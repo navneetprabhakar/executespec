@@ -1,737 +1,876 @@
-# Frontend API usage
+# Frontend → Backend API usage
 
-> Authoritative map of which frontend file consumes which backend endpoint. Source of truth: [`frontend/src/lib/api.ts`](../frontend/src/lib/api.ts) — the **single** API client module for the entire React app. Every backend call funnels through it.
+This document is the single reference for **how the React frontend talks to the Spring Boot backend**. It answers:
 
-This document is generated from the code (not from product docs). If `lib/api.ts` and this doc disagree, the code wins.
+- Where the bearer token comes from on every request.
+- What a 4xx error envelope looks like and how the frontend maps it to user-visible copy.
+- Which `api.*` function calls which controller, and which Signal page consumes it.
+- How SSE event streams are authenticated and reconnected.
+- Where polling intervals live (live cost, run status, file refresh, etc.).
+- The minimum checklist for adding a new endpoint without drift.
 
-## 1. How the client works
+Scope: all REST calls from `frontend/src/`. The authoritative client is `frontend/src/lib/api.ts` (~3,620 lines); namespaced sub-clients live alongside it (`execution-api.ts`, `billing-api.ts`, `invoice-api.ts`). Pages under `frontend/src/signal/pages/` and components under `frontend/src/signal/components/` consume those exports.
 
-### 1.1 Module layout
+Last meaningful refresh: 2026-05-16.
 
-[`frontend/src/lib/api.ts`](../frontend/src/lib/api.ts) (3620 lines) exports:
+---
 
-- A typed `req<T>` / `reqText` core that wraps `fetch`.
-- A typed `ApiError extends Error` (carries `status: number`).
-- One exported function per backend endpoint — always typed via TypeScript generics.
-- DTO interfaces inline with the endpoints that produce them.
+## 1. Bearer token injection
 
-The base URL is the constant `BASE = '/api'`. In dev, Vite proxies `/api` to `http://localhost:8080` (see `frontend/vite.config.ts`); in prod, the Spring Boot JAR serves the built SPA from `src/main/resources/static/` so the call is same-origin.
+Every authenticated REST call carries `Authorization: Bearer <jwt>` where `<jwt>` is the **JWT access token** stored in `localStorage` under the key `access_token`. The refresh token is **not** stored in `localStorage` — it is an HttpOnly cookie owned by the backend (the OAuth callback page explicitly strips any legacy `refresh_token` key from `localStorage`).
 
-### 1.2 Bearer-token injection
+### How it works
 
-`authHeader()` (lines 6–9 of `api.ts`):
+In `frontend/src/lib/api.ts`:
 
-```ts
+```
+const BASE = '/api';
+
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem('access_token');
-  return token ? {Authorization: `Bearer ${token}`} : {};
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function req<T>(url: string, opts: RequestInit = {}): Promise<T> {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...authHeader(),
+    ...(opts.headers || {}),
+  };
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${url}`, { ...opts, headers });
+  } catch (e) {
+    throw new ApiError(0, 'Network error');
+  }
+  if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res, res.status));
+  // ... JSON or text parse
 }
 ```
 
-Every `req()` call composes `Authorization` automatically from `localStorage.access_token`. The token is written by `authLogin` / `authRefresh` / `authVerifyEmail` call sites in `stores/useAuthStore.ts` and read on every subsequent request without explicit plumbing.
+Behaviour:
 
-Refresh tokens flow via a `credentials: 'include'` cookie — `req()` passes `credentials: 'include'` so the `refresh_token` HttpOnly cookie rides along on every call (POST `/auth/refresh` uses it to mint a new access token).
+- The header is read **at the moment of the call**, not at module load — so a freshly-stored token (after `/login` or `/auth/refresh`) is picked up by the very next request without a page reload.
+- If the user is anonymous, `authHeader()` returns `{}` and the request goes through unauthenticated. The backend resolves `permitAll` paths; everything else 401s through `ValidationAdvice` and bubbles up as `ApiError(401)`.
+- `fetch` failures (network down, DNS, CORS) throw `ApiError(0, 'Network error')` so call sites can distinguish "server didn't respond" from "server responded with 401".
 
-### 1.3 Error envelope
+### Where tokens come from
 
-Every backend 4xx lands on `com.navneet.executespec.api.advice.ValidationAdvice` (see [`src/main/java/com/navneet/executespec/api/advice/ValidationAdvice.java`](../src/main/java/com/navneet/executespec/api/advice/ValidationAdvice.java)). The canonical JSON envelope is:
+Source paths that write `access_token` into `localStorage`:
+
+- `frontend/src/stores/useAuthStore.ts` — sets the token in the `login` and `refreshAccessToken` actions, clears it in `logout`/`clearAuth`.
+- `frontend/src/signal/pages/AuthCallbackPage.tsx` — after the OAuth2 backend redirect to `/auth/callback?token=…`, the callback page persists the token and immediately calls `loadMe()` to populate the auth store.
+- `frontend/src/signal/pages/AuthPages.tsx::LoginPage` — calls `store.login(email, password)` which internally hits `POST /api/auth/login` and stores the returned token.
+
+### Known footgun
+
+`api.uploadProjectDocument` (used by `ProjectSettingsPage.tsx`) reads `localStorage.getItem('token')` instead of `'access_token'` when constructing its custom `multipart/form-data` `Authorization` header — likely a copy-paste regression. Document uploads will hit the backend unauthenticated until the key is corrected.
+
+### Scoped JWTs for SSE
+
+The full access token is **not** sent as a query parameter to SSE endpoints (it would leak into proxy logs). Instead, the frontend mints a short-lived scoped token first via `getSseToken(runId)` (5-min TTL, `scope=sse` + `runId` claim) and passes it as `?token=…` on `GET /api/runs/{runId}/events`. See section 4.
+
+---
+
+## 2. Error envelope
+
+### Canonical 4xx shape
+
+`src/main/java/com/navneet/executespec/api/advice/ValidationAdvice.java` registers at `@Order(HIGHEST_PRECEDENCE)` and forces `application/json` on every error response so a malformed JSON body or an `IllegalArgumentException` never leaks as a 500 with `text/plain`.
+
+Every 4xx response body looks like:
 
 ```json
 {
-  "timestamp": "2026-05-16T10:42:08.123Z",
+  "timestamp": "2026-05-16T08:42:03Z",
   "status": 400,
-  "error": "validation_failed",
-  "message": "2 validation error(s)",
-  "fields": {"email": "must be a valid email", "password": "must not be blank"}
+  "error": "bad_request",
+  "message": "Human-readable description of what went wrong",
+  "fields": {
+    "email": "must be a well-formed email address",
+    "userRequest": "must not be blank"
+  }
 }
 ```
 
-`fields` is included only on bean-validation failures. `globalErrors` may appear for class-level constraints.
-
-`ValidationAdvice` is annotated `@Order(Ordered.HIGHEST_PRECEDENCE)` so it runs before any catch-all `@ExceptionHandler(Throwable.class)`. It maps:
-
-| Exception                                  | HTTP status | `error` slug             |
-| ------------------------------------------ | ----------- | ------------------------ |
-| `MethodArgumentNotValidException`          | 400         | `validation_failed`      |
-| `ConstraintViolationException`             | 400         | `validation_failed`      |
-| `HttpMessageNotReadableException`          | 400         | `bad_request`            |
-| `MethodArgumentTypeMismatchException`      | 400         | `bad_request`            |
-| `MissingServletRequestParameterException`  | 400         | `bad_request`            |
-| `IllegalArgumentException`                 | 400         | `bad_request`            |
-| `ResponseStatusException`                  | (as raised) | derived from status code |
-| `AccessDeniedException`                    | 403         | `forbidden`              |
-| `HttpRequestMethodNotSupportedException`   | 405         | `method_not_allowed`     |
-| `BillingException`                         | 402         | `payment_required`       |
-
-Every error body is forced to `Content-Type: application/json` (see `jsonError`) so content-type negotiation never fails over to 500.
-
-### 1.4 `parseErrorMessage`
-
-Lines 50–72 of `api.ts`. Resolution order:
-
-1. Parse the body as JSON; if `message` is a non-empty string, use it.
-2. Otherwise, if `error` is a non-empty string AND not the bare Spring default phrases `"Payment Required"` or `"Forbidden"`, use it.
-3. Otherwise, fall back to `STATUS_MESSAGES[status]` (a human-readable dictionary in `api.ts`, lines 11–25).
-4. Otherwise, return `Request failed (${status}). Please try again.`
-
-The friendly defaults cover 400, 401, 402, 403, 404, 409, 410, 422, 429, 500, 502, 503.
-
-### 1.5 Network errors
-
-`fetch()` itself can reject with `TypeError: Failed to fetch` (DNS, backend crash, network drop). `req()` wraps the call in a `try` and rethrows as `new ApiError(0, ...)` so call sites can branch on `status === 0` as a sentinel for "couldn't reach server". The helper `isRetryableError(e)` (lines 114–118) returns true for `status === 0` or `status >= 500`.
-
-### 1.6 Empty bodies
-
-`req()` returns `undefined as T` for 204 No Content responses and for 200 OK with empty body (Spring sometimes returns empty `200` from approve / merge endpoints).
-
-### 1.7 Binary download helpers
-
-`downloadWorkspace`, `downloadValidationReportPdf`, `adminExportPaymentAuditCsv`, `downloadProjectDoc` use raw `fetch()` (not `req()`) because they consume blobs, not JSON. They still inject `authHeader()` and surface `ApiError` on non-2xx.
-
-### 1.8 Plain-text helpers
-
-`reqText(url)` (lines 121–131) is for `text/plain` endpoints — file content (`/runs/{id}/file`), OpenAPI YAML (`/runs/{id}/openapi.yaml`). Returns a `string`, not a parsed JSON object.
-
-### 1.9 Per-module breakdown
-
-Other files under `frontend/src/lib/`:
-
-| File                 | Purpose                                                                                            |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `api.ts`             | The single backend client. **All HTTP calls live here.**                                           |
-| `analytics.ts`       | Thin PostHog wrapper. Not a backend client.                                                        |
-| `billing-api.ts`     | Billing-specific helpers built on top of `api.ts` (no direct fetch).                               |
-| `execution-api.ts`   | Execution-specific helpers (no direct fetch).                                                      |
-| `invoice-api.ts`     | Invoice-specific helpers.                                                                          |
-| `verdict.ts`         | Pure-function verdict derivation. No I/O.                                                          |
-| `glossary.ts`        | Static dictionary. No I/O.                                                                         |
-| `telemetry.ts`       | OTel browser SDK init.                                                                             |
-| `monaco*.ts`         | Monaco editor setup (lazy module).                                                                 |
-| `techDetect.ts`      | Client-side tech-stack heuristics.                                                                 |
-| `constants.ts`       | Compile-time constants.                                                                            |
-| `utils.ts`           | Misc utilities (className helpers etc.).                                                           |
-
-## 2. ArchUnit contract test
-
-The Java test [`src/test/java/com/navneet/executespec/arch/ApiContractTest.java`](../src/test/java/com/navneet/executespec/arch/ApiContractTest.java) asserts every URL referenced from `frontend/src/lib/api.ts` resolves to a registered backend `@*Mapping`. The test:
-
-- Scans the classpath via ArchUnit's `ClassFileImporter` for every `@Controller` / `@RestController` class.
-- Walks `@RequestMapping` / `@GetMapping` / `@PostMapping` / `@PutMapping` / `@DeleteMapping` / `@PatchMapping` on both classes and methods.
-- Normalises path placeholders (`{id}`, `${runId}`, `{x}`) so they compare structurally.
-- Extracts URLs from `api.ts` via a regex that catches `req(...)`, `reqText(...)`, and `fetch(...)` first-string-argument literals.
-- Fails the build (Maven `verify` phase) if any URL in `api.ts` has no matching backend route.
-
-The `ALLOWLIST` set is currently empty — every URL in `api.ts` resolves to a real backend mapping. Drift is caught at CI time, not at runtime.
-
-## 3. Endpoint catalogue
-
-The tables below group every exported function by domain. Columns:
-
-- **Function** — symbol name exported from `lib/api.ts`.
-- **Method** — HTTP verb.
-- **Path** — relative to `/api`.
-- **Consumed by** — TSX/TS files that import the symbol (sampled via `grep`; not exhaustive when used by indirect re-exports, but every direct site is listed).
-
-### 3.1 Runs — lifecycle
-
-| Function           | Method | Path                              | Consumed by                                                                                                                                            |
-| ------------------ | ------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `getRuns`          | GET    | `/runs`                           | `stores/useRunStore.ts`, `pages/ExecSummaryPage.tsx`, `signal/pages/AllRunsPage.tsx`, `signal/pages/MiscPages.tsx`, `signal/pages/HomePage.tsx`         |
-| `getRun`           | GET    | `/runs/{id}`                      | `stores/useRunStore.ts`, `pages/project/ProjectDashboardPage.tsx`, `signal/pages/ResultPage.tsx`, `signal/pages/LivePage.tsx`, `signal/pages/PlanPage.tsx`, `components/project/ProjectTaskList.tsx` |
-| `createRun`        | POST   | `/runs`                           | `stores/useRunStore.ts`, `signal/pages/ComposePage.tsx`, `signal/pages/project/ProjectComposePage.tsx`                                                  |
-| `forkRun`          | POST   | `/runs/{runId}/fork`              | `signal/pages/ResultPage.tsx`                                                                                                                           |
-| `approveRun`       | POST   | `/runs/{id}/approve`              | `stores/useRunStore.ts`, `signal/pages/PlanPage.tsx`                                                                                                    |
-| `cancelRun`        | DELETE | `/runs/{id}`                      | `signal/pages/LivePage.tsx`, `signal/pages/PlanPage.tsx`, `signal/pages/ResultPage.tsx`                                                                 |
-| `pauseRun`         | POST   | `/runs/{runId}/pause`             | `signal/pages/LivePage.tsx` (behind `v2.pause.enabled` flag)                                                                                            |
-| `resumeRun`        | POST   | `/runs/{runId}/resume`            | `signal/pages/LivePage.tsx`                                                                                                                             |
-| `archiveRun`       | POST   | `/runs/{runId}/archive`           | `signal/pages/AllRunsPage.tsx`                                                                                                                          |
-| `unarchiveRun`     | POST   | `/runs/{runId}/unarchive`         | `signal/pages/AllRunsPage.tsx`                                                                                                                          |
-| `softDeleteRun`    | POST   | `/runs/{runId}/soft-delete`       | `signal/pages/AllRunsPage.tsx` (V191 delete with undo)                                                                                                  |
-| `restoreRun`       | POST   | `/runs/{runId}/restore`           | `signal/pages/AllRunsPage.tsx`                                                                                                                          |
-| `retryTask`        | POST   | `/runs/{runId}/tasks/{taskId}/retry` | `components/project/InlineRunDetail.tsx`, `signal/pages/ResultPage.tsx`                                                                              |
-| `getSseToken`      | GET    | `/runs/{runId}/sse-token`         | `signal/hooks/useSse.ts` (then opens an `EventSource` directly to `/runs/{id}/events?token=...`)                                                        |
-| `getLiveCost`      | GET    | `/runs/{runId}/cost`              | `signal/pages/LivePage.tsx`, `signal/components/CostProgressBar.tsx`                                                                                    |
-| `updateRunProject` | PATCH  | `/runs/{runId}/project`           | `signal/pages/AllRunsPage.tsx`                                                                                                                          |
-
-### 3.2 Runs — plan editing and graph
-
-| Function          | Method | Path                          | Consumed by                                                                          |
-| ----------------- | ------ | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `editRunPlan`     | POST   | `/runs/{runId}/edit-plan`     | `signal/pages/PlanPage.tsx`                                                          |
-| `getPlanVersions` | GET    | `/runs/{runId}/plan-versions` | `signal/pages/PlanPage.tsx`                                                          |
-| `getTaskGraph`    | GET    | `/runs/{runId}/task-graph`    | `signal/pages/ResultPage.tsx` (when Code tab is opened)                              |
-
-### 3.3 Runs — files, diff, push
-
-| Function             | Method | Path                                       | Consumed by                                                                                                  |
-| -------------------- | ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `getFiles`           | GET    | `/runs/{runId}/files`                      | (legacy; superseded by `getFilesWithStatus`)                                                                  |
-| `getFilesWithStatus` | GET    | `/runs/{runId}/files/status`               | `signal/pages/ResultPage.tsx`, `components/runs/RunDetailTabs.tsx`                                            |
-| `getFile`            | GET    | `/runs/{runId}/file?path=...`              | `signal/components/CodeView.tsx`, `signal/pages/ResultPage.tsx`                                               |
-| `getFileDiff`        | GET    | `/runs/{runId}/file/diff?path=...`         | `signal/components/CodeView.tsx`                                                                              |
-| `downloadWorkspace`  | GET    | `/runs/{runId}/download`                   | `signal/pages/ResultPage.tsx`, `components/project/InlineRunDetail.tsx`                                       |
-| `pushToGitHub`       | POST   | `/runs/{runId}/push-github`                | (legacy single-repo path)                                                                                     |
-| `pushToScm`          | POST   | `/runs/{runId}/push-scm`                   | `signal/pages/ResultPage.tsx`, `components/project/InlineRunDetail.tsx`                                       |
-| `syncRun`            | POST   | `/runs/{runId}/sync`                       | `signal/pages/ResultPage.tsx`                                                                                 |
-| `syncRunToOriginal`  | POST   | `/runs/{runId}/sync/original`              | `signal/pages/ResultPage.tsx`                                                                                 |
-| `getRunPrs`          | GET    | `/runs/{runId}/prs`                        | `signal/pages/ResultPage.tsx`, `components/project/InlineRunDetail.tsx`                                       |
-| `getMessages`        | GET    | `/runs/{runId}/messages`                   | `signal/pages/LivePage.tsx`                                                                                   |
-| `getTimeline`        | GET    | `/runs/{runId}/timeline`                   | `signal/pages/ResultPage.tsx`                                                                                 |
-| `getOpenApiSpec`     | GET    | `/runs/{runId}/openapi.yaml`               | `signal/pages/ResultPage.tsx` (API tab)                                                                       |
-| `probeApiDocs`       | GET    | `/runs/{runId}/preview/probe-api-docs`     | `signal/pages/ResultPage.tsx`                                                                                 |
-
-### 3.4 Runs — preview lifecycle
-
-| Function              | Method | Path                                | Consumed by                                                                          |
-| --------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------------ |
-| `getPreviewStatus`    | GET    | `/runs/{runId}/preview/status`      | `signal/pages/ResultPage.tsx`                                                        |
-| `analyzePreview`      | GET    | `/runs/{runId}/preview/analyze`     | `signal/pages/ResultPage.tsx`                                                        |
-| `startPreview`        | POST   | `/runs/{runId}/preview/start`       | `signal/pages/ResultPage.tsx`                                                        |
-| `stopPreview`         | DELETE | `/runs/{runId}/preview/stop`        | `signal/pages/ResultPage.tsx`                                                        |
-| `rebuildPreview`      | POST   | `/runs/{runId}/preview/rebuild`     | `signal/pages/ResultPage.tsx`                                                        |
-| `getPreviewLogs`      | GET    | `/runs/{runId}/preview/logs`        | `signal/pages/ResultPage.tsx`                                                        |
-| `execPreviewCommand`  | POST   | `/runs/{runId}/preview/exec`        | `signal/pages/ResultPage.tsx`                                                        |
-
-### 3.5 Runs — chat (post-run iteration)
-
-| Function               | Method | Path                                            | Consumed by                                                            |
-| ---------------------- | ------ | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `getRunChat`           | GET    | `/runs/{runId}/chat`                            | `signal/pages/ResultPage.tsx`                                          |
-| `sendRunChatMessage`   | POST   | `/runs/{runId}/chat`                            | `signal/pages/ResultPage.tsx`                                          |
-| `iterateRun`           | POST   | `/runs/{runId}/iterate`                         | `signal/pages/ResultPage.tsx`                                          |
-| `applyToRun`           | POST   | `/runs/{runId}/apply`                           | `signal/pages/ResultPage.tsx`                                          |
-| `conversationChat`     | POST   | `/conversation`                                 | `signal/components/SpecChat.tsx`                                       |
-
-### 3.6 Runs — PR comment inbox
-
-Incoming review comments on PRs ExecuteSpec opened. The backend webhook ingests these into `pr_comment_inbox`; the frontend polls.
-
-| Function                  | Method | Path                                                  | Consumed by                                       |
-| ------------------------- | ------ | ----------------------------------------------------- | ------------------------------------------------- |
-| `getPrComments`           | GET    | `/runs/{runId}/pr-comments`                           | `signal/pages/ResultPage.tsx`                     |
-| `getPrCommentPendingCount`| GET    | `/runs/{runId}/pr-comments/pending-count`             | `signal/pages/ResultPage.tsx`                     |
-| `dismissPrComment`        | POST   | `/runs/{runId}/pr-comments/{commentId}/dismiss`       | `signal/pages/ResultPage.tsx`                     |
-| `applyPrComment`          | POST   | `/runs/{runId}/pr-comments/{commentId}/apply`         | `signal/pages/ResultPage.tsx`                     |
-
-### 3.7 Validation report
-
-| Function                       | Method | Path                                  | Consumed by                                                                                                        |
-| ------------------------------ | ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `getValidationReport`          | GET    | `/runs/{runId}/report`                | `signal/pages/ResultPage.tsx`, `components/runs/ValidationReportPanel.tsx`                                         |
-| `retryValidationReport`        | POST   | `/runs/{runId}/retry-validation`      | `signal/pages/ResultPage.tsx`                                                                                       |
-| `shareValidationReport`        | POST   | `/runs/{runId}/report/share`          | `signal/pages/ResultPage.tsx`                                                                                       |
-| `getSharedReport`              | GET    | `/reports/shared/{shareToken}`        | `signal/pages/MiscPages.tsx` (`SharedPage`)                                                                        |
-| `downloadValidationReportPdf`  | GET    | `/runs/{runId}/report/pdf`            | `signal/pages/ResultPage.tsx`                                                                                       |
-
-### 3.8 Test generation pipeline
-
-| Function           | Method | Path                                          | Consumed by                       |
-| ------------------ | ------ | --------------------------------------------- | --------------------------------- |
-| `runTests`         | POST   | `/runs/{runId}/run-tests`                     | `signal/pages/ResultPage.tsx`     |
-| `getTestReport`    | GET    | `/runs/{runId}/test-report`                   | `signal/pages/ResultPage.tsx`     |
-| `getTestPlan`      | GET    | `/runs/{runId}/test-plan`                     | `signal/pages/ResultPage.tsx`     |
-| `getTestGraph`     | GET    | `/runs/{runId}/test-graph`                    | `signal/pages/ResultPage.tsx`     |
-| `markTestInvalid`  | PUT    | `/test-results/{testResultId}/mark-invalid`   | `signal/pages/ResultPage.tsx`     |
-| `applyTestFixes`   | POST   | `/runs/{runId}/apply-test-fixes`              | `signal/pages/ResultPage.tsx`     |
-
-### 3.9 Metrics, models, pricing
-
-| Function                | Method | Path                          | Consumed by                                                                       |
-| ----------------------- | ------ | ----------------------------- | --------------------------------------------------------------------------------- |
-| `getMetrics`            | GET    | `/metrics`                    | `stores/useMetricsStore.ts`, `signal/pages/MiscPages.tsx` (`InsightsPage`)        |
-| `getModelComparison`    | GET    | `/model-comparison`           | `signal/pages/MiscPages.tsx`                                                      |
-| `getUserRunsSummary`    | GET    | `/user-runs-summary`          | `signal/pages/MiscPages.tsx`                                                      |
-| `getAvailableModels`    | GET    | `/models/available`           | `signal/pages/ComposePage.tsx`, `signal/pages/project/ProjectComposePage.tsx`     |
-| `getPricing`            | GET    | `/pricing`                    | `signal/pages/account/PlansPage.tsx`                                              |
-| `getAllPricing`         | GET    | `/pricing`                    | admin model-rates view (duplicate of `getPricing`)                                |
-| `updatePricing`         | PUT    | `/pricing/{provider}/{model}` | admin model-rates view                                                            |
-| `updateModelPricing`    | PUT    | `/pricing/{provider}/{model}` | admin model-rates view (alias of `updatePricing`)                                 |
-
-### 3.10 Deployments
-
-| Function                  | Method | Path                                  | Consumed by                                            |
-| ------------------------- | ------ | ------------------------------------- | ------------------------------------------------------ |
-| `getDeployments`          | GET    | `/deployments`                        | `signal/pages/ExtraPages.tsx` (`DeploymentsPage`)      |
-| `createDeployment`        | POST   | `/deployments`                        | `signal/pages/ExtraPages.tsx`                          |
-| `getDeploymentDetail`     | GET    | `/deployments/{id}`                   | `signal/pages/ExtraPages.tsx`                          |
-| `deleteDeployment`        | DELETE | `/deployments/{id}`                   | `signal/pages/ExtraPages.tsx`                          |
-| `rollbackDeployment`      | POST   | `/deployments/{id}/rollback`          | `signal/pages/ExtraPages.tsx`                          |
-| `analyzeForDeploy`        | POST   | `/deployments/analyze?runId=...`      | `signal/pages/ExtraPages.tsx`                          |
-| `confirmDeploy`           | POST   | `/deployments/confirm`                | `signal/pages/ExtraPages.tsx`                          |
-| `engineRollback`          | POST   | `/deployments/{id}/engine-rollback`   | `signal/pages/ExtraPages.tsx`                          |
-| `engineDestroy`           | DELETE | `/deployments/{id}/engine-destroy`    | `signal/pages/ExtraPages.tsx`                          |
-
-### 3.11 GCP credentials (for Deploy Engine)
-
-| Function                  | Method | Path                                       | Consumed by                                  |
-| ------------------------- | ------ | ------------------------------------------ | -------------------------------------------- |
-| `getRequiredPermissions`  | GET    | `/credentials/gcp/required-permissions`    | `signal/pages/ExtraPages.tsx`                |
-| `getGcpCredential`        | GET    | `/credentials/gcp`                         | `signal/pages/ExtraPages.tsx`                |
-| `listGcpCredentials`      | GET    | `/credentials/gcp/all`                     | `signal/pages/ExtraPages.tsx`                |
-| `storeGcpCredential`      | POST   | `/credentials/gcp`                         | `signal/pages/ExtraPages.tsx`                |
-| `validateGcpCredential`   | GET    | `/credentials/gcp/validate`                | `signal/pages/ExtraPages.tsx`                |
-| `deleteGcpCredential`     | DELETE | `/credentials/gcp`                         | `signal/pages/ExtraPages.tsx`                |
-
-### 3.12 Auth
-
-| Function                  | Method | Path                                  | Consumed by                                                                                          |
-| ------------------------- | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `authRegister`            | POST   | `/auth/register`                      | `stores/useAuthStore.ts`, `signal/pages/AuthPages.tsx` (`SignupPage`)                                |
-| `authLogin`               | POST   | `/auth/login`                         | `stores/useAuthStore.ts`, `signal/pages/AuthPages.tsx` (`LoginPage`)                                 |
-| `authRefresh`             | POST   | `/auth/refresh`                       | `stores/useAuthStore.ts` (called on `authMe` 401 fallback)                                           |
-| `authLogout`              | DELETE | `/auth/logout`                        | `stores/useAuthStore.ts`                                                                              |
-| `authMe`                  | GET    | `/auth/me`                            | `stores/useAuthStore.ts` (on every page load)                                                         |
-| `authVerifyEmail`         | GET    | `/auth/verify-email?token=...`        | `signal/pages/AuthPages.tsx` (`VerifyPage`)                                                          |
-| `authResendVerification`  | POST   | `/auth/resend-verification`           | `signal/pages/AuthPages.tsx`                                                                          |
-| `authForgotPassword`      | POST   | `/auth/forgot-password`               | `signal/pages/ExtraPages.tsx` (`ForgotPasswordPage`)                                                 |
-| `authResetPassword`       | POST   | `/auth/reset-password`                | `signal/pages/ExtraPages.tsx` (`ResetPasswordPage`)                                                  |
-| `authChangePassword`      | POST   | `/auth/change-password`               | `components/auth/ChangePasswordModal.tsx`                                                            |
-| `getMyPermissions`        | GET    | `/auth/me/permissions`                | `stores/useAuthStore.ts`, `hooks/useTierPermissions.ts`                                              |
-
-### 3.13 Per-user settings
-
-| Function                    | Method | Path                                        | Consumed by                                                                        |
-| --------------------------- | ------ | ------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `updateGithubSettings`      | PUT    | `/auth/settings/github`                     | `signal/pages/account/MiscAccountPages.tsx` (`IntegrationsPage`)                   |
-| `updateAiKeySettings`       | PUT    | `/auth/settings/ai-keys`                    | `signal/pages/account/MiscAccountPages.tsx` (`ApiKeysPage`)                        |
-| `validateAiKey`             | POST   | `/auth/settings/ai-keys/validate`           | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `validateGitHub`            | POST   | `/auth/settings/github/validate`            | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `updateJiraSettings`        | PUT    | `/auth/settings/jira`                       | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `validateJira`              | POST   | `/auth/settings/jira/validate`              | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `updateConfluenceSettings`  | PUT    | `/auth/settings/confluence`                 | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `validateConfluence`        | POST   | `/auth/settings/confluence/validate`        | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `updateBitbucketSettings`   | PUT    | `/auth/settings/bitbucket`                  | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `validateBitbucket`         | POST   | `/auth/settings/bitbucket/validate`         | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `updateViewMode`            | PUT    | `/auth/settings/view-mode`                  | `signal/pages/account/AccountPage.tsx`                                             |
-| `getGitHubAppStatus`        | GET    | `/auth/github-app/status`                   | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `getGitHubAppInstallUrl`    | GET    | `/auth/github-app/install-url`              | `signal/pages/account/MiscAccountPages.tsx`                                        |
-| `uninstallGitHubApp`        | DELETE | `/auth/github-app/install`                  | `signal/pages/account/MiscAccountPages.tsx`                                        |
-
-### 3.14 Onboarding (sandbox + sample specs)
-
-| Function                  | Method | Path                                  | Consumed by                                            |
-| ------------------------- | ------ | ------------------------------------- | ------------------------------------------------------ |
-| `listOnboardingSamples`   | GET    | `/onboarding/sample-specs`            | `signal/pages/AuthPages.tsx` (`WelcomePage`)           |
-| `pickOnboardingSample`    | POST   | `/onboarding/pick-sample`             | `signal/pages/AuthPages.tsx`                           |
-| `getSandboxStatus`        | GET    | `/onboarding/sandbox-status`          | `signal/pages/AuthPages.tsx`                           |
-
-### 3.15 Organization
-
-| Function                       | Method | Path                                          | Consumed by                                                                          |
-| ------------------------------ | ------ | --------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `getMyOrg`                     | GET    | `/org/me`                                     | `stores/useAuthStore.ts`, `signal/pages/account/MiscAccountPages.tsx`                |
-| `createOrg`                    | POST   | `/org`                                        | `signal/pages/AuthPages.tsx`                                                          |
-| `updateOrg`                    | PUT    | `/org/me`                                     | `signal/pages/LegalPages.tsx` (`OrgSettingsPage`)                                     |
-| `adjustOrgSeats`               | POST   | `/org/me/seats/adjust`                        | `signal/pages/LegalPages.tsx`                                                         |
-| `updateOrgAiKeySettings`       | PUT    | `/org/me/settings/ai-keys`                    | `signal/pages/LegalPages.tsx`                                                         |
-| `updateOrgKeySourceSettings`   | PUT    | `/org/me/settings/key-source`                 | `signal/pages/LegalPages.tsx`                                                         |
-| `updateExternalSharing`        | PUT    | `/org/me/settings/external-sharing`           | `signal/pages/LegalPages.tsx` (V198, ORG_ADMIN toggle)                                |
-| `updateOrgJiraSettings`        | PUT    | `/org/me/settings/jira`                       | `signal/pages/LegalPages.tsx`                                                         |
-| `validateOrgJira`              | POST   | `/org/me/settings/jira/validate`              | `signal/pages/LegalPages.tsx`                                                         |
-| `updateOrgConfluenceSettings`  | PUT    | `/org/me/settings/confluence`                 | `signal/pages/LegalPages.tsx`                                                         |
-| `validateOrgConfluence`        | POST   | `/org/me/settings/confluence/validate`        | `signal/pages/LegalPages.tsx`                                                         |
-| `getOrgMembers`                | GET    | `/org/me/members`                             | `signal/pages/account/MiscAccountPages.tsx` (`OrgMembersPage`)                        |
-| `removeMember`                 | DELETE | `/org/me/members/{userId}`                    | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `changeMemberRole`             | PUT    | `/org/me/members/{userId}/role`               | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `orgSuspendMember`             | PUT    | `/org/me/members/{userId}/suspend`            | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `inviteMember`                 | POST   | `/org/invite`                                 | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `getOrgInvitations`            | GET    | `/org/me/invitations`                         | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `resendInvitation`             | POST   | `/org/me/invitations/{id}/resend`             | `signal/pages/account/MiscAccountPages.tsx`                                            |
-| `acceptInvite`                 | POST   | `/org/accept-invite?token=...`                | `signal/pages/ExtraPages.tsx` (`AcceptInvitePage`)                                     |
-
-### 3.16 Projects — lifecycle
-
-| Function                  | Method | Path                                  | Consumed by                                                                                                      |
-| ------------------------- | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `getProjects`             | GET    | `/projects`                           | `stores/useProjectStore.ts`, `signal/pages/ProjectsPage.tsx`, `signal/pages/HomePage.tsx`, `signal/pages/MiscPages.tsx`, `signal/hooks/useProjectMeta.ts`, `pages/ExecSummaryPage.tsx`, `pages/org/OrgProjectsPage.tsx` |
-| `getProject`              | GET    | `/projects/{id}`                      | `signal/pages/project/ProjectTabs.tsx`, `signal/pages/project/ProjectSettingsPage.tsx`                            |
-| `createProject`           | POST   | `/projects`                           | `signal/pages/ProjectsPage.tsx`                                                                                   |
-| `updateProjectSettings`   | PATCH  | `/projects/{id}/settings`             | `signal/pages/project/ProjectSettingsPage.tsx`                                                                    |
-| `archiveProject`          | PUT    | `/projects/{id}/archive`              | `signal/pages/project/ProjectSettingsPage.tsx`                                                                    |
-| `unarchiveProject`        | PUT    | `/projects/{id}/unarchive`            | `signal/pages/project/ProjectSettingsPage.tsx`                                                                    |
-| `deleteProject`           | DELETE | `/projects/{id}`                      | `signal/pages/project/ProjectSettingsPage.tsx`                                                                    |
-| `restoreProject`          | POST   | `/projects/{id}/restore`              | `signal/pages/project/ProjectSettingsPage.tsx`                                                                    |
-| `getProjectMembers`       | GET    | `/projects/{id}/members`              | `signal/pages/project/ProjectMembersPage.tsx`, `pages/org/OrgProjectsPage.tsx`                                    |
-| `addProjectMember`        | POST   | `/projects/{id}/members`              | `signal/pages/project/ProjectMembersPage.tsx`                                                                     |
-| `removeProjectMember`     | DELETE | `/projects/{id}/members/{userId}`     | `signal/pages/project/ProjectMembersPage.tsx`                                                                     |
-
-### 3.17 Projects — dashboard, scores, memory
-
-| Function                  | Method | Path                                          | Consumed by                                                              |
-| ------------------------- | ------ | --------------------------------------------- | ------------------------------------------------------------------------ |
-| `getProjectDashboard`     | GET    | `/projects/{id}/dashboard`                    | `stores/useProjectStore.ts`, `signal/pages/project/ProjectPulsePage.tsx` |
-| `getProjectScores`        | GET    | `/projects/{id}/scores`                       | `stores/useProjectStore.ts`, `components/project/PulseTab.tsx`           |
-| `getWorkspaceHealth`      | GET    | `/projects/{id}/workspace-health`             | `components/project/WorkspaceHealthPanel.tsx`, `components/project/ResetWorkspaceSheet.tsx` |
-| `getProjectSummary`       | GET    | `/projects/{id}/summary`                      | `signal/pages/project/ProjectPulsePage.tsx`                              |
-| `getProjectMemory`        | GET    | `/projects/{id}/memory`                       | `components/project/ProjectMemoryPanel.tsx`                              |
-| `getProjectLedger`        | GET    | `/projects/{id}/memory/ledger`                | `components/project/ProjectMemoryPanel.tsx`                              |
-| `compactProjectMemory`    | POST   | `/projects/{id}/memory/compact`               | `components/project/ProjectMemoryPanel.tsx`                              |
-
-### 3.18 Projects — chat
-
-| Function                  | Method | Path                                  | Consumed by                                          |
-| ------------------------- | ------ | ------------------------------------- | ---------------------------------------------------- |
-| `getProjectChatInfo`      | GET    | `/projects/{id}/chat/info`            | `signal/pages/project/ProjectChatPage.tsx`           |
-| `compileProjectChatToSpec`| POST   | `/projects/{id}/chat/compile`         | `components/project/ProjectChatPanel.tsx`            |
-| `clearProjectChat`        | DELETE | `/projects/{id}/chat`                 | `components/project/ProjectChatPanel.tsx`            |
-| `compactProjectChat`      | POST   | `/projects/{id}/chat/compact`         | `components/project/ProjectChatPanel.tsx`            |
-
-### 3.19 Projects — architecture + codemap
-
-| Function                       | Method | Path                                          | Consumed by                                                            |
-| ------------------------------ | ------ | --------------------------------------------- | ---------------------------------------------------------------------- |
-| `getArchitectureDoc`           | GET    | `/projects/{id}/architecture`                 | `components/project/ArchitectureViewer.tsx`, `signal/pages/project/ProjectArchitecturePage.tsx` |
-| `getArchitectureVersions`      | GET    | `/projects/{id}/architecture/versions`        | `components/project/ArchitectureViewer.tsx`                            |
-| `generateArchitecture`         | POST   | `/projects/{id}/architecture/generate`        | `components/project/ArchitectureViewer.tsx`                            |
-| `annotateArchitecture`         | PUT    | `/projects/{id}/architecture/annotate`        | `components/project/ArchitectureViewer.tsx`                            |
-| `getArchitectureDiff`          | GET    | `/projects/{id}/architecture/diff?from=&to=`  | `components/project/ArchitectureViewer.tsx`                            |
-| `getArchitectureStaleness`     | GET    | `/projects/{id}/architecture/staleness`       | `components/project/ArchitectureViewer.tsx`, `signal/pages/project/ProjectArchitecturePage.tsx` |
-| `analyseProject`               | POST   | `/projects/{id}/analyse?branch=...`           | `components/project/ResetWorkspaceSheet.tsx`, `components/project/WorkspaceHealthPanel.tsx` |
-| `getRepoCodeMap`               | GET    | `/projects/{id}/repos/{repoId}/codemap`       | `signal/pages/project/ProjectCodePage.tsx`                             |
-| `listRepoFiles`                | GET    | `/projects/{id}/repos/{repoId}/files`         | `signal/pages/project/ProjectCodePage.tsx` (Browse tab)                |
-| `readRepoFile`                 | GET    | `/projects/{id}/repos/{repoId}/file?path=...` | `signal/pages/project/ProjectCodePage.tsx`                             |
-
-### 3.20 Projects — documents (RAG)
-
-| Function                    | Method | Path                                          | Consumed by                                          |
-| --------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `listProjectDocuments`      | GET    | `/projects/{id}/documents`                    | `components/project/ProjectDocumentsPanel.tsx`       |
-| `uploadProjectDocument`     | POST   | `/projects/{id}/documents` (multipart)        | `components/project/ProjectDocumentsPanel.tsx`       |
-| `deleteProjectDocument`     | DELETE | `/projects/{id}/documents/{documentId}`       | `components/project/ProjectDocumentsPanel.tsx`       |
-
-### 3.21 Projects — generated docs
-
-| Function                  | Method | Path                                          | Consumed by                                          |
-| ------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `getProjectDoc`           | GET    | `/projects/{id}/docs/{docType}`               | `components/project/GeneratedDocsPanel.tsx`, `components/project/PulseTab.tsx` |
-| `generateProjectDoc`      | POST   | `/projects/{id}/docs/{docType}/generate`      | `components/project/GeneratedDocsPanel.tsx`          |
-| `downloadProjectDoc`      | GET    | `/projects/{id}/docs/{docType}/download`      | `components/project/GeneratedDocsPanel.tsx`          |
-
-### 3.22 Projects — PRs
-
-| Function                  | Method | Path                                                  | Consumed by                                          |
-| ------------------------- | ------ | ----------------------------------------------------- | ---------------------------------------------------- |
-| `refreshProjectPrs`       | POST   | `/projects/{id}/prs/refresh`                          | `signal/pages/project/ProjectPulsePage.tsx`, `components/project/PostMergeBar.tsx` |
-| `fetchPrReviewComments`   | GET    | `/projects/{id}/prs/{prNumber}/reviews?repo=...`      | `components/project/InlineRunDetail.tsx`             |
-| `getPullRequestSnapshot`  | GET    | `/prs/snapshot?repo=&number=&maxChars=`               | `signal/pages/project/ProjectPulsePage.tsx`, `components/project/PostMergeBar.tsx` |
-| `getPostMergeBar`         | GET    | `/projects/{id}/post-merge-bar`                       | `components/project/PostMergeBar.tsx`                |
-| `dismissPostMergeBar`     | DELETE | `/projects/{id}/post-merge-bar`                       | `components/project/PostMergeBar.tsx`                |
-
-### 3.23 Projects — estimate + tech debt + activity
-
-| Function                    | Method | Path                                          | Consumed by                                                                       |
-| --------------------------- | ------ | --------------------------------------------- | --------------------------------------------------------------------------------- |
-| `estimateRun`               | GET    | `/projects/{id}/estimate?requirement=...`     | `signal/pages/project/ProjectComposePage.tsx`, `components/runs/EstimateChip.tsx` |
-| `getTechDebt`               | GET    | `/projects/{id}/tech-debt?since=...`          | `components/project/TechDebtPanel.tsx` (via `ProjectPulsePage`)                   |
-| `dispatchTechDebtFix`       | POST   | `/projects/{id}/tech-debt/fix`                | `components/project/TechDebtPanel.tsx` (autofix Phase 2)                          |
-| `getActivityFeed`           | GET    | `/projects/{id}/activity`                     | `signal/pages/project/ProjectActivityPage.tsx`                                    |
-
-### 3.24 Projects — spec templates
-
-| Function                       | Method | Path                                          | Consumed by                                          |
-| ------------------------------ | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `listSpecTemplates`            | GET    | `/projects/{id}/templates`                    | `signal/pages/ExtraPages.tsx` (`SpecTemplatesPage`)  |
-| `createProjectSpecTemplate`    | POST   | `/projects/{id}/templates`                    | `signal/pages/ExtraPages.tsx`                        |
-| `createOrgSpecTemplate`        | POST   | `/orgs/{orgId}/templates`                     | `signal/pages/ExtraPages.tsx`                        |
-| `deleteSpecTemplate`           | DELETE | `/projects/{id}/templates/{templateId}`       | `signal/pages/ExtraPages.tsx`                        |
-
-### 3.25 Projects — contracts + drift
-
-| Function                       | Method | Path                                                          | Consumed by                                          |
-| ------------------------------ | ------ | ------------------------------------------------------------- | ---------------------------------------------------- |
-| `getContractCoverage`          | GET    | `/projects/{id}/repos/{repoId}/contract-coverage`             | `components/project/ContractCoveragePanel.tsx`       |
-| `rescanContractCoverage`       | POST   | `/projects/{id}/repos/{repoId}/contract-coverage/rescan`      | `components/project/ContractCoveragePanel.tsx`       |
-| `checkContractDrift`           | POST   | `/projects/{id}/contracts/{contractId}/check-drift`           | `components/project/ContractDriftModal.tsx`          |
-| `checkRepoDrift`               | POST   | `/projects/{id}/repos/{repoId}/check-drift`                   | `components/project/ContractDriftModal.tsx`          |
-| `checkProjectDrift`            | POST   | `/projects/{id}/check-drift`                                  | `components/project/ContractDriftModal.tsx`          |
-| `refreshContractFromSource`    | POST   | `/projects/{id}/contracts/{contractId}/refresh-from-source`   | `components/project/ContractDriftModal.tsx`          |
-| `dismissContractDrift`         | POST   | `/projects/{id}/contracts/{contractId}/dismiss-drift`         | `components/project/ContractDriftModal.tsx`          |
-
-### 3.26 Projects — ADRs and invariants
-
-| Function                          | Method | Path                                          | Consumed by                                          |
-| --------------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `listProjectAdrs`                 | GET    | `/projects/{id}/adrs`                         | `components/project/AdrPanel.tsx`                    |
-| `getProjectAdr`                   | GET    | `/projects/{id}/adrs/{id}`                    | `components/project/AdrPanel.tsx`                    |
-| `listProjectInvariants`           | GET    | `/projects/{id}/invariants`                   | `components/project/InvariantPanel.tsx`              |
-| `listProjectInvariantViolations`  | GET    | `/projects/{id}/invariants/violations`        | `components/project/InvariantPanel.tsx`              |
-
-### 3.27 Standards (compliance report)
-
-| Function                  | Method | Path                                                | Consumed by                                          |
-| ------------------------- | ------ | --------------------------------------------------- | ---------------------------------------------------- |
-| `getStandardsReport`      | GET    | `/projects/{id}/standards/report?orgId=&sinceDays=` | `components/settings/OrgStandardsManager.tsx`        |
-| `listOrgStandards`        | GET    | `/orgs/{orgId}/standards`                           | `components/settings/OrgStandardsManager.tsx`        |
-| `createOrgStandard`       | POST   | `/orgs/{orgId}/standards`                           | `components/settings/OrgStandardsManager.tsx`        |
-| `updateOrgStandard`       | PUT    | `/orgs/{orgId}/standards/{standardId}`              | `components/settings/OrgStandardsManager.tsx`        |
-| `deleteOrgStandard`       | DELETE | `/orgs/{orgId}/standards/{standardId}`              | `components/settings/OrgStandardsManager.tsx`        |
-
-### 3.28 Repos (project-linked)
-
-| Function                  | Method | Path                                          | Consumed by                                                                          |
-| ------------------------- | ------ | --------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `listRepos`               | GET    | `/repos?scope=...`                            | `components/project/ProjectRepoManager.tsx`                                          |
-| `listGitHubRepos`         | GET    | `/repos/github?owner=...`                     | `components/project/ProjectRepoManager.tsx`                                          |
-| `createRepo`              | POST   | `/repos`                                      | `components/project/ProjectRepoManager.tsx`                                          |
-| `deleteRepo`              | DELETE | `/repos/{repoId}`                             | `components/project/ProjectRepoManager.tsx`                                          |
-| `syncRepo`                | POST   | `/repos/{repoId}/sync`                        | `components/project/ProjectRepoManager.tsx`                                          |
-| `installRepoWebhook`      | POST   | `/repos/{repoId}/webhook`                     | `components/project/RepoCard.tsx`                                                    |
-| `getProjectRepos`         | GET    | `/projects/{id}/repos`                        | `stores/useProjectStore.ts`, `components/project/ProjectChatPanel.tsx`, `signal/pages/project/ProjectReposPage.tsx`, `signal/pages/project/ProjectComposePage.tsx` |
-| `linkProjectRepo`         | POST   | `/projects/{id}/repos/{repoId}`               | `signal/pages/project/ProjectReposPage.tsx`                                          |
-| `unlinkProjectRepo`       | DELETE | `/projects/{id}/repos/{repoId}`               | `signal/pages/project/ProjectReposPage.tsx`                                          |
-| `updateRepoRelationships` | PUT    | `/projects/{id}/repos/{repoId}/relationships` | `signal/pages/project/ProjectReposPage.tsx`                                          |
-
-### 3.29 PR Review agent (V172)
-
-| Function                          | Method | Path                                          | Consumed by                                          |
-| --------------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `submitPrReview`                  | POST   | `/pr-reviews`                                 | `components/project/PrReviewButton.tsx`              |
-| `getPrReview`                     | GET    | `/pr-reviews/{id}`                            | `components/project/PrReviewButton.tsx`              |
-| `listPrReviewsForPr`              | GET    | `/pr-reviews?repo=&number=`                   | `components/project/PrReviewButton.tsx`              |
-| `listPrReviewsForProject`         | GET    | `/projects/{id}/pr-reviews`                   | `components/project/PrReviewButton.tsx`              |
-| `dispatchPrReviewAutofix`         | POST   | `/pr-reviews/{reviewId}/autofix`              | `components/project/PrReviewButton.tsx` (autofix Phase 1) |
-
-### 3.30 Code Review agent (V172)
-
-| Function                          | Method | Path                                          | Consumed by                                                              |
-| --------------------------------- | ------ | --------------------------------------------- | ------------------------------------------------------------------------ |
-| `submitCodeReview`                | POST   | `/code-reviews`                               | `components/project/CodeQualityPanel.tsx`                                |
-| `getCodeReview`                   | GET    | `/code-reviews/{id}`                          | `components/project/CodeQualityPanel.tsx`                                |
-| `listCodeReviewsForProject`       | GET    | `/projects/{id}/code-reviews`                 | `components/project/CodeQualityPanel.tsx`                                |
-| `getLatestCodeReviewForRepo`      | GET    | `/projects/{id}/code-reviews/latest?repo=...` | `components/project/CodeQualityPanel.tsx`                                |
-| `dispatchCodeReviewAutofix`       | POST   | `/code-reviews/{scanId}/autofix`              | `components/project/CodeQualityPanel.tsx` (autofix Phase 4)              |
-| `codeReviewReportDownloadUrl`     | GET    | `/code-reviews/{id}/report`                   | `components/project/CodeQualityPanel.tsx` (direct anchor `href`)         |
-
-### 3.31 External project sharing — invites + share links (V175 + V198)
-
-| Function                  | Method | Path                                                  | Consumed by                                          |
-| ------------------------- | ------ | ----------------------------------------------------- | ---------------------------------------------------- |
-| `createProjectInvite`     | POST   | `/projects/{id}/invites`                              | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `listProjectInvites`      | GET    | `/projects/{id}/invites`                              | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `revokeProjectInvite`     | DELETE | `/projects/{id}/invites/{inviteId}`                   | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `previewProjectInvite`    | GET    | `/invites/preview?token=...`                          | `signal/pages/ExtraPages.tsx` (`AcceptInvitePage`)   |
-| `acceptProjectInvite`     | POST   | `/invites/accept?token=...`                           | `signal/pages/ExtraPages.tsx`                        |
-| `createShareLink`         | POST   | `/projects/{id}/share-links`                          | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `listShareLinks`          | GET    | `/projects/{id}/share-links`                          | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `revokeShareLink`         | DELETE | `/projects/{id}/share-links/{linkId}`                 | `signal/pages/project/ProjectMembersPage.tsx`        |
-| `shareLinkPublicUrl`      | n/a    | window-local helper (no backend call)                 | `signal/pages/project/ProjectMembersPage.tsx`        |
-
-### 3.32 Billing
-
-`frontend/src/lib/billing-api.ts` and `frontend/src/lib/invoice-api.ts` wrap higher-level helpers. The contact form is the one direct billing-adjacent call in `api.ts`:
-
-| Function                  | Method | Path                                  | Consumed by                                                         |
-| ------------------------- | ------ | ------------------------------------- | ------------------------------------------------------------------- |
-| `submitContactForm`       | POST   | `/contact`                            | `components/auth/ContactModal.tsx`                                  |
-
-Most billing flows (plans, subscribe, top-up purchases, payment history, webhook acknowledgements) live in `frontend/src/lib/billing-api.ts`. The URLs there match the backend `@PostMapping` / `@GetMapping` annotations on `billing/` controllers and are also covered by `ApiContractTest`.
-
-### 3.33 Notifications
-
-| Function                       | Method | Path                                  | Consumed by                                                                          |
-| ------------------------------ | ------ | ------------------------------------- | ------------------------------------------------------------------------------------ |
-| `getNotifications`             | GET    | `/notifications`                      | `components/layout/NotificationPanel.tsx`, `signal/pages/MiscPages.tsx` (`NotificationsPage`) |
-| `getUnreadCount`               | GET    | `/notifications/unread-count`         | `components/layout/NotificationBell.tsx`                                             |
-| `markNotificationRead`         | POST   | `/notifications/{id}/read`            | `components/layout/NotificationPanel.tsx`                                            |
-| `markAllNotificationsRead`     | POST   | `/notifications/read-all`             | `components/layout/NotificationPanel.tsx`                                            |
-| `getNotificationPreferences`   | GET    | `/notifications/preferences`          | `components/settings/NotificationPreferences.tsx`                                    |
-| `updateNotificationPreference` | PUT    | `/notifications/preferences`          | `components/settings/NotificationPreferences.tsx`                                    |
-
-### 3.34 SSO config (M-004)
-
-| Function           | Method | Path                          | Consumed by                                          |
-| ------------------ | ------ | ----------------------------- | ---------------------------------------------------- |
-| `getSsoConfig`     | GET    | `/auth/sso/config`            | `components/settings/SsoConfigCard.tsx`              |
-| `updateSsoConfig`  | PUT    | `/auth/sso/config`            | `components/settings/SsoConfigCard.tsx`              |
-| `clearSsoConfig`   | DELETE | `/auth/sso/config`            | `components/settings/SsoConfigCard.tsx`              |
-
-### 3.35 Slack integration
-
-| Function                       | Method | Path                                                                      | Consumed by                                          |
-| ------------------------------ | ------ | ------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `getSlackStatus`               | GET    | `/integrations/slack/status`                                              | `signal/pages/account/MiscAccountPages.tsx`          |
-| `getSlackInstallUrl`           | GET    | `/integrations/slack/install`                                             | `signal/pages/account/MiscAccountPages.tsx`          |
-| `disconnectSlack`              | DELETE | `/integrations/slack/disconnect`                                          | `signal/pages/account/MiscAccountPages.tsx`          |
-| `listSlackChannels`            | GET    | `/integrations/slack/channels`                                            | `signal/pages/account/MiscAccountPages.tsx`          |
-| `getProjectSlackChannels`      | GET    | `/integrations/slack/projects/{projectId}/channels`                       | `signal/pages/project/ProjectSettingsPage.tsx`       |
-| `addProjectSlackChannel`       | POST   | `/integrations/slack/projects/{projectId}/channels`                       | `signal/pages/project/ProjectSettingsPage.tsx`       |
-| `removeProjectSlackChannel`    | DELETE | `/integrations/slack/projects/{projectId}/channels/{channelId}`           | `signal/pages/project/ProjectSettingsPage.tsx`       |
-| `updateSlackChannelVerbosity`  | PUT    | `/integrations/slack/projects/{projectId}/channels/{channelId}/verbosity` | `signal/pages/project/ProjectSettingsPage.tsx`       |
-| `sendSlackTestMessage`         | POST   | `/integrations/slack/test`                                                | `signal/pages/account/MiscAccountPages.tsx`          |
-
-### 3.36 Jira / Confluence integrations
-
-| Function                  | Method | Path                                          | Consumed by                                          |
-| ------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `getIntegrationStatus`    | GET    | `/integrations/status`                        | `signal/pages/account/MiscAccountPages.tsx`          |
-| `getIntegrationRuns`      | GET    | `/integrations/runs?source=...`               | `signal/pages/account/MiscAccountPages.tsx`          |
-| `triggerConfluence`       | POST   | `/integrations/confluence/trigger`            | `signal/pages/account/MiscAccountPages.tsx`          |
-| `triggerJira`             | POST   | `/integrations/jira/trigger`                  | `signal/pages/account/MiscAccountPages.tsx`          |
-
-### 3.37 Migrations (R-336..R-339)
-
-| Function                  | Method | Path                                  | Consumed by                                          |
-| ------------------------- | ------ | ------------------------------------- | ---------------------------------------------------- |
-| `listMigrations`          | GET    | `/migrations`                         | `signal/pages/ExtraPages.tsx` (`MigrationsPage`)     |
-| `getMigrationDetail`      | GET    | `/migrations/{slug}`                  | `signal/pages/ExtraPages.tsx` (`MigrationDetailPage`)|
-| `migrationDryRun`         | POST   | `/migrations/{slug}/dry-run`          | `signal/pages/ExtraPages.tsx`                        |
-| `migrationApply`          | POST   | `/migrations/{slug}/apply`            | `signal/pages/ExtraPages.tsx`                        |
-
-### 3.38 Readymade Solutions library (R-327..R-331)
-
-| Function                       | Method | Path                                  | Consumed by                                                              |
-| ------------------------------ | ------ | ------------------------------------- | ------------------------------------------------------------------------ |
-| `listLibrary`                  | GET    | `/library`                            | `signal/pages/ExtraPages.tsx` (`LibraryPage`)                            |
-| `getLibraryDetail`             | GET    | `/library/{slug}`                     | `signal/pages/ExtraPages.tsx` (`LibraryDetailPage`)                      |
-| `getLibraryFacets`             | GET    | `/library/categories`                 | `signal/pages/ExtraPages.tsx`                                            |
-| `resolveLibraryVariant`        | POST   | `/library/{slug}/resolve`             | `signal/pages/ExtraPages.tsx`                                            |
-| `instantiateLibrarySolution`   | POST   | `/library/{slug}/instantiate`         | `signal/pages/ExtraPages.tsx`                                            |
-| `favouriteLibrarySolution`     | POST   | `/library/favourite/{slug}`           | `signal/pages/ExtraPages.tsx`                                            |
-| `unfavouriteLibrarySolution`   | DELETE | `/library/favourite/{slug}`           | `signal/pages/ExtraPages.tsx`                                            |
-| `requiresCostCap`              | n/a    | Pure-function tier predicate (no HTTP)| `signal/pages/ExtraPages.tsx`, `components/runs/EstimateChip.tsx`        |
-
-### 3.39 Audit logs
-
-| Function           | Method | Path                                          | Consumed by                                          |
-| ------------------ | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `getAuditLogs`     | GET    | `/admin/audit-logs` OR `/org/me/audit-logs`   | `signal/pages/ExtraPages.tsx` (`AuditLogPage`) — toggled via the `orgScoped` flag in the call site |
-
-### 3.40 Admin — users, orgs, invitations
-
-| Function                          | Method | Path                                          | Consumed by                                          |
-| --------------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `adminListUsers`                  | GET    | `/admin/users`                                | `signal/pages/MiscPages.tsx` (`AdminPage`)           |
-| `adminGetUser`                    | GET    | `/admin/users/{id}`                           | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateUserStatus`           | PUT    | `/admin/users/{id}/status`                    | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateUserTier`             | PUT    | `/admin/users/{id}/tier`                      | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateUserRole`             | PUT    | `/admin/users/{id}/role`                      | `signal/pages/MiscPages.tsx`                         |
-| `adminGrantUserRuns`              | POST   | `/admin/users/{userId}/grant-runs`            | `signal/pages/MiscPages.tsx`                         |
-| `adminGrantOrgRuns`               | POST   | `/admin/orgs/{orgId}/grant-runs`              | `signal/pages/MiscPages.tsx`                         |
-| `adminListOrgs`                   | GET    | `/admin/orgs`                                 | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateOrgTier`              | PUT    | `/admin/orgs/{id}/tier`                       | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateOrgStatus`            | PUT    | `/admin/orgs/{id}/status`                     | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateOrgRunLimit`          | PUT    | `/admin/orgs/{id}/run-limit`                  | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateOrgApiKeys`           | PUT    | `/admin/orgs/{id}/api-keys`                   | `signal/pages/MiscPages.tsx`                         |
-| `adminInviteUser`                 | POST   | `/admin/invite`                               | `signal/pages/MiscPages.tsx`                         |
-| `adminListEscalated`              | GET    | `/admin/invitations/escalated`                | `signal/pages/MiscPages.tsx`                         |
-| `adminApproveInvite`              | POST   | `/admin/invitations/{id}/approve`             | `signal/pages/MiscPages.tsx`                         |
-| `adminRejectInvite`               | POST   | `/admin/invitations/{id}/reject`              | `signal/pages/MiscPages.tsx`                         |
-| `adminGetTierConfig`              | GET    | `/admin/tier-config`                          | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateTierConfig`           | PUT    | `/admin/tier-config/{tier}`                   | `signal/pages/MiscPages.tsx`                         |
-
-### 3.41 Admin — tier lifecycle (LISTED / HIDDEN / SUNSETTING)
-
-| Function                  | Method | Path                                  | Consumed by                                          |
-| ------------------------- | ------ | ------------------------------------- | ---------------------------------------------------- |
-| `fetchTiersLifecycle`     | GET    | `/admin/tiers`                        | tier lifecycle admin view (under `signal/pages/MiscPages.tsx → AdminPage`) |
-| `updateTierLifecycle`     | PUT    | `/admin/tiers/{tier}/lifecycle`       | tier lifecycle admin view                            |
-
-### 3.42 Admin — top-up packages, halt-all, audit chain, activation funnel
-
-| Function                          | Method | Path                                  | Consumed by                                          |
-| --------------------------------- | ------ | ------------------------------------- | ---------------------------------------------------- |
-| `adminListTopupPackages`          | GET    | `/admin/topup-packages`               | `signal/pages/MiscPages.tsx`                         |
-| `adminCreateTopupPackage`         | POST   | `/admin/topup-packages`               | `signal/pages/MiscPages.tsx`                         |
-| `adminUpdateTopupPackage`         | PUT    | `/admin/topup-packages/{id}`          | `signal/pages/MiscPages.tsx`                         |
-| `adminDeleteTopupPackage`         | DELETE | `/admin/topup-packages/{id}`          | `signal/pages/MiscPages.tsx`                         |
-| `haltAllActiveRuns`               | POST   | `/admin/runs/halt-all`                | `signal/pages/MiscPages.tsx`                         |
-| `verifyAuditChain`                | GET    | `/admin/audit-chain/verify`           | `signal/pages/MiscPages.tsx`                         |
-| `getActivationFunnel`             | GET    | `/admin/activation-funnel`            | `signal/pages/MiscPages.tsx`                         |
-| `adminTriggerUsageReport`         | POST   | `/admin/usage-reports/trigger`        | `signal/pages/MiscPages.tsx`                         |
-
-### 3.43 Admin — feature flags
-
-| Function                  | Method | Path                                          | Consumed by                                          |
-| ------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `adminListFeatureFlags`   | GET    | `/admin/feature-flags`                        | `signal/pages/MiscPages.tsx`                         |
-| `getPublicFeatureFlags`   | GET    | `/admin/feature-flags/public`                 | `stores/useAuthStore.ts` (loaded post-login)         |
-| `adminUpdateFeatureFlag`  | PUT    | `/admin/feature-flags/{key}`                  | `signal/pages/MiscPages.tsx`                         |
-
-### 3.44 Admin — analytics
-
-| Function                  | Method | Path                                          | Consumed by                                          |
-| ------------------------- | ------ | --------------------------------------------- | ---------------------------------------------------- |
-| `getAnalyticsUsage`       | GET    | `/admin/analytics/usage`                      | `signal/pages/MiscPages.tsx` (`AdminPage` analytics tab) |
-| `getAnalyticsMembers`     | GET    | `/admin/analytics/members`                    | `signal/pages/MiscPages.tsx`                         |
-| `getAnalyticsBilling`     | GET    | `/admin/analytics/billing`                    | `signal/pages/MiscPages.tsx`                         |
-
-### 3.45 Admin — payment audit + webhook log
-
-| Function                       | Method | Path                                  | Consumed by                                          |
-| ------------------------------ | ------ | ------------------------------------- | ---------------------------------------------------- |
-| `adminListPaymentAudit`        | GET    | `/admin/payment-audit`                | `signal/pages/MiscPages.tsx`                         |
-| `adminExportPaymentAuditCsv`   | GET    | `/admin/payment-audit/export`         | `signal/pages/MiscPages.tsx`                         |
-| `adminListWebhookEvents`       | GET    | `/admin/webhook-events`               | `signal/pages/MiscPages.tsx`                         |
-
-## 4. Coverage check — every `api.ts` URL has a backend mapping
-
-`ApiContractTest.everyApiTsUrlResolvesToRegisteredBackendRoute` runs in `mvn verify`. Last green at HEAD. The `ALLOWLIST` is empty — no orphans.
-
-The Java test scans for these annotations on each `@Controller` / `@RestController`:
-
-```java
-RequestMapping, GetMapping, PostMapping, PutMapping, DeleteMapping, PatchMapping
-```
-
-…and asserts every URL literal extracted from `api.ts` matches one of the registered patterns after placeholder normalisation.
-
-When a `lib/api.ts` URL no longer has a backend mapping (a controller was renamed or removed), the test fails with the listing:
+Field semantics:
+
+- `timestamp` — ISO-8601 UTC; emitted by the backend, not the client clock.
+- `status` — integer matching the HTTP status line (200-class never reaches this advice).
+- `error` — short slug derived from the status: `bad_request` (400), `unauthorized` (401), `payment_required` (402), `forbidden` (403), `not_found` (404), `conflict` (409), `gone` (410), `unprocessable_entity` (422), `too_many_requests` (429), `internal_server_error` (500), `bad_gateway` (502), `service_unavailable` (503). The slug map lives in `ValidationAdvice.slugForStatus`.
+- `message` — surfaced to the user; this is the field the frontend's `parseErrorMessage` reads.
+- `fields` — present only on bean-validation failures (`MethodArgumentNotValidException`, `ConstraintViolationException`). Keys are field names (e.g. `userRequest`, `userCostCap`), values are the violation message. The frontend uses this to highlight specific form inputs.
+
+### Specific 4xx handlers in ValidationAdvice
+
+| Handler                                       | Status | Triggered when                                                          |
+| --------------------------------------------- | ------ | ----------------------------------------------------------------------- |
+| `onValidation(MethodArgumentNotValidException)` | 400  | `@Valid` body fails (e.g. blank `userRequest`, `userCostCap` out of range) |
+| `onResponseStatus(ResponseStatusException)`    | varies | Controllers explicitly throw `ResponseStatusException` (e.g. 409, 503) |
+| `onAccessDenied(AccessDeniedException)`        | 403  | RBAC guard rejects the call                                              |
+| `onBadJson(HttpMessageNotReadableException)`   | 400  | Malformed JSON body / wrong content type                                |
+| `onTypeMismatch(MethodArgumentTypeMismatchException)` | 400 | Path/query param coerces to wrong type                              |
+| `onIllegalArgument(IllegalArgumentException)`  | 400  | Enum coercion / range checks (was leaking as 500 pre-2026-05-16)        |
+| `onConstraintViolation(ConstraintViolationException)` | 400 | Method-level validation (e.g. `@Min` on query param)                |
+| `onMethodNotAllowed(HttpRequestMethodNotSupportedException)` | 405 | Wrong verb; response also lists supported methods             |
+| `onMissingParam(MissingServletRequestParameterException)` | 400 | Required `@RequestParam` absent                                  |
+| `onBilling(BillingException)`                  | 402  | Quota exceeded / payment required                                       |
+
+### Additional advice handlers
+
+- `OptimisticLockAdvice` (`api/advice/OptimisticLockAdvice.java`) — translates `ObjectOptimisticLockingFailureException` to **409 Conflict** with body `{error, message, entity, id}` and message "Reload and retry." Introduced with V112 + `@Version` on `ExecutionRun`.
+- `GlobalExceptionAdvice` (`api/advice/GlobalExceptionAdvice.java`) — runs at `@Order(Integer.MAX_VALUE)` as the last-chance catch. Handles `ErrorResponseException` (Spring 6 supertype for 4xx), `NoResourceFoundException` (canonical 404), and any other `Throwable` (returns 500 with an opaque 8-char UUID `errorId`; the full stack is logged server-side under that same id).
+
+### Frontend mapping: `parseErrorMessage` + `STATUS_MESSAGES`
+
+In `frontend/src/lib/api.ts`:
 
 ```
-URLs in frontend/src/lib/api.ts with no matching backend route (1 total):
-  /runs/{id}/legacy-endpoint
+const STATUS_MESSAGES: Record<number, string> = {
+  400: 'Request was invalid. Check the form and try again.',
+  401: 'Sign in to continue.',
+  402: 'Payment required. Check your plan or top up credits.',
+  403: 'You don’t have permission to do that.',
+  404: 'We couldn’t find that.',
+  409: 'Conflict — someone else changed this. Reload and try again.',
+  410: 'That action has been retired.',
+  422: 'Validation failed.',
+  429: 'Slow down — too many requests.',
+  500: 'Something went wrong on our side. We’ve been notified.',
+  502: 'Upstream service is unavailable.',
+  503: 'Service temporarily unavailable.',
+};
 
-Resolution: either
-  (a) add the missing @*Mapping on a controller,
-  (b) remove the dead frontend call site in lib/api.ts, or
-  (c) add the URL template to ALLOWLIST in ApiContractTest with a one-line justification.
+async function parseErrorMessage(res: Response, status: number): Promise<string> {
+  try {
+    const body = await res.json();
+    if (body?.message) return body.message;
+    if (body?.error)   return body.error;
+  } catch { /* not JSON */ }
+  return STATUS_MESSAGES[status] || `Request failed (${status}).`;
+}
 ```
 
-## 5. Server-sent events (not via api.ts)
+`ApiError` itself is intentionally minimal:
 
-SSE is not routed through `req()` — it uses the browser-native `EventSource` directly. The hook `frontend/src/signal/hooks/useSse.ts` does:
+```
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+```
 
-1. Call `getSseToken(runId)` to mint a scoped JWT (`scope=sse`, `runId` claim, 5-min TTL).
-2. Open `new EventSource('/api/runs/' + runId + '/events?token=' + token)`.
-3. Dispatch event types (`PLAN_READY`, `RUN_STATUS`, `TASK_STATUS`, `LIVE_LOG`, `RUN_COST`, `EXEC_COMPENSATION_UPDATE`, `EXEC_COMPENSATION_DONE`, `RUN_PROVIDER_SWITCHED`, `COMPLETE`) into `useRunStore`.
-4. Reconnect with a fresh token if the EventSource errors.
+There is no `cause`/`details` slot — callers that need richer error info today would have to inspect the raw response themselves (none currently do).
 
-The token endpoint (`getSseToken`) IS in `api.ts` and IS covered by `ApiContractTest`; the EventSource open is not.
+The exported helper `isRetryableError(e: unknown): boolean` returns `true` when the error is `ApiError(0)` (network) or `status >= 500`. Two call sites use it: `useSse.ts` (to decide whether to reconnect) and the `SkeletonRow` background fetches (to decide whether to show "tap to retry").
 
-## 6. WebSocket usage
+---
 
-None. The app is HTTP + SSE only.
+## 3. Endpoint catalog
 
-## 7. Polling cadences (informational)
+Every function exported from `frontend/src/lib/api.ts` (plus the namespaced clients in `lib/execution-api.ts`, `lib/billing-api.ts`, `lib/invoice-api.ts`) is listed below, grouped by domain. For each function:
 
-These are not API endpoints but call-site contracts worth knowing about:
+- **Function name** as exported.
+- **HTTP verb** + URL (prefixed with `/api` by the `req<T>` helper — written without the prefix below to match how it looks at the call site).
+- **Consumed by** — the Signal pages or components that call it. Helper components rarely call the API directly; most consumption happens at page level.
 
-| Surface                                       | Cadence                       | Calls                                              |
-| --------------------------------------------- | ----------------------------- | -------------------------------------------------- |
-| RunDetail cost chip                           | 5 s while non-terminal        | `getLiveCost(runId)`                               |
-| RunDetail files panel                         | 5 s while non-terminal        | `getFilesWithStatus(runId)`                        |
-| HomePage activity feed                        | 30 s                          | `getActivityFeed(projectId, ...)`                  |
-| ProjectMemoryPanel                            | 30 s                          | `getProjectMemory(projectId)`                      |
-| NotificationBell unread-count                 | 60 s                          | `getUnreadCount()`                                 |
+### 3.1 Run lifecycle
 
-## 8. Where to add a new endpoint
+All paths under `/api/runs/*`. The hub controller is `src/main/java/com/navneet/executespec/api/controller/RunController.java` (~1,394 lines, ~30 endpoints). Lifecycle, workspace, recovery, plan-versions, push, archive/soft-delete all live in one class.
 
-1. Add the typed exported function at the bottom of the appropriate section in `frontend/src/lib/api.ts`. Follow the existing pattern:
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `createRun(body)`                             | POST `/runs`                                   | `signal/pages/ComposePage.tsx`, `project/ProjectComposePage.tsx`, `ResultPage.tsx` (re-run row)      |
+| `getRuns(params)`                             | GET `/runs` (paginated)                        | `AllRunsPage.tsx`, `HomePage.tsx`, `MiscPages.tsx::SearchPage`, `project/ProjectsPage.tsx`, `project/ProjectRunsPage.tsx`, `project/ProjectPulsePage.tsx`, `project/ProjectComposePage.tsx` |
+| `getRun(id)`                                  | GET `/runs/{id}`                               | `LivePage.tsx` (8s poll), `PlanPage.tsx` (2s poll), `ResultPage.tsx`, `HomePage.tsx`, `project/ProjectRunsPage.tsx` |
+| `approveRun(id, approved, creditsConfirmed?)` | POST `/runs/{id}/approve`                      | `PlanPage.tsx`                                                                                       |
+| `cancelRun(id)`                               | DELETE `/runs/{id}`                            | `LivePage.tsx`                                                                                       |
+| `pauseRun(runId)`                             | POST `/runs/{runId}/pause`                     | not yet wired into a Signal page (flag-gated)                                                        |
+| `resumeRun(runId)`                            | POST `/runs/{runId}/resume`                    | not yet wired into a Signal page                                                                     |
+| `archiveRun(runId)`                           | POST `/runs/{runId}/archive`                   | `AllRunsPage.tsx`, `project/ProjectRunsPage.tsx`                                                     |
+| `unarchiveRun(runId)`                         | POST `/runs/{runId}/unarchive`                 | `AllRunsPage.tsx`                                                                                    |
+| `softDeleteRun(runId)`                        | POST `/runs/{runId}/soft-delete`               | `AllRunsPage.tsx`                                                                                    |
+| `restoreRun(runId)`                           | POST `/runs/{runId}/restore`                   | `AllRunsPage.tsx`                                                                                    |
+| `forkRun(runId, overrides?)`                  | POST `/runs/{runId}/fork`                      | `ResultPage.tsx` (re-run on different provider)                                                       |
+| `retryTask(runId, taskId)`                    | POST `/runs/{runId}/tasks/{taskId}/retry`      | `ResultPage.tsx`                                                                                     |
+| `retryValidationReport(runId)`                | POST `/runs/{runId}/retry-validation`          | `ResultPage.tsx`                                                                                     |
+| `updateRunProject(runId, projectId)`          | PATCH `/runs/{runId}/project`                  | `AllRunsPage.tsx` (move-to-project menu)                                                             |
+| `iterateRun(runId, userRequest)`              | POST `/runs/{runId}/iterate`                   | `ResultPage.tsx` (legacy path; backend returns 410 Gone today)                                       |
+| `editRunPlan(runId, feedback)`                | POST `/runs/{runId}/edit-plan`                 | not wired (backend returns 410 Gone)                                                                 |
+| `getLiveCost(runId)`                          | GET `/runs/{runId}/cost`                       | `LivePage.tsx` (8s poll)                                                                             |
+| `getTaskGraph(runId)`                         | GET `/runs/{runId}/task-graph`                 | `ResultPage.tsx` (Tasks tab)                                                                         |
+| `getPlanVersions(runId)`                      | GET `/runs/{runId}/plan-versions`              | `ResultPage.tsx`                                                                                     |
+| `getMessages(runId)`                          | GET `/runs/{runId}/messages`                   | `useSse.ts` (pre-populates the message buffer when SSE first connects)                               |
+| `downloadWorkspace(runId)`                    | GET `/runs/{runId}/download` (blob)            | `ResultPage.tsx`                                                                                     |
+| `getFiles(runId)`                             | GET `/runs/{runId}/files`                      | `ResultPage.tsx`                                                                                     |
+| `getFilesWithStatus(runId)`                   | GET `/runs/{runId}/files/status`               | `ResultPage.tsx` (Code tab — ADDED/MODIFIED/UNCHANGED dots in `FileTree`)                            |
+| `getFile(runId, filePath)`                    | GET `/runs/{runId}/file?path=` (text)          | `ResultPage.tsx` (file viewer)                                                                       |
+| `getFileDiff(runId, filePath)`                | GET `/runs/{runId}/file/diff?path=`            | `ResultPage.tsx` (diff toggle)                                                                       |
+| `getOpenApiSpec(runId)`                       | GET `/runs/{runId}/openapi.yaml` (text)        | `ResultPage.tsx` (API tab)                                                                            |
+| `pushToGitHub(runId, repoMode?)`              | POST `/runs/{runId}/push-github` (deprecated)   | `ResultPage.tsx` (legacy single-repo button)                                                          |
+| `pushToScm(runId)`                            | POST `/runs/{runId}/push-scm`                  | `ResultPage.tsx` (multi-repo path)                                                                   |
+| `syncRun(runId, branch?)`                     | POST `/runs/{runId}/sync`                      | `ResultPage.tsx`                                                                                     |
+| `syncRunToOriginal(runId)`                    | POST `/runs/{runId}/sync/original`             | `ResultPage.tsx`                                                                                     |
+| `getRunPrs(runId)`                            | GET `/runs/{runId}/prs`                        | `ResultPage.tsx` (PR tab)                                                                            |
 
-   ```ts
-   export const fooBar = (id: string, body: FooBody) =>
-     req<Foo>(`/projects/${id}/foo`, {method: 'POST', body: JSON.stringify(body)});
-   ```
+#### Chat / apply (post-run conversation)
 
-2. Add the matching `@*Mapping` on a controller under `src/main/java/com/navneet/executespec/`.
-3. Run `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -Dtest=ApiContractTest test -q` — if the contract test passes, the URL resolves to a real route.
-4. Import + call the function from a TSX page or component. The bearer token is auto-injected.
+Controller: `src/main/java/com/navneet/executespec/api/controller/RunConversationController.java`. Uses a dedicated `applyExecutor` (4-thread pool) so the 25-iter worker loop in `ApplyService` doesn't burn a Tomcat handler thread.
 
-## 9. Where to add a new error case
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getRunChat(runId)`                           | GET `/runs/{runId}/chat`                       | `ResultPage.tsx` (Chat tab)                                                                          |
+| `sendRunChatMessage(runId, message)`          | POST `/runs/{runId}/chat`                      | `ResultPage.tsx`                                                                                     |
+| `applyToRun(runId, suggestion, source?)`      | POST `/runs/{runId}/apply` (async)             | `ResultPage.tsx` (apply-suggestion CTA)                                                              |
 
-`STATUS_MESSAGES` in `lib/api.ts` (lines 11–25) is the friendly-fallback dictionary. Each entry maps an HTTP status to a customer-facing one-liner. Add a new status by:
+#### Removed-in-V2 endpoints (backend returns 410 Gone)
 
-1. Adding a new entry to the constant.
-2. Verifying the backend `ValidationAdvice` returns the canonical envelope at that status (otherwise the `parseErrorMessage` JSON path fails over to the status-message fallback).
+`POST /runs/{id}/clarify`, `/merge`, `/retry` (general), `/edit-and-restart`, `/reopen-merge`, `/rework`, `/implement-suggestions`, `/edit-plan`, `/iterate` are all wired explicitly by `RunController` / `RunConversationController` to throw 410. Old clients get a clean error envelope instead of a silent 404.
 
-The error envelope is fixed — changing `ValidationAdvice.baseBody` will break `parseErrorMessage`'s preferred path (it would fall through to the status-message dictionary, lossy).
+### 3.2 Auth + onboarding
+
+Controllers: `auth/security/SecurityConfig.java` registers the filter chain; per-feature endpoints live under `auth/*` packages.
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `authRegister(body)`                          | POST `/auth/register`                          | `AuthPages.tsx::SignupPage`                                                                          |
+| `authLogin(body)`                             | POST `/auth/login`                             | `useAuthStore.login` (called by `AuthPages.tsx::LoginPage`)                                          |
+| `authRefresh()`                               | POST `/auth/refresh`                           | `useAuthStore.refreshAccessToken`                                                                    |
+| `authLogout()`                                | DELETE `/auth/logout`                          | `useAuthStore.logout` (called by `AccountPage.tsx`)                                                  |
+| `authMe()`                                    | GET `/auth/me`                                 | `useAuthStore.loadMe` (called by `AuthCallbackPage.tsx`, app bootstrap)                              |
+| `getMyPermissions()`                          | GET `/auth/me/permissions`                     | `useTierPermissions.ts` hook (consumed by `AccountPage.tsx`, `ComposePage.tsx`, `ResultPage.tsx`, `BillingPage.tsx`, `Shell.tsx`, …) |
+| `authVerifyEmail(token)`                      | GET `/auth/verify-email?token=`                | `AuthPages.tsx::VerifyPage`                                                                          |
+| `authResendVerification(email)`               | POST `/auth/resend-verification`               | `AuthPages.tsx::VerifyPage`                                                                          |
+| `authForgotPassword(email)`                   | POST `/auth/forgot-password`                   | `ExtraPages.tsx::ForgotPasswordPage`                                                                 |
+| `authResetPassword(token, newPassword)`       | POST `/auth/reset-password`                    | `ExtraPages.tsx::ResetPasswordPage`                                                                  |
+| `authChangePassword(currentPassword, newPassword)` | POST `/auth/change-password`               | `AccountPage.tsx`                                                                                    |
+| `updateGithubSettings(pat, owner)`            | PUT `/auth/settings/github`                    | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateGitHub(pat)`                         | POST `/auth/settings/github/validate`          | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `getGitHubAppStatus()`                        | GET `/auth/github-app/status`                  | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `getGitHubAppInstallUrl()`                    | GET `/auth/github-app/install-url`             | `AuthPages.tsx::WelcomePage`, `MiscAccountPages.tsx::IntegrationsPage`                               |
+| `uninstallGitHubApp()`                        | DELETE `/auth/github-app/install`              | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `updateAiKeySettings(openai, anthropic, gemini)` | PUT `/auth/settings/ai-keys`                | `MiscAccountPages.tsx::ApiKeysPage`                                                                  |
+| `validateAiKey(provider, apiKey)`             | POST `/auth/settings/ai-keys/validate`         | `MiscAccountPages.tsx::ApiKeysPage`                                                                  |
+| `updateJiraSettings(...)`                     | PUT `/auth/settings/jira`                      | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateJira(...)`                           | POST `/auth/settings/jira/validate`            | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `updateConfluenceSettings(...)`               | PUT `/auth/settings/confluence`                | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateConfluence(...)`                     | POST `/auth/settings/confluence/validate`      | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `updateBitbucketSettings(...)`                | PUT `/auth/settings/bitbucket`                 | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateBitbucket(...)`                      | POST `/auth/settings/bitbucket/validate`       | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `updateViewMode(viewMode)`                    | PUT `/auth/settings/view-mode`                 | `useViewMode.ts` hook                                                                                |
+| `getSsoConfig()`                              | GET `/auth/sso/config`                         | `LegalPages.tsx::OrgSettingsPage`                                                                    |
+| `updateSsoConfig(body)`                       | PUT `/auth/sso/config`                         | `LegalPages.tsx::OrgSettingsPage`                                                                    |
+| `clearSsoConfig()`                            | DELETE `/auth/sso/config`                      | `LegalPages.tsx::OrgSettingsPage`                                                                    |
+| `listOnboardingSamples()`                     | GET `/onboarding/sample-specs`                 | `AuthPages.tsx::WelcomePage`                                                                         |
+| `pickOnboardingSample(sampleId)`              | POST `/onboarding/pick-sample`                 | `AuthPages.tsx::WelcomePage`                                                                         |
+| `getSandboxStatus()`                          | GET `/onboarding/sandbox-status`               | `AuthPages.tsx::WelcomePage`                                                                         |
+
+OAuth2 redirect flow: `/api/auth/oauth2/init?surface=signal&provider=google` and `/api/auth/oauth2/authorize/{google,github}` are full-page redirects (not `fetch`), handled in `AuthPages.tsx::LoginPage` via `window.location.href`. The callback comes back to `AuthCallbackPage.tsx`.
+
+### 3.3 Organization + members
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getMyOrg()`                                  | GET `/org/me`                                  | `LegalPages.tsx::OrgSettingsPage`, `MiscAccountPages.tsx::OrgMembersPage`, `project/ProjectMembersPage.tsx` |
+| `createOrg(body)`                             | POST `/org`                                    | `AccountPage.tsx` (new-org flow)                                                                     |
+| `updateOrg(body)`                             | PUT `/org/me`                                  | `LegalPages.tsx::OrgSettingsPage`                                                                    |
+| `adjustOrgSeats(newSeats)`                    | POST `/org/me/seats/adjust`                    | not yet wired                                                                                        |
+| `updateOrgAiKeySettings(anthropic, openai, gemini)` | PUT `/org/me/settings/ai-keys`           | `MiscAccountPages.tsx::ApiKeysPage` (ORG_ADMIN path)                                                 |
+| `updateOrgKeySourceSettings(keySourceMode, enabledProviders)` | PUT `/org/me/settings/key-source` | `MiscAccountPages.tsx::ApiKeysPage` (BYOK toggle)                                                    |
+| `updateExternalSharing(enabled)`              | PUT `/org/me/settings/external-sharing`        | `LegalPages.tsx::OrgSettingsPage` (V198 toggle)                                                      |
+| `updateOrgJiraSettings(...)`                  | PUT `/org/me/settings/jira`                    | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateOrgJira(...)`                        | POST `/org/me/settings/jira/validate`          | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `updateOrgConfluenceSettings(...)`            | PUT `/org/me/settings/confluence`              | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `validateOrgConfluence(...)`                  | POST `/org/me/settings/confluence/validate`    | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `getOrgMembers()`                             | GET `/org/me/members`                          | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `removeMember(userId)`                        | DELETE `/org/me/members/{userId}`              | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `changeMemberRole(userId, role)`              | PUT `/org/me/members/{userId}/role`            | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `orgSuspendMember(userId, suspended)`         | PUT `/org/me/members/{userId}/suspend`         | not yet wired                                                                                        |
+| `inviteMember(body)`                          | POST `/org/invite`                             | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `getOrgInvitations()`                         | GET `/org/me/invitations`                      | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `resendInvitation(id)`                        | POST `/org/me/invitations/{id}/resend`         | `MiscAccountPages.tsx::OrgMembersPage`                                                               |
+| `acceptInvite(token)`                         | POST `/org/accept-invite?token=`               | `ExtraPages.tsx::AcceptInvitePage`                                                                   |
+
+### 3.4 Project workspace
+
+The project-scoped surface is the V3 multi-repo flow. Controllers spread across `project/*`, `codeintel/*`, `memory/*`, `contracts/*`, `standards/*`, `adr/*`, `arch/invariants/*`, `activity/*`. The Signal `ProjectTabs.tsx` strip drives all of them.
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getProjects()`                               | GET `/projects`                                | `ProjectsPage.tsx`, `ComposePage.tsx`, `HomePage.tsx`, `MiscPages.tsx::SearchPage`, `MiscPages.tsx::MorePage`, `ExtraPages.tsx::SpecTemplatesPage` |
+| `getProject(id)`                              | GET `/projects/{id}`                           | `useProjectMeta` hook (every project-scoped page)                                                    |
+| `createProject(body)`                         | POST `/projects`                               | `ProjectsPage.tsx`                                                                                   |
+| `updateProjectSettings(id, body)`             | PATCH `/projects/{id}/settings`                | `project/ProjectSettingsPage.tsx`                                                                    |
+| `archiveProject(id)`                          | PUT `/projects/{id}/archive`                   | `project/ProjectSettingsPage.tsx`                                                                    |
+| `unarchiveProject(id)`                        | PUT `/projects/{id}/unarchive`                 | `ProjectsPage.tsx` (Archived tab)                                                                    |
+| `deleteProject(id)`                           | DELETE `/projects/{id}`                        | `project/ProjectSettingsPage.tsx`                                                                    |
+| `restoreProject(id)`                          | POST `/projects/{id}/restore`                  | `ProjectsPage.tsx`                                                                                   |
+| `getProjectDashboard(projectId)`              | GET `/projects/{projectId}/dashboard`          | `project/ProjectPulsePage.tsx`, `project/ProjectsPage.tsx`, `project/ProjectRunsPage.tsx`, `project/ProjectTabs.tsx` |
+| `getProjectScores(projectId)`                 | GET `/projects/{projectId}/scores`             | not yet wired into a Signal page                                                                     |
+| `getProjectMemory(projectId)`                 | GET `/projects/{projectId}/memory`             | `project/ProjectChatPage.tsx` (30s poll), `project/ProjectSettingsPage.tsx` (Memory sub-tab)         |
+| `getProjectLedger(projectId)`                 | GET `/projects/{projectId}/memory/ledger`      | not yet wired                                                                                        |
+| `compactProjectMemory(projectId)`             | POST `/projects/{projectId}/memory/compact`    | `project/ProjectSettingsPage.tsx`                                                                    |
+| `getActivityFeed(projectId, opts?)`           | GET `/projects/{projectId}/activity`           | `project/ProjectActivityPage.tsx` (30s poll)                                                         |
+| `getWorkspaceHealth(projectId)`               | GET `/projects/{projectId}/workspace-health`   | `project/ProjectPulsePage.tsx`, `project/ProjectReposPage.tsx`, `project/ProjectCodePage.tsx`        |
+| `getPostMergeBar(projectId)`                  | GET `/projects/{projectId}/post-merge-bar`     | not yet wired                                                                                        |
+| `dismissPostMergeBar(projectId)`              | DELETE `/projects/{projectId}/post-merge-bar`  | not yet wired                                                                                        |
+| `refreshProjectPrs(projectId)`                | POST `/projects/{projectId}/prs/refresh`       | `project/ProjectRunsPage.tsx`                                                                        |
+| `estimateRun(projectId, requirement)`         | GET `/projects/{projectId}/estimate`           | `ComposePage.tsx`, `project/ProjectComposePage.tsx` (debounced)                                      |
+| `getProjectSummary(projectId)`                | GET `/projects/{projectId}/summary`            | not yet wired                                                                                        |
+| `listProjectDocuments(projectId)`             | GET `/projects/{projectId}/documents`          | `project/ProjectSettingsPage.tsx` (Documents sub-tab)                                                |
+| `uploadProjectDocument(projectId, file)`      | POST `/projects/{projectId}/documents` (multipart) | `project/ProjectSettingsPage.tsx` — **bug**: reads `localStorage['token']` not `'access_token'`  |
+| `deleteProjectDocument(projectId, documentId)` | DELETE `/projects/{projectId}/documents/{documentId}` | `project/ProjectSettingsPage.tsx`                                                              |
+| `getProjectMembers(projectId)`                | GET `/projects/{projectId}/members`            | `project/ProjectMembersPage.tsx`, `project/ProjectTabs.tsx`                                          |
+| `addProjectMember(projectId, userId, role)`   | POST `/projects/{projectId}/members`           | not yet wired (Signal uses invite-by-email instead)                                                  |
+| `removeProjectMember(projectId, userId)`      | DELETE `/projects/{projectId}/members/{userId}` | `project/ProjectMembersPage.tsx`                                                                     |
+
+#### Architecture pipeline
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getArchitectureDoc(projectId)`               | GET `/projects/{projectId}/architecture`       | `project/ProjectArchitecturePage.tsx`                                                                |
+| `getArchitectureVersions(projectId)`          | GET `/projects/{projectId}/architecture/versions` | `project/ProjectArchitecturePage.tsx`                                                             |
+| `annotateArchitecture(projectId, annotation)` | PUT `/projects/{projectId}/architecture/annotate` | not yet wired                                                                                     |
+| `generateArchitecture(projectId)`             | POST `/projects/{projectId}/architecture/generate` | `project/ProjectArchitecturePage.tsx`                                                            |
+| `analyseProject(projectId, branch?)`          | POST `/projects/{projectId}/analyse`           | not yet wired                                                                                        |
+| `getArchitectureDiff(projectId, from, to)`    | GET `/projects/{projectId}/architecture/diff`  | `project/ProjectArchitecturePage.tsx`                                                                |
+| `getArchitectureStaleness(projectId)`         | GET `/projects/{projectId}/architecture/staleness` | `project/ProjectArchitecturePage.tsx`                                                            |
+
+#### Repos (per project)
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `listRepos(scope?)`                           | GET `/repos?scope=`                            | `project/ProjectReposPage.tsx`                                                                       |
+| `listGitHubRepos(owner?)`                     | GET `/repos/github`                            | not yet wired                                                                                        |
+| `createRepo(data)`                            | POST `/repos`                                  | not yet wired                                                                                        |
+| `deleteRepo(repoId)`                          | DELETE `/repos/{repoId}`                       | not yet wired                                                                                        |
+| `syncRepo(repoId)`                            | POST `/repos/{repoId}/sync`                    | `project/ProjectReposPage.tsx`                                                                       |
+| `installRepoWebhook(repoId)`                  | POST `/repos/{repoId}/webhook`                 | `project/ProjectReposPage.tsx`                                                                       |
+| `getProjectRepos(projectId)`                  | GET `/projects/{projectId}/repos`              | `ComposePage.tsx`, `project/ProjectComposePage.tsx`, `project/ProjectReposPage.tsx`, `project/ProjectPulsePage.tsx`, `project/ProjectCodePage.tsx`, `project/ProjectArchitecturePage.tsx`, `project/ProjectTabs.tsx` |
+| `linkProjectRepo(projectId, repoId)`          | POST `/projects/{projectId}/repos/{repoId}`    | `project/ProjectReposPage.tsx`                                                                       |
+| `unlinkProjectRepo(projectId, repoId)`        | DELETE `/projects/{projectId}/repos/{repoId}`  | `project/ProjectReposPage.tsx`                                                                       |
+| `updateRepoRelationships(projectId, repoId, relationships)` | PUT `/projects/{projectId}/repos/{repoId}/relationships` | not yet wired                                                              |
+| `listRepoFiles(projectId, repoId)`            | GET `/projects/{projectId}/repos/{repoId}/files` | `project/ProjectCodePage.tsx::BrowseTab`                                                          |
+| `readRepoFile(projectId, repoId, path)`       | GET `/projects/{projectId}/repos/{repoId}/file` | `project/ProjectCodePage.tsx::BrowseTab`                                                           |
+| `getRepoCodeMap(projectId, repoId)`           | GET `/projects/{projectId}/repos/{repoId}/codemap` | not yet wired                                                                                    |
+
+#### Contracts, standards, ADRs, invariants (enterprise readiness)
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getContractCoverage(projectId, repoId)`      | GET `/projects/{projectId}/repos/{repoId}/contract-coverage` | `project/ProjectArchitecturePage.tsx`                                                  |
+| `rescanContractCoverage(projectId, repoId)`   | POST `/projects/{projectId}/repos/{repoId}/contract-coverage/rescan` | `project/ProjectArchitecturePage.tsx`                                          |
+| `checkContractDrift(projectId, contractId)`   | POST `/projects/{projectId}/contracts/{contractId}/check-drift` | not yet wired                                                                         |
+| `checkRepoDrift(projectId, repoId)`           | POST `/projects/{projectId}/repos/{repoId}/check-drift` | `project/ProjectArchitecturePage.tsx`                                                         |
+| `checkProjectDrift(projectId)`                | POST `/projects/{projectId}/check-drift`       | `project/ProjectArchitecturePage.tsx`                                                                |
+| `refreshContractFromSource(projectId, contractId)` | POST `/projects/{projectId}/contracts/{contractId}/refresh-from-source` | not yet wired                                                            |
+| `dismissContractDrift(projectId, contractId, rationale)` | POST `/projects/{projectId}/contracts/{contractId}/dismiss-drift` | not yet wired                                                            |
+| `getStandardsReport(projectId, orgId, sinceDays?)` | GET `/projects/{projectId}/standards/report` | `project/ProjectCodePage.tsx` (Standards sub-tab)                                                  |
+| `listProjectAdrs(projectId, acceptedOnly?)`   | GET `/projects/{projectId}/adrs`               | `project/ProjectArchitecturePage.tsx`                                                                |
+| `getProjectAdr(projectId, id)`                | GET `/projects/{projectId}/adrs/{id}`          | not yet wired                                                                                        |
+| `listProjectInvariants(projectId)`            | GET `/projects/{projectId}/invariants`         | `project/ProjectArchitecturePage.tsx`                                                                |
+| `listProjectInvariantViolations(projectId)`   | GET `/projects/{projectId}/invariants/violations` | `project/ProjectArchitecturePage.tsx`                                                             |
+| `listOrgStandards(orgId)`                     | GET `/orgs/{orgId}/standards`                  | not yet wired                                                                                        |
+| `createOrgStandard(orgId, body)`              | POST `/orgs/{orgId}/standards`                 | not yet wired                                                                                        |
+| `updateOrgStandard(orgId, standardId, body)`  | PUT `/orgs/{orgId}/standards/{standardId}`     | not yet wired                                                                                        |
+| `deleteOrgStandard(orgId, standardId)`        | DELETE `/orgs/{orgId}/standards/{standardId}`  | not yet wired                                                                                        |
+
+#### Tech debt + generated docs
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getTechDebt(projectId, sinceDays?)`          | GET `/projects/{projectId}/tech-debt`          | `project/ProjectCodePage.tsx`                                                                        |
+| `dispatchTechDebtFix(projectId, category)`    | POST `/projects/{projectId}/tech-debt/fix`     | `project/ProjectCodePage.tsx`                                                                        |
+| `generateProjectDoc(projectId, docType)`      | POST `/projects/{projectId}/docs/{docType}/generate` | `project/ProjectCodePage.tsx` (Docs sub-tab)                                                  |
+| `getProjectDoc(projectId, docType)`           | GET `/projects/{projectId}/docs/{docType}`     | `project/ProjectCodePage.tsx`                                                                        |
+| `downloadProjectDoc(projectId, docType)`      | GET `/projects/{projectId}/docs/{docType}/download` (blob) | `project/ProjectCodePage.tsx`                                                            |
+
+#### Project chat
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getProjectChatInfo(projectId)`               | GET `/projects/{projectId}/chat/info`          | `project/ProjectChatPage.tsx` (also detects 403 → "Upgrade card" gate)                               |
+| `compactProjectChat(projectId)`               | POST `/projects/{projectId}/chat/compact`      | `project/ProjectChatPage.tsx`                                                                        |
+| `clearProjectChat(projectId)`                 | DELETE `/projects/{projectId}/chat`            | `project/ProjectChatPage.tsx`                                                                        |
+| `compileProjectChatToSpec(projectId)`         | POST `/projects/{projectId}/chat/compile`      | `project/ProjectChatPage.tsx`                                                                        |
+
+Note: the send-message call (`POST /api/projects/{id}/chat`) is not currently wrapped in `lib/api.ts`. `ProjectChatPage.tsx` uses a raw `fetch(...)` with manual `Authorization` header. Same pattern for `MiscPages.tsx::AdminPage`'s reconcile call, `ProjectMembersPage.tsx`'s invite + share-link calls, `ProjectCodePage.tsx`'s code-reviews submit, `BillingPage.tsx`'s payment-history call, and `ProjectSettingsPage.tsx`'s extended settings PATCH. These are gaps the contract test (section 6) flags.
+
+#### Project sharing (V175 + V198)
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `createProjectInvite(projectId, body)`        | POST `/projects/{projectId}/invites`           | typed wrapper exists; `project/ProjectMembersPage.tsx` currently calls via raw `fetch`                |
+| `listProjectInvites(projectId)`               | GET `/projects/{projectId}/invites`            | `project/ProjectMembersPage.tsx`                                                                     |
+| `revokeProjectInvite(projectId, inviteId)`    | DELETE `/projects/{projectId}/invites/{inviteId}` | `project/ProjectMembersPage.tsx`                                                                  |
+| `previewProjectInvite(token)`                 | GET `/invites/preview`                         | `ExtraPages.tsx::AcceptInvitePage`                                                                   |
+| `acceptProjectInvite(token)`                  | POST `/invites/accept`                         | `ExtraPages.tsx::AcceptInvitePage`                                                                   |
+| `createShareLink(projectId, body)`            | POST `/projects/{projectId}/share-links`       | `project/ProjectMembersPage.tsx`                                                                     |
+| `listShareLinks(projectId)`                   | GET `/projects/{projectId}/share-links`        | `project/ProjectMembersPage.tsx`                                                                     |
+| `revokeShareLink(projectId, linkId)`          | DELETE `/projects/{projectId}/share-links/{linkId}` | `project/ProjectMembersPage.tsx`                                                                |
+| `getSharedReport(shareToken)`                 | GET `/reports/shared/{shareToken}` (no auth)   | `MiscPages.tsx::SharedPage`                                                                          |
+| `shareLinkPublicUrl(token)`                   | (local URL builder, no HTTP)                   | `project/ProjectMembersPage.tsx`                                                                     |
+
+### 3.5 Validation reports + tests
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getValidationReport(runId)`                  | GET `/runs/{runId}/report`                     | `ResultPage.tsx`, `project/ProjectRunsPage.tsx`                                                      |
+| `downloadValidationReportPdf(runId)`          | GET `/runs/{runId}/report/pdf` (blob)          | `ResultPage.tsx`                                                                                     |
+| `shareValidationReport(runId)`                | POST `/runs/{runId}/report/share`              | `ResultPage.tsx`                                                                                     |
+| `getTestReport(runId)`                        | GET `/runs/{runId}/test-report`                | `ResultPage.tsx` (Tests tab)                                                                         |
+| `getTestPlan(runId)`                          | GET `/runs/{runId}/test-plan`                  | not yet wired                                                                                        |
+| `getTestGraph(runId)`                         | GET `/runs/{runId}/test-graph`                 | not yet wired                                                                                        |
+| `markTestInvalid(testResultId)`               | PUT `/test-results/{testResultId}/mark-invalid` | `ResultPage.tsx`                                                                                    |
+| `applyTestFixes(runId, signature?)`           | POST `/runs/{runId}/apply-test-fixes`          | `ResultPage.tsx`                                                                                     |
+| `runTests(runId)`                             | POST `/runs/{runId}/run-tests`                 | `ResultPage.tsx` (manual re-test button)                                                             |
+
+### 3.6 PR comments + reviews
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getPrComments(runId)`                        | GET `/runs/{runId}/pr-comments`                | `ResultPage.tsx`                                                                                     |
+| `getPrCommentPendingCount(runId)`             | GET `/runs/{runId}/pr-comments/pending-count`  | `ResultPage.tsx`                                                                                     |
+| `dismissPrComment(runId, commentId)`          | POST `/runs/{runId}/pr-comments/{commentId}/dismiss` | `ResultPage.tsx`                                                                               |
+| `applyPrComment(runId, commentId)`            | POST `/runs/{runId}/pr-comments/{commentId}/apply` | `ResultPage.tsx`                                                                                 |
+| `fetchPrReviewComments(projectId, prNumber, repoFullName)` | GET `/projects/{projectId}/prs/{prNumber}/reviews` | `project/ProjectRunsPage.tsx`                                                          |
+| `submitPrReview(body)`                        | POST `/pr-reviews`                             | not yet wired (would land on `ProjectRunsPage` PR tab)                                               |
+| `getPrReview(id)`                             | GET `/pr-reviews/{id}`                         | not yet wired                                                                                        |
+| `listPrReviewsForPr(repoFullName, prNumber)`  | GET `/pr-reviews`                              | not yet wired                                                                                        |
+| `listPrReviewsForProject(projectId)`          | GET `/projects/{projectId}/pr-reviews`         | not yet wired                                                                                        |
+| `dispatchPrReviewAutofix(reviewId)`           | POST `/pr-reviews/{reviewId}/autofix`          | not yet wired (Phase 1 autofix surface)                                                              |
+| `submitCodeReview(body)`                      | POST `/code-reviews`                           | `project/ProjectCodePage.tsx` (currently via raw fetch)                                              |
+| `getCodeReview(id)`                           | GET `/code-reviews/{id}`                       | not yet wired                                                                                        |
+| `listCodeReviewsForProject(projectId)`        | GET `/projects/{projectId}/code-reviews`       | not yet wired                                                                                        |
+| `getLatestCodeReviewForRepo(projectId, repoFullName)` | GET `/projects/{projectId}/code-reviews/latest` | `project/ProjectCodePage.tsx` (currently via raw fetch)                                  |
+| `codeReviewReportDownloadUrl(id)`             | (local URL builder)                            | not yet wired                                                                                        |
+| `dispatchCodeReviewAutofix(scanId, severity)` | POST `/code-reviews/{scanId}/autofix`          | not yet wired (Phase 4 autofix surface)                                                              |
+
+### 3.7 Library + migrations
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `listLibrary(filters?)`                       | GET `/library`                                 | not yet wired into Signal (the demo Library page in `ExtraPages.tsx` uses a hard-coded list)         |
+| `getLibraryDetail(slug)`                      | GET `/library/{slug}`                          | not yet wired                                                                                        |
+| `getLibraryFacets()`                          | GET `/library/categories`                      | not yet wired                                                                                        |
+| `resolveLibraryVariant(slug, projectId, repoId)` | POST `/library/{slug}/resolve`              | not yet wired                                                                                        |
+| `instantiateLibrarySolution(slug, body)`      | POST `/library/{slug}/instantiate`             | not yet wired                                                                                        |
+| `favouriteLibrarySolution(slug)`              | POST `/library/favourite/{slug}`               | not yet wired                                                                                        |
+| `unfavouriteLibrarySolution(slug)`            | DELETE `/library/favourite/{slug}`             | not yet wired                                                                                        |
+| `listMigrations(filters?)`                    | GET `/migrations`                              | not yet wired into Signal (`MigrationsPage` in `ExtraPages.tsx` is hard-coded)                       |
+| `getMigrationDetail(slug)`                    | GET `/migrations/{slug}`                       | not yet wired                                                                                        |
+| `migrationDryRun(slug, body)`                 | POST `/migrations/{slug}/dry-run`              | not yet wired                                                                                        |
+| `migrationApply(slug, body)`                  | POST `/migrations/{slug}/apply`                | not yet wired                                                                                        |
+
+Both `LibraryPage` / `MigrationsPage` / their detail variants ship today with static demo data — flagged BETA via `Shell.tsx` sidebar badges. The typed `api.*` wrappers exist in anticipation of the backend going live.
+
+### 3.8 Spec templates
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `listSpecTemplates(projectId)`                | GET `/projects/{projectId}/templates`          | `ExtraPages.tsx::SpecTemplatesPage`                                                                  |
+| `createProjectSpecTemplate(projectId, body)`  | POST `/projects/{projectId}/templates`         | `ExtraPages.tsx::SpecTemplatesPage`                                                                  |
+| `createOrgSpecTemplate(orgId, body)`          | POST `/orgs/{orgId}/templates`                 | not yet wired                                                                                        |
+| `deleteSpecTemplate(projectId, templateId)`   | DELETE `/projects/{projectId}/templates/{templateId}` | `ExtraPages.tsx::SpecTemplatesPage`                                                           |
+
+### 3.9 Deployments + previews
+
+Controllers: `DeploymentController.java` (gated by `agent.deployment.enabled`), `PreviewController.java`.
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getDeployments()`                            | GET `/deployments`                             | `ExtraPages.tsx::DeploymentsPage`                                                                    |
+| `createDeployment(body)`                      | POST `/deployments`                            | not yet wired in Signal                                                                              |
+| `getDeploymentDetail(id)`                     | GET `/deployments/{id}`                        | not yet wired                                                                                        |
+| `deleteDeployment(id)`                        | DELETE `/deployments/{id}`                     | `ExtraPages.tsx::DeploymentsPage`                                                                    |
+| `rollbackDeployment(id)`                      | POST `/deployments/{id}/rollback`              | `ExtraPages.tsx::DeploymentsPage`                                                                    |
+| `analyzeForDeploy(runId)`                     | POST `/deployments/analyze`                    | not yet wired                                                                                        |
+| `confirmDeploy(body)`                         | POST `/deployments/confirm`                    | not yet wired                                                                                        |
+| `engineRollback(id)`                          | POST `/deployments/{id}/engine-rollback`       | not yet wired                                                                                        |
+| `engineDestroy(id)`                           | DELETE `/deployments/{id}/engine-destroy`      | not yet wired                                                                                        |
+| `getRequiredPermissions()`                    | GET `/credentials/gcp/required-permissions`    | not yet wired                                                                                        |
+| `storeGcpCredential(json, projectId?)`        | POST `/credentials/gcp`                        | not yet wired                                                                                        |
+| `getGcpCredential(projectId?)`                | GET `/credentials/gcp`                         | not yet wired                                                                                        |
+| `listGcpCredentials()`                        | GET `/credentials/gcp/all`                     | not yet wired                                                                                        |
+| `validateGcpCredential(projectId?)`           | GET `/credentials/gcp/validate`                | not yet wired                                                                                        |
+| `deleteGcpCredential(projectId?)`             | DELETE `/credentials/gcp`                      | not yet wired                                                                                        |
+| `analyzePreview(runId)`                       | GET `/runs/{runId}/preview/analyze`            | `ResultPage.tsx`                                                                                     |
+| `getPreviewStatus(runId)`                     | GET `/runs/{runId}/preview/status`             | `ResultPage.tsx`                                                                                     |
+| `startPreview(runId, envVars?)`               | POST `/runs/{runId}/preview/start`             | `ResultPage.tsx`                                                                                     |
+| `stopPreview(runId)`                          | DELETE `/runs/{runId}/preview/stop`            | `ResultPage.tsx`                                                                                     |
+| `rebuildPreview(runId)`                       | POST `/runs/{runId}/preview/rebuild`           | `ResultPage.tsx`                                                                                     |
+| `getPreviewLogs(runId, lines?, filter?)`      | GET `/runs/{runId}/preview/logs`               | `ResultPage.tsx`                                                                                     |
+| `execPreviewCommand(runId, cmd, args)`        | POST `/runs/{runId}/preview/exec`              | not yet wired                                                                                        |
+| `probeApiDocs(runId)`                         | GET `/runs/{runId}/preview/probe-api-docs`     | `ResultPage.tsx`                                                                                     |
+
+### 3.10 Billing + topup (`lib/billing-api.ts` + `lib/api.ts`)
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getPricing()` / `getAllPricing()`            | GET `/pricing`                                 | `PlansPage.tsx`                                                                                      |
+| `updatePricing(provider, model, body)` / `updateModelPricing(...)` | PUT `/pricing/{provider}/{model}` | not yet wired into Signal (SUPER_ADMIN)                                                              |
+| `fetchPlans(keyMode?)`                        | GET `/billing/plans`                           | not yet wired in Signal (the source-of-truth for PlansPage today)                                    |
+| `fetchFounderOffer(tier)`                     | GET `/billing/founder-pricing/{tier}`          | not yet wired                                                                                        |
+| `fetchBillingStatus()`                        | GET `/billing/status`                          | not yet wired                                                                                        |
+| `subscribe(planId, gateway?, ...)`            | POST `/billing/subscribe`                      | `PlansPage.tsx` uses a raw `fetch('/api/billing/subscribe', POST)` instead of the typed helper       |
+| `verifyPayment(...)`                          | POST `/billing/verify`                         | not yet wired                                                                                        |
+| `cancelSubscription()`                        | POST `/billing/cancel`                         | not yet wired                                                                                        |
+| `updateSeats(totalSeats)`                     | POST `/billing/seats`                          | not yet wired                                                                                        |
+| `fetchTopupPackages()` / `adminListTopupPackages()` | GET `/billing/topup/packages` / `/admin/topup-packages` | `MiscAccountPages.tsx::TopupPage`                                              |
+| `purchaseTopup(packageId)`                    | POST `/billing/topup/purchase`                 | `MiscAccountPages.tsx::TopupPage` uses raw `fetch(...)`                                              |
+| `verifyTopup(...)`                            | POST `/billing/topup/verify`                   | not yet wired                                                                                        |
+| `getAnalyticsBilling(entityType, entityId)`   | GET `/admin/analytics/billing`                 | `BillingPage.tsx`                                                                                    |
+| `getAnalyticsUsage(entityType, entityId, period?)` | GET `/admin/analytics/usage`              | `BillingPage.tsx`                                                                                    |
+| `getAnalyticsMembers(orgId, period?)`         | GET `/admin/analytics/members`                 | not yet wired                                                                                        |
+
+Note: Razorpay vs Stripe gateway selection is routed server-side by `PaymentGatewayRouter`; the frontend only passes `{gateway: 'stripe'|'razorpay'}` on subscribe.
+
+### 3.11 Invoices + accounting (`lib/invoice-api.ts`)
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getBillingProfile()` / `updateBillingProfile(...)` | GET / PUT `/billing/profile`              | not yet wired in Signal                                                                              |
+| `getMyInvoices(page?, size?)`                 | GET `/billing/invoices`                        | `BillingPage.tsx`                                                                                    |
+| `getInvoiceDetail(id)`                        | GET `/billing/invoices/{id}`                   | not yet wired                                                                                        |
+| `getAllInvoices(page?, size?)`                | GET `/admin/invoices`                          | not yet wired                                                                                        |
+| `resendInvoice(invoiceId)`                    | POST `/admin/invoices/{invoiceId}/send`        | not yet wired                                                                                        |
+| `getSellerConfig()` / `updateSellerConfig(...)` | GET / PUT `/admin/seller-config`             | not yet wired                                                                                        |
+| `getRevenueMetrics(from, to)`                 | GET `/accounting/revenue`                      | not yet wired                                                                                        |
+| `getGstSummary(fy, quarter)`                  | GET `/accounting/gst-summary`                  | not yet wired                                                                                        |
+| `getTrialBalance(from, to)`                   | GET `/accounting/trial-balance`                | not yet wired                                                                                        |
+| `downloadInvoicePdf(id, invoiceNumber, admin?)` | GET `/{admin|billing}/invoices/{id}/pdf`     | not yet wired                                                                                        |
+| `getGstr1ExportUrl(fy, quarter)`              | (URL builder for direct download)              | not yet wired                                                                                        |
+
+### 3.12 Integrations (Slack + Jira + Confluence + GitHub App)
+
+`api.ts` exposes a single canonical set; `SlackIntegrationController` mounts at `/api/integrations/slack/*` and is gated by `agent.integrations.slack.enabled`.
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getIntegrationStatus()`                      | GET `/integrations/status`                     | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `getIntegrationRuns(source?)`                 | GET `/integrations/runs`                       | not yet wired                                                                                        |
+| `triggerConfluence(body)`                     | POST `/integrations/confluence/trigger`        | not yet wired                                                                                        |
+| `triggerJira(body)`                           | POST `/integrations/jira/trigger`              | not yet wired                                                                                        |
+| `getSlackStatus()`                            | GET `/integrations/slack/status`               | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `getSlackInstallUrl()`                        | GET `/integrations/slack/install`              | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `disconnectSlack()`                           | DELETE `/integrations/slack/disconnect`        | `MiscAccountPages.tsx::IntegrationsPage`                                                             |
+| `listSlackChannels()`                         | GET `/integrations/slack/channels`             | not yet wired (admin-only)                                                                           |
+| `getProjectSlackChannels(projectId)`          | GET `/integrations/slack/projects/{projectId}/channels` | not yet wired                                                                               |
+| `addProjectSlackChannel(...)`                 | POST `/integrations/slack/projects/{projectId}/channels` | not yet wired                                                                              |
+| `removeProjectSlackChannel(projectId, channelId)` | DELETE `/integrations/slack/projects/{projectId}/channels/{channelId}` | not yet wired                                                       |
+| `updateSlackChannelVerbosity(...)`            | PUT `/integrations/slack/projects/{projectId}/channels/{channelId}/verbosity` | not yet wired                                                  |
+| `sendSlackTestMessage(channelId)`             | POST `/integrations/slack/test`                | not yet wired                                                                                        |
+
+### 3.13 Admin (`/admin/*` — SUPER_ADMIN)
+
+Most consumed by `MiscPages.tsx::AdminPage`.
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `adminListUsers()`                            | GET `/admin/users`                             | `MiscPages.tsx::AdminPage`                                                                           |
+| `adminGetUser(id)`                            | GET `/admin/users/{id}`                        | not yet wired                                                                                        |
+| `adminUpdateUserStatus(id, status)`           | PUT `/admin/users/{id}/status`                 | not yet wired                                                                                        |
+| `adminUpdateUserTier(id, tier)`               | PUT `/admin/users/{id}/tier`                   | not yet wired                                                                                        |
+| `adminUpdateUserRole(id, role)`               | PUT `/admin/users/{id}/role`                   | not yet wired                                                                                        |
+| `haltAllActiveRuns(reason?)`                  | POST `/admin/runs/halt-all`                    | not yet wired                                                                                        |
+| `verifyAuditChain()`                          | GET `/admin/audit-chain/verify`                | not yet wired                                                                                        |
+| `getActivationFunnel(sinceDays?)`             | GET `/admin/activation-funnel`                 | `MiscPages.tsx::AdminPage`                                                                           |
+| `adminListOrgs()`                             | GET `/admin/orgs`                              | `MiscPages.tsx::AdminPage`                                                                           |
+| `adminUpdateOrgTier(id, tier)`                | PUT `/admin/orgs/{id}/tier`                    | not yet wired                                                                                        |
+| `adminUpdateOrgStatus(id, status)`            | PUT `/admin/orgs/{id}/status`                  | not yet wired                                                                                        |
+| `adminUpdateOrgRunLimit(id, limit)`           | PUT `/admin/orgs/{id}/run-limit`               | not yet wired                                                                                        |
+| `adminUpdateOrgApiKeys(id, provided)`         | PUT `/admin/orgs/{id}/api-keys`                | not yet wired                                                                                        |
+| `adminListEscalated()`                        | GET `/admin/invitations/escalated`             | not yet wired                                                                                        |
+| `adminApproveInvite(id)`                      | POST `/admin/invitations/{id}/approve`         | not yet wired                                                                                        |
+| `adminRejectInvite(id)`                       | POST `/admin/invitations/{id}/reject`          | not yet wired                                                                                        |
+| `adminGetTierConfig()`                        | GET `/admin/tier-config`                       | not yet wired                                                                                        |
+| `adminUpdateTierConfig(tier, monthlyRunLimit)` | PUT `/admin/tier-config/{tier}`               | not yet wired                                                                                        |
+| `adminInviteUser(body)`                       | POST `/admin/invite`                           | not yet wired                                                                                        |
+| `adminGrantUserRuns(userId, qty, expiryDays?, reason?)` | POST `/admin/users/{userId}/grant-runs` | not yet wired                                                                                  |
+| `adminGrantOrgRuns(orgId, qty, expiryDays?, reason?)` | POST `/admin/orgs/{orgId}/grant-runs`   | not yet wired                                                                                  |
+| `fetchTiersLifecycle()`                       | GET `/admin/tiers`                             | `MiscPages.tsx::AdminPage`                                                                           |
+| `updateTierLifecycle(tier, body)`             | PUT `/admin/tiers/{tier}/lifecycle`            | not yet wired                                                                                        |
+| `adminCreateTopupPackage(body)`               | POST `/admin/topup-packages`                   | not yet wired                                                                                        |
+| `adminUpdateTopupPackage(id, body)`           | PUT `/admin/topup-packages/{id}`               | not yet wired                                                                                        |
+| `adminDeleteTopupPackage(id)`                 | DELETE `/admin/topup-packages/{id}`            | not yet wired                                                                                        |
+| `adminTriggerUsageReport(period)`             | POST `/admin/usage-reports/trigger`            | not yet wired                                                                                        |
+| `adminListFeatureFlags()`                     | GET `/admin/feature-flags`                     | `MiscPages.tsx::AdminPage`                                                                           |
+| `getPublicFeatureFlags()`                     | GET `/admin/feature-flags/public`              | not yet wired                                                                                        |
+| `adminUpdateFeatureFlag(key, value)`          | PUT `/admin/feature-flags/{key}`               | not yet wired                                                                                        |
+| `adminListPaymentAudit(page?, size?, orgId?, userId?)` | GET `/admin/payment-audit`            | not yet wired                                                                                        |
+| `adminExportPaymentAuditCsv()`                | GET `/admin/payment-audit/export` (blob)       | not yet wired                                                                                        |
+| `adminListWebhookEvents(page?, size?, gateway?)` | GET `/admin/webhook-events`                 | not yet wired                                                                                        |
+| `getAuditLogs(params)`                        | GET `/admin/audit-logs` OR `/org/me/audit-logs` (depending on `orgScoped` param) | `ExtraPages.tsx::AuditLogPage`                                       |
+
+### 3.14 Metrics + diagnostics
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getMetrics(days?)`                           | GET `/metrics`                                 | `ExtraPages.tsx::InsightsPage`                                                                       |
+| `getModelComparison(days?)`                   | GET `/model-comparison`                        | `ExtraPages.tsx::InsightsPage`                                                                       |
+| `getUserRunsSummary(days?)`                   | GET `/user-runs-summary`                       | `ExtraPages.tsx::InsightsPage`                                                                       |
+| `getTimeline(runId)`                          | GET `/runs/{runId}/timeline`                   | `ResultPage.tsx`                                                                                     |
+| `getAvailableModels()`                        | GET `/models/available`                        | `ComposePage.tsx`, `project/ProjectComposePage.tsx`                                                  |
+
+### 3.15 Notifications
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `getNotifications(page?, size?)`              | GET `/notifications`                           | `MiscPages.tsx::NotificationsPage`                                                                   |
+| `getUnreadCount()`                            | GET `/notifications/unread-count`              | `MiscPages.tsx::MorePage`                                                                            |
+| `markNotificationRead(id)`                    | POST `/notifications/{id}/read`                | `MiscPages.tsx::NotificationsPage`                                                                   |
+| `markAllNotificationsRead()`                  | POST `/notifications/read-all`                 | `MiscPages.tsx::NotificationsPage`                                                                   |
+| `getNotificationPreferences()`                | GET `/notifications/preferences`               | `AccountPage.tsx`                                                                                    |
+| `updateNotificationPreference(eventType, channel, enabled)` | PUT `/notifications/preferences` | `AccountPage.tsx`                                                                                    |
+
+### 3.16 Misc + chat refinement
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `conversationChat(messages)`                  | POST `/conversation`                           | `SpecChat.tsx` (composer side-panel — available to FREE tier)                                        |
+| `submitContactForm(subject, body)`            | POST `/contact`                                | not yet wired into a Signal page                                                                     |
+| `getPullRequestSnapshot(repoFullName, prNumber, maxChars?)` | GET `/prs/snapshot`              | not yet wired                                                                                        |
+
+### 3.17 Execution-run client (`lib/execution-api.ts`)
+
+The V3 multi-repo execution surface lives under `executionApi.*`. These routes share the project namespace (not `/api/runs`).
+
+| Function                                      | Verb + path                                    | Consumed by                                                                                          |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `executionApi.create(projectId, body)`        | POST `/projects/{projectId}/executions`        | `useExecutionStore.createExecution`                                                                  |
+| `executionApi.get(id)`                        | GET `/executions/{id}`                         | `useExecutionStore.fetchExecution`                                                                   |
+| `executionApi.list(projectId, page?, size?)`  | GET `/projects/{projectId}/executions`         | not yet wired into Signal                                                                            |
+| `executionApi.triggerAnalysis(id)`            | POST `/executions/{id}/analyse`                | `useExecutionStore.triggerAnalysis`                                                                  |
+| `executionApi.approveArch(id, body)`          | PUT `/executions/{id}/arch-review`             | `useExecutionStore.approveArch`                                                                      |
+| `executionApi.generatePlan(id)`               | POST `/executions/{id}/plan`                   | `useExecutionStore.generatePlan`                                                                     |
+| `executionApi.approvePlan(id)`                | PUT `/executions/{id}/plan/approve`            | `useExecutionStore.approvePlan`                                                                      |
+| `executionApi.decide(id, solutionId, body)`   | POST `/executions/{id}/solutions/{solutionId}/decide` | `useExecutionStore.decide`                                                                     |
+| `executionApi.signalManualReady(id, solutionId)` | POST `/executions/{id}/solutions/{solutionId}/manual-ready` | `useExecutionStore.signalManualReady`                                            |
+| `executionApi.abort(id)`                      | POST `/executions/{id}/abort`                  | `useExecutionStore.abort`                                                                            |
+| `executionApi.resume(id)`                     | POST `/executions/{id}/resume`                 | not yet wired                                                                                        |
+| `executionApi.getReport(id)`                  | GET `/executions/{id}/report`                  | not yet wired                                                                                        |
+| `executionApi.getSseToken(id)`                | GET `/executions/{id}/sse-token`               | `useExecutionSse.ts` hook                                                                            |
+| `executionApi.listScaffolds()`                | GET `/scaffolds`                               | not yet wired                                                                                        |
+| `executionApi.listSolutionRuns(id, solutionId)` | GET `/executions/{id}/solutions/{solutionId}/runs` | not yet wired                                                                                |
+| `executionApi.listProjectLaunches(projectId, page?, size?)` | GET `/projects/{projectId}/launches` | not yet wired                                                                                  |
+| `executionApi.listProjectPrs(projectId)`      | GET `/projects/{projectId}/prs`                | not yet wired                                                                                        |
+| `executionApi.projectOverview(projectId)`     | GET `/projects/{projectId}/overview`           | not yet wired                                                                                        |
+| `executionApi.validateOwner(projectId, githubOwner)` | POST `/projects/{projectId}/launches/validate-repo-access` | not yet wired                                                            |
+
+### 3.18 V3 entitlements + referrals + anonymous trial
+
+These live under `/api/v3/*` so V2 surface remains untouched. They are wired only into V3 chrome — not Signal.
+
+| Path                                          | Controller                                     | Notes                                                                                                |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| GET `/v3/entitlements`                        | `EntitlementsController`                       | Single-source entitlements (`R-142`)                                                                 |
+| POST `/v3/referrals/invite`                   | `ReferralController`                           | R-162 Free-tier growth loop                                                                          |
+| GET `/v3/referrals/state`                     | `ReferralController`                           |                                                                                                      |
+| GET `/v3/referrals/lookup?token=` (public)    | `ReferralController`                           | No auth — token-keyed                                                                                |
+| POST `/v3/anonymous-runs`                     | `AnonymousRunController`                       | R-111 anonymous trial; rate-limited                                                                  |
+| GET `/v3/anonymous-runs/{sessionToken}`       | `AnonymousRunController`                       |                                                                                                      |
+| POST `/v3/auth/claim-anonymous-session`       | `SignupClaimController`                        | Binds anon session to authenticated user                                                             |
+
+---
+
+## 4. SSE handling
+
+There are two parallel SSE surfaces today: the V2 run stream (Signal-consumed) and the V3 execution stream (V3 chrome only). Both follow the same pattern.
+
+### 4.1 Token minting
+
+The frontend never sends the user's full `access_token` on an SSE URL — it would leak into proxy access logs. Instead:
+
+1. The page calls `api.getSseToken(runId)` → backend `SseController.getSseToken` mints a 5-min JWT with `scope=sse` and `runId=<id>` claims and returns it as `{token: "<jwt>"}`.
+2. The page (or `useSse` hook) opens `new EventSource('/api/runs/{runId}/events?token=<jwt>')`.
+3. Backend validates the scoped token, asserts `runId` claim matches `@PathVariable`, and starts emitting events.
+
+The scoped token expires before the long-lived access token, limiting the damage if a stream URL leaks.
+
+### 4.2 `useSse` hook (V2 runs)
+
+`frontend/src/hooks/useSse.ts`:
+
+- Pre-populates the message buffer by calling `api.getMessages(runId)` when a new `runId` is supplied — so the live log starts with history, not an empty box.
+- Mints a scoped token via `api.getSseToken(runId)`.
+- Opens `EventSource('/api/runs/{runId}/events?token=…')`.
+- Dispatches typed events into `useSseStore`: `RUN_DETAIL`, `RUN_STATUS`, `GATE_OPENED`, `RUN_RESTARTED`, `BUDGET_EXCEEDED`, `BATCH_PROGRESS`, `BATCH_COMPLETE`, `BATCH_FAILED`, `FILE_WRITTEN`.
+- Reconnect uses **exponential backoff**: `[1000, 2000, 4000, 8000, 16000, 30000]` ms. After 30s it stays at 30s and keeps trying. The `useSseStore` `status` field cycles `DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING` so the UI can show a banner.
+- Buffer cap: `useSseStore` keeps the last 500 entries; older ones are dropped on the way in.
+
+Consumed by: `LivePage.tsx` (the main customer-facing live-watch surface).
+
+ASCII view of the connection lifecycle:
+
+```
+   page mount        token mint          stream open
+       |                 |                    |
+       v                 v                    v
+   [hook init] --> getSseToken(id) --> new EventSource(url?token=...)
+                                              |
+                                              v
+                                       receive event ----> dispatch to useSseStore
+                                              |
+                                              v
+                                   on('error') | on('close')
+                                              |
+                                              v
+                                  schedule reconnect with BACKOFF[n]
+                                              |
+                                              v
+                                       (loop until unmount)
+```
+
+### 4.3 `useExecutionSse` hook (V3 executions)
+
+`frontend/src/hooks/useExecutionSse.ts`:
+
+- Mints token via `executionApi.getSseToken(executionId)`.
+- Opens `/api/executions/{id}/events?token=…`.
+- Dispatches V3-specific events into `useExecutionStore`: `EXEC_REPO_CODEMAP_STARTED/DONE`, `EXEC_REPO_ARCH_STARTED/DONE`, `EXEC_ANALYSIS_COMPLETE`, `EXEC_PLANNING_STARTED`, `EXEC_PLAN_READY`, `EXEC_STARTED`, `EXEC_SOLUTION_RUNNING|VALIDATING|PR_RAISED|DONE|FAILED|SKIPPED|LOG`, `EXEC_FINAL_PR_CREATED`, `EXEC_COMPLETE`, `EXEC_ABORTED`, `EXEC_RESUMED`, `EXEC_COMPENSATION_UPDATE`, `EXEC_COMPENSATION_DONE`.
+- Reconnect: simple 3s retry on error (V3 path predates the exponential backoff design from `useSse`).
+
+Not consumed by any Signal page; only the V3 execution view uses it.
+
+### 4.4 Backend resume-on-reconnect
+
+`SseController.subscribe` accepts a `Last-Event-ID` header. When present, the broadcaster replays events from after that id so a reconnected client doesn't miss messages. Neither `useSse` nor `useExecutionSse` currently sends `Last-Event-ID` — that's a TODO if SSE drops become user-visible.
+
+---
+
+## 5. Polling cadences
+
+Where SSE isn't enough (or isn't available), pages fall back to interval polling. All current polling sites and their intervals:
+
+| Page / hook                                   | Endpoint                                       | Interval                                                                                             |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `LivePage.tsx`                                | `api.getRun(runId)` + `api.getLiveCost(runId)` | **8 seconds** while run is non-terminal — safety net behind SSE                                      |
+| `PlanPage.tsx`                                | `api.getRun(runId)`                            | **2 seconds** while status is CLASSIFYING / PLANNING; stops once the page navigates away             |
+| `HomePage.tsx`                                | `api.getRun(liveRunId)`                        | **5 seconds** when a live run is present, **30 seconds** otherwise                                   |
+| `project/ProjectChatPage.tsx`                 | `api.getProjectMemory(projectId)`              | **30 seconds**                                                                                       |
+| `project/ProjectActivityPage.tsx`             | `api.getActivityFeed(projectId, {…})`          | **30 seconds**                                                                                       |
+| `RunController.getLiveCost` (server-side cache) | n/a — TTL of the in-memory `costCache`        | **30 seconds** for non-terminal runs (terminal runs read straight from `RunCostTracker` snapshot)    |
+| `HealthController` (server-side cache)        | n/a — health probe cache                       | **30 seconds** background refresh of DB / Redis / metrics                                            |
+
+`PlanPage.tsx` deliberately uses the tightest interval because the plan gate is a hard-stop UX — the user is staring at the screen waiting to approve. `LivePage` widens to 8s because SSE is the primary channel; the poll is just a safety net for the case where the stream drops without recovering. The home page's 30s cadence is purely for the "last active run" hero; per-run pages own their own polling.
+
+There is no global polling client — every page schedules its own `setInterval` and clears it in the `useEffect` cleanup. No `Page Visibility` API gating today, so a backgrounded tab still polls.
+
+---
+
+## 6. ApiContractTest — does it exist?
+
+**No backend ArchUnit / contract test currently asserts that every URL string in `lib/api.ts` resolves to a real `@RequestMapping` on the backend.** The closest cousin is `AccessGuardCoverageTest` in `src/test/java/com/navneet/executespec/arch/`, which pins that every controller method whose URL contains `/runs/{`, `/projects/{`, `/executions/{`, `/launches/{`, or `/repos/{` calls a tenant access guard (with 10 explicitly-ledgered legacy sites in `KNOWN_LEGACY_DRIFT`).
+
+What we rely on instead today:
+
+- The frontend lists every endpoint in one file (`lib/api.ts`) so endpoints are diffable in PR review.
+- TypeScript catches DTO shape drift at compile time when the response interface changes — but it doesn't catch URL typos or removed endpoints.
+- `ApiError` propagates 404s from missing routes cleanly to the UI, so a broken call surfaces on first user click rather than silently doing nothing.
+
+This is **technical debt**. A `tools/check-api-contract.ts` script that grep's `lib/api.ts` for `${BASE}/…` literals and crosschecks each against the Java `@*Mapping` annotations would catch this class of drift cheaply. Until that lands, the gaps below are the known soft spots:
+
+- `uploadProjectDocument` reads `localStorage['token']` instead of `'access_token'` — silently unauthenticated uploads.
+- `ValidationResult` is declared twice in `lib/api.ts` with different shapes (Deploy validators vs credential validators) — the second declaration masks the first.
+- Several pages use raw `fetch` instead of the typed `api.*` wrapper: `ProjectMembersPage.tsx` (invites + share-links), `ProjectChatPage.tsx` (send message), `ProjectCodePage.tsx` (code-reviews list + submit), `MiscPages.tsx::AdminPage` (executions reconcile), `MiscAccountPages.tsx::TopupPage` (purchase), `PlansPage.tsx` (subscribe), `BillingPage.tsx` (payment-history), `ProjectSettingsPage.tsx` (extended settings PATCH), `AccountPage.tsx` (GDPR data-export). These are the most likely sources of future drift because the URL string isn't tracked anywhere typed.
+
+When you add a contract test (recommended), it should also assert that every wrapper in the table above has a real `@*Mapping` and that every controller method has a wrapper (so a backend-only endpoint can't ship without a frontend call site, and vice versa).
+
+---
+
+## 7. Adding a new endpoint
+
+The minimum checklist for landing a new endpoint without breaking either side:
+
+1. **Backend** — add the controller method.
+
+   - Pick the right controller package (`api/controller/` for cross-cutting, `project/*` for project-scoped, `billing/`, `prreview/`, etc.).
+   - Use constructor injection via Lombok `@RequiredArgsConstructor`. **No** `@Autowired` on fields.
+   - Annotate the path with the correct `@GetMapping` / `@PostMapping` / etc. — under `/api/<resource>` to match the frontend `BASE`.
+   - If the path matches `/runs/{`, `/projects/{`, `/executions/{`, `/launches/{`, or `/repos/{`, call a tenant access guard (e.g. `runAccessGuard.assertCanRead(runId, userDetails)`). The build pins this via `AccessGuardCoverageTest`.
+   - Validate inputs with `@Valid` on the body record. Add `@NotBlank` / `@Size` / `@Pattern` / `@Min` / `@Max` annotations so `ValidationAdvice` can produce a 400 with field-level error keys.
+   - Throw `ResponseStatusException` for explicit non-200s (or let the appropriate exception bubble up — `ValidationAdvice` will map it).
+   - Return a `record` DTO (or a Lombok `@Data @Builder` class if the DTO needs to evolve additively — `RunDetail` and `RunSummary` are precedent).
+
+2. **Frontend** — add a wrapper in `lib/api.ts` (or the matching namespaced client).
+
+   - Add a typed response interface near the related interfaces.
+   - Add the function under the right domain section. Match the existing style: `async function`, calls `req<T>(url, opts?)`, encodes path params via template literals, encodes query params via `URLSearchParams`.
+   - For blob downloads, return the raw `Blob` (see `downloadValidationReportPdf`, `downloadProjectDoc`, `adminExportPaymentAuditCsv` for shape).
+   - Export from `lib/api.ts` (no default export — everything is named).
+
+3. **Frontend** — consume from a page.
+
+   - Prefer `useEffect` + `useState` for one-shot loads.
+   - Use `useAsyncAction` (in `hooks/useAsyncAction.ts`) for action buttons that need pending state + debounce.
+   - Show errors via the in-place coral error banner pattern (search for `<FormError>` in Signal pages). Avoid `window.alert` — `AccountPage.tsx::onExport` is the lone legacy survivor.
+   - For SSE-backed updates, dispatch to `useSseStore` so multiple components stay in sync; for one-page polling, use `setInterval` in `useEffect` and clear it in the cleanup.
+
+4. **Tier gating** — if the endpoint is paid:
+
+   - Backend: enforce in the controller using `tierEnforcementService.assertCanX(...)` or `tierPermissionService.assertCanX(userDetails)`. Never trust the client.
+   - Frontend: read `useTierPermissions()` to gate the UI. Use it for *disable + show upgrade CTA* rather than *hide entirely* so users discover the feature.
+
+5. **Documentation pass** — required, per the standing 2026-04-25 rule:
+
+   - Add the function row to this file (`docs/frontend-api-usage.md`) under the right domain table.
+   - If the new endpoint mounts under a new top-level path (e.g. a new `/api/<resource>`), add it to `docs/CODEMAP.md`.
+   - If the backend behaviour change is user-visible, update `README.md`.
+   - If you touched a per-package surface, update that package's `CLAUDE.md`.
+
+6. **Migration trail** — if the endpoint reads / writes a new entity:
+
+   - Add the `Vxxx__*.sql` migration. Migration head as of this writing is **V199**.
+   - Cross-link it from the entity row in the touching package's `CLAUDE.md`.
+
+7. **Tests**:
+
+   - At minimum, a JUnit test on the controller hitting the happy path + the most likely 4xx (e.g. missing param → 400, unauthorized → 401, forbidden → 403).
+   - For multi-tenant endpoints, a test that proves a user can't read another tenant's data (mirrors `AccessGuardCoverageTest` expectations).
+   - If the endpoint touches credit cost, a test on the multiplier path in `RunCostTracker` / `verifiedScore`.
+
+8. **Final spot-check**:
+
+   - Boot locally (`mvn spring-boot:run` + `npm --prefix frontend run dev`), hit the new endpoint from the page, verify the JWT goes out and the response shows up.
+   - Watch the network panel — make sure the response is JSON, the status is what you expected, and a forced 4xx renders the canonical error envelope rather than a stack trace.
+
+If you're touching `lib/api.ts` and not landing the matching backend change in the same PR, document that explicitly so a reviewer can flag it (the frontend will 404 silently otherwise).
+
+---
+
+## Appendix A — referenced files
+
+Frontend:
+
+- `frontend/src/lib/api.ts` — the canonical client, 3,620 lines.
+- `frontend/src/lib/execution-api.ts` — V3 execution-run client.
+- `frontend/src/lib/billing-api.ts` — billing + subscription client.
+- `frontend/src/lib/invoice-api.ts` — invoice + accounting client.
+- `frontend/src/hooks/useSse.ts` — V2 run SSE hook.
+- `frontend/src/hooks/useExecutionSse.ts` — V3 execution SSE hook.
+- `frontend/src/hooks/useTierPermissions.ts` — tier-derived permissions.
+- `frontend/src/hooks/useAsyncAction.ts` — pending-state wrapper.
+- `frontend/src/stores/useAuthStore.ts` — JWT + user state.
+- `frontend/src/stores/useSseStore.ts` — SSE log + connection status.
+- `frontend/src/signal/pages/*.tsx` — Signal page surfaces (consumers).
+- `frontend/src/signal/components/*.tsx` — Signal primitives (mostly no API).
+
+Backend:
+
+- `src/main/java/com/navneet/executespec/api/controller/RunController.java` — run lifecycle hub.
+- `src/main/java/com/navneet/executespec/api/controller/RunConversationController.java` — post-run chat + apply.
+- `src/main/java/com/navneet/executespec/api/controller/PreviewController.java` — preview lifecycle.
+- `src/main/java/com/navneet/executespec/api/controller/SseController.java` — SSE token + subscribe.
+- `src/main/java/com/navneet/executespec/api/controller/DeploymentController.java` — deployment CRUD.
+- `src/main/java/com/navneet/executespec/api/controller/MetricsController.java`, `TimelineController.java`, `UserRunsController.java`, `AdminAnalyticsController.java` — analytics surfaces.
+- `src/main/java/com/navneet/executespec/api/controller/ConversationController.java` — pre-flight spec refinement.
+- `src/main/java/com/navneet/executespec/api/controller/SlackIntegrationController.java`, `IntegrationController.java`, `IntegrationStatusController.java` — integrations.
+- `src/main/java/com/navneet/executespec/api/controller/ModelController.java`, `PricingController.java` — model + pricing matrix.
+- `src/main/java/com/navneet/executespec/api/controller/HealthController.java` — health + readiness.
+- `src/main/java/com/navneet/executespec/api/controller/FeasibilityController.java` — retired 410 stub.
+- `src/main/java/com/navneet/executespec/api/EntitlementsController.java`, `ReferralController.java`, `SignupClaimController.java`, `AnonymousRunController.java` — V3 surface.
+- `src/main/java/com/navneet/executespec/api/advice/ValidationAdvice.java` — 4xx envelope.
+- `src/main/java/com/navneet/executespec/api/advice/OptimisticLockAdvice.java` — 409 on stale write.
+- `src/main/java/com/navneet/executespec/api/advice/GlobalExceptionAdvice.java` — 500 last-chance.
+- `src/main/java/com/navneet/executespec/api/RunMapper.java` — entity → DTO mapping for run endpoints.

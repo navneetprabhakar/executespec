@@ -1,255 +1,340 @@
-# ExecuteSpec — Enterprise tier
+# ExecuteSpec ENTERPRISE Tier — One-Pager
 
-> What customers on the ENTERPRISE tier get, derived from the code that
-> implements it. Each capability cites the file or migration that makes
-> it real.
+> Engineering-honest summary of what an ENTERPRISE customer actually gets from
+> the code on `main`. Status, caveats, and known gaps are called out inline.
 
----
+## At a glance
 
-## 1. Unlimited monthly runs (with BYOK)
-
-`TierEnforcementService.effectiveOrgLimit(Org)` in
-`src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java`
-(lines 538-556):
-
-```java
-public int effectiveOrgLimit(Org org) {
-  String effectiveTier = org.getTier() != null ? org.getTier() : "FREE";
-
-  // ENTERPRISE with own keys = unlimited (BYOK contract).
-  if ("ENTERPRISE".equals(effectiveTier) && org.isApiKeysProvided()) return -1;
-
-  if (org.getMonthlyRunLimitOverride() != null) return org.getMonthlyRunLimitOverride();
-
-  return getMonthlyLimit(effectiveTier);
-}
-```
-
-When an ENTERPRISE org sets `org.api_keys_provided = TRUE` (via the
-ORG_ADMIN settings page that backs `PUT /api/org/me/settings/ai-keys`), the
-return value is `-1` (unlimited). Without BYOK keys, the org falls through
-to `tier_config.monthly_run_limit` for ENTERPRISE, currently seeded at
-`5000` (`V6__tier_config_and_org_limits.sql:13-15`).
-
-Solo ENTERPRISE users (single-member personal org per V162) follow the same
-path because `TierPermissionService.getPermissions` routes them through
-`effectiveUserLimit` for the cap check, which still resolves to the
-ENTERPRISE tier_config row.
+| Dimension                    | ENTERPRISE                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| Monthly run quota            | Unlimited (`tier_config.monthly_run_limit = -1`)                                            |
+| Concurrent runs              | Unlimited at the tier-config level; bounded by `agent.concurrency.max-runs` per JVM         |
+| Cost-cap policy              | Exempt when org is BYOK (`org.api_keys_provided = true`); platform cap applies otherwise    |
+| BYOK (Bring Your Own Keys)   | Supported via `Org.key_source_mode = OWN_KEYS` or `HYBRID`                                  |
+| Cross-org collaboration      | Supported via per-org flag `org.external_sharing_enabled` (V198, default OFF)               |
+| SSO                          | Google OIDC (live); OKTA_SAML + AZURE_AD_SAML configurable but enforcement returns 409      |
+| Audit log access             | Hash-chained `activity_audit` + `payment_audit`; ORG_ADMIN reads its own org; SUPER_ADMIN all|
+| Standards + invariants       | Per-org engineering standards with project-level downgrade overrides + violation reporting  |
+| Project export               | Tar.gz bundle (manifest, contracts, recent activity); ORG_ADMIN / BILLING_ADMIN / SUPER_ADMIN |
+| GDPR data export + erasure   | ZIP bundle (manifest, payload, README) + right-to-erasure                                   |
+| SLA + dedicated support      | See `docs/enterprise-sla.md`                                                                |
 
 ---
 
-## 2. BYOK with full cost-cap exemption
+## Runs and quotas
 
-Two interlocking pieces:
+ENTERPRISE accounts have no monthly run quota. `tier_config.monthly_run_limit`
+is set to `-1` (the unlimited sentinel used across the platform), and
+`TierEnforcementService.assertAndIncrementRunCount` skips the quota check when
+the resolved limit is negative.
 
-### Per-org key resolution
+- Quota enforcement code:
+  `src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java`
+- Quota check is atomic and pessimistic-locked
+  (`AppUserRepository#findByIdForUpdate`, `OrgRepository#findByIdForUpdate`).
+- Concurrent-run policy is governed by `tier_config.concurrent_run_limit` and
+  the per-JVM ceiling `agent.concurrency.max-runs` (20 in prod, 50 local).
 
-`Org.keySourceMode` (lines 96-100 of `auth/entity/Org.java`):
+Quota refund (v2.5.12) is event-driven. On `RunFailed` or `PARTIAL` with
+reason `CLEAN_WITH_INTERMEDIATE_WARNINGS`, credits are auto-refunded:
 
-- `SYSTEM` — always use platform-provided keys.
-- `OWN_KEYS` — only use user/org keys; no platform fallback.
-- `HYBRID` (default) — user/org keys first, fall back to platform.
-
-`Org.enabledProviders` lets the ORG_ADMIN narrow the allowed set
-(`"anthropic,openai,gemini"` — null = all allowed). Both are set via
-`PUT /api/org/me/settings/key-source` (OrgController line 203-213).
-
-### Cost-cap exemption
-
-The platform-wide cost cap defaults to `$8` per run (per
-`docs/CLAUDE.md` references; verified by `RunOrchestrator` not by re-read
-here). When `org.keySourceMode == OWN_KEYS`, the cap is bypassed — the run
-is paid for entirely by the customer's own LLM provider account, so
-ExecuteSpec has no cost exposure.
-
-The customer can still set a voluntary `userCostCap` on the run request
-(see API contract for `POST /api/runs` in the project CLAUDE.md). This is
-clamped against the platform cap on non-BYOK orgs; BYOK skips clamping.
+- `src/main/java/com/navneet/executespec/billing/service/RunQuotaRefundListener.java`
 
 ---
 
-## 3. Single Sign-On (TEAM and ENTERPRISE)
+## BYOK and cost-cap exemption
 
-**What works today**: `GOOGLE_OIDC` enforced SSO. An ORG_ADMIN sets the
-provider + email domain via `PUT /api/auth/sso/config` and flips
-`enforced = true`. Future logins for the org's email domain land on Google's
-authorisation code flow and are auto-bounced back into ExecuteSpec.
+ENTERPRISE customers are expected to provide their own LLM API keys for
+Anthropic, OpenAI, and Gemini. The platform-wide per-run dollar cap is waived
+when the org is on BYOK:
 
-**What's saved-but-not-enforced**: `OKTA_SAML` and `AZURE_AD_SAML`. The
-schema columns exist (`V127__wave3_sso_githubapp_trial.sql`) and the
-configuration UI accepts the metadata URL + domain, but enforcement is
-rejected with 409 Conflict — the SAML2 ACS / SP-metadata wiring has not
-shipped. See `docs/sso-saml-wiring.md` for the full picture and the
-operator runbook.
+- `Org.api_keys_provided` (boolean) signals the BYOK posture for the org.
+- `Org.key_source_mode` is `OWN_KEYS`, `HYBRID`, or `SYSTEM_ONLY`; ENTERPRISE
+  typically uses `OWN_KEYS` or `HYBRID`.
+- `TierEnforcementService.requiresCostCap(tier, hasByok)` returns `false` for
+  BYOK orgs (R-341), so the run-cost ceiling does not apply.
+- Per-org API keys are stored encrypted via `KeyEncryptor` (AES-256-GCM, key
+  derived from `app.jwt.secret`):
+  `src/main/java/com/navneet/executespec/security/KeyEncryptor.java`
 
-The save itself is gated to `SUPER_ADMIN` or `ORG_ADMIN`
-(`@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")` at every method on
-`auth/sso/SsoConfigController.java`). The tier gate is currently a
-front-end cosmetic gate, not a server-side hard gate.
-
----
-
-## 4. Audit log (TEAM and ENTERPRISE)
-
-Every meaningful state change (settings updates, role changes, payment
-events, run lifecycle, invitations, SSO toggles, sharing toggles) is
-recorded as an `ActivityAudit` row by `ActivityAuditService.record(...)`.
-
-Org-scoped query endpoint:
-
-```
-GET /api/org/me/audit-logs
-  ?entityType=&eventType=&actorId=&entityId=&from=&to=&page=&size=
-```
-
-Annotated `@PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")`
-(`auth/controller/OrgController.java:179`). Returns a paginated
-`AuditLogPage` DTO. Backed by `ActivityAuditService.query(...)`.
-
-Auth-side event types in the audit log include `USER_REGISTERED`,
-`EMAIL_VERIFIED`, `PASSWORD_RESET`, `PASSWORD_CHANGED`,
-`USER_GITHUB_SETTINGS_CHANGED`, `USER_AI_KEYS_CHANGED`,
-`USER_JIRA_SETTINGS_CHANGED`, `USER_CONFLUENCE_SETTINGS_CHANGED`,
-`USER_BITBUCKET_SETTINGS_CHANGED`, `ORG_EXTERNAL_SHARING_CHANGED` (V198).
-The audit table has a hash-chain integrity field (`hash_chain_value`); the
-chain is verified by an internal job and is **not** exposed in DSAR exports.
-
-`TierPermissionService.orgMemberPermissions` (ORG_ADMIN branch, lines
-207-236) sets `canViewAudit = true`; the FREE / PRO front-end does not
-surface the menu item. ENTERPRISE customers see it by default.
+Note: user-level keys are also encrypted and live on `AppUser`. Org-level keys
+override user-level on resolution; the resolution order is documented in
+`OrgService.updateKeySourceSettings`.
 
 ---
 
-## 5. External cross-org collaboration (V175 + V198)
+## SSO status (read the fine print)
 
-ENTERPRISE orgs (and any PRO+ tier where the org admin has enabled it) can
-invite collaborators from outside the org as `is_external = TRUE`
-`ProjectMember` rows on a single project. The flow is:
+The data model and admin endpoints for SSO exist. Today, only Google OIDC is
+fully wired end-to-end through Spring Security's OAuth2 client.
 
-1. ORG_ADMIN flips `org.external_sharing_enabled = TRUE` via
-   `PUT /api/org/me/settings/external-sharing` (`OrgController:228-237`).
-2. ORG_ADMIN calls `POST /api/projects/{id}/invites` with `{email,
-   projectRole}`. Role can be `PROJECT_VIEWER` (read-only), `PROJECT_DEVELOPER`,
-   or `PROJECT_ADMIN`.
-3. Invitee receives an email with a magic link, accepts via
-   `POST /api/invites/accept?token=…`, gets a `project_member` row added.
-4. From that moment, `ProjectAccessGuard.assertCanRead` admits them on any
-   project sub-resource via the cross-org branch; writes are blocked for
-   `PROJECT_VIEWER` only.
+| Provider       | Save config | Enforce SSO-only login | Code path                         |
+| -------------- | ----------- | ---------------------- | --------------------------------- |
+| GOOGLE_OIDC    | Yes         | Yes (live)             | `auth/oauth/OAuthUserMapper.java` |
+| OKTA_SAML      | Yes         | Returns 409 (not live) | `auth/sso/SsoConfigController.java` (gated reject) |
+| AZURE_AD_SAML  | Yes         | Returns 409 (not live) | Same gated reject                                  |
 
-Three gates are enforced by `ProjectInviteService.assertCanInvite`
-(`sharing/service/ProjectInviteService.java:99-147`):
+- Config endpoints: `GET|PUT|DELETE /api/auth/sso/config` (ORG_ADMIN or
+  SUPER_ADMIN).
+- File: `src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java`
+- `Org` columns persisted: `sso_provider`, `sso_enforced`, `sso_metadata_url`,
+  `sso_domain` (see `Org.java`).
+- The 409 on enforce-with-SAML is intentional (M-016 lockout-prevention guard
+  + the J-14 SAML enforcement gate). SAML handshake itself is on the roadmap;
+  it is not in production today.
 
-- Tier: caller must be `PRO`, `TEAM`, `MAX`, or `ENTERPRISE`.
-- Role (V198): caller must be SUPER_ADMIN, or ORG_ADMIN of their own org.
-- Org flag (V198): the caller's `org.external_sharing_enabled` must be
-  `true`. SUPER_ADMIN bypasses the last two.
-
-A separate **public share link** surface (`project_share_link` table) lets
-an admin generate signed, read-only URLs for specific surfaces
-(`PROJECT_OVERVIEW`, `RUN_DETAIL`, `CODE_REVIEW`, `PR_REVIEW`,
-`VALIDATION_REPORT`, `ARCHITECTURE_DOC`). Tier-gated by
-`tier_config.share_link_active_cap` (FREE=3, PRO=25, ENTERPRISE
-unlimited).
+OAuth providers wired in `SecurityConfig`: Google + GitHub. OAuth client IDs
+come from environment variables in prod (`GOOGLE_OAUTH_CLIENT_ID`,
+`GITHUB_OAUTH_CLIENT_ID`, plus secrets).
 
 ---
 
-## 6. Standards compliance + architecture invariants
+## Audit log access
 
-`src/main/java/com/navneet/executespec/standards/` houses the per-org coding
-standards engine. ORG_ADMINs can:
+Two tamper-evident audit surfaces are exposed:
 
-- Add per-org standards (`POST /api/admin/standards/...`, gated to
-  `@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")` at every method
-  on `standards/OrgStandardController.java`).
-- Override or grant standing exceptions on violations via
-  `POST /api/projects/{id}/standards/violations/{id}/override` and
-  `POST /api/projects/{id}/standards/{id}/exception` (≥30-char rationale
-  required).
-- Query the standards compliance report at
-  `GET /api/projects/{id}/standards/report?orgId=&sinceDays=`.
+1. `activity_audit` — append-only, SHA-256 hash-chained
+   - Entity: `src/main/java/com/navneet/executespec/auth/entity/ActivityAudit.java`
+     (cols `prev_hash`, `row_hash`, `chain_seq`).
+   - Writer: `src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java`
+     — JVM-synchronized `record(...)`; chain verifier walks rows in
+     `chain_seq` order.
+   - Chain verifier endpoint: `GET /api/admin/audit-chain/verify` (SUPER_ADMIN).
+   - Org-scoped reads: `GET /api/org/me/audit-logs` (ORG_ADMIN).
+   - SUPER_ADMIN reads: `GET /api/admin/audit-logs` with filters.
+   - Filter spec helper: `src/main/java/com/navneet/executespec/auth/repository/ActivityAuditSpec.java`.
 
-`arch/invariants/` holds architecture invariants — declarative rules that
-the planner / reviewer enforce on generated code (no field injection, prompt
-files only via `PromptAssembler`, etc.). These are the same rules the
-platform itself follows; they ship as defaults for enterprise customers and
-can be customised per org.
+2. `payment_audit` — payment + tier-change audit, JSONB metadata
+   - Entity: `src/main/java/com/navneet/executespec/auth/entity/PaymentAudit.java`.
+   - Idempotency key: `gatewayProvider:gatewayEventId`.
+   - Writer: `src/main/java/com/navneet/executespec/auth/service/PaymentAuditService.java`.
+   - SUPER_ADMIN listing + CSV export: `GET /api/admin/payment-audit`,
+     `GET /api/admin/payment-audit/export`.
+   - Org-scoped reads: `GET /api/billing/payment-history` (ORG_ADMIN |
+     BILLING_ADMIN | SUPER_ADMIN).
 
----
+A higher-volume activity feed lives on the partitioned `activity_feed` table
+(M-019/V133) for project activity surfaced in the UI:
 
-## 7. Other ENTERPRISE-grade features (one-liners with code anchors)
-
-| Feature                          | Anchor                                                                                                                       |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Org-wide JIRA + Confluence creds  | `auth/entity/Org.java:160-187`; managed via `PUT /api/org/me/settings/{jira,confluence}` (ORG_ADMIN only)                     |
-| Per-org domain enforcement       | `org.domain_enforcement_mode` (`V21__tier_permissions.sql:11`); ENTERPRISE is always `ENFORCED` regardless of column          |
-| Block common consumer domains    | `org.block_common_domains` — ENTERPRISE always `TRUE` (`V21__tier_permissions.sql:24`)                                        |
-| Per-org GitHub owner allowlist   | `org.allowed_github_owners` (V148, M-039) — `ProjectRepoService` rejects links outside the list                              |
-| Admin-approval threshold         | `org.require_admin_approval_above_usd` (V148, M-032) — plan-gate approval requires ORG_ADMIN above the USD threshold         |
-| Suspend / un-suspend members     | `PUT /api/org/me/members/{userId}/suspend` (`OrgController:93-103`)                                                          |
-| GitHub App installation          | `org.github_installation_id` (`V127__wave3_sso_githubapp_trial.sql:26-31`); preferred over per-user PATs when set            |
-| Seat management (TEAM tier)      | `POST /api/org/me/seats/adjust` — proration via Stripe/Razorpay (`OrgController:389-398`)                                    |
-| Multi-repo runs                  | `auth/entity/Project.java` + `project_repo` join — per-repo workspace + per-repo PR cross-link                                |
-| Data retention                   | `tier_config.retention_days` — ENTERPRISE=365 days (`auth/entity/TierConfig.java:85-87`)                                     |
-| GDPR data export                 | `GET /api/auth/me/data-export` — ZIP bundle. See `docs/dpa-flow.md`                                                          |
-| DSAR (legal-team workflow)       | `GET /api/dsar/me` + `GET /api/dsar/users/{id}` (SUPER_ADMIN only)                                                            |
-| Per-org cleanup / erasure        | `DELETE /api/auth/me/data` — soft-deletes the caller's runs; full account closure is policy / contractual via admin@         |
-
----
-
-## 8. Onboarding workflow
-
-The customer-facing onboarding pattern (verified by reading code, not
-inferring from marketing):
-
-1. **Tier provisioning** — SUPER_ADMIN sets `org.tier = "ENTERPRISE"` (and
-   typically `api_keys_provided = TRUE` once the customer has shared their
-   LLM keys). Billing path: either `BILLING_DEFAULT_GATEWAY=stripe` with the
-   `STRIPE_ENTERPRISE_PRICE_ID`, or a manual override row written via
-   `PaymentAuditService` (event `MANUAL_OVERRIDE`).
-2. **ORG_ADMIN onboarding** — One ORG_ADMIN account from the customer's
-   domain. Either signs up via Google OAuth (and is then promoted) or via
-   email + password followed by manual `app_user.global_role` update.
-3. **Domain enforcement** — `org.domain_patterns = "acme.com"` so future
-   members from that domain auto-attach. `block_common_domains` is always
-   true on ENTERPRISE per `V21__tier_permissions.sql`.
-4. **SSO setup** — Today this means GOOGLE_OIDC. SAML is on the roadmap (see
-   `docs/sso-saml-wiring.md`). The M-016 lockout guard requires the
-   onboarding admin to themselves have logged in via Google before
-   enforcement can be flipped on.
-5. **External sharing decision** — V198 flag stays off unless the customer
-   asks for cross-org collaboration. Toggle via the Org Settings page.
-6. **GitHub App install (preferred)** — installs at the org level and writes
-   `org.github_installation_id`. Avoids requiring every member to upload a
-   PAT.
-7. **First project + repos** — created by the ORG_ADMIN via
-   `POST /api/projects` and `POST /api/projects/{id}/repos`. Tier caps
-   (`tier_config.max_projects_per_org`, `max_repos_per_project`) default to
-   `-1` (unlimited) for ENTERPRISE.
+- Entity: `src/main/java/com/navneet/executespec/activity/ActivityFeedEntry.java`.
+- Writer (single chokepoint):
+  `src/main/java/com/navneet/executespec/activity/ActivityEventEmitter.java`.
+- Dual-writes to `activity_audit` for events marked `Surface.AUDIT` in
+  `ActivityEventType`.
+- Read endpoint: `GET /api/projects/{id}/activity` — partition-pruned by
+  `occurred_at` time window.
+- Retention: daily 03:00 job drops partitions older than
+  `activity.feed.retention.days` (default 365, dry-run default ON).
+  - `src/main/java/com/navneet/executespec/activity/ActivityFeedRetentionJob.java`.
+  - `src/main/java/com/navneet/executespec/activity/ActivityFeedPartitionJob.java`
+    keeps the lookahead window topped up (default 3 months ahead, runs daily
+    02:30).
 
 ---
 
-## 9. SLA + support
+## External cross-org collaboration (V175 + V198)
 
-For uptime targets, support response times, maintenance windows, and
-incident reporting, see `docs/enterprise-sla.md`. This document does not
-restate those terms.
+Two surfaces, both governed by the per-org `external_sharing_enabled` flag for
+the cross-org invite path:
+
+1. **Cross-org project membership** (`ProjectMember.is_external = true`)
+   - Endpoints: `POST /api/projects/{id}/invites`,
+     `GET /api/invites/preview?token=`, `POST /api/invites/accept?token=`.
+   - Requirements (V198, 2026-05-16):
+     - Tier PRO or higher
+     - Caller is ORG_ADMIN-of-own-org (or SUPER_ADMIN)
+     - `org.external_sharing_enabled = true`
+   - Per-org toggle: `PUT /api/org/me/settings/external-sharing` (ORG_ADMIN of
+     own org, or SUPER_ADMIN). Emits `ORG_EXTERNAL_SHARING_CHANGED` audit row.
+   - Entity column: `Org.external_sharing_enabled` (default `false`).
+
+2. **Public read-only share links** (not gated by V198)
+   - Endpoints: `POST /api/projects/{id}/share-links`,
+     `GET /api/shared/{token}/{meta,run,validation-report,...,architecture}`.
+   - Tier-gated via `tier_config.share_link_active_cap`.
 
 ---
 
-## 10. References
+## Engineering standards + invariants (org-wide)
 
-- `auth/service/TierEnforcementService.java` — limit + BYOK exemption logic.
-- `auth/entity/Org.java` — every org-level capability column.
-- `auth/entity/TierConfig.java` — per-tier feature toggles + caps.
-- `auth/service/TierPermissionService.java` — capability matrix derived
-  from tier + role.
-- `auth/controller/OrgController.java` — all ORG_ADMIN-gated settings.
-- `auth/sso/SsoConfigController.java` — SSO config (see also
-  `docs/sso-saml-wiring.md`).
-- `sharing/service/ProjectInviteService.java` — V175 + V198 cross-org
-  invite gates.
-- `V6__tier_config_and_org_limits.sql`, `V21__tier_permissions.sql`,
-  `V127__wave3_sso_githubapp_trial.sql`, `V148__governance_caps.sql`,
-  `V175__external_project_sharing.sql`, `V198__org_external_sharing_flag.sql`
-  — schema deltas that underlie each capability.
+ENTERPRISE customers commonly want to encode their engineering standards once
+and have ExecuteSpec apply them on every run.
+
+- Per-org standard rows:
+  `src/main/java/com/navneet/executespec/standards/OrgStandard.java` (YAML
+  body, optionally `org_level_locked = true` to forbid project-level
+  overrides).
+- Project-level overrides:
+  `src/main/java/com/navneet/executespec/standards/ProjectStandardOverride.java`
+  — `SEVERITY_DOWNGRADE` (BLOCKING → WARNING → ADVISORY) or `NOT_APPLICABLE`.
+  Severity upgrades are rejected (downgrade-only contract).
+- Merge logic:
+  `src/main/java/com/navneet/executespec/standards/EffectiveStandardsResolver.java`.
+- Enforcers (deterministic):
+  - Lint adapters (`eslint`, `checkstyle`):
+    `src/main/java/com/navneet/executespec/standards/enforcement/lint/EslintAdapter.java`,
+    `src/main/java/com/navneet/executespec/standards/enforcement/lint/CheckstyleAdapter.java`.
+  - File-pattern:
+    `src/main/java/com/navneet/executespec/standards/enforcement/filepattern/FilePatternEnforcer.java`.
+  - AST checks (forbidden-import, naming-pattern, dependency-direction):
+    `src/main/java/com/navneet/executespec/standards/enforcement/ast/AstCheckEnforcer.java`.
+- LLM-review fragment composer:
+  `src/main/java/com/navneet/executespec/standards/enforcement/llmreview/LlmReviewEnforcer.java`.
+- Runner (used twice per V2 run — worker self-check + reviewer pass):
+  `src/main/java/com/navneet/executespec/standards/StandardsRunner.java`.
+- Violation persistence:
+  `src/main/java/com/navneet/executespec/standards/StandardsViolation.java`
+  (JSONB payload, emergency-override fields).
+- Override pattern detector (recommends downgrades when threshold crossed in
+  rolling window):
+  `src/main/java/com/navneet/executespec/standards/override/OverridePatternDetector.java`.
+  Wired as a pure-read service; daily job consumer is **not** yet scheduled
+  (returns `Recommendation` records to no consumer).
+- Compliance report: `GET /api/projects/{id}/standards/report` — surfaces
+  effective standards + recent violations + persistent overrides
+  (`src/main/java/com/navneet/executespec/standards/report/StandardsComplianceController.java`).
+- Three override endpoints (≥30-char rationale required, audited):
+  `src/main/java/com/navneet/executespec/standards/override/StandardsOverrideController.java`.
+
+Sibling system: cross-repo `contracts/*` package (consumer pinning, drift
+detection, coverage rollup). Surface points and APIs are listed in the root
+architecture doc under "Enterprise readiness".
+
+Wave 3 governance guards bundled into a single service:
+
+- `src/main/java/com/navneet/executespec/governance/GovernanceGuard.java`
+  - `Org.require_admin_approval_above_usd` (M-032) — non-admin approval block
+    at the run-cost threshold.
+  - `Project.spend_cap_usd_monthly` (M-033) — MTD spend cap; throws 402 when
+    estimate would exceed.
+  - `Org.allowed_github_owners` CSV (M-039) — owner allowlist for repo links.
+
+---
+
+## Project + run portability (export, retention)
+
+- Project export bundle (tar.gz, no secrets, no `.executespec/` duplication —
+  customer git remains authoritative):
+  - `src/main/java/com/navneet/executespec/export/ProjectExportService.java`
+    (`composeBundle(projectId)` returns bytes; schema version = 1).
+  - `src/main/java/com/navneet/executespec/export/ProjectExportController.java`
+    — `POST /api/projects/{id}/export`, `@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN','BILLING_ADMIN')")`,
+    also gated by `ProjectAccessGuard.assertCanRead`.
+  - Layout: `manifest.json`, `project.json`, `members.json` (placeholder),
+    `contracts/index.json`, `activity/events-recent.ndjson` (last 90d),
+    `README.md`.
+
+- GDPR Article 15 + 20 export (ZIP, capped at 200 rows per table):
+  - `src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java`.
+  - Redacts password hash + every API key; replaces with `hasXxxKey` booleans.
+  - Endpoint: `GET /api/auth/me/data-export`.
+
+- Right-to-erasure (soft delete + asynchronous purge):
+  - `DELETE /api/auth/me/data`.
+  - `compliance/DataRetentionService.eraseUserData(userId)` emits
+    `executespec.data.retention.deleted_runs{trigger=GDPR}`.
+
+- Per-tier data retention (sweeps daily 03:00):
+  - `src/main/java/com/navneet/executespec/compliance/DataRetentionService.java`.
+    Soft-deletes expired runs per `tier_config.retention_days`, hard-deletes
+    graced runs 7 days later, purges tombstoned projects 30 days after
+    `deleted_at`, purges archived runs after 90 days.
+  - Workspace disk reaper (nightly 03:30):
+    `src/main/java/com/navneet/executespec/compliance/WorkspaceDiskCleanupJob.java`
+    — ORPHAN / TERMINAL_OLD / TOMBSTONED categories.
+  - Stale SCM reaper (nightly 03:45):
+    `src/main/java/com/navneet/executespec/compliance/StaleScmCleanupJob.java`
+    — closes OPEN PRs from CANCELLED/FAILED/ABORTED runs >14d old; deletes
+    `executespec/*` branches whose PR is terminal and >30d old.
+
+---
+
+## Security posture (summary)
+
+8-layer defense-in-depth per the root architecture document. Highlights
+relevant to ENTERPRISE buyers:
+
+- Input sanitization
+  (`src/main/java/com/navneet/executespec/security/InputSanitizer.java`) —
+  guardrail-aware (LOW / MEDIUM / HIGH); NFKC normalize + zero-width strip +
+  base64 decode-and-scan; blocks injection / shell / abuse patterns.
+- Agent-code abuse scanner
+  (`src/main/java/com/navneet/executespec/security/CodeAbuseScanner.java`) —
+  flags crypto-miner / reverse-shell / data-exfil / cloud-metadata /
+  obfuscated payloads; promotes to 400 at MEDIUM+.
+- Context sanitizer
+  (`src/main/java/com/navneet/executespec/security/ContextSanitizer.java`) —
+  strips XML system tags, neutralizes injection phrases, redacts secret
+  patterns (OpenAI / Anthropic / Google API keys, Bearer tokens, `password=`,
+  etc.).
+- AES-256-GCM encryption-at-rest for sensitive Redis values
+  (`src/main/java/com/navneet/executespec/security/KeyEncryptor.java`).
+- BCrypt(strength=12) password hashing
+  (`src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java`).
+- JWT signature validator at startup (prod profile) fails fast on missing /
+  short / dev-placeholder secret:
+  `src/main/java/com/navneet/executespec/auth/security/JwtSecretValidator.java`.
+- Cleanroom container hardening for SWE-bench + ProgramBench:
+  `--rm --network none -v <hostDir>:/workspace`.
+- Per-org cost approval threshold + project spend cap + repo-owner allowlist
+  (`src/main/java/com/navneet/executespec/governance/GovernanceGuard.java`).
+
+---
+
+## What ENTERPRISE does **not** automatically get
+
+We are deliberately conservative here:
+
+- **SAML SSO enforcement.** Configurable, but enforcing SSO-only login on a
+  SAML provider returns 409 in `SsoConfigController`. SAML handshake itself
+  is on the roadmap.
+- **SCIM provisioning.** Not implemented.
+- **CMK (customer-managed encryption keys).** All encryption uses a key
+  derived from `app.jwt.secret`. Rotation makes prior Redis entries
+  unreadable; the system falls back to `SYSTEM_ONLY` gracefully but there is
+  no per-customer key today.
+- **Dedicated tenant / single-tenant deployment.** ExecuteSpec is
+  multi-tenant on a single GCE VM in `us-east4`. Single-tenant is out of
+  scope today.
+- **Active-active multi-region failover.** The VM lives in one region; Cloud
+  SQL is zonal in dev, regional-capable in prod (`db_ha_enabled` Terraform
+  flag — currently `false` by default).
+
+If any of these is required for a deal, treat it as a contractual gap and
+escalate.
+
+---
+
+## Where this fits with adjacent docs
+
+- SLA, uptime targets, maintenance windows, data residency, backup +
+  disaster-recovery: `docs/enterprise-sla.md`.
+- Architecture overview: `docs/ARCHITECTURE.md`.
+- RBAC matrix: `docs/RBAC.md`.
+- Deployment + infra: `docs/DEPLOYMENT.md`.
+- Operations runbook + SLOs: `docs/operations/slos.md`.
+
+---
+
+## Source-of-truth file paths
+
+| Topic                          | Path                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| TierConfig entity              | `src/main/java/com/navneet/executespec/auth/entity/TierConfig.java`                                           |
+| Org entity                     | `src/main/java/com/navneet/executespec/auth/entity/Org.java`                                                  |
+| Tier enforcement               | `src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java`                              |
+| Tier permissions               | `src/main/java/com/navneet/executespec/auth/service/TierPermissionService.java`                               |
+| SSO config controller          | `src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java`                                     |
+| Activity audit                 | `src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java`                                |
+| Activity feed (UI surface)     | `src/main/java/com/navneet/executespec/activity/`                                                             |
+| Payment audit                  | `src/main/java/com/navneet/executespec/auth/service/PaymentAuditService.java`                                 |
+| Standards merge resolver       | `src/main/java/com/navneet/executespec/standards/EffectiveStandardsResolver.java`                             |
+| Standards runner               | `src/main/java/com/navneet/executespec/standards/StandardsRunner.java`                                        |
+| Governance guards              | `src/main/java/com/navneet/executespec/governance/GovernanceGuard.java`                                       |
+| Project export                 | `src/main/java/com/navneet/executespec/export/ProjectExportService.java`                                      |
+| GDPR data export               | `src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java`                               |
+| Data retention sweeper         | `src/main/java/com/navneet/executespec/compliance/DataRetentionService.java`                                  |
+| Workspace disk cleanup         | `src/main/java/com/navneet/executespec/compliance/WorkspaceDiskCleanupJob.java`                               |
+| Stale SCM cleanup              | `src/main/java/com/navneet/executespec/compliance/StaleScmCleanupJob.java`                                    |
+| Key encryptor (AES-256-GCM)    | `src/main/java/com/navneet/executespec/security/KeyEncryptor.java`                                            |
+| External-sharing toggle (V198) | `OrgService.updateExternalSharing` + `OrgController` `PUT /me/settings/external-sharing`                      |

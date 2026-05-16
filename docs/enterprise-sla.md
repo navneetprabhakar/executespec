@@ -1,290 +1,424 @@
-# Enterprise SLA — ExecuteSpec
+# ExecuteSpec ENTERPRISE — Service Level Agreement
 
-> Service Level Agreement summary for customers on the **ENTERPRISE** tier.
-> Last refreshed: 2026-05-16. Code-backed claims cite the file or migration
-> that implements them. Anything not citable is marked **policy /
-> contractual** — verify against the executed customer agreement before
-> quoting.
+> Engineering-honest SLA reference. Code-backed values are pinned to a file
+> path; policy-only values are flagged **policy (commercial)**. Sales should
+> negotiate the policy-only values per deal; engineering enforces the
+> code-backed half.
 
-PRO and TEAM customers receive best-effort email support; this document does
-not apply to them.
+## Quick reference
 
----
-
-## 1. Uptime target
-
-**Policy / contractual.** The platform aims for 99.9 % monthly uptime on
-the API + UI surface (`*.executespec.ai`), measured by the same probe
-endpoints that back the public status page. The contracted target lives in
-the executed Master Services Agreement; this number is informational.
-
-**Code-backed monitoring**: the platform exports liveness / readiness via
-Spring Boot Actuator. `SecurityConfig` (`auth/security/SecurityConfig.java`
-lines 167-170) leaves `/actuator/health` and `/actuator/prometheus` open
-without authentication, so external probes can poll them. The Prometheus
-scrape feeds the Grafana dashboards under `observability/grafana/` and the
-GCP Cloud Monitoring exporter (`@Profile("gcp")`).
-
-The status page itself is rendered from the same probe data plus the most
-recent five published SLO observations.
+| Item                                        | Value                                                    | Source                                                  |
+| ------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
+| Uptime target                               | 99.9% monthly (commercial) — **policy (commercial)**     | Not enforced in code                                    |
+| Region                                      | `us-east4` (GCP), single-region today                    | `infra/main.tf` + `application-prod.yml`                |
+| Data at rest — DB                           | Cloud SQL Postgres 15, GCP-managed encryption            | `infra/modules/database/main.tf`                        |
+| Data at rest — object                       | GCS deploy + workspace buckets, GCP-managed encryption   | `infra/modules/storage/main.tf`                         |
+| DB backup                                   | Daily 03:00 UTC; PITR + 7d txn log retention when HA on  | `infra/modules/database/main.tf`                        |
+| DB high availability                        | `db_ha_enabled` Terraform flag — currently `false`       | `infra/variables.tf`, `infra/modules/database/main.tf`  |
+| Cache                                       | Memorystore Redis 7.0, `BASIC` tier (no HA)              | `infra/modules/cache/main.tf`                           |
+| Maintenance window                          | Sunday 04:00 UTC (DB + Redis maintenance)                | `infra/modules/database/main.tf`, `cache/main.tf`       |
+| TLS                                         | Cloudflare front + GCP managed cert (LB) when enabled    | `infra/modules/loadbalancer/main.tf`                    |
+| Incident reporting channel                  | `admin@executespec.ai` + Telegram operator bridge        | `app.contact.fallback-email` in `application.yml`       |
+| Operational SLOs (5 numerical commitments)  | See `docs/operations/slos.md`                            | Code-backed via Micrometer + dashboards                 |
 
 ---
 
-## 2. Performance SLOs
+## 1. Uptime target — **policy (commercial)**
 
-The five published Service Level Objectives are in
-[`docs/operations/slos.md`](operations/slos.md). The headline targets are:
+We commit, by contract, to a **99.9% monthly uptime** for the ENTERPRISE
+control plane (REST API + dashboard) once the customer is provisioned.
 
-1. **Run terminal in 15 min** — ≥95 % of submitted runs reach a terminal
-   status within 15 minutes.
-2. **Verified-score correctness** — ≥90 % of `verifiedScore` values must
-   agree with a manual re-grade within ±5 points.
-3. **Cost estimate accuracy** — the buffered cost estimate quoted at the
-   plan gate must be within 30 % of the realised cost on ≥80 % of runs.
-4. **Webhook delivery** — ≥99 % of GitHub PR webhooks update the linked
-   `pull_request_record` within 60 seconds of arrival.
-5. **Hot-path 5xx** — overall 5xx rate on the customer-facing API surface
-   must be under 0.5 %.
+**This SLA target is not currently enforced by code.** The platform exposes
+five operational SLOs (see §6 below) but the 99.9% uptime number is a
+commercial commitment, not an automated guarantee.
 
-The SLO breach-handling workflow (alerting, incident-runbook, postmortem
-cadence) is documented alongside the targets in the linked file. This SLA
-does not duplicate it.
+What "down" means:
 
----
+- The Spring Boot app at `https://app.executespec.ai` / `https://dev.executespec.ai`
+  returns 5xx on `/api/health/ready` for ≥5 consecutive minutes; OR
+- The Cloud SQL Postgres instance is unreachable from the VM; OR
+- The marketing surface (`executespec.ai`) is unreachable through Cloudflare.
 
-## 3. Data residency
+What does **not** count toward downtime:
 
-**All customer data is stored in Google Cloud us-east4** (Ashburn, Virginia,
-US). The region is hard-coded in `application.yml` (lines 482-485) and
-duplicated in the dev / prod profiles (`application-dev.yml:97-100`,
-`application-prod.yml:99-102`):
+- Scheduled maintenance (see §4).
+- Force majeure (GCP region-wide outage, Cloudflare outage).
+- Customer-induced rate-limit / quota / billing failures.
+- LLM provider outages (Anthropic, OpenAI, Gemini upstream). The platform
+  fails over via `model-matrix.failover-order` in `application.yml`; if all
+  three providers are down simultaneously, that's force majeure.
 
-```yaml
-executespec:
-  gcp-region: us-east4
-  artifact-registry:
-    host: us-east4-docker.pkg.dev
-```
+Health endpoints:
 
-Storage components:
-
-| Component                  | Service                   | Region                            |
-| -------------------------- | ------------------------- | --------------------------------- |
-| Database                   | Cloud SQL (PostgreSQL 15) | us-east4                          |
-| Cache + queues             | Memorystore / Redis       | us-east4                          |
-| Workspace files (runtime)  | GCE VM persistent disk    | us-east4-a                        |
-| Workspace ship (long-term) | Google Cloud Storage      | us-east4 (multi-region default off) |
-| Container images           | Artifact Registry         | us-east4 (`us-east4-docker.pkg.dev`) |
-| Cloud Run previews         | Cloud Run                 | us-east4                          |
-
-**Outbound traffic to sub-processors** (Anthropic / OpenAI / Google AI /
-Stripe / Razorpay / GitHub) crosses the public internet. See
-[`docs/dpa-flow.md`](dpa-flow.md) §6 for the data-per-processor breakdown.
-Each provider's regional commitment is **policy / contractual** with that
-provider and outside ExecuteSpec's direct control.
-
-**EU residency**: not offered today. Enterprise customers requiring EU-region
-data residency should treat this as a contractual gap; the technical
-feasibility (deploying a parallel europe-west cluster) exists but the
-single-region commit is hard-coded throughout `application*.yml`.
+- Spring Boot Actuator: `/actuator/health/{liveness,readiness}` (public).
+- Public health: `/api/health/ready` (LB health check target).
+- Cloudflare-fronted status page is **policy (commercial)** — not yet wired
+  to an automated probe.
 
 ---
 
-## 4. Support response time
+## 2. Operational SLOs (code-backed)
 
-**Policy / contractual.** The standard ENTERPRISE response-time matrix:
+Five SLOs are formally tracked in `docs/operations/slos.md` and instrumented
+via Micrometer. Quoting the root architecture doc:
 
-| Severity                                       | Target initial response | Target resolution / workaround |
-| ---------------------------------------------- | ----------------------- | ------------------------------ |
-| S1 — production down, customer business impact | 1 business hour         | 8 business hours                |
-| S2 — major feature degraded, workaround exists | 4 business hours        | 2 business days                 |
-| S3 — minor degradation                         | 1 business day          | 5 business days                 |
-| S4 — question or change request                | 2 business days         | Best-effort                     |
+> 5 published SLOs in `docs/operations/slos.md`: run terminal in 15min ≥95% /
+> verified-score correctness ≥90% / cost estimate within 30% on ≥80% /
+> webhook in 60s ≥99% / hot-path 5xx <0.5%.
 
-"Business hour" means weekday 09:00–18:00 US Eastern.
+These are observable in real time:
 
-The customer contact for support is `admin@executespec.ai`. There is no
-ticketing system in code; tickets are tracked in the customer's contracted
-JIRA project (configured via `app.contact.jira.*` in `application.yml:687-694`
-when ExecuteSpec is the JIRA tenant) or by email if no JIRA is configured.
+- Local stack: Prometheus + Tempo + Grafana via `observability/docker-compose.yml`.
+  Dashboards `executespec-overview.json` and `jvm-http-overview.json`.
+- Production: Cloud Trace + Cloud Monitoring via `@Profile("gcp")`.
+- Metric prefix: `executespec.v2.*` (e.g. `executespec.v2.run.outcome`,
+  `executespec.v2.run.latency`).
+  - Source: `src/main/java/com/navneet/executespec/observability/Metrics.java`.
+- Actuator scrape: `/actuator/prometheus` (public).
+- Dashboard scrape config: `observability/prometheus.yml` (15s interval).
 
----
-
-## 5. Maintenance windows & change management
-
-**Policy.** Routine maintenance (rolling restarts, schema migrations, library
-upgrades) is performed during the **Sunday 03:00–05:00 US Eastern** window.
-ENTERPRISE customers are notified at least 48 hours in advance for any
-maintenance window expected to cause ≥30 seconds of user-visible
-unavailability.
-
-Emergency maintenance (security patches, P0 bug fixes) is performed
-immediately with retrospective notification.
-
-**Code-backed change management**:
-
-- Every database schema change ships as a Flyway migration under
-  `src/main/resources/db/migration/V*.sql`. Migration head is V199.
-  Migrations are immutable after apply (operational rule:
-  never modify an already-applied migration; add a follow-up
-  `V_next` instead).
-- Every backend / frontend change ships through the CI pipeline at
-  `.github/workflows/deploy.yml`. The deploy artifact is a single Spring
-  Boot fat JAR + the built frontend bundle served from the same JAR's
-  `static/` directory.
-- Feature flips that require runtime control go through `FeatureFlagService`
-  (`config/featureflag/`) — no need for a deploy. Examples: `v2.pause.enabled`,
-  `ci.autofix.enabled`, `security.guardrail_level`, `force_logout_epoch`.
+Refer to `docs/operations/slos.md` for the formal SLO contract, error budgets,
+and breach behaviour. ENTERPRISE customers receive the same five SLOs as the
+shared platform — the commercial uptime target in §1 sits on top of them.
 
 ---
 
-## 6. Incident reporting
+## 3. Service availability outside the control plane
 
-**Code-backed pieces**:
+Three asynchronous surfaces have their own commitments, all instrumented:
 
-- **Operator alerting** — the platform's operator (internal staff) is paged
-  via the Telegram bridge (`chat_id=6475810501`, bot `8489535450`) on every
-  status-count change. This is internal-only and is not a customer-facing
-  channel.
-- **Customer alerting on run lifecycle** — `Notification` rows are inserted
-  on run terminal, gate-open, quota-warning events. ENTERPRISE customers
-  using Slack get the same data piped via the Slack integration
-  (`/api/integrations/slack/*`).
-- **Webhook delivery** — GitHub PR + `check_run` events flow into
-  `/webhooks/github` (HMAC SHA-256 verified). When CI fails on a PR the
-  `ci.autofix.enabled` flag governs whether the platform auto-attempts a
-  fix.
+| Surface                       | Commitment                                       | Code path                                                              |
+| ----------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- |
+| Run terminal status           | 95% within 15 minutes (SLO)                      | `RunOrchestrator` + `SequentialExecutor`                               |
+| Webhook ingestion (GitHub)    | 99% processed within 60 seconds (SLO)            | `POST /webhooks/github` (HMAC SHA-256)                                 |
+| Webhook ingestion (Stripe)    | 99% processed within 60 seconds (SLO)            | `POST /api/webhooks/stripe` + `BillingService.processStripeWebhook`    |
+| Webhook ingestion (Razorpay)  | 99% processed within 60 seconds (SLO)            | `POST /api/webhooks/razorpay` + `BillingService.processRazorpayWebhook`|
+| Preview environments          | Provisioned within 60s of plan approval          | `agent.preview.*` config + Cloud Run preview engine                    |
 
-**Policy / contractual**:
-
-- **Customer-facing incident page**: hosted at `https://status.executespec.ai`
-  (out of repo). The five published SLOs feed this page.
-- **Email notifications for S1/S2 incidents**: sent to the customer's
-  designated admin contacts within the response time matrix above
-  (§4).
-- **Postmortems**: a written postmortem is delivered within 5 business days
-  for any S1 incident. Format follows the same template the internal team
-  uses for `docs/operations/postmortems/`.
-
-There is no PagerDuty integration today. Customers who need their own
-PagerDuty / Opsgenie webhook can configure it against the Slack integration
-output or by polling `/api/notifications`.
+Webhook idempotency is enforced via the `(gateway, event_id)` unique
+constraint on `webhook_event_log` and `billing_webhook_event` — Stripe and
+Razorpay retries are absorbed without duplicate side-effects.
 
 ---
 
-## 7. Backup & disaster recovery
+## 4. Maintenance windows
 
-**Code-backed**:
+| Window                          | Purpose                                                       |
+| ------------------------------- | ------------------------------------------------------------- |
+| Sunday 04:00 UTC                | Cloud SQL Postgres maintenance (auto-applied)                 |
+| Sunday 04:00 UTC                | Memorystore Redis maintenance (auto-applied)                  |
+| Daily 03:00 UTC                 | DB backup (Cloud SQL managed)                                 |
+| Daily 03:00                     | Data-retention sweep (per-tier expiry, soft + hard delete)    |
+| Daily 03:30                     | Workspace disk-cleanup job (orphan / TERMINAL_OLD / TOMBSTONED)|
+| Daily 03:45                     | Stale SCM cleanup (close stale PRs, delete stale branches)    |
+| Daily ~03:00                    | Activity-feed partition retention (default 365d, dry-run ON)  |
+| Daily ~02:30                    | Activity-feed partition lookahead refresh (3 months ahead)    |
+| 30-minute granularity           | Subscription period-end downgrade scheduler                   |
+| Daily 09:00 IST                 | Dunning + renewal reminders (billing)                         |
+| Weekly Monday 09:00 IST         | Admin summary email                                           |
+| Monthly 00:00 IST 1st of month  | Monthly run-counter reset (`MonthlyRunCounterResetJob`)       |
 
-- **Database** — Cloud SQL automated backups run daily at 03:00 UTC
-  (default Cloud SQL retention 7 days; ENTERPRISE deployments override to
-  35 days — **operator configuration, not in repo**).
-- **Workspace files** — runtime workspaces are ephemeral on the GCE VM.
-  Long-term run artefacts ship to GCS with `tier_config.retention_days` as
-  the soft-delete window (ENTERPRISE = 365 days,
-  `auth/entity/TierConfig.java:85-87`).
+Scheduled cron sources:
 
-**Policy / contractual**:
+- `auth/service/MonthlyRunCounterResetJob.java` — `@Scheduled(cron = "0 0 0 1 * *", zone = "Asia/Kolkata")`.
+- `compliance/DataRetentionService.java` — `@Scheduled(cron = "0 0 3 * * *")`.
+- `compliance/WorkspaceDiskCleanupJob.java` — `@Scheduled(cron = "0 30 3 * * *")`.
+- `compliance/StaleScmCleanupJob.java` — `@Scheduled(cron = "0 45 3 * * *")`.
+- `activity/ActivityFeedRetentionJob.java` — `@Scheduled(cron = "0 0 3 * * *")`.
+- `activity/ActivityFeedPartitionJob.java` — `@Scheduled(cron = "0 30 2 * * *")`.
+- `billing/scheduler/PeriodEndDowngradeScheduler.java` — every 30 min.
+- `billing/scheduler/DunningScheduler.java` — daily 09:00.
+- `billing/scheduler/RenewalReminderScheduler.java` — daily 09:15.
 
-- **Recovery Time Objective (RTO)**: ≤4 hours for the platform API + UI.
-- **Recovery Point Objective (RPO)**: ≤24 hours for transactional data
-  (matches the daily Cloud SQL backup cadence).
-- DR exercises are run quarterly internally; results are not published but
-  are available on request.
+All schedulers use [ShedLock](https://github.com/lukas-krecan/ShedLock) to
+guarantee single-leader execution if the platform ever scales horizontally.
+Today, prod is a single GCE VM, so the lock is more of a safety net than a
+necessity.
+
+ENTERPRISE customer impact during these windows is expected to be **zero** —
+the jobs operate on internal tables and disk, never on hot-path request
+handling.
+
+Emergency or breaking-change maintenance: **policy (commercial)** — typically
+announced ≥7 days in advance via the admin email channel
+(`admin@executespec.ai`).
+
+---
+
+## 5. Data residency
+
+| Item                       | Location / region                              | Source                                          |
+| -------------------------- | ---------------------------------------------- | ----------------------------------------------- |
+| Postgres (Cloud SQL)       | `us-east4` (GCP, dev + prod)                   | `application-prod.yml` `agent.deployment.gcp-region` |
+| Redis (Memorystore)        | `us-east4` (GCP)                               | `infra/modules/cache/main.tf`                   |
+| Object storage (GCS)       | `us-east4` (GCP)                               | `infra/modules/storage/main.tf`                 |
+| Artifact Registry (Docker) | `us-east4-docker.pkg.dev/executespecv1/...`    | `application-prod.yml`, `infra/modules/storage/main.tf` |
+| GCE VM (Spring Boot app)   | `us-east4` (configured per Terraform `zone` var; default `us-central1-a` in `infra/variables.tf`, overridden to `us-east4-*` in prod) | `infra/main.tf`, `infra/variables.tf`           |
+| LLM call routing           | Provider-controlled (Anthropic, OpenAI, Google)| `model-matrix.failover-order` in `application.yml`   |
+| Object storage retention   | Workspace bucket: 30 days lifecycle delete; deploy bucket: keep latest 20 versions | `infra/modules/storage/main.tf` |
+
+**EU / UK / IN data-residency commitments are policy (commercial).** Today,
+the platform runs in a single GCP region (`us-east4`). If a customer's data
+must remain inside a specific jurisdiction, that has to be negotiated as a
+commercial term — there is no per-tenant region routing in the code today.
+
+The Terraform default `region = us-central1` in `infra/variables.tf` is a
+defensive default; the prod deployment is overridden to `us-east4` via
+profile config and the artifact-registry host. If you provision a new
+environment from scratch, **explicitly pass `-var region=us-east4`** to keep
+all resources in the same region.
+
+LLM provider data handling is governed by each provider's terms (Anthropic,
+OpenAI, Google). ExecuteSpec does not control where the providers process
+prompts — this is disclosed to ENTERPRISE customers during onboarding.
+
+---
+
+## 6. Backup and disaster recovery
+
+### Postgres (Cloud SQL)
+
+Configured in `infra/modules/database/main.tf`:
+
+- **Daily automated backups** at 03:00 UTC.
+- **Point-in-time recovery (PITR)** enabled when `db_ha_enabled = true`.
+- **Transaction log retention**: 7 days; backup retention: 1 day binary +
+  PITR window.
+- **Deletion protection**: enabled when `db_ha_enabled = true`; otherwise
+  off (dev VM is unprotected to allow re-provisioning).
+- **Availability type**: `REGIONAL` (HA across zones) when
+  `db_ha_enabled = true`; otherwise `ZONAL`.
+- **Maintenance window**: Sunday 04:00 UTC, stable release track.
+- **`max_connections`**: 100 (Hikari pool max-pool=30 leaves headroom for the
+  pgvector worker plus migration shells).
+
+The HA flag defaults to `false` in `infra/variables.tf`. **For ENTERPRISE
+deployments, set `db_ha_enabled = true` at provisioning time** to enable
+REGIONAL HA + PITR. The flag is not flippable without recreating the
+instance.
+
+### Redis (Memorystore)
+
+Configured in `infra/modules/cache/main.tf`:
+
+- Memorystore **Redis 7.0**, `BASIC` tier (single node — no HA).
+- `maxmemory-policy = allkeys-lru` (oldest keys evicted under pressure).
+- Maintenance: Sunday 04:00 UTC.
+- Private service access only (no public IP).
+
+Redis is treated as a cache, not a system of record. All durable state lives
+in Postgres. A Redis outage degrades:
+
+- Run-context replay (`v2:agent-ctx:{runId}:{taskId}`, 24h TTL).
+- SSE cross-instance fanout (single-instance fallback works fine).
+- Rate-limit counters (`rl:*` keys with 60s window) — filter fails open at
+  50% capacity per `RateLimitFilter`.
+- Force-logout JWT epoch.
+
+The platform survives a Redis outage with graceful degradation; durability is
+not compromised.
+
+### Object storage (GCS)
+
+Configured in `infra/modules/storage/main.tf`:
+
+- **`executespec-deploy` bucket**: versioning enabled, lifecycle deletes
+  objects when `num_newer_versions = 20` is reached. Holds release JARs +
+  config blobs.
+- **`executespec-workspaces` bucket**: lifecycle deletes objects after 30
+  days. Holds long-term-archived run workspaces (only when
+  `agent.deployment.workspace.gcs-enabled = true`).
+- Uniform bucket-level access (no per-object ACLs).
+- GCP-managed encryption at rest (default).
+
+Workspace shipping to GCS is **not enabled by default**
+(`workspace.gcs-enabled = false`). Workspaces today live on the local VM disk
+and are reaped by `WorkspaceDiskCleanupJob` after 14 days for terminal runs.
+
+### Artifact Registry (Docker)
+
+Configured in `infra/modules/storage/main.tf`:
+
+- `executespec-docker` Docker repo, keeps 10 most recent versions per
+  cleanup policy.
+
+### Disaster recovery — what happens on full VM loss
+
+1. New VM provisioned via Terraform (single VM, no MIG today; instance group
+   is unmanaged).
+2. Startup script (`infra/scripts/startup.sh`) installs Java 21 + Maven +
+   Docker + Node.js + Python + gcloud, pulls the latest JAR by `CURRENT_SHA`
+   from the GCS deploy bucket, and starts the `executespec.service` systemd
+   unit.
+3. Cloudflare Origin Certificate is preloaded on the VM at
+   `/etc/caddy/origin.pem` / `origin-key.pem`; Caddy fronts the Spring Boot
+   app on port 8080.
+4. Cloud SQL is unaffected (separate resource); the new VM reconnects via
+   the existing private IP.
+5. Redis is unaffected.
+6. In-flight runs at the moment of crash: V2's `StartupRunResumer` scans
+   resumable statuses (`PLANNING`, `WORKING`, `REVIEWING`,
+   `AWAITING_APPROVAL`) on application-ready, salvages where possible, and
+   marks the rest FAILED with `status_reason = REVIEWER_INTERRUPTED_CODE_PRESERVED`.
+   - Source: `src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java`.
+
+**Estimated recovery time objective (RTO)** for a clean VM rebuild: ~15–25
+minutes (Terraform apply + startup script + first health probe). This is a
+**policy (commercial)** target — not formally measured every cycle.
+
+**Recovery point objective (RPO)** for Postgres: <5 minutes when PITR is on
+(HA mode); up to 24 hours otherwise (daily backup only).
+
+Workspace data loss on VM failure: in-flight workspaces not yet shipped to
+GCS are lost. The customer's git remotes remain authoritative — every
+completed task commits via `gitCommit` and pushes via `ScmPushService`
+before the run is marked terminal.
+
+---
+
+## 7. Incident reporting
+
+### Customer → ExecuteSpec
+
+Primary channel: email to `admin@executespec.ai`
+(`app.mail.admin-address` in `application.yml`).
+
+For confirmed P1 incidents (control plane down, data loss suspected, security
+breach suspected), ENTERPRISE customers should follow up by phone if no
+response within 1 hour — **policy (commercial)** — contact details supplied
+during onboarding.
+
+### ExecuteSpec → customer
+
+Internal monitoring channels:
+
+- **Telegram operator bridge** (not customer-facing).
+  - Operator chat id `6475810501`, bot `8489535450`.
+  - Heartbeat every 600s + on every status-count change.
+  - Pull every 120s via `getUpdates`.
+- **In-app notifications** for billing and run lifecycle events:
+  - `auth/service/MailService.java` (subscription activated, payment failed,
+    downgraded, cancellation, top-up, dunning, renewal reminder, run
+    completion).
+  - `billing/service/BillingNotificationService.java` (async Gmail-API
+    transactional emails; degrades to WARN log if Gmail unavailable).
+- **Customer-facing status page**: **policy (commercial)** — see
+  `docs/status-page.md` for the current commitment.
+
+### Incident response steps (internal)
+
+1. Alert lands in the Telegram operator chat.
+2. Operator pulls `/actuator/prometheus` + Grafana dashboards.
+3. If JVM-level, `journalctl -u executespec` on the GCE VM (or via
+   `gcloud compute ssh`).
+4. Audit chain verifier (`GET /api/admin/audit-chain/verify`) confirms no
+   tamper.
+5. If data-loss suspected, the SUPER_ADMIN runs
+   `POST /api/admin/executions/reconcile` to mark orphaned non-terminal runs
+   FAILED.
+6. Communication: customer-affecting incidents are summarized in the next
+   admin summary email (Monday 09:00 IST) plus an out-of-cycle email if P1.
 
 ---
 
 ## 8. Security incident response
 
-The reporting channel is `security@executespec.ai` (**policy** — verify the
-mailbox is monitored). Anyone discovering a vulnerability should email
-this address before any public disclosure.
+- **Suspected breach contact**: `admin@executespec.ai`.
+- **Cleanroom isolation** for SWE-bench / ProgramBench worker containers:
+  `--rm --network none -v <hostDir>:/workspace`.
+- **Audit chain** (`activity_audit`) is tamper-evident; the chain verifier
+  endpoint reveals any rewrite within seconds:
+  - `auth/service/ActivityAuditService.java` — `verifyChain()`.
+- **Force-logout** on suspected JWT compromise: per-user `token_invalidated_at`
+  flip via `POST /api/auth/invalidate-sessions`, plus a global feature-flag
+  epoch (`FeatureFlagService`).
+- **AES-256-GCM encryption** for sensitive Redis values via `KeyEncryptor`.
+- **BCrypt(strength=12)** for password hashes; JWT secret validator fails
+  fast at startup in prod.
 
-The platform's defence-in-depth controls (see project `CLAUDE.md` "Security"
-section for the 8-layer summary) are code-enforced. Key items:
-
-- 3 guardrail levels (`LOW | MEDIUM | HIGH`) flipped via the
-  `security.guardrail_level` feature flag (`config/featureflag/`).
-- Container sandbox: `ShellTool` and `BuildProjectTool` route shell + build
-  invocations through `--read-only --cap-drop ALL` containers with an
-  env-var whitelist. Cleanroom runs (SWE-bench / ProgramBench) additionally
-  use `--network none`.
-- Input sanitisation pipeline (`InputSanitizer`) — NFKC normalisation,
-  zero-width strip, base64 decode-and-scan before LLM ingest.
-- LLM prompt-injection defence + code-abuse scanning before any
-  generated artefact lands on disk.
-- Webhook signatures: GitHub HMAC SHA-256, Razorpay HMAC, Stripe
-  `Stripe-Signature`.
-
-For the GDPR / DPDP / CCPA data-subject rights, see
-[`docs/dpa-flow.md`](dpa-flow.md).
+Disclosure timelines are **policy (commercial)**.
 
 ---
 
-## 9. Exclusions
+## 9. Quotas, throttling, and rate limits
 
-The uptime target (§1) does **not** apply during:
+The platform rate-limits `/api/**` traffic via `RateLimitFilter`. ENTERPRISE
+tier limits per `RateLimitPolicy.LIMITS`:
 
-- Scheduled maintenance windows announced ≥48 hours in advance.
-- Force majeure events (regional cloud-provider outages, internet routing
-  failures upstream of the GCP edge).
-- Customer-caused incidents (e.g. an ORG_ADMIN flipping `sso_enforced =
-  TRUE` without first passing the M-016 lockout-prevention guard — see
-  `docs/sso-saml-wiring.md` §5).
-- Suspension for non-payment or material breach of the customer agreement.
+| Group   | Limit (req/min) |
+| ------- | --------------- |
+| AUTH    | per-subtype (login=10, register=5, forgot=3, default=10) |
+| RUNS    | 60              |
+| READ    | 2000            |
+| WRITE   | 1000            |
+| PREVIEW | 200             |
+| DEPLOY  | 60              |
+| WEBHOOK | 100 (default; IP-keyed) |
 
-**Sub-processor downstream availability** (Anthropic / OpenAI / Google AI /
-GitHub / Stripe / Razorpay) is excluded from the ExecuteSpec uptime
-calculation. The platform's fallback chain (`model-matrix.failover-order`
-in `application.yml`) cushions short-lived provider outages by routing to
-an alternate model, but a full multi-provider outage will surface as a
-failed run.
+Source: `src/main/java/com/navneet/executespec/ratelimit/RateLimitPolicy.java`.
 
----
-
-## 10. Service credits
-
-**Policy / contractual.** The standard remedy for a missed uptime target
-is a service credit against the next monthly invoice, scaled by the
-severity of the miss. Exact percentages live in the executed customer
-agreement. This SLA does not enumerate them.
-
-There is **no automated service-credit issuance** in code — credit
-adjustments go through `PaymentAuditService` as a `MANUAL_OVERRIDE` event,
-applied by a SUPER_ADMIN after the customer reports a miss.
+429 responses include `Retry-After-Seconds` and follow the canonical error
+envelope. Bypass for SUPER_ADMIN ops users is not implemented; rate-limit
+breaches surface in the monitoring counter `executespec.redis.failopen` when
+Redis is the failure cause.
 
 ---
 
-## 11. Termination & data return
+## 10. Termination and data-deletion
 
-**Policy / contractual.** On termination, ExecuteSpec retains data for 30
-days before purging, during which the customer can:
+- **Customer-initiated termination** (off-boarding): the customer should
+  export data via `POST /api/projects/{id}/export` (per project) and
+  `GET /api/auth/me/data-export` (per user) before requesting account
+  closure.
+- **Right-to-erasure** (`DELETE /api/auth/me/data`): soft-deletes the user
+  and schedules hard-delete via the daily `DataRetentionService` sweep
+  (7-day grace).
+- **Project deletion**: soft-delete sets `deleted_at`; 30-day undo window;
+  then hard-delete via `DataRetentionService.hardDeleteTombstonedProjects`.
+- **Archived run purge**: 90 days after `archived_at` per
+  `DataRetentionService.hardDeleteArchivedRuns`.
 
-- Self-serve export their personal data via `GET /api/auth/me/data-export`
-  (ENTERPRISE quota-cap not applied to this endpoint — it always returns
-  the full bundle up to the 200-row per-list cap).
-- Self-serve org-scoped export via `POST /api/projects/{id}/export` for
-  each project they own.
-- Request DSAR JSON via `GET /api/dsar/me`.
-- Request a custodial copy of workspace files for any specific runs by
-  ticket.
-
-After 30 days, retention cleanup happens via `DataRetentionService`
-(`compliance/DataRetentionService`) — runs older than the tier window
-(ENTERPRISE = 365 days) are soft-deleted; the customer's account itself
-requires manual closure via `admin@executespec.ai`.
+Post-termination data residency: backups remain in Cloud SQL's managed
+backup retention window (1 day binary + 7 days PITR transaction log when HA
+on); object-storage objects follow each bucket's lifecycle rule.
 
 ---
 
-## 12. References
+## 11. Liability and exclusions — **policy (commercial)**
 
-- `docs/operations/slos.md` — the five published SLOs with measurement
-  windows + breach handling.
-- `docs/dpa-flow.md` — data export, retention, sub-processor list.
-- `docs/sso-saml-wiring.md` — SSO setup runbook + known gaps.
-- `auth/entity/TierConfig.java:85-87` — ENTERPRISE retention window.
-- `application*.yml` — `executespec.gcp-region`, artifact registry host,
-  OAuth2 redirect URIs (us-east4 throughout).
-- `.github/workflows/deploy.yml` — deploy pipeline (referenced; not read
-  for this document).
-- `config/featureflag/FeatureFlagService.java` — runtime flag mechanism.
+Commercial terms in the master agreement govern:
+
+- Liability cap.
+- Service credits for SLA breach.
+- Force majeure scope (GCP region outage, Cloudflare outage, LLM provider
+  outage).
+- Termination for material breach.
+- Survival clauses.
+
+None of these are enforced in code; they belong to the signed contract.
+
+---
+
+## 12. Source-of-truth file paths
+
+| Topic                                | Path                                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Infrastructure (Terraform)           | `infra/main.tf`, `infra/variables.tf`, `infra/modules/*/`                                     |
+| GCE startup script                   | `infra/scripts/startup.sh`                                                                    |
+| Cloud SQL config                     | `infra/modules/database/main.tf`                                                              |
+| Memorystore Redis config             | `infra/modules/cache/main.tf`                                                                 |
+| GCS storage config                   | `infra/modules/storage/main.tf`                                                               |
+| Load balancer + managed SSL          | `infra/modules/loadbalancer/main.tf`                                                          |
+| Spring Boot prod config              | `src/main/resources/application-prod.yml`                                                     |
+| Spring Boot dev config               | `src/main/resources/application-dev.yml`                                                      |
+| Health endpoints                     | `/actuator/health/{liveness,readiness}`, `/api/health/ready`                                  |
+| Metrics + dashboards                 | `src/main/java/com/navneet/executespec/observability/Metrics.java`, `observability/grafana/dashboards/` |
+| Prometheus scrape config             | `observability/prometheus.yml`                                                                |
+| Operational SLOs                     | `docs/operations/slos.md`                                                                     |
+| Data retention sweeper               | `src/main/java/com/navneet/executespec/compliance/DataRetentionService.java`                  |
+| Workspace cleanup job                | `src/main/java/com/navneet/executespec/compliance/WorkspaceDiskCleanupJob.java`               |
+| Stale SCM cleanup job                | `src/main/java/com/navneet/executespec/compliance/StaleScmCleanupJob.java`                    |
+| Rate limit policy                    | `src/main/java/com/navneet/executespec/ratelimit/RateLimitPolicy.java`                        |
+| Startup run resumer                  | `src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java`                       |
+| Webhook idempotency                  | `WebhookEventLog` + `BillingWebhookEvent` entities + `(gateway, event_id)` unique constraint  |
+| Activity audit (tamper-evident)      | `src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java`                |

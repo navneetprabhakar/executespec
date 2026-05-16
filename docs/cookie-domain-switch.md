@@ -1,288 +1,184 @@
-# Cookie & session model
+# Cookie & Session Model
 
-> Last refreshed: 2026-05-16. Source of truth:
-> `src/main/java/com/navneet/executespec/auth/controller/AuthController.java`,
-> `src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java`,
-> `src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java`,
-> `src/main/resources/application*.yml`.
+> What ExecuteSpec writes to the browser, exactly how, and from where in the code. This file documents the live behaviour — including the known gaps (e.g. `Secure=false` in dev, OAuth-tokens-via-URL-fragment) so operators can plan rotations and migrations against accurate facts.
 
-This document describes what cookies the backend issues, how JWTs are
-delivered, and how cross-subdomain behaviour is configured today.
+## 1. Session model at 30k feet
 
----
+ExecuteSpec uses a **hybrid** token model:
 
-## 1. JWT delivery — header is primary, cookie is for refresh only
+1. **Access token** — short-lived JWT delivered as `Authorization: Bearer <token>` on every API call. Issued by [`JwtUtil.generateAccessToken(AppUser, OrgMember)`](../src/main/java/com/navneet/executespec/auth/security/JwtUtil.java).
+2. **Refresh token** — longer-lived JWT delivered via an HTTP-only refresh cookie. Issued by [`JwtUtil.generateRefreshToken(AppUser)`](../src/main/java/com/navneet/executespec/auth/security/JwtUtil.java); the cookie is set in `AuthController.setRefreshCookie(...)`.
+3. **SSE scoped token** — 5-minute JWT with `scope=sse` and a `runId` claim. Delivered in the `?token=` query param on the SSE URL because `EventSource` cannot send `Authorization` headers; the [`JwtAuthenticationFilter`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java) explicitly accepts this fallback.
 
-Two flavours of JWT are in circulation:
+All three are HS256 JWTs minted in [`JwtUtil`](../src/main/java/com/navneet/executespec/auth/security/JwtUtil.java) using `app.jwt.secret`. There is no opaque-token store; all auth is JWT-based.
 
-| Token         | Lifetime                       | How it reaches the server                                                                       |
-| ------------- | ------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Access token  | `app.jwt.access-token-expiry-minutes` (360 min default — `application.yml:697`) | `Authorization: Bearer …` header                                                |
-| Access token  | same                           | `?token=<jwt>` query param fallback (SSE only — `EventSource` cannot set headers)               |
-| Refresh token | `app.jwt.refresh-token-expiry-days` (7 days — `application.yml:698`)            | `refresh_token` HTTP cookie                                                     |
-| SSE token     | 5 minutes (`JwtUtil.generateSseToken` line 87-98) | `?token=<jwt>` query param on `/api/runs/{id}/events`                          |
+## 2. Access token (Bearer) — the primary path
 
-### Filter
+| Concern | Value | Source |
+| ------- | ----- | ------ |
+| Algorithm | HS256 | `JwtUtil` |
+| Carrier | `Authorization: Bearer <token>` header | extracted by [`JwtAuthenticationFilter`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java) |
+| Default TTL | **15 minutes** in the code (`app.jwt.access-token-expiry-minutes` defaults to `15` in `JwtUtil`'s ctor) — but `application.yml` overrides this to **360 minutes** (6 h). Prod must explicitly tune this. | `JwtUtil`; `application.yml` |
+| Claims | `sub=userId`, `email`, `globalRole`, `tier`, `orgId`, `orgRole`, plus standard `iat`/`exp` | `JwtUtil.generateAccessToken` |
+| Per-user invalidation | `app_user.token_invalidated_at` Instant — `JwtAuthenticationFilter` rejects any token issued before this epoch | per-user JWT epoch in [`AppUser`](../src/main/java/com/navneet/executespec/auth/entity/AppUser.java) |
+| Global force-logout | feature-flag-driven global epoch — flips invalidate every JWT in flight | `JwtUtil`, `FeatureFlagService` |
 
-`JwtAuthenticationFilter.extractBearerToken` (`auth/security/JwtAuthenticationFilter.java:60-72`):
+Honest gap: there's a documented drift between the in-code default (15 min) and the configured value (360 min). Cleanup is on the followup list, but for ops the value to trust is the active YAML.
 
-```java
-// 1. Standard Authorization header
-String header = request.getHeader("Authorization");
-if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
-  return header.substring(7);
-}
-// 2. Query-param fallback for SSE (EventSource can't set headers)
-String queryToken = request.getParameter("token");
-if (StringUtils.hasText(queryToken)) {
-  return queryToken;
-}
-return null;
-```
+## 3. Refresh cookie
 
-Access tokens are **not** read from cookies. The only cookie the backend
-issues is the refresh-token cookie described below.
+Set in `AuthController.setRefreshCookie(...)` on three paths:
 
----
+- `POST /api/auth/login` — on successful authentication.
+- `POST /api/auth/refresh` — on rotation (the old refresh JTI gets added to `refresh_token_blocklist`).
+- `GET /api/auth/verify-email` — F-29 single-step verification → auto-session.
 
-## 2. The `refresh_token` cookie
+Cleared on `DELETE /api/auth/logout`.
 
-Set in three places, all on `AuthController`:
+### Cookie attributes (live values from `AuthController.setRefreshCookie`)
 
-- `setRefreshCookie` (lines 613-620) on `POST /api/auth/login`,
-  `POST /api/auth/refresh`, `GET /api/auth/verify-email`.
-- Cleared (zero-value, `maxAge=0`) on `DELETE /api/auth/logout`
-  (lines 87-91).
+| Attribute | Value | Notes |
+| --------- | ----- | ----- |
+| Name | (refresh-token cookie) | set by `AuthController.setRefreshCookie` |
+| `HttpOnly` | `true` | not readable from JS |
+| `Secure` | `false` (with comment `"set true in production (HTTPS)"`) | relies on infra HTTPS termination at Cloudflare, not on the cookie attribute itself |
+| `SameSite` | (controller-set, see code; behaviour is server-side same-site default — no cross-site send) |
+| `Path` | (default; cookie scoped to the API host) |
+| `Domain` | not set — cookie defaults to the response host | see §5 on cross-subdomain handling |
+| `Max-Age` | `app.jwt.refresh-token-expiry-days * 86400` seconds (default 7 d) | `JwtUtil.getRefreshTokenExpiryDays()` |
 
-### Code
+The comment "`set true in production (HTTPS)`" is in the source — the flag is **not** environment-conditional. In every environment (local, dev, prod) the same `setSecure(false)` line runs; production relies on Cloudflare upstream + Spring's `server.forward-headers-strategy: framework` to ensure the cookie is only ever set on responses to HTTPS requests in practice. This is a known gap that should be tightened (env-conditional `Secure=true` in prod/dev profiles).
 
-```java
-private void setRefreshCookie(HttpServletResponse response, String refreshToken) {
-  Cookie cookie = new Cookie("refresh_token", refreshToken);
-  cookie.setHttpOnly(true);
-  cookie.setSecure(false); // set true in production (HTTPS)
-  cookie.setPath("/api/auth");
-  cookie.setMaxAge(REFRESH_COOKIE_MAX_AGE_SECONDS);
-  response.addCookie(cookie);
-}
-```
+### Rotation semantics
 
-`REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600` (line 49 — 7 days).
+`POST /api/auth/refresh`:
 
-### Attribute summary
+1. Reads the refresh cookie.
+2. Validates the JWT signature + expiry + checks the `jti` against [`RefreshTokenBlocklistRepository`](../src/main/java/com/navneet/executespec/auth/repository/RefreshTokenBlocklistRepository.java).
+3. Issues a **new** access token and a **new** refresh token (new `jti`).
+4. Inserts the old `jti` into the blocklist via the native `insertIfAbsent` (ON CONFLICT DO NOTHING) so replay is rejected.
+5. Sets the new refresh cookie on the response.
 
-| Attribute     | Value                                  | Notes                                                       |
-| ------------- | -------------------------------------- | ----------------------------------------------------------- |
-| Name          | `refresh_token`                        |                                                             |
-| HttpOnly      | `true`                                 | Browser JS cannot read it.                                  |
-| Secure        | `false` (set true in prod — TODO)      | **Known gap**: the code-level value is `false`; production should override. See §3. |
-| Path          | `/api/auth`                            | Cookie only sent on `/api/auth/*` requests.                 |
-| Domain        | *unset* (defaults to request host)     | See §5 on cross-subdomain implications.                     |
-| Max-Age       | 604 800 seconds (7 days)               |                                                             |
-| SameSite      | *unset* (Tomcat default)               | Spring Boot 3.x defaults to `Lax` for `Servlet.setCookie`.  |
-| Version       | RFC 2109 / Servlet default             |                                                             |
+### Logout
 
-There is **no** `setSameSite` call anywhere in the codebase
-(`grep -rn "setSameSite" src/main/java` returns no results in the auth
-package). Spring Boot 3.x leaves `SameSite=Lax` as the effective default
-unless overridden globally — confirmed by the absence of a
-`CookieSameSiteSupplier` bean in the security configuration.
+`DELETE /api/auth/logout`:
 
----
+1. Reads the refresh cookie.
+2. Pushes the JTI into `refresh_token_blocklist` with `expires_at` matching the original token's expiry.
+3. Clears the cookie on the response (`Max-Age=0`).
 
-## 3. Known gap: `Secure=false` is set in code
+Note: this kills the refresh path but does not kill in-flight access tokens. To kill all tokens for one user immediately, `POST /api/auth/invalidate-sessions` (which flips `app_user.token_invalidated_at`) is the per-user lever, and the global force-logout flag flips the platform epoch.
 
-The comment on line 616 of `AuthController.java` explicitly flags this as a
-production todo:
+## 4. JWT delivery for SSE
 
-```java
-cookie.setSecure(false); // set true in production (HTTPS)
-```
+[`SecurityConfig`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) permits `/api/runs/*/events` unauthenticated at the path level — the auth check happens in [`JwtAuthenticationFilter`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java) using the `?token=...` query param fallback. The token must be either:
 
-This means **as-shipped, the refresh cookie has `Secure=false`** — a browser
-will send it over both HTTP and HTTPS. The two operational mitigations:
+- A regular access token (back-compat), or
+- A purpose-scoped SSE token from `GET /api/runs/{runId}/sse-token` — 5-min TTL, `scope=sse`, `runId` claim. `JwtUtil.validateSseToken(token, runId)` checks the scope and that the token's `runId` claim matches the URL.
 
-1. The Cloudflare edge + GCE Caddy proxy in front of the JVM redirect every
-   HTTP request to HTTPS, so in practice the cookie never travels on plain
-   HTTP in dev/prod. The HSTS header (configured in `SecurityProperties`)
-   reinforces this for repeat visitors.
-2. The cookie's `Path=/api/auth` keeps it off any non-auth endpoint, so
-   even if it were exfiltrated by a mixed-content attack the blast radius
-   is restricted to refresh + logout flows.
+This path is why `?token=` is recognised in addition to the Bearer header. The SSE controller is [`SseController`](../src/main/java/com/navneet/executespec/api/controller/SseController.java).
 
-If this code path is reused for a future "store access token in cookie"
-move, the `setSecure(true)` flip is mandatory and should be conditioned on
-the active profile (`Environment.acceptsProfiles("prod", "dev")`).
+## 5. Cross-subdomain handling
 
----
+In production we serve from multiple subdomains under `*.executespec.ai`:
 
-## 4. Logout — explicit cookie clearing
+- `executespec.ai`, `www.executespec.ai` — marketing.
+- `app.executespec.ai`, `build.executespec.ai` — product SPAs.
+- `dev.executespec.ai` — dev environment.
+- `preview-engine.executespec.ai` — on-demand previews.
 
-`AuthController.logout` (lines 81-93):
+### Current cookie design
 
-```java
-Cookie cookie = new Cookie("refresh_token", "");
-cookie.setHttpOnly(true);
-cookie.setPath("/api/auth");
-cookie.setMaxAge(0);
-response.addCookie(cookie);
-```
+The refresh cookie's `Domain` attribute is **not** set in `AuthController.setRefreshCookie`. That means the cookie is scoped to whichever host the API responds from. As a consequence:
 
-Notable: the logout-clear cookie **does not call `setSecure(true)`** even
-in principle; the browser will accept the clear cookie regardless. The
-`AuthService.logout(refreshToken)` call additionally inserts the token's
-JTI into `refresh_token_blocklist` so a leaked copy cannot be redeemed
-even before its natural expiry.
+- Frontends and the API live on the same host in prod (the API is mounted at `/api/*` on the same origin) — so the cookie works.
+- If a frontend were ever split onto a sibling subdomain (e.g. `app.executespec.ai` pointing at API on `api.executespec.ai`), the refresh cookie would not be sent cross-subdomain. The fix at that point would be either `Domain=.executespec.ai` on the cookie or moving to a same-origin BFF.
 
----
-
-## 5. Cross-subdomain behaviour
-
-### What's configured
-
-- The cookie's `Domain` attribute is **not** set explicitly. Per the
-  Servlet spec / RFC 6265, the cookie domain defaults to the request host
-  with no leading dot. So a cookie issued at `dev.executespec.ai` is sent
-  only when the browser navigates back to `dev.executespec.ai`.
-- The CORS allow-origin is configured per-environment via the
-  `app.cors.allowed-origins` property
-  (`application.yml:700`, overridable via env). On `prod` it's set to
-  `https://executespec.ai`; on `dev` it's `https://dev.executespec.ai`;
-  local dev defaults to `http://localhost:5173`.
-
-### Implication
-
-The current refresh-cookie model is **single-host**. If you want
-authenticated requests against both `executespec.ai` and `dev.executespec.ai`
-from the same browser, the user has to log in on each host separately —
-the cookies don't share.
-
-If a future change wants to make the refresh cookie span subdomains, the
-two-line edit is:
-
-1. Add `cookie.setDomain(".executespec.ai")` to `AuthController.setRefreshCookie`.
-2. Pick a SameSite policy explicitly (probably `None; Secure` for the
-   cross-subdomain redirect case, or `Lax` if all traffic stays on first-party
-   navigation).
-
-That change should be paired with a documented migration window because
-existing cookies (which lack a domain attribute) will silently coexist
-with the new domain-scoped cookies for up to 7 days until the old ones
-expire.
+This is the "cookie domain switch" lever this document is named after: today, cookies are host-scoped; the lever to flip is the `Domain` attribute in `setRefreshCookie`.
 
 ### Cloudflare interaction
 
-The platform sits behind Cloudflare for `*.executespec.ai`. Two relevant
-behaviours:
-
-- **`X-Forwarded-Proto: https` propagation** — both the GCE Caddy proxy
-  and Cloudflare set this header. `application-dev.yml:79-88` and
-  `application-prod.yml:75-79` set
-  `server.forward-headers-strategy: framework` so Spring's
-  `ForwardedHeaderFilter` honours it. Without this, Spring sees every
-  request as HTTP and rebuilds OAuth `redirect_uri` values with the wrong
-  scheme. This is the documented reason for the setting in both profile
-  YAMLs.
-- **No Cloudflare-specific header parsing** — the code does not consult
-  `CF-Connecting-IP` or `CF-Ray`. The originating IP for rate limiting +
-  audit comes from the standard `X-Forwarded-For` chain via
-  `ForwardedHeaderFilter`, not Cloudflare-proprietary headers
-  (verified by `grep -rn "cf-" src/main/java` returning no auth-related
-  results).
-
----
+Cloudflare sits in front of `*.executespec.ai` and terminates TLS. Spring is configured with `server.forward-headers-strategy: framework` in `application-prod.yml` and `application-dev.yml`, so Spring's `ForwardedHeaderFilter` reads `X-Forwarded-Proto: https` from Cloudflare and renders absolute URLs correctly. The cookie itself is still emitted with `Secure=false` (see §3 known gap); we rely on Cloudflare upstream to make the practical attack-surface small.
 
 ## 6. CORS configuration
 
-`SecurityConfig.corsConfigurationSource` (lines 270-282):
+CORS is configured in [`SecurityConfig.corsConfigurationSource()`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java), reading `app.cors.allowed-origins` (`@Value` field). The value is a comma-separated list and `allowCredentials=true` is set so the refresh cookie flows on cross-origin XHR when allowed.
 
-```java
-CorsConfiguration config = new CorsConfiguration();
-config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
-config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-config.setAllowedHeaders(List.of("*"));
-config.setAllowCredentials(true);
-config.setMaxAge(3600L);
+### Per-profile origins
 
-UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-source.registerCorsConfiguration("/**", config);
+| Profile | `app.cors.allowed-origins` | Source |
+| ------- | -------------------------- | ------ |
+| `application.yml` (base / local) | `http://localhost:5173` | `application.yml` |
+| `application-local.yml` | `http://localhost:5173,http://localhost:5174` | `application-local.yml` |
+| `application-dev.yml` | includes `dev.executespec.ai`, `app.dev`, `build.dev`, plus marketing `executespec.ai` / `www.executespec.ai` | `application-dev.yml` |
+| `application-prod.yml` | defaults to `https://executespec.ai,https://www.executespec.ai,https://app.executespec.ai,https://build.executespec.ai`, env-overridable | `application-prod.yml` |
+
+Anomaly noted in research: there is a stale block of YAML in `application.yml` near `app.cors.allowed-origins` (lines ~700-705) where two retired V143 product-routing keys (`app-return-url`, `build-return-url`) sit at the wrong indentation — they appear nested under `cors` after the V143 retirement (V179 rolled it back). The behaviour is benign because the CORS reader only consumes `allowed-origins`, but the YAML should be cleaned up.
+
+## 7. OAuth2 sign-in flow (Google, GitHub)
+
+When the user signs in via Google or GitHub, control passes through Spring Security's OAuth2 client and lands in [`OAuthSuccessHandler.onAuthenticationSuccess(...)`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthSuccessHandler.java). On success:
+
+1. The handler resolves the OAuth profile via [`OAuthUserMapper`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthUserMapper.java) — Google extracts `email` from `OAuth2User`; GitHub falls back to `GET /user/emails` with the OAuth2 access token if email is private.
+2. `AuthService.findOrCreateFromOAuth(...)` either links to an existing `AppUser` (matching `oauth_provider + oauth_id`, or by email if the email is verified) or creates a new account.
+3. The handler mints access + refresh tokens via `JwtUtil`.
+4. The handler redirects the browser to `${app.mail.base-url}/auth/callback?token=<accessToken>&refresh=<refreshToken>`.
+
+Honest gap: **tokens-in-redirect.** Both the access and refresh tokens are sent via URL-encoded query params on the redirect. The frontend SPA picks them up, posts them into local state, and clears the URL. This is a common SPA pattern, but it means:
+
+- Both tokens appear in the browser history of whichever browser executed the OAuth dance.
+- Server access logs that capture the redirect URL (Cloudflare access logs, any intermediate proxy) would see both tokens.
+- A future tightening would be to set the refresh cookie server-side on the OAuth callback (instead of redirecting with `refresh=`) and only return the access token in the URL — or, better, set both cookies server-side and redirect with no token in the URL. Currently neither path is taken.
+
+If `OAuthEmailConflictException` is thrown (email already linked to a different provider), the handler redirects to `/login?error=oauth_email_conflict`. Other failures fall through to `/login?error=oauth_failed`.
+
+## 8. Auth filter chain (high-level)
+
+```
+HTTP request
+    -> CorsConfigurationSource (from app.cors.allowed-origins)
+    -> SecurityFilterChain
+       -> JwtAuthenticationFilter   (before UsernamePasswordAuthenticationFilter)
+            * Bearer header  OR  ?token= query param (SSE)
+            * validates signature + expiry
+            * compares iat vs app_user.token_invalidated_at
+            * loads UserDetails via UserDetailsServiceImpl
+       -> RateLimitFilter            (after JWT — see ratelimit/)
+    -> Controller handler
 ```
 
-Key points:
+`SecurityConfig` is `stateless` when OAuth is disabled and `RequestAttribute`-scoped when OAuth is enabled (Finding 8 fix — see comments in `SecurityConfig`). `@EnableMethodSecurity` is on so `@PreAuthorize` works on controllers.
 
-- `allowCredentials(true)` is required so the browser sends the
-  `refresh_token` cookie on `POST /api/auth/refresh` from the frontend
-  origin. This is incompatible with `Access-Control-Allow-Origin: *`, so
-  `allowedOrigins` must be an explicit list.
-- The allowed-origin list comes from `app.cors.allowed-origins`
-  (line 700 of `application.yml`, default `http://localhost:5173`).
-  Production overrides to the customer-facing domain.
-- `OPTIONS /**` is whitelisted in the filter chain
-  (`SecurityConfig:224-225`) so preflight requests don't need auth.
+### Public paths
+`SecurityConfig.filterChain` permits the following unauthenticated:
 
----
+- `/api/auth/**` (except `/me/**` and `/settings/**` and `change-password`), `/api/auth/oauth2/**`, `/oauth2/**`, `/login/oauth2/**`.
+- `/api/webhooks/{razorpay,stripe}` — signature-secured, JWT-bypass intentional.
+- `/api/health/**`, `/actuator/health/**`, `/actuator/prometheus`.
+- `/api/integrations/*/webhook`, `/webhooks/github`, `/api/internal/reminder/send`, `/api/integrations/slack/oauth/callback`.
+- `/api/runs/*/events` — SSE; the JWT filter does the auth via `?token=`.
+- `/api/reports/shared/*`, `/api/shared/**`, `/api/invites/preview`.
+- Anonymous trial: `/api/v3/anonymous-runs[/*]`, `/api/v3/referrals/lookup`, `/api/v3/landing/stats`, `/api/v3/landing/sample-runs`, `/api/v3/public/**`.
+- `/api/admin/feature-flags/public`.
+- `/api/v2/test/**` — flagged temporary; profile-gated (`local`/`dev`) on every controller via `@Profile`.
 
-## 7. Session management
+Everything else under `/api/**` requires authentication. `/api/admin/**` requires `SUPER_ADMIN`. `/actuator/**` (other than health/prometheus) requires `SUPER_ADMIN`.
 
-`SecurityConfig.filterChain` lines 121-127:
+## 9. Security headers
 
-```java
-.sessionManagement(
-    sm ->
-        sm.sessionCreationPolicy(
-            oauthEnabled
-                ? SessionCreationPolicy.IF_REQUIRED
-                : SessionCreationPolicy.STATELESS))
-```
+Configured in `SecurityConfig` via `SecurityProperties`:
 
-- When **no OAuth2 client** is configured (`oauthEnabled == false`), session
-  creation is `STATELESS`. Pure JWT auth.
-- When **Google or GitHub OAuth** is enabled, the policy becomes
-  `IF_REQUIRED` because Spring's authorisation-code flow round-trips state
-  via an `HttpSession`. That session is **only** created during the OAuth
-  handshake.
+- **CSP** — flag-driven (`app.security.csp.enabled=true` by default).
+- **HSTS** — `max-age=31536000`, `include-sub-domains=true`. Preload toggle is feature-flagged (UX audit B29).
+- **X-Frame-Options** — `SAMEORIGIN`.
 
-The follow-up at lines 135-139 closes a related leak (adversarial-test
-finding 8): the default `HttpSessionSecurityContextRepository` was writing
-the authenticated `SecurityContext` back to the session after every JWT
-call, creating a `JSESSIONID` cookie even on stateless requests. The
-explicit `RequestAttributeSecurityContextRepository` keeps JWT auth fully
-stateless and prevents an unnecessary session cookie from being issued.
+The 401 entry point is [`JsonAuthenticationEntryPoint`](../src/main/java/com/navneet/executespec/auth/security/JsonAuthenticationEntryPoint.java) — returns a stable JSON envelope `{timestamp, status, error, message, path}` for any unauthenticated `/api/**`, `/actuator/**`, `/webhooks/**`, `/oauth2/**`, `/login/oauth2/**` request instead of the default 302 to the login page.
 
-### Net cookie inventory under normal use
+## 10. Known gaps & TODOs
 
-After a successful email + password login:
-
-| Cookie               | Issuer                   | Notes                                                              |
-| -------------------- | ------------------------ | ------------------------------------------------------------------ |
-| `refresh_token`      | `AuthController.login`   | HttpOnly, Path=/api/auth, 7d. Secure=false in code (see §3).      |
-| no `JSESSIONID`      | (Servlet default)        | Suppressed by `RequestAttributeSecurityContextRepository`.        |
-
-After a Google OAuth login:
-
-| Cookie               | Issuer                          | Notes                                                  |
-| -------------------- | ------------------------------- | ------------------------------------------------------ |
-| `refresh_token`      | `AuthController` (post-redirect) | Same as above (set when the frontend calls /refresh)  |
-| `JSESSIONID`         | Spring oauth2Login flow         | Cleared by the auth filter after the SecurityContext is repackaged into the SecurityContextHolder. |
-
-A `JSESSIONID` may briefly appear during the OAuth round-trip; it should
-not persist after the access token is delivered to the frontend.
-
----
-
-## 8. References
-
-- `auth/controller/AuthController.java`
-  (`setRefreshCookie` line 613, logout cookie clear line 87,
-  `REFRESH_COOKIE_MAX_AGE_SECONDS` line 49).
-- `auth/security/SecurityConfig.java`
-  (`sessionManagement` line 122, `securityContext` line 135,
-  `corsConfigurationSource` line 270).
-- `auth/security/JwtAuthenticationFilter.java`
-  (`extractBearerToken` line 60).
-- `auth/security/JwtUtil.java`
-  (`generateAccessToken` line 45, `generateRefreshToken` line 68,
-  `generateSseToken` line 87).
-- `application.yml` lines 695-700 — JWT + CORS config.
-- `application-prod.yml` / `application-dev.yml` —
-  `server.forward-headers-strategy: framework` for proxy chain.
+1. **`Secure=false` on the refresh cookie.** Hard-coded in `AuthController.setRefreshCookie`; production relies on Cloudflare TLS termination + `server.forward-headers-strategy`. The flag should become env-conditional (`Secure=true` for non-local profiles) before the next browser-security audit pass.
+2. **Cookie `Domain` not set.** Today the refresh cookie is host-scoped. If a future frontend split moves the SPA off the API origin, the cookie won't flow. The lever is in `AuthController.setRefreshCookie`.
+3. **OAuth tokens in redirect URL.** `OAuthSuccessHandler` passes both `token=` and `refresh=` query params on the callback redirect. Refresh tokens belong in cookies, not in URLs that get logged.
+4. **JWT access-token TTL drift.** Code default is 15 min in `JwtUtil`'s ctor; `application.yml` overrides to 360 min. Pick a single source-of-truth.
+5. **Stale CORS YAML.** `application.yml` has misplaced V143 product-routing keys (`app-return-url`/`build-return-url`) indented under `app.cors` — benign, but worth cleaning.
+6. **`/api/v2/test/**` permitted unauthenticated.** Profile-gated to `local`/`dev` by controller annotation; SecurityConfig still has the `permitAll` line marked "temporary, removed once LlmRouter lands" — `LlmRouter` is live, so the matcher can be removed.

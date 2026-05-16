@@ -1,477 +1,960 @@
-# ExecuteSpec — Architecture
+# ExecuteSpec Architecture
 
-Version `1.0.0-M1`. Flyway head **V199**. Source-of-truth references are file paths; if this doc and the code disagree, the code wins.
+This document is the engineering-level map of the system. It is intended for engineers
+who need to find their way around the codebase, understand where a given concern lives,
+and trace a request from the React composer to the GitHub pull request it eventually
+produces.
 
-Sibling docs: [`CODEMAP.md`](CODEMAP.md) (mechanical index), [`document_map.md`](document_map.md), [`RBAC.md`](RBAC.md), [`DEPLOYMENT.md`](DEPLOYMENT.md).
+`Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
+`pom.xml`). DB head: `V199`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
+single Spring Boot JAR; the frontend build is served from `static/`.
 
 ---
 
 ## 1. System overview
 
 ```
-                                  +-----------------------------+
-                                  |   Customer / Operator       |
-                                  |  (browser, GitHub webhook,  |
-                                  |   Stripe / Razorpay)        |
-                                  +--------------+--------------+
-                                                 |
-                                                 v
-                  +------------------------------+-----------------------------+
-                  |                Spring Boot single JAR (:8080)              |
-                  |                                                            |
-                  |  +---------------------+    +----------------------------+ |
-                  |  | REST controllers    |    |  Static frontend assets    | |
-                  |  | /api/runs           |    |  (built React, served      | |
-                  |  | /api/projects/...   |--->|  from /resources/static)   | |
-                  |  | /api/billing/...    |    +----------------------------+ |
-                  |  | /webhooks/github    |                                   |
-                  |  | (98 controllers)    |                                   |
-                  |  +----------+----------+                                   |
-                  |             |                                              |
-                  |             v                                              |
-                  |  +----------+-----------+   +---------------------------+  |
-                  |  | services / agents    |   | tools/*  (16 files)       |  |
-                  |  | (125 *Service, 17    |-->| readFile / writeFile /    |  |
-                  |  |  *Agent)             |   | editFile / shell / git*   |  |
-                  |  +----------+-----------+   | / buildProject / runTests |  |
-                  |             |               | / completeTask            |  |
-                  |             v               +-------------+-------------+  |
-                  |  +----------+-----------+                 |                |
-                  |  | LlmRouter (V2)       |                 |                |
-                  |  | + FallbackLlmRouter  |                 |                |
-                  |  | + OpenAi / Gemini    |                 |                |
-                  |  |   NativeToolClient   |                 |                |
-                  |  +-+--------+--------+--+                 |                |
-                  |    |        |        |                    |                |
-                  +----|--------|--------|--------------------|----------------+
-                       |        |        |                    |
-                       v        v        v                    v
-                +------+--+ +---+----+ +-+------+   +---------+-------------+
-                |Anthropic| | OpenAI | | Gemini |   |  workspace/<runId>/   |
-                | API     | | API    | | API    |   |  (git clones,         |
-                +---------+ +--------+ +--------+   |   build artefacts)    |
-                                                    +---------+-------------+
-                                                              |
-                                  +---------------------------+---------------------+
-                                  |                                                 |
-                                  v                                                 v
-                       +----------+----------+                          +-----------+----------+
-                       |  PostgreSQL         |                          |  Redis (Lettuce)     |
-                       |  (Flyway, head V199)|                          |  gate signals,       |
-                       |  ~96 @Table classes |                          |  SSE replay,         |
-                       +---------------------+                          |  classifier cache,   |
-                                                                        |  rate-limit buckets, |
-                                                                        |  conversation snaps  |
-                                                                        +----------------------+
+                          ┌──────────────────────────────────────────────┐
+                          │   Cloudflare → app.executespec.ai / *.dev    │
+                          └────────────────────┬─────────────────────────┘
+                                               │
+                                  ┌────────────▼────────────┐
+                                  │   React 18 SPA (Signal) │
+                                  │   frontend/src/App.tsx  │
+                                  │   served from static/   │
+                                  └────────────┬────────────┘
+                                               │ HTTPS (JWT 1h / refresh 7d)
+                                               │ SSE  (5-min scoped tokens)
+                                               │
+       ┌───────────────────────────────────────▼──────────────────────────────────────┐
+       │                          Spring Boot 3.5.14 (Java 21)                        │
+       │                       single JAR, virtual threads on GCP                     │
+       │                                                                              │
+       │  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐  │
+       │  │ api/controller/*   │    │   ratelimit/       │    │  api/advice/       │  │
+       │  │  98 controllers    │←──▶│  RateLimitFilter   │    │ Validation/Global/ │  │
+       │  │  REST + SSE        │    │  per-tier per-IP   │    │ OptimisticLock     │  │
+       │  └─────────┬──────────┘    └────────────────────┘    └────────────────────┘  │
+       │            │                                                                 │
+       │            ▼                                                                 │
+       │  ┌──────────────────────────┐         ┌──────────────────────────────────┐   │
+       │  │ integration/             │         │  state/StateStore                │   │
+       │  │ RunOrchestrator (4654 L) │────────▶│  the single mutation API to      │   │
+       │  │ submitRun / cancel /     │         │  pipeline_run + agent_task etc.  │   │
+       │  │ pause / resume / retry   │         └──────────────────────────────────┘   │
+       │  └────────┬─────────────────┘                                                │
+       │           │                                                                  │
+       │  ┌────────▼──────────────────┐  ┌──────────────────────┐                     │
+       │  │ harness/                  │  │ agent/*              │                     │
+       │  │ SequentialExecutor        │──│ 40 agents:           │                     │
+       │  │ per-task tier-routed loop │  │ SmartClassifier,     │                     │
+       │  │ smoke-tests + retries     │  │ OutlinePlanner,      │                     │
+       │  └────────┬──────────────────┘  │ TaskExpander,        │                     │
+       │           │                     │ Coherence,           │                     │
+       │  ┌────────▼──────────────────┐  │ Worker, Reviewer,    │                     │
+       │  │ tool/* (28 tools)         │  │ Patch, ApiTest,      │                     │
+       │  │ readFile/writeFile/edit/  │  │ Validation, etc.     │                     │
+       │  │ list/search/shell/git/    │  └─────────┬────────────┘                     │
+       │  │ buildProject/runTests/    │            │                                  │
+       │  │ completeTask              │  ┌─────────▼────────────┐                     │
+       │  └───────────────────────────┘  │ agent/LlmRouter      │                     │
+       │                                 │ provider-native      │                     │
+       │                                 │ tool-calling         │                     │
+       │                                 └──┬───────┬───────┬───┘                     │
+       └────────────────────────────────────┼───────┼───────┼─────────────────────────┘
+                                            │       │       │
+                                ┌───────────▼──┐ ┌──▼──┐ ┌──▼──────────┐
+                                │  Anthropic   │ │ OAI │ │   Gemini    │
+                                │  (Spring AI) │ │ REST│ │   REST      │
+                                └──────────────┘ └─────┘ └─────────────┘
 
-   Side channels:
-     - GitHub (PR open/refresh, check-runs, webhook /webhooks/github HMAC SHA-256)
-     - Cleanroom Docker containers (SWE-bench / ProgramBench, --rm --network none)
-     - GCP Cloud Run + Cloud Build (on-demand previews + permanent deployments)
-     - Stripe + Razorpay webhooks (/api/webhooks/{stripe,razorpay}, HMAC verified)
+Substrate                                Side-cars (off the hot path)
+─────────                                ──────────────────────────────
+                                         ┌───────────────────────────┐
+   ┌───────────────────────┐             │  integration/scm/         │
+   │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
+   │ Flyway V1..V199       │             │   → GitHub / Bitbucket    │
+   │ ~115 entities         │             ├───────────────────────────┤
+   └───────────────────────┘             │  cleanroom containers     │
+                                         │   docker exec --rm        │
+   ┌───────────────────────┐             │   SWE-bench / ProgBench   │
+   │  Redis (Lettuce)      │             ├───────────────────────────┤
+   │  pub/sub + cache +    │             │  billing                  │
+   │  ShedLock + queues    │             │   Stripe (USD)            │
+   └───────────────────────┘             │   Razorpay (INR)          │
+                                         └───────────────────────────┘
 ```
 
-The whole platform is a single Spring Boot 3.5.14 JAR (Java 21, Spring AI 1.1.6). The compiled React bundle is copied into `src/main/resources/static/` at build time (see `frontend/vite.config.ts` — `build.outDir`) and served from the same process; no separate frontend deployment.
+Key non-obvious points:
+
+- A *single* Spring Boot JAR serves prod + dev. The frontend is bundled into
+  `src/main/resources/static/` at build time. There is no separate frontend service.
+- Cloud Run is used only for *previews* and a separate `preview-engine` deployment
+  pipeline. The main application runs on a GCE VM in `us-east4`. See
+  [`docs/DEPLOYMENT.md`](DEPLOYMENT.md).
+- Cleanroom containers (SWE-bench, ProgramBench) are spawned via `docker --rm
+  --network none -v <hostDir>:/workspace`. The `BuildProjectTool`, `ShellTool`, and
+  `RunTestsTool` route through `ProgramBenchContainerStore` /
+  `SwebenchContainerStore` when a container id is set on the run.
 
 ---
 
 ## 2. Backend layering
 
-Strict five-layer pipeline. Each call from a controller eventually lands on `LlmRouter` (or `FallbackLlmRouter` for the legacy non-tool agents).
+The backend follows a strict layered structure. The rule: a controller never talks to
+a tool, an agent never talks to a controller, and only `LlmRouter` and
+`FallbackLlmRouter` talk to LLM provider SDKs.
 
 ```
-controller  ->  service  ->  agent  ->  tool  ->  LlmRouter / FallbackLlmRouter  ->  provider SDK
+controller  → service          → agent              → tool                → LlmRouter
+────────────────────────────────────────────────────────────────────────────────────
+RunController  RunOrchestrator    WorkerAgent          ReadFileTool         LlmRouter
+              SequentialExecutor   OutlinePlannerAgent  WriteFileTool        (Spring AI
+              StateStore           ReviewerAgent        EditFileTool          + native
+              ValidationReport-    TaskExpanderAgent    BuildProjectTool      OpenAI/
+                Service            CoherencePlanner-    ShellTool             Gemini
+                                     Agent              RunTestsTool          REST)
+                                   SmartClassifier-     GitStatusTool
+                                     Agent              GitDiffTool
+                                                        GitCommitTool
+                                                        CompleteTaskTool
 ```
 
-Concrete example, the run-submit path:
+Concrete worked example, from request to LLM:
 
-| Layer | File |
-|---|---|
-| Controller | [`src/main/java/com/navneet/executespec/api/controller/RunController.java`](../src/main/java/com/navneet/executespec/api/controller/RunController.java) — `POST /api/runs` → `submit()` |
-| Service / orchestrator | [`src/main/java/com/navneet/executespec/integration/RunOrchestrator.java`](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) — `submitRun(...)` and the build-mode + patch-mode pipelines |
-| Sequential executor | [`src/main/java/com/navneet/executespec/harness/SequentialExecutor.java`](../src/main/java/com/navneet/executespec/harness/SequentialExecutor.java) — per-task tier-routed dispatch |
-| Agent | [`src/main/java/com/navneet/executespec/agent/WorkerAgent.java`](../src/main/java/com/navneet/executespec/agent/WorkerAgent.java) — multi-turn loop with native tool calls |
-| Tool | [`src/main/java/com/navneet/executespec/tool/`](../src/main/java/com/navneet/executespec/tool/) — `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, `runTests`, `completeTask` |
-| LLM router | [`src/main/java/com/navneet/executespec/agent/LlmRouter.java`](../src/main/java/com/navneet/executespec/agent/LlmRouter.java) + `OpenAiNativeToolClient.java` + `GeminiNativeToolClient.java` |
+1. `POST /api/runs` lands on
+   [`api/controller/RunController.submit`](../src/main/java/com/navneet/executespec/api/controller/RunController.java).
+   The controller validates `RunRequest`, runs `InputSanitizer`, checks tier quota
+   (`TierEnforcementService.assertAndIncrementRunCount`), and calls
+   `v2Orchestrator.submitRun(...)`.
+2. [`integration/RunOrchestrator.submitRun`](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)
+   persists a `pipeline_run` row via `StateStore`, then submits a background pipeline
+   future onto a `Executors.newFixedThreadPool` pool sized by
+   `PoolSizing.coreMultiple(1, 4, 16)`.
+3. The pipeline thread runs phases: workspace init →
+   [`SmartClassifierAgent`](../src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java) →
+   [`OutlinePlannerAgent`](../src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java) →
+   plan gate (`GateStore.awaitPlanGate`) →
+   [`SequentialExecutor.execute`](../src/main/java/com/navneet/executespec/harness/SequentialExecutor.java).
+4. `SequentialExecutor` loops over `Plan.tasks` and dispatches each to
+   [`WorkerAgent.run`](../src/main/java/com/navneet/executespec/agent/WorkerAgent.java),
+   which iterates LLM-tool-call-LLM until `completeTask` fires.
+5. `WorkerAgent` calls
+   [`agent/LlmRouter.call(LlmRequest)`](../src/main/java/com/navneet/executespec/agent/LlmRouter.java).
+   Anthropic dispatches through Spring AI's `AnthropicChatModel`; OpenAI dispatches
+   through [`OpenAiNativeToolClient`](../src/main/java/com/navneet/executespec/agent/OpenAiNativeToolClient.java)
+   (because Spring AI 1.1.4 mis-serialises `extra_body`); Gemini dispatches through
+   [`GeminiNativeToolClient`](../src/main/java/com/navneet/executespec/agent/GeminiNativeToolClient.java).
+   Each call routes through
+   [`cost/RunCostTracker`](../src/main/java/com/navneet/executespec/cost/RunCostTracker.java)
+   for token accounting.
+6. The LLM returns tool calls. They are dispatched by `ContextBoundToolCallback`
+   inside [`tool/ToolRegistry`](../src/main/java/com/navneet/executespec/tool/ToolRegistry.java),
+   which hands each call to the matching `Tool` (e.g. `WriteFileTool`,
+   `BuildProjectTool`). `ToolRegistry.bindForWorker(ctx)` excludes `gitCommit` from
+   the worker tool set (commits happen at run-end).
 
-`agent/` contains 17 `*Agent.java` files (full list in `CODEMAP.md`). `tool/` holds the `Tool` contract and 11 concrete tools + `CompleteTaskTool` + 4 facade variants (`FileLockTool`, `FileSystemTool`, `GitTool` are higher-level composites).
+### Legacy non-tool path
 
-**Rules** (also enforced by `arch/` ArchUnit tests):
-- LLM calls go through `LlmRouter` (native tool agents) or `FallbackLlmRouter` (non-tool legacy agents). No agent calls Anthropic / OpenAI / Gemini SDKs directly.
-- DI is constructor-only via Lombok `@RequiredArgsConstructor`. No `@Autowired` on fields.
-- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) are stamped on the entity **before** the async pipeline thread starts (see `RunOrchestrator.submitRun` — every field passed explicitly into the method signature for exactly this reason).
-- LLM prompts live in `src/main/resources/prompts/*.md` and are assembled via `agent/PromptAssembler.java` (resolves `{{include:<fragment>}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions). Agents never call `Resource.getContentAsString()` directly.
+A second LLM router survives:
+[`agent/FallbackLlmRouter`](../src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java)
+(1040 lines, YAML-driven fallback chain via
+[`router/ModelRegistry`](../src/main/java/com/navneet/executespec/router/ModelRegistry.java)
+and circuit-breaker via
+[`router/ProviderHealthTracker`](../src/main/java/com/navneet/executespec/router/ProviderHealthTracker.java)).
+It is the path for agents that do *not* use native tool calling:
+`AccuracyAssessmentService`, `ConversationAgent`, `ContextAgent`, `testgen/*`,
+`ValidationReportGenerator`. These flow `Spring AI Prompt → callWithFallbackTracked
+→ provider → ChatResponse`. Same pricing path through `RunCostTracker`, but no tool
+dispatch happens.
 
 ---
 
-## 3. Run lifecycle (`POST /api/runs` → PR)
+## 3. Run lifecycle (`POST /api/runs` to GitHub PR)
 
-The default flow is **BUILD** mode. Trace:
+Trace through a `BUILD`-mode run end-to-end. References are to
+[`integration/RunOrchestrator.java`](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)
+unless noted otherwise.
 
-1. **`RunController.submit`** (`src/main/java/com/navneet/executespec/api/controller/RunController.java:98`). Synchronous gates:
-   - `guard.requireAuthenticated` — JWT must resolve to an `AppUser`.
-   - `InputSanitizer.scan` — NFKC normalize, strip zero-width chars, base64 decode-and-scan; throws on prompt-injection patterns.
-   - `featureFlagService.isEnabled("submissions.paused")` — maintenance gate.
-   - `TierEnforcementService.assertAndIncrementRunCount` — pessimistic-lock TOCTOU-safe monthly cap (single TX).
-   - `UsageTrackingService.assertWithinLimits` — billing surface check (HTTP 402 on exceed).
-   - `ApiKeyResolver.validateKeyAvailability` — in BYOK / `OWN_KEYS` mode, at least one enabled provider must have a key.
-2. **`RunOrchestrator.submitRun`** persists the row (`pipeline_run.status=PLANNING`) with every pre-async field stamped, then submits the pipeline future to its dedicated `ExecutorService`. Returns HTTP `202 Accepted` with a `RunSummary` to the controller.
-3. **Async pipeline thread** (build mode):
-   1. Probe `pipeline_run.run_mode` — if `PATCH`, branch to `runPatchPipeline` (see §4); otherwise continue.
-   2. Optional codemap (`codeintel/RunCodeMapService`) for paid tiers on existing-repo runs.
-   3. `assessment/FeatureAssessmentService` heuristic + LLM-augmented assessment, attached to the run row.
-   4. `SmartClassifierAgent` (LIGHTWEIGHT tier) picks `PlanStrategy ∈ {SINGLE_SHOT, SMALL, MEDIUM, LARGE, LEGACY}`. Heuristic fast-path for tiny specs; LLM verifier for the rest; Redis-cached 1h (`planner:classify:<sha>`).
-   5. `OutlinePlannerAgent` (PLANNING tier) emits a `Plan` via the `submitPlan` tool. SMALL/MEDIUM use `FULL_PLAN` mode; LARGE/LEGACY use `SKELETON_ONLY`.
-   6. For LARGE/LEGACY: parallel `TaskExpanderAgent` (WORKHORSE tier) over a 4-thread pipeline pool, then `CoherencePlannerAgent` (LIGHTWEIGHT tier) `patchPlan` reconciles dependencies + hard constraints.
-   7. **Plan gate** — `pipeline_run.status=AWAITING_APPROVAL`. SSE event `PLAN_READY` fires. In PRODUCTION mode the thread blocks on `harness/GateStore`; in PROTOTYPE mode it bypasses. Approval (`POST /api/runs/{id}/approve`) charges credits and signals the gate.
-   8. `SequentialExecutor.runAll` (`src/main/java/com/navneet/executespec/harness/SequentialExecutor.java`) walks the task list. Per-task:
-      - Resolve the tier from task complexity (LOW=LIGHTWEIGHT, MEDIUM=WORKHORSE, HIGH=PLANNING).
-      - Dispatch a fresh `WorkerAgent` with its `ExecutionContext` and `ToolRegistry.bindForWorker(ctx)` (gitCommit excluded — push happens at run-end).
-      - Iter caps per tier: LOW=30 / 4k output, MEDIUM=50 / 8k, HIGH=75 / 16k.
-      - Two resilience levers fire at end-of-budget — Lever A (force-edit watchdog at 0.7× maxIter, UserMessage so Anthropic cache stays intact) and Lever B (best-guess salvage on iter-limit / budget-exceeded / stagnation).
-      - Per-task `buildProject` smoke at end.
-      - Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL).
-   9. `ReviewerAgent` (PLANNING tier) runs the general + wiring passes (project-type aware) then `PostEditFormatter` (`reviewer/PostEditFormatter.java`) applies deterministic formatting.
-   10. `report/ValidationReportService` builds the `ValidationReport`; `scoring/` computes the multiplicative `verifiedScore = clamp(0, 100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`.
-   11. `integration/scm/ScmPushService.pushMultiRepo` opens the PR(s). `PullRequestSnapshot` rows persisted; `pull_request_record` table tracks state.
-   12. Background test generation (`testgen/`) + auto-preview (5-min TTL) kicked off.
-   13. Terminal status: `COMPLETE` / `PARTIAL` + `status_reason ∈ {CLEAN_COMPLETION, CLEAN_WITH_INTERMEDIATE_WARNINGS, FINAL_BUILD_FAILED, TESTS_FAILED:N_OF_M, REVIEWER_UNRESOLVED, REVIEWER_FAILED, ALL_TASKS_FAILED, LEGACY_UNKNOWN}` (V107).
-4. **SSE stream** — `GET /api/runs/{id}/events?token=<jwt>` (scoped 5-min JWT, `scope=sse`). Event types: `PLAN_READY`, `RUN_STATUS`, `TASK_STATUS`, `LIVE_LOG`, `RUN_COST`, `EXEC_COMPENSATION_*`, `RUN_PROVIDER_SWITCHED`, `COMPLETE`. Replay buffer in Redis (`sse:replay:<runId>`).
+### Submit (synchronous, returns 202)
 
-`pipeline_run` row fields populated through this flow (entity at [`src/main/java/com/navneet/executespec/state/entity/PipelineRun.java`](../src/main/java/com/navneet/executespec/state/entity/PipelineRun.java)): `status`, `statusReason`, `plan`, `planStrategy`, `planRequirementsJson`, `costEstimate`, `actualCostUsd`, `creditsCharged`, `hardCapUsd`, `userCostCap`, `githubPrUrl`, `verifiedScore`, `runMode`, `triggeredByFinding`, plus per-phase cost columns `{classifier,outline,expansion,coherence}_{input,output}_tokens` + `_cost_usd`.
+1. **Controller** —
+   [`RunController.submit`](../src/main/java/com/navneet/executespec/api/controller/RunController.java)
+   validates `RunRequest` (Bean Validation), then scans `userRequest` with
+   `InputSanitizer` (NFKC + zero-width strip + base64 decode-and-scan), then calls
+   `tierEnforcementService.assertAndIncrementRunCount`, then dispatches to the
+   orchestrator. Returns the `RunSummary` mapped from the freshly-persisted row.
+2. **Orchestrator stamp** — `submitRun(...)` (20-arg canonical signature; 7 progressive
+   overloads exist for callsite back-compat) stamps `runId`, `provider`, `model`,
+   `plannerDbModel` (tier-resolved via `ModelResolver.resolve("OutlinePlannerAgent")`),
+   `reviewerDbModel`, `harnessVersion="v2"`, `createdByUserId`, `orgId`, `projectId`.
+   These ownership fields are stamped *before* the async pipeline thread starts
+   (race-condition fix from 2026-04). Persists `pipeline_run` with `status=PLANNING`,
+   publishes `PipelineEvent.RunStarted`, submits the pipeline future.
+
+### Pipeline phases (background thread)
+
+The async `runPipeline(...)` method (called from a `Future` on `pool`) executes the
+phases below.
+
+#### 0a. BYOK key resolution
+
+[`agent/RunKeyContextStore.resolveAndPut(runId, userId)`](../src/main/java/com/navneet/executespec/agent/RunKeyContextStore.java)
+populates the per-run Caffeine cache of API keys via
+[`agent/ApiKeyResolver`](../src/main/java/com/navneet/executespec/agent/ApiKeyResolver.java)
+(user → org → system precedence; honours `keySourceMode` ∈ `{SYSTEM, OWN_KEYS,
+HYBRID}`). Evicted in `finally`. OWN_KEYS orgs are exempted from the platform cost
+cap.
+
+#### 0a-bis. Workspace init
+
+[`harness/WorkspaceInitService.ensureRunWorkspace(runId)`](../src/main/java/com/navneet/executespec/harness/WorkspaceInitService.java)
+creates `<agent.workspace>/<runId>/`, runs `git init -b main`, writes a baseline
+`.gitignore` + `.gitattributes` (with `README.md merge=union`), commits. If the spec
+references multiple repos, `cloneMultipleRepos` clones each linked repo to
+`<workspace>/<runId>/repos/<name>/`, captures a `RunRepoSnapshot` row per repo
+(used by `RunSyncService.syncToOriginalCommit`), and augments the `.gitignore` via
+[`harness/VendoredPathGuard`](../src/main/java/com/navneet/executespec/harness/VendoredPathGuard.java)
+to keep `node_modules/`, `target/`, etc. out of accidental commits.
+
+#### V182 PATCH-mode dispatch
+
+If `run_mode = PATCH`, `runPatchPipeline(...)` runs instead of the rest. See section
+4.
+
+#### 0b. Per-run codemap (PRO+, EXISTING repos)
+
+`runCodeMapService.generateForRun(...)` builds a per-file map (functions, classes,
+imports) idempotent by HEAD SHA.
+
+#### 0c. Feature assessment
+
+[`assessment/FeatureAssessmentService`](../src/main/java/com/navneet/executespec/assessment/FeatureAssessmentService.java)
+emits an `AssessmentResult` (summary, complexity S/M/L, files affected, risks).
+Default path is deterministic length+keyword scan; LLM path is feature-flagged.
+
+#### 1. Plan
+
+- `SpecClassifier.classify(spec)` (deterministic heuristic).
+- `runClassifierShadow(...)` calls
+  [`SmartClassifierAgent.classify`](../src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java)
+  on LIGHTWEIGHT tier. Heuristic-fast-path returns `SINGLE_SHOT` at 0ms / $0 for
+  specs ≤150 chars. Otherwise an LLM verifier emits strict JSON
+  `{strategy, estimatedTaskCount, estimatedRepoTouchCount, requiresEpics, reasoning}`
+  cached in Redis (1h TTL).
+- Project-scoped runs hydrate `{{PROJECT_MEMORY}}` via
+  [`memory/ProjectMemoryProvider`](../src/main/java/com/navneet/executespec/memory/),
+  `{{PROJECT_BRIEF}}` via `ProjectBriefService`, and
+  `{{REFERENCE_DOCS}}` via `RetrievalService.retrieve(projectId, query, k, cap)`
+  (RAG over pgvector).
+- Strategy dispatch:
+  - `SINGLE_SHOT` → `OutlinePlannerAgent.synthesizeSingleShot(req)` (no LLM call;
+    `RunTitleSummarizer` LIGHTWEIGHT call only).
+  - `SMALL` / `MEDIUM` → `OutlinePlannerAgent.plan(req, Mode.FULL_PLAN)` with
+    `submitOutline` tool. 32k max output, 8-minute wall-clock cap.
+  - `LARGE` / `LEGACY` → `runLargePipeline`: skeleton phase via
+    `OutlinePlannerAgent.plan(req, SKELETON_ONLY)` (id/title/complexity/repos/
+    dependsOn/type only) → parallel
+    [`TaskExpanderAgent.expand`](../src/main/java/com/navneet/executespec/agent/TaskExpanderAgent.java)
+    per leaf task via the pool → coherence pass via
+    [`CoherencePlannerAgent.patchIfNeeded`](../src/main/java/com/navneet/executespec/agent/CoherencePlannerAgent.java)
+    emitting minimal-delta `patchPlan` tool calls (ADD_MEETS_REQUIREMENT,
+    ADD_DEPENDS_ON, REMOVE_DEPENDS_ON, etc.).
+  - `LEGACY` enables recursive `expandEpic` to depth-2 for EPIC tasks.
+- Strategy is gated by
+  [`agent/PlanStrategyCircuitBreaker.degradeIfOpen`](../src/main/java/com/navneet/executespec/agent/PlanStrategyCircuitBreaker.java):
+  5 consecutive failures of a strategy in a 1h window opens the breaker and degrades
+  the ladder LEGACY → LARGE → MEDIUM → SMALL.
+
+#### 1b. Plan gate (PRODUCTION only)
+
+`PROTOTYPE` mode bypasses. `PRODUCTION` mode flips status to `AWAITING_APPROVAL`,
+calls
+[`harness/GateStore.openPlanGate(runId)`](../src/main/java/com/navneet/executespec/harness/GateStore.java)
+(write-through: in-memory `CompletableFuture` + Redis + `gate_record` DB row), then
+blocks on `awaitPlanGate` (polls Redis at 500ms, falls back to DB on Redis outage).
+SSE `gateOpenedWithCredits` event fires for the UI.
+
+The user calls `POST /api/runs/{id}/approve` which atomically claims the gate via
+`gateRepository.tryResolveIfPending(...)` (returns 0 row count → HTTP 409 race-loser;
+1 row count → winner). Approval charges credits via `creditsCharged` × tier multiplier.
+
+#### 2. Execute
+
+[`SequentialExecutor.execute(ExecutionRequest)`](../src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)
+iterates plan tasks. Per task:
+
+- `tierConfigFor(complexity, runProvider, runModel, projectRun)` returns a
+  `TierConfig(provider, model, maxIter, maxTokens, stagnationWarnAfter,
+  stagnationForceAfter, wallClockSeconds)`.
+  - `LOW` → LIGHTWEIGHT tier, 30 iters, 4096 tokens, stagnationForce=12, 15-min wall.
+  - `MEDIUM` → WORKHORSE, 75 iters, 8192 tokens, stagnationForce=20, 25-min wall.
+  - `HIGH` → PLANNING tier (full Sonnet/Pro/gpt-5.4), 120 iters, 16384 tokens,
+    stagnationForce=26, 45-min wall.
+  - Project runs apply a ×2 multiplier to `maxIter` + `wallClockSeconds`.
+- `composeSystemPrompt(...)` injects: per-project-type scaffold from
+  `prompts/scaffolds/<key>.md`, design-system block from `UiStyleResolver`, RAG
+  reference-docs block, multi-repo workspace summary.
+- Dispatches to `WorkerAgent.run(WorkerTaskRequest)` which loops:
+  LLM call → dispatch tool calls → on `completeTask` return `COMPLETED`. Resilience
+  levers fire at end-of-budget:
+  - **Lever A (force-edit watchdog)** — at `min(0.7×maxIter, stagnationForce-1)`
+    iterations with `totalWriteCalls=0`, injects "commit to ANY edit now" UserMessage.
+  - **Lever B (best-guess salvage)** — on `ITERATION_LIMIT_EXCEEDED`,
+    `BUDGET_EXCEEDED`, or `COMPLETED_BY_STAGNATION` with zero writes, makes one final
+    LLM call attempting to salvage code.
+  - **Test-verification gate** (V182) — required when `requireTestVerification=true`;
+    blocks `COMPLETED` until a `runTests` call returns
+    `failed:[] errored:[] exit_code:0` within 5 iterations of `completeTask`.
+  - **Build-verification gate** (2026-05-08) — required when
+    `requireBuildVerification=true`; needs a `buildProject` exit=0 within 5 iterations.
+- After each task, a smoke test runs via
+  [`BuildProjectTool`](../src/main/java/com/navneet/executespec/tool/BuildProjectTool.java)
+  (one retry on failure with the build error injected; HIGH-complexity gets two
+  retries).
+- Outcomes mapped into `TaskOutcome.Status` (SUCCESS, SUCCESS_AFTER_RETRY,
+  COMPLETED_WITH_WARNING, WORKER_FAILED, SKIPPED). Aggregated into `ExecutionResult`.
+- Conversation snapshots persisted every 5 iters to Redis at
+  `v2:agent-ctx:{runId}:{taskId}` (24h TTL) via
+  [`context/ContextStore`](../src/main/java/com/navneet/executespec/context/).
+
+#### 2.5. Lint auto-fix
+
+[`lint/LintPass.run(workspace)`](../src/main/java/com/navneet/executespec/lint/LintPass.java)
+detects formatters by filesystem markers (prettier, spotless-maven, spotless-gradle,
+black, gofmt, rustfmt). 5-min per-tool timeout, 10-min total budget. Strips
+secret-bearing env vars before spawning. Gated by `lint.autofix.enabled`. Non-fatal.
+
+#### 3. Reviewer
+
+[`reviewer/ReviewerAgent.review(ReviewerRequest)`](../src/main/java/com/navneet/executespec/reviewer/)
+runs two passes: general code review + project-type-aware wiring pass. Wiring pass is
+skipped when `linkedRepoCount <= 1 && planTaskCount <= 1`. ProgramBench bumps the
+reviewer iteration cap to 80. Anthropic + OpenAI reviewers stay on PLANNING tier;
+Gemini reviewer routes to WORKHORSE (`gemini-3-flash-preview`) because Pro's
+4096-token implicit-cache threshold drifts and never hits cache.
+
+After the reviewer verdict, `PostEditFormatter.run(...)` applies a final formatter
+sweep so CI lint gates on the resulting PR don't fail.
+
+#### 4. README ensure + 4b. Status resolution
+
+`ensureReadme(...)` synthesises a placeholder if absent. `resolveTerminalStatus(...)`
+pre-derives the run's `StatusAndReason` from `ExecutionResult` + `ReviewerResult` so
+the validation report's `pipeline_result` reconciliation has the right anchor (2026-
+05-13 audit fix: always derive, independent of `scoring.v2-verified` flag).
+
+#### 5. Validation report
+
+[`report/ValidationReportService.generateAndPersist(runId, ReportInput)`](../src/main/java/com/navneet/executespec/report/ValidationReportService.java)
+synthesises `WorkerReports`/`ReviewReport`, runs
+`AccuracyAssessmentService.assess(...)`, then:
+
+- LLM-rendered narrative via
+  [`report/ValidationReportGenerator`](../src/main/java/com/navneet/executespec/report/ValidationReportGenerator.java)
+  through `FallbackLlmRouter` with `FallbackMode.IMMEDIATE`.
+- Computes `verifiedScore` (multiplicative since 264cca58):
+  ```
+  verifiedScore = clamp(0, 100,
+       100 × buildFactor
+           × testFactor
+           × reviewerFactor
+           × endpointFactor
+           × criticalDamper)
+  ```
+  Trust gates:
+  - `endpointFactor` floors at `reviewerFactor` when reviewer ∈ {CLEAN,
+    FIXED_ISSUES} (2026-05-10, PR #95): blocks the AccuracyAssessment LLM's
+    read-budget-limited endpoint count from dragging down a healthy wiring pass.
+  - `testFactor` floors at `reviewerFactor` when `testsTotal==0 &&
+    endpointCoveragePercent>=95 && reviewer ∈ {CLEAN, FIXED_ISSUES}` (2026-05-16):
+    blocks the same false-negative for spec-minimal-tests runs.
+- Computes `rubricScore` (additive 25/20/20/15/10/10 dimension breakdown, PR-E
+  Phase A, 2026-05-13 / V194). Spec-aware via `rubricTestPointsFromCoverageLevel`.
+- Reroutes provider OPENAI → ANTHROPIC for the report LLM call to dodge Spring AI
+  1.1.4 OpenAI `extra_body` bug. Flagged as a billing-attribution hazard
+  (audit E #37); a proper fix is to surface an explicit provider override on
+  `generateAndPersist`.
+- For `runtimeSurface=HTTP`, kicks off `testGenOrchestrator.runTestGenPipeline` in
+  background. For `CLI`, runs
+  [`smoketest/CliSmokeRunner`](../src/main/java/com/navneet/executespec/smoketest/CliSmokeRunner.java).
+
+#### 6. Final commit + 6b. Ledger
+
+`git add -A && git commit --allow-empty` via `commitWorkspaceOutputs`. Then
+[`memory/RunLedgerAgent.generateLedgerEntry(...)`](../src/main/java/com/navneet/executespec/memory/)
+appends a digest to `project_run_ledger` for project memory. Every 10 runs,
+`MemoryCompactionService` rewrites a versioned `project_memory_snapshot`.
+
+#### 7. Terminate
+
+`terminate(runId, finalStatus, finalReason, ...)`:
+
+- Finalises `RunCostTracker`, persists `actualCostUsd`, total tokens, `statusReason`.
+- Writes `RunCostLog`.
+- Calls `referralCompletionHook.onTerminalStatus` (R-162 invite credit grant).
+- Records `costHistoryService.recordOnTerminal`.
+- Publishes `PipelineEvent.RunCompleted` or `RunFailed`.
+- Tracks `EventTrackingService` `RUN_COMPLETE` event.
+
+#### 7b. Auto-push
+
+For `COMPLETE` or `PARTIAL` with EXISTING-mode repos,
+[`integration/scm/ScmPushService.push(fresh)`](../src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)
+runs. Single-repo path → branch push + PR create + reviewer request from the
+project's `defaultReviewers` JSON. Multi-repo path → per-subdir push + per-repo PR +
+cross-link via `GitHubRepoService.updatePullRequestBody` patching each PR body with
+the sibling list. PRs persisted to `pull_request_record` (V169 added `project_id` +
+`kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status`). The
+representative PR URL is stamped on `pipeline_run.github_pr_url` (the full per-repo
+list is at `GET /api/runs/{id}/prs`). A one-shot `runSkipPushFlag.consume(runId)`
+override skips auto-push.
 
 ---
 
-## 4. Two run modes — BUILD vs PATCH
+## 4. Two run modes: `BUILD` vs `PATCH`
 
-[`src/main/java/com/navneet/executespec/state/RunMode.java`](../src/main/java/com/navneet/executespec/state/RunMode.java) defines the discriminator (`BUILD` / `PATCH`). Stored as a string on `pipeline_run.run_mode` (V182).
+`pipeline_run.run_mode` (V182). Default is `BUILD` — section 3 above.
 
-| Aspect | BUILD | PATCH |
-|---|---|---|
-| Default for product entry points | yes | no — used only by SWE-bench + ProgramBench + the 4 finding-autofix surfaces |
-| Classifier, outline planner, coherence planner | yes | skipped |
-| Plan gate (`AWAITING_APPROVAL`) | yes (PRODUCTION) | bypassed |
-| Per-task split + SequentialExecutor | yes | no — single `PatchAgent` loop on the whole request |
-| Reviewer pass | yes | skipped |
-| Per-provider iter cap | tier-derived (30/50/75) | Anthropic 150 / OpenAI 100 / Gemini 120 |
-| Test verification on `completeTask` | per-task `buildProject` smoke | `runTests` outcome must be `failed:[], errored:[], exit_code:0` within last 5 iters |
-| Auto-push | per `runBuildPipeline` end | per `runPatchPipeline` terminal via `scmPushService.push()` |
+`PATCH` mode (`RunOrchestrator.runPatchPipeline`) is used by:
 
-The orchestrator branch lives in `RunOrchestrator.java` around line 900 — a `RunMode.isPatch(modeProbe.getRunMode())` probe routes to `runPatchPipeline(...)`.
+- SWE-bench Lite + ProgramBench benchmark adapters (bench-mode).
+- Four customer-facing autofix surfaces, all routed through the chokepoint
+  [`finding/FindingPatchSubmitter`](../src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java)
+  with `source="finding:<TYPE>"` and the finding key stamped on
+  `pipeline_run.triggered_by_finding` (V183):
+  1. **PR Review autofix** —
+     [`prreview/PrReviewAutofixService`](../src/main/java/com/navneet/executespec/prreview/).
+     PR Review verdict popover → "Autofix N comments" → pushes to PR head branch
+     via `branchOverride`.
+  2. **Tech debt autofix** —
+     [`project/techdebt/TechDebtFixService`](../src/main/java/com/navneet/executespec/project/techdebt/).
+     TechDebtPanel category row → "Fix" → fresh PR per category.
+  3. **CI failure autofix** —
+     [`project/pr/CiFailureAutoFixService`](../src/main/java/com/navneet/executespec/project/pr/).
+     GitHub `check_run` webhook auto-fires on PR CI failure. Gated by flag
+     `ci.autofix.enabled` (default OFF). Max 3 attempts per PR.
+  4. **Code review severity autofix** —
+     [`codereview/CodeReviewAutofixService`](../src/main/java/com/navneet/executespec/codereview/).
+     CodeQualityPanel severity chip → one PR per severity.
 
-**Four customer-facing PATCH surfaces** dispatch through one chokepoint [`finding/FindingPatchSubmitter.java`](../src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java) (the row gets `triggered_by_finding=<id>`, V183):
+Differences from BUILD:
 
-| Phase | Surface | Trigger |
-|---|---|---|
-| 1 | `prreview/PrReviewAutofixService` | PR Review verdict popover "Autofix N comments" — pushes to PR head branch via `branchOverride` |
-| 2 | `project/techdebt/TechDebtFixService` | Tech-debt panel "Fix" per category — fresh PR |
-| 3 | `project/pr/CiFailureAutoFixService` | GitHub `check_run` webhook on CI failure — flag `ci.autofix.enabled`, default OFF, max 3 attempts/PR |
-| 4 | `codereview/CodeReviewAutofixService` | Code Review severity chips ("N CRITICAL" / "N MAJOR") — one PR per severity |
+- Skips classifier, planner, reviewer.
+- Single thin-agent loop:
+  [`agent/PatchAgent.run`](../src/main/java/com/navneet/executespec/agent/PatchAgent.java)
+  delegates to `WorkerAgent` with no per-task fragmentation. Per-provider iteration
+  cap: Anthropic 150, OpenAI 100, Gemini 120. Stagnation disabled.
+  `requireTestVerification=true`.
+- BYOK cost-cap exemption: OWN_KEYS orgs skip the platform cap.
+- Outcome mapping: `COMPLETED` / `COMPLETED_BY_STAGNATION` /
+  `STOPPED_WITHOUT_COMPLETE` → `COMPLETE`; `ITERATION_LIMIT_EXCEEDED` /
+  `BUDGET_EXCEEDED` → `PARTIAL`; `ERROR` → `FAILED`.
+- For sources whose name starts with `"finding:"`, runs `PostEditFormatter.run` and
+  pushes via `scmPushService.push(...)` automatically on terminal status (no
+  separate gate).
 
 ---
 
-## 5. Frontend layout
+## 5. Frontend chrome (Signal)
 
-[`frontend/src/main.tsx`](../frontend/src/main.tsx) is the entry; [`frontend/src/App.tsx`](../frontend/src/App.tsx) holds routes and a `LegacyRedirect` collapsing every removed `/v3/*` / `/v4/*` / `/signal/*` / `/p/*` URL to the canonical Signal path.
+Signal is the *only* active chrome. The legacy V2 sidebar shell and the V3 top-bar
+shell were both retired in commit 5f5e4aaa on 2026-05-15; their components have been
+deleted. The Signal namespace lives under `frontend/src/signal/`.
 
-```
-frontend/src/
-├── main.tsx                 entry: pre-paint .signal-app class, theme apply, telemetry init, SW register
-├── App.tsx                  React Router routes — Signal is the only chrome
-├── tokens.css               Graphite + Signal palette tokens, 4-band score colours
-├── signal/                  the chrome
-│   ├── components/Shell.tsx  shell layout (sidebar, header)
-│   ├── pages/                12 top-level pages + project/* (11) + account/* (4) = 27 .tsx pages
-│   ├── hooks/                SSE hook, theme hook, run polling hook
-│   ├── icons/                inline SVG icon set
-│   ├── lib/                  signal-internal helpers
-│   └── signal.css            chrome-specific CSS
-├── components/               reusable primitives: runs/, project/, billing/, auth/, execution/, shared/, design-system/
-├── v3/                       retired chrome — kept only for legacy URL catching (Shell still imported nowhere from App.tsx)
-├── v4/                       retired chrome — same status
-├── pages/                    pre-Signal page set; some still mounted (admin/, auth/, execution/, onboarding/, org/, project/)
-├── stores/                   Zustand: useAuthStore, useUiStore (theme), useRunStore, useProjectStore, useExecutionStore
-├── lib/                      api.ts (single backend client), telemetry.ts (OTel), analytics.ts (PostHog), glossary.ts
-└── hooks/                    shared hooks
-```
+### Route table
 
-The header note in `App.tsx` reads literally "Signal — the only design now. v2/v3/v4 chromes retired 2026-05-15." All current production routes mount under `<SignalShell />`. The `v3/` and `v4/` folders remain on disk only for legacy-redirect catching and a handful of demo pages.
+The router lives in
+[`frontend/src/App.tsx`](../frontend/src/App.tsx). The shell is
+[`frontend/src/signal/components/Shell.tsx`](../frontend/src/signal/components/Shell.tsx).
+Highlights:
 
-Stores survive navigation across the legacy shell boundary so users don't lose context.
+- **Public**: `/login`, `/register`, `/welcome`, `/pricing`, `/trust`, `/terms`,
+  `/privacy`, `/dpa`, `/shared/:token`, `/reports/shared/:token`, `/forgot-password`,
+  `/reset-password`, `/accept-invite`, `/auth/callback`.
+- **Protected** (under `<ProtectedRoute>` + `<SignalShell>`):
+  - Run loop: `/home`, `/runs`, `/compose`, `/plan/:runId`, `/live/:runId`,
+    `/result/:runId`.
+  - Project pages: `/projects`, `/projects/:projectId` (Compose default landing),
+    `/projects/:id/pulse`, `/repos`, `/runs`, `/code`, `/chat`, `/activity`,
+    `/members`, `/architecture`, `/settings`.
+  - Account: `/account`, `/billing`, `/plans`, `/topup`, `/integrations`,
+    `/api-keys`, `/org-members`, `/org/settings`.
+  - Cross-cutting: `/insights`, `/library`, `/migrations`, `/templates`, `/audit`,
+    `/deployments`, `/notifications`, `/search`, `/more`, `/admin`.
+- **Legacy redirects**: `/signal/*`, `/v3/*`, `/v4/*`, `/p/*`, `/dashboard`,
+  `/exec`, `/team` etc. are absorbed by `LegacyRedirect` and rewritten.
 
-OTel browser telemetry initialises before `<App>` renders — see `frontend/src/lib/telemetry.ts`.
+### Primitives
+
+[`frontend/src/signal/components/Primitives.tsx`](../frontend/src/signal/components/Primitives.tsx)
+exports `Feed`, `Card`, `Row`, `Chip`, `StatusPill`, `Button`, `KvList`,
+`TabsStrip`. Specialised primitives:
+
+- [`Compose.tsx`](../frontend/src/signal/components/Compose.tsx) — `LiveHero`,
+  `ScoreCard`, `StreamCard`, `PrCard`, `ComposerCard`, `TaskLine`.
+- [`Modal.tsx`](../frontend/src/signal/components/Modal.tsx) — `Modal`,
+  `ConfirmModal`, `PromptModal`. Replaces native `window.confirm` /
+  `window.prompt`. Focus-trap + ESC + body scroll-lock.
+- [`Markdown.tsx`](../frontend/src/signal/components/Markdown.tsx) — a 3KB custom
+  GFM-subset renderer replacing react-markdown (saves ~80KB bundle).
+- [`CodeView.tsx`](../frontend/src/signal/components/CodeView.tsx) —
+  per-line regex tokeniser + unified-diff renderer replacing Monaco (saves
+  ~600KB). Supports ts/tsx/js/jsx/java/python/json/yaml/sql/bash.
+- [`FileTree.tsx`](../frontend/src/signal/components/FileTree.tsx) and
+  [`FileIcon.tsx`](../frontend/src/signal/components/FileIcon.tsx) — VS Code-style
+  20-icon dispatcher.
+- [`SpecChat.tsx`](../frontend/src/signal/components/SpecChat.tsx) — collapsible
+  "Build my spec" chat panel.
+- [`CostProgressBar.tsx`](../frontend/src/signal/components/CostProgressBar.tsx),
+  [`Loaders.tsx`](../frontend/src/signal/components/Loaders.tsx),
+  [`Glossary.tsx`](../frontend/src/signal/components/Glossary.tsx),
+  [`BrandLogos.tsx`](../frontend/src/signal/components/BrandLogos.tsx).
+
+### Pages
+
+27 page files under
+[`frontend/src/signal/pages/`](../frontend/src/signal/pages/). Notable ones:
+
+- `LivePage.tsx` (410 lines) — SSE-driven event stream + 8s polling safety net via
+  `useSse(runId)` (subscribes to `/api/runs/{id}/events`). Auto-redirects to
+  `/result/{id}` on terminal status.
+- `PlanPage.tsx` (316 lines) — polls every 2s during CLASSIFYING/PLANNING, surfaces
+  Approve/Cancel once `AWAITING_APPROVAL`. Glossary tooltips for jargon
+  (`classifier`, `wiring pass`).
+- `ResultPage.tsx` (1560 lines) — 9 tabs (Overview / Tasks / Timeline / Code / Cost
+  / PR / Validation / Tests / Chat). Lazy-loads per-tab data. The largest page in
+  the codebase; refactor candidate.
+- `ProjectCodePage.tsx` (1105 lines) — 6 sub-tabs (Browse / Tech debt / Code review
+  / Health / Standards / Docs). Browse tab is a GitHub-proxied two-pane file
+  viewer.
+
+### Telemetry
+
+[`frontend/src/main.tsx`](../frontend/src/main.tsx) calls `initTelemetry()` before
+render — instruments all `fetch()` calls. Service worker (`/sw.js`) registered in
+prod only. Theme bootstrap pre-paint reads `localStorage.getItem('signal:theme')`
+and sets `<html data-signal-theme>`.
+
+Design tokens at
+[`frontend/src/tokens.css`](../frontend/src/tokens.css) — `:root` declares dark
+defaults; `[data-theme='light']` overrides for light. The 2026-05-14 UX overhaul
+added role-named surface tokens (`--surface-page`, `--surface-card`,
+`--surface-raised`, `--surface-sunken`), Apple-HIG motion vocabulary
+(`--motion-press`, `--motion-tap`, `--motion-reveal`, `--motion-pulse`), and hit
+target floors (44px mobile, 32px desktop).
 
 ---
 
 ## 6. Storage
 
-### PostgreSQL (Flyway-managed)
+### PostgreSQL (Cloud SQL in prod)
 
-Head migration **V199** ([`src/main/resources/db/migration/V199__sync_org_tier_with_subscription_tier.sql`](../src/main/resources/db/migration/V199__sync_org_tier_with_subscription_tier.sql)). 199 versioned migrations total. 96 distinct `@Table` annotations across 121 `@Entity`-annotated classes (some embeddables, some inheriting). Flyway runs on boot (`spring.flyway.enabled=true`, `baseline-on-migrate=true`).
+Schema is managed by Flyway. Migration head is `V199`. All migrations live in
+[`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
+Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
+truth.
 
-Notable entity files: [`PipelineRun`](../src/main/java/com/navneet/executespec/state/entity/PipelineRun.java), [`AgentTask`](../src/main/java/com/navneet/executespec/state/entity/AgentTask.java), [`ValidationReport`](../src/main/java/com/navneet/executespec/report/entity/ValidationReport.java), [`Project`](../src/main/java/com/navneet/executespec/project/entity/Project.java), [`Org`](../src/main/java/com/navneet/executespec/auth/entity/Org.java), [`AppUser`](../src/main/java/com/navneet/executespec/auth/entity/AppUser.java).
+Connection pool: HikariCP, `maximum-pool-size=30`, `minimum-idle=5`,
+`leak-detection-threshold=90000`. `spring.jpa.open-in-view=false`. Hibernate
+`connection.handling_mode=DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION`.
 
-`spring.jpa.open-in-view=false` since v2.6.1 — connections released back to Hikari on tx commit (Hibernate `connection.handling_mode=DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION`). Hikari pool sized 30, with a 90s leak detection threshold tuned for the long async apply-suggestion path.
+There are ~115 JPA entities. The hottest table is
+[`pipeline_run`](../src/main/java/com/navneet/executespec/state/entity/PipelineRun.java)
+(597-line entity covering plan/review JSON, harness version, run mode, per-agent
+token counters, cost estimates, batch state, hierarchical-planner phase costs,
+ownership/RBAC, SCM fields (GitHub + Bitbucket), GCS archive markers, pause/resume
+state, soft-delete tombstone). All mutations flow through
+[`state/StateStore`](../src/main/java/com/navneet/executespec/state/StateStore.java)
+(2143 lines; the single mutation API).
 
-Flyway ignores `*:missing` to tolerate the V119 orphan from the preview-engine repo split. See the long comment in `application.yml` for the exit strategy.
+Tenant scoping: 12+ entities are tenant-aware via
+`@EntityListeners(TenantInterceptor.class)` — `pipeline_run`, `agent_task`,
+`agent_message`, `agent_inbox`, `run_repo`, `integration_run`,
+`integration_event_log`, `gate_event`, `run_recovery`, `deployment`, and others.
+Tenant id defaults to `"default"` and is propagated by AOP.
 
-### Redis (Lettuce client + ShedLock)
+### Redis (Lettuce client)
 
-Single Redis instance; default `localhost:6379` (overridable via `REDIS_HOST`). Key prefixes in the code:
+Local config defaults to `localhost:6379`. Prod uses GCE VM redis. Lettuce pool
+sized at `max-active=50, min-idle=5, test-on-borrow=true, test-while-idle=true`.
 
-| Prefix | Purpose | Origin |
-|---|---|---|
-| `v2:agent-ctx:{runId}:{taskId}` | Conversation snapshots, 24h TTL | `context/ContextStore` |
-| `v2:apply:result:{...}` | Project-chat apply-suggestion result cache | `memory/ProjectChatService` |
-| `gate:plan:{runId}` | Plan-approval gate signal | `harness/GateStore` |
-| `sse:replay:{runId}` | SSE event replay buffer | `sse/SseBroadcaster` |
-| `planner:classify:{sha}` | Classifier result cache, 1h | `agent/SmartClassifierAgent` |
-| `planner:strategy:open:{...}` / `planner:strategy:fail:{...}` | Plan-strategy circuit breaker | `agent/PlanStrategyCircuitBreaker` |
-| `provider:health:{...}` / `provider:failures:{...}` / `provider:status:{...}` | Provider health tracker (legacy router) | `router/ProviderHealthTracker` |
-| `run:provider:pin:{runId}` / `run:skip-push:{runId}` | Per-run flags, TTL-bound | `run/` |
-| `git:lock:workspace:{...}` | Per-workspace JGit lock | `integration/scm/` |
-| `project:origin-sha:{...}` / `project:post-merge:{...}` / `project:stale:{...}` / `project:ws-lock:{...}` | Project workspace coordination | `project/` + `codeintel/` |
-| `rl:tier:{userId}` | Sliding-window tier rate limit | `ratelimit/RateLimitFilter` |
-| `v3:anon-run:sess:{...}` / `v3:anon-run:rl:{...}` | Anonymous-trial session + rate limit | `anonrun/` |
-| `preview:count:{...}` | Concurrent preview cap | `deployment/preview/` |
-| `swebench:run:{...}` / `programbench:run:{...}` | Bench-mode run dispatch state | `swebench/`, `programbench/` |
-| `model:stats:{...}` | Adaptive routing success-rate tracker | `router/ModelResolver` |
-| `provider:model:tier` | Resolver cache | `router/` |
+Redis is used for:
 
-Distributed locking for scheduled jobs via ShedLock (`@SchedulerLock`) backed by `RedisLockProvider`.
+- **SSE pub/sub fanout** for cross-instance horizontal scale —
+  [`sse/SseBroadcaster`](../src/main/java/com/navneet/executespec/sse/SseBroadcaster.java).
+  Channel prefix `sse:`. Replay log at `sse:replay:{runId}` (capped 500 events, 24h
+  TTL). Self-origin echo suppression via envelope `{"from": instanceId, "data": ...}`.
+- **Gate signalling** —
+  [`harness/GateStore`](../src/main/java/com/navneet/executespec/harness/GateStore.java).
+  Plan gates at `gate:plan:{runId}` (4h TTL). DB fallback via `gate_record` on Redis
+  outage.
+- **Rate-limit counters** —
+  [`ratelimit/RateLimitFilter`](../src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java).
+  Per-identifier counters at `rl:{group}:{identifier}` (60s window). Per-tier cache
+  at `rl:tier:{userId}` (2-min TTL). Fail-open at 50% capacity on Redis outage.
+- **Distributed locking** — ShedLock 7.7.0 with the Redis Lettuce provider. Used by
+  `WorkspaceDiskCleanupJob`, `StaleScmCleanupJob`, and other `@SchedulerLock`
+  jobs.
+- **Per-run worker context snapshots** at `v2:agent-ctx:{runId}:{taskId}` (24h TTL)
+  — written every 5 iterations by `WorkerAgent`.
+- **BYOK key cache** —
+  [`agent/RunKeyContextStore`](../src/main/java/com/navneet/executespec/agent/RunKeyContextStore.java)
+  uses an in-process Caffeine cache (1024 × 6h TTL), backed by `RunKeyStore`
+  Redis (AES-256-GCM encrypted, 2h TTL, key prefix `runkey:`) for cross-instance
+  recovery.
+- **Provider circuit breaker** — `ProviderHealthTracker` at `provider:health:{NAME}`
+  (180s recovery window) and `provider:failures:{NAME}` (300s counter TTL).
+- **Plan strategy circuit breaker** — `PlanStrategyCircuitBreaker` at
+  `planner:strategy:open:{strategy}` and `planner:strategy:fail:{strategy}` (1h
+  windows, 5-failure threshold).
+- **Provider pin** — `RunProviderPinStore` at `run:provider:pin:{runId}` (2h TTL,
+  first-write-wins).
+- **Apply-suggestion lifecycle** at `v2:apply:result:{runId}` (1h TTL) —
+  `ApplyResultStore` so the UI can poll `GET /api/runs/{id}/apply/status` even
+  after the original POST stream dies.
+- **Webhook idempotency** — `integration_event_log` table (idempotency keyed by
+  `(source_type, event_id)`, pruned daily).
+- **Skip-push flag** at `run:skip-push:{runId}` (24h TTL, atomic get-and-delete).
+- **Classifier cache** at `planner:classify:{sha256(spec+repos+projectId)}` (1h TTL).
+- **Gate signalling key collision detection** — `setIfAbsent` (SET NX) semantics
+  used in several places.
 
 ---
 
-## 7. Workspace model
+## 7. LLM model resolution
 
-Configured by `agent.workspace` in `application.yml`; defaults to `./workspace` locally.
+YAML is the *single source of truth* for every model identifier, context window,
+max-output, pricing rate, display label, fallback chain, free-tier lock, agent→tier
+map, and provider-default model. Configuration is in
+[`src/main/resources/application.yml`](../src/main/resources/application.yml) under
+the `model-matrix.*` tree, bound to
+[`router/ModelMatrixProperties`](../src/main/java/com/navneet/executespec/router/ModelMatrixProperties.java).
 
-```
-workspace/
-└── <runId>/                            owned by run; transient on Cloud Run / GCE
-    ├── repos/<repoName>/               git clones for multi-repo runs
-    └── (single-repo runs: clone at workspace root)
-```
+[`router/ModelRegistry`](../src/main/java/com/navneet/executespec/router/ModelRegistry.java)
+reads the matrix and exposes:
 
-Multi-repo runs: each linked `ProjectRepo` is cloned into `repos/<name>/` and `WorkerAgent`'s `ExecutionContext` carries a per-task working directory. Cleanroom containers (`SWE-bench`, `ProgramBench`) bind-mount the workspace dir at `/workspace` so host-side tools and container-side tools see the same files (see `swebench/` and `programbench/`).
+- `canonicalize(name)` — resolves legacy aliases.
+- `providerFor(name)`, `contextLimitFor(name)`, `maxOutputForModel(name)`,
+  `pricingFor(name)`, `displayLabelFor(name)`.
+- `fallbackChainFor(name)` — returns provider/model pairs for the model's
+  chain-tier (ARCHITECT, CAPABLE, UTILITY).
+- `workhouseModelFor(provider)` / `planningModelFor(provider)` /
+  `lightweightModelFor(provider)`.
 
-Project workspaces are separate: `workspace/projects/<projectId>/` (codemaps, architecture docs, generated docs) owned by `ProjectWorkspaceService` with atomic writes + Redis-backed lock (`project:ws-lock:`). Disk is ephemeral; DB blobs are authoritative — `project_code_map`, `project_architecture_doc`, `repo_architecture_doc`, `project_generated_doc` rows hold the canonical content.
+A `@PostConstruct validate()` boots-fast-fails if a referenced model is missing.
 
-GCS workspace archive (post-run) lives at `executespec-workspaces` (controlled via `agent.deployment.workspace.gcs-*` keys, off by default in local dev).
+[`router/ModelResolver.resolve(agentName, userProvider)`](../src/main/java/com/navneet/executespec/router/ModelResolver.java)
+is the public entry. Resolution chain:
+
+1. Map agent simple-name → `AgentTier` via `model-matrix.agent-tier-map`.
+2. Pick model from `model-matrix.providers.<userProvider>.<tier>`.
+3. If the user's provider is unhealthy (circuit-breaker via
+   `ProviderHealthTracker`), failover through `model-matrix.failover-order`.
+4. If adaptive routing is enabled (`routing.adaptive-routing.enabled` + JVM strict
+   `-Dexecutespec.strict-provider=false`),
+   `ModelPerformanceTracker` can substitute a provider with ≥10pp better score over
+   the last 24h sliding window (5-sample minimum).
+
+Agent → tier mapping (excerpt):
+
+| Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                             |
+| ----------- | --------------------------- | -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
+| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ValidationReportGenerator                    |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ConversationAgent                   |
+
+Per-provider implicit-cache is enabled — Gemini Flash threshold 1024 tokens, Pro
+4096; Anthropic uses explicit `cache_control` blocks. `RunCostTracker` records
+`cache_read_input_tokens` on every call for all 3 providers. Reviewer routes Gemini
+to WORKHORSE (Flash) because Pro's 4096 threshold misses every implicit-cache hit on
+the reviewer's drifting system prompt.
+
+Two known gaps:
+
+- **Bug #1c (router strict-provider bypass)** —
+  `ModelResolver.selectAdaptiveProvider` can silently switch providers based on
+  historical success rate even when `-Dexecutespec.strict-provider=true` is set.
+  The JVM-flag check is implemented but the order of guards has a small hole; fix
+  is deferred.
+- **Planner model sourced from run model, not tier** — `OutlinePlannerAgent`
+  constructs LLM requests using `req.model()` (the run-level
+  `defaultModelFor(provider)`, which is haiku for anthropic) rather than
+  `ModelResolver.resolve("OutlinePlannerAgent", provider).getModel()`. Editing
+  `anthropic.planning` in YAML has no effect on the planner today. Tracked.
 
 ---
 
-## 8. LLM model resolution
+## 8. Workspace and multi-repo model
 
-Single source of truth: the `model-matrix` block in [`src/main/resources/application.yml`](../src/main/resources/application.yml) (line 156). Three providers, three tiers per provider, plus a canonical model registry, fallback chains, free-tier lock, agent→tier mapping, and per-provider failover order.
+Per-run workspaces live on local disk at `<agent.workspace>/<runId>/`. Default
+`agent.workspace` is `./workspace`. Workspace lifecycle is owned by
+[`harness/WorkspaceInitService`](../src/main/java/com/navneet/executespec/harness/WorkspaceInitService.java).
 
-Resolution chain:
+Single-repo run:
 
 ```
-agent name  --(application.yml agent-tier-map)-->  tier
-                                                     |
-provider    --(application.yml model-matrix.providers.<provider>.<tier>)-->  model id
-                                                     |
-model id    --(application.yml model-matrix.models.<id>)-->  context-limit, max-output-tokens,
-                                                              pricing, display label, chain tier
+workspace/<runId>/
+├── .git/                  (initialised by ensureRunWorkspace)
+├── .gitignore             (target/, node_modules/, etc.)
+├── .gitattributes         (README.md merge=union, CHANGELOG.md merge=union)
+└── <source files>
 ```
 
-Provider → tier → model wiring (today's matrix; rebalanced 2026-05-16):
+Multi-repo run (linked via `RunRequest.selectedRepoIds`):
 
-| Tier | Anthropic | OpenAI | Gemini |
-|---|---|---|---|
-| PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-pro-preview` |
-| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
+```
+workspace/<runId>/
+├── .git/                  (outer wrapper repo)
+├── repos/
+│   ├── service-api/
+│   │   ├── .git/
+│   │   └── <source>
+│   ├── service-frontend/
+│   │   ├── .git/
+│   │   └── <source>
+│   └── ...
+└── (no top-level source)
+```
 
-Agent → tier mapping (excerpt; full table in `application.yml agent-tier-map`):
+Per-repo clone SHAs are captured in
+[`run_repo_snapshot`](../src/main/java/com/navneet/executespec/state/entity/RunRepoSnapshot.java)
+(V100) and used by
+[`run/sync/RunSyncService`](../src/main/java/com/navneet/executespec/run/sync/RunSyncService.java)
+for `POST /api/runs/{id}/sync/original`.
 
-- **PLANNING:** OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent
-- **WORKHORSE:** WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent
-- **LIGHTWEIGHT:** SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator
+Multi-repo summary (a markdown header listing each `repos/<name>/` subdir) is built
+by `RunOrchestrator.buildMultiRepoSummary` and threaded into
+`ExecutionRequest.workspaceSummary` so the worker's system prompt knows the layout.
+`BuildCommandResolver.wrapForReposSubdirIfNeeded` handles per-subdir build dispatch
+(e.g. `cd repos/api && mvn verify`).
 
-`router/ModelRegistry.java` reads the matrix at startup; `router/ModelResolver.java` does adaptive-routing decisions (Redis-backed success-rate tracking — see `model:stats:` keys). `router/AgentTier.java` enumerates `PLANNING / WORKHORSE / LIGHTWEIGHT`.
+Multi-repo push is handled by `ScmPushService.pushMultiRepo`: each linked repo is
+pushed and PR'd separately, then cross-linked by patching each PR body with the
+sibling list via `GitHubRepoService.updatePullRequestBody`. The representative PR
+URL is stamped on `pipeline_run.github_pr_url`; the full per-repo list is at
+`GET /api/runs/{id}/prs` via `pull_request_record`.
 
-Defaults:
-- Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1).
-- FREE tier locked to `openai / gpt-5.4-mini`.
-- Per-provider failover order at `model-matrix.failover-order`: anthropic→openai→gemini, openai→gemini→anthropic, gemini→openai→anthropic.
+Disk is ephemeral on Cloud Run and may be wiped on GCE VM restart. DB blobs are
+authoritative. Long-term archive is handled by `GcsWorkspaceStore` (GCS bucket
+`executespec-workspaces`, archive-after 24h, retention 30d) when
+`agent.deployment.workspace.gcs-enabled=true`. Daily disk cleanup is performed by
+[`compliance/WorkspaceDiskCleanupJob`](../src/main/java/com/navneet/executespec/compliance/WorkspaceDiskCleanupJob.java):
+ORPHAN (no DB row), TERMINAL_OLD (>14d after terminal), TOMBSTONED (deleted/archived
+>30d).
 
-Provider clients:
-- **Anthropic** — via Spring AI starter (`spring-ai-starter-model-anthropic`). Cache_control blocks emitted by `LlmRouter` for explicit caching.
-- **OpenAI** — direct via [`agent/OpenAiNativeToolClient.java`](../src/main/java/com/navneet/executespec/agent/OpenAiNativeToolClient.java) (bypasses Spring AI's `extra_body` bug; ~43% auto-cache hit verified).
-- **Gemini** — direct via [`agent/GeminiNativeToolClient.java`](../src/main/java/com/navneet/executespec/agent/GeminiNativeToolClient.java) (schema sanitization for the strict Gemini tool-spec format + thought-signature round-trip; implicit-cache prefix preservation).
-
-`cost/RunCostTracker.java` reads pricing from `model-matrix.models.<id>.pricing` on every call (input, output, and cached-input rates per 1M tokens) and writes `run_cost_log` rows + atomic `addTokens` updates on `pipeline_run`.
-
-The legacy [`agent/FallbackLlmRouter.java`](../src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java) survives only for non-tool-calling agents: `AccuracyAssessmentService`, `ConversationAgent`, the `testgen/` agents. Same YAML for tier resolution; separate fallback chain.
+Workspace path safety is enforced by
+[`tool/PathSafety.safeResolve`](../src/main/java/com/navneet/executespec/tool/PathSafety.java)
+and
+[`tool/FileSandboxPolicy`](../src/main/java/com/navneet/executespec/tool/FileSandboxPolicy.java).
+The sandbox layers MEDIUM/HIGH restrictions on top of workspace-root containment;
+LOW is a no-op. MEDIUM allows known build files (package.json, pom.xml, etc.) and
+allow-listed directories (src, test, tests, public, static, etc.). HIGH narrows
+allowed dotfiles to a tiny whitelist (`.env.example`, `.gitignore`,
+`.gitattributes`, `.dockerignore`).
 
 ---
 
 ## 9. Observability
 
-Spring Boot Actuator + Micrometer tracing-bridge OTel + OpenTelemetry exporters. Dependencies in `pom.xml`:
+Micrometer + OpenTelemetry pipeline. Local dev exports to Prometheus + Tempo +
+Grafana via `observability/docker-compose.yml`. Prod GCP exports to Cloud Trace +
+Cloud Monitoring via `com.google.cloud.opentelemetry:exporter-trace` and
+`exporter-metrics` (`@Profile("gcp")` activates them; `application.yml` `gcp`
+profile section toggles `tracing.enabled=true` + `metrics.export.enabled=false`).
 
-- `spring-boot-starter-actuator` — `/actuator/prometheus`, `/actuator/health`.
-- `micrometer-tracing-bridge-otel` + `opentelemetry-exporter-otlp` + `opentelemetry-sdk-extension-autoconfigure` — trace propagation.
-- `micrometer-registry-otlp` + `micrometer-registry-prometheus` — metrics export.
-- `com.google.cloud.opentelemetry:exporter-trace` + `:exporter-metrics` — GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
-- `logstash-logback-encoder` — JSON logs with traceId / spanId.
+### Custom metrics
 
-Custom metrics in `executespec.v2.*`: `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. Dump endpoint `/api/v2/test/metrics` (test profile only).
+All under the `executespec.v2.*` namespace. Bundled in
+[`observability/Metrics`](../src/main/java/com/navneet/executespec/observability/Metrics.java):
 
-Local observability stack — [`observability/docker-compose.yml`](../observability/docker-compose.yml):
-- Prometheus :9090 (scrapes `host.docker.internal:8080/actuator/prometheus`)
-- Tempo :3200 (Tempo API), :4317 OTLP gRPC, :4318 OTLP HTTP
-- Grafana :3001 (admin/admin, anonymous viewer enabled)
+- `run.outcome{overall}`, `run.latency{overall}`.
+- `planner.latency{classification,provider,model}`, `planner.tasks{classification}`.
+- `task.status`, `task.latency`, `task.smoketest{result}`.
+- `worker.iterations{outcome,provider,model}`, `worker.outcome`,
+  `worker.toolcall{tool}`.
+- `llm.latency{provider,model,outcome}`,
+  `llm.key_source{provider,source}` (V165 BYOK attribution).
+- `classifier.verifier.engaged{result}`.
+- `reviewer.verdict`.
+- `context.save{result}`, `context.save.bytes`.
 
-GCP profile sends traces to Cloud Trace and metrics to Cloud Monitoring directly.
+Other counters:
 
-Published SLOs at [`docs/operations/slos.md`](operations/slos.md): run terminal in 15min ≥95%; verified-score correctness ≥90%; cost estimate within 30% on ≥80%; webhook ack in 60s ≥99%; hot-path 5xx <0.5%.
+- `executespec.redis.connection_failures`, `executespec.redis.failopen`.
+- `executespec.gate.db_fallback`.
+- `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed`,
+  `executespec.provider.outage.queued_runs` (gauge).
+- `executespec.routing.adaptive_switch{from,to,agent}`,
+  `executespec.routing.failover{from,to,agent}`.
+- `executespec.workspace.disk.reaped{category}`,
+  `executespec.scm.cleanup.{closed,deleted,skipped}{kind}`.
+- `executespec.data.retention.deleted_runs{trigger}`,
+  `executespec.data.retention.deleted_projects{trigger}`.
+- `executespec.sse.emitters.active` (gauge).
+- `executespec.llm.rate_limited`.
+
+### Endpoints
+
+- `/actuator/prometheus` — Prometheus scrape.
+- `/actuator/health` — Boot health probe (used by readiness checks).
+- `/api/health` —
+  [`HealthController`](../src/main/java/com/navneet/executespec/api/controller/HealthController.java)
+  custom liveness probe with 30s background-cached DB/Redis check (always 200 if
+  JVM alive); `/api/health/ready` inline DB check (503 on DB down).
+- `/api/v2/test/metrics` — internal metric dump.
+
+### SLOs
+
+5 published SLOs in [`docs/operations/slos.md`](operations/slos.md):
+
+1. Run terminal in 15 min ≥ 95%.
+2. Verified-score correctness ≥ 90%.
+3. Cost estimate within 30% on ≥ 80% of runs.
+4. Webhook handled within 60s ≥ 99%.
+5. Hot-path 5xx < 0.5%.
 
 ---
 
 ## 10. Security model
 
-Eight-layer defense-in-depth, each layer in a discrete package so failure modes are isolated.
+8-layer defense-in-depth:
 
-| Layer | Code |
-|---|---|
-| 1. Request validation (DTO + Spring Validation) | `api/dto/*` + `@Valid` on every controller method |
-| 2. Input sanitization (NFKC, zero-width strip, base64 decode-scan) | [`security/InputSanitizer.java`](../src/main/java/com/navneet/executespec/security/InputSanitizer.java) |
-| 3. LLM prompt defense (system-prompt fragments) | `prompts/fragments/security-rules-planner.md`, `security-rules-worker.md` |
-| 4. Code abuse scanning (crypto, shells, PowerShell, DNS exfil, cloud metadata, obfuscation) | [`security/CodeAbuseScanner.java`](../src/main/java/com/navneet/executespec/security/CodeAbuseScanner.java) |
-| 5. Shell sandbox (allowlist + blocked patterns) | `tool/ShellTool.java` consulting `ShellSandboxPolicy` |
-| 6. File sandbox (workspace-root jail) | `tool/FileSystemTool.java` |
-| 7. Process isolation (per-task `WorkerAgent` + Redis-snapshotted context) | `agent/WorkerAgent.java` |
-| 8. Container hardening (`--rm --network none --read-only --cap-drop ALL`) | `swebench/`, `programbench/`, `testgen/` runners |
+1. **Request validation** — Bean Validation on every `@RequestBody`. Jakarta
+   `@NotBlank`, `@Size`, `@Pattern`, `@DecimalMin/Max`. See
+   [`api/dto/RunRequest`](../src/main/java/com/navneet/executespec/api/dto/RunRequest.java)
+   — `userRequest` capped at 50,000 chars, `repoUrl` restricted to HTTPS GitHub/
+   GitLab/Bitbucket only (closes adversarial-test finding 7).
+2. **Input sanitization** — `InputSanitizer` runs NFKC normalisation + zero-width
+   character strip + base64 decode-and-scan before persisting `userRequest`. Spec
+   field of `IntegrationManager.sanitizeAndCap` strips prompt-injection patterns
+   and caps each field at 4,000 chars.
+3. **LLM prompt defense** — system prompts include sandbox rules, tool-use rules,
+   no-exfil rules. Strict JSON schemas on every tool entry in `tool/`.
+4. **Code abuse scanning** — `CodeAbuseScanner` integrated into `FileSystemTool`
+   detects crypto patterns, shell payloads, PowerShell, DNS exfil, cloud-metadata
+   probes, and obfuscation. Blocks write.
+5. **Shell sandbox** —
+   [`tool/ShellSandboxPolicy`](../src/main/java/com/navneet/executespec/tool/ShellSandboxPolicy.java)
+   (559 lines) splits chained commands and validates each segment against an
+   allowlist of first-token verbs (mvn, gradle, npm, npx, node, python, etc.).
+   BLOCKED_COMMANDS deny rm -rf /, mkfs, dd if=, fork bombs, chmod -R 777 /,
+   reboot/shutdown/halt, iptables, ufw, useradd/del/mod, passwd, ncat, etc.
+   BLOCKED_PATTERNS catch `curl | bash`, writes to `/etc /usr /var`, ssh/scp to
+   remote, python socket import, base64 | bash, docker `--privileged`,
+   stratum+tcp/known miners, /dev/tcp/, nc -e /bin/. Three guardrail levels (LOW /
+   MEDIUM / HIGH) tighten the allowlist via `security.guardrail_level` flag.
+   MEDIUM adds `\beval\b`, `\bexec\b` deny.
+6. **File sandbox** —
+   [`tool/FileSandboxPolicy`](../src/main/java/com/navneet/executespec/tool/FileSandboxPolicy.java)
+   + `PathSafety.safeResolve` enforce workspace-root containment (lexical +
+   symlink). MEDIUM allowed-dirs list and allowed-root-files list. HIGH tightens.
+7. **Process isolation** — virtual threads on `gcp` profile; `BuildProjectTool` and
+   `ShellTool` use `ProcessBuilder` with env whitelist (PATH, HOME, DOCKER_HOST
+   only). Hard timeouts at 30-300 seconds per tool.
+8. **Container hardening** — cleanroom containers (SWE-bench, ProgramBench) run
+   with `--rm --network none -v <hostDir>:/workspace`. Test execution containers
+   run with `--read-only --cap-drop ALL` + memory/CPU limits + env-var whitelist.
 
-Three configurable guardrail levels (LOW / MEDIUM / HIGH) resolve through [`security/guardrail/GuardrailLevelResolver.java`](../src/main/java/com/navneet/executespec/security/guardrail/GuardrailLevelResolver.java) — feature-flag key `security.guardrail_level`.
+Additional surfaces:
 
-Spring Security wiring at [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) defines the single `SecurityFilterChain` bean. JWT auth filter is [`JwtAuthenticationFilter.java`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java); JWT secret validation at boot via [`JwtSecretValidator.java`](../src/main/java/com/navneet/executespec/auth/security/JwtSecretValidator.java); per-run access guard at [`auth/security/RunAccessGuard.java`](../src/main/java/com/navneet/executespec/auth/security/RunAccessGuard.java) + spec-based filter at [`RunVisibilitySpec.java`](../src/main/java/com/navneet/executespec/auth/security/RunVisibilitySpec.java).
-
-`AccessGuardCoverageTest` (ArchUnit, `src/test/java/.../arch/`) pins every controller method whose URL path touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard. A small `KNOWN_LEGACY_DRIFT` allowlist tracks the remaining sites; new violators fail the build.
-
-Configurable headers (CSP, HSTS, X-Frame-Options) via `app.security.*` in `application.yml`. Frame-options default `SAMEORIGIN` so preview iframes work; `DENY` for hard lockdown.
-
-Webhook signature verification: GitHub webhook HMAC SHA-256 at `/webhooks/github`; Razorpay webhook HMAC SHA-256 at `/api/webhooks/razorpay`; Stripe webhook via the `Stripe-Signature` header at `/api/webhooks/stripe`.
-
-Spec-based filters (e.g. `BillingSpecs`, `RunVisibilitySpec`) compose JPA `Specification<T>` predicates so org / project / role gates are uniform across services.
-
----
-
-## 11. Side-system catalogue
-
-- **GitHub** — [`repo/GitHubRepoService.java`](../src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) for clone + PR open/refresh + check-runs polling. [`repo/BitbucketRepoService.java`](../src/main/java/com/navneet/executespec/repo/BitbucketRepoService.java) for the Bitbucket variant. Webhook receiver at `/webhooks/github`.
-- **Cleanroom Docker containers** — SWE-bench Lite + ProgramBench use `--rm --network none -v <hostDir>:/workspace`. `ShellTool` + `BuildProjectTool` consult `ProgramBenchContainerStore` per invocation; when a `containerId` is set for the run, dispatch via `docker exec` instead of host shell.
-- **GCP** — Cloud Run (on-demand previews + permanent deployments via [`deployment/`](../src/main/java/com/navneet/executespec/deployment/)), Cloud Build, Artifact Registry, GCS workspace archive, Secret Manager. Cloud SQL Postgres is the prod DB.
-- **Cloudflare** — fronts `*.executespec.ai` (TLS + WAF).
-- **Stripe + Razorpay** — `BillingService` + `PaymentGatewayRouter` (currency-routed: INR→Razorpay, USD/EUR/GBP→Stripe). Webhooks at `/api/webhooks/{razorpay,stripe}`.
-- **OAuth2 social login** — Google + GitHub via `spring-boot-starter-oauth2-client`. Endpoints `/api/auth/oauth2/init`, `/authorize`, `/callback/{provider}`. Auto-config excluded when client IDs blank.
-- **Gmail API + SMTP** — transactional email transport; `app.mail.transport=smtp|gmail-api`. Gmail API uses installed-app OAuth2 with `LocalServerReceiver` for first-run consent.
-- **Slack** — OAuth2 install + Block Kit notification path. Off by default; `slack:` flags in `application.yml`.
-- **PostHog** — product analytics (6-event activation funnel). No-op when `analytics.posthog.api-key` is blank.
-- **Telegram operator bridge** — push heartbeat + pull-poll inbox for out-of-band ops. Chat ID + bot configured outside the code; not a customer feature.
-
----
-
-## 12. Configuration surface
-
-[`src/main/resources/application.yml`](../src/main/resources/application.yml) — base/local defaults. Profile overlays:
-
-- `application-dev.yml` — dev VM (GCE), activated via `--spring.profiles.active=dev`
-- `application-prod.yml` — prod VM, `--spring.profiles.active=prod`
-- `application-local.yml{,.yaml}` — local-only overrides, gitignored
-
-Notable knobs:
-
-| Block | Purpose |
-|---|---|
-| `model-matrix` | LLM provider × tier × model wiring (single source of truth) |
-| `agent.concurrency` | `max-runs`, `max-task-duration-minutes`, `safety-iteration-cap`, `task-max-retries` |
-| `agent.provider-pools` | Per-provider concurrency + queue cap (HTTP 429 on overflow) |
-| `agent.cost` | `credit-multiplier-usd=5.0`, `estimation-buffer`, `budget-margin`, `max-credits-free` |
-| `agent.recovery` | Auto-restart heuristics + thresholds for `recovery/StartupRunResumer.java` |
-| `agent.shell` | Sandbox toggle, timeout, allow/block lists |
-| `agent.deployment` | Cloud Run defaults + artifact registry + workspace archive |
-| `agent.integrations` | Jira / Confluence / ServiceNow / PagerDuty / Bitbucket / Slack toggles + creds |
-| `agent.security.deps` | Dependency-install policy (lockfile required, audit required, pre-release blocked, allowed-registries) |
-| `preview` | Mode (docker / cloud-run / vm), TTL, port range, concurrency per tier |
-| `app.security` | CSP, HSTS, X-Frame-Options |
-| `app.mail` | SMTP vs Gmail-API transport |
-| `app.jwt` | Secret + expiry windows |
-| `app.tiers` | Monthly + concurrent run limits per tier |
-| `executespec.designs` | Curated style presets for the preview engine |
-| `executespec.repo.max-size-kb` | Repo-size gate at clone time (default 250 000 KB) |
-| `executespec.rate-limit.enabled`, `executespec.crypto`, `executespec.validator` | Cross-cutting toggles |
-| `billing.*` | Default gateway, Stripe + Razorpay creds, currency map, founder-pricing slots |
-| `analytics.posthog` | Activation funnel telemetry |
-| `management.*` | Actuator exposure |
-
-Feature flags resolve via [`config/featureflag/FeatureFlagService.java`](../src/main/java/com/navneet/executespec/config/featureflag/FeatureFlagService.java) over the `feature_flag` table. Active keys observed in the source (grep `isEnabled(...)`): `submissions.paused`, `v2.pause.enabled`, `scoring.v2-verified`, `project.runs.auto-push`, `lint.autofix.enabled`, `validation.v3-strict`, `assessment.llm.enabled`, `codemap.purpose-summaries`, `provider.smart-routing.enabled`, `routing.adaptive-routing.enabled`, `ci.autofix.enabled`, `harness.v2.batch_enabled`, `security.guardrail_level`, `execution.view.enabled`, `v3.anonymous-trial.real-dispatch`, `billing.lifecycle.sunsetting.enabled`.
+- **Auth** — `SecurityConfig` configures JWT (access 1h, refresh 7d) + OAuth2
+  (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for
+  event streams. JWT secret via `app.jwt.secret` (env var).
+- **Rate limiting** —
+  [`ratelimit/RateLimitFilter`](../src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java)
+  (`OncePerRequestFilter`) gates `/api/**`. Endpoint group classification (AUTH /
+  WEBHOOK / RUNS / READ / WRITE / PREVIEW / DEPLOY) × tier (FREE / PRO /
+  ENTERPRISE) × guardrail-level multiplier (LOW=×1, MEDIUM=×0.5 for write/deploy/
+  preview, HIGH=×0.25 everywhere). Identifier: userId for authenticated, rightmost
+  X-Forwarded-For IP for unauthenticated (leftmost is client-spoofable).
+- **CORS** — `app.cors.allowed-origins` per-profile. Prod allows
+  `https://executespec.ai`, `https://www.executespec.ai`,
+  `https://app.executespec.ai`, `https://build.executespec.ai`.
+- **Headers** — CSP, HSTS (max-age 31536000, include-sub-domains), X-Frame-Options
+  (SAMEORIGIN) configured via
+  [`config/SecurityProperties`](../src/main/java/com/navneet/executespec/config/).
+- **Webhook signature verification** — all inbound webhooks verify HMAC-SHA256
+  with constant-time compare via `MessageDigest.isEqual`. GitHub
+  (`/webhooks/github`), Razorpay (`/api/webhooks/razorpay`), Stripe
+  (`/api/webhooks/stripe`), Jira, Confluence, ServiceNow, PagerDuty, Bitbucket,
+  Slack.
+- **Access guards** — `RunAccessGuard`, `ProjectAccessGuard`, `OrgAccessGuard`,
+  `GovernanceGuard` enforce tenant isolation. `AccessGuardCoverageTest`
+  (ArchUnit) pins every controller method whose URL touches `/runs/{` /
+  `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant
+  access guard. 10 legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators
+  fail the build.
 
 ---
 
-## 13. Async + thread model
+## 11. Background jobs
 
-- Run pipelines: `RunOrchestrator` owns an `ExecutorService` (virtual threads since Java 21). Each run is one future.
-- Plan-gate signal: `harness/GateStore` uses Redis pub/sub-ish gate signalling so cross-instance approval flows still work.
-- Per-task worker: synchronous from the executor's point of view; the executor is the run-pipeline thread.
-- Apply-suggestion in project chat: dedicated `applyExecutor` (4 threads in `memory/ProjectChatService`) so the 25-iter worker loop doesn't pin a Tomcat handler.
-- Async work crossing thread boundaries must wrap the runnable in `ContextSnapshotFactory.captureAll().wrap(runnable)` so traceId + MDC + RequestAttributes propagate.
-- Scheduled jobs: ShedLock + `@SchedulerLock` ensure single-instance execution across the cluster (Redis-backed `LockProvider`).
-- Tomcat async request timeout: 15 min (`spring.mvc.async.request-timeout=900000`) — sized to the worst-case worker loop.
+`@Scheduled` jobs in the codebase, plus `@SchedulerLock` notes for distributed
+locking via ShedLock 7.7.0 (Redis provider). Distributed lock means the job runs
+on exactly one JVM in the cluster per fire.
+
+| Job                                    | Schedule                | Lock | Source                                                                                                              | Purpose                                                                                       |
+| -------------------------------------- | ----------------------- | ---- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `WorkspaceDiskCleanupJob.cleanup`      | `0 30 3 * * *`          | yes  | [`compliance/WorkspaceDiskCleanupJob`](../src/main/java/com/navneet/executespec/compliance/WorkspaceDiskCleanupJob.java) | Daily 03:30. Sweeps orphan/old/tombstoned workspace dirs, max 5k per pass.                    |
+| `StaleScmCleanupJob.cleanup`           | `0 45 3 * * *`          | yes  | [`compliance/StaleScmCleanupJob`](../src/main/java/com/navneet/executespec/compliance/StaleScmCleanupJob.java)      | Daily 03:45. Closes stale PRs (>14d) and deletes stale `executespec/*` branches (>30d).       |
+| `DataRetentionService.runRetentionSweep` | `0 0 3 * * *`        | no   | [`compliance/DataRetentionService`](../src/main/java/com/navneet/executespec/compliance/DataRetentionService.java)  | Daily 03:00. Soft-deletes expired runs per tier_config, hard-deletes after 7d grace, purges archived runs >90d. |
+| `IntegrationEventLogCleanupJob.pruneOldEvents` | `0 0 3 * * *`  | no   | [`integration/IntegrationEventLogCleanupJob`](../src/main/java/com/navneet/executespec/integration/IntegrationEventLogCleanupJob.java) | Daily 03:00. Prunes webhook idempotency entries >7d old.                                      |
+| `SlackNotificationLogCleanupJob.cleanup` | `0 0 4 * * *`         | no   | [`integration/slack/SlackNotificationLogCleanupJob`](../src/main/java/com/navneet/executespec/integration/slack/SlackNotificationLogCleanupJob.java) | Daily 04:00. Prunes `slack_notification_log` rows >90d old.                                  |
+| Cloud Run preview cleanup              | `agent.deployment.cleanup-cron` (`0 3 * * * *`) | no | `agent.deployment.*`     | Hourly cleanup of expired Cloud Run preview revisions.                                        |
+| `ProviderStatusService.pollStatusPages` | every 60s             | no   | [`router/ProviderStatusService`](../src/main/java/com/navneet/executespec/router/ProviderStatusService.java)        | Polls Anthropic / OpenAI / Google status JSON endpoints, writes `provider:status:{NAME}` to Redis (TTL 90s). |
+| `StartupRunResumer.onApplicationReady` | `ApplicationReadyEvent` | no | [`recovery/StartupRunResumer`](../src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java)            | Boot-time recovery of mid-flight `v2` runs. Phase 2 replay via `RunOrchestrator.resumeAfterCrash`. |
+| `RunTitleBackfillService.backfillTitles` | `ApplicationReadyEvent` | no | [`state/RunTitleBackfillService`](../src/main/java/com/navneet/executespec/state/RunTitleBackfillService.java)      | One-shot backfill of `run_title`/`run_summary` from `plan_json` for legacy pre-V36 runs.      |
+
+Plus per-feature heartbeats and pollers:
+
+- `PerkyMessenger` (`integration/PerkyMessenger`) — every 15s during long phases,
+  emits SSE `LOG` events to keep proxies' idle timeouts warm. Daemon thread pool
+  size 2.
+- Operator Telegram bridge — heartbeat every 600s, `getUpdates` poll every 120s.
+  Chat 6475810501. Out-of-band channel only; not customer-facing.
 
 ---
 
-## 14. Build + deploy pipeline
+## 12. Build and deploy
 
-CI workflows in [`.github/workflows/`](../.github/workflows):
+Pointer only. Full instructions in [`docs/DEPLOYMENT.md`](DEPLOYMENT.md).
 
-- `lint.yml` — runs on PR against `dev` and `main`. Jobs: spotless:check (Java), prettier --check + eslint (frontend), `npm audit --audit-level=high` (warn-only).
-- `deploy.yml` — runs on push to `dev` and `workflow_dispatch`. Workload Identity Federation; uploads JAR to `executespec-{env}-deploy` GCS bucket; reboots the GCE VM. Frontend lint + build runs before the JAR build so any frontend regression fails fast.
-
-Local pipeline:
+Local build:
 
 ```bash
-# 1. mvn verify   - spotless:check + jacoco + surefire unit tests (e2e/integration/chaos excluded)
-# 2. npm run lint - eslint with --max-warnings 9999 (errors only block)
-# 3. npm run build - tsc + vite into src/main/resources/static
-# 4. mvn spring-boot:run - serve from :8080
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
+npm --prefix frontend run build
 ```
 
-Spotless config in `pom.xml`: google-java-format 1.22, `<style>GOOGLE</style>`, `removeUnusedImports`, import order `java,javax,jakarta,com,org,`, `formatAnnotations`. Bound to the `verify` phase so CI is the spotless gate.
+Spotless 3.4.0 (`com.diffplug.spotless:spotless-maven-plugin`) is bound to the
+`verify` phase via the `spotless-check` execution — formatting must pass before
+the build succeeds. Google Java Format 1.22.0 with style `GOOGLE`,
+`reflowLongStrings=true`, `removeUnusedImports`, import order `java, javax,
+jakarta, com, org`.
 
-Architecture-rule tests (ArchUnit 1.4): `arch/AccessGuardCoverageTest`, `arch/ApiContractTest` (asserts every URL in `frontend/src/lib/api.ts` resolves to a registered backend mapping), plus a few targeted layering checks.
+Tests excluded by default: `e2e`, `integration`, `chaos` groups. Run integration
+with `-Pintegration`.
 
----
+Application coordinates: `com.navneet:executespec:1.0.0-M1`, packaging `jar`,
+Spring Boot Parent `3.5.14`, Java 21. Single artifact built by
+`spring-boot-maven-plugin`. Frontend is bundled into `static/`.
 
-## 15. Known weak spots (engineering-honest)
+Local Grafana stack: `cd observability && docker compose up -d` →
+[http://localhost:3001](http://localhost:3001) (admin/admin), Prometheus :9090,
+Tempo :3200.
 
-These exist in code today; treat them as signals when navigating, not as recommendations.
+Deploy targets:
 
-- **Library / Migrations / Deployments are pre-GA.** The Signal shell flags them with a BETA badge in `frontend/src/signal/components/Shell.tsx`. Library is a static-content browser; Migrations runs the recipe catalog but lacks polish; Deployments routes to Cloud Run but lacks the org-key flow.
-- **Patch-mode tests run unattended only when `ci.autofix.enabled` is flipped on.** Phase 3's webhook stays OFF by default until SWE-bench Lite resolved-% justifies the unattended-bot path.
-- **`v3/` and `v4/` page folders are retired.** Files remain on disk for legacy redirect catching. New work goes in `signal/`.
-- **`MAX` tier is dropped.** The current ladder is FREE / PRO (HIDDEN, grandfathered) / TEAM ($39/seat BYOK, min 2 seats) / ENTERPRISE. V165 renamed MAX → TEAM @ $39/seat.
-- **Adaptive routing can silently override `-Dexecutespec.strict-provider=true`** — `ModelResolver.selectAdaptiveProvider` switches providers based on historical success rate without consulting the strict flag. Tracked.
-- **Outline planner uses run-level model, not its tier model.** `OutlinePlannerAgent` constructs the LLM request from `req.model()` which is the run-level default rather than `ModelResolver.resolve("OutlinePlannerAgent", provider)`. Swapping `anthropic.planning` in YAML has no effect on the planner today.
-- **Flyway tolerates `*:missing`** — wide net to cover the V119 orphan from the preview-engine split. PR review on migrations is the compensating control; see the comment block in `application.yml`.
+- **prod** — GCE VM in `us-east4`. Profile `prod`. `BILLING_DEFAULT_GATEWAY=stripe`,
+  Cloudflare in front of `*.executespec.ai`.
+- **dev** — same GCE VM but separate service. Profile `dev`. Domain
+  `dev.executespec.ai`. Razorpay as default billing.
+- **previews** — Cloud Run, 5-min TTL, separate `preview-engine` deployment.
+- **local** — `application-local.yml` profile, postgres/postgres credentials,
+  `localhost:6379` redis.
 
----
-
-## 16. Glossary
-
-| Term | Meaning |
-|---|---|
-| **BUILD mode** | Default V2 pipeline: classify → outline → executor → reviewer |
-| **PATCH mode** | Single-agent loop on a failing-test spec; SWE-bench + 4 autofix surfaces |
-| **Plan gate** | `pipeline_run.status=AWAITING_APPROVAL`. Human approval charges credits and signals the gate |
-| **Verified score** | Multiplicative; `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)` |
-| **Tier** (run) | LIGHTWEIGHT / WORKHORSE / PLANNING — agent-level model class |
-| **Tier** (account) | FREE / PRO (HIDDEN) / TEAM / ENTERPRISE — billing class |
-| **Run mode** | `pipeline_run.run_mode` column, V182 — `BUILD` or `PATCH` |
-| **Cleanroom container** | `--rm --network none --read-only` Docker container for bench-mode runs |
-| **Codemap** | LLM-built summary of repo structure; per-run + per-project variants |
-| **Findings autofix** | Phases 1–4 — PR Review / TechDebt / CI failure / Code Review severity |
-| **Signal** | The single production frontend chrome (since 2026-05-15). `v3/`, `v4/` retired |
+See [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for full env-var matrix and the GCP
+deployment recipe.

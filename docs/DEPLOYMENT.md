@@ -1,422 +1,989 @@
-# ExecuteSpec Deployment
+# Deployment
 
-Production + development environments are GCP-hosted in region `us-east4`. A single GCE VM serves each environment for the long-running Spring Boot JAR; Cloud Run is used for on-demand preview containers. CI/CD is GitHub Actions; auth to GCP is Workload Identity Federation (no JSON keys).
+How the ExecuteSpec Spring Boot application is built, shipped, and run. Covers CI/CD,
+target environments, environment variables, Spring profiles, Flyway, cleanroom
+containers, preview deploys, and manual escape hatches.
 
-This document is code-truth: every claim cross-links the source file. If you change the deploy pipeline, update this file in the same commit.
+> Engineering-honest notes: prod paths exist in the deploy workflow but are gated
+> behind a dev-only trigger; some Terraform modules (`infra/modules/secrets`) are
+> declared but not wired into the root composition; committed secrets exist in
+> `application-local.yml` and need rotation. These are called out inline where they
+> matter.
 
-## Topology
+---
 
-| Concern              | Where                                                                                                     |
-| -------------------- | --------------------------------------------------------------------------------------------------------- |
-| Backend JVM (prod)   | GCE VM `executespec-prod-vm` in `us-east4-a` — see `infra/environments/prod.tfvars`                       |
-| Backend JVM (dev)    | GCE VM `executespec-dev-vm` in `us-east4-b` — see `infra/environments/dev.tfvars`                         |
-| Domain (prod)        | `https://app.executespec.ai` (Cloudflare proxied) — set in `.github/workflows/deploy.yml`                 |
-| Domain (dev)         | `https://dev.executespec.ai` (Cloudflare proxied) — set in `.github/workflows/deploy.yml`                 |
-| Database             | Cloud SQL PostgreSQL — `infra/main.tf` module `database`                                                  |
-| Cache                | Memorystore Redis — `infra/main.tf` module `cache`                                                        |
-| Object store         | GCS — `infra/main.tf` module `storage`                                                                    |
-| Preview containers   | Cloud Run (per-run, TTL configured in `application.yml preview.preview-ttl-minutes`)                      |
-| Preview reverse-prox | Caddy on the GCE VM with Cloudflare Origin Certificate — `infra/scripts/startup.sh` phase 11              |
-| Secrets at runtime   | GCP Secret Manager (primary) + GCS `config/api-keys` fallback — `infra/scripts/startup.sh` phase 6c       |
-| Frontend bundle      | Compiled into the JAR at `src/main/resources/static/` (Vite `outDir`) — `frontend/vite.config.ts`         |
-| Observability        | Local: Prometheus + Tempo + Grafana (`observability/docker-compose.yml`). Prod: GCP Cloud Trace + Monitoring (Spring profile `gcp` in `application.yml`) |
+## 1. Target environment
 
-The prod surface is gated: `.github/workflows/deploy.yml` lines 7-22 only trigger on `push: branches: [dev]` and a `workflow_dispatch` whose `target_env` is hard-coded to a single option (`dev`). Production credentials are not yet provisioned; the workflow header comments explain the gate.
+Single-region GCP deployment in `us-east4`.
 
-## CI/CD pipeline (`.github/workflows/deploy.yml`)
+```
+                 Cloudflare DNS + TLS termination
+                       (*.executespec.ai)
+                              |
+                              v
+              +-------------------------------+
+              |  GCE VM (executespec-{env}-vm)|
+              |  Ubuntu 22.04, e2-standard-4  |
+              |                               |
+              |  systemd: executespec.service |
+              |   `- java -jar /opt/app/app.jar
+              |                               |
+              |  Caddy :443 reverse proxy     |
+              |   `- Cloudflare Origin Cert   |
+              |   `- localhost:8080           |
+              |                               |
+              |  Docker daemon (previews)     |
+              |  Python/Node/Maven toolchains |
+              +-------------------------------+
+                              |
+       +----------------------+----------------------+
+       v                      v                      v
+  Cloud SQL              Memorystore             GCS buckets
+  Postgres 15            Redis 7.0           executespec-*-deploy
+  (private IP)           (private SA)        executespec-workspaces
+                                              executespec-tfstate
 
-Single workflow `Build & Deploy`, single job `build-and-deploy`. Runs on `ubuntu-latest`. Permissions: `contents: read`, `id-token: write` (the second is required for Workload Identity Federation).
+       v on-demand for previews and customer deploys
+  Cloud Run (preview-engine handoff, customer Cloud Run Direct deploys)
+  Artifact Registry: us-east4-docker.pkg.dev/executespecv1/executespec-{env}-docker
+```
 
-### Trigger
+The same Spring Boot JAR serves both `dev.executespec.ai` and `app.executespec.ai`.
+Environments differ only by Spring profile (`dev` vs `prod`), the GCS deploy bucket
+(`executespec-dev-deploy` vs `executespec-prod-deploy`), the GCE instance name,
+and the OAuth redirect URIs.
 
-| Event                | Effect                                                                              |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| `push` to `dev`      | Deploys to dev. `DEPLOY_ENV=dev`, `TARGET_SHA=github.sha`                           |
-| `workflow_dispatch`  | Manual run, only `target_env=dev` option exposed; optional `target_sha` for rollback |
+### Infrastructure provisioning (Terraform)
 
-### Job steps (in order)
+The `infra/` Terraform stack provisions one full environment from
+`infra/main.tf`. Composition order (root module dependencies):
 
-1. **Checkout** (`actions/checkout@v6`) at `TARGET_SHA` with `fetch-depth: 0` so commit messages are available for the Slack notification step.
-2. **Set up Java 21** (`actions/setup-java@v5`, Temurin distribution, Maven cache).
-3. **Set up Node.js** (`actions/setup-node@v6`, LTS, npm cache keyed on `frontend/package-lock.json`).
-4. **Install frontend dependencies** — `cd frontend && npm ci`.
-5. **Frontend format check** — `cd frontend && npm run format:check` (prettier).
-6. **Frontend lint** — `cd frontend && npm run lint` (eslint, `--max-warnings 9999`).
-7. **Build frontend** — `cd frontend && npm run build`. Output goes to `src/main/resources/static/` (see `frontend/vite.config.ts` `build.outDir`).
-8. **Build JAR + run unit tests** — `mvn verify -q`. Surefire excludes groups `e2e,integration,chaos` (see `pom.xml` plugin config). The `verify` phase runs the spotless `check` execution wired in `pom.xml` so any drift from `google-java-format` fails CI here.
-9. **Authenticate to GCP** (`google-github-actions/auth@v3`) — uses `secrets.GCP_WORKLOAD_IDENTITY_PROVIDER` + `secrets.GCP_SERVICE_ACCOUNT`. No JSON key.
-10. **Set up gcloud CLI** (`google-github-actions/setup-gcloud@v3`).
-11. **Debug — print resolved config** — echoes `GCP_PROJECT`, `GCE_ZONE`, `GCP_REGION`, `DEPLOY_ENV`; lists compute instances filtered by `name~executespec`.
-12. **Set deploy bucket** — derives `DEPLOY_BUCKET=gs://executespec-${DEPLOY_ENV}-deploy` and exports to `$GITHUB_ENV`.
-13. **Upload JAR to GCS** — picks `target/*.jar`, uploads to `gs://${DEPLOY_BUCKET}/releases/app-${TARGET_SHA}.jar`. Writes the SHA to `gs://${DEPLOY_BUCKET}/CURRENT_SHA`. Releases are keyed by commit SHA and never overwritten, so rollback = update `CURRENT_SHA` to a prior value.
-14. **Set instance name** — `executespec-prod-vm` if `DEPLOY_ENV=prod` else `executespec-dev-vm`.
-15. **Ensure validator toolchains on GCE** — SSHes over IAP and idempotently installs Node LTS + Python 3 + `mypy ruff pytest`. Needed because the code validator (`validator/CodeValidatorImpl.java`) shells out to `npx`/`tsc`/`eslint`/`mypy`/`ruff`/`pytest` on the VM.
-16. **Set public URL** — `https://app.executespec.ai` for prod, `https://dev.executespec.ai` for dev. Exported as `APP_PUBLIC_URL`.
-17. **Sync design system files** (`continue-on-error: true`) — `gsutil rsync` of `gs://${DEPLOY_BUCKET}/designs/design-md` into `/opt/executespec/designs/design-md` on the VM.
-18. **Write env patch script** — generates `/tmp/env-patch.sh`. Upserts settings into `/opt/app/executespec.env`: `CORS_ALLOWED_ORIGINS`, `DASHBOARD_URL`, `APP_BASE_URL`, `MAIL_TRANSPORT=smtp`, `MAIL_FROM`, the preview-engine handoff vars (`PREVIEW_ENGINE_URL`, `PREVIEW_ENGINE_REGISTRY_URL`, `PREVIEW_ENGINE_ROUTE_VIA`, `PREVIEW_MODE`). Then pulls `gs://${DEPLOY_BUCKET}/config/api-keys` and `gs://${DEPLOY_BUCKET}/config/smtp-credentials` (if present) and upserts each `KEY=VALUE` line.
-19. **Deploy JAR to GCE** — SCPs the patch script to the VM, SSHes in, downloads the new JAR via `sudo gsutil cp` into `/opt/app/releases/`, runs the env patch, symlinks `/opt/app/app.jar` to the new JAR, writes the SHA into `/opt/app/RUNNING_SHA`, then `sudo systemctl restart executespec`.
-20. **Wait for app startup** — local `sleep 30`.
-21. **Health check** — SSHes in and curls `http://localhost:8080/actuator/health` up to 8 times with 10s spacing. The wrapper deletes `/tmp/health.json` before every probe to avoid the buffer-reuse false-positive that caused the V113 silent boot crash (header comments on the step document the bug). Success = HTTP 200 AND body matches `"status":"(UP|DEGRADED)"`.
-22. **Dump app logs on failure** — `if: failure()` — pulls `systemctl status executespec`, last 150 lines of `journalctl -u executespec`, and the env file with values redacted.
-23. **Prune old Docker images** (`if: success()`, `continue-on-error: true`) — `docker image prune -a --force --filter 'until=168h'` + `docker builder prune --force --filter 'until=168h'`. Runs on the VM.
-24. **Prune old JAR releases** — `gsutil ls` everything under `releases/`, keep the current SHA + the most recent 10. The current JAR is explicitly excluded from the prune list to guarantee it survives.
-25. **Deployment summary** — echoes target SHA, instance, bucket path, environment.
-26. **Notify Slack (success)** / **Notify Slack (failure)** — webhook payload built with `jq`, posted to `secrets.SLACK_WEBHOOK_URL`. Skipped if the secret is unset.
+1. **Network** (`infra/modules/network/main.tf`) — VPC `executespec-{env}-vpc`,
+   subnet `10.0.0.0/24`, Cloud Router + NAT for outbound egress, private services
+   range, five firewall rules (LB health, LB->backend on `:8080`, IAP SSH from
+   `35.235.240.0/20`, internal `10.0.0.0/24` ICMP/TCP/UDP, preview ports
+   `10000-10100`).
+2. **Database** (`infra/modules/database/main.tf`) — Cloud SQL `executespec-{env}-pg`
+   on `POSTGRES_15`, private IP only, `PD_SSD`, automated backups 03:00 UTC with
+   point-in-time recovery when HA, max-connections 100. Generates a 32-char random
+   password and stores it in Secret Manager (`executespec-{env}-db-password`).
+3. **Cache** (`infra/modules/cache/main.tf`) — Memorystore Redis 7.0,
+   `allkeys-lru` eviction, weekly maintenance Sunday 04:00 UTC, default 1 GB,
+   `BASIC` tier.
+4. **Storage** (`infra/modules/storage/main.tf`) — three GCS buckets and one
+   Artifact Registry repo:
+   - `executespec-{env}-deploy` — versioned, keeps last 20 object versions
+   - `executespec-{env}-workspaces` — 30-day lifecycle delete
+   - Docker repo `executespec-{env}-docker` — keeps 10 most recent versions
+5. **Compute** (`infra/modules/compute/main.tf`) — standalone GCE VM on Ubuntu
+   22.04 LTS, network tag `executespec-server`, no external IP (outbound via NAT),
+   `e2-standard-4` default machine type, 50 GB `pd-balanced` boot disk.
+   Wrapped in an unmanaged instance group for LB backend wiring.
+6. **Compute Service Account** (`infra/modules/compute/sa/main.tf`) — 9 IAM
+   roles: `cloudsql.client`, `secretmanager.secretAccessor`,
+   `logging.logWriter`, `monitoring.metricWriter`, `cloudtrace.agent`,
+   `artifactregistry.writer`, `compute.instanceAdmin.v1`,
+   `iap.tunnelResourceAccessor`, `iam.serviceAccountUser`. Plus
+   `storage.objectAdmin` on the deploy and workspace buckets.
+7. **Load Balancer** (`infra/modules/loadbalancer/main.tf`, optional via
+   `var.enable_lb`) — global HTTPS LB with managed SSL cert, backend service with
+   `session_affinity=CLIENT_IP` (for SSE), HTTP health check on
+   `/api/health/ready` (15s interval, 10s timeout), HTTP->HTTPS redirect with
+   `MOVED_PERMANENTLY_DEFAULT`.
 
-### Secrets referenced
+State lives in GCS at `gs://executespec-tfstate/infra/{dev,prod}/`
+(`infra/backend.tf`). Terraform >= 1.5, providers
+`hashicorp/google ~> 5.0` and `hashicorp/google-beta ~> 5.0`
+(`infra/versions.tf`).
 
-Every `${{ secrets.X }}` reference in `.github/workflows/deploy.yml`:
+Engineering-honest: `infra/modules/secrets/main.tf` declares 14 Secret Manager
+slots (`anthropic-api-key`, `openai-api-key`, `google-api-key`, `github-pat`,
+`jwt-secret`, the four Razorpay secrets, two SMTP creds, two Slack secrets,
+two Atlassian tokens) but the module is **not wired into the root composition**.
+Operators bootstrap these manually using `infra/scripts/seed-secrets.sh` (see
+section 11).
 
-| Secret                            | Used at line(s) | Purpose                                                        |
-| --------------------------------- | --------------- | -------------------------------------------------------------- |
-| `GCP_PROJECT`                     | 39              | Target GCP project for `gcloud` + `gsutil`                    |
-| `GCP_REGION`                      | 40              | Region (`us-east4`) for `gcloud` defaults                      |
-| `GCE_ZONE`                        | 41              | Zone for the target GCE VM                                     |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER`  | 106             | WIF provider for keyless auth                                  |
-| `GCP_SERVICE_ACCOUNT`             | 107             | Service account impersonated via WIF                           |
-| `SLACK_WEBHOOK_URL`               | 430, 458        | Incoming-webhook URL for the deploy-channel notifications      |
+### GCE VM startup
 
-Application secrets (LLM keys, GitHub PAT, Razorpay, Stripe, SMTP, OAuth) are NOT injected by the workflow; they are loaded at runtime by the JVM from GCP Secret Manager (primary) or from `gs://${DEPLOY_BUCKET}/config/api-keys` (fallback). See `infra/scripts/startup.sh` phase 6c and `infra/scripts/seed-secrets.sh`.
+`infra/scripts/startup.sh` (503 lines, idempotent) runs on first boot and every
+subsequent reboot via instance metadata. It installs:
 
-### Workload Identity Federation
+- Java 21 (`openjdk-21-jdk-headless`), Maven
+- Docker CE + compose-plugin (enabled at boot)
+- Node.js LTS via NodeSource
+- Python 3 + pip + mypy + ruff + pytest (validator fallbacks)
+- gcloud SDK and `gcloud auth configure-docker` for Artifact Registry
+- Caddy (writes `/etc/caddy/config.json`, admin API on `localhost:2019`,
+  listens `:443`, Cloudflare Origin Cert at `/etc/caddy/origin.pem`)
 
-The workflow uses `permissions.id-token: write` to mint an OIDC token, then `google-github-actions/auth@v3` exchanges it for a short-lived GCP access token via the configured WIF provider. The job assumes the service account via impersonation; no service-account key file is stored in GitHub.
+Reads 11 `es-*` metadata keys (environment, db-host/name/user/password,
+redis-host/port, deploy-bucket, workspace-bucket, ar-region, ar-repo, ar-host)
+plus pulls `gs://<deploy-bucket>/config/api-keys` and
+`gs://<deploy-bucket>/config/smtp-credentials` as a fallback to Secret Manager.
 
-### Lint workflow (`.github/workflows/lint.yml`)
+Writes `/opt/app/executespec.env` with: POSTGRES_\*, REDIS_\*,
+GCS_WORKSPACE_BUCKET, DEPLOY_BUCKET, MAIL_\*, API keys, GCP_PROJECT,
+AR_REPOSITORY, CONTACT_JIRA_\*, `SPRING_PROFILES_ACTIVE=<env>,gcp`,
+CORS_ALLOWED_ORIGINS, DASHBOARD_URL, APP_BASE_URL,
+`JAVA_OPTS=-Xms4g -Xmx12g -XX:+UseG1GC`, `PREVIEW_MODE=vm`,
+`PREVIEW_GATEWAY_IP=34.186.68.141`, `PREVIEW_GW_INTERNAL_IP=10.150.0.2`,
+`PREVIEW_SSH_KEY_PATH=/opt/app/preview-ssh-key`,
+`PREVIEW_SSH_USER=admin_executespec_ai`.
 
-Separate workflow that runs on `pull_request: branches: [dev, main]` and `workflow_dispatch`. Three jobs:
+The systemd unit `/etc/systemd/system/executespec.service` is `Type=simple`,
+`ExecStart=java $JAVA_OPTS -jar /opt/app/app.jar`, `Restart=always`,
+`RestartSec=30`, `LimitNOFILE=65535`.
 
-| Job              | Steps                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| `java-lint`      | `mvn -B spotless:check` (fails on any drift from Google Java Format)                |
-| `frontend-lint`  | `npm ci` → `npm run format:check` (prettier) → `npm run lint` (eslint)              |
-| `frontend-audit` | `npm audit --audit-level=high` — warn-only (`continue-on-error: true`)              |
+Engineering-honest: `PREVIEW_GATEWAY_IP=34.186.68.141` and
+`PREVIEW_GW_INTERNAL_IP=10.150.0.2` are hardcoded in the startup script
+(`infra/scripts/startup.sh` phase 6d) and are NOT exposed via Terraform
+variables. The preview-gateway VM is provisioned out-of-band.
 
-`frontend-audit` is intentionally warn-only at present; the comment in the workflow file (lines 84-106) explains why and how to flip it to enforcing.
+---
 
-## Build artifacts
+## 2. CI/CD pipeline
 
-### Backend JAR
+Two workflows under `.github/workflows/`:
 
-- `mvn verify -q` produces a fat Spring Boot JAR at `target/executespec-*.jar` (artifact ID `executespec`, version `1.0.0-M1` from `pom.xml`).
-- The Spring Boot Maven plugin builds the executable JAR. Lombok is excluded from the packaged artifact.
-- JaCoCo is wired (`pom.xml` plugin `jacoco-maven-plugin`); `prepare-agent` runs at `test` phase, `report` at `test`. Excludes: DTO classes + the application entrypoint. Reports land in `target/site/jacoco/`.
-- Surefire excludes JUnit groups `e2e,integration,chaos`; only unit tests run during default `mvn verify`. CI runs the same default.
+| File         | Purpose                                | Trigger                                            |
+| ------------ | -------------------------------------- | -------------------------------------------------- |
+| `deploy.yml` | Build, push JAR to GCS, deploy on VM   | `push` to `dev`, manual `workflow_dispatch` (dev) |
+| `lint.yml`   | Java spotless + Prettier + ESLint gate | `pull_request` to `dev` or `main`                  |
 
-### Frontend bundle
+### `.github/workflows/deploy.yml` -- Build & Deploy
 
-- `npm --prefix frontend run build` runs `tsc && vite build` (`frontend/package.json`).
-- Vite `build.outDir` is `../src/main/resources/static` (`frontend/vite.config.ts`), so the bundle is dropped directly into the Spring Boot static path and gets packaged into the JAR.
-- `emptyOutDir: true` is set; the static dir is wiped each build.
+Workflow name `Build & Deploy` (v2.5.12 -- dev-only). 479 lines; single job
+`build-and-deploy` runs on `ubuntu-latest`.
 
-### Combined deliverable
+Triggers:
 
-A single JAR contains the compiled backend + the prebuilt frontend bundle. The deploy step uploads exactly one artifact to GCS. The GCE VM serves both the API (`/api/**`) and the static frontend (everything else) from the same JVM process.
+- `push` on branches: `[dev]`
+- `workflow_dispatch` with inputs:
+  - `target_env`: choice, required, default `dev`, options `[dev]` (prod
+    option **not currently exposed** -- the dev-only restriction was added
+    after `2152308b` deleted the file to silence prod-env failures, and it
+    was restored as v2.5.12 with the dev-only gate)
+  - `target_sha`: optional, blank = latest
 
-## GCE VM bootstrap (`infra/scripts/startup.sh`)
+Top-level env: `JAVA_VERSION=21`, `DEPLOY_BUCKET_PREFIX=executespec`.
 
-The startup script is attached to the GCE instance and runs on first boot AND every reboot. It is idempotent. Eleven phases:
+Job env:
 
-| Phase | Action                                                                                                       |
-| ----- | ------------------------------------------------------------------------------------------------------------ |
-| 1     | Install OpenJDK 21 + Maven                                                                                    |
-| 2     | Install Docker CE + `docker-compose-plugin`; enable + start `docker.service`                                |
-| 3     | Install Node.js LTS via NodeSource                                                                            |
-| 4     | Install Python 3, pip, and `mypy ruff pytest` globally (used by the code validator on the host)              |
-| 5     | Ensure `git`, `gsutil`, `gcloud` are present                                                                  |
-| 5b    | `gcloud auth configure-docker` for the Artifact Registry host so the VM can push preview images              |
-| 6     | Read GCE metadata attributes → write `/opt/app/executespec.env` (mode 600). DB / Redis / bucket / region come from metadata; SMTP creds + LLM API keys come from `gs://${DEPLOY_BUCKET}/config/*` files (fallback path) |
-| 6c    | LLM API keys fallback: pulls `gs://${DEPLOY_BUCKET}/config/api-keys` and exports `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_PAT`. The primary path is GCP Secret Manager via `SecretManagerConfigLoader` at JVM startup |
-| 6d    | Derive `APP_PUBLIC_URL` from `ES_ENV` metadata; set `CORS_ALLOWED_ORIGINS` (`https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173`); set `SPRING_PROFILES_ACTIVE=${ES_ENV},gcp`; set `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`; set `JAVA_OPTS="-Xms4g -Xmx12g -XX:+UseG1GC"` |
-| 7     | Write `/etc/systemd/system/executespec.service` (Type=simple, EnvironmentFile, Restart=always, RestartSec=30, StartLimitBurst=5, LimitNOFILE=65535)                                              |
-| 8     | Read `gs://${DEPLOY_BUCKET}/CURRENT_SHA`, download the matching JAR, symlink `/opt/app/app.jar` to it. Falls back to "most recent JAR by lex sort" if the CURRENT_SHA JAR has been pruned |
-| 8b    | `gsutil rsync` design system files into `/opt/executespec/designs/design-md`                                |
-| 9     | `systemctl restart executespec` (only if a JAR exists)                                                       |
-| 10    | Install `/etc/cron.daily/docker-cleanup` (24h-idle Docker prune)                                             |
-| 11    | Install Caddy reverse proxy with a pre-shipped `/etc/caddy/config.json` (terminates TLS using a Cloudflare Origin Certificate at `/etc/caddy/origin.pem` + `/etc/caddy/origin-key.pem`). Routes `dev.executespec.ai` → `localhost:8080`. Preview routes are added dynamically via the Caddy admin API at `localhost:2019` |
+- `DEPLOY_ENV` -- `prod` if branch/input is `main`, else `dev`
+- `TARGET_SHA` -- `inputs.target_sha || github.sha`
+- `GCP_PROJECT`, `GCP_REGION`, `GCE_ZONE` from secrets
+- `environment:` -- `production` if `main`, else `development`
 
-The systemd unit runs `java $JAVA_OPTS -jar /opt/app/app.jar` as root with `EnvironmentFile=/opt/app/executespec.env`. Logs go to journald.
+Permissions: `contents: read`, `id-token: write` (required for Workload
+Identity Federation).
 
-## Spring profiles
+Steps (in order):
 
-Profile-specific YAML files live in `src/main/resources/`:
+1. **Checkout** -- `actions/checkout@v6`, `ref: ${{ env.TARGET_SHA }}`,
+   `fetch-depth: 0` (needed for Slack commit message rendering).
+2. **Set up Java 21** -- `actions/setup-java@v5`, `distribution: temurin`,
+   `cache: maven`.
+3. **Set up Node.js** -- `actions/setup-node@v6`, `node-version: 'lts/*'`,
+   `cache: 'npm'`, `cache-dependency-path: frontend/package-lock.json`.
+4. **Install frontend deps** -- `cd frontend && npm ci`.
+5. **Frontend format check** -- `cd frontend && npm run format:check`.
+6. **Frontend lint** -- `cd frontend && npm run lint`.
+7. **Build frontend** -- `cd frontend && npm run build`.
+8. **Build JAR** -- `mvn verify -q`. Binds `spotless-maven-plugin` at the
+   `verify` phase; surefire excludes `e2e,integration,chaos` groups.
+9. **Authenticate to GCP** -- `google-github-actions/auth@v3` with
+   `workload_identity_provider` and `service_account` from secrets (no
+   service-account JSON keys checked in).
+10. **Set up gcloud CLI** -- `google-github-actions/setup-gcloud@v3`.
+11. **Debug -- print resolved config** -- emits `gcloud config get-value project`
+    and `gcloud compute instances list --filter="name~executespec"`.
+12. **Set deploy bucket** -- exports
+    `DEPLOY_BUCKET=gs://executespec-{env}-deploy`.
+13. **Upload JAR to GCS** -- `gsutil cp` to
+    `${DEPLOY_BUCKET}/releases/app-${TARGET_SHA}.jar` and writes the SHA to
+    `${DEPLOY_BUCKET}/CURRENT_SHA`. JARs are permanent -- never overwritten --
+    giving a full rollback history.
+14. **Set instance name** -- `executespec-prod-vm` or `executespec-dev-vm`.
+15. **Ensure validator toolchains on GCE** -- SSH via `--tunnel-through-iap`;
+    installs Node LTS, Python3 + pip + venv if missing, then
+    `pip3 install --break-system-packages mypy ruff pytest`.
+16. **Set public URL** -- `https://app.executespec.ai` (prod) or
+    `https://dev.executespec.ai` (dev).
+17. **Sync design system files** -- `continue-on-error: true`; SSHes to VM and
+    rsyncs `gs://...-deploy/designs/design-md` to
+    `/opt/executespec/designs/design-md`.
+18. **Write env patch script** -- generates `/tmp/env-patch.sh` (a heredoc bash
+    script that upserts keys into `/opt/app/executespec.env`). Keys it sets:
+    - `CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173`
+    - `DASHBOARD_URL=$1`, `APP_BASE_URL=$1`
+    - `MAIL_TRANSPORT=smtp`, `MAIL_FROM=admin@executespec.ai`
+    - `PREVIEW_ENGINE_URL=https://preview-engine.executespec.ai`
+    - `PREVIEW_ENGINE_REGISTRY_URL=us-east4-docker.pkg.dev/executespecv1/preview-images`
+    - `PREVIEW_ENGINE_ROUTE_VIA=true`, `PREVIEW_MODE=docker`
+    - Loads `gs://${DEPLOY_BUCKET}/config/api-keys` and
+      `gs://${DEPLOY_BUCKET}/config/smtp-credentials` line-by-line via `upsert`.
+19. **Deploy JAR to GCE** -- `gcloud compute scp` env-patch.sh to VM,
+    then SSH and:
+    - `gsutil cp` JAR from GCS to `/opt/app/releases/`
+    - Run `/tmp/env-patch.sh` with public URL + bucket name
+    - `ln -sf` JAR to `/opt/app/app.jar`
+    - Write SHA to `/opt/app/RUNNING_SHA`
+    - `systemctl restart executespec`
+20. **Wait for app startup** -- `sleep 30`.
+21. **Health check** -- 8-attempt loop with 10s sleep. SSH and
+    `curl http://localhost:8080/actuator/health`. v2.5.12 fix: `rm /tmp/health.json`
+    before each curl to avoid buffer-reuse false-positive. Gate on `http=200`
+    substring AND JSON body containing `"status":"(UP|DEGRADED)"`. (A 2026-04-17
+    V113 boot-crash previously sailed through CI as success because of the
+    buffer-reuse bug.)
+22. **Dump app logs (on failure)** -- `if: failure()`; SSHes to dump
+    `systemctl status executespec`, last 150 lines of `journalctl -u executespec`,
+    and a redacted env file.
+23. **Prune old Docker images** -- `if: success()`,
+    `continue-on-error: true`; SSH and run
+    `docker image prune -a --force --filter 'until=168h'` plus
+    `docker builder prune --force --filter 'until=168h'`.
+24. **Prune old JAR releases** -- keeps current + last 10; deletes older via
+    `gsutil rm`.
+25. **Deployment summary** -- echoes deployed SHA, JAR path, branch,
+    environment.
+26. **Notify Slack (success)** -- uses `secrets.SLACK_WEBHOOK_URL`; builds
+    Block-Kit payload with `jq`.
+27. **Notify Slack (failure)** -- same Slack pattern with `:x:` message.
 
-| File                      | Activated by                              | Notes                                                                                      |
-| ------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `application.yml`         | Base; always loaded                       | Hardcoded local defaults (Postgres at `localhost:5432`, Redis at `localhost:6379`). Contains the model matrix, agent config, observability config |
-| `application-local.yml`   | `--spring.profiles.active=local`           | Local dev — silences OTel exporter (no collector), provides convenience defaults for credentials. NOT for production use |
-| `application-dev.yml`     | `--spring.profiles.active=dev`             | Dev VM. Resolves DB/Redis/secrets from env vars. Excludes `OtlpAutoConfiguration` since the dev VM has no collector |
-| `application-prod.yml`    | `--spring.profiles.active=prod`            | Prod VM. Stricter `agent.concurrency.max-runs=20`. `server.forward-headers-strategy=framework` for LB TLS termination. Requires `PREVIEW_ENGINE_REGISTRY_URL` + `PREVIEW_ENGINE_API_KEY` (no defaults) |
-| `application.yml` (`gcp` section, line 880+) | Composed with `dev`/`prod` via `SPRING_PROFILES_ACTIVE=${ES_ENV},gcp` | Activates virtual threads, disables local OTLP exporters in favour of GCP Cloud Trace + Cloud Monitoring (`exporter-trace`, `exporter-metrics` from `pom.xml`) |
+Workload Identity Federation: no static service-account JSON keys. The job uses
+`google-github-actions/auth@v3` with `workload_identity_provider` +
+`service_account` secrets and the `id-token: write` permission on the
+workflow.
 
-`@Profile` annotations in the codebase:
+Cross-workflow consistency: both `deploy.yml` and `lint.yml` pin
+`actions/checkout@v6`, `actions/setup-java@v5`, `actions/setup-node@v6`, and
+Java 21.
 
-| Class                                    | Profile  | What it does                                                          |
-| ---------------------------------------- | -------- | --------------------------------------------------------------------- |
-| `config/GcpOtelExporterConfig.java`      | `gcp`    | Wires GCP Cloud Trace + Cloud Monitoring exporters                     |
-| `auth/security/JwtSecretValidator.java`  | `prod`   | Fails fast at boot if `app.jwt.secret` is still the default value     |
+### `.github/workflows/lint.yml` -- Lint
 
-## Database setup
+146 lines; three parallel jobs gating PRs.
 
-Flyway is enabled (`application.yml` `spring.flyway`). Migrations live in `src/main/resources/db/migration/V*.sql`. Current head: **V199** (`V199__sync_org_tier_with_subscription_tier.sql`). Migrations run on application startup before Hibernate validates the schema (`spring.jpa.hibernate.ddl-auto: validate`).
+Triggers:
 
-`pom.xml` pulls in `flyway-core` + `flyway-database-postgresql`. The latter is required for Spring Boot 3.5 + Flyway 11.x against PostgreSQL.
+- `pull_request` on `[dev, main]`
+- `workflow_dispatch`
 
-Two boot-time behaviours documented in `application.yml`:
+Jobs:
 
-- `baseline-on-migrate: true` and `baseline-version: 0` — safe on existing databases.
-- `ignore-migration-patterns: "*:missing"` — tolerates the V119 orphan left when `preview-engine` was extracted to its own repo. The comment block (lines 81-116) explains the workaround.
+| Job              | Tool                                  | Behavior                                                                                       |
+| ---------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `java-lint`      | `mvn -B spotless:check`                | Google Java Format gate. On failure: `::error::` hint to run `mvn spotless:apply`.            |
+| `frontend-lint`  | `npm run format:check && npm run lint` | Prettier + ESLint. On failure: hint to run `npm --prefix frontend run format` + `lint:fix`. |
+| `frontend-audit` | `npm audit --audit-level=high`        | `continue-on-error: true`. Emits `::warning::` or `::notice::npm audit clean`.                |
 
-The dev profile additionally sets `spring.flyway.out-of-order: true` (`application-dev.yml`) so out-of-order V68 from the v2 branch can apply on a dev DB that already saw later versions.
+The `frontend-audit` job is **warn-only by design** pending clearance of known
+high-severity advisories in dev-only Vite 5.x transitives (referenced as
+`docs/security/audit-policy.md`, currently TBD).
 
-Hibernate is configured for `DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` and `open-in-view: false`. JDBC connections are released to Hikari at every transaction commit.
+---
 
-## Cleanroom containers (SWE-bench + ProgramBench)
+## 3. Secrets
 
-Bench-mode runs use Docker for isolation:
+Every GitHub Actions secret referenced by `deploy.yml`. Values never appear in
+this doc.
 
-| Adapter                                                | Launch command                                                                                                                                                |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `swebench/SwebenchTaskService.java` (line 142)         | `docker run -d --rm --network none --name <runId> -v <workspaceHost>:/testbed -w /testbed <image> sleep`                                                       |
-| `programbench/ProgramBenchTaskService.java` (line 167) | `docker run -d --rm --network none --name <runId> -v <workspaceHost>:/workspace -w /workspace <image> sleep`                                                  |
+| Secret                          | Used for                                                                |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `GCP_PROJECT`                   | GCP project ID for both Cloud Build / SCP / SSH targets                 |
+| `GCP_REGION`                    | `us-east4` (used for AR host and gcloud config)                         |
+| `GCE_ZONE`                      | Zone of the executespec-{env}-vm                                        |
+| `WORKLOAD_IDENTITY_PROVIDER`    | WIF provider full path (`projects/.../providers/...`)                   |
+| `SERVICE_ACCOUNT`               | Email of the GitHub-side service account WIF impersonates                |
+| `SLACK_WEBHOOK_URL`             | Slack incoming-webhook for `deploy.yml` success/failure notifications   |
 
-After the container starts, the adapter registers the container ID with `ProgramBenchContainerStore`. Subsequent `ShellTool` and `BuildProjectTool` invocations consult the store and dispatch via `docker exec` instead of running directly on the host. `--network none` blocks all egress for the duration of the run. `--rm` ensures the container is removed on stop.
+(GCS-resident secrets -- API keys, SMTP credentials, OAuth client secrets -- are
+NOT referenced as GitHub Actions secrets; they are pulled from
+`gs://{deploy-bucket}/config/api-keys` and `gs://{deploy-bucket}/config/smtp-credentials`
+during the env-patch step on the VM.)
 
-Cleanroom invocations only fire when the run is bench-mode (SWE-bench or ProgramBench adapters); standard customer runs use the host shell directly with the `ShellSandboxPolicy` allowlist (see `agent/shell/`).
+Engineering-honest:
+- **`application-local.yml` commits real Anthropic, OpenAI, and Google API
+  keys, plus Razorpay test creds, plus Google + GitHub OAuth client secrets,
+  plus an admin Gmail app password.** The file header says "NEVER commit real
+  secrets here in production repos" but the file itself does. These keys need
+  rotation and the file should source from env-only.
+- **`application-dev.yml` commits OAuth client-id / client-secret defaults and
+  the same SMTP app password as fallbacks.** Intentional for dev VM
+  convenience but defeats the env-var pattern.
 
-## Preview container lifecycle
+---
 
-`application.yml` `preview.*` and `application-prod.yml` `preview.*`. Three possible modes (`PREVIEW_MODE` env var):
+## 4. Build artifacts
 
-| Mode        | Where it runs                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `docker`    | Docker Compose on the main GCE VM (default in dev). Caddy on port 443 routes `preview-<id>.executespec.ai` → container  |
-| `cloud-run` | Cloud Run service per preview. Managed HTTPS                                                                              |
-| `vm`        | Out-of-band preview-gateway VM (`preview-gw` in `us-east4-b`). Configured in `application.yml` `preview.vm.*`            |
+### Backend: Maven JAR
 
-Prod composes `mode=docker` with `engine.route-via=true`: the main JVM builds the preview image, pushes it to `us-east4-docker.pkg.dev/executespecv1/preview-images`, and hands off to the external `preview-engine` service at `https://preview-engine.executespec.ai`. The engine then pulls the image and owns the container's lifetime. `PREVIEW_ENGINE_API_KEY` is the shared secret. Disable by setting `PREVIEW_ENGINE_ROUTE_VIA=false`.
+- Coordinates: `com.navneet:executespec:1.0.0-M1` (`pom.xml` line 12-15).
+- Output: `target/executespec-1.0.0-M1.jar`.
+- Parent: `org.springframework.boot:spring-boot-starter-parent:3.5.14`.
+- Java 21 (`<java.version>21`).
+- Spring AI 1.1.6 BOM (`org.springframework.ai:spring-ai-bom`).
+- Static frontend bundled under `src/main/resources/static/` and served from
+  the JAR.
+- Build plugins:
+  - `spring-boot-maven-plugin` -- excludes `org.projectlombok:lombok` from the
+    repackaged JAR.
+  - `maven-surefire-plugin` -- `<excludedGroups>e2e,integration,chaos</excludedGroups>`.
+  - `spotless-maven-plugin:3.4.0` -- bound to `verify` phase; Google Java
+    Format `1.22.0`, style `GOOGLE`, `reflowLongStrings=true`,
+    `removeUnusedImports`, importOrder `java,javax,jakarta,com,org,`,
+    `formatAnnotations`.
+  - `jacoco-maven-plugin:0.8.14` -- `prepare-agent` + `report` (phase `test`),
+    excludes `com/navneet/executespec/api/dto/**`, `**/dto/**`, and
+    `ExecutespecApplication.class`.
+- Spring repositories:
+  - `spring-milestones` -> `https://repo.spring.io/milestone` (snapshots
+    disabled)
+  - `spring-snapshots` -> `https://repo.spring.io/snapshot` (releases disabled)
 
-Default `preview-ttl-minutes: 30` (`application.yml`). The scheduled job `PreviewGarbageCollector` (`deployment/preview/vm/PreviewGarbageCollector.java`, `@Scheduled(fixedRate = 600_000)`) reaps expired previews every 10 minutes.
+Mockito is pinned to `5.17.0` and ByteBuddy to `1.16.1` to override the SB
+3.5 defaults for Java 25 class-file compatibility (comment is forward-looking;
+project currently runs on Java 21).
 
-## Manual deploy escape hatch
+### Frontend: Vite bundle
 
-There is no manual `gcloud` deploy script in `scripts/`. Manual deploys are done via the `workflow_dispatch` trigger on `.github/workflows/deploy.yml` with an explicit `target_sha`.
+- Built via `cd frontend && npm ci && npm run build`.
+- Vite production output is copied to `src/main/resources/static/` so the
+  Spring Boot JAR serves it directly. No separate frontend deploy step.
+- Format/lint gates: `npm run format:check` (Prettier) and `npm run lint`
+  (ESLint) -- both enforced in `deploy.yml` and `lint.yml`.
 
-Rollback is performed by running `workflow_dispatch` with `target_sha` set to a prior commit. The previous JAR will already be in GCS at `gs://${DEPLOY_BUCKET}/releases/app-<sha>.jar` (last 10 retained by the prune step), so the deploy step downloads it directly and the systemd symlink flips to point at it.
+### Versioning
 
-Operational scripts under `scripts/` are for testing and local cleanup, not deploy:
+`VERSION` and `Version` at the repo root both contain `1.0.0-M1`. Two
+case-distinct files with identical content -- risk of drift on future bumps.
+The project's `Version` file is the source of truth referenced in onboarding
+docs.
 
-| Script                       | Purpose                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `dev-cleanup.sh`             | Wipes run data + resets usage on a dev VM (preserves users/orgs) |
-| `dev-wipe-runs-and-projects.sh` | More aggressive wipe (project tables included)                |
-| `e2e-test.sh`                | E2E provider matrix run via the API                              |
-| `e2e-matrix-test.sh`         | Multi-spec matrix variant                                        |
-| `e2e-preview-test.sh`        | Preview-engine smoke against deployed environment                |
-| `v2-eval.sh`                 | 3 × 3 (provider × complexity band) evaluation harness            |
-| `v2-eval-strict.sh`          | Stricter variant of `v2-eval.sh`                                 |
-| `test-providers.sh`          | Per-provider connectivity smoke                                  |
-| `test-resilience.sh`         | Chaos / resilience harness                                        |
+---
 
-## Local development
+## 5. Local development
 
-Backend:
+### Backend
 
 ```bash
+# macOS dev requires this -- toolchains use OpenJDK 21 from Homebrew
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.profiles=local
+
+# Compile only
+mvn compile -q
+
+# Full verify (spotless + tests)
+mvn verify -q
+
+# Run with the local profile
+mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-The `local` profile is required to silence the OTel exporter loop when no Tempo collector is running (see the comment block at the bottom of `application.yml`, lines 851-877).
+The `local` Spring profile is the base `application.yml` with the local
+profile doc activated. It uses:
 
-Backend listens on **8080**. Health probe: `curl http://localhost:8080/api/health` (custom `HealthController`, not actuator) or `curl http://localhost:8080/actuator/health` (Spring actuator).
+- Postgres on `localhost:5432`, db `executespec`, user/password `postgres/postgres`
+- Redis on `localhost:6379`
+- Tracing disabled (`management.tracing.enabled=false`)
+- CORS origin `http://localhost:5173`
+- JWT secret = baked-in dev default
+- Razorpay-first billing (`billing.default-gateway=razorpay`)
 
-Frontend:
+`application-local.yml` is loaded after `application.yml` when
+`SPRING_PROFILES_ACTIVE=local` is set. It currently commits real API keys (see
+section 3 engineering-honest note).
+
+### Frontend
 
 ```bash
-npm --prefix frontend run dev
+npm --prefix frontend ci
+npm --prefix frontend run dev          # Vite dev server on :5173
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
 ```
 
-Vite dev server listens on **5173** (overridable via `VITE_PORT`) and proxies `/api` → `http://localhost:8080` (overridable via `VITE_BACKEND_URL`). See `frontend/vite.config.ts`.
-
-Postgres and Redis are assumed at localhost on default ports. To run them via Docker, the simplest path is `cd observability && docker compose up -d` (which only starts the observability stack), then `docker run -d --name pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16` and `docker run -d --name redis -p 6379:6379 redis:7-alpine` separately. There is no integrated dev docker-compose for the app dependencies yet — see `docs/operations/local-test-playbook.md`.
-
-## Environment variables
-
-Variables read by the application via `@Value("${...}")` or by `application.yml` substitution. Required vs optional is determined by the presence of a default (`${VAR:default}`) or the criticality of the surface.
-
-### Required at runtime (prod / dev VM)
-
-| Variable                        | Read by                                                                  | Purpose                                          |
-| ------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
-| `ANTHROPIC_API_KEY`             | `application*.yml` → `spring.ai.anthropic.api-key`                       | Claude API. Without it the LLM router falls over |
-| `OPENAI_API_KEY`                | `application*.yml` → `spring.ai.openai.api-key`                          | OpenAI + embeddings                              |
-| `GOOGLE_API_KEY`                | `application*.yml` → `spring.ai.google.genai.api-key`                    | Gemini                                            |
-| `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `application-{dev,prod}.yml` → `spring.datasource.*` | Cloud SQL connection                              |
-| `REDIS_HOST` / `REDIS_PORT`     | `application-{dev,prod}.yml` → `spring.data.redis.*`                     | Memorystore connection                            |
-| `JWT_SECRET`                    | `app.jwt.secret` (validated by `JwtSecretValidator` under `@Profile("prod")`) | JWT signing — must be ≥256 bits in prod    |
-
-### Required for specific surfaces
-
-| Variable                                                                  | Surface that needs it                                                           |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `GITHUB_PAT` / `GITHUB_OWNER`                                             | Multi-repo runs, PR Review autofix, code review                                  |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` (and `SMTP_HOST`/`SMTP_PORT` if overriding) | Outbound transactional + admin email                                          |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`     | INR billing path                                                                 |
-| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRO_PRICE_ID` / `STRIPE_ENTERPRISE_PRICE_ID` / `STRIPE_TEAM_PRICE_ID` / `STRIPE_TEAM_PRICE_ID_INR` | USD billing (default in prod) |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                   | OAuth2 login via Google                                                          |
-| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                   | OAuth2 login via GitHub                                                          |
-| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`        | Slack integration                                                                |
-| `PREVIEW_ENGINE_REGISTRY_URL` / `PREVIEW_ENGINE_API_KEY`                  | Required in prod when `engine.route-via=true` (no defaults in `application-prod.yml`) |
-| `JIRA_WEBHOOK_SECRET`                                                     | Jira integration webhook HMAC verification                                        |
-| `POSTHOG_API_KEY` / `POSTHOG_HOST`                                        | Product analytics (no-op when blank — `application.yml` `analytics.posthog`)    |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SAMPLING_PROBABILITY`               | Custom OTel collector / sampling override                                         |
-| `GCP_PROJECT` / `GCP_REGION` / `AR_REPOSITORY` / `AR_HOST`                | Cloud Run preview deploys + Artifact Registry pushes (`agent.deployment.*`)     |
-| `GCS_WORKSPACE_BUCKET` / `DEPLOY_BUCKET`                                  | GCS workspace archival + deploy artefacts                                         |
-| `CRYPTO_LOCAL_KEY`                                                        | Local-dev override of GCP-Secret-Manager-backed crypto key (`executespec.crypto.local-key`) |
-| `ADMIN_NOTIFICATION_EMAIL`                                                | Override the destination address for admin alerts                                 |
-| `ADMIN_REMINDER_TOKEN`                                                    | Enables `POST /api/internal/reminder/send` (blank disables endpoint)              |
-| `CONTACT_JIRA_BASE_URL` / `CONTACT_JIRA_EMAIL` / `CONTACT_JIRA_API_TOKEN` / `CONTACT_JIRA_PROJECT_KEY` | Contact-form ingestion into Jira                                                  |
-| `AGENT_SECURITY_DEPS_*`                                                   | Override dependency-install guardrails (see `application.yml` `agent.security.deps`) |
-| `EXECUTESPEC_REPO_MAX_SIZE_KB`                                            | Repo-size clone-time gate (default 250000 KB)                                    |
-| `PREVIEW_GATEWAY_IP` / `PREVIEW_GW_INTERNAL_IP` / `PREVIEW_SSH_KEY_PATH` / `PREVIEW_SSH_USER` | Preview VM mode (preview-gw)                                                      |
-| `VITE_PORT` / `VITE_BACKEND_URL`                                          | Frontend dev-server port + proxy target overrides (`frontend/vite.config.ts`)    |
-
-`.env.template` at the repo root tracks the most-commonly-needed subset for local bootstrapping; it is not exhaustive.
-
-## Smoke after deploy
-
-After every deploy the workflow runs the actuator health probe documented above. For deeper post-deploy verification:
+### Local observability stack
 
 ```bash
-# 1. Liveness (cached state; always 200 unless JVM is gone)
-curl https://dev.executespec.ai/api/health
-
-# 2. Readiness (inline DB check; 503 if Postgres unreachable)
-curl https://dev.executespec.ai/api/health/ready
-
-# 3. Spring Actuator (used by CI)
-curl https://dev.executespec.ai/actuator/health
+cd observability && docker compose up -d
+# Grafana http://localhost:3001 (admin/admin)
+# Prometheus :9090, Tempo :3200
 ```
 
-The exposed actuator endpoints are configured in `application.yml`:
+### Environment template
 
-```
-management.endpoints.web.exposure.include: health,info,metrics,prometheus
-management.endpoints.web.base-path: /actuator
-```
-
-Only `health`, `info`, `metrics`, and `prometheus` are reachable externally. The deploy step gates success on `/actuator/health` returning HTTP 200 + body containing `"status":"UP"` or `"status":"DEGRADED"`. DEGRADED is treated as success because the cached DB/Redis state may briefly lag after a restart; the readiness probe catches actual outages.
-
-## Observability stack
-
-Prod ships traces to GCP Cloud Trace and metrics to Cloud Monitoring (`exporter-trace`, `exporter-metrics` in `pom.xml`; activated by the `gcp` profile). Local + dev use Prometheus + Tempo + Grafana via `observability/docker-compose.yml`:
-
-| Service     | Image                       | Host port | Container port |
-| ----------- | --------------------------- | --------- | -------------- |
-| Prometheus  | `prom/prometheus:latest`    | 9090      | 9090           |
-| Tempo       | `grafana/tempo:2.6.1`       | 4317 (OTLP gRPC), 4318 (OTLP HTTP), 3200 (Tempo API) | 4317/4318/3200 |
-| Grafana     | `grafana/grafana:latest`    | 3001      | 3000           |
-
-Prometheus scrapes `host.docker.internal:8080/actuator/prometheus` every 15s (`observability/prometheus.yml`). Tempo stores traces locally under `/var/tempo/traces` (`observability/tempo/tempo.yml`). Grafana provisions both as datasources and ships two dashboards: `executespec-overview.json` and `jvm-http-overview.json`.
-
-Custom metrics are emitted under two namespaces:
-
-- `executespec.v2.*` — V2 pipeline metrics (`observability/Metrics.java`). Counters/timers/distribution-summaries for `run.outcome`, `run.latency`, `planner.latency`, `planner.tasks`, `task.status`, `task.latency`, `task.smoketest`, `worker.iterations`, `worker.outcome`, `worker.toolcall`, `llm.latency`, `llm.key_source`, `classifier.verifier.engaged`, `reviewer.verdict`, `context.save`, `context.save.bytes`.
-- `executespec.*` — Cross-cutting metrics (`config/CustomMetricsConfig.java` + ad-hoc `Counter.builder(...)` sites). Gauges for `run.active`, `run.queued`, `preview.active`, `deploy.active`; counters for LLM tokens / errors / fallbacks; deploy lifecycle timers; SCM cleanup; SSE emitters; Redis/gate fallbacks.
-
-See `docs/operations/slos.md` for the SLO-relevant subset.
-
-## Scheduled jobs (run automatically on the JVM)
-
-Jobs annotated `@Scheduled`. Distributed locking via ShedLock + Redis (`pom.xml`: `shedlock-spring`, `shedlock-provider-redis-spring`). 29 jobs total at the time of writing; the table below lists the operationally-meaningful ones.
-
-| Job                                                | Schedule          | Lock name                  | Effect                                                         |
-| -------------------------------------------------- | ----------------- | -------------------------- | -------------------------------------------------------------- |
-| `deployment/WorkspaceArchiveJob.java`              | `0 0 * * * *` (hourly) | `WorkspaceArchiveJob`     | Zips + uploads completed-run workspaces older than 24h to GCS |
-| `compliance/WorkspaceDiskCleanupJob.java`          | `0 30 3 * * *` (03:30 daily) | `workspaceDiskCleanup` | Reaps orphaned per-run workspace directories                  |
-| `compliance/StaleScmCleanupJob.java`               | `0 45 3 * * *` (03:45 daily) | `staleScmCleanup`     | Closes/deletes stale SCM branches                              |
-| `compliance/DataRetentionService.java`             | `0 0 3 * * *` (03:00 daily) | n/a                    | Hard-delete pass per retention policy                          |
-| `activity/ActivityFeedRetentionJob.java`           | `0 0 3 * * *` (03:00 daily) | `ActivityFeedRetentionJob` | Drops activity rows past retention                           |
-| `activity/ActivityFeedPartitionJob.java`           | `0 30 2 * * *` (02:30 daily) | `ActivityFeedPartitionJob` | Creates next-N-month partitions on `activity_feed`         |
-| `auth/service/MonthlyRunCounterResetJob.java`      | `0 0 0 1 * *` (1st of month, Asia/Kolkata) | `monthlyRunCounterReset` | Resets per-user monthly run counters         |
-| `auth/service/WeeklyAdminSummaryJob.java`          | `0 0 9 * * MON` (Mon 09:00 Asia/Kolkata) | `weeklyAdminSummary` | Emails weekly admin summary                       |
-| `onboarding/SandboxCleanupJob.java`                | `0 5 * * * *` (xx:05 hourly) | `sandboxCleanup`     | GCs abandoned sandbox projects                                  |
-| `integration/IntegrationEventLogCleanupJob.java`   | `0 0 3 * * *` (03:00 daily) | n/a                    | Trims integration event log                                     |
-| `integration/slack/SlackNotificationLogCleanupJob.java` | `0 0 4 * * *` (04:00 daily) | n/a               | Trims Slack notification log                                    |
-| `deployment/DeploymentCleanupJob.java`             | `${agent.deployment.cleanup-cron}` (default `0 3 * * * *`, hourly :03) | n/a | Reaps Cloud Run preview services past TTL                |
-| `deployment/preview/PreviewService.java`           | `fixedRate = 60_000` + `fixedRate = 1_800_000` | n/a            | Preview heartbeat (1 min) + cleanup (30 min)                   |
-| `deployment/preview/vm/PreviewGarbageCollector.java` | `fixedRate = 600_000` (10 min) | n/a                   | VM-mode preview reaper                                          |
-| `deployment/preview/engine/BuildCachePruneJob.java` | cron-scheduled    | n/a                        | Prunes preview-engine local build cache                         |
-| `deployment/WorkspaceGcsUploadListener.java`       | `fixedRate = 300_000` (5 min) | `GcsUploadFallback`   | Retries failed GCS workspace uploads                           |
-| `recovery/StartupRunResumer.java`                  | `ApplicationReadyEvent` (boot-time, once) | n/a            | Scans non-terminal V2 runs, marks each FAILED with a clear reason + emits SSE so the UI shows them (Phase 1 fail-cleanly behaviour) |
-| `saga/SideEffectExecutor.java`                     | `fixedRate = 30_000` (30s) | n/a                  | Dispatches deferred side effects (retries on failure)           |
-| `batch/BatchPollService.java`                      | `fixedDelay = 30_000`, lock `v2-batch-poll` | n/a            | Polls in-flight provider batch jobs                              |
-| `config/featureflag/FeatureFlagService.java`       | `fixedRate = 60_000` (60s) | n/a                  | Reloads feature flag rows                                        |
-| `project/service/StackRefreshJob.java`             | `0 0 3 * * *` (03:00 daily) | `StackRefreshJob`    | Per-project stack refresh                                        |
-| `execution/service/AdminReconciliationService.java` | `fixedDelay = 15 * 60_000`, `initialDelay = 5 * 60_000` | `executionRunReconcile` | Marks orphaned non-terminal `ExecutionRun` rows FAILED |
-| `billing/scheduler/RenewalReminderScheduler.java`   | `0 15 9 * * *` (09:15 daily) | n/a                  | Sends renewal reminder emails                                    |
-| `billing/scheduler/PeriodEndDowngradeScheduler.java` | `0 */30 * * * *` (every 30 min) | n/a                | Applies period-end downgrades                                    |
-| `billing/scheduler/DunningScheduler.java`            | `0 0 9 * * *` (09:00 daily) | n/a                  | Sends dunning notices on failed payments                          |
-
-## Cost-management knobs at runtime
-
-These are not deploy concerns but live in `application.yml` and affect per-deploy cost behaviour:
-
-- `agent.concurrency.max-runs` — `50` in base config, **`20` in `application-prod.yml`**
-- `agent.concurrency.max-task-duration-minutes` — `25`
-- `agent.concurrency.safety-iteration-cap` — `500`
-- `agent.cost.credit-multiplier-usd` — `5.0` ($5 of LLM compute per run credit)
-- `agent.cost.budget-margin` — `1.5` (silent hard cap = credits × multiplier × margin)
-- `preview.preview-ttl-minutes` — `30`
-- `preview.concurrency.{free-max, pro-max, enterprise-max}` — `1`, `3`, `10`
-- `app.tiers.{free,pro,enterprise}.{monthly-run-limit, concurrent-run-limit}` — see `application.yml`
-
-## Terraform infrastructure
-
-`infra/` uses a workspace-per-environment layout (`dev`, `prod`). Common modules:
-
-- `network/` — VPC, subnet, Cloud NAT, IAP firewall rule
-- `compute/` — GCE instance with the startup script attached
-- `database/` — Cloud SQL PostgreSQL (HA toggled by `db_ha_enabled`)
-- `cache/` — Memorystore Redis (`BASIC` for dev, `STANDARD_HA` for prod)
-- `storage/` — GCS deploy bucket + workspace bucket
-- `loadbalancer/` — Optional HTTPS LB (`enable_lb`)
-- `secrets/` — Secret Manager bindings (consumed by `SecretManagerConfigLoader` at JVM startup)
-
-Apply:
+Copy `.env.template` to `.env` (gitignored) and fill in the required keys:
 
 ```bash
-cd infra
-terraform workspace select dev
-terraform apply -var-file=environments/dev.tfvars
+cp .env.template .env
 ```
 
-Estimated monthly cost is documented at the bottom of each `.tfvars` file (`infra/environments/dev.tfvars`: ~$229/mo, `infra/environments/prod.tfvars`: ~$373/mo).
+Required (uncommented in template): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GOOGLE_API_KEY`, `GITHUB_PAT`, `GITHUB_OWNER`.
 
-A one-time secret-seed pass migrates plain-text GCS keys to Secret Manager via `infra/scripts/seed-secrets.sh`; the GCS file remains as a fallback for boot-time bootstrap (see `infra/scripts/startup.sh` phase 6c).
+Optional sections (all commented out in template): Postgres connection,
+Redis host, Stripe keys, OAuth2 client IDs/secrets, Slack credentials.
 
-## Rollback
+Razorpay is uncommented with placeholder values; comment notes
+`# Test keys: rzp_test_xxx / secret  |  Live keys: rzp_live_xxx / secret`.
 
-1. Identify the prior good SHA from `gs://${DEPLOY_BUCKET}/releases/`.
-2. Trigger `workflow_dispatch` on `.github/workflows/deploy.yml` with `target_env=dev`, `target_sha=<prior_sha>`.
-3. The workflow re-uploads the SHA-keyed JAR (idempotent), updates `CURRENT_SHA`, runs the env-patch + JAR-symlink dance on the VM, and restarts the service.
+Engineering-honest: `.env.template` foregrounds Razorpay while the prod
+default gateway is Stripe -- the template hasn't been updated for the prod
+default switch.
 
-Production rollback is currently blocked at the workflow-trigger level (no `prod` option in the `target_env` choice). The header comment in `deploy.yml` (lines 1-6) documents this gate. Until prod GCP credentials are provisioned, manual production rollback would require SSHing onto the VM and running:
+---
+
+## 6. Environment variables
+
+Pulled from `.env.template`, `application*.yml`, and the env-patch step in
+`deploy.yml`. Variables marked **required** must be set to start the JVM;
+optionals carry sensible defaults.
+
+### LLM providers
+
+| Variable            | Required        | Notes                                             |
+| ------------------- | --------------- | ------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | Yes             | Bound to `spring.ai.anthropic.api-key`            |
+| `OPENAI_API_KEY`    | Yes             | Bound to `spring.ai.openai.api-key`               |
+| `GOOGLE_API_KEY`    | Optional        | Gemini; bound to `spring.ai.google.genai.api-key` |
+
+### Integrations
+
+| Variable                                                                                                    | Used for                                                |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `GITHUB_PAT`, `GITHUB_OWNER`                                                                                | GitHub repo creation + multi-repo push via `agent.github` |
+| `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`                                            | Slack OAuth + webhook verification                      |
+| `DASHBOARD_URL`                                                                                             | Link target embedded in Slack messages + emails         |
+
+### OAuth2 (web login)
+
+| Variable                       | Used for                                                                |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `GOOGLE_OAUTH_CLIENT_ID`       | `spring.security.oauth2.client.registration.google.client-id`           |
+| `GOOGLE_OAUTH_CLIENT_SECRET`   | `...google.client-secret`                                               |
+| `GITHUB_OAUTH_CLIENT_ID`       | `spring.security.oauth2.client.registration.github.client-id`           |
+| `GITHUB_OAUTH_CLIENT_SECRET`   | `...github.client-secret`                                               |
+
+Redirect URIs in prod default to
+`https://executespec.ai/api/auth/oauth2/callback/{registrationId}`; dev uses
+`https://dev.executespec.ai/...` (`application-prod.yml`, `application-dev.yml`).
+
+### Billing
+
+| Variable                            | Used for                                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `RAZORPAY_KEY_ID`                   | Razorpay API key (INR payments)                                                    |
+| `RAZORPAY_KEY_SECRET`               | Razorpay secret                                                                     |
+| `RAZORPAY_WEBHOOK_SECRET`           | HMAC-SHA256 for `/api/webhooks/razorpay`                                            |
+| `RAZORPAY_WEBHOOK_URL`              | Full webhook URL Razorpay posts back to                                              |
+| `STRIPE_SECRET_KEY`                 | Stripe API key (USD + multi-currency)                                                |
+| `STRIPE_WEBHOOK_SECRET`             | `Stripe-Signature` verification for `/api/webhooks/stripe`                          |
+| `STRIPE_PUBLISHABLE_KEY`            | Frontend Checkout init                                                              |
+| `STRIPE_TEAM_MONTHLY_PRICE_ID`      | Stripe price ID for Team monthly                                                    |
+| `STRIPE_ENTERPRISE_PRICE_ID`        | Stripe price ID for Enterprise                                                      |
+| `BILLING_DEFAULT_GATEWAY`           | `stripe` (prod default) / `razorpay` (dev default)                                  |
+| `BILLING_STRIPE_ENABLED`            | Set `true` in prod to enable Stripe handler                                          |
+
+### Infrastructure
+
+| Variable          | Default               | Notes                                                       |
+| ----------------- | --------------------- | ----------------------------------------------------------- |
+| `POSTGRES_HOST`   | `localhost`           | `spring.datasource.url` interpolation                       |
+| `POSTGRES_PORT`   | `5432`                |                                                             |
+| `POSTGRES_DB`     | `executespec`         |                                                             |
+| `POSTGRES_USER`   | `postgres`            |                                                             |
+| `POSTGRES_PASSWORD` | `postgres`           |                                                             |
+| `REDIS_HOST`      | `localhost`           |                                                             |
+| `REDIS_PORT`      | `6379`                |                                                             |
+| `GCS_WORKSPACE_BUCKET` | `executespec-workspaces` | `agent.deployment.workspace.gcs-bucket`               |
+| `DEPLOY_BUCKET`   | env-driven            | `executespec-{env}-deploy`                                  |
+| `AR_REPOSITORY`   | env-driven            | `executespec-{env}-docker`                                  |
+| `GCP_PROJECT`     | `executespecv1`       | `agent.deployment.gcp-project`                              |
+
+### Observability
+
+| Variable                          | Default | Notes                                                              |
+| --------------------------------- | ------- | ------------------------------------------------------------------ |
+| `OTEL_SAMPLING_PROBABILITY`       | `1.0`   | `management.tracing.sampling.probability`                          |
+| `OTEL_METRICS_ENABLED`            | `false` | `management.otlp.metrics.export.enabled` (prod overrides to true) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`     | `http://localhost:4318/v1/traces` | OTLP HTTP endpoint                       |
+
+### Preview engine
+
+| Variable                          | Used for                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------- |
+| `PREVIEW_MODE`                    | `docker` (local + GCE), `vm` (worker pool), `cloud-run` (managed)                  |
+| `PREVIEW_ENGINE_URL`              | `preview.engine.base-url`; `https://preview-engine.executespec.ai` in prod         |
+| `PREVIEW_ENGINE_REGISTRY_URL`     | Artifact Registry host for preview images                                          |
+| `PREVIEW_ENGINE_API_KEY`          | `X-Preview-Api-Key` header set by `PreviewEngineClient`                            |
+| `PREVIEW_ENGINE_ROUTE_VIA`        | `true` to enable handoff; otherwise `PreviewService` runs local Docker Compose      |
+| `PREVIEW_GATEWAY_IP`              | Public IP of the preview gateway VM (hardcoded `34.186.68.141` in startup.sh)      |
+| `PREVIEW_GW_INTERNAL_IP`          | Internal IP `10.150.0.2`                                                            |
+| `PREVIEW_SSH_KEY_PATH`            | `/opt/app/preview-ssh-key`                                                          |
+| `PREVIEW_SSH_USER`                | `admin_executespec_ai`                                                              |
+
+### Security
+
+| Variable                                              | Used for                                                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `JWT_SECRET`                                          | `app.jwt.secret` -- HS256 signing key for access + refresh tokens                            |
+| `AGENT_DEPLOYMENT_CREDENTIAL_ENCRYPTION_KEY`          | Base64 32-byte AES-256-GCM key used by `CredentialEncryptionService` for stored GCP creds   |
+
+Engineering-honest: `CredentialEncryptionService` (line 91 of source) silently
+generates an **ephemeral** AES key with only a WARN log if
+`agent.deployment.credential-encryption-key` is unset. In production this
+would encrypt with a per-restart key that breaks all subsequent decrypts --
+there is no startup fail-fast guard.
+
+### Mail
+
+| Variable        | Default             | Notes                                                       |
+| --------------- | ------------------- | ----------------------------------------------------------- |
+| `MAIL_TRANSPORT` | `smtp`             | `app.mail.transport`                                        |
+| `MAIL_FROM`     | `admin@executespec.ai` |                                                          |
+| `SMTP_HOST`     | `smtp.gmail.com`    |                                                             |
+| `SMTP_PORT`     | `587`               |                                                             |
+| `SMTP_USERNAME` | env-driven          | Pulled from `gs://{deploy-bucket}/config/smtp-credentials` |
+| `SMTP_PASSWORD` | env-driven          | Same                                                       |
+
+### CORS + URLs
+
+| Variable                | Default                                                                | Notes                                                        |
+| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `CORS_ALLOWED_ORIGINS`  | `http://localhost:5173` (local) -> `https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173` (prod) | Comma-separated origins set in env-patch                     |
+| `APP_BASE_URL`          | env-driven                                                              | `app.mail.base-url` -- derives links in transactional email  |
+| `DASHBOARD_URL`         | env-driven                                                              | Public URL embedded in Slack notifications + reset-password emails |
+
+---
+
+## 7. Spring profiles
+
+Four profiles defined across `src/main/resources/application*.yml`.
+
+### `local` (default)
+
+Active when no profile is set. Embedded in `application.yml` as a
+profile-document section. Overrides:
+
+- `management.tracing.enabled=false`
+- `management.otlp.metrics.export.enabled=false`
+
+Uses base `application.yml` defaults: localhost Postgres + Redis, base
+`spring.ai.anthropic/openai.api-key` blank (must be supplied via env or
+`application-local.yml`), Razorpay-first billing,
+`agent.recovery.auto-resume-on-startup=false`.
+
+### `local` (file override)
+
+`src/main/resources/application-local.yml` (76 lines). Loaded when
+`SPRING_PROFILES_ACTIVE=local`. Adds developer-machine overrides:
+
+- Postgres user/password = `postgres/postgres`
+- `spring.flyway.out-of-order=true`
+- Local design system path `/Users/navneetprabhakar/Documents/git/uxdesigns/design-md`
+- CORS origins `http://localhost:5173,http://localhost:5174`
+- Tracing disabled
+
+Engineering-honest: this file commits **real Anthropic, OpenAI, and Google API
+keys** + Razorpay test creds + Google OAuth secret + GitHub OAuth secret +
+Gmail app password. See section 3.
+
+### `dev`
+
+`src/main/resources/application-dev.yml` (183 lines). Used by the GCE
+`executespec-dev-vm` at `dev.executespec.ai`. Differences from prod:
+
+- `dev.executespec.ai` domain everywhere
+- `spring.flyway.out-of-order=true` (V2 branch safety net -- V68 added after
+  V69-V73 already applied on some envs)
+- `spring.autoconfigure.exclude=OtlpAutoConfiguration` (no collector on dev VM)
+- Hardcoded fallback Google + GitHub OAuth client IDs/secrets (env-overridable)
+- `agent.deployment.artifact-registry.repository=executespec-dev-docker`
+- `agent.recovery.auto-resume-on-startup=true`,
+  `startup-resume-delay-seconds=30`
+- `preview.preview-ttl-minutes=15`
+- `app.cors.allowed-origins` includes `dev.executespec.ai`, the `app.dev` and
+  `build.dev` subdomains, plus marketing origins `executespec.ai` +
+  `www.executespec.ai`
+- `management.tracing.enabled=false`, `sampling.probability=0`
+- `management.metrics.tags.environment=dev`
+- `billing.default-gateway=razorpay` (dev default)
+
+### `prod`
+
+`src/main/resources/application-prod.yml` (198 lines). Used by
+`executespec-prod-vm` at `app.executespec.ai` (currently dormant -- see
+section 2 deploy gate). Differences from base:
+
+- All credentials env-driven, no committed fallbacks
+- `spring.security.oauth2.client.registration.*.redirect-uri` points to
+  `https://executespec.ai/...`
+- `server.forward-headers-strategy=framework` (Spring's
+  `ForwardedHeaderFilter` for LB termination)
+- `agent.concurrency.max-runs=20` (base value 50 is labeled "temporarily
+  increased for load testing")
+- `agent.deployment.artifact-registry.repository=executespec-docker` (no `-dev`)
+- `preview.engine.base-url=https://preview-engine.executespec.ai`,
+  `route-via=true`
+- `app.cors.allowed-origins=https://executespec.ai,https://www.executespec.ai,https://app.executespec.ai,https://build.executespec.ai`
+- `billing.default-gateway=stripe`, `billing.stripe.enabled=true`
+- `management.tracing.sampling.probability=0.1`
+- `management.otlp.metrics.export.enabled=true`
+- `management.metrics.tags.environment=prod`
+
+### `gcp`
+
+Embedded profile document inside `application.yml`. Activated alongside `dev`
+or `prod` (`SPRING_PROFILES_ACTIVE=<env>,gcp`). Overrides:
+
+- `spring.threads.virtual.enabled=true`
+- `management.otlp.tracing.enabled=false`
+- `management.otlp.metrics.export.enabled=false`
+- `management.tracing.sampling.probability=1.0`
+- `management.zipkin.tracing.enabled=false`
+
+Used to disable the OTLP exporters when running on GCE so Cloud Trace +
+Cloud Monitoring exporters take over via the `com.google.cloud.opentelemetry`
+deps (`pom.xml`).
+
+---
+
+## 8. Flyway migrations
+
+| Setting               | Value                                |
+| --------------------- | ------------------------------------ |
+| Head migration        | **V199**                              |
+| Locations             | `classpath:db/migration`             |
+| Baseline              | `baseline-on-migrate=true`, `baseline-version=0` |
+| Ignore patterns       | `*:missing` (tolerates applied-but-missing rows; see below) |
+| Out-of-order          | `false` in base, `true` in `dev` + `local` profiles |
+
+`spring.jpa.hibernate.ddl-auto=validate` -- Flyway is the **only** source of
+schema changes. Hibernate fails fast at boot if the schema drifts from
+entity definitions.
+
+Migrations run automatically on app startup via the Spring Boot Flyway
+auto-configuration. Files live at
+`src/main/resources/db/migration/V{n}__description.sql`.
+
+Engineering-honest: `ignore-migration-patterns: "*:missing"` is broad --
+tolerates **any** applied-but-missing migration. Documented exit strategy
+in inline comment is to repair the orphan V119 row from dev/prod DBs (V119
+was split into the preview-engine repo). Until that's done, the
+missing-migration safety net is disabled.
+
+---
+
+## 9. Cleanroom containers
+
+Used by SWE-bench and ProgramBench bench-mode runs for full
+sandbox-isolation. Every shell + build invocation is dispatched via
+`docker exec` into a per-run container.
+
+### Container spec
+
+```
+docker run --rm --network none -v <hostDir>:/workspace ...
+```
+
+- `--rm` -- container is removed at exit
+- `--network none` -- no outbound network access (no internet, no cloud
+  metadata, no DNS)
+- `-v <hostDir>:/workspace` -- workspace dir is bind-mounted at `/workspace`
+  so host-side tools and container-side tools see the same files
+
+The mount path is fixed at `/workspace` so `ShellTool` and
+`BuildProjectTool` paths line up regardless of which side they're invoked
+from. When `ProgramBenchContainerStore` records a containerId for a run,
+those tools dispatch via `docker exec` instead of host shell.
+
+### ProgramBench config
+
+`scripts/programbench/programbench.yaml` is the mini-swe-agent config for
+ProgramBench tasks. Notable values:
+
+```yaml
+environment:
+  cwd: /workspace
+  timeout: 120
+  interpreter: ["bash", "-c"]
+  run_args: ["--rm", "--network", "none"]
+  environment_class: docker
+agent:
+  step_limit: 500
+  cost_limit: 25.0
+model:
+  model_name: "anthropic/claude-sonnet-4-6"
+  observation_template:    # 10000-char cap with head 5000 + tail 5000 elision
+```
+
+The runner is `scripts/programbench/programbench_runner.py` (358 lines, Typer
+CLI). Discovers tasks under the installed `programbench` package's
+`data/tasks/<id>/task.yaml`, renders Jinja templates, spawns the docker
+container, then captures `/workspace` via `docker cp` and tars to
+`submission.tar.gz`.
+
+### Submission shape
+
+Unlike SWE-bench (which submits a git diff), ProgramBench submits a tarball
+of `/workspace` after the agent writes `compile.sh` + source files producing
+`/workspace/executable`. The agent terminates with:
+
+```
+echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && echo programbench-done
+```
+
+### Setup
+
+See `scripts/programbench/README.md`. Requires `uv` + a `.venv` at
+`/opt/programbench-bench`, plus the three LLM keys
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`).
+
+CLI: `--instance` (single task), `--language`, `--difficulty`, `--workers`,
+`--slice 0:5`, `--filter '^abishek.*'`, `--output`, `--model`. Score command:
+`programbench eval ./out`.
+
+Cost guidance per the README: `cmatrix` easy = $5; `ffmpeg`/`chroma` large
+Rust/Go = push `cost_limit` to $15-30 + `step_limit` 800+.
+
+---
+
+## 10. Preview deploys
+
+Cloud Run on-demand previews with a 5-minute TTL (legacy default) or 30-minute
+TTL (`preview.preview-ttl-minutes` in `application.yml`; dev profile shortens
+to 15 min). Four modes selected by `preview.mode`:
+
+| Mode         | Backend                                                            | Use                                              |
+| ------------ | ------------------------------------------------------------------ | ------------------------------------------------ |
+| `docker`     | Local Docker Compose via `ComposeExecutor`                          | Default on dev VM; runs on the same host        |
+| `cloud-run`  | `CloudRunClient` + `gcloud run deploy`                              | Managed previews on Cloud Run                   |
+| `vm`         | SSH/SCP to preview-gateway VM via `PreviewDeploymentService`        | Worker pool, multi-VM ready                     |
+| `engine`     | Handoff to preview-engine via `PreviewEngineHandoff`                | Enabled when `preview.engine.route-via=true`    |
+
+The orchestrator entry point is `PreviewService.start(runId, user, envVars)`
+in `deployment/preview/PreviewService.java` (1817 lines). It:
+
+1. Looks up tier-based concurrency limit (FREE=1, PRO=3, ENTERPRISE=10 via
+   `GlobalPreviewLimiter` + `PreviewProperties.ConcurrencyConfig`).
+2. Increments a Redis-backed counter at `preview:count:{userId}` (1h TTL).
+   Rolls back if the count crosses the limit. Fail-open on Redis errors.
+3. Dispatches to one of `buildAndStart` (Docker), `buildAndStartCloudRun`,
+   `buildAndStartVm`, or `buildAndStartViaEngine`.
+
+### Docker Compose mode
+
+Per-run workspace gets a generated `Dockerfile` from `DevDockerfileGenerator`
+(3538 lines covering 10 `PreviewProjectType`s x 2 environments x 3 modes:
+WEB / CLI / MCP). Auto-detects monorepos, full-stack layouts, patches
+`vite.config.*` to set `allowedHosts:true`, normalizes ports.
+
+`ComposeFileGenerator.generate(...)` writes a `docker-compose.yml` with:
+
+- Auto-injected DB sidecars (Postgres / MySQL / Mongo / Redis) when the app
+  declares them
+- `tmpfs` mounts for ephemeral data
+- App container hardening: `no-new-privileges`, `cap_drop:ALL`,
+  metadata-endpoint blocking via `extra_hosts`
+- DB containers exempt from hardening (official images need chown)
+
+Port assignment via `PreviewPortPool` (`ServerSocket(0)` ephemeral port or
+scan of `preview.port-range-start..end` = 10000..10100).
+
+### Cloud Run mode
+
+`CloudRunClient` shells out to `gcloud run deploy` with
+`--allow-unauthenticated`, IAM patch (`allUsers` -> `roles/run.invoker`),
+env-vars YAML file. Three retries with backoff `[2s, 5s, 10s]` for transient
+errors (429/5xx/UNAVAILABLE/INTERNAL).
+
+Health check: 3 attempts x 15s timeout, status `<500` counts as healthy.
+
+### VM mode
+
+`PreviewDeploymentService` SCPs the project to the target VM (selected by
+lowest active preview count), SSHs to run
+`/opt/preview-engine/bin/deploy-preview.sh`, parses the `PREVIEW_JSON:` line,
+and writes a Caddy config on the gateway if the target is a worker.
+Persisted to the `preview_registry` table.
+
+`PreviewGarbageCollector` runs every 10 minutes
+(`@Scheduled(fixedRate=600_000)`), finds `status='active' AND expires_at < now`,
+and calls `previewService.teardown` on each.
+
+### Preview-engine handoff
+
+`PreviewEngineHandoff.start(...)` builds + tags + pushes a content-addressed
+image (SHA-256 over (path, contents) per audit I #58 -- was previously
+hashing (path, size, mtime) which caused cache-poisoning collisions). Then
+POSTs `/from-image` to the preview-engine REST surface. Engine pulls, runs,
+health-probes, and registers. DELETE `/api/previews/{id}` unregisters.
+
+`BuildCachePruneJob` keeps the main app's local BuildKit layer cache bounded:
+every 6 hours runs `docker builder prune --keep-storage 10g` and prunes
+preview-engine-labelled local images older than 24h.
+
+### Workspace garbage collection
+
+`WorkspaceArchiveJob` runs hourly (`@Scheduled(cron="0 0 * * * *")`), archives
+terminal-state run workspaces older than `archiveAfterHours` (default 24) to
+GCS via `WorkspaceExportService.exportWorkspace` +
+`GcsWorkspaceStore.uploadZip`, then deletes the local copy.
+
+`WorkspaceGcsUploadListener` listens for `PipelineEvent.RunCompleted` /
+`RunFailed` events and uploads the workspace zip to GCS for VM-restart
+resilience; also runs a 5-min fallback sweep via
+`@Scheduled(fixedRate=300_000)` with ShedLock.
+
+Workspaces archive into
+`gs://executespec-workspaces/{env}/workspace/{runId}.zip` with a legacy
+`workspaces/{runId}.zip` fallback. The bucket has a 30-day lifecycle delete
+rule (`infra/modules/storage/main.tf`).
+
+---
+
+## 11. Manual deploy escape hatches
+
+Scripts under `scripts/` that operators can run directly when CI is broken
+or for one-off operations.
+
+### Bootstrapping secrets
+
+`infra/scripts/seed-secrets.sh` (116 lines, one-time migration script).
+Reads the plain-text `config/api-keys` file from GCS and seeds matching
+Secret Manager secrets (prefixed `executespec-*`). Maps 13 env var names ->
+secret suffixes: `ANTHROPIC_API_KEY` -> `anthropic-api-key`, etc. Creates
+secret if missing with `automatic` replication and `app=executespec` label,
+then adds a version with the value. Loops through `config/smtp-credentials`
+afterward.
+
+Usage:
 
 ```bash
-sudo gsutil cp gs://executespec-prod-deploy/releases/app-<prior_sha>.jar /opt/app/releases/
-sudo ln -sf /opt/app/releases/app-<prior_sha>.jar /opt/app/app.jar
-echo '<prior_sha>' | sudo tee /opt/app/RUNNING_SHA
-sudo systemctl restart executespec
+./infra/scripts/seed-secrets.sh <GCP_PROJECT> <DEPLOY_BUCKET>
 ```
 
-This is the same set of commands the workflow runs in the `Deploy JAR to GCE` step.
+### Local crash-resilience test
 
-## Known operational gaps
+`scripts/test-resilience.sh` (309 lines). Boots Spring Boot via
+`mvn spring-boot:run`, submits a multi-task V2 run, polls until WORKING,
+SIGKILLs (or SIGTERM via `SIGNAL=TERM`) the JVM mid-flight, restarts the
+JVM, asserts the run reaches terminal status. Validates
+`StartupRunResumer` + `RunOrchestrator.resumeAfterCrash`.
 
-- Production deploy path is wired but `target_env=prod` is gated out of the `workflow_dispatch` choice list (see header comment in `deploy.yml`).
-- `frontend-audit` job is warn-only (`continue-on-error: true`); high-severity vite/esbuild advisories surface in CI but don't block.
-- Health check uses HTTP not HTTPS via `localhost:8080` — fine because it runs over the IAP-tunnelled SSH session inside the VM.
-- Single GCE VM per environment means there is no HA story for the JVM. Cloud SQL HA is on in prod (`db_ha_enabled = true`); Memorystore is `STANDARD_HA` in prod; the JVM itself is not redundant.
-- The `recovery/StartupRunResumer.java` Phase 1 behaviour fails non-terminal runs cleanly on boot — it does not yet replay them. Phase 2 (replay via `ContextStore.load` + `WorkerAgent.resumeFromSnapshot()`) is tracked in the class header.
+```bash
+scripts/test-resilience.sh
+# Exits 0 on success; 1-6 for various failure modes
+# Logs: /tmp/executespec-resilience/{app.log, app-after-restart.log, ...}
+```
+
+### Database / workspace wipe (dev only)
+
+`scripts/dev-wipe-runs-and-projects.sh` (60 lines) takes a `pg_dump -Fc` of
+the local DB into `~/executespec-backups/`, runs the companion `.sql` to
+TRUNCATE CASCADE all run/project tables, then clears the local `workspace/`
+directory and Redis keys (`project:*`, `sse:*`, `run:*`).
+
+`scripts/dev-cleanup.sh` (196 lines) is the VM-targeted equivalent that uses
+`DELETE FROM` (not TRUNCATE) inside a transaction, resets monthly-run
+counters, restores `run_topup.remaining = quantity`, and removes GCS
+archives. Requires interactive `yes` confirmation. Preserves
+users/orgs/projects/billing/deployment-creds/slack-integrations.
+
+> Engineering-honest: the two scripts overlap but cover slightly different
+> tables -- `dev-cleanup.sh` omits the V131-V139 enterprise-readiness tables
+> that `dev-wipe-runs-and-projects.sql` truncates. Operational drift risk.
+
+### Eval / benchmark drivers
+
+These submit runs against a running backend (local or
+`https://dev.executespec.ai`) and emit JSON + markdown reports:
+
+| Script                          | Purpose                                                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `scripts/v2-eval.sh`            | 3 bands x 3 providers (anthropic/openai/gemini) = 9 runs. Outputs `scripts/v2-eval-results/`              |
+| `scripts/v2-eval-strict.sh`     | S3/S4/S5 strict specs x 3 providers. Captures `verifiedScore` + `reviewerVerdict` + `finalBuildPassed`   |
+| `scripts/exhaustive-eval.sh`    | 16 specs x 3 providers in parallel. Critic report with failure-pattern detection                          |
+| `scripts/benchmark-run.sh`      | 9-run Go/No-Go production-readiness benchmark (Anthropic + OpenAI only, Google skipped). 5-dim scoring  |
+| `scripts/e2e-test.sh`           | Per-provider 7-language matrix with retry/share-link/preview/GitHub push tests                            |
+| `scripts/e2e-matrix-test.sh`    | 5 specs x 3 providers, sequential or parallel. Emits Devil's-Advocate critical report                    |
+| `scripts/e2e-preview-test.sh`   | 3 providers x 2 spec sizes with preview poll. Verdict per test: PASS / WARN / FAIL                       |
+| `scripts/test-providers.sh`     | Two specs x 2 providers. 4-dimension per-provider box                                                    |
+| `scripts/project-view-e2e.sh`   | Project workbench E2E across 5 phases (12 repos, memory compaction at 20+30 marks, chat)                 |
+| `scripts/hostel-e2e.sh`         | 10-step iterative E2E for the "HostelMgmt" project, $25 budget ceiling                                   |
+
+Most default `BASE_URL` to `http://localhost:8080`; `e2e-matrix-test.sh`
+defaults to `https://dev.executespec.ai` -- easy to misfire on shared dev.
+
+### Per-slice status messengers
+
+`scripts/slice-email.py` (356 lines) renders mobile-friendly inline-CSS HTML
+email and sends to `admin@executespec.ai` via SMTP+STARTTLS. Reads SMTP
+credentials from `application-local.yml` (no PyYAML -- has a tiny inline
+YAML reader).
+
+`scripts/slice-telegram.py` (214 lines) renders compact HTML
+(Telegram cap 4096 chars; `<b>` / `<code>` only) and POSTs to
+`https://api.telegram.org/bot<token>/sendMessage`. Loads creds with priority:
+env vars `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` -> `~/.executespec/telegram.json`
+-> `application-local.yml`.
+
+### Trust-pack PDF render
+
+`scripts/trust-pack/render.mjs` (250 lines) generates the Trust Pack PDF for
+the V3 trust page. Renders a hardcoded HTML mirror of `V3Trust.tsx` via
+Playwright headless Chromium to a printable Letter-sized PDF dropped at
+`frontend/public/trust-pack.pdf`. Run via `node scripts/trust-pack/render.mjs`.
+
+### Build & test commands
+
+```bash
+# Backend
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
+
+# Frontend
+npm --prefix frontend run build
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
+
+# Run locally
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
+```
+
+---
+
+## Appendix: key file references
+
+| Concern                        | Path                                                                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| CI workflow                    | `.github/workflows/deploy.yml`                                                                                             |
+| Lint workflow                  | `.github/workflows/lint.yml`                                                                                               |
+| Maven build                    | `pom.xml`                                                                                                                  |
+| Env template                   | `.env.template`                                                                                                            |
+| Base Spring config             | `src/main/resources/application.yml`                                                                                       |
+| Dev profile                    | `src/main/resources/application-dev.yml`                                                                                   |
+| Prod profile                   | `src/main/resources/application-prod.yml`                                                                                  |
+| Local profile                  | `src/main/resources/application-local.yml`                                                                                 |
+| Flyway migrations              | `src/main/resources/db/migration/V*.sql` (head V199)                                                                       |
+| Terraform root                 | `infra/main.tf`, `infra/variables.tf`, `infra/outputs.tf`, `infra/backend.tf`                                              |
+| Terraform modules              | `infra/modules/{network,database,cache,storage,compute,compute/sa,loadbalancer,secrets}/`                                   |
+| GCE startup script             | `infra/scripts/startup.sh`                                                                                                 |
+| Secret bootstrap               | `infra/scripts/seed-secrets.sh`                                                                                            |
+| Cloud Run deploy client        | `src/main/java/com/navneet/executespec/deployment/CloudRunClient.java`                                                     |
+| Cloud Run deploy orchestrator  | `src/main/java/com/navneet/executespec/deployment/DeploymentService.java`                                                  |
+| Customer Cloud Run path        | `src/main/java/com/navneet/executespec/deployment/engine/DeployEngineOrchestrator.java`                                   |
+| Cloud Build user-side images   | `src/main/java/com/navneet/executespec/deployment/engine/UserImageBuilder.java`                                            |
+| Preview lifecycle              | `src/main/java/com/navneet/executespec/deployment/preview/PreviewService.java`                                             |
+| VM preview deployer            | `src/main/java/com/navneet/executespec/deployment/preview/vm/PreviewDeploymentService.java`                                |
+| Preview-engine handoff         | `src/main/java/com/navneet/executespec/deployment/preview/engine/PreviewEngineHandoff.java`                                |
+| Dev Dockerfile generator       | `src/main/java/com/navneet/executespec/deployment/preview/DevDockerfileGenerator.java`                                     |
+| Workspace archive job          | `src/main/java/com/navneet/executespec/deployment/WorkspaceArchiveJob.java`                                                |
+| GCS upload listener            | `src/main/java/com/navneet/executespec/deployment/WorkspaceGcsUploadListener.java`                                         |
+| GCS workspace store            | `src/main/java/com/navneet/executespec/deployment/GcsWorkspaceStore.java`                                                  |
+| Workspace restore              | `src/main/java/com/navneet/executespec/deployment/WorkspaceRestoreService.java`                                            |
+| ProgramBench runner            | `scripts/programbench/programbench_runner.py`                                                                              |
+| ProgramBench config            | `scripts/programbench/programbench.yaml`                                                                                   |
+| Run orchestrator               | `src/main/java/com/navneet/executespec/integration/RunOrchestrator.java`                                                   |
+| Multi-repo push                | `src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java`                                                |

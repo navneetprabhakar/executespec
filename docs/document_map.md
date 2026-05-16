@@ -1,136 +1,129 @@
-# ExecuteSpec — Document map
+# Documentation Map
 
-Index of every doc in this repo, grouped by purpose. The path on the left is canonical. The right column says when you'd read it.
+> Authoritative index of every document under `docs/` plus the four entry-point files at the repo root.
+> Updated 2026-05-16 as part of the `feature/full-project-review-2026-05-11` doc-refresh sweep.
 
----
+This file is the routing table for the documentation surface. Each entry below has a one-line description of what the document covers and a note on when you should reach for it. If you don't know which file to open first, start here.
 
-## Entry points
+## A note on CLAUDE.md vs. docs/
 
-| Path | Read when |
-|---|---|
-| [`../README.md`](../README.md) | First 60 seconds — elevator pitch, stack, run-it-locally, build/test commands. |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Need the system shape — layering, run lifecycle, run modes, frontend chrome, storage, model resolution, observability, security model. |
-| [`CODEMAP.md`](CODEMAP.md) | Mechanical index — every Java package, controller, agent, tool, entity, migration, prompt, feature flag, frontend page. |
-| [`document_map.md`](document_map.md) | This file. Pointer to every doc in the repo. |
+`CLAUDE.md` files live at the repository root and (historically) at every per-package directory under `src/main/java/com/navneet/executespec/`. They are **code-adjacent context for AI coding assistants** — written for Claude Code session bootstrapping, not for human onboarding. They are intentionally terse, contain in-flight-status notes, may carry preferences or rules-of-engagement, and may drift between commits because they're maintained as part of feature work rather than as standalone deliverables.
 
----
+Treat the files under `/docs/` as authoritative for code-truth. If a `CLAUDE.md` and a `/docs/` file disagree, the `/docs/` file wins, and the `CLAUDE.md` is the bug — file the drift and move on.
 
-## Operational
+The same rule applies the other direction: if `/docs/` is silent on a topic and a `CLAUDE.md` covers it, that's a documentation gap to file — not an excuse to leave the `CLAUDE.md` as the only source. Promote the content into `/docs/`, then trim the `CLAUDE.md` reference.
 
-| Path | Read when |
-|---|---|
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Deploying — GCP project layout, GCE VM setup, Cloudflare wiring, GCS bucket layout, Workload Identity Federation. |
-| [`operations/local-test-playbook.md`](operations/local-test-playbook.md) | Smoke-testing locally before pushing — submit a run, verify SSE, watch metrics, check Flyway head. |
-| [`operations/slos.md`](operations/slos.md) | Reviewing or revising the published SLOs (run terminal latency, verified-score correctness, cost-estimate accuracy, webhook ack, hot-path 5xx). |
-| [`status-page.md`](status-page.md) | Updating the public status page; what each surface monitors. |
+For humans: the documents below are the contract.
+For LLM coding agents: read the relevant `CLAUDE.md` for session-bootstrap context, then come here for ground-truth on anything older than a week.
 
 ---
 
-## Product and UX
+## 1. Entry points
 
-| Path | Read when |
-|---|---|
-| [`PRD.md`](PRD.md) | Need the product-level requirements doc (full vision and scope). |
-| [`USER_MANUAL.md`](USER_MANUAL.md) | Customer-facing manual — how to use the platform end-to-end. |
-| [`WORKFLOWS.md`](WORKFLOWS.md) | Sequenced user workflows (submit → approve → review → merge) with screenshots. |
-| [`project-user-journeys.md`](project-user-journeys.md) | Project-workbench user journeys (Pulse, Repos, Chat, Code, etc.). |
-| [`user-journeys.md`](user-journeys.md) | High-level cross-feature user journeys. |
-| [`billing-workflows.html`](billing-workflows.html) | HTML diagram of the billing-workflow paths (Stripe + Razorpay + topup + refund). |
+The four files anyone (human or LLM) should be able to find in under thirty seconds.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| README | [`README.md`](../README.md) | One-page overview: what ExecuteSpec does, who it's for, how to run it locally, where the docs live. | First file anyone opens on the repo. |
+| Architecture | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) | The 30-minute orientation: V2 pipeline diagram, package layout, async boundaries, data flows, resilience levers. | When you need to understand *how* the system executes a run end-to-end. |
+| Codemap | [`docs/CODEMAP.md`](CODEMAP.md) | Per-package index — every top-level `com.navneet.executespec.*` package with its responsibilities, key classes, and migration trail. | When you need to locate code by responsibility ("where does cost tracking live?"). |
+| Document map | [`docs/document_map.md`](document_map.md) | This file. Routing table for every document. | When you don't know which `/docs/` file to open. |
 
-## Auth and Enterprise
+## 2. Operational
 
-| Path | Read when |
-|---|---|
-| [`RBAC.md`](RBAC.md) | Auth roles, tier gates, external sharing rules (V198 per-org flag), and per-endpoint guard ledger. |
-| [`sso-saml-wiring.md`](sso-saml-wiring.md) | Wiring SAML SSO for an enterprise tenant. |
-| [`dpa-flow.md`](dpa-flow.md) | Data Processing Agreement intake + signing flow. |
-| [`enterprise-one-pager.md`](enterprise-one-pager.md) | The sales-side enterprise one-pager content + maintenance. |
-| [`enterprise-sla.md`](enterprise-sla.md) | The published enterprise SLA (uptime targets, support windows, escalation). |
-| [`cookie-domain-switch.md`](cookie-domain-switch.md) | Cookie-domain runbook (e.g. moving `.executespec.ai` → app-only). |
+Everything you need to ship, run, and stay-up-to-the-SLO. Read in order on a first deploy.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| Deployment | [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) | How the prod + dev GCE VM is provisioned, how Cloud Run on-demand previews ship, Cloudflare in front of `*.executespec.ai`, secrets layout, rollback procedure. | Before any change that touches infra, env vars, or the deploy pipeline. |
+| Local test playbook | [`docs/operations/local-test-playbook.md`](operations/local-test-playbook.md) | The local smoke-test recipe: Flyway migrate against a clean Postgres, Spring Boot startup, frontend `npm run dev`, end-to-end run submission, expected timing budgets. | Before pushing to `dev` — the rule is local-first, CI is not authoritative. |
+| Service-level objectives | [`docs/operations/slos.md`](operations/slos.md) | The 5 published SLOs: terminal-in-15-min, verified-score correctness, cost-estimate accuracy, webhook latency, hot-path 5xx. With measurement methodology and on-call escalation. | When auditing reliability or pricing a customer SLA. |
+| Status page | [`docs/status-page.md`](status-page.md) | How the public status page is wired, what each surfaced metric means, where the cron + uptime probes live, how an incident is declared and resolved. | When the status page is wrong or when adding a new probe. |
 
-## Billing
+## 3. Product / UX
 
-| Path | Read when |
-|---|---|
-| [`payment-history.md`](payment-history.md) | Reconstructing a customer's payment history; admin payment-audit endpoint. |
-| [`stripe-price-ids-ops.md`](stripe-price-ids-ops.md) | Operating the Stripe price IDs — what each price ID is for, how to rotate. |
+The user-shaped view of the system. Useful for PMs, support, and anyone writing customer-facing copy.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| PRD | [`docs/PRD.md`](PRD.md) | The product requirements doc — problem statement, target personas, must-have / should-have / won't-have feature buckets, success metrics. | When questioning whether a feature belongs in scope. |
+| User manual | [`docs/USER_MANUAL.md`](USER_MANUAL.md) | Customer-facing operator's guide: how to submit a spec, what the plan gate is, how to read the validation report, how to retry a failed task, where credits go. | When writing customer-facing help text or onboarding emails. |
+| Workflows | [`docs/WORKFLOWS.md`](WORKFLOWS.md) | The canonical workflow catalogue: BUILD mode, PATCH mode, the four autofix surfaces (PR Review / TechDebt / CI-failure webhook / Code Review), multi-repo runs, project chat, PR review submission. | When you need a step-by-step of a specific user workflow. |
+| Project user journeys | [`docs/project-user-journeys.md`](project-user-journeys.md) | Project-scoped journeys: create project, link repos, run architecture refresh, project chat, tech-debt fix, code review, share-link invite. | When designing or QA-ing a project-workspace feature. |
+| User journeys | [`docs/user-journeys.md`](user-journeys.md) | Non-project journeys: anonymous landing, register, first run, upgrade, billing change, account close. | When designing or QA-ing the unauthenticated and solo-user surfaces. |
 
-## Catalog formats
+## 4. Auth + Enterprise
 
-| Path | Read when |
-|---|---|
-| [`migration-recipes-catalog-format.md`](migration-recipes-catalog-format.md) | Authoring or validating a migration recipe (the schema for `migration_recipe` entries). |
-| [`readymades-catalog-format.md`](readymades-catalog-format.md) | Authoring or validating a readymade solution (`readymade_solution` schema). |
+The plumbing that gates everything, plus the contracts that wrap an enterprise sale.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| RBAC | [`docs/RBAC.md`](RBAC.md) | The seven roles, the access-guard ladder, `AccessGuardCoverageTest` pin, cross-org `ProjectMember` semantics, the V198 per-org `org.external_sharing_enabled` flag, the legacy-drift ledger. | Before adding a new controller method or relaxing an existing guard. |
+| SSO / SAML wiring | [`docs/sso-saml-wiring.md`](sso-saml-wiring.md) | How enterprise customers connect Okta / Azure AD / Google Workspace, IdP-initiated vs SP-initiated flow, JIT provisioning, and how SAML coexists with the OAuth2 (Google + GitHub) surface. | When wiring a new SSO customer or debugging a SAML callback. |
+| DPA flow | [`docs/dpa-flow.md`](dpa-flow.md) | The data-processing-agreement signing flow, what's in the DPA, who can countersign, where the signed copy lands, retention terms. | When an enterprise prospect asks for a DPA. |
+| Enterprise one-pager | [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) | The single-page enterprise pitch — what's in the tier, what's not, what the customer gets at signing, BYOK cost-cap exemption, dedicated support hours. | When sending the first enterprise reply or building a quote. |
+| Enterprise SLA | [`docs/enterprise-sla.md`](enterprise-sla.md) | The contractual SLA: uptime, support hours, response targets, credit-back math, force-majeure carve-outs. Numbers must match `operations/slos.md`. | Before signing or negotiating an enterprise contract. |
+| Cookie domain switch | [`docs/cookie-domain-switch.md`](cookie-domain-switch.md) | How the JWT + refresh cookie domain flips between `localhost` (dev), `dev.executespec.ai` (staging), and `executespec.ai` (prod), and what breaks when it's wrong. | When auth works in one environment but not another. |
 
-## Frontend
+## 5. Billing
 
-| Path | Read when |
-|---|---|
-| [`frontend-api-usage.md`](frontend-api-usage.md) | Auditing which frontend file consumes which backend endpoint. Cross-checked by ArchUnit `ApiContractTest`. |
-| [`design/code-style.md`](design/code-style.md) | Resolving an eslint/spotless complaint or wanting to know the documented deviations (`D-J1` wildcards, `D-T1` default exports for `*.tsx`, etc.). |
-| [`design/ui-tokens.md`](design/ui-tokens.md) | Adding or changing a colour / typography token; the canonical Graphite + Signal palette + the 4-band score colour scale. |
+Two operational guides for the money plumbing. Both are short by design.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| Payment history | [`docs/payment-history.md`](payment-history.md) | The org-scoped payment-history surface — what columns exist, how it joins Razorpay and Stripe events, what's queryable from `/api/billing/payment-history`. | When reconciling invoices or debugging a missing payment. |
+| Stripe price-ID ops | [`docs/stripe-price-ids-ops.md`](stripe-price-ids-ops.md) | The operational mapping between Stripe price IDs (`STRIPE_TEAM_MONTHLY_PRICE_ID`, `STRIPE_ENTERPRISE_PRICE_ID`, etc.) and the in-app pricing rows, plus how to rotate a price without breaking renewals. | Before creating, retiring, or rotating a Stripe price. |
 
-## API surface
+## 6. Catalog formats
 
-| Path | Read when |
-|---|---|
-| [`openapi.yaml`](openapi.yaml) | Machine-readable OpenAPI definition of the public REST surface. |
-| [`JAVADOC.md`](JAVADOC.md) | Curated rich Javadoc on the headline classes. Last comprehensive refresh predates several recent waves — treat as historical context unless the section is dated. |
+Two YAML/Markdown catalogue schemas that ship with the product. Both are loaded at boot and validated.
 
----
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| Readymades catalog format | [`docs/readymades-catalog-format.md`](readymades-catalog-format.md) | The on-disk schema for the "readymade" spec templates — YAML front matter, required keys, validation rules, how the loader resolves them. | When adding a new readymade or fixing one that won't load. |
+| Migration recipes catalog format | [`docs/migration-recipes-catalog-format.md`](migration-recipes-catalog-format.md) | The on-disk schema for migration-recipe spec templates — separate from readymades, used for guided framework / library migrations. | When adding a migration recipe (Spring Boot 2 to 3, JUnit 4 to 5, etc.). |
 
-## Per-package CLAUDE.md (code-adjacent context)
+## 7. Frontend
 
-These live under `src/main/java/com/navneet/executespec/<pkg>/CLAUDE.md` and serve as code-adjacent context for an LLM (or human) navigating that package. They are not part of the user-facing documentation set but are kept in sync with the code in the same PR as the change.
+The frontend has its own conventions because the two coexisting chromes (V2 sidebar shell, V3 top-bar shell) share Zustand stores. Read all three before touching `frontend/src/`.
 
-Present today:
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| Frontend API usage | [`docs/frontend-api-usage.md`](frontend-api-usage.md) | The frontend's API client conventions — where `frontend/src/lib/api.ts` lives, how SSE tokens are minted, how the two chrome surfaces share Zustand stores, error-boundary patterns. | Before adding a new endpoint call from the frontend. |
+| Code style | [`docs/design/code-style.md`](design/code-style.md) | Frontend code-style commitments — file layout, naming, prop-shape conventions, when to reach for a hook vs a store, mobile-first rules. | Before writing a new React component. |
+| UI tokens | [`docs/design/ui-tokens.md`](design/ui-tokens.md) | The design-token surface — Tailwind tokens, color ramps, spacing scale, radius scale, the V2 vs V3 chrome differences, a11y minima. | Before introducing a new color, spacing, or radius. |
 
-| Path | Covers |
-|---|---|
-| [`../src/main/java/com/navneet/executespec/agent/CLAUDE.md`](../src/main/java/com/navneet/executespec/agent/CLAUDE.md) | Agents, `LlmRouter`, prompt assembler, tier map, patterns. |
-| [`../src/main/java/com/navneet/executespec/codereview/CLAUDE.md`](../src/main/java/com/navneet/executespec/codereview/CLAUDE.md) | `CodeReviewAgent` + autofix Phase 4. |
-| [`../src/main/java/com/navneet/executespec/deployment/CLAUDE.md`](../src/main/java/com/navneet/executespec/deployment/CLAUDE.md) | Cloud Run + Cloud Build + Artifact Registry deploy paths + preview engine. |
-| [`../src/main/java/com/navneet/executespec/harness/CLAUDE.md`](../src/main/java/com/navneet/executespec/harness/CLAUDE.md) | `SequentialExecutor`, `GateStore`, tier configs. |
-| [`../src/main/java/com/navneet/executespec/prreview/CLAUDE.md`](../src/main/java/com/navneet/executespec/prreview/CLAUDE.md) | `PrReviewAgent` + autofix Phase 1. |
-| [`../src/main/java/com/navneet/executespec/router/CLAUDE.md`](../src/main/java/com/navneet/executespec/router/CLAUDE.md) | `ModelRegistry`, `ModelResolver`, adaptive routing. |
-| [`../src/main/java/com/navneet/executespec/sharing/CLAUDE.md`](../src/main/java/com/navneet/executespec/sharing/CLAUDE.md) | Cross-org invites + public share links. |
-| [`../src/main/java/com/navneet/executespec/state/CLAUDE.md`](../src/main/java/com/navneet/executespec/state/CLAUDE.md) | `StateStore`, `PipelineRun`, `AgentTask`, migration trail. |
-| [`../src/main/java/com/navneet/executespec/validator/CLAUDE.md`](../src/main/java/com/navneet/executespec/validator/CLAUDE.md) | Validation v3 strict-mode requirement graph. |
+## 8. API surface
 
-There is also a root [`../CLAUDE.md`](../CLAUDE.md) (project-wide context) and a [`../frontend/CLAUDE.md`](../frontend/CLAUDE.md) (frontend context). These are intentionally kept terse and refreshed with every PR; they are the live operational handbook for working in this tree.
+| Doc | Path | What | When to read |
+| --- | --- | --- | --- |
+| Javadoc | [`docs/JAVADOC.md`](JAVADOC.md) | The generated-style API reference — every public class with package, role, key methods. **Known stale** since v2.4.0 (2026-04-14); subsequent deltas live in `ARCHITECTURE.md`, `CODEMAP.md`, and per-package `CLAUDE.md`. Rewriting `JAVADOC.md` is queued but not blocking. | When you need a class-level signature reference. Cross-check against `ARCHITECTURE.md` and `CODEMAP.md` for anything younger than v2.4.0. |
 
 ---
 
-## What's no longer here (historical)
+## Common starting points by task
 
-- `docs/audits/` removed — point-in-time audit reports were superseded by source-of-truth in `CLAUDE.md` and `ARCHITECTURE.md`.
-- `docs/plans/` consolidated into the per-feature thread of `CLAUDE.md` + per-package CLAUDE.md files; standalone planning docs no longer live here.
-- `docs/reports/` removed — short-lived investigation reports are kept in commit messages and PR descriptions instead.
+Use this as a cheat-sheet when you know what you're trying to do but not which doc to open. All paths are relative to the repo root.
 
-If you need an old version of any of these, the git history retains the deleted files.
+| You're trying to... | Start here | Then read |
+| --- | --- | --- |
+| Run the app locally for the first time | `README.md` | `docs/operations/local-test-playbook.md` |
+| Understand the V2 pipeline before touching `agent/` or `harness/` | `docs/ARCHITECTURE.md` | `docs/CODEMAP.md` (for the relevant package) |
+| Add a new REST endpoint | `docs/RBAC.md` | `docs/frontend-api-usage.md` |
+| Add a new frontend screen | `docs/design/code-style.md` | `docs/design/ui-tokens.md`, `docs/frontend-api-usage.md` |
+| Wire a new SSO customer | `docs/sso-saml-wiring.md` | `docs/RBAC.md`, `docs/cookie-domain-switch.md` |
+| Quote or contract an enterprise sale | `docs/enterprise-one-pager.md` | `docs/enterprise-sla.md`, `docs/dpa-flow.md` |
+| Debug a billing event | `docs/payment-history.md` | `docs/stripe-price-ids-ops.md` |
+| Add a readymade or migration recipe | `docs/readymades-catalog-format.md` or `docs/migration-recipes-catalog-format.md` | — |
+| Ship to prod or rollback | `docs/DEPLOYMENT.md` | `docs/operations/slos.md`, `docs/status-page.md` |
+| Look up a class signature | `docs/JAVADOC.md` (caveat: stale post-v2.4.0) | `docs/CODEMAP.md`, then per-package `CLAUDE.md` |
 
 ---
 
-## Doc-refresh rule
+## Documents intentionally omitted from this map
 
-Standing rule from 2026-04-25: every commit must keep documentation in lockstep with code. Before staging files for any commit, walk this checklist:
+- **Audit reports** under `docs/audits/` (line-by-line reviews, migration-and-library verification dumps) and **dated UX assessments** under `docs/design/` (mobile-UX audits, redesign drafts) are point-in-time artefacts. They are kept in git history for traceability but are not re-indexed here once the action items are merged.
+- **`docs/plans/pending.md`** is the operational truth for in-flight tracks (hierarchical planner, SWE-bench adapter, ProgramBench wire-in, V2 batch execution). It's volatile by design and lives outside this map so the map can stay stable across PRs.
+- **`docs/reports/*`** (model-mapping audits, matrix-tracking dumps) is tooling output, not curated docs.
 
-1. Root [`../CLAUDE.md`](../CLAUDE.md) — if architecture / API contracts / file locations / agent tiers change.
-2. Per-package `CLAUDE.md` — if entities, repository methods, agents, or migrations change in that package.
-3. [`CODEMAP.md`](CODEMAP.md) — if top-level packages, entities, agents, or DB migrations are added/removed.
-4. [`document_map.md`](document_map.md) — if a doc is added or removed under `docs/`.
-5. [`../README.md`](../README.md) — if a user-visible feature, env var, or build step changes.
-6. [`design/*`](design/) — if tokens / theming / a11y commitments change.
-7. Migration trail — every new `Vxxx__*.sql` cross-linked from the touching package + entity row.
-
-Trivial typo fixes may carry `skip doc-refresh: trivial typo` in the commit message. Everything else ships the doc-refresh in the same commit as the code, not a follow-up.
+If you need any of those, look in git history — they were last touched on the audit-review branches.
