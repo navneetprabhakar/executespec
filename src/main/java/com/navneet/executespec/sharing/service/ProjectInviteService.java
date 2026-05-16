@@ -9,10 +9,14 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
+import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgMemberRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
@@ -64,6 +68,8 @@ public class ProjectInviteService {
   private final ProjectMemberRepository memberRepo;
   private final AppUserRepository userRepo;
   private final TierConfigRepository tierConfigRepo;
+  private final OrgRepository orgRepo;
+  private final OrgMemberRepository orgMemberRepo;
   private final MailService mailService;
 
   /** Public-facing base URL — used to build accept-invite links in the email body. */
@@ -73,13 +79,31 @@ public class ProjectInviteService {
   // ── Tier gating ──────────────────────────────────────────────────────────
 
   /**
-   * Validate that the inviter's tier permits external invites. Same shape as the other {@code
-   * assertTierAndQuota} methods so a future quota knob can be added in one place.
+   * Validate that the inviter is allowed to create an external invite. Three gates, in order of
+   * specificity (cheapest first):
+   *
+   * <ol>
+   *   <li><b>Tier gate</b> — must be on PRO+ tier. Same as before V198.
+   *   <li><b>Role gate (V198, 2026-05-16)</b> — only SUPER_ADMIN globally or ORG_ADMIN of the
+   *       inviting org may create external invites. Project-level admins (PROJECT_ADMIN) are not
+   *       sufficient — adding outsiders to a project is an org-level decision because the outsider
+   *       sees code / runs / cost that belongs to the org.
+   *   <li><b>Org-flag gate (V198)</b> — the inviter's org must have {@code external_sharing_enabled
+   *       = true}. Default is false; SUPER_ADMIN or the org's own ORG_ADMIN can flip this via
+   *       {@code PUT /api/org} (see {@link com.navneet.executespec.auth.controller.OrgController}).
+   * </ol>
+   *
+   * <p>SUPER_ADMIN bypasses both the role and org-flag gates — useful for support/ops who need to
+   * provision a cross-org collaborator without the org admin needing to flip the flag first.
    */
   void assertCanInvite(AppUser inviter, String projectId) {
     if (inviter == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
+    boolean isSuperAdmin = "SUPER_ADMIN".equals(inviter.getGlobalRole());
+    // Tier check still applies even for SUPER_ADMIN's own org — but SUPER_ADMIN
+    // acting on behalf of any org is rare and intentional, so we keep the gate
+    // strict and rely on operator judgement.
     String tier = inviter.getTier();
     if (tier == null || !PAID_TIERS.contains(tier.toUpperCase())) {
       throw new ResponseStatusException(
@@ -90,7 +114,36 @@ public class ProjectInviteService {
     if (cfg.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tier config not found");
     }
-    // Future: per-tier monthly invite cap. Today: paid tier is enough.
+
+    if (isSuperAdmin) {
+      // SUPER_ADMIN bypasses role + org-flag — handled centrally by ops/support.
+      return;
+    }
+
+    // Role gate — only the inviter's ORG_ADMIN row in their own org may invite.
+    // orgRole lives on OrgMember (not AppUser); look it up here.
+    String orgId = inviter.getOrgId();
+    if (orgId == null) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Only an org admin can invite external collaborators. You aren't a member of any org.");
+    }
+    OrgMember membership = orgMemberRepo.findByOrgIdAndUserId(orgId, inviter.getId()).orElse(null);
+    if (membership == null || !"ORG_ADMIN".equals(membership.getOrgRole())) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Only an org admin can invite external collaborators. Ask your org admin to send the"
+              + " invite.");
+    }
+
+    // Org-flag gate — the inviter's org must have external sharing enabled.
+    Org org = orgRepo.findById(orgId).orElse(null);
+    if (org == null || !org.isExternalSharingEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "External sharing is disabled for your org. Enable it in Org Settings → External sharing"
+              + " before sending invites.");
+    }
   }
 
   // ── Public entry ─────────────────────────────────────────────────────────

@@ -25,6 +25,11 @@ public class ProjectArchitectureController {
   private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
   private final ArchitectureDiffService diffService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  // 2026-05-16 — Browse-tab file-fetch endpoints below need the per-repo
+  // entity (for the github slug + default branch) and the GitHub client
+  // (for the actual list + read calls).
+  private final com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
+  private final com.navneet.executespec.repo.GitHubRepoService github;
 
   public record ArchDocDto(
       UUID id, Integer version, String content, String userAnnotations, Instant generatedAt) {
@@ -190,5 +195,86 @@ public class ProjectArchitectureController {
         .latestRepoArch(projectId, repoId)
         .map(d -> ResponseEntity.ok(RepoArchDto.from(d)))
         .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
+  // ─── 2026-05-16 — file-browse endpoints for Project → Code → Browse ────────
+  //
+  // The Browse tab now shows actual file content, not codemap-derived
+  // metadata. Two endpoints back it:
+  //
+  //   GET /api/projects/{projectId}/repos/{repoId}/files
+  //     → list every path in the repo (via the GitHub Trees API). Returns
+  //       the same data CodeMapGenerator already fetches; we surface it
+  //       directly so the UI doesn't need to wait for a codemap regenerate
+  //       to render the file tree.
+  //
+  //   GET /api/projects/{projectId}/repos/{repoId}/file?path=<rel>
+  //     → return the raw text content of one file. Uses the caller's
+  //       per-user PAT (preferred) or falls back to the system PAT,
+  //       same resolution order as the planner / worker use elsewhere.
+  //
+  // Both go through ProjectAccessGuard so cross-org reads are blocked at
+  // the same line every other project-scoped endpoint uses.
+
+  public record RepoFileListDto(String repoFullName, String defaultBranch, List<String> files) {}
+
+  @GetMapping("/api/projects/{projectId}/repos/{repoId}/files")
+  public ResponseEntity<RepoFileListDto> listRepoFiles(
+      @PathVariable String projectId,
+      @PathVariable UUID repoId,
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    var repo =
+        projectRepoRepo
+            .findById(repoId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
+    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    String slug = repo.getGithubRepoFullName();
+    String branch = repo.getDefaultBranch();
+    List<String> files;
+    try {
+      files = github.listRepoFiles("https://github.com/" + slug, branch, pat);
+    } catch (Exception e) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_GATEWAY, "GitHub list failed: " + e.getMessage());
+    }
+    return ResponseEntity.ok(new RepoFileListDto(slug, branch, files));
+  }
+
+  public record RepoFileDto(
+      String repoFullName, String defaultBranch, String path, String content, int sizeBytes) {}
+
+  @GetMapping("/api/projects/{projectId}/repos/{repoId}/file")
+  public ResponseEntity<RepoFileDto> readRepoFile(
+      @PathVariable String projectId,
+      @PathVariable UUID repoId,
+      @org.springframework.web.bind.annotation.RequestParam("path") String path,
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // Path-traversal guard — even though `path` ends up as a relative segment
+    // in the GitHub contents URL (server-side dereferenced), normalise + reject
+    // any `..` so a misguided caller can't probe sibling repos via clever paths.
+    if (path == null || path.isBlank() || path.contains("..") || path.startsWith("/")) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file path");
+    }
+    var repo =
+        projectRepoRepo
+            .findById(repoId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
+    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    String slug = repo.getGithubRepoFullName();
+    String branch = repo.getDefaultBranch();
+    String content = github.readRepoFile("https://github.com/" + slug, path, branch, pat);
+    // Defensive size cap — repos with massive generated SQL dumps or vendored
+    // bundles shouldn't drag the chat thread. 1 MB matches what the worker's
+    // tool dispatcher already enforces.
+    int bytes = content == null ? 0 : content.length();
+    if (bytes > 1_000_000) {
+      content =
+          content.substring(0, 1_000_000) + "\n\n// … (truncated; file exceeds 1 MB display cap)";
+    }
+    return ResponseEntity.ok(new RepoFileDto(slug, branch, path, content, bytes));
   }
 }

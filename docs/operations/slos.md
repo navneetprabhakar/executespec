@@ -1,223 +1,240 @@
-# Service-Level Objectives (SLOs)
+# Service Level Objectives
 
-> **Created:** 2026-05-06.
-> **Last reviewed:** 2026-05-12 (1.0.0-M1).
-> **Status:** PROPOSED — alert rules + Grafana dashboard land alongside the
-> on-call rotation in the next pass.
-> **Audience:** founding eng team + incoming on-call rotation.
+Every SLO listed here is wired to a metric registered in code. Metrics that
+exist but are not yet attached to an SLO are listed in section 4 as
+"unobjectived inventory" so they can be promoted when targets are agreed.
 
-These are the production health targets ExecuteSpec commits to. Each SLO
-has a clearly stated indicator (the metric we measure), a target (the
-acceptable level over a 30-day rolling window), an alert threshold (when
-we page someone), and an owner.
+Scrape path: `GET /actuator/prometheus`, scraped every 15s by
+`observability/prometheus.yml`. Spring Boot exposes the four-endpoint allowlist
+`health, info, metrics, prometheus` (see `application.yml`):
 
-The bar: **all 5 SLOs must be GREEN over 30 consecutive days before
-GA cutover** (per §11 of the GA-readiness plan).
-
----
-
-## SLO 1 — Run reaches a terminal status within 15 minutes
-
-**Why.** A run stuck in `WORKING` / `REVIEWING` past 15 minutes is a
-poor customer experience and almost always indicates a JVM crash, an
-LLM timeout cascade, or a stuck plan-approval gate. Hierarchical
-planner LARGE-band timeout is 20 minutes, so we set the SLO at 15
-minutes which is still safely above the 95% historical p95.
-
-**Indicator.** Of all `pipeline_run` rows that started in the window,
-percent that reached a terminal status (`COMPLETE` / `PARTIAL` /
-`FAILED` / `CANCELLED`) within 15 minutes of `started_at`.
-
-```sql
--- Run this query on a 7-day rolling window for the SLO calc.
-SELECT
-  100.0 * SUM(CASE WHEN ended_at IS NOT NULL
-                   AND ended_at - started_at <= INTERVAL '15 minutes'
-                   THEN 1 ELSE 0 END)
-        / COUNT(*) AS pct_within_15min
-FROM pipeline_run
-WHERE started_at >= NOW() - INTERVAL '7 days'
-  AND status IN ('COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED');
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  tracing:
+    sampling:
+      probability: 1.0
+  observations:
+    annotations:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.request.duration: true
+        spring.ai.chat.client.duration: true
+    tags:
+      application: executespec
+      environment: local      # prod overrides to "prod", dev to "dev"
 ```
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 95% over 30d rolling |
-| **Stretch (post-GA)** | ≥ 99.5% |
-
-**Alert.** Page on-call when 3 consecutive 1h windows fall below 90%.
-Dashboard: `executespec-slos.json` panel "Run terminal in <15min".
-
-**Metric source.** `pipeline_run.ended_at` (DB) +
-`executespec.v2.run.latency` Prometheus histogram.
-
-**Owner.** Backend/AI lead.
+The `percentiles-histogram` flags above are what let Prometheus compute the
+`p50/p95/p99` latency panels in
+`observability/grafana/dashboards/jvm-http-overview.json` and
+`executespec-overview.json` — without them, the Spring Boot Counter/Timer
+wouldn't emit a `_bucket` series for `histogram_quantile()`.
 
 ---
 
-## SLO 2 — Verified score reflects true delivery
+## 1. SLO inventory
 
-**Why.** Audit Risk #1 (catastrophic): if the dashboard shows 45/100
-on working code, customers churn. After the P1.1 + P1.2 fixes, we
-need confidence the score is now anchored on real signals.
+| # | SLO statement | Target | Backing metric(s) | Window |
+| - | --- | --- | --- | --- |
+| 1 | A submitted run reaches a terminal status (`COMPLETE`, `PARTIAL`, `FAILED`, `CANCELLED`) within 15 minutes for at least 95% of runs. | >= 95% | `executespec.v2.run.latency{overall}` (Timer, histogram) | rolling 7 days |
+| 2 | The reported `verifiedScore` matches the underlying signals — multiplicative `baseAccuracy x buildOK x testRatio x reviewerMultiplier - criticalPenalty` is computed and persisted; no NULL `verifiedScore` rows for terminal runs. | >= 90% non-null | `executespec.v2.run.outcome{overall=COMPLETE|PARTIAL}` x DB query `SELECT count(*) FROM pipeline_run WHERE status IN (...) AND verified_score IS NULL` | rolling 30 days |
+| 3 | Cost estimate accuracy: 80% of completed runs land within 30% of the planner-estimated buffered cost (`actualCostUsd` vs `costEstimateHigh`). | >= 80% | `executespec.v2.planner.latency{classification,provider,model}` for the estimate side; DB column `pipeline_run.actual_cost_usd` for the actual. Composed at report time, no live metric. | rolling 30 days |
+| 4 | Webhook ingestion (`POST /webhooks/github`, `POST /api/webhooks/{stripe,razorpay}`) completes server-side processing within 60s. | >= 99% | `http.server.requests{uri=~"/webhooks/.*"}` Timer (Spring AutoConfig) | rolling 7 days |
+| 5 | Hot-path 5xx rate on customer-facing API (`/api/runs/**`, `/api/projects/**`, `/api/auth/**`) stays below 0.5%. | < 0.5% | `http.server.requests{status=~"5..", uri=~"/api/(runs|projects|auth).*"}` / total | rolling 1 day |
 
-**Indicator.** On a weekly random-sample audit of 10 COMPLETE runs,
-what fraction of `verifiedScore` values fall within ±10 points of the
-human-graded score (manual review by the on-call engineer).
-
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 90% (i.e. ≥ 9 of 10 in agreement) |
-| **Stretch** | ≥ 95% |
-
-**Process.** Friday afternoon — engineer pulls 10 random runs from
-the past week, walks the validation report + the actual diff in
-GitHub, scores 0-100 by hand. Disagreements logged; recurring
-disagreement patterns drive a follow-up to the formula.
-
-**Alert.** No automatic alert (manual process); track in a `metrics`
-sheet shared with the team.
-
-**Metric source.** Manual + `validation_report.verified_score`.
-
-**Owner.** Backend/AI lead.
+These five are the published gates. Sections 2-4 expand on each, then list the
+metrics that exist in code but aren't yet attached to a target.
 
 ---
 
-## SLO 3 — Cost estimate vs actual within 30%
+## 2. SLO details
 
-**Why.** Audit Risk #6 (medium-high): customers will dispute a $20
-charge if the pre-approval estimate said $5. The 2026-04-19 estimator
-recalibration closed the gap from −42% to a documented band; we
-need to confirm it stays there.
+### SLO 1 — Run terminal latency
 
-**Indicator.** Per row in `run_cost_log` (which logs estimate +
-actual at run-end), percent where `|actual - estimate| / estimate <=
-0.30`.
+The `RunOrchestrator` records run start/end on the `Metrics` facade
+(`src/main/java/com/navneet/executespec/observability/Metrics.java`):
 
-```sql
-SELECT
-  100.0 * SUM(CASE WHEN ABS(actual_cost_usd - estimated_cost_usd)
-                          / NULLIF(estimated_cost_usd, 0) <= 0.30
-                   THEN 1 ELSE 0 END)
-        / COUNT(*) AS pct_within_30pct_band
-FROM run_cost_log
-WHERE created_at >= NOW() - INTERVAL '7 days';
+```java
+void recordRunLatency(String overall, Duration elapsed);  // executespec.v2.run.latency{overall=...}
+void recordRunOutcome(String overall);                    // executespec.v2.run.outcome{overall=...}
 ```
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 80% within ±30% |
-| **Stretch** | ≥ 90% |
+With `management.metrics.distribution.percentiles-histogram` enabled for the
+HTTP path and the Micrometer Timer DSL, we get a `_bucket` series suitable for
+`histogram_quantile(0.95, sum by (le) (rate(executespec_v2_run_latency_seconds_bucket[5m])))`.
 
-**Alert.** Page when more than 20% of runs in any rolling 24h window
-are >50% off (either direction).
+Caveat: the Grafana panel "Run Duration (p50/p95/p99)" in
+`executespec-overview.json` actually queries
+`executespec_run_duration_seconds_bucket`, not `executespec_v2_run_latency_*`.
+The dashboard pre-dates the V2 rename. Either the panel needs a query update
+or the V2 Timer needs a no-namespace alias before this SLO can be charted from
+the existing dashboard.
 
-**Metric source.** `run_cost_log` (DB).
+### SLO 2 — Verified-score correctness
 
-**Owner.** Backend/AI lead.
+The score is computed in `scoring/` and persisted on the `validation_report`
+table. `Metrics.recordReviewerVerdict(verdict)` fires per-run so we can rate
+the verdict distribution, but there is no Timer measuring the score's
+correctness directly — correctness has to be measured against the spec via the
+strict eval harness (`scripts/v2-eval-strict.sh`) and the resulting JSON,
+which carries both `accuracyScore` (legacy LLM-judged) and `verifiedScore`
+(the multiplicative product).
 
----
+Operational signal: a count of terminal runs with `verified_score IS NULL`
+indicates a scoring pipeline regression. There is no Prometheus query for this
+today — it's a DB-only signal.
 
-## SLO 4 — Webhook processed within 60 seconds
+### SLO 3 — Cost estimation accuracy
 
-**Why.** GitHub PR webhooks drive the merge-status update + the
-post-merge cascade banner. Razorpay/Stripe webhooks drive subscription
-state. A webhook delayed > 60s leaves customers staring at stale UI
-and risks billing-state desync.
+The planner-side estimate is recorded as Timer + token-count metrics:
 
-**Indicator.** Per row in `webhook_event` (V147 hash chain audit
-log), percent where `processed_at - received_at <= 60s`.
+```java
+recordPlannerLatency(classification, provider, model, elapsed)
+recordPlannerTaskCount(classification, tasks)
+```
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 99% |
-| **Stretch** | ≥ 99.9% |
+The actual cost lives on `pipeline_run.actual_cost_usd`, populated by
+`RunCostTracker` (`cost/RunCostTracker.java`). The estimate band lives on
+`cost_estimate_low` / `cost_estimate_high`. The 30%-of-estimate-high
+comparison is done at report-rendering time, not at scrape time — so this SLO
+is observed via offline rollups (the V2 eval scripts) rather than continuous
+Prometheus alerting.
 
-**Alert.** Page when any single webhook takes > 5 minutes (real lag,
-not just slow), OR when the 99% target slips below 95% in a 1h window.
+### SLO 4 — Webhook latency
 
-**Metric source.** `webhook_event` (DB) + `executespec.v2.webhook.*`
-meters.
+Spring Boot's autoconfigured `http.server.requests` Timer covers every HTTP
+endpoint (because the Actuator + Micrometer autoconfig wires it in). With the
+`uri` label intact, we can extract:
 
-**Owner.** Full-stack lead.
+```
+histogram_quantile(0.99,
+  sum by (le, uri) (rate(http_server_requests_seconds_bucket{uri=~"/webhooks/.*"}[5m]))
+)
+```
 
----
+The actual handlers (`GithubWebhookController`, `StripeWebhookController`,
+`RazorpayWebhookController`) all sign-verify in-line and persist to
+`webhook_event_log`. None of them spin off long async work on the request
+thread — the latency budget is fundamentally bounded by signature verification
++ a single DB insert.
 
-## SLO 5 — Hot-path 5xx rate stays below 0.5%
+### SLO 5 — Hot-path 5xx rate
 
-**Why.** "Just keep the lights on." A page rendering `/projects/{id}/dashboard`
-that 500s makes the product look broken regardless of what the agent
-is doing.
-
-**Indicator.** Per Prometheus `http_server_requests_seconds_count`
-filtered to:
-- Method: `GET` (read paths only — POST/PUT/DELETE have legitimate
-  user-input-driven errors that we don't count toward this SLO).
-- URI: in the hot-path allowlist (`/api/projects/*/dashboard`,
-  `/api/runs/*`, `/api/runs/*/report`, `/api/billing/plans`,
-  `/api/billing/status`, `/api/auth/me/permissions`).
-- Status: 5xx vs 2xx ratio.
-
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | < 0.5% over 30d rolling |
-| **Stretch** | < 0.1% |
-
-**Alert.** Page on > 2% sustained for 10 minutes.
-
-**Metric source.** Prometheus `http_server_requests_seconds_count` +
-Spring Boot Actuator.
-
-**Owner.** Backend/AI lead.
-
----
-
-## Burn-down rules
-
-1. Track each SLO on a 30d rolling window. Mark each day RED / AMBER /
-   GREEN based on the alert thresholds above.
-2. Two consecutive RED days on any SLO → file an incident, post in
-   `#exec-spec-eng`, schedule a fix in the current sprint.
-3. Three consecutive RED weeks → SLO becomes a sprint blocker until
-   GREEN-trajectory restored.
-4. Stretch targets are aspirational; missing them is not an incident,
-   but they drive the post-GA SLO ratchet.
-
-## SLO ownership matrix
-
-| SLO | Owner | Backup |
-| --- | ----- | ------ |
-| 1 — Run terminal in 15min | Backend/AI lead | Founder |
-| 2 — Verified score correct | Backend/AI lead | Frontend lead |
-| 3 — Cost estimate within 30% | Backend/AI lead | Founder |
-| 4 — Webhook in 60s | Full-stack lead | Backend/AI lead |
-| 5 — Hot-path 5xx < 0.5% | Backend/AI lead | Founder |
-
-## What's NOT an SLO yet
-
-- LLM provider success rate (depends on Anthropic / OpenAI / Gemini —
-  we'd need to commit to a target we can't actually control).
-- Frontend bundle size (a build-time concern, not runtime SLO).
-- TTFB / Core Web Vitals (worthy goals; track separately on the
-  marketing site, not the app).
-- Semgrep static-analysis runtime (best-effort — graceful degradation
-  is the contract, see `codereview/SemgrepRunner`).
-
-These may be promoted to SLOs post-GA once we have baseline data.
+`http.server.requests` carries the `status` label. The `ValidationAdvice`
+(`src/main/java/com/navneet/executespec/api/advice/ValidationAdvice.java`) and
+`GlobalExceptionAdvice` translate the common 4xx/5xx classes to canonical
+envelopes, so a real 500 only fires when an unhandled `Throwable` reaches
+`GlobalExceptionAdvice.onAny(Throwable)` and stamps an `errorId` UUID. That
+gives us a clean way to scope this SLO to "unhandled" 5xx — count 500s with
+the `error.handler` tag set to `GlobalExceptionAdvice` (the
+`management.observations.annotations.enabled: true` flag picks up the
+`@Observed` annotation on the handler).
 
 ---
 
-## Alert rules — to be added in `observability/grafana/alerts/`
+## 3. Custom metric inventory
 
-Each SLO above will spawn a corresponding YAML rule in the Grafana
-config. This file is the canonical source — the alert YAML is
-generated/maintained to match. P4.2-followup: wire each rule + page
-target (PagerDuty integration key TBD; ops to confirm pricing tier).
+All V2 pipeline metrics are registered via the facade
+`observability/Metrics.java`. The namespace constant is `NS = "executespec.v2."`,
+so each method below maps to a Micrometer metric name with that prefix and the
+tags listed.
 
-## Customer-facing rollup
+| Java method | Prometheus name | Tags | Type |
+| --- | --- | --- | --- |
+| `recordRunOutcome(overall)` | `executespec.v2.run.outcome` | `overall` (COMPLETE / PARTIAL / FAILED / CANCELLED) | Counter |
+| `recordRunLatency(overall, elapsed)` | `executespec.v2.run.latency` | `overall` | Timer (histogram) |
+| `recordPlannerLatency(classification, provider, model, elapsed)` | `executespec.v2.planner.latency` | `classification, provider, model` | Timer |
+| `recordPlannerTaskCount(classification, tasks)` | `executespec.v2.planner.tasks` | `classification` | DistributionSummary |
+| `recordTaskStatus(status)` | `executespec.v2.task.status` | `status` | Counter |
+| `recordTaskLatency(status, elapsed)` | `executespec.v2.task.latency` | `status` | Timer |
+| `recordSmokeTest(result)` | `executespec.v2.task.smoketest` | `result` (PASSED / FAILED / TIMEOUT / SKIPPED) | Counter |
+| `recordWorkerIterations(outcome, provider, model, iterations)` | `executespec.v2.worker.iterations` | `outcome, provider, model` | DistributionSummary |
+| `recordWorkerOutcome(outcome, provider, model)` | `executespec.v2.worker.outcome` | `outcome, provider, model` | Counter |
+| `recordToolCall(tool)` | `executespec.v2.worker.toolcall` | `tool` (readFile / writeFile / editFile / shell / buildProject / runTests / completeTask / ...) | Counter |
+| `recordLlmLatency(provider, model, outcome, elapsed)` | `executespec.v2.llm.latency` | `provider, model, outcome` | Timer |
+| `recordKeySource(provider, source)` | `executespec.v2.llm.key_source` | `provider, source` (SYSTEM / OWN_KEYS / HYBRID) | Counter |
+| `recordClassifierVerifier(result)` | `executespec.v2.classifier.verifier.engaged` | `result` | Counter |
+| `recordReviewerVerdict(verdict)` | `executespec.v2.reviewer.verdict` | `verdict` (CLEAN / FIXED_ISSUES / NEEDS_WORK / FAILED) | Counter |
+| `recordContextSave(result, bytes)` | `executespec.v2.context.save` + `executespec.v2.context.save.bytes` | `result` | Counter + DistributionSummary |
 
-A subset of these (1, 4, 5) appears on `status.executespec.ai` (P4.3)
-as up/down/degraded indicators. Customers don't see the actual SLO
-percentage — that's an internal trust commitment. They see "API
-healthy / degraded / outage" derived from the SLO state.
+Other custom metric emitters not on the `Metrics` facade:
+
+| Source | Metric | Use |
+| --- | --- | --- |
+| `compliance/WorkspaceDiskCleanupJob.java` | `executespec.workspace.disk.reaped{category}` | Counter — orphan disk sweep |
+| `compliance/StaleScmCleanupJob.java` | `executespec.scm.cleanup.{closed|deleted|skipped}{kind}` | Counter — stale PR/branch sweep |
+| `compliance/DataRetentionService.java` | `executespec.data.retention.deleted_runs{trigger}` | Counter — GDPR + scheduled retention sweeps |
+| `compliance/DataRetentionService.java` | `executespec.data.retention.deleted_projects{trigger}` | Counter |
+| `ratelimit/RateLimitFilter.java` | `executespec.redis.failopen` | Counter — Redis dropped, fail-open path engaged |
+| `sse/SseBroadcaster.java` | `executespec.sse.emitters.active` | Gauge — currently-attached SSE emitters |
+
+Standard auto-instrumented metrics worth knowing (all under
+`spring.boot.actuator` / Micrometer defaults):
+
+| Metric | Source |
+| --- | --- |
+| `http.server.requests` | Spring MVC autoconfig (Timer w/ histogram, tags `method, status, uri, exception, outcome`) |
+| `jvm.memory.used`, `jvm.memory.max` | JVM binder |
+| `jvm.gc.pause` | JVM binder |
+| `jvm.threads.{live,daemon,peak}` | JVM binder |
+| `hikaricp.connections.{active,idle,pending}`, `hikaricp.connections` | HikariCP binder |
+| `lettuce.command.completion` | Lettuce binder for Redis command latency |
+| `spring.ai.chat.client.duration` | Spring AI autoconfig (per-provider chat call duration, histogram-enabled in `application.yml`) |
+
+The Grafana JVM panel queries `jvm_memory_used_bytes{area="heap"}`,
+`hikaricp_connections_*`, `lettuce_command_completion_seconds_*` — all
+standard names produced by the autoconfig binders, no custom wiring required.
+
+---
+
+## 4. Error-budget gaps (honest list)
+
+These are SLO-shaped statements we could publish but for which the metric or
+the alerting integration isn't fully wired. Listed so they don't go pretending
+they're enforced.
+
+| Gap | What we'd need | Why it's not done |
+| --- | --- | --- |
+| Verified-score correctness alerting | Counter `executespec.scoring.score_null_terminal_total` incremented from `scoring/` when `verifiedScore` lands NULL on a terminal run | The scoring path doesn't increment a metric; correctness is checked offline via `scripts/v2-eval-strict.sh` |
+| Cost-estimate band hit rate | Histogram `executespec.cost.estimate_error_pct` = `(actual - estimate_high) / estimate_high` | Calculated only on report render; not pushed into Micrometer |
+| Stuck-run alerting | Counter `executespec.monitor.stuck_detected` exists; the Grafana panel "Stuck Runs Detected" is wired to `executespec_monitor_stuck_detected_total`. Alert rule not configured. | Prometheus has no `alerting.rules` block; Grafana alerting is set up but no destinations configured (Slack / PagerDuty integrations are present in code but require per-env credentials). |
+| Provider failover rate | Counter `executespec.v2.llm.fallback` would let us track how often the YAML `failover-order` kicks in | `LlmRouter` does not increment a fallback-event counter today — the failover happens silently |
+| Preview / deploy failure rate | `executespec_preview_failures_total`, `executespec_deploy_failures_total` panels exist in the Grafana dashboard; the metric name produced by code is `executespec.preview.failures` (and `executespec.deploy.failures`) but I could not find the Micrometer registration sites in the bucket research, only the dashboard query | Worth a separate audit of `deployment/preview/*` and `deployment/engine/*` for the Counter registration |
+| Container/Cloud Run health-check budget | `UserCloudRunDeployer.healthCheck` retries 5x with `{5,10,15,20,30}s` delays | The result is captured per-deployment in the `Deployment` entity but isn't surfaced as a Counter (`deploy.health_check_outcome`) for fleet-level alerting |
+| Rate-limit fail-open severity | `executespec.redis.failopen` increments but no SLO target | We treat it as a leading indicator: Redis being down for >60s is a P1 ops event, but the alert threshold isn't set |
+
+---
+
+## 5. Where to put alert rules
+
+Prometheus alert rules live under `observability/prometheus.yml`, which today
+only carries `scrape_configs`. To attach an alert to SLO 1 (run terminal
+latency p95 > 15min), the file would gain:
+
+```yaml
+rule_files:
+  - rules.d/*.yml
+
+# observability/rules.d/run-latency.yml
+groups:
+  - name: run-latency
+    rules:
+      - alert: V2RunP95LatencyHigh
+        expr: histogram_quantile(0.95,
+                sum by (le) (rate(executespec_v2_run_latency_seconds_bucket{overall=~"COMPLETE|PARTIAL"}[10m]))
+              ) > 900
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: V2 run latency p95 above 15min for 10min
+```
+
+(No rule files are checked in today — alerting is owned by ops infrastructure
+not represented in this repo.)

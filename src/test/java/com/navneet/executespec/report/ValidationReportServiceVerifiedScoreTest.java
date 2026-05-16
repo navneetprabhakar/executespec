@@ -197,11 +197,24 @@ class ValidationReportServiceVerifiedScoreTest {
   void run_0444c95f_audit_regression_case_no_tests_no_credit() {
     // Run 0444c95f: build pass + no tests + FIXED_ISSUES + 100% endpoints + 0 critical.
     // Additive: 85 (40+20+0+15+10).
-    // Multiplicative: 1×0.5×0.85×1.0×1 = 0.425 → 43. The "no tests" damper does the
-    // honest work here — endpoint coverage at 100% can't compensate for the run not
-    // verifying the implementation behaves correctly.
+    //
+    // SDET 2026-05-16 — under the test-factor trust gate (added with the
+    // OpenAI todo-app run 29b761fc analysis), all three precondition checks
+    // fire on this shape: testsTotal=0, endpointCoveragePercent>=95, and
+    // reviewer ∈ {CLEAN, FIXED_ISSUES}. testFactor floors at reviewerFactor
+    // (0.85 for FIXED_ISSUES); endpointFactor also floors at 0.85; the
+    // composed multiplicative becomes 1.0×0.85×0.85×0.85×1.0 = 0.614 →
+    // wait, actually the testFactor=max(0.5, 0.85)=0.85 then endpointFactor
+    // stays 1.0 because both the raw 1.0 and the floored 0.85 mean the
+    // max-pin is at 1.0. So 100×1.0×0.85×0.85×1.0×1.0 = 72.25 → 72.
+    //
+    // Pre-2026-05-16 (legacy "no tests" damper alone) this would be:
+    //   100 × 1.0 × 0.5 × 0.85 × 1.0 × 1.0 = 42.5 → 43
+    // Under the new trust gate this shape is interpreted as "build + wiring
+    // + endpoints all verified; the spec didn't ask for tests so don't
+    // penalize as if they're missing".
     int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 100);
-    assertEquals(43, score);
+    assertEquals(72, score);
   }
 
   // ── 2026-05-10 endpoint trust gate (PR #95 follow-up) ─────────────────

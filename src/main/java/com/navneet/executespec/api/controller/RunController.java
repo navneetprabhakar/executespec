@@ -111,9 +111,15 @@ public class RunController {
           "Run submissions are temporarily paused for maintenance. Please try again later.");
     }
 
-    // Check quota availability (no increment — credits are charged at plan approval,
-    // after cost estimation determines how many credits this run requires)
-    tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+    // SDET 2026-05-16 (BUG-006) — increment monthly counter at submit-time. The previous
+    // `assertCanSubmitRun` was a non-incrementing probe; combined with
+    // `executionMode=PROTOTYPE+skipApproval=true` which bypasses the plan gate,
+    // the FREE-tier 5-runs/month cap was effectively unenforced (the rate-limiter
+    // alone gated by an N-second window, so a FREE user could submit forever).
+    // `assertAndIncrementRunCount` atomically checks the quota AND increments
+    // the counter under a pessimistic lock (TOCTOU-safe). Refunds happen at
+    // terminal-FAILURE via `decrementRunCount` so a failed run doesn't burn quota.
+    tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
     // Enforce billing usage limits (throws 402 if limit exceeded)
     usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
     // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
@@ -151,7 +157,9 @@ public class RunController {
             req.branch(),
             req.prReviewComments());
 
-    // Run count already incremented atomically in assertAndIncrementRunCount above
+    // Run count incremented atomically inside `assertAndIncrementRunCount` above. The
+    // usageTrackingService increment below tracks the BILLING surface (not the quota counter),
+    // which is independent and used by `assertWithinLimits` for the plan-tier billing limits.
     usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
     // GA-readiness P3.2 — stamp the customer-supplied cost cap onto the new run row so
@@ -634,8 +642,32 @@ public class RunController {
     }
     stateStore.save(run);
     scmPushService.push(run);
+    // SDET 2026-05-16 (BUG-018) — surface push outcome honestly. The previous response was a
+    // hard-coded `{status: "pushed"}` whether or not a PR actually got created. When the user has
+    // no GitHub installation, `scmPushService.push` short-circuits silently — leaving the user
+    // confused because the button reports success but no PR appears anywhere. Reload the run to
+    // see whether a PR URL got populated by the push, then derive `status` + `prUrl` from that.
+    PipelineRun updated = stateStore.findRun(runId).orElse(run);
+    String prUrl =
+        updated.getGithubPrUrl() != null
+            ? updated.getGithubPrUrl()
+            : (updated.getScmPrUrl() != null ? updated.getScmPrUrl() : "");
+    String status = prUrl.isBlank() ? "no_install" : "pushed";
+    String message =
+        prUrl.isBlank()
+            ? "No GitHub installation found for this user. Connect GitHub under Settings →"
+                + " Integrations and retry."
+            : "Pushed and PR opened.";
     return ResponseEntity.ok(
-        Map.of("status", "pushed", "repoUrl", run.getRepoUrl() != null ? run.getRepoUrl() : ""));
+        Map.of(
+            "status",
+            status,
+            "repoUrl",
+            updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
+            "prUrl",
+            prUrl,
+            "message",
+            message));
   }
 
   /**
@@ -665,9 +697,18 @@ public class RunController {
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
     var outcome = runSyncService.sync(runId, branch);
+    // SDET 2026-05-16 (BUG-019) — distinguish "everything synced" from "nothing synced (all
+    // failed)" / "partial sync". The previous response said `status: "synced"` whether or not any
+    // repo actually moved; with `reposSynced=0 + details=[FAILED ...]` the UI happily displayed
+    // a green check even though every clone failed.
+    boolean anyFailed = outcome.details().stream().anyMatch(d -> d.contains("FAILED"));
+    String syncStatus;
+    if (outcome.reposSynced() == 0 && anyFailed) syncStatus = "failed";
+    else if (anyFailed) syncStatus = "partial";
+    else syncStatus = "synced";
     return ResponseEntity.ok(
         Map.of(
-            "status", "synced",
+            "status", syncStatus,
             "reposSynced", outcome.reposSynced(),
             "details", outcome.details()));
   }
@@ -689,9 +730,16 @@ public class RunController {
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
     var outcome = runSyncService.syncToOriginalCommit(runId);
+    // SDET 2026-05-16 (BUG-019) — same outcome aggregation as /sync above so the UI doesn't
+    // surface a misleading success when every repo failed to reset.
+    boolean anyFailed = outcome.details().stream().anyMatch(d -> d.contains("FAILED"));
+    String syncStatus;
+    if (outcome.reposSynced() == 0 && anyFailed) syncStatus = "failed";
+    else if (anyFailed) syncStatus = "partial";
+    else syncStatus = "synced";
     return ResponseEntity.ok(
         Map.of(
-            "status", "synced",
+            "status", syncStatus,
             "reposSynced", outcome.reposSynced(),
             "details", outcome.details()));
   }
@@ -909,7 +957,7 @@ public class RunController {
    * asynchronous.
    */
   @PostMapping("/{runId}/tasks/{taskId}/retry")
-  public ResponseEntity<Void> retryTask(
+  public ResponseEntity<Map<String, Object>> retryTask(
       @PathVariable String runId,
       @PathVariable String taskId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -917,7 +965,21 @@ public class RunController {
     log.info("POST /api/runs/{}/tasks/{}/retry", runId, taskId);
     try {
       v2Orchestrator.retryTask(runId, taskId);
-      return ResponseEntity.accepted().build();
+      // SDET 2026-05-16 (BUG-017) — return a non-empty body so the UI's generic ApiResult parser
+      // can surface a confirmation message instead of "ok!" silence. The 4xx mapping (task not
+      // found → 404, wrong state → 409) was already in place; the empty-202 was the residual
+      // wart that made the SDET probe report ambiguous behaviour.
+      return ResponseEntity.accepted()
+          .body(
+              Map.of(
+                  "status",
+                  "queued",
+                  "runId",
+                  runId,
+                  "taskId",
+                  taskId,
+                  "message",
+                  "Task retry queued — watch the run feed for progress."));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {

@@ -145,9 +145,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setHeader("Retry-After", String.valueOf(resetSeconds));
 
-        objectMapper.writeValue(
-            response.getWriter(),
-            Map.of("error", "Rate limit exceeded", "retryAfterSeconds", resetSeconds));
+        // SDET 2026-05-16 (BUG-007) — emit the canonical 4xx error envelope so the frontend's
+        // generic ApiError parser surfaces the message + retry info instead of falling back to its
+        // catch-all string. Shape matches ValidationAdvice / GlobalExceptionAdvice exactly:
+        // { timestamp, status, error, message, retryAfterSeconds }.
+        objectMapper.writeValue(response.getWriter(), rateLimitedBody(resetSeconds));
         return;
       }
 
@@ -173,9 +175,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         long resetSeconds = 60 - (Instant.now().getEpochSecond() % 60);
         response.setHeader("Retry-After", String.valueOf(resetSeconds));
-        objectMapper.writeValue(
-            response.getWriter(),
-            Map.of("error", "Rate limit exceeded", "retryAfterSeconds", resetSeconds));
+        objectMapper.writeValue(response.getWriter(), rateLimitedBody(resetSeconds));
         return;
       }
     }
@@ -259,6 +259,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
   /** Builds the Redis key for rate limiting: {prefix}{identifier}:{group}:{minuteBucket}. */
   private String buildRateLimitKey(String identifier, String group, long minuteBucket) {
     return RATE_LIMIT_KEY_PREFIX + identifier + ":" + group + ":" + minuteBucket;
+  }
+
+  /**
+   * SDET 2026-05-16 (BUG-007) — canonical 429 envelope shared by the Redis + in-memory fallback
+   * paths so the frontend's error parser handles rate-limit responses identically to any other 4xx.
+   * Order matches {@code ValidationAdvice.baseBody} / {@code GlobalExceptionAdvice.onAny} so any
+   * future tooling that walks the envelope sees the same fields in the same order.
+   */
+  private static Map<String, Object> rateLimitedBody(long retryAfterSeconds) {
+    java.util.LinkedHashMap<String, Object> body = new java.util.LinkedHashMap<>();
+    body.put("timestamp", Instant.now().toString());
+    body.put("status", 429);
+    body.put("error", "rate_limited");
+    body.put("message", "Rate limit exceeded — retry in " + retryAfterSeconds + "s.");
+    body.put("retryAfterSeconds", retryAfterSeconds);
+    return body;
   }
 
   /** Remove local counter entries from previous minute buckets to prevent memory growth. */

@@ -212,6 +212,30 @@ public class OrgController {
             orgId, req.keySourceMode(), req.enabledProviders(), userDetails.getUser().getId()));
   }
 
+  // ── External sharing toggle (V198, 2026-05-16) ───────────────────────────
+
+  record ExternalSharingRequest(boolean enabled) {}
+
+  /**
+   * Enable or disable external project sharing for the caller's org. When false (default), the
+   * {@code POST /api/projects/{id}/invites} endpoint refuses any new invite even from PRO+ org
+   * admins. When true, ORG_ADMIN / SUPER_ADMIN may invite any email (gmail, outlook, etc.) as a
+   * cross-org PROJECT_VIEWER or PROJECT_DEVELOPER on a single project.
+   *
+   * <p>Gated to ORG_ADMIN of the caller's org or SUPER_ADMIN — same as the other compliance-grade
+   * org settings endpoints. The Spring-AOP @PreAuthorize fires before the service even runs.
+   */
+  @PutMapping("/me/settings/external-sharing")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<OrgDto> updateExternalSharing(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestBody ExternalSharingRequest req) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    return ResponseEntity.ok(
+        orgService.updateExternalSharing(orgId, req.enabled(), userDetails.getUser().getId()));
+  }
+
   // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
 
   record OrgAiKeySettingsRequest(

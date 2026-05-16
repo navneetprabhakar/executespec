@@ -1,446 +1,228 @@
-import {useEffect} from 'react';
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
-// Single-surface retirement (2026-05-06) — AppLayout is gone. Every
-// protected route now mounts under v3 <Shell>; admin/finance pages
-// reach via the avatar-menu dropdown.
-import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
+
+// Signal — the only design now. v2/v3/v4 chromes retired 2026-05-15.
+import SignalShell from '@/signal/components/Shell';
+
+// Auth + onboarding
+import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
+import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
+
+// Run loop — each in its own file with default export
+import HomePage from '@/signal/pages/HomePage';
+import AllRunsPage from '@/signal/pages/AllRunsPage';
+import ComposePage from '@/signal/pages/ComposePage';
+import PlanPage from '@/signal/pages/PlanPage';
+import LivePage from '@/signal/pages/LivePage';
+import ResultPage from '@/signal/pages/ResultPage';
+
+// Projects
+import ProjectsPage from '@/signal/pages/ProjectsPage';
+import ProjectPulsePage from '@/signal/pages/project/ProjectPulsePage';
+import ProjectReposPage from '@/signal/pages/project/ProjectReposPage';
+import ProjectRunsPage from '@/signal/pages/project/ProjectRunsPage';
+import ProjectCodePage from '@/signal/pages/project/ProjectCodePage';
+import ProjectChatPage from '@/signal/pages/project/ProjectChatPage';
+import ProjectActivityPage from '@/signal/pages/project/ProjectActivityPage';
+import ProjectMembersPage from '@/signal/pages/project/ProjectMembersPage';
+import ProjectArchitecturePage from '@/signal/pages/project/ProjectArchitecturePage';
+import ProjectSettingsPage from '@/signal/pages/project/ProjectSettingsPage';
+import ProjectComposePage from '@/signal/pages/project/ProjectComposePage';
+
+// Account + billing
+import AccountPage from '@/signal/pages/account/AccountPage';
+import BillingPage from '@/signal/pages/account/BillingPage';
+import PlansPage from '@/signal/pages/account/PlansPage';
+import {
+  TopupPage,
+  IntegrationsPage,
+  ApiKeysPage,
+  OrgMembersPage,
+} from '@/signal/pages/account/MiscAccountPages';
+
+// Cross-cutting + admin
+import {
+  NotificationsPage,
+  SearchPage,
+  MorePage,
+  AdminPage,
+  SharedPage,
+} from '@/signal/pages/MiscPages';
+
+// Extras (Library, Migrations, etc.)
+import {
+  InsightsPage,
+  LibraryPage,
+  LibraryDetailPage,
+  MigrationsPage,
+  MigrationDetailPage,
+  TrustPage,
+  EmptyProjectPage,
+  PublicPricingPage,
+  ForgotPasswordPage,
+  ResetPasswordPage,
+  AcceptInvitePage,
+  AuditLogPage,
+  DeploymentsPage,
+  SpecTemplatesPage,
+} from '@/signal/pages/ExtraPages';
+import {TermsPage, PrivacyPage, DpaPage, OrgSettingsPage} from '@/signal/pages/LegalPages';
 
 /**
- * R-342 — single redirect handler for every legacy `/v3/*` URL.
- *
- * Before R-342 the v3-shell surfaces lived at `/v3/{home,settings,
- * library,migrations,p/:slug,...}`.  Unification dropped the `/v3/`
- * prefix; this component maps any `/v3/X` request to its new
- * unified URL and Navigate-replaces.  Existing bookmarks, email
- * deep-links, marketing copy + shared run URLs keep working.
- *
- * Path remapping rules (most-specific first):
- *   /projects/empty           → /projects/empty
- *   /projects/:slug/runs/:run    → /projects/:slug/runs/:run
- *   /projects/:slug           → /projects/:slug
- *   /claim              → /claim
- *   /           → /
- *   /home              → /home
- *   /v3/X                 → /X
+ * Legacy URL redirects so old bookmarks + marketing links keep working.
+ * Every removed v2/v3/v4 path collapses to its Signal equivalent.
  */
-function LegacyUrlRedirect() {
+function LegacyRedirect() {
   const location = useLocation();
-  let path = location.pathname.replace(/^\/v3/, '');
-  // /projects/empty → /projects/empty (must come before the catch-all
-  // /projects/ rule since `empty` is a literal segment, not a slug).
+  let path = location.pathname;
+  // /signal/* prefix dropped — the app IS Signal now
+  if (path.startsWith('/signal/')) path = path.replace(/^\/signal/, '');
+  // v3-era prefixes
+  path = path.replace(/^\/v3/, '');
   path = path.replace(/^\/p\/empty\b/, '/projects/empty');
-  // /projects/:slug/runs/:runShort → /projects/:slug/runs/:runShort
   path = path.replace(/^\/p\/([^/]+)\/r\//, '/projects/$1/runs/');
-  // /projects/:slug → /projects/:slug (catch-all for the project root).
   path = path.replace(/^\/p\//, '/projects/');
-  // /claim → /claim (the post-signup spec-claim screen renamed).
-  if (path === '/auth') path = '/claim';
-  // / folded into root (the marketing site is the landing).
-  if (path === '/landing') path = '/';
-  // Empty path → /home so the dispatcher fires.
-  if (path === '' || path === '/') path = '/home';
+  // Executions (v3 launch system) is currently being rebuilt — collapse any
+  // legacy /projects/:id/executions/* link to the project Compose tab so
+  // bookmarks don't 404. The redirect-only behaviour is intentional and
+  // documented in the gap report (P0 #3).
+  path = path.replace(/^\/projects\/([^/]+)\/executions(\/.*)?$/, '/projects/$1');
+  // v2 routes folded into Signal equivalents
+  if (path === '/dashboard') path = '/insights';
+  if (path === '/legacy/billing') path = '/billing';
+  if (path === '/exec' || path === '/exec-demo') path = '/insights';
+  if (path === '/accounting' || path === '/invoices') path = '/billing';
+  if (path === '/team') path = '/org-members';
+  if (path === '/org/projects') path = '/projects';
+  // /org/settings now has a real page (SSO + standards + profile) — no redirect needed.
+  if (path === '/governance/audit') path = '/audit';
+  if (path === '/runs/new') path = '/compose';
+  if (path === '/runs/new/sandbox') path = '/welcome';
+  if (
+    path === '/admin/analytics' ||
+    path === '/admin/pricing' ||
+    path === '/admin/feature-flags' ||
+    path === '/admin/tiers' ||
+    path === '/admin/model-rates'
+  )
+    path = '/admin';
+  if (path === '/claim') path = '/welcome';
+  if (path === '/landing' || path === '') path = '/home';
   return <Navigate to={path + location.search + location.hash} replace />;
 }
 
-/**
- * 2026-05-09 — `/projects/:projectId/dashboard` legacy redirect that
- * preserves the caller's query string. Replaces the previous
- * `<Navigate to="..?tab=pulse">` which hard-stripped any query the
- * caller had passed.
- *
- * Six call sites in the codebase navigate to `/dashboard?tab=...`
- * (PostMergeBar, InlineRunDetail, RunDetail, OrgProjectsPage,
- * RepoContextPanel "Open Architecture →", PrReviewButton). Pre-fix
- * all six landed on Pulse regardless of intent — the "Open
- * Architecture" link being the most visible offender ("does
- * nothing" from the user's POV).
- *
- * Strategy: forward `location.search` onto the canonical
- * `/projects/:id` URL. If the caller didn't supply a `tab=`,
- * default to `pulse` so dashboard-intent users (the V2 muscle
- * memory) still land on the dense inspection view.
- */
-function ProjectDashboardRedirect() {
-  const location = useLocation();
-  const sp = new URLSearchParams(location.search);
-  if (!sp.has('tab')) sp.set('tab', 'pulse');
-  const search = sp.toString();
-  return (
-    <Navigate to={`..${search ? '?' + search : ''}${location.hash}`} replace relative='path' />
-  );
-}
-
-// Main app pages
-// Single-surface retirement (2026-05-06) — RunsPage deleted. The flat
-// run list across all projects belonged to the v2 sidebar surface;
-// users now navigate runs through their project home or the per-
-// project Launches list inside ProjectDashboardPage. /runs redirects
-// to /home (HomeRedirectPage dispatches to first project).
-import ExecSummaryPage from '@/pages/ExecSummaryPage';
-import PricingPage from '@/pages/PricingPage';
-// Tier-coherence: PlansPage + BillingPage no longer mounted — v2 routes
-// `/plans` + `/billing` redirect to /pricing + /billing.
-import IntegrationsPage from '@/pages/IntegrationsPage';
-import SettingsPage from '@/pages/SettingsPage';
-
-// Auth pages (public)
-import LoginPage from '@/pages/auth/LoginPage';
-import RegisterPage from '@/pages/auth/RegisterPage';
-import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
-import ResetPasswordPage from '@/pages/auth/ResetPasswordPage';
-import VerifyEmailPage from '@/pages/auth/VerifyEmailPage';
-import AcceptInvitePage from '@/pages/auth/AcceptInvitePage';
-import AuthCallbackPage from '@/pages/auth/AuthCallbackPage';
-
-// Org pages
-import OrgSettingsPage from '@/pages/org/OrgSettingsPage';
-import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
-
-// Project pages (pilot v3.0)
-import ProjectDashboardPage from '@/pages/project/ProjectDashboardPage';
-// R-201 (Wave 4) — ProjectsListPage import removed; /projects now hard-redirects to /home.
-// import ProjectsListPage from '@/pages/project/ProjectsListPage';
-import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
-
-// Admin pages
-import AdminPage from '@/pages/admin/AdminPage';
-import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
-// [F-14] (audit Sprint 1 PR-1) — Placeholder pattern retired.
-// Admin sub-pages now mount their actual components directly under v3 URLs;
-// the AppLayout sidebar wrapper from ProtectedRoute keeps the chrome
-// consistent with /admin and /admin/feature-flags which always rendered live.
-import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
-import TeamMemberDashboard from '@/pages/admin/TeamMemberDashboard';
-import PricingManager from '@/pages/admin/PricingManager';
-import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
-
-// Audit page
-import AuditPage from '@/pages/AuditPage';
-
-// Finance pages
-import InvoicesPage from '@/pages/InvoicesPage';
-import AccountingPage from '@/pages/AccountingPage';
-
-// Deploy page
-import DeploymentsPage from '@/pages/DeploymentsPage';
-
-// Public pages
-import SharedReportPage from '@/pages/SharedReportPage';
-import SharedProjectPage from '@/pages/SharedProjectPage';
-import TermsPage from '@/pages/TermsPage';
-import PrivacyPage from '@/pages/PrivacyPage';
-import DpaPage from '@/pages/DpaPage';
-
-// Wave 2.2 — onboarding
-import WelcomePage from '@/pages/onboarding/WelcomePage';
-import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
-
-// v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
-// touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
-// Single-surface retirement (2026-05-06): the v3-vs-v2 split is gone;
-// this is the only chrome now. ProjectHomePage was deleted — its
-// chat-thread + composer is the default `Compose` tab inside
-// ProjectDashboardPage now.
-import Shell from '@/v3/components/Shell';
-import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
-// R-341 (2026-04-29): LandingPage route converted to a Navigate redirect
-// to root (the static marketing site at executespec.ai is now the
-// canonical public landing surface).  The component file stays in the
-// codebase so direct deep-links + e2e tests keep their reference, but
-// it no longer mounts as a user-facing page.
-// import LandingPage from '@/v3/pages/LandingPage';
-import AuthPage from '@/v3/pages/AuthPage';
-// Single-surface retirement (2026-05-06): ProjectHomePage deleted.
-// Its chat-thread + composer is now the default `Compose` tab inside
-// ProjectDashboardPage. /projects/:projectId mounts the unified page.
-import RunDetailPage from '@/v3/pages/RunDetailPage';
-import BillingPage from '@/v3/pages/BillingPage';
-import TeamPage from '@/v3/pages/TeamPage';
-import TrustPage from '@/v3/pages/TrustPage';
-import InsightsPage from '@/v3/pages/InsightsPage';
-// 2026-05-06 — restored flat /runs page for individual / FREE users who
-// don't have access to the Project Shell. See RunsListPage.tsx header.
-import RunsListPage from '@/v3/pages/RunsListPage';
-import RunsNewPage from '@/v3/pages/RunsNewPage';
-// R-340 — Migrations product W5 frontend (gallery + detail).
-import MigrationsPage from '@/v3/pages/MigrationsPage';
-import MigrationDetailPage from '@/v3/pages/MigrationDetailPage';
-// R-330 — Readymade Solutions library W4 frontend (gallery + detail).
-import LibraryPage from '@/v3/pages/LibraryPage';
-import LibraryDetailPage from '@/v3/pages/LibraryDetailPage';
-// R-342 (2026-04-29): OptInGate removed — unification of v2/v3 URLs
-// supersedes the opt-in dance.  The component file is kept as a stub so
-// the import path doesn't break for any external test harnesses, but
-// no route uses it anymore.
-// import OptInGate from '@/v3/components/OptInGate';
-// Selling-point #6 — public anonymized /exec snapshot for the
-// PgM/CFO conversion path. Public, no auth, share-link-able.
-import ExecDemoPage from '@/v3/pages/ExecDemoPage';
-import EmptyProjectPage from '@/v3/pages/EmptyProjectPage';
-// R-201 — Wave 4. "Coming to v3" placeholder for v2 admin routes whose
-// v3 equivalent hasn't shipped yet (per cohabitation invariant in
-// docs/strict-ux-thread-handoff.md §8 — surface-not-allowed renders
-// an evaluate-then-commit panel, not 404).
-// [F-14] Placeholder import removed; component file kept as a stub
-// in case external test harnesses still reference it (parallel to the
-// OptInGate pattern from R-342).
-
-import {useAuthStore} from '@/stores/useAuthStore';
-import {useKeyboardScroll} from '@/hooks/useKeyboardScroll';
-import {initAnalytics, identify, page, reset as resetAnalytics} from '@/lib/analytics';
-
 export default function App() {
-  const {loadMe, user} = useAuthStore();
-
-  // iOS Safari: scroll focused input into view when soft keyboard opens
-  useKeyboardScroll();
-
-  useEffect(() => {
-    // Wave 2.1 — initialize PostHog once. Safe no-op when VITE_POSTHOG_API_KEY
-    // is unset.
-    initAnalytics();
-    // Try to restore session from access_token or refresh cookie on mount
-    loadMe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Wave 2.1 — identify once the user record resolves; reset on logout.
-  useEffect(() => {
-    if (user?.id) {
-      identify(user.id, {
-        tier: user.tier,
-        orgId: user.orgId ?? null,
-        orgRole: user.orgRole ?? null,
-        viewMode: user.viewMode ?? null,
-      });
-    } else {
-      resetAnalytics();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.tier, user?.orgId]);
-
-  // Wave 2.1 — lightweight pageview tracking. Routes are controlled by
-  // react-router; re-trigger on path changes via location.pathname.
-  useEffect(() => {
-    page(window.location.pathname);
-    const handler = () => page(window.location.pathname);
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
-  }, []);
-
   return (
-    <>
-      {/* [A-01] (audit Sprint 4, 2026-05-01) — Skip to main content link.
-          WCAG 2.4.1 (Bypass Blocks, Level A). Renders as the first
-          focusable element on every page; visually hidden until focused
-          (Tab from the URL bar) so it doesn't disturb the visual design.
-          Both Shell <main> and AppLayout <main> use #main as the
-          jump target. */}
-      <a
-        href='#main'
-        className='skip-link'
-        style={{
-          position: 'absolute',
-          top: 8,
-          left: 8,
-          zIndex: 100,
-          padding: '8px 16px',
-          background: 'var(--accent-blue, #5B8DEF)',
-          color: '#fff',
-          borderRadius: 6,
-          fontWeight: 600,
-          fontSize: 14,
-          textDecoration: 'none',
-          // Visually hide until focused — standard "skip-link" pattern.
-          transform: 'translateY(-200%)',
-          transition: 'transform 0.15s ease',
-        }}
-        onFocus={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.transform = 'translateY(-200%)';
-        }}
-      >
-        Skip to main content
-      </a>
-      <Routes>
-        {/* ── Public auth routes ── */}
-        <Route path='/login' element={<LoginPage />} />
-        <Route path='/register' element={<RegisterPage />} />
-        <Route path='/forgot-password' element={<ForgotPasswordPage />} />
-        <Route path='/reset-password' element={<ResetPasswordPage />} />
-        <Route path='/verify-email' element={<VerifyEmailPage />} />
-        <Route path='/accept-invite' element={<AcceptInvitePage />} />
-        <Route path='/auth/callback' element={<AuthCallbackPage />} />
+    <Routes>
+      {/* ───── Public auth ───── */}
+      <Route path='/login' element={<LoginPage />} />
+      <Route path='/register' element={<SignupPage />} />
+      <Route path='/signup' element={<SignupPage />} />
+      <Route path='/verify' element={<VerifyPage />} />
+      <Route path='/verify-email' element={<VerifyPage />} />
+      <Route path='/forgot-password' element={<ForgotPasswordPage />} />
+      <Route path='/reset-password' element={<ResetPasswordPage />} />
+      <Route path='/accept-invite' element={<AcceptInvitePage />} />
+      <Route path='/auth/callback' element={<AuthCallbackPage />} />
 
-        {/* ── Public shared pages ── */}
-        <Route path='/reports/shared/:shareToken' element={<SharedReportPage />} />
-        {/* X-13 (UX audit, 2026-05-03) — read-only project snapshot share.
-            Frontend-only stub; the backend endpoint
-            GET /api/projects/snapshot/{token} is not yet implemented. The
-            page renders a "coming soon" notice until it lands, so the URL
-            pattern is reserved + bookmarkable from day one. See
-            docs/audits/enterprise-ux-2026-05-03.md (X-13). */}
-        <Route path='/projects/snapshot/:token' element={<SharedProjectPage />} />
+      {/* ───── Public marketing / legal ───── */}
+      <Route path='/welcome' element={<WelcomePage />} />
+      <Route path='/pricing' element={<PublicPricingPage />} />
+      <Route path='/trust' element={<TrustPage />} />
+      <Route path='/terms' element={<TermsPage />} />
+      <Route path='/privacy' element={<PrivacyPage />} />
+      <Route path='/dpa' element={<DpaPage />} />
+      <Route path='/shared/:token' element={<SharedPage />} />
+      <Route path='/reports/shared/:token' element={<SharedPage />} />
+      <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
-        {/* ── Public legal pages ── */}
-        <Route path='/terms' element={<TermsPage />} />
-        <Route path='/privacy' element={<PrivacyPage />} />
-        <Route path='/dpa' element={<DpaPage />} />
+      {/* ───── Protected app ───── */}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<SignalShell />}>
+          {/* Default + run loop */}
+          <Route path='/' element={<Navigate to='/home' replace />} />
+          <Route path='/home' element={<HomePage />} />
+          <Route path='/runs' element={<AllRunsPage />} />
+          <Route path='/compose' element={<ComposePage />} />
+          <Route path='/plan' element={<PlanPage />} />
+          <Route path='/plan/:runId' element={<PlanPage />} />
+          <Route path='/live' element={<LivePage />} />
+          <Route path='/live/:runId' element={<LivePage />} />
+          <Route path='/result' element={<ResultPage />} />
+          <Route path='/result/:runId' element={<ResultPage />} />
+          <Route path='/runs/:runShort' element={<ResultPage />} />
 
-        {/* ── Greenfield surfaces — clean URLs without the /v3/ prefix ──
-          R-342 (2026-04-29): unified the URL surface.  The Shell-wrapped
-          routes (top-bar layout) used to live under `/v3/*`; now they
-          live at root paths.  Where v2 had a competing route on the same
-          URL (settings, billing, integrations, pricing), the v3
-          implementation wins — v2 versions of those pages are dropped
-          from the protected block below.  v2-only admin surfaces (audit,
-          accounting, deployments, invoices, exec, admin/*) keep their
-          AppLayout sidebar and stay reachable.
-
-          Every `/v3/*` URL still routes via the `<LegacyUrlRedirect>`
-          catch-all below so existing bookmarks, marketing copy, email
-          deep-links, and shared run URLs keep working. */}
-        <Route element={<Shell />}>
-          {/* Single-surface retirement (2026-05-06) — `/projects/:projectId`
-              is the canonical project URL. It mounts ProjectDashboardPage
-              with the new `Compose` tab as default (chat-thread +
-              composer, formerly the v3 ProjectHomePage). The `empty`
-              route MUST come first so the catch-all doesn't 404 on
-              /api/projects/empty. The legacy `/projects/:projectId/dashboard`
-              URL (mounted further down inside ProtectedRoute) redirects
-              here so old bookmarks survive. */}
+          {/* Projects */}
+          <Route path='/projects' element={<ProjectsPage />} />
           <Route path='/projects/empty' element={<EmptyProjectPage />} />
-          <Route path='/projects/:projectId/runs/:runShort' element={<RunDetailPage />} />
-          {/* 2026-05-06 — flat run-detail route for unlinked runs (FREE
-              users without a Project Shell, runs created before a project
-              was attached). RunDetailPage handles a missing projectId by
-              hiding the breadcrumb / back-to-project link; everything
-              else (status header, file tree, diff, side panel) renders
-              from runId alone. Without this, /runs (RunsListPage) had to
-              forward unlinked rows to /projects/empty?run=... which fell
-              into the EmptyProjectPage and dropped the runId silently. */}
-          <Route path='/runs/:runShort' element={<RunDetailPage />} />
-          <Route path='/settings' element={<SettingsPage />} />
-          {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — full
-              key-management surface (GitHub PAT, AI provider keys, Bitbucket,
-              JIRA, Confluence). SettingsPage is a read-only summary; this is
-              the actual form page. Deep-linkable via `#github`, `#api-keys`,
-              `#bitbucket`, `#jira`, `#confluence`. */}
-          <Route path='/settings/manage' element={<SettingsPage />} />
+          {/* Compose is the default landing for projects — matches v3/dev. Pulse
+              lives at the explicit /pulse path. Old bookmarks of /projects/:id
+              come straight here. */}
+          <Route path='/projects/:projectId' element={<ProjectComposePage />} />
+          <Route path='/projects/:projectId/pulse' element={<ProjectPulsePage />} />
+          <Route path='/projects/:projectId/repos' element={<ProjectReposPage />} />
+          <Route path='/projects/:projectId/runs' element={<ProjectRunsPage />} />
+          <Route path='/projects/:projectId/runs/:runShort' element={<ResultPage />} />
+          <Route path='/projects/:projectId/code' element={<ProjectCodePage />} />
+          <Route path='/projects/:projectId/chat' element={<ProjectChatPage />} />
+          <Route path='/projects/:projectId/activity' element={<ProjectActivityPage />} />
+          <Route path='/projects/:projectId/members' element={<ProjectMembersPage />} />
+          <Route path='/projects/:projectId/architecture' element={<ProjectArchitecturePage />} />
+          <Route path='/projects/:projectId/settings' element={<ProjectSettingsPage />} />
+
+          {/* Account + billing */}
+          <Route path='/account' element={<AccountPage />} />
+          <Route path='/settings' element={<AccountPage />} />
+          <Route path='/settings/manage' element={<AccountPage />} />
           <Route path='/billing' element={<BillingPage />} />
-          <Route path='/pricing' element={<PricingPage />} />
+          <Route path='/plans' element={<PlansPage />} />
+          <Route path='/topup' element={<TopupPage />} />
           <Route path='/integrations' element={<IntegrationsPage />} />
-          <Route path='/team' element={<TeamPage />} />
-          <Route path='/trust' element={<TrustPage />} />
+          <Route path='/api-keys' element={<ApiKeysPage />} />
+          <Route path='/org-members' element={<OrgMembersPage />} />
+          <Route path='/org/settings' element={<OrgSettingsPage />} />
+
+          {/* Discover */}
           <Route path='/insights' element={<InsightsPage />} />
-          {/* R-340 — Migrations product gallery + detail. */}
-          <Route path='/migrations' element={<MigrationsPage />} />
-          <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
-          {/* R-330 — Readymade Solutions library gallery + detail. */}
           <Route path='/library' element={<LibraryPage />} />
           <Route path='/library/:slug' element={<LibraryDetailPage />} />
-          {/* Selling-point #6 — public exec snapshot. No auth required. */}
-          <Route path='/exec-demo' element={<ExecDemoPage />} />
-          {/* HomeRedirectPage — the silent dispatcher.  /home for users
-            who deep-link to it; the bare `/` is handled by ProtectedRoute
-            (anon → /login) + the protected index Route below (authed →
-            HomeRedirectPage dispatches to /projects/{first} or /projects/empty). */}
-          <Route path='/home' element={<HomeRedirectPage />} />
-          {/* Post-signup spec-claim screen (was /claim). */}
-          <Route path='/claim' element={<AuthPage />} />
+          <Route path='/migrations' element={<MigrationsPage />} />
+          <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
+          <Route path='/templates' element={<SpecTemplatesPage />} />
+          <Route path='/audit' element={<AuditLogPage />} />
+          <Route path='/deployments' element={<DeploymentsPage />} />
+
+          {/* System */}
+          <Route path='/notifications' element={<NotificationsPage />} />
+          <Route path='/search' element={<SearchPage />} />
+          <Route path='/more' element={<MorePage />} />
+          <Route path='/admin' element={<AdminPage />} />
+          <Route path='/admin/*' element={<AdminPage />} />
         </Route>
+      </Route>
 
-        {/* Legacy /v3/* paths — redirect to the unified URLs.  Single
-          catch-all keeps existing bookmarks + marketing copy working. */}
-        <Route path='/v3/*' element={<LegacyUrlRedirect />} />
+      {/* Legacy URL catchers — collapse to canonical equivalents */}
+      <Route path='/v3/*' element={<LegacyRedirect />} />
+      <Route path='/v4/*' element={<LegacyRedirect />} />
+      <Route path='/signal/*' element={<LegacyRedirect />} />
+      <Route path='/p/*' element={<LegacyRedirect />} />
+      <Route path='/dashboard' element={<LegacyRedirect />} />
+      <Route path='/legacy/billing' element={<LegacyRedirect />} />
+      <Route path='/exec' element={<LegacyRedirect />} />
+      <Route path='/exec-demo' element={<LegacyRedirect />} />
+      <Route path='/accounting' element={<LegacyRedirect />} />
+      <Route path='/invoices' element={<LegacyRedirect />} />
+      <Route path='/team' element={<LegacyRedirect />} />
+      <Route path='/team/:userId' element={<LegacyRedirect />} />
+      <Route path='/org/*' element={<LegacyRedirect />} />
+      <Route path='/governance/audit' element={<LegacyRedirect />} />
+      <Route path='/runs/new' element={<LegacyRedirect />} />
+      <Route path='/runs/new/sandbox' element={<LegacyRedirect />} />
+      <Route path='/claim' element={<LegacyRedirect />} />
+      <Route path='/landing' element={<LegacyRedirect />} />
 
-        {/* ── Protected app routes ──
-         * Single-surface retirement (2026-05-06) — every protected
-         * route now mounts under <Shell> (the v3 top-bar chrome).
-         * AppLayout is gone; the sidebar/Header/v2-CommandPalette
-         * are deleted. The avatar dropdown surfaces every admin /
-         * finance page that previously lived under the sidebar
-         * (Insights, Audit log, Invoices, Accounting, Executive
-         * summary, Admin home, Feature flags, Tier lifecycle). */}
-        <Route element={<ProtectedRoute />}>
-          {/* Welcome/onboarding stays chrome-free (no Shell wrapper)
-              so the first-paint hero owns the full viewport. */}
-          <Route path='welcome' element={<WelcomePage />} />
-
-          <Route element={<Shell />}>
-            {/* 2026-05-07 — `/runs/new` is now a real page (was a redirect
-                to /home → first project, which forced FREE / no-project
-                users into a project shell they didn't have). Renders the
-                v3 Composer with an optional project picker; project-less
-                submissions land in /runs and redirect to /runs/{id} for
-                the live planner view. */}
-            <Route path='runs/new' element={<RunsNewPage />} />
-            <Route path='runs/new/sandbox' element={<RunsNewLanding />} />
-            {/* /legacy/billing — soft landing for grandfathered PRO
-                subscribers whose tier-state-changed email links here. */}
-            <Route path='legacy/billing' element={<Navigate to='/billing' replace />} />
-            <Route index element={<Navigate to='/home' replace />} />
-            {/* 2026-05-06 — /runs restored as a flat list page (was a
-                redirect to /home after the v2 RunsPage deletion). FREE
-                users have no access to the Project Shell's Launches
-                tab (gated to ENTERPRISE/MAX), so without this page
-                they had no way to view the runs they'd already
-                submitted. The endpoint /api/runs is NOT tier-gated —
-                it filters by RunVisibilitySpec on the backend. */}
-            <Route path='runs' element={<RunsListPage />} />
-            <Route path='dashboard' element={<Navigate to='/insights' replace />} />
-            <Route path='plans' element={<Navigate to='/pricing' replace />} />
-            <Route path='admin/model-rates' element={<PricingPage />} />
-
-            {/* Admin / finance surfaces — same pages as before, now
-                rendered under v3 chrome instead of the deleted
-                AppLayout sidebar. */}
-            <Route path='invoices' element={<InvoicesPage />} />
-            <Route path='accounting' element={<AccountingPage />} />
-            <Route path='audit' element={<AuditPage />} />
-            <Route path='governance/audit' element={<Navigate to='/audit' replace />} />
-            <Route path='deployments' element={<DeploymentsPage />} />
-            <Route path='exec' element={<ExecSummaryPage />} />
-
-            {/* Org pages */}
-            <Route path='org/settings' element={<OrgSettingsPage />} />
-            <Route path='org/projects' element={<OrgProjectsPage />} />
-            <Route path='projects' element={<Navigate to='/home' replace />} />
-            {/* Single-surface retirement (2026-05-06) — `/projects/:projectId`
-                is the canonical project URL. Mounts ProjectDashboardPage
-                with the new `compose` tab as default (chat-thread +
-                composer, formerly the deleted v3 ProjectHomePage). */}
-            <Route path='projects/:projectId' element={<ProjectDashboardPage />} />
-            {/* Back-compat: the old `/dashboard` URL redirects to the
-                canonical one. We default to `?tab=pulse` so users with
-                explicit dashboard intent keep landing on the dense
-                inspection view they wanted. */}
-            <Route path='projects/:projectId/dashboard' element={<ProjectDashboardRedirect />} />
-            <Route
-              path='projects/:projectId/activity'
-              element={<Navigate to='..?tab=pulse&drawer=activity' replace relative='path' />}
-            />
-            <Route path='projects/:projectId/executions/new' element={<ExecutionViewPage />} />
-            <Route
-              path='projects/:projectId/executions/:executionId'
-              element={<ExecutionViewPage />}
-            />
-
-            {/* Admin */}
-            <Route path='admin' element={<AdminPage />} />
-            <Route path='admin/analytics' element={<OrgAdminDashboard />} />
-            <Route path='team/:userId' element={<TeamMemberDashboard />} />
-            <Route path='admin/pricing' element={<PricingManager />} />
-            <Route path='admin/feature-flags' element={<FeatureFlagsPage />} />
-            <Route path='admin/tiers' element={<TierLifecyclePage />} />
-            <Route path='admin/*' element={<AdminPage />} />
-
-            <Route path='*' element={<Navigate to='/' replace />} />
-          </Route>
-        </Route>
-      </Routes>
-    </>
+      {/* Catch-all */}
+      <Route path='*' element={<Navigate to='/home' replace />} />
+    </Routes>
   );
 }
