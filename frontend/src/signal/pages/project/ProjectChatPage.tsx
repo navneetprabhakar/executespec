@@ -37,11 +37,16 @@ export default function ProjectChatPage() {
     let cancelled = false;
     let memTimer: number | undefined;
     api
-      .getProjectChatInfo(id)
-      .then((c) => {
+      .getProjectChatHistory(id)
+      .then((rows) => {
         if (cancelled) return;
-        const cAny = c as unknown as {messages?: ChatMsg[]};
-        if (cAny?.messages) setMessages(cAny.messages);
+        setMessages(
+          rows.map((r) => ({
+            role: r.role === 'USER' ? 'user' : 'assistant',
+            content: r.content,
+            ts: r.createdAt,
+          })),
+        );
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -49,7 +54,6 @@ export default function ProjectChatPage() {
         if (/403|forbidden|Team or Enterprise/i.test(msg)) {
           setChatGated(true);
         }
-        // Otherwise swallow — chat may still be usable even if /info fails.
       });
     function refreshMemory() {
       api
@@ -190,7 +194,7 @@ export default function ProjectChatPage() {
           </>
         }
       />
-      <Feed padBottom={140}>
+      <Feed padBottom={24}>
         <ProjectTabs active='chat' />
 
         {err && (
@@ -324,25 +328,33 @@ export default function ProjectChatPage() {
           )}
           <div ref={tail} />
         </div>
+      </Feed>
 
-        {/* Composer pinned to the bottom of the Feed via sticky positioning.
-            Previously this was position:absolute, which broke when the
-            page got long enough to scroll — the bar overlapped the message
-            list and the user couldn't see what they were typing. Sticky
-            keeps it in normal flow + glued to the viewport bottom while
-            scrolling within the Feed. */}
+      {/* Composer is rendered OUTSIDE the Feed as a flex-sibling of the Feed
+          inside .signal-content (which is a flex column). This pins the
+          composer to the bottom of the chat panel deterministically — sticky
+          inside the scrollable Feed broke when an assistant bubble was tall
+          enough to extend past the scrollport, leaving the composer floating
+          mid-screen with content visible above AND below it. */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: '12px 20px',
+          background: 'var(--signal-bg)',
+          borderTop: '1px solid var(--signal-hairline)',
+          display: 'flex',
+          gap: 8,
+          alignItems: 'flex-end',
+        }}
+      >
         <div
           style={{
-            position: 'sticky',
-            bottom: 0,
-            marginTop: 16,
-            padding: '12px 0',
-            background: 'var(--signal-bg)',
-            borderTop: '1px solid var(--signal-hairline)',
+            maxWidth: 960,
+            margin: '0 auto',
             display: 'flex',
             gap: 8,
+            flex: 1,
             alignItems: 'flex-end',
-            zIndex: 25,
           }}
         >
           <textarea
@@ -405,7 +417,7 @@ export default function ProjectChatPage() {
             </svg>
           </button>
         </div>
-      </Feed>
+      </div>
 
       <ConfirmModal
         open={confirmClear}

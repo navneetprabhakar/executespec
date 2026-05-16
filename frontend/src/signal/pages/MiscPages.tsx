@@ -1,6 +1,6 @@
 import {ReactNode, useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {TopBar, TabBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
+import {TopBar, TabBar, SectionHeader} from '@/signal/components/Chrome';
 import {
   Feed,
   Row,
@@ -93,9 +93,9 @@ export function NotificationsPage() {
         back
         backTo='/home'
         actions={
-          <IconButton ariaLabel='Mark all read' onClick={readAll}>
-            <Settings size={18} />
-          </IconButton>
+          <Button kind='ghost' sm onClick={readAll} disabled={unreadCount === 0}>
+            Mark all read
+          </Button>
         }
       />
       <Feed>
