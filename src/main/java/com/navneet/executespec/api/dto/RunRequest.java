@@ -23,20 +23,16 @@ public record RunRequest(
      * docs and several external scripts historically used that name (adversarial-test-report
      * Finding 17).
      */
-    @NotBlank(message = "User request must not be blank")
-        @Size(max = 50_000, message = "User request must not exceed 50,000 characters")
-        @JsonAlias({"requirement", "spec"})
+    @NotBlank(message = "User request must not be blank") @Size(max = 50_000, message = "User request must not exceed 50,000 characters") @JsonAlias({"requirement", "spec"})
         String userRequest,
     /** "MANUAL" | "GITHUB_NEW" | "GITHUB_EXISTING" */
-    @Pattern(regexp = "MANUAL|GITHUB_NEW|GITHUB_EXISTING|REST", message = "Invalid source")
-        String source,
+    @Pattern(regexp = "MANUAL|GITHUB_NEW|GITHUB_EXISTING|REST", message = "Invalid source") String source,
     /**
      * HTTPS URL of an existing repo (optional). Restricted to HTTPS against the major SCM hosts so
      * the harness can't be tricked into fetching from the cloud-metadata endpoint, localhost, or a
      * {@code file://} URI. Closes adversarial-test-report Finding 7.
      */
-    @Size(max = 500, message = "Repo URL must not exceed 500 characters")
-        @Pattern(
+    @Size(max = 500, message = "Repo URL must not exceed 500 characters") @Pattern(
             regexp =
                 "^$|^https://(github\\.com|gitlab\\.com|bitbucket\\.org|[a-zA-Z0-9.-]+\\.githubusercontent\\.com)/.+$",
             message =
@@ -49,16 +45,14 @@ public record RunRequest(
     /** When true, automatically approve the merge gate without human review. */
     Boolean autoMerge,
     /** "PROTOTYPE" | "PRODUCTION" (default). Controls speed-vs-quality tradeoffs. */
-    @Pattern(regexp = "PROTOTYPE|PRODUCTION", message = "Invalid executionMode")
-        String executionMode,
+    @Pattern(regexp = "PROTOTYPE|PRODUCTION", message = "Invalid executionMode") String executionMode,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
     @Size(max = 100, message = "Model name must not exceed 100 characters") String modelName,
     /**
      * Optional AI provider override for this run. v2.5.13 — enum renamed GOOGLE → GEMINI; legacy
      * GOOGLE still accepted.
      */
-    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider")
-        String aiProvider,
+    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider") String aiProvider,
     /** Optional project ID to associate this run with (org members only). */
     @Size(max = 36, message = "Project ID must not exceed 36 characters") String projectId,
     /**
@@ -89,8 +83,7 @@ public record RunRequest(
      * <p>Use cases: (1) re-launch on an existing PR's head branch to address review comments; (2)
      * stack a staged launch onto an in-progress branch.
      */
-    @Size(max = 200, message = "Branch must not exceed 200 characters")
-        @JsonAlias({"branchOverride"})
+    @Size(max = 200, message = "Branch must not exceed 200 characters") @JsonAlias({"branchOverride"})
         String branch,
     /**
      * Fix M (2026-05-03) — feed prior PR review comments into the planner. {@link
@@ -101,8 +94,7 @@ public record RunRequest(
      *
      * <p>Free-form text — the planner treats it as advisory context, not as a hard task list.
      */
-    @Size(max = 20_000, message = "PR review comments must not exceed 20,000 characters")
-        String prReviewComments,
+    @Size(max = 20_000, message = "PR review comments must not exceed 20,000 characters") String prReviewComments,
     /**
      * GA-readiness P3.2 (2026-05-06) — optional customer-supplied hard cost ceiling in USD. When
      * set, this overrides the platform-derived {@code hard_cap_usd} (credits × $5 × 1.5) with a
@@ -117,9 +109,7 @@ public record RunRequest(
      * RunOrchestrator}. Customers can lower their ceiling but not raise it past what credits
      * already authorised.
      */
-    @DecimalMin(value = "0.10", message = "userCostCap must be ≥ $0.10")
-        @DecimalMax(value = "1000.00", message = "userCostCap must be ≤ $1000")
-        Double userCostCap,
+    @DecimalMin(value = "0.10", message = "userCostCap must be ≥ $0.10") @DecimalMax(value = "1000.00", message = "userCostCap must be ≤ $1000") Double userCostCap,
     /**
      * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode.
      *

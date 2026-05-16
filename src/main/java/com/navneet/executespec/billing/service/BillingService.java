@@ -1151,7 +1151,11 @@ public class BillingService {
     user.setTier(authTier);
     userRepo.save(user);
 
-    // Set key source mode on org if applicable
+    // SDET 2026-05-16 (BUG-009) — set both org.tier AND org.key_source_mode here. The previous
+    // implementation only wrote `key_source_mode` to the org; `user.tier` got the upgrade but
+    // `org.tier` stayed on its initial value (typically FREE) so the Plans page + billing surface
+    // continued to render "Currently on FREE" for a TEAM-tier user. Two sources of truth diverged.
+    // Backfill of legacy rows lives in `V199__sync_org_tier_with_subscription_tier.sql`.
     if (orgId != null) {
       orgRepo
           .findById(orgId)
@@ -1164,6 +1168,7 @@ public class BillingService {
                       default -> "HYBRID";
                     };
                 org.setKeySourceMode(keyMode);
+                org.setTier(authTier);
                 orgRepo.save(org);
               });
     }
@@ -1325,12 +1330,15 @@ public class BillingService {
     user.setTier("FREE");
     userRepo.save(user);
 
+    // SDET 2026-05-16 (BUG-009) — mirror the downgrade to org.tier so it doesn't get stuck on the
+    // previous paid tier. Same root cause as the upgrade path.
     if (sub.getOrgId() != null) {
       orgRepo
           .findById(sub.getOrgId())
           .ifPresent(
               org -> {
                 org.setKeySourceMode("SYSTEM");
+                org.setTier("FREE");
                 orgRepo.save(org);
               });
     }

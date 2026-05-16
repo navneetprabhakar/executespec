@@ -1,195 +1,206 @@
 # ExecuteSpec
 
-**v1.0.0-M1** · Spec-driven AI coding platform. Submit a natural-language spec; ExecuteSpec plans the work, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves the plan; everything after is automatic.
+Spec-driven AI coding platform. A customer submits a spec in natural language, the V2 pipeline plans, codes across one or more repos, builds + tests, and opens a pull request with a deterministic verified score. A human approves at the plan gate; everything after is automatic. Backend is a single Spring Boot 3.5 JAR (Java 21) serving the React 18 / Vite 5 frontend out of `static/`. Postgres + Redis are the only required infra; observability and billing are pluggable. The codebase is structured so the same Worker tool surface drives both the build-from-scratch path (`runMode=BUILD`) and the patch-mode path (`runMode=PATCH`) that powers the SWE-bench / ProgramBench adapters and four customer-facing autofix surfaces.
 
-**Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.4 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind CSS · GCP (us-east4)
+## Versions
 
----
+| Component         | Version             | Source                                                                 |
+| ----------------- | ------------------- | ---------------------------------------------------------------------- |
+| Project           | `1.0.0-M1`          | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
+| Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
+| Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
+| Flyway head       | `V199`              | `src/main/resources/db/migration/V199_*.sql`                           |
+| Frontend          | `1.0.0-M1`          | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
-## Quick start
+`VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
+
+## Stack at a glance
+
+| Layer               | Tech                                                                                | Source of truth                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| JVM / language      | Java 21                                                                             | [`pom.xml`](pom.xml) `<java.version>`                                            |
+| Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
+| LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
+| LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V199                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
+| Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
+| Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
+| GCS / Cloud Run     | google-cloud-{storage, run, build, artifact-registry, resourcemanager, secretmanager} | [`pom.xml`](pom.xml) deps 23–29                                                |
+| Code intelligence   | JGit 6.9.0, JavaParser 3.28.1 (no symbol-solver), Tika 3.3.0                        | [`pom.xml`](pom.xml) deps 9–11, 59                                              |
+| Observability       | Micrometer + OTel bridge + Prometheus registry; structured JSON via logstash encoder; local Grafana / Prometheus / Tempo stack | [`pom.xml`](pom.xml) deps 40–48, [`observability/docker-compose.yml`](observability/docker-compose.yml) |
+| Build               | Maven; Spotless 3.4.0 (google-java-format 1.22.0), JaCoCo 0.8.14, Surefire (excludes `e2e,integration,chaos`) | [`pom.xml`](pom.xml) `<build><plugins>` |
+| Frontend            | React 18.3, React Router 6.22, Zustand 4.5, TypeScript 5.3, Tailwind CSS 4.3, Vite 5.1 | [`frontend/package.json`](frontend/package.json), [`frontend/vite.config.ts`](frontend/vite.config.ts), [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts) |
+| Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
+| Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
+| Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`     | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+
+## Repository layout
+
+```
+.
+├── pom.xml                       Maven build descriptor (parent SB 3.5.14, Spring AI 1.1.6 BOM)
+├── VERSION / Version             Single-line version stamps (1.0.0-M1)
+├── lombok.config                 Stop-bubbling + Spring @Qualifier propagation for constructor injection
+├── .env.template                 Copy-to-.env env var template (LLM keys + integrations)
+├── src/main/java/com/navneet/executespec/
+│   ├── ExecutespecApplication.java  Spring Boot entry; excludes provider auto-configs
+│   ├── agent/                    OutlinePlanner, WorkerAgent, LlmRouter, SmartClassifier, ...
+│   ├── harness/                  SequentialExecutor (per-task tier-routed Worker + smoke build)
+│   ├── reviewer/                 ReviewerAgent (general + wiring passes)
+│   ├── tool/                     11 tools (readFile, writeFile, editFile, shell, gitDiff, ...) + ToolRegistry
+│   ├── integration/              RunOrchestrator + scm/ScmPushService
+│   ├── codeintel/ memory/        Project workbench: codemaps, architecture pipeline, RAG, ledger
+│   ├── prreview/ codereview/ finding/  PR Review + Code Review agents + four-surface autofix chokepoint
+│   ├── billing/ auth/ ratelimit/ Tier + payment + JWT + scoped SSE token paths
+│   ├── swebench/ programbench/   Cleanroom container adapters for the patch-mode pipeline
+│   └── ... (~72 packages total under com.navneet.executespec)
+├── src/main/resources/
+│   ├── application.yml           Single source of truth for model matrix (tier → provider → model, pricing, failover)
+│   ├── db/migration/             Flyway V*.sql (head V199, immutable post-apply)
+│   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
+│   └── static/                   Vite build output served by Spring Boot
+├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
+├── frontend/
+│   ├── package.json              React 18, Vite 5, Tailwind 4, TS 5.3
+│   ├── vite.config.ts            `@` → `./src`, dev port 5173, proxies /api → http://localhost:8080
+│   ├── tailwind.config.ts        Var-driven theme (CSS custom properties), class-based dark mode
+│   ├── public/                   logo-{192,512}.png, manifest.webmanifest, sw.js (PWA shell cache)
+│   └── src/
+│       ├── App.tsx               Top-level routes + LegacyRedirect for retired /v3, /v4, /signal paths
+│       ├── main.tsx              React entry, OTel init, service-worker registration (prod only)
+│       ├── tokens.css            Graphite + Signal design tokens (:root dark default, [data-theme='light'] overrides)
+│       ├── index.css             Global stylesheet (Tailwind v4, mobile/iOS Safari fixes, component utilities)
+│       ├── signal/               Signal chrome (only active shell since 2026-05-15)
+│       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
+│       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
+├── observability/                Local Prometheus + Grafana + Tempo (docker compose up -d)
+├── .github/workflows/            CI: lint.yml + deploy.yml (dev-only push trigger)
+└── docs/                         All project docs (see "Where to go next")
+```
+
+Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. Only Signal is active; `App.tsx` keeps a `LegacyRedirect` component to absorb bookmarks of the old paths.
+
+## Run it locally
+
+**Prerequisites**
+
+- Java 21 (Temurin recommended). On macOS, `JAVA_HOME=/opt/homebrew/opt/openjdk@21` is the project convention.
+- Maven (or use the wrapper if present).
+- Node.js LTS (matches the `lts/*` pin in CI).
+- Docker (for local Postgres, Redis, and the observability stack).
+- PostgreSQL 14+ and Redis reachable on the defaults (`localhost:5432` / `localhost:6379`) — Flyway will create the schema on first boot.
+- At least one LLM API key. The backend boots without any keys (provider auto-configs are excluded and `AgentModelConfig` degrades gracefully) but any run that needs that provider will fail.
+
+**Backend**
 
 ```bash
-# Prerequisites: Java 21, PostgreSQL (localhost:5432/executespec), Redis, Node.js 18+
-
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-export ANTHROPIC_API_KEY=sk-ant-...    # default provider since 1.0.0-M1
-export OPENAI_API_KEY=sk-...           # for openai-targeted runs + embeddings
-export GOOGLE_API_KEY=AIza...          # for gemini-targeted runs (optional)
-
-# Option 1: Supervisor (recommended)
-./supervisor.sh start
-
-# Option 2: Manual
-npm --prefix frontend install && npm --prefix frontend run build
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -DskipTests
+cp .env.template .env                      # fill in keys
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # macOS only
+mvn spring-boot:run                        # serves on http://localhost:8080
 ```
 
-Open **http://localhost:8080**. Default admin: `admin@executespec.ai` / `Admin@123` (forced password change on first login).
-
----
-
-## Pipeline (V2 — the only execution path)
-
-```
-POST /api/runs  →  RunOrchestrator
-                       ↓
-                 SmartClassifierAgent (LIGHTWEIGHT)
-                   heuristic fast-path for tiny specs; LLM verifier otherwise.
-                   Verdict: SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY
-                       ↓
-                 Strategy router (per verdict):
-                   • SINGLE_SHOT  → OutlinePlannerAgent.synthesizeSingleShot (no LLM, 1-task plan)
-                   • SMALL/MEDIUM → OutlinePlannerAgent FULL_PLAN (PLANNING tier, 32k cap)
-                   • LARGE        → SKELETON_ONLY outline → parallel TaskExpanderAgent (WORKHORSE)
-                                    → CoherencePlannerAgent (LIGHTWEIGHT, patchPlan tool)
-                   • LEGACY       → LARGE pipeline + recursive depth-2 EPIC expansion
-                       ↓
-                 Plan approval gate
-                   PRODUCTION: pauses at AWAITING_APPROVAL until human approves
-                   PROTOTYPE / skipApproval: bypasses
-                       ↓
-                 SequentialExecutor (one task at a time, per-task tier routing)
-                   • LOW    → LIGHTWEIGHT model (30-iter / 4k token cap)
-                   • MEDIUM → WORKHORSE   model (50-iter / 8k token cap)
-                   • HIGH   → PLANNING    model (75-iter / 16k token cap)
-                   • PATCH mode → per-provider caps (Anthropic 150, OpenAI 100, Gemini 120)
-                   → WorkerAgent (multi-turn, native tool calling via LlmRouter)
-                   → CompleteTaskTool terminates the loop
-                   → buildProject smoke test (final task on multi-task plans)
-                   → ONE retry with build error injected on smoke fail
-                       ↓
-                 ReviewerAgent — general pass + project-type-aware wiring pass
-                       ↓
-                 ★ COMPLETE / PARTIAL / FAILED
-                    ↓ (background)
-                 AccuracyAssessmentService → ValidationReport
-                                            (verifiedScore is multiplicative + deterministic)
-                    ↓
-                 TestGenOrchestrator (plan → generate → compile → execute)
-                    ↓
-                 Auto-preview (5-min TTL) + GitHub branch + PR
-                    (per-repo PR for multi-repo runs, cross-linked)
-```
-
-**Run modes:** `BUILD` (default — diagram above) and `PATCH` (single thin-agent loop against a failing-test spec; powers the four autofix surfaces — PR Review · TechDebt · CI failure webhook · Code Review severity buckets — and the SWE-bench / ProgramBench adapters).
-
-**Versioning note (2026-05-07 onward):** Java code no longer carries V2/V3 markers. Backend packages were flattened from `com.navneet.executespec.v2.*` / `v3.*` to `com.navneet.executespec.*`; class suffixes / prefixes dropped. Flyway filenames + prompt-rollback archives stay versioned (intentionally — Flyway tracks applied migrations by exact filename).
-
----
-
-## Key features
-
-- **Multi-agent V2 pipeline** — Smart classifier · Outline planner (hierarchical for LARGE/LEGACY) · Sequential executor with per-task tier routing · Reviewer (general + wiring) · `WorkerAgent` resilience levers (force-edit watchdog at 0.7×maxIter, best-guess salvage on iter-limit / budget-exceeded / stagnation).
-- **Patch mode + 4 autofix surfaces** — `finding/FindingPatchSubmitter` chokepoint routes PR-Review fix, TechDebt fix, CI-failure webhook (flag-gated), and Code-Review severity-bucket fix through the same patch-mode pipeline.
-- **Deterministic verified score** — multiplicative: `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`. No LLM self-rating in the score path.
-- **Per-run codemap + 3-step project architecture** — per-repo codemap → per-repo HLD/LLD → cross-repo synthesis. Idempotent by SHA. Versioned. Lazy-refreshed before each run.
-- **Project memory** — every completed run appends a digest; compaction rewrites a versioned snapshot every 10 runs. Planner reads it as `{{PROJECT_MEMORY}}`.
-- **Always-on RAG** — Tika + pgvector + OpenAI embeddings. User-uploaded docs indexed; planner + chat read narrowed retrieval at run-time.
-- **External project sharing** (V175) — cross-org `ProjectMember` invites + public read-only share links (6 surfaces, tier-gated).
-- **PR Review + Code Review agents** (V172) — single-call PR review with line-anchored comments + whole-repo semgrep-augmented code review with markdown report.
-- **Multi-repo runs** — clone each linked repo into `<workspace>/<runId>/repos/<name>/`; per-repo codemap; per-repo PR with cross-link.
-- **TDD mode + spec templates + heuristic launch estimate + tech debt panel + workspace health rollup + post-merge cascade banner + cancel rollback** (closes any opened PRs idempotently with a live cleanup SSE channel).
-- **Tier ladder** — FREE (5 runs/month, 1-credit specs) · PRO (HIDDEN — grandfathered, new buyers can't pick) · TEAM ($39/seat/month BYOK, min 2 seats) · ENTERPRISE (custom, unlimited).
-- **Cost-proportional run credits** — `credits = max(1, ceil(estimate × 1.10 / $5.0))`. Charged at plan approval, refunded on FAILURE. Customer can lower the ceiling via `userCostCap`. BYOK orgs skip the platform cap entirely.
-- **Multi-gateway billing** (Razorpay + Stripe) via `PaymentGatewayRouter`, subscriptions + run top-up credits + invoicing with GST, full payment audit + CSV export.
-- **Auth** — JWT (1h access / 7d refresh) + OAuth2 (Google, GitHub). 7 roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER. Personal org auto-provisioned on self-registration. Force-logout via feature-flag epoch.
-- **8-layer security** + 3 guardrail levels (LOW / MEDIUM / HIGH) flippable via `security.guardrail_level` feature flag.
-- **YAML model matrix** — single source of truth for every model identifier / context window / pricing rate / display label / fallback chain / agent→tier map. `ModelRegistry` reads `application.yml model-matrix.*`.
-- **Dual-mode previews** — Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, Caddy + Cloudflare Origin Certificate).
-- **GitHub integration** — create repos, push code, create branches + auto-open PRs, webhook flips PR status (HMAC SHA-256). `PullRequestSnapshot.headSha` powers CI check-run polling on PR refresh.
-- **Slack + JIRA + Confluence integrations** — Slack org-level OAuth with per-project channel routing (Block Kit messages); JIRA/Confluence inbound webhooks create runs + outbound comments on `MergeCompleted`.
-- **In-app notifications** — run completion, quota warning (≥80% of monthly cap, dedupe per cycle), gate-opened events.
-- **Pause / resume** on V2 runs (interrupt + resume-from-disk; flag `v2.pause.enabled`, default OFF).
-- **GDPR data export** — `GET /api/auth/me/data-export` returns a ZIP (manifest + payload + README) with sensitive fields stripped.
-- **Cleanroom benchmarks** — SWE-bench Lite adapter + ProgramBench adapter run in a container with `--network none` bind-mounted to the worker's workspace dir.
-- **GCP deployment** — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Cloud SQL + Redis; Cloudflare in front of `*.executespec.ai`.
-
----
-
-## Security
-
-8-layer defense-in-depth for running untrusted user input through LLM agents:
-
-1. **Request validation** — Jakarta Bean Validation (`@Size`, `@Pattern`, `@NotBlank`).
-2. **Content scanning** — `InputSanitizer` (26 regexes + NFKC normalization + zero-width strip + base64 decode-and-scan + obfuscation detection).
-3. **LLM prompt defense** — user input tagged untrusted in planner / worker prompts; tool results wrapped with `untrusted="true"` to prevent second-order injection from repo files.
-4. **Code abuse scanning** — `CodeAbuseScanner` blocks writes matching malware patterns (crypto miners, reverse shells, exfil, cloud metadata, obfuscated payloads).
-5. **Shell sandbox** — 3-layer (`ShellSandboxPolicy`): subshell blocking + blocklist + pattern blocklist + chained-command splitting + 32-prefix allowlist + chmod allowed inside workspace but blocked against system dirs.
-6. **File sandbox** — path normalization + workspace boundary enforcement (`safeResolve()`).
-7. **Process isolation** — secret env-var stripping + 5-minute hard timeout + Redis-backed per-tenant rate limiting.
-8. **Container hardening** — `.dockerignore` excludes `.env*` / `credentials.json` / `secrets.*` from preview/deploy images; container console command allowlist enforced server-side; cleanroom containers run `--rm --network none`.
-
-Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Three guardrail levels (LOW / MEDIUM / HIGH) tighten input sanitiser, code abuse scanner, rate-limit policy, shell sandbox, and file sandbox in unison.
-
----
-
-## Documentation
-
-| Document | Audience | Description |
-|----------|----------|-------------|
-| [CLAUDE.md](CLAUDE.md) | AI assistant + new engineers | Session-start instructions, architecture snapshot, conventions, API contracts, key file locations, current state |
-| [CHANGELOG.md](CHANGELOG.md) | All | Release-note style — Unreleased + 1.0.0-M1 + pre-1.0 history in git |
-| [docs/CODEMAP.md](docs/CODEMAP.md) | Engineers | Every package + key class → one-line purpose |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Engineers | System design, Mermaid diagrams, design decisions |
-| [docs/JAVADOC.md](docs/JAVADOC.md) | Engineers | Class-level reference (historical detail; for current state see CLAUDE.md) |
-| [docs/PRD.md](docs/PRD.md) | Product / Business | Product requirements, tier ladder, user journeys |
-| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Engineers / Product | Mermaid workflow diagrams |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | DevOps / Engineers | Local setup + GCP deployment + Terraform operations |
-| [docs/RBAC.md](docs/RBAC.md) | Engineers | Role definitions and permission matrix |
-| [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | End users | How-to guide for the ExecuteSpec UI |
-| [docs/openapi.yaml](docs/openapi.yaml) | Engineers | OpenAPI 3 spec |
-| [docs/frontend-api-usage.md](docs/frontend-api-usage.md) | Frontend engineers | Frontend API client audit |
-| [docs/user-journeys.md](docs/user-journeys.md) + [project-user-journeys.md](docs/project-user-journeys.md) | Product / QA | UI user journeys + project workbench journeys |
-| [docs/plans/pending.md](docs/plans/pending.md) | Engineers | Consolidated pending plans (Mobile follow-ups · Figma v2 · Harness V2 gaps · PARTIAL-status removal · Backlog M-* · V2 batch · distributed processing · VS Code extension · Vite split · Readymades · Migrations) |
-| [docs/design/ui-tokens.md](docs/design/ui-tokens.md) | Frontend | Single source of truth for tokens |
-| [docs/design/code-style.md](docs/design/code-style.md) | Engineers | Documented deviations from Google Java + TypeScript style guides |
-| [docs/operations/slos.md](docs/operations/slos.md) | Ops | Published SLOs + alert thresholds |
-| [docs/document_map.md](docs/document_map.md) | Engineers | Which docs to update for each type of change |
-
----
-
-## Database migrations
-
-186 Flyway migrations (`V1__init.sql` → `V186__pull_request_ci_status.sql`) run automatically on startup. The per-migration index lives in [`docs/CODEMAP.md`](docs/CODEMAP.md) and the per-package `CLAUDE.md` files. Range highlights:
-
-| Range | Theme |
-|-------|-------|
-| V1–V44 | Core schema, auth, billing, integrations, design system |
-| V45–V60 | Stripe gateway + OAuth + force-logout + cost-proportional credits |
-| V61–V90 | Batch execution + preview registry + accuracy reports + Pilot v3.0 (project workspace) |
-| V91–V120 | Project memory + assessment + plan-version tooling + Validation v3 + V120 LlmProvider GEMINI rename |
-| V121–V129 | v2.6.1 persona-roadmap waves (TEAM tier + activation funnel + SSO/GitHub-app schema + smart-routing scaffold + startup program) |
-| V130 | Hierarchical planner phase-0 schema |
-| V131–V139 | Enterprise readiness — `.executespec/` folder + activity feed + contracts + standards + ADR + invariants + notification prefs |
-| V140–V146 | Tier-config alignment with website pricing + ladder consolidations + annual billing plans |
-| V147–V164 | v2.7 Foundation batch (audit-chain, governance, retention, multi-org seam) |
-| V165–V168 | Drop MAX tier (rename to TEAM @ $39) + FREE→5 revert + pause/resume |
-| V169–V178 | PR record `project_id`/`kind`, CI auto-fix counter, R09 reconcile, PR/Code review agents, external sharing, Solo tier (introduced V176/177, retired V179/185), user cost cap |
-| V179–V186 | Product-split retired, lint autofix flag, PR comment inbox, run_mode (BUILD/PATCH), triggered_by_finding, widen last_llm_failure, Solo branding retired, PR CI status columns |
-
----
-
-## Model matrix
-
-YAML is the single source of truth (`application.yml model-matrix.*`). `ModelRegistry` reads it.
-
-| Agent tier | Anthropic | OpenAI | Gemini |
-|------------|-----------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-pro-preview` |
-| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-pro-preview` |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
-
-**Default provider:** Anthropic (changed from OpenAI in 1.0.0-M1). User-selectable per project. Failover chain via YAML `failover-order:`. Reviewer routes Gemini to WORKHORSE tier so Flash's 1024-token implicit-cache threshold actually fires (Pro at 4096 was hitting 0% cache hit rate empirically).
-
----
-
-## Build check
+**Frontend (dev mode with HMR)**
 
 ```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q    # backend (spotless gate + tests)
-npm --prefix frontend run build                          # frontend
-npm --prefix frontend run format:check                   # prettier gate
-npm --prefix frontend run lint                           # eslint gate
+cd frontend
+npm ci
+npm run dev                                # http://localhost:5173
 ```
 
-CI runs `mvn spotless:check` + `npm run format:check` + `npm run lint` on every PR (`.github/workflows/lint.yml`), and `mvn verify` + frontend build + GCE deploy + health check on push to `dev`/`main` (`.github/workflows/deploy.yml`).
+The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
+
+**Local observability (optional)**
+
+```bash
+cd observability
+docker compose up -d
+# Grafana http://localhost:3001  (admin/admin)
+# Prometheus http://localhost:9090
+# Tempo API http://localhost:3200
+```
+
+Prometheus scrapes the Spring Boot app at `host.docker.internal:8080/actuator/prometheus` every 15s; Grafana auto-provisions both datasources and two dashboards (JVM + HTTP, and ExecuteSpec product/pipeline metrics).
+
+## Build / test / lint
+
+**Backend**
+
+```bash
+mvn compile -q                  # quick compile
+mvn verify -q                   # full gate: spotless:check + JaCoCo report + Surefire (unit tests only)
+mvn spotless:apply              # auto-format to google-java-format 1.22.0
+mvn -Pintegration verify        # opt-in integration tests (e2e, integration, chaos groups)
+```
+
+`mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
+
+**Frontend**
+
+```bash
+cd frontend
+npm run build                   # tsc strict compile + vite build → ../src/main/resources/static
+npm run format                  # prettier --write
+npm run format:check            # prettier --check (CI gate)
+npm run lint                    # eslint (--max-warnings 9999; severity gated via eslint config)
+npm run lint:fix                # eslint --fix
+```
+
+`npm run build` writes the production bundle into `src/main/resources/static` with `emptyOutDir: true`, so it wipes and rebuilds the Spring Boot static folder. Run `mvn package` afterward to embed the bundle in the JAR.
+
+## Where to go next
+
+| Doc                                                            | What's in it                                                        |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | V2 pipeline, agents, tools, scoring, container model                |
+| [`docs/CODEMAP.md`](docs/CODEMAP.md)                           | Package map, key files, migration trail                             |
+| [`docs/PRD.md`](docs/PRD.md)                                   | Product requirements + user stories                                 |
+| [`docs/RBAC.md`](docs/RBAC.md)                                 | Roles, tenant-access guards, scoped SSE tokens                      |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                     | GCE + Cloud Run deploy mechanics                                    |
+| [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)                       | End-to-end run + autofix workflows                                  |
+| [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md)                   | Customer-facing usage reference                                     |
+| [`docs/JAVADOC.md`](docs/JAVADOC.md)                           | Generated Javadoc index (may lag — see project notes)               |
+| [`docs/openapi.yaml`](docs/openapi.yaml)                       | REST API spec                                                       |
+| [`docs/frontend-api-usage.md`](docs/frontend-api-usage.md)     | Frontend API client conventions                                     |
+| [`docs/operations/`](docs/operations/)                         | SLOs, local test playbook, on-call docs                             |
+| [`docs/design/`](docs/design/)                                 | UI tokens, code-style, design references                            |
+| [`docs/document_map.md`](docs/document_map.md)                 | Map of everything under `docs/`                                     |
+| [`docs/enterprise-sla.md`](docs/enterprise-sla.md)             | Enterprise SLA terms                                                |
+| [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md)           | SSO / SAML setup                                                    |
+| [`docs/billing-workflows.html`](docs/billing-workflows.html)   | Razorpay / Stripe billing flows                                     |
+
+## Required environment variables
+
+Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below match the template verbatim.
+
+**Required**
+
+| Variable               | Purpose                              |
+| ---------------------- | ------------------------------------ |
+| `ANTHROPIC_API_KEY`    | Anthropic provider (Claude)          |
+| `OPENAI_API_KEY`       | OpenAI provider (GPT)                |
+| `GOOGLE_API_KEY`       | Google GenAI provider (Gemini)       |
+| `GITHUB_PAT`           | GitHub PAT for repo + PR operations  |
+| `GITHUB_OWNER`         | Default GitHub owner / org           |
+| `RAZORPAY_KEY_ID`      | Razorpay test or live key            |
+| `RAZORPAY_KEY_SECRET`  | Razorpay key secret                  |
+| `RAZORPAY_WEBHOOK_SECRET` | HMAC for webhook verification     |
+| `RAZORPAY_WEBHOOK_URL` | Webhook callback URL                 |
+
+The application boots without LLM keys (provider auto-configs are excluded; manual beans degrade gracefully), but any pipeline that needs a missing provider will fail. The template foregrounds Razorpay because the dev default gateway is Razorpay; prod default is Stripe (toggle via `BILLING_DEFAULT_GATEWAY=stripe`).
+
+**Optional**
+
+| Variable                                                                                   | Default / notes                                                       |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`  | `localhost` / `5432` / `executespec` / `postgres` / `postgres`        |
+| `REDIS_HOST`                                                                               | `localhost`                                                           |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET`                   | Required when `BILLING_DEFAULT_GATEWAY=stripe`                        |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                                    | Enables Google OAuth2 login                                           |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
+| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
+| `DASHBOARD_URL`                                                                            | Dashboard URL used in OAuth + Slack callbacks (e.g. `http://localhost:5173`) |
+
+Additional environment variables consumed at runtime (cookies, CORS, mail, preview engine, OTel) are set per-environment by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) (`env-patch.sh`) rather than committed to the template.
