@@ -5,19 +5,19 @@ import {Feed, Row, Card, Button, StatusPill, TabsStrip} from '@/signal/component
 import {LoadingState} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {FileTree} from '@/signal/components/FileTree';
+import {CodeView} from '@/signal/components/CodeView';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
-import {parseCodemap, type CodemapSummary} from '@/signal/lib/codemapParse';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 /* useProjectMeta delivers project name from cached project list quickly,
    and refreshes from /api/projects/{id} in the background. */
 
-// 2026-05-16 (feedback) — added 'browse' as the FIRST sub-tab so users land
-// on "see the actual code" by default. The codemap is the cheap+available
-// source of truth here: parsed client-side via parseCodemap to avoid a new
-// backend endpoint. When the codemap is missing, the panel prompts to
-// regenerate architecture (which re-runs the codemap step).
+// 2026-05-16 (feedback) — Browse is the FIRST sub-tab so users land on
+// "see the actual code" by default. Data source is the GitHub-proxied
+// /api/projects/{id}/repos/{repoId}/files + /file endpoints, NOT the codemap
+// — the user explicitly asked for actual source content rather than codemap-
+// derived function lists / purpose summaries.
 type Sub = 'browse' | 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
 export default function ProjectCodePage() {
@@ -25,13 +25,20 @@ export default function ProjectCodePage() {
   const id = projectId || '';
   const project = useProjectMeta(id);
   const [sub, setSub] = useState<Sub>('browse');
-  // Per-repo codemap state for the Browse sub-tab. Loaded lazily so the
-  // other sub-tabs don't pay for the fetch when they're the entry point.
+  // Browse sub-tab — fetches the live file list via the new
+  // /api/projects/{id}/repos/{repoId}/files endpoint (GitHub-proxied through
+  // the user's PAT) so users see the actual current code, not codemap
+  // metadata. Per-repo cache + per-file content cache so flipping between
+  // files doesn't re-fetch.
   const [browseRepoId, setBrowseRepoId] = useState<string | null>(null);
-  const [codemapByRepo, setCodemapByRepo] = useState<Record<string, CodemapSummary | 'missing'>>(
-    {},
-  );
-  const [codemapLoading, setCodemapLoading] = useState<Record<string, boolean>>({});
+  const [filesByRepo, setFilesByRepo] = useState<
+    Record<string, api.RepoFileList | 'error' | undefined>
+  >({});
+  const [filesLoading, setFilesLoading] = useState<Record<string, boolean>>({});
+  const [fileContentCache, setFileContentCache] = useState<
+    Record<string, api.RepoFile | 'error' | undefined>
+  >({});
+  const [fileLoading, setFileLoading] = useState<Record<string, boolean>>({});
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [debt, setDebt] = useState<api.TechDebtReport | null>(null);
   const [docs, setDocs] = useState<api.GeneratedDocRow[] | null>(null);
@@ -101,25 +108,44 @@ export default function ProjectCodePage() {
     }
   }, [sub, repos, browseRepoId]);
 
-  // Lazy-fetch the codemap for whichever repo is selected. Cached per-repo
+  // Lazy-fetch the file LIST for whichever repo is selected. Cached per-repo
   // so flipping between repos in the same session pays once.
   useEffect(() => {
     if (sub !== 'browse' || !id || !browseRepoId) return;
-    if (codemapByRepo[browseRepoId] || codemapLoading[browseRepoId]) return;
-    setCodemapLoading((m) => ({...m, [browseRepoId]: true}));
+    if (filesByRepo[browseRepoId] != null || filesLoading[browseRepoId]) return;
+    setFilesLoading((m) => ({...m, [browseRepoId]: true}));
     api
-      .getRepoCodeMap(id, browseRepoId)
+      .listRepoFiles(id, browseRepoId)
       .then((res) => {
-        const parsed = parseCodemap(res.content);
-        setCodemapByRepo((m) => ({...m, [browseRepoId]: parsed}));
+        setFilesByRepo((m) => ({...m, [browseRepoId]: res}));
       })
       .catch(() => {
-        setCodemapByRepo((m) => ({...m, [browseRepoId]: 'missing'}));
+        setFilesByRepo((m) => ({...m, [browseRepoId]: 'error'}));
       })
       .finally(() => {
-        setCodemapLoading((m) => ({...m, [browseRepoId]: false}));
+        setFilesLoading((m) => ({...m, [browseRepoId]: false}));
       });
-  }, [sub, id, browseRepoId, codemapByRepo, codemapLoading]);
+  }, [sub, id, browseRepoId, filesByRepo, filesLoading]);
+
+  // Lazy-fetch the CONTENT of the selected file. Keyed by repoId:path so the
+  // cache is unambiguous when the same path exists in multiple repos.
+  useEffect(() => {
+    if (sub !== 'browse' || !id || !browseRepoId || !selectedFilePath) return;
+    const key = `${browseRepoId}:${selectedFilePath}`;
+    if (fileContentCache[key] != null || fileLoading[key]) return;
+    setFileLoading((m) => ({...m, [key]: true}));
+    api
+      .readRepoFile(id, browseRepoId, selectedFilePath)
+      .then((res) => {
+        setFileContentCache((m) => ({...m, [key]: res}));
+      })
+      .catch(() => {
+        setFileContentCache((m) => ({...m, [key]: 'error'}));
+      })
+      .finally(() => {
+        setFileLoading((m) => ({...m, [key]: false}));
+      });
+  }, [sub, id, browseRepoId, selectedFilePath, fileContentCache, fileLoading]);
 
   // Reset selected file when the active repo changes — otherwise switching
   // repos leaves a stale path highlighted that doesn't exist in the new tree.
@@ -307,10 +333,20 @@ export default function ProjectCodePage() {
             repos={repos}
             browseRepoId={browseRepoId}
             setBrowseRepoId={setBrowseRepoId}
-            codemap={browseRepoId ? codemapByRepo[browseRepoId] : undefined}
-            loading={browseRepoId ? !!codemapLoading[browseRepoId] : false}
+            fileList={browseRepoId ? filesByRepo[browseRepoId] : undefined}
+            fileListLoading={browseRepoId ? !!filesLoading[browseRepoId] : false}
             selectedFilePath={selectedFilePath}
             setSelectedFilePath={setSelectedFilePath}
+            selectedFileContent={
+              browseRepoId && selectedFilePath
+                ? fileContentCache[`${browseRepoId}:${selectedFilePath}`]
+                : undefined
+            }
+            selectedFileLoading={
+              browseRepoId && selectedFilePath
+                ? !!fileLoading[`${browseRepoId}:${selectedFilePath}`]
+                : false
+            }
           />
         )}
 
@@ -823,52 +859,46 @@ export default function ProjectCodePage() {
 }
 
 /**
- * Browse — surfaces the project's current code via the per-repo codemap. The
- * codemap is generated as part of the architecture pipeline and stored as a
- * markdown blob; we parse it client-side (see {@link parseCodemap}) to derive:
+ * Browse — shows the project's *actual current code*.
  *
- *   - a file tree (every `### \`path\`` heading in the codemap)
- *   - per-file metadata (functions extracted by the regex pass + an optional
- *     LLM-summarised "purpose" line)
- *   - top-level dir + route lists for the repo-level overview
- *
- * No new backend endpoint needed; the data is already there.
+ * Data source: `/api/projects/{id}/repos/{repoId}/files` (file list) +
+ * `/api/projects/{id}/repos/{repoId}/file?path=…` (file content), both
+ * GitHub-proxied through the user's stored PAT. The codemap is not used
+ * here — users explicitly asked for the actual source, not codemap-derived
+ * summaries / function lists / purpose strings.
  *
  * Two-pane layout matches the Result page Code tab — file tree on the left,
- * file detail on the right. The detail panel renders the markdown directly
- * so the function list + purpose summary are formatted properly.
+ * syntax-highlighted file content on the right via `CodeView`.
  */
 function BrowseTab({
   id,
   repos,
   browseRepoId,
   setBrowseRepoId,
-  codemap,
-  loading,
+  fileList,
+  fileListLoading,
   selectedFilePath,
   setSelectedFilePath,
+  selectedFileContent,
+  selectedFileLoading,
 }: {
   id: string;
   repos: Array<Record<string, unknown>>;
   browseRepoId: string | null;
   setBrowseRepoId: (s: string) => void;
-  codemap: CodemapSummary | 'missing' | undefined;
-  loading: boolean;
+  fileList: api.RepoFileList | 'error' | undefined;
+  fileListLoading: boolean;
   selectedFilePath: string | null;
   setSelectedFilePath: (s: string | null) => void;
+  selectedFileContent: api.RepoFile | 'error' | undefined;
+  selectedFileLoading: boolean;
 }) {
-  // Memoise the file list so FileTree's deterministic-sort isn't re-running
-  // every render. Falls back to an empty array when the codemap is missing
-  // or still loading.
+  // Memoise the file entries so FileTree's deterministic-sort isn't re-running
+  // every render. We only render the FileTree once the file list has arrived.
   const fileEntries = useMemo(() => {
-    if (!codemap || codemap === 'missing') return [];
-    return codemap.files.map((f) => ({path: f.path, status: 'BROWSE' as const}));
-  }, [codemap]);
-
-  const selectedFile = useMemo(() => {
-    if (!codemap || codemap === 'missing' || !selectedFilePath) return null;
-    return codemap.files.find((f) => f.path === selectedFilePath) ?? null;
-  }, [codemap, selectedFilePath]);
+    if (!fileList || fileList === 'error') return [];
+    return fileList.files.map((p) => ({path: p, status: 'BROWSE' as const}));
+  }, [fileList]);
 
   if (repos.length === 0) {
     return (
@@ -902,21 +932,22 @@ function BrowseTab({
         />
       )}
 
-      {loading || codemap == null ? (
-        <LoadingState label='Loading codemap…' />
-      ) : codemap === 'missing' ? (
+      {fileListLoading || fileList == null ? (
+        <LoadingState label='Loading file list…' />
+      ) : fileList === 'error' ? (
         <Card>
           <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-            No codemap yet for this repo. Generate one from the{' '}
-            <a href={`/projects/${id}/architecture`} style={{color: 'var(--signal-coral)'}}>
-              Architecture page
+            Couldn&apos;t list files for this repo. Usually means the connected GitHub PAT is
+            missing, expired, or lacks read access. Reconnect GitHub from{' '}
+            <a href='/integrations' style={{color: 'var(--signal-coral)'}}>
+              Integrations
             </a>{' '}
-            (the codemap is a side-product of architecture analysis) and come back here.
+            and try again.
           </p>
         </Card>
       ) : (
         <>
-          {/* Repo-level overview card — files count, top-level dirs, routes. */}
+          {/* Repo-level overview card — file count + branch info. */}
           <Card style={{marginBottom: 12}}>
             <div style={{display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5}}>
               <div>
@@ -932,55 +963,58 @@ function BrowseTab({
                 >
                   Files
                 </div>
-                <div style={{fontWeight: 600}}>{codemap.fileCount || codemap.files.length}</div>
+                <div style={{fontWeight: 600}}>{fileList.files.length}</div>
               </div>
-              {codemap.topLevelDirs.length > 0 && (
-                <div style={{flex: 1, minWidth: 180}}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: 'var(--signal-text-dim)',
-                      letterSpacing: '0.1em',
-                      textTransform: 'uppercase',
-                      marginBottom: 4,
-                    }}
-                  >
-                    Top-level layout
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 11.5,
-                      color: 'var(--signal-ink)',
-                    }}
-                  >
-                    {codemap.topLevelDirs.slice(0, 8).join(' · ')}
-                    {codemap.topLevelDirs.length > 8 && ` +${codemap.topLevelDirs.length - 8}`}
-                  </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--signal-text-dim)',
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    marginBottom: 4,
+                  }}
+                >
+                  Branch
                 </div>
-              )}
-              {codemap.routes.length > 0 && (
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: 'var(--signal-text-dim)',
-                      letterSpacing: '0.1em',
-                      textTransform: 'uppercase',
-                      marginBottom: 4,
-                    }}
-                  >
-                    Routes
-                  </div>
-                  <div style={{fontWeight: 600}}>{codemap.routes.length}</div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                  }}
+                >
+                  {fileList.defaultBranch}
                 </div>
-              )}
+              </div>
+              <div style={{flex: 1, minWidth: 180}}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--signal-text-dim)',
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    marginBottom: 4,
+                  }}
+                >
+                  Repo
+                </div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                  }}
+                >
+                  {fileList.repoFullName}
+                </div>
+              </div>
             </div>
           </Card>
 
-          {/* Two-pane: file tree (left) + file detail (right). On narrow
+          {/* Two-pane: file tree (left) + file content (right). On narrow
               viewports the panes stack vertically so the tree stays usable
               on mobile. */}
           <div className='signal-split-runs'>
@@ -995,40 +1029,8 @@ function BrowseTab({
                       lineHeight: 1.5,
                     }}
                   >
-                    {/*
-                     * 2026-05-16 — distinguish two empty-states: codemap generated
-                     * but the GitHub listing failed (fileCount=0), vs an older
-                     * codemap that pre-dates the `## Files (listing)` section.
-                     */}
-                    {codemap.fileCount === 0 ? (
-                      <>
-                        The codemap was generated but couldn&apos;t read any files from this repo.
-                        Usually means the GitHub PAT used at codemap-generation time was missing,
-                        expired, or lacked read access. Reconnect GitHub from{' '}
-                        <a href='/integrations' style={{color: 'var(--signal-coral)'}}>
-                          Integrations
-                        </a>
-                        , then regenerate the architecture from{' '}
-                        <a
-                          href={`/projects/${id}/architecture`}
-                          style={{color: 'var(--signal-coral)'}}
-                        >
-                          here →
-                        </a>
-                      </>
-                    ) : (
-                      <>
-                        This codemap pre-dates the full file-listing format. Regenerate the
-                        architecture from{' '}
-                        <a
-                          href={`/projects/${id}/architecture`}
-                          style={{color: 'var(--signal-coral)'}}
-                        >
-                          here →
-                        </a>{' '}
-                        to pick up the new section.
-                      </>
-                    )}
+                    GitHub returned an empty file list for this repo. Verify the repo isn&apos;t
+                    archived / empty, and that the connected PAT has access.
                   </p>
                 </Card>
               ) : (
@@ -1040,99 +1042,59 @@ function BrowseTab({
               )}
             </div>
             <div className='split-detail'>
-              {selectedFile == null ? (
+              {selectedFilePath == null ? (
                 <Card>
                   <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>
                     {fileEntries.length === 0
                       ? 'No files to browse — see the note on the left.'
-                      : 'Select a file on the left to see its functions and purpose summary.'}
+                      : 'Select a file on the left to view its content.'}
+                  </p>
+                </Card>
+              ) : selectedFileLoading || selectedFileContent == null ? (
+                <Card>
+                  <LoadingState label={`Loading ${selectedFilePath}…`} />
+                </Card>
+              ) : selectedFileContent === 'error' ? (
+                <Card>
+                  <p style={{fontSize: 13, color: 'var(--signal-coral-text)', margin: 0}}>
+                    Couldn&apos;t read this file from GitHub. The file may have been deleted, moved,
+                    or the PAT may have lost access since the listing was fetched.
                   </p>
                 </Card>
               ) : (
-                <Card>
+                <>
+                  <CodeView
+                    path={selectedFileContent.path}
+                    content={selectedFileContent.content}
+                    maxHeight={620}
+                  />
                   <div
                     style={{
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      marginBottom: 6,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      marginTop: 10,
+                      display: 'flex',
+                      gap: 8,
+                      alignItems: 'center',
+                      fontSize: 11.5,
+                      color: 'var(--signal-text-dim)',
                     }}
                   >
-                    {selectedFile.path}
-                  </div>
-                  {selectedFile.purpose && (
-                    <p
-                      style={{
-                        fontSize: 13,
-                        color: 'var(--signal-text-dim)',
-                        margin: '0 0 12px 0',
-                        lineHeight: 1.5,
-                      }}
+                    <span>{selectedFileContent.sizeBytes.toLocaleString()} bytes</span>
+                    <span>·</span>
+                    <Button
+                      kind='ghost'
+                      sm
+                      onClick={() =>
+                        window.open(
+                          `https://github.com/${fileList.repoFullName}/blob/${fileList.defaultBranch}/${selectedFileContent.path}`,
+                          '_blank',
+                          'noopener',
+                        )
+                      }
                     >
-                      {selectedFile.purpose}
-                    </p>
-                  )}
-                  {selectedFile.functions.length > 0 ? (
-                    <>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'var(--signal-text-dim)',
-                          letterSpacing: '0.1em',
-                          textTransform: 'uppercase',
-                          marginBottom: 6,
-                        }}
-                      >
-                        Functions · {selectedFile.functions.length}
-                      </div>
-                      <ul
-                        style={{
-                          margin: 0,
-                          paddingLeft: 18,
-                          fontFamily: "'JetBrains Mono', monospace",
-                          fontSize: 12.5,
-                          lineHeight: 1.7,
-                        }}
-                      >
-                        {selectedFile.functions.map((fn) => (
-                          <li key={fn}>{fn}</li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : (
-                    <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0}}>
-                      No functions extracted by the codemap regex pass — this file may be config /
-                      static markup or use a syntax the extractor doesn't recognise.
-                    </p>
-                  )}
-                  <div
-                    style={{
-                      marginTop: 16,
-                      paddingTop: 12,
-                      borderTop: '1px solid var(--signal-hairline)',
-                    }}
-                  >
-                    {(() => {
-                      // Build a GitHub deep-link from the codemap's repo
-                      // slug — gives users a one-click "view full source"
-                      // affordance since we don't ship raw file content here.
-                      const slug = codemap.repoSlug;
-                      const href = slug
-                        ? `https://github.com/${slug}/blob/HEAD/${selectedFile.path}`
-                        : null;
-                      return href ? (
-                        <Button
-                          kind='ghost'
-                          sm
-                          onClick={() => window.open(href, '_blank', 'noopener')}
-                        >
-                          Open in GitHub →
-                        </Button>
-                      ) : null;
-                    })()}
+                      Open in GitHub →
+                    </Button>
                   </div>
-                </Card>
+                </>
               )}
             </div>
           </div>

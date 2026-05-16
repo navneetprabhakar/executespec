@@ -5,7 +5,7 @@ import {useSignalTheme} from '@/signal/hooks/useSignalTheme';
 import {Moon, Sun} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 
-type SidebarItem = {path: string; label: string; icon?: string};
+type SidebarItem = {path: string; label: string; icon?: string; badge?: 'BETA'};
 type SidebarGroup = {title: string; items: SidebarItem[]};
 
 // Build the sidebar groups based on the current user's tier + role. This is a
@@ -29,11 +29,22 @@ function buildSidebar(opts: {
       title: 'Workspace',
       items: [
         {path: '/projects', label: 'Projects', icon: '▤'},
-        {path: '/library', label: 'Library', icon: '✦'},
-        {path: '/migrations', label: 'Migrations', icon: '⇄'},
+        // 2026-05-16 (user feedback) — Library + Migrations + Deployments
+        // are beta surfaces; flag with the BETA chip so users know they're
+        // pre-GA and may have rough edges. The chip renders to the right
+        // of the label without disturbing the icon column.
+        {path: '/library', label: 'Library', icon: '✦', badge: 'BETA'},
+        {path: '/migrations', label: 'Migrations', icon: '⇄', badge: 'BETA'},
         {path: '/templates', label: 'Templates', icon: '✎'},
         ...(opts.canDeploy
-          ? [{path: '/deployments', label: 'Deployments', icon: '⌁'} satisfies SidebarItem]
+          ? [
+              {
+                path: '/deployments',
+                label: 'Deployments',
+                icon: '⌁',
+                badge: 'BETA',
+              } satisfies SidebarItem,
+            ]
           : []),
       ],
     },
@@ -138,6 +149,7 @@ export default function SignalShell() {
                     {item.icon}
                   </span>
                   <span className='nav-label'>{item.label}</span>
+                  {item.badge && <span className='nav-badge'>{item.badge}</span>}
                 </NavLink>
               ))}
             </div>

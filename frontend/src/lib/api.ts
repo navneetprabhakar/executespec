@@ -2956,6 +2956,30 @@ export const annotateArchitecture = (projectId: string, annotation: string) =>
 export const getRepoCodeMap = (projectId: string, repoId: string) =>
   req<{content: string}>(`/projects/${projectId}/repos/${repoId}/codemap`);
 
+// 2026-05-16 — Browse tab — list the actual files in a linked repo via the
+// backend's GitHub-proxied endpoint. The backend uses the caller's stored
+// PAT, so file reads stay within the user's GitHub permissions.
+export interface RepoFileList {
+  repoFullName: string;
+  defaultBranch: string;
+  files: string[];
+}
+export const listRepoFiles = (projectId: string, repoId: string) =>
+  req<RepoFileList>(`/projects/${projectId}/repos/${repoId}/files`);
+
+// 2026-05-16 — Browse tab — fetch the raw text of one file. Cap-enforced
+// to 1 MB on the backend; longer content is truncated with a trailing
+// marker so the UI can warn the user without bailing entirely.
+export interface RepoFile {
+  repoFullName: string;
+  defaultBranch: string;
+  path: string;
+  content: string;
+  sizeBytes: number;
+}
+export const readRepoFile = (projectId: string, repoId: string, path: string) =>
+  req<RepoFile>(`/projects/${projectId}/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
+
 // PR list for a run (R5)
 export const getRunPrs = (runId: string) =>
   req<import('@/types/project').PrSummary[]>(`/runs/${runId}/prs`);
