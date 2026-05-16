@@ -206,12 +206,7 @@ export function TabsStrip({
             {it.label}
           </Link>
         ) : (
-          <button
-            key={i}
-            type='button'
-            className={it.active ? 'active' : ''}
-            onClick={it.onClick}
-          >
+          <button key={i} type='button' className={it.active ? 'active' : ''} onClick={it.onClick}>
             {it.label}
           </button>
         ),

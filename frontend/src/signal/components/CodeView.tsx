@@ -12,7 +12,17 @@ import {useMemo} from 'react';
  *   <CodeView path="foo.ts" content="..." />               — plain file
  *   <CodeView path="foo.ts" diff="..." />                  — unified diff
  */
-export function CodeView({path, content, diff, maxHeight = 480}: {path: string; content?: string; diff?: string; maxHeight?: number}) {
+export function CodeView({
+  path,
+  content,
+  diff,
+  maxHeight = 480,
+}: {
+  path: string;
+  content?: string;
+  diff?: string;
+  maxHeight?: number;
+}) {
   const lang = guessLang(path);
   const isDiff = typeof diff === 'string' && diff.length > 0;
   const body = isDiff ? diff! : content || '';
@@ -41,8 +51,20 @@ export function CodeView({path, content, diff, maxHeight = 480}: {path: string; 
           color: 'var(--signal-text-dim)',
         }}
       >
-        <span style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0}}>{path}</span>
-        <span style={{textTransform: 'uppercase', letterSpacing: '0.1em', fontSize: 10, flexShrink: 0, marginLeft: 12}}>
+        <span
+          style={{whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0}}
+        >
+          {path}
+        </span>
+        <span
+          style={{
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            fontSize: 10,
+            flexShrink: 0,
+            marginLeft: 12,
+          }}
+        >
           {isDiff ? 'diff' : lang}
         </span>
       </div>
@@ -78,11 +100,33 @@ export function CodeView({path, content, diff, maxHeight = 480}: {path: string; 
                   minHeight: 18,
                 }}
               >
-                <span style={{display: 'inline-block', width: 36, color: 'var(--signal-text-mute)', textAlign: 'right', paddingRight: 12, flexShrink: 0, userSelect: 'none'}}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 36,
+                    color: 'var(--signal-text-mute)',
+                    textAlign: 'right',
+                    paddingRight: 12,
+                    flexShrink: 0,
+                    userSelect: 'none',
+                  }}
+                >
                   {i + 1}
                 </span>
                 {prefix && (
-                  <span style={{display: 'inline-block', width: 12, color: prefix === '+' ? 'var(--signal-mint-text-on-light)' : prefix === '-' ? 'var(--signal-coral-text)' : 'inherit', flexShrink: 0}}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 12,
+                      color:
+                        prefix === '+'
+                          ? 'var(--signal-mint-text-on-light)'
+                          : prefix === '-'
+                            ? 'var(--signal-coral-text)'
+                            : 'inherit',
+                      flexShrink: 0,
+                    }}
+                  >
                     {prefix}
                   </span>
                 )}
@@ -101,12 +145,31 @@ export function CodeView({path, content, diff, maxHeight = 480}: {path: string; 
 function guessLang(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() || '';
   const map: Record<string, string> = {
-    ts: 'ts', tsx: 'tsx', js: 'js', jsx: 'jsx', mjs: 'js', cjs: 'js',
-    java: 'java', py: 'python', rb: 'ruby', go: 'go', rs: 'rust',
-    json: 'json', yml: 'yaml', yaml: 'yaml', toml: 'toml',
-    sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash',
-    md: 'markdown', html: 'html', css: 'css', scss: 'scss',
-    xml: 'xml', svg: 'xml',
+    ts: 'ts',
+    tsx: 'tsx',
+    js: 'js',
+    jsx: 'jsx',
+    mjs: 'js',
+    cjs: 'js',
+    java: 'java',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    rs: 'rust',
+    json: 'json',
+    yml: 'yaml',
+    yaml: 'yaml',
+    toml: 'toml',
+    sql: 'sql',
+    sh: 'bash',
+    bash: 'bash',
+    zsh: 'bash',
+    md: 'markdown',
+    html: 'html',
+    css: 'css',
+    scss: 'scss',
+    xml: 'xml',
+    svg: 'xml',
   };
   return map[ext] || 'text';
 }
@@ -114,17 +177,69 @@ function guessLang(path: string): string {
 // Per-language token regex + colour for highlight. Tiny — covers keywords,
 // strings, numbers, comments. Returns ReactNode array.
 function tokenize(line: string, lang: string): React.ReactNode {
-  const langs: Record<string, {keywords: Set<string>; comment: RegExp; string: RegExp; number: RegExp}> = {
-    ts: kw('const,let,var,function,class,interface,type,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,implements,public,private,protected,static,readonly,as,in,of,typeof,instanceof,null,undefined,true,false,void,never,any,unknown,Promise'),
-    tsx: kw('const,let,var,function,class,interface,type,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,implements,public,private,protected,static,readonly,as,in,of,typeof,instanceof,null,undefined,true,false,void,never,any,unknown,Promise'),
-    js: kw('const,let,var,function,class,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,typeof,instanceof,null,undefined,true,false'),
-    jsx: kw('const,let,var,function,class,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,typeof,instanceof,null,undefined,true,false'),
-    java: kw('public,private,protected,class,interface,extends,implements,return,if,else,for,while,switch,case,break,continue,do,new,this,super,static,final,void,int,long,double,float,boolean,String,null,true,false,abstract,synchronized,throws,throw,try,catch,finally,import,package'),
-    python: kw('def,class,return,if,else,elif,for,while,break,continue,pass,import,from,as,with,try,except,finally,raise,lambda,yield,async,await,None,True,False,not,and,or,in,is,self'),
-    json: {keywords: new Set(['true', 'false', 'null']), comment: /^\/\/.*$/, string: /"(?:\\.|[^"\\])*"/g, number: /\b-?\d+(?:\.\d+)?\b/g},
-    yaml: {keywords: new Set(['true', 'false', 'null', 'yes', 'no']), comment: /#.*$/g, string: /"(?:\\.|[^"\\])*"|'(?:[^']|'')*'/g, number: /\b-?\d+(?:\.\d+)?\b/g},
-    sql: kw('SELECT,FROM,WHERE,JOIN,LEFT,RIGHT,INNER,OUTER,ON,AS,AND,OR,NOT,IN,LIKE,BETWEEN,IS,NULL,GROUP,BY,ORDER,HAVING,LIMIT,OFFSET,UNION,INSERT,UPDATE,DELETE,CREATE,TABLE,INDEX,VIEW,DROP,ALTER,COLUMN,PRIMARY,KEY,FOREIGN,REFERENCES,DEFAULT,NOT NULL'),
-    bash: {keywords: new Set(['if', 'then', 'else', 'elif', 'fi', 'for', 'in', 'do', 'done', 'while', 'case', 'esac', 'function', 'return', 'echo', 'export', 'local', 'true', 'false']), comment: /#.*$/g, string: /"(?:\\.|[^"\\])*"|'[^']*'/g, number: /\b-?\d+(?:\.\d+)?\b/g},
+  const langs: Record<
+    string,
+    {keywords: Set<string>; comment: RegExp; string: RegExp; number: RegExp}
+  > = {
+    ts: kw(
+      'const,let,var,function,class,interface,type,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,implements,public,private,protected,static,readonly,as,in,of,typeof,instanceof,null,undefined,true,false,void,never,any,unknown,Promise',
+    ),
+    tsx: kw(
+      'const,let,var,function,class,interface,type,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,implements,public,private,protected,static,readonly,as,in,of,typeof,instanceof,null,undefined,true,false,void,never,any,unknown,Promise',
+    ),
+    js: kw(
+      'const,let,var,function,class,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,typeof,instanceof,null,undefined,true,false',
+    ),
+    jsx: kw(
+      'const,let,var,function,class,import,export,from,return,if,else,for,while,switch,case,break,continue,do,async,await,new,this,super,extends,typeof,instanceof,null,undefined,true,false',
+    ),
+    java: kw(
+      'public,private,protected,class,interface,extends,implements,return,if,else,for,while,switch,case,break,continue,do,new,this,super,static,final,void,int,long,double,float,boolean,String,null,true,false,abstract,synchronized,throws,throw,try,catch,finally,import,package',
+    ),
+    python: kw(
+      'def,class,return,if,else,elif,for,while,break,continue,pass,import,from,as,with,try,except,finally,raise,lambda,yield,async,await,None,True,False,not,and,or,in,is,self',
+    ),
+    json: {
+      keywords: new Set(['true', 'false', 'null']),
+      comment: /^\/\/.*$/,
+      string: /"(?:\\.|[^"\\])*"/g,
+      number: /\b-?\d+(?:\.\d+)?\b/g,
+    },
+    yaml: {
+      keywords: new Set(['true', 'false', 'null', 'yes', 'no']),
+      comment: /#.*$/g,
+      string: /"(?:\\.|[^"\\])*"|'(?:[^']|'')*'/g,
+      number: /\b-?\d+(?:\.\d+)?\b/g,
+    },
+    sql: kw(
+      'SELECT,FROM,WHERE,JOIN,LEFT,RIGHT,INNER,OUTER,ON,AS,AND,OR,NOT,IN,LIKE,BETWEEN,IS,NULL,GROUP,BY,ORDER,HAVING,LIMIT,OFFSET,UNION,INSERT,UPDATE,DELETE,CREATE,TABLE,INDEX,VIEW,DROP,ALTER,COLUMN,PRIMARY,KEY,FOREIGN,REFERENCES,DEFAULT,NOT NULL',
+    ),
+    bash: {
+      keywords: new Set([
+        'if',
+        'then',
+        'else',
+        'elif',
+        'fi',
+        'for',
+        'in',
+        'do',
+        'done',
+        'while',
+        'case',
+        'esac',
+        'function',
+        'return',
+        'echo',
+        'export',
+        'local',
+        'true',
+        'false',
+      ]),
+      comment: /#.*$/g,
+      string: /"(?:\\.|[^"\\])*"|'[^']*'/g,
+      number: /\b-?\d+(?:\.\d+)?\b/g,
+    },
   };
   const cfg = langs[lang];
   if (!cfg) return line;
@@ -159,7 +274,11 @@ function tokenize(line: string, lang: string): React.ReactNode {
   let pos = 0;
   filtered.forEach((r, i) => {
     if (pos < r.start) out.push(<span key={`p${i}`}>{line.slice(pos, r.start)}</span>);
-    out.push(<span key={`k${i}`} style={{color: r.color}}>{line.slice(r.start, r.end)}</span>);
+    out.push(
+      <span key={`k${i}`} style={{color: r.color}}>
+        {line.slice(r.start, r.end)}
+      </span>,
+    );
     pos = r.end;
   });
   if (pos < line.length) out.push(<span key='tail'>{line.slice(pos)}</span>);

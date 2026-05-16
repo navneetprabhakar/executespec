@@ -5,7 +5,16 @@
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
-import {Feed, Row, Card, Button, Chip, StatusPill, TabsStrip, KvList} from '@/signal/components/Primitives';
+import {
+  Feed,
+  Row,
+  Card,
+  Button,
+  Chip,
+  StatusPill,
+  TabsStrip,
+  KvList,
+} from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
@@ -35,7 +44,15 @@ export function InsightsPage() {
     });
   }, [days]);
 
-  const mAny = (metrics || {}) as unknown as {totalRuns?: number; avgVerifiedScore?: number; avgDurationMs?: number; totalSpend?: number; shipped?: number; needs?: number; failed?: number};
+  const mAny = (metrics || {}) as unknown as {
+    totalRuns?: number;
+    avgVerifiedScore?: number;
+    avgDurationMs?: number;
+    totalSpend?: number;
+    shipped?: number;
+    needs?: number;
+    failed?: number;
+  };
   const total = mAny.totalRuns ?? 0;
   const shipped = mAny.shipped ?? 0;
   const needs = mAny.needs ?? 0;
@@ -48,9 +65,19 @@ export function InsightsPage() {
     return `${m}m ${s}s`;
   })();
   const spend = mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(2)}` : '—';
-  const mcAny = (byProvider || {}) as unknown as {byProvider?: Array<{provider?: string; spend?: number; cacheHitRate?: number}>};
+  const mcAny = (byProvider || {}) as unknown as {
+    byProvider?: Array<{provider?: string; spend?: number; cacheHitRate?: number}>;
+  };
   const providers = mcAny.byProvider || [];
-  const topUser = (summary?.users || [])[0] as unknown as {firstName?: string; lastName?: string; email?: string; runCount?: number; successRate?: number} | undefined;
+  const topUser = (summary?.users || [])[0] as unknown as
+    | {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        runCount?: number;
+        successRate?: number;
+      }
+    | undefined;
 
   return (
     <>
@@ -64,54 +91,114 @@ export function InsightsPage() {
           ]}
         />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         <div className='signal-quick-grid'>
           <div className='signal-quick-card mint'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2}>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+              >
                 <path d='M22 11.08V12a10 10 0 1 1-5.93-9.14' />
                 <polyline points='22 4 12 14.01 9 11.01' />
               </svg>
             </div>
             <h4>Avg score</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{avgScore}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {avgScore}
+            </div>
           </div>
           <div className='signal-quick-card signal'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2}>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+              >
                 <circle cx='12' cy='12' r='10' />
                 <path d='M12 6v6l4 2' />
               </svg>
             </div>
             <h4>Avg run time</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{avgDuration}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {avgDuration}
+            </div>
           </div>
           <div className='signal-quick-card coral'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2}>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+              >
                 <line x1='12' y1='1' x2='12' y2='23' />
                 <path d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' />
               </svg>
             </div>
             <h4>Total spend</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{spend}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {spend}
+            </div>
           </div>
           <div className='signal-quick-card lavender'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2}>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+              >
                 <path d='M9 11l3 3L22 4' />
               </svg>
             </div>
             <h4>Runs shipped</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{shipped} / {total}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {shipped} / {total}
+            </div>
           </div>
         </div>
 
         <SectionHeader>Cost by provider</SectionHeader>
         <Card>
           {providers.length === 0 ? (
-            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No provider data yet for this range.</p>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No provider data yet for this range.
+            </p>
           ) : (
             <KvList
               pairs={providers.map((p) => ({
@@ -124,16 +211,34 @@ export function InsightsPage() {
 
         <SectionHeader>Run outcomes · {days}d</SectionHeader>
         <Card>
-          <div style={{display: 'flex', gap: 4, height: 18, borderRadius: 999, overflow: 'hidden', marginBottom: 14}}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 4,
+              height: 18,
+              borderRadius: 999,
+              overflow: 'hidden',
+              marginBottom: 14,
+            }}
+          >
             <div style={{flex: shipped, background: 'var(--signal-mint)'}} />
             <div style={{flex: needs, background: 'var(--signal-y)'}} />
             <div style={{flex: failed, background: 'var(--signal-coral)'}} />
           </div>
           <KvList
             pairs={[
-              {k: <span style={{color: 'var(--signal-mint-text-on-light)'}}>● Shipped</span>, v: `${shipped} (${total > 0 ? Math.round((shipped / total) * 100) : 0}%)`},
-              {k: <span style={{color: 'var(--signal-y-text)'}}>● Needs review</span>, v: `${needs} (${total > 0 ? Math.round((needs / total) * 100) : 0}%)`},
-              {k: <span style={{color: 'var(--signal-coral-text)'}}>● Failed / cancelled</span>, v: `${failed} (${total > 0 ? Math.round((failed / total) * 100) : 0}%)`},
+              {
+                k: <span style={{color: 'var(--signal-mint-text-on-light)'}}>● Shipped</span>,
+                v: `${shipped} (${total > 0 ? Math.round((shipped / total) * 100) : 0}%)`,
+              },
+              {
+                k: <span style={{color: 'var(--signal-y-text)'}}>● Needs review</span>,
+                v: `${needs} (${total > 0 ? Math.round((needs / total) * 100) : 0}%)`,
+              },
+              {
+                k: <span style={{color: 'var(--signal-coral-text)'}}>● Failed / cancelled</span>,
+                v: `${failed} (${total > 0 ? Math.round((failed / total) * 100) : 0}%)`,
+              },
             ]}
           />
         </Card>
@@ -143,11 +248,20 @@ export function InsightsPage() {
             <SectionHeader>Most active user</SectionHeader>
             <Row
               dot='lavender'
-              title={topUser.email || `${topUser.firstName ?? ''} ${topUser.lastName ?? ''}`.trim() || '—'}
+              title={
+                topUser.email ||
+                `${topUser.firstName ?? ''} ${topUser.lastName ?? ''}`.trim() ||
+                '—'
+              }
               meta={
                 <>
                   <span>{topUser.runCount ?? 0} runs</span>
-                  {topUser.successRate != null && (<><span>·</span><span>{Math.round(topUser.successRate * 100)}% success</span></>)}
+                  {topUser.successRate != null && (
+                    <>
+                      <span>·</span>
+                      <span>{Math.round(topUser.successRate * 100)}% success</span>
+                    </>
+                  )}
                 </>
               }
               showChev
@@ -161,12 +275,60 @@ export function InsightsPage() {
 
 // ──────────────────── Library (readymade solutions) ────────────────────
 const LIBRARY_SOLUTIONS = [
-  {slug: 'stripe-checkout', name: 'Stripe checkout', desc: 'Subscriptions + one-time + webhook signature verify', tags: ['payments', 'webhook'], time: '~6m', credits: 4, color: 'mint'},
-  {slug: 'oauth-login', name: 'OAuth login', desc: 'Google + GitHub + email/password fallback', tags: ['auth', 'security'], time: '~4m', credits: 2, color: 'signal'},
-  {slug: 'rag-pgvector', name: 'RAG with pgvector', desc: 'Tika extraction → embeddings → retrieval', tags: ['llm', 'postgres'], time: '~9m', credits: 6, color: 'coral'},
-  {slug: 'github-actions', name: 'GitHub Actions CI', desc: 'Build · test · lint · containerize · push', tags: ['ci', 'docker'], time: '~3m', credits: 2, color: 'lavender'},
-  {slug: 'docker-compose', name: 'Docker compose dev', desc: 'Postgres + Redis + app · hot reload', tags: ['infra'], time: '~2m', credits: 1, color: 'mint'},
-  {slug: 'razorpay-checkout', name: 'Razorpay checkout', desc: 'India payments · UPI · cards · auth webhooks', tags: ['payments'], time: '~5m', credits: 3, color: 'signal'},
+  {
+    slug: 'stripe-checkout',
+    name: 'Stripe checkout',
+    desc: 'Subscriptions + one-time + webhook signature verify',
+    tags: ['payments', 'webhook'],
+    time: '~6m',
+    credits: 4,
+    color: 'mint',
+  },
+  {
+    slug: 'oauth-login',
+    name: 'OAuth login',
+    desc: 'Google + GitHub + email/password fallback',
+    tags: ['auth', 'security'],
+    time: '~4m',
+    credits: 2,
+    color: 'signal',
+  },
+  {
+    slug: 'rag-pgvector',
+    name: 'RAG with pgvector',
+    desc: 'Tika extraction → embeddings → retrieval',
+    tags: ['llm', 'postgres'],
+    time: '~9m',
+    credits: 6,
+    color: 'coral',
+  },
+  {
+    slug: 'github-actions',
+    name: 'GitHub Actions CI',
+    desc: 'Build · test · lint · containerize · push',
+    tags: ['ci', 'docker'],
+    time: '~3m',
+    credits: 2,
+    color: 'lavender',
+  },
+  {
+    slug: 'docker-compose',
+    name: 'Docker compose dev',
+    desc: 'Postgres + Redis + app · hot reload',
+    tags: ['infra'],
+    time: '~2m',
+    credits: 1,
+    color: 'mint',
+  },
+  {
+    slug: 'razorpay-checkout',
+    name: 'Razorpay checkout',
+    desc: 'India payments · UPI · cards · auth webhooks',
+    tags: ['payments'],
+    time: '~5m',
+    credits: 3,
+    color: 'signal',
+  },
 ] as const;
 
 export function LibraryPage() {
@@ -185,11 +347,21 @@ export function LibraryPage() {
       />
       <Feed>
         <Card style={{background: 'var(--signal-y-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-y-text)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             How it works
           </div>
           <div style={{fontSize: 14, color: 'var(--signal-y-text)', lineHeight: 1.5}}>
-            Pick a solution, edit the spec to match your stack, approve the plan. Average ~5 minutes from click to PR.
+            Pick a solution, edit the spec to match your stack, approve the plan. Average ~5 minutes
+            from click to PR.
           </div>
         </Card>
 
@@ -205,46 +377,57 @@ export function LibraryPage() {
         />
 
         <div className='signal-grid auto'>
-        {LIBRARY_SOLUTIONS.map((s) => (
-          <Card key={s.slug} to={`/library/${s.slug}`}>
-            <div style={{display: 'flex', gap: 14, marginBottom: 12}}>
+          {LIBRARY_SOLUTIONS.map((s) => (
+            <Card key={s.slug} to={`/library/${s.slug}`}>
+              <div style={{display: 'flex', gap: 14, marginBottom: 12}}>
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 10,
+                    background:
+                      s.color === 'mint'
+                        ? 'var(--signal-mint-soft)'
+                        : s.color === 'signal'
+                          ? 'var(--signal-y-soft)'
+                          : s.color === 'coral'
+                            ? 'var(--signal-coral-soft)'
+                            : 'var(--signal-lavender-soft)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  ⚡
+                </div>
+                <div style={{flex: 1, minWidth: 0}}>
+                  <div style={{fontSize: 15, fontWeight: 600, marginBottom: 4}}>{s.name}</div>
+                  <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.4}}>
+                    {s.desc}
+                  </div>
+                </div>
+              </div>
+              <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+                {s.tags.map((t) => (
+                  <Chip key={t}>{t}</Chip>
+                ))}
+              </div>
               <div
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  background:
-                    s.color === 'mint'
-                      ? 'var(--signal-mint-soft)'
-                      : s.color === 'signal'
-                      ? 'var(--signal-y-soft)'
-                      : s.color === 'coral'
-                      ? 'var(--signal-coral-soft)'
-                      : 'var(--signal-lavender-soft)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  flexShrink: 0,
+                  display: 'flex',
+                  gap: 10,
+                  alignItems: 'center',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  color: 'var(--signal-text-mute)',
                 }}
               >
-                ⚡
+                <span>{s.time}</span>
+                <span>·</span>
+                <span>{s.credits} credits</span>
               </div>
-              <div style={{flex: 1, minWidth: 0}}>
-                <div style={{fontSize: 15, fontWeight: 600, marginBottom: 4}}>{s.name}</div>
-                <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.4}}>{s.desc}</div>
-              </div>
-            </div>
-            <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-              {s.tags.map((t) => (
-                <Chip key={t}>{t}</Chip>
-              ))}
-            </div>
-            <div style={{display: 'flex', gap: 10, alignItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--signal-text-mute)'}}>
-              <span>{s.time}</span>
-              <span>·</span>
-              <span>{s.credits} credits</span>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          ))}
         </div>
       </Feed>
     </>
@@ -254,11 +437,36 @@ export function LibraryPage() {
 export function LibraryDetailPage() {
   return (
     <>
-      <TopBar title='Stripe checkout' sub='Library solution · ~6m · 4 credits' back backTo='/library' />
+      <TopBar
+        title='Stripe checkout'
+        sub='Library solution · ~6m · 4 credits'
+        back
+        backTo='/library'
+      />
       <Feed>
         <Card>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-text-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8}}>What you'll get</div>
-          <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8, fontSize: 14}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-text-mute)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            What you'll get
+          </div>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'grid',
+              gap: 8,
+              fontSize: 14,
+            }}
+          >
             <li>✓ Subscription + one-time checkout endpoints</li>
             <li>✓ Webhook handler with signature verification</li>
             <li>✓ Customer + invoice persistence</li>
@@ -300,12 +508,48 @@ export function LibraryDetailPage() {
 
 // ──────────────────── Migrations ────────────────────
 const MIGRATIONS = [
-  {slug: 'js-to-ts', name: 'JavaScript → TypeScript', desc: 'Add types incrementally with strict mode pin', impact: 'high', time: '~15m / file'},
-  {slug: 'express-fastify', name: 'Express → Fastify', desc: 'Per-route migration · Zod schemas · perf wins', impact: 'medium', time: '~8m / route'},
-  {slug: 'mongoose-prisma', name: 'Mongoose → Prisma', desc: 'Schema · queries · migrations · Postgres adapter', impact: 'high', time: '~12m / model'},
-  {slug: 'react-class-hooks', name: 'React classes → hooks', desc: 'Components, lifecycle → useEffect, context → providers', impact: 'medium', time: '~4m / cmp'},
-  {slug: 'webpack-vite', name: 'Webpack → Vite', desc: 'Config, plugins, alias, env, build · dev-server', impact: 'high', time: '~30m'},
-  {slug: 'pages-app-router', name: 'Pages → App Router', desc: 'Next.js routing · server components · loading', impact: 'high', time: '~10m / route'},
+  {
+    slug: 'js-to-ts',
+    name: 'JavaScript → TypeScript',
+    desc: 'Add types incrementally with strict mode pin',
+    impact: 'high',
+    time: '~15m / file',
+  },
+  {
+    slug: 'express-fastify',
+    name: 'Express → Fastify',
+    desc: 'Per-route migration · Zod schemas · perf wins',
+    impact: 'medium',
+    time: '~8m / route',
+  },
+  {
+    slug: 'mongoose-prisma',
+    name: 'Mongoose → Prisma',
+    desc: 'Schema · queries · migrations · Postgres adapter',
+    impact: 'high',
+    time: '~12m / model',
+  },
+  {
+    slug: 'react-class-hooks',
+    name: 'React classes → hooks',
+    desc: 'Components, lifecycle → useEffect, context → providers',
+    impact: 'medium',
+    time: '~4m / cmp',
+  },
+  {
+    slug: 'webpack-vite',
+    name: 'Webpack → Vite',
+    desc: 'Config, plugins, alias, env, build · dev-server',
+    impact: 'high',
+    time: '~30m',
+  },
+  {
+    slug: 'pages-app-router',
+    name: 'Pages → App Router',
+    desc: 'Next.js routing · server components · loading',
+    impact: 'high',
+    time: '~10m / route',
+  },
 ];
 
 export function MigrationsPage() {
@@ -324,25 +568,52 @@ export function MigrationsPage() {
       />
       <Feed>
         <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: '#5443a8', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#5443a8',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             What's a migration?
           </div>
           <div style={{fontSize: 14, color: '#5443a8', lineHeight: 1.5}}>
-            A multi-file refactor with parity tests. We run it incrementally — file by file, route by route — so your CI stays green throughout.
+            A multi-file refactor with parity tests. We run it incrementally — file by file, route
+            by route — so your CI stays green throughout.
           </div>
         </Card>
 
         <div className='signal-grid cols-2'>
-        {MIGRATIONS.map((m) => (
-          <Card key={m.slug} to={`/migrations/${m.slug}`}>
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6}}>
-              <div style={{fontSize: 15, fontWeight: 600}}>{m.name}</div>
-              <StatusPill kind={m.impact === 'high' ? 'shipped' : 'needs'}>{m.impact}</StatusPill>
-            </div>
-            <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 8}}>{m.desc}</div>
-            <div style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--signal-text-mute)'}}>{m.time}</div>
-          </Card>
-        ))}
+          {MIGRATIONS.map((m) => (
+            <Card key={m.slug} to={`/migrations/${m.slug}`}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 6,
+                }}
+              >
+                <div style={{fontSize: 15, fontWeight: 600}}>{m.name}</div>
+                <StatusPill kind={m.impact === 'high' ? 'shipped' : 'needs'}>{m.impact}</StatusPill>
+              </div>
+              <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 8}}>
+                {m.desc}
+              </div>
+              <div
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  color: 'var(--signal-text-mute)',
+                }}
+              >
+                {m.time}
+              </div>
+            </Card>
+          ))}
         </div>
       </Feed>
     </>
@@ -352,15 +623,47 @@ export function MigrationsPage() {
 export function MigrationDetailPage() {
   return (
     <>
-      <TopBar title='JavaScript → TypeScript' sub='Migration · incremental · per-file' back backTo='/migrations' />
+      <TopBar
+        title='JavaScript → TypeScript'
+        sub='Migration · incremental · per-file'
+        back
+        backTo='/migrations'
+      />
       <Feed>
         <Card>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-text-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8}}>How it runs</div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-text-mute)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
+            How it runs
+          </div>
           <ol style={{padding: '0 0 0 18px', margin: 0, display: 'grid', gap: 8, fontSize: 14}}>
-            <li>Scan all <code className='mono' style={{fontSize: 12}}>.js</code> / <code className='mono' style={{fontSize: 12}}>.jsx</code> files</li>
+            <li>
+              Scan all{' '}
+              <code className='mono' style={{fontSize: 12}}>
+                .js
+              </code>{' '}
+              /{' '}
+              <code className='mono' style={{fontSize: 12}}>
+                .jsx
+              </code>{' '}
+              files
+            </li>
             <li>Cluster by dependency graph; start at leaves</li>
             <li>For each file: rename, infer types, add explicit annotations on public APIs</li>
-            <li>Run <code className='mono' style={{fontSize: 12}}>tsc --noEmit</code> after every cluster</li>
+            <li>
+              Run{' '}
+              <code className='mono' style={{fontSize: 12}}>
+                tsc --noEmit
+              </code>{' '}
+              after every cluster
+            </li>
             <li>Open one PR per cluster (~30 files), CI-green</li>
           </ol>
         </Card>
@@ -383,11 +686,21 @@ export function MigrationDetailPage() {
         </div>
 
         <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-coral-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-coral-text)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             Heads up
           </div>
           <div style={{fontSize: 13.5, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
-            We pause at every plan gate. You're never further than one approval away from the next batch.
+            We pause at every plan gate. You're never further than one approval away from the next
+            batch.
           </div>
         </Card>
       </Feed>
@@ -411,7 +724,10 @@ export function TrustPage() {
             <div key={b.label} className={`signal-quick-card ${b.tone}`}>
               <div className='icon-bg'>✓</div>
               <h4>{b.label}</h4>
-              <div className='count' style={{color: 'var(--signal-ink)', fontSize: 15, fontWeight: 600}}>
+              <div
+                className='count'
+                style={{color: 'var(--signal-ink)', fontSize: 15, fontWeight: 600}}
+              >
                 {b.v}
               </div>
             </div>
@@ -444,7 +760,11 @@ export function TrustPage() {
         <SectionHeader>Documents</SectionHeader>
         <Row title='SOC 2 Type II report' meta={<span>NDA required</span>} showChev />
         <Row title='Data Processing Addendum (DPA)' meta={<span>Standard MSAs</span>} showChev />
-        <Row title='Sub-processors list' meta={<span>GCP · Anthropic · OpenAI · Google AI</span>} showChev />
+        <Row
+          title='Sub-processors list'
+          meta={<span>GCP · Anthropic · OpenAI · Google AI</span>}
+          showChev
+        />
         <Row title='Penetration test report · 2026' meta={<span>NDA required</span>} showChev />
         <Row title='Privacy policy' meta={<span>last updated 2026-03-14</span>} showChev />
       </Feed>
@@ -458,41 +778,97 @@ export function EmptyProjectPage() {
     <>
       <TopBar title='Get started' sub="Let's get your first PR shipped" back backTo='/home' />
       <Feed>
-        <Card style={{background: 'var(--signal-mint-soft)', borderColor: 'transparent', textAlign: 'center', padding: 28}}>
+        <Card
+          style={{
+            background: 'var(--signal-mint-soft)',
+            borderColor: 'transparent',
+            textAlign: 'center',
+            padding: 28,
+          }}
+        >
           <div style={{fontSize: 38, marginBottom: 8}}>🚀</div>
-          <div style={{fontSize: 18, fontWeight: 700, color: 'var(--signal-mint-text-on-light)', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: 'var(--signal-mint-text-on-light)',
+              marginBottom: 6,
+            }}
+          >
             You don't have any projects yet
           </div>
-          <div style={{fontSize: 13.5, color: 'var(--signal-mint-text-on-light)', maxWidth: 280, margin: '0 auto', lineHeight: 1.5}}>
-            Link a repo or pick a sandbox to see ExecuteSpec in action. ~3 minutes to your first verified PR.
+          <div
+            style={{
+              fontSize: 13.5,
+              color: 'var(--signal-mint-text-on-light)',
+              maxWidth: 280,
+              margin: '0 auto',
+              lineHeight: 1.5,
+            }}
+          >
+            Link a repo or pick a sandbox to see ExecuteSpec in action. ~3 minutes to your first
+            verified PR.
           </div>
         </Card>
 
         <SectionHeader>Path 1 · Link a GitHub repo</SectionHeader>
         <Card>
-          <div style={{fontSize: 14, color: 'var(--signal-text-dim)', marginBottom: 12, lineHeight: 1.5}}>
-            Bring an existing codebase. We'll install a webhook, snapshot the architecture, and you can run specs against it immediately.
+          <div
+            style={{
+              fontSize: 14,
+              color: 'var(--signal-text-dim)',
+              marginBottom: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            Bring an existing codebase. We'll install a webhook, snapshot the architecture, and you
+            can run specs against it immediately.
           </div>
           <Button kind='primary' block to='/integrations'>
-            <svg viewBox='0 0 24 24' style={{width: 16, height: 16}}><path fill='currentColor' d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z' /></svg>
+            <svg viewBox='0 0 24 24' style={{width: 16, height: 16}}>
+              <path
+                fill='currentColor'
+                d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z'
+              />
+            </svg>
             Connect GitHub
           </Button>
         </Card>
 
         <SectionHeader>Path 2 · Try a sandbox</SectionHeader>
         <Card>
-          <div style={{fontSize: 14, color: 'var(--signal-text-dim)', marginBottom: 12, lineHeight: 1.5}}>
-            We'll spin up a brand-new repo with one of three preset specs. Free, no commits to your repos.
+          <div
+            style={{
+              fontSize: 14,
+              color: 'var(--signal-text-dim)',
+              marginBottom: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            We'll spin up a brand-new repo with one of three preset specs. Free, no commits to your
+            repos.
           </div>
-          <Button kind='secondary' block to='/welcome'>Pick a starter →</Button>
+          <Button kind='secondary' block to='/welcome'>
+            Pick a starter →
+          </Button>
         </Card>
 
         <SectionHeader>Path 3 · Browse the library</SectionHeader>
         <Card>
-          <div style={{fontSize: 14, color: 'var(--signal-text-dim)', marginBottom: 12, lineHeight: 1.5}}>
-            28 readymade solutions (Stripe, OAuth, RAG, …) and 11 migrations (JS→TS, Express→Fastify, …) — each pre-tuned to ship to a real repo.
+          <div
+            style={{
+              fontSize: 14,
+              color: 'var(--signal-text-dim)',
+              marginBottom: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            28 readymade solutions (Stripe, OAuth, RAG, …) and 11 migrations (JS→TS,
+            Express→Fastify, …) — each pre-tuned to ship to a real repo.
           </div>
-          <Button kind='secondary' block to='/library'>Open library →</Button>
+          <Button kind='secondary' block to='/library'>
+            Open library →
+          </Button>
         </Card>
       </Feed>
     </>
@@ -505,79 +881,132 @@ export function PublicPricingPage() {
     <>
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
-        <TabsStrip
-          items={[
-            {label: 'Monthly'},
-            {label: 'Yearly · save 20%', active: true},
-          ]}
-        />
+        <TabsStrip items={[{label: 'Monthly'}, {label: 'Yearly · save 20%', active: true}]} />
 
         <div className='signal-grid cols-2 cols-4-xl'>
-        {[
-          {
-            tier: 'FREE',
-            price: '$0',
-            sub: 'No card required',
-            features: ['5 runs / month', '1-credit specs only', '$3 hard cost cap', 'Single repo', 'Email support'],
-          },
-          {
-            tier: 'SOLO',
-            price: '$29',
-            unit: '/mo',
-            sub: 'Indie devs · single workspace',
-            features: ['100 runs / month', '200 credits / month', '$10 hard cap', 'Multi-repo', '1 BYOK provider', 'Library + migrations'],
-          },
-          {
-            tier: 'TEAM',
-            price: '$31',
-            unit: '/seat/mo',
-            sub: 'Min 2 seats · yearly',
-            features: ['Unlimited runs', '500 credits / seat / month', '$25 hard cap', 'BYOK · 3 providers', 'Cross-repo + sharing', 'All autofix surfaces'],
-            best: true,
-          },
-          {
-            tier: 'ENTERPRISE',
-            price: 'Custom',
-            sub: 'SSO · SLA · dedicated CSM',
-            features: ['Unlimited credits', 'No cost cap', 'Standards · Contracts · ADRs', 'SSO + SCIM', '99.9% SLA', 'Dedicated CSM'],
-          },
-        ].map((p) => (
-          <Card key={p.tier} style={{position: 'relative', borderColor: p.best ? 'var(--signal-ink)' : undefined}}>
-            {p.best && (
+          {[
+            {
+              tier: 'FREE',
+              price: '$0',
+              sub: 'No card required',
+              features: [
+                '5 runs / month',
+                '1-credit specs only',
+                '$3 hard cost cap',
+                'Single repo',
+                'Email support',
+              ],
+            },
+            {
+              tier: 'SOLO',
+              price: '$29',
+              unit: '/mo',
+              sub: 'Indie devs · single workspace',
+              features: [
+                '100 runs / month',
+                '200 credits / month',
+                '$10 hard cap',
+                'Multi-repo',
+                '1 BYOK provider',
+                'Library + migrations',
+              ],
+            },
+            {
+              tier: 'TEAM',
+              price: '$31',
+              unit: '/seat/mo',
+              sub: 'Min 2 seats · yearly',
+              features: [
+                'Unlimited runs',
+                '500 credits / seat / month',
+                '$25 hard cap',
+                'BYOK · 3 providers',
+                'Cross-repo + sharing',
+                'All autofix surfaces',
+              ],
+              best: true,
+            },
+            {
+              tier: 'ENTERPRISE',
+              price: 'Custom',
+              sub: 'SSO · SLA · dedicated CSM',
+              features: [
+                'Unlimited credits',
+                'No cost cap',
+                'Standards · Contracts · ADRs',
+                'SSO + SCIM',
+                '99.9% SLA',
+                'Dedicated CSM',
+              ],
+            },
+          ].map((p) => (
+            <Card
+              key={p.tier}
+              style={{position: 'relative', borderColor: p.best ? 'var(--signal-ink)' : undefined}}
+            >
+              {p.best && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: -10,
+                    right: 16,
+                    background: 'var(--signal-y)',
+                    color: 'var(--signal-y-text)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: 999,
+                  }}
+                >
+                  RECOMMENDED
+                </div>
+              )}
               <div
                 style={{
-                  position: 'absolute',
-                  top: -10,
-                  right: 16,
-                  background: 'var(--signal-y)',
-                  color: 'var(--signal-y-text)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: '3px 9px',
-                  borderRadius: 999,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 6,
                 }}
               >
-                RECOMMENDED
+                <div style={{fontSize: 16, fontWeight: 700}}>{p.tier}</div>
+                <div>
+                  <span style={{fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em'}}>
+                    {p.price}
+                  </span>
+                  {p.unit && (
+                    <span style={{fontSize: 13, color: 'var(--signal-text-dim)', fontWeight: 400}}>
+                      {p.unit}
+                    </span>
+                  )}
+                </div>
               </div>
-            )}
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6}}>
-              <div style={{fontSize: 16, fontWeight: 700}}>{p.tier}</div>
-              <div>
-                <span style={{fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em'}}>{p.price}</span>
-                {p.unit && <span style={{fontSize: 13, color: 'var(--signal-text-dim)', fontWeight: 400}}>{p.unit}</span>}
+              <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginBottom: 14}}>
+                {p.sub}
               </div>
-            </div>
-            <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginBottom: 14}}>{p.sub}</div>
-            <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8, fontSize: 13.5}}>
-              {p.features.map((f) => (
-                <li key={f}>✓ {f}</li>
-              ))}
-            </ul>
-            <Button kind={p.best ? 'primary' : 'secondary'} block style={{marginTop: 14}}>
-              {p.tier === 'ENTERPRISE' ? 'Talk to sales' : p.tier === 'FREE' ? 'Start free' : 'Start trial'}
-            </Button>
-          </Card>
-        ))}
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  display: 'grid',
+                  gap: 8,
+                  fontSize: 13.5,
+                }}
+              >
+                {p.features.map((f) => (
+                  <li key={f}>✓ {f}</li>
+                ))}
+              </ul>
+              <Button kind={p.best ? 'primary' : 'secondary'} block style={{marginTop: 14}}>
+                {p.tier === 'ENTERPRISE'
+                  ? 'Talk to sales'
+                  : p.tier === 'FREE'
+                    ? 'Start free'
+                    : 'Start trial'}
+              </Button>
+            </Card>
+          ))}
         </div>
       </Feed>
     </>
@@ -644,37 +1073,39 @@ export function ForgotPasswordPage() {
   }
   return (
     <AuthLayout>
-    <div className='signal-splash'>
-      <div className='brand'>
-        <div className='logo'>E</div>
-        <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
-      </div>
-      <h1>
-        Forgot your <em>password?</em>
-      </h1>
-      <p className='lede'>Tell us your email and we'll send you a reset link. The link is good for one hour.</p>
-      <FormError msg={err} />
-      <FormSuccess msg={ok} />
-      <form onSubmit={onSubmit}>
-        <div className='signal-field'>
-          <label>Email</label>
-          <input
-            type='email'
-            autoComplete='email'
-            placeholder='you@company.com'
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+      <div className='signal-splash'>
+        <div className='brand'>
+          <div className='logo'>E</div>
+          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <Button kind='primary' block type='submit' disabled={busy}>
-          {busy ? 'Sending…' : 'Send reset link'}
-        </Button>
-      </form>
-      <div className='footer-link'>
-        Remembered it? <Link to='/login'>Sign in</Link>
+        <h1>
+          Forgot your <em>password?</em>
+        </h1>
+        <p className='lede'>
+          Tell us your email and we'll send you a reset link. The link is good for one hour.
+        </p>
+        <FormError msg={err} />
+        <FormSuccess msg={ok} />
+        <form onSubmit={onSubmit}>
+          <div className='signal-field'>
+            <label>Email</label>
+            <input
+              type='email'
+              autoComplete='email'
+              placeholder='you@company.com'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <Button kind='primary' block type='submit' disabled={busy}>
+            {busy ? 'Sending…' : 'Send reset link'}
+          </Button>
+        </form>
+        <div className='footer-link'>
+          Remembered it? <Link to='/login'>Sign in</Link>
+        </div>
       </div>
-    </div>
     </AuthLayout>
   );
 }
@@ -715,30 +1146,45 @@ export function ResetPasswordPage() {
   }
   return (
     <AuthLayout>
-    <div className='signal-splash'>
-      <div className='brand'>
-        <div className='logo'>E</div>
-        <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+      <div className='signal-splash'>
+        <div className='brand'>
+          <div className='logo'>E</div>
+          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+        </div>
+        <h1>
+          Pick a new <em>password.</em>
+        </h1>
+        <p className='lede'>12+ characters. One number, one symbol. Anything else goes.</p>
+        <FormError msg={err} />
+        <form onSubmit={onSubmit}>
+          <div className='signal-field'>
+            <label>New password</label>
+            <input
+              type='password'
+              autoComplete='new-password'
+              placeholder='••••••••'
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              minLength={12}
+              required
+            />
+          </div>
+          <div className='signal-field'>
+            <label>Confirm</label>
+            <input
+              type='password'
+              autoComplete='new-password'
+              placeholder='••••••••'
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+            />
+          </div>
+          <Button kind='primary' block type='submit' disabled={busy}>
+            {busy ? 'Resetting…' : 'Reset password'}
+          </Button>
+        </form>
       </div>
-      <h1>
-        Pick a new <em>password.</em>
-      </h1>
-      <p className='lede'>12+ characters. One number, one symbol. Anything else goes.</p>
-      <FormError msg={err} />
-      <form onSubmit={onSubmit}>
-        <div className='signal-field'>
-          <label>New password</label>
-          <input type='password' autoComplete='new-password' placeholder='••••••••' value={pw} onChange={(e) => setPw(e.target.value)} minLength={12} required />
-        </div>
-        <div className='signal-field'>
-          <label>Confirm</label>
-          <input type='password' autoComplete='new-password' placeholder='••••••••' value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-        </div>
-        <Button kind='primary' block type='submit' disabled={busy}>
-          {busy ? 'Resetting…' : 'Reset password'}
-        </Button>
-      </form>
-    </div>
     </AuthLayout>
   );
 }
@@ -768,33 +1214,50 @@ export function AcceptInvitePage() {
   }
   return (
     <AuthLayout>
-    <div className='signal-splash'>
-      <div className='brand'>
-        <div className='logo'>E</div>
-        <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+      <div className='signal-splash'>
+        <div className='brand'>
+          <div className='logo'>E</div>
+          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+        </div>
+        <h1>
+          You've been <em>invited</em>.
+        </h1>
+        <p className='lede'>
+          Open this page from your email invite link. We'll add you to the project and take you
+          straight there.
+        </p>
+        <FormError msg={err} />
+        <Card style={{marginBottom: 18}}>
+          <KvList
+            pairs={[
+              {
+                k: 'Invite token',
+                v: token ? (
+                  token.slice(0, 12) + '…'
+                ) : (
+                  <span style={{color: 'var(--signal-coral-text)'}}>(missing)</span>
+                ),
+              },
+              {
+                k: 'Status',
+                v: token ? (
+                  'Ready to accept'
+                ) : (
+                  <span style={{color: 'var(--signal-coral-text)'}}>
+                    Open the link in your email
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Card>
+        <Button kind='mint' block onClick={accept} disabled={busy || !token}>
+          {busy ? 'Accepting…' : 'Accept & open project'}
+        </Button>
+        <Button kind='ghost' block to='/home' style={{color: 'var(--signal-coral-text)'}}>
+          Decline invite
+        </Button>
       </div>
-      <h1>
-        You've been <em>invited</em>.
-      </h1>
-      <p className='lede'>
-        Open this page from your email invite link. We'll add you to the project and take you straight there.
-      </p>
-      <FormError msg={err} />
-      <Card style={{marginBottom: 18}}>
-        <KvList
-          pairs={[
-            {k: 'Invite token', v: token ? token.slice(0, 12) + '…' : <span style={{color: 'var(--signal-coral-text)'}}>(missing)</span>},
-            {k: 'Status', v: token ? 'Ready to accept' : <span style={{color: 'var(--signal-coral-text)'}}>Open the link in your email</span>},
-          ]}
-        />
-      </Card>
-      <Button kind='mint' block onClick={accept} disabled={busy || !token}>
-        {busy ? 'Accepting…' : 'Accept & open project'}
-      </Button>
-      <Button kind='ghost' block to='/home' style={{color: 'var(--signal-coral-text)'}}>
-        Decline invite
-      </Button>
-    </div>
     </AuthLayout>
   );
 }
@@ -829,9 +1292,13 @@ export function AuditLogPage() {
           if (tier === 'FREE' || tier === 'PRO') {
             setErr('Audit log is a TEAM+ feature. Upgrade your plan to enable it.');
           } else if (!isOrgAdmin) {
-            setErr('Audit log is restricted to org admins. Ask your org admin to grant you access.');
+            setErr(
+              'Audit log is restricted to org admins. Ask your org admin to grant you access.',
+            );
           } else {
-            setErr("Audit log isn't enabled for your org yet. Open Org Settings → Compliance to turn it on, or contact support if the toggle isn't visible.");
+            setErr(
+              "Audit log isn't enabled for your org yet. Open Org Settings → Compliance to turn it on, or contact support if the toggle isn't visible.",
+            );
           }
         } else {
           setErr(msg);
@@ -845,11 +1312,24 @@ export function AuditLogPage() {
 
   const filtered = (logs || []).filter((l) => {
     if (filter === 'all') return true;
-    const t = ((l as unknown as {action?: string; eventType?: string}).action ||
-      (l as unknown as {eventType?: string}).eventType || '').toLowerCase();
-    if (filter === 'auth') return t.includes('login') || t.includes('oauth') || t.includes('logout') || t.includes('password');
-    if (filter === 'billing') return t.includes('billing') || t.includes('subscription') || t.includes('payment') || t.includes('invoice');
-    if (filter === 'members') return t.includes('member') || t.includes('invite') || t.includes('seat');
+    const t = (
+      (l as unknown as {action?: string; eventType?: string}).action ||
+      (l as unknown as {eventType?: string}).eventType ||
+      ''
+    ).toLowerCase();
+    if (filter === 'auth')
+      return (
+        t.includes('login') || t.includes('oauth') || t.includes('logout') || t.includes('password')
+      );
+    if (filter === 'billing')
+      return (
+        t.includes('billing') ||
+        t.includes('subscription') ||
+        t.includes('payment') ||
+        t.includes('invoice')
+      );
+    if (filter === 'members')
+      return t.includes('member') || t.includes('invite') || t.includes('seat');
     if (filter === 'admin') return t.includes('admin') || t.includes('tier') || t.includes('flag');
     return true;
   });
@@ -857,8 +1337,17 @@ export function AuditLogPage() {
   function exportCsv() {
     const rows = ['action,actor,target,createdAt'];
     for (const l of filtered) {
-      const lAny = l as unknown as {action?: string; eventType?: string; actorEmail?: string; targetId?: string; createdAt?: string; occurredAt?: string};
-      rows.push(`${lAny.action || lAny.eventType || ''},${lAny.actorEmail || ''},${lAny.targetId || ''},${lAny.createdAt || lAny.occurredAt || ''}`);
+      const lAny = l as unknown as {
+        action?: string;
+        eventType?: string;
+        actorEmail?: string;
+        targetId?: string;
+        createdAt?: string;
+        occurredAt?: string;
+      };
+      rows.push(
+        `${lAny.action || lAny.eventType || ''},${lAny.actorEmail || ''},${lAny.targetId || ''},${lAny.createdAt || lAny.occurredAt || ''}`,
+      );
     }
     const blob = new Blob([rows.join('\n')], {type: 'text/csv'});
     const url = URL.createObjectURL(blob);
@@ -878,7 +1367,13 @@ export function AuditLogPage() {
         backTo='/account'
         actions={
           <IconButton ariaLabel='Export' onClick={exportCsv}>
-            <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} fill='none' stroke='currentColor' strokeWidth={2}>
+            <svg
+              viewBox='0 0 24 24'
+              style={{width: 18, height: 18}}
+              fill='none'
+              stroke='currentColor'
+              strokeWidth={2}
+            >
               <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3' />
             </svg>
           </IconButton>
@@ -887,7 +1382,11 @@ export function AuditLogPage() {
       <Feed>
         <TabsStrip
           items={[
-            {label: `All · ${logs?.length ?? 0}`, active: filter === 'all', onClick: () => setFilter('all')},
+            {
+              label: `All · ${logs?.length ?? 0}`,
+              active: filter === 'all',
+              onClick: () => setFilter('all'),
+            },
             {label: 'Auth', active: filter === 'auth', onClick: () => setFilter('auth')},
             {label: 'Billing', active: filter === 'billing', onClick: () => setFilter('billing')},
             {label: 'Members', active: filter === 'members', onClick: () => setFilter('members')},
@@ -895,15 +1394,43 @@ export function AuditLogPage() {
           ]}
         />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {logs === null ? (
-          <LoadingState label="Loading audit log…" />
+          <LoadingState label='Loading audit log…' />
         ) : filtered.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No audit events for this filter.</p></Card>
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No audit events for this filter.
+            </p>
+          </Card>
         ) : (
           filtered.map((l, i) => {
-            const lAny = l as unknown as {id?: string; action?: string; eventType?: string; actorEmail?: string; actorUserId?: string; targetId?: string; createdAt?: string; occurredAt?: string; description?: string};
+            const lAny = l as unknown as {
+              id?: string;
+              action?: string;
+              eventType?: string;
+              actorEmail?: string;
+              actorUserId?: string;
+              targetId?: string;
+              createdAt?: string;
+              occurredAt?: string;
+              description?: string;
+            };
             const action = lAny.action || lAny.eventType || 'event';
             const ts = lAny.createdAt || lAny.occurredAt;
             return (
@@ -913,7 +1440,9 @@ export function AuditLogPage() {
                 title={action}
                 meta={
                   <>
-                    {(lAny.actorEmail || lAny.actorUserId) && <span className='mono'>{lAny.actorEmail || lAny.actorUserId}</span>}
+                    {(lAny.actorEmail || lAny.actorUserId) && (
+                      <span className='mono'>{lAny.actorEmail || lAny.actorUserId}</span>
+                    )}
                     {lAny.targetId && (
                       <>
                         <span>·</span>
@@ -946,9 +1475,12 @@ export function DeploymentsPage() {
   const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
-    api.getDeployments().then(setItems).catch((e: unknown) => {
-      setErr(e instanceof Error ? e.message : 'Failed to load deployments.');
-    });
+    api
+      .getDeployments()
+      .then(setItems)
+      .catch((e: unknown) => {
+        setErr(e instanceof Error ? e.message : 'Failed to load deployments.');
+      });
   }, []);
 
   async function performRollback(id: string) {
@@ -982,26 +1514,69 @@ export function DeploymentsPage() {
       <TopBar title='Deployments' sub={`${items?.length ?? 0} total`} back backTo='/home' />
       <Feed>
         <Card style={{background: 'var(--signal-y-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-y-text)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             How previews work
           </div>
           <div style={{fontSize: 14, color: 'var(--signal-y-text)', lineHeight: 1.5}}>
-            Every shipped run gets a free 5-minute preview on Cloud Run. Promote to permanent from a completed run.
+            Every shipped run gets a free 5-minute preview on Cloud Run. Promote to permanent from a
+            completed run.
           </div>
         </Card>
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         <SectionHeader>Deployments</SectionHeader>
         {items === null ? (
-          <LoadingState label="Loading deployments…" />
+          <LoadingState label='Loading deployments…' />
         ) : items.length === 0 ? (
-          <Card><p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>No deployments yet. Run a spec to ship one.</p></Card>
+          <Card>
+            <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+              No deployments yet. Run a spec to ship one.
+            </p>
+          </Card>
         ) : (
           items.map((d) => {
-            const dAny = d as unknown as {id?: string; status?: string; url?: string; createdAt?: string; runId?: string; name?: string; environment?: string};
+            const dAny = d as unknown as {
+              id?: string;
+              status?: string;
+              url?: string;
+              createdAt?: string;
+              runId?: string;
+              name?: string;
+              environment?: string;
+            };
             const status = (dAny.status || 'UNKNOWN').toUpperCase();
-            const dot: 'mint' | 'live' | 'coral' | 'mute' = status === 'LIVE' || status === 'RUNNING' ? 'live' : status === 'HEALTHY' ? 'mint' : status === 'FAILED' ? 'coral' : 'mute';
+            const dot: 'mint' | 'live' | 'coral' | 'mute' =
+              status === 'LIVE' || status === 'RUNNING'
+                ? 'live'
+                : status === 'HEALTHY'
+                  ? 'mint'
+                  : status === 'FAILED'
+                    ? 'coral'
+                    : 'mute';
             return (
               <Row
                 key={dAny.id}
@@ -1009,7 +1584,9 @@ export function DeploymentsPage() {
                 title={dAny.name || `Deployment ${dAny.id?.slice(0, 8)}`}
                 meta={
                   <>
-                    {dAny.url && <span className='mono'>{dAny.url.replace(/^https?:\/\//, '')}</span>}
+                    {dAny.url && (
+                      <span className='mono'>{dAny.url.replace(/^https?:\/\//, '')}</span>
+                    )}
                     {dAny.environment && (
                       <>
                         <span>·</span>
@@ -1020,9 +1597,42 @@ export function DeploymentsPage() {
                 }
                 trailing={
                   <div style={{display: 'flex', gap: 4}}>
-                    {dAny.url && <Button kind='secondary' sm onClick={() => window.open(dAny.url!, '_blank', 'noopener')}>Open</Button>}
-                    <Button kind='ghost' sm onClick={() => dAny.id && setConfirmRollback({id: dAny.id, name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`})}>Rollback</Button>
-                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => dAny.id && setConfirmDestroy({id: dAny.id, name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`})}>×</Button>
+                    {dAny.url && (
+                      <Button
+                        kind='secondary'
+                        sm
+                        onClick={() => window.open(dAny.url!, '_blank', 'noopener')}
+                      >
+                        Open
+                      </Button>
+                    )}
+                    <Button
+                      kind='ghost'
+                      sm
+                      onClick={() =>
+                        dAny.id &&
+                        setConfirmRollback({
+                          id: dAny.id,
+                          name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`,
+                        })
+                      }
+                    >
+                      Rollback
+                    </Button>
+                    <Button
+                      kind='ghost'
+                      sm
+                      style={{color: 'var(--signal-coral-text)'}}
+                      onClick={() =>
+                        dAny.id &&
+                        setConfirmDestroy({
+                          id: dAny.id,
+                          name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`,
+                        })
+                      }
+                    >
+                      ×
+                    </Button>
                   </div>
                 }
               />
@@ -1038,7 +1648,9 @@ export function DeploymentsPage() {
         confirmLabel='Roll back'
         busy={confirmBusy}
         onClose={() => setConfirmRollback(null)}
-        onConfirm={() => { if (confirmRollback) void performRollback(confirmRollback.id); }}
+        onConfirm={() => {
+          if (confirmRollback) void performRollback(confirmRollback.id);
+        }}
       />
       <ConfirmModal
         open={!!confirmDestroy}
@@ -1048,7 +1660,9 @@ export function DeploymentsPage() {
         danger
         busy={confirmBusy}
         onClose={() => setConfirmDestroy(null)}
-        onConfirm={() => { if (confirmDestroy) void performRemove(confirmDestroy.id); }}
+        onConfirm={() => {
+          if (confirmDestroy) void performRemove(confirmDestroy.id);
+        }}
       />
     </>
   );
@@ -1066,22 +1680,28 @@ export function SpecTemplatesPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
-    api.getProjects().then((p) => {
-      const active = p.filter((x) => !x.archivedAt);
-      setProjects(active);
-      if (active.length > 0 && !projectId) setProjectId(active[0].id);
-    }).catch(() => {
-      /* swallow */
-    });
+    api
+      .getProjects()
+      .then((p) => {
+        const active = p.filter((x) => !x.archivedAt);
+        setProjects(active);
+        if (active.length > 0 && !projectId) setProjectId(active[0].id);
+      })
+      .catch(() => {
+        /* swallow */
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!projectId) return;
     setTemplates(null);
-    api.listSpecTemplates(projectId).then(setTemplates).catch((e: unknown) => {
-      setErr(e instanceof Error ? e.message : 'Failed to load templates.');
-    });
+    api
+      .listSpecTemplates(projectId)
+      .then(setTemplates)
+      .catch((e: unknown) => {
+        setErr(e instanceof Error ? e.message : 'Failed to load templates.');
+      });
   }, [projectId]);
 
   async function performCreate(values: Record<string, string>) {
@@ -1092,7 +1712,9 @@ export function SpecTemplatesPage() {
     setCreateBusy(true);
     setErr('');
     try {
-      await api.createProjectSpecTemplate(projectId, {name, body} as unknown as Parameters<typeof api.createProjectSpecTemplate>[1]);
+      await api.createProjectSpecTemplate(projectId, {name, body} as unknown as Parameters<
+        typeof api.createProjectSpecTemplate
+      >[1]);
       setTemplates(await api.listSpecTemplates(projectId));
       setCreateOpen(false);
     } catch (e: unknown) {
@@ -1118,7 +1740,12 @@ export function SpecTemplatesPage() {
 
   return (
     <>
-      <TopBar title='Spec templates' sub={projects.find((p) => p.id === projectId)?.name || 'Saved templates'} back backTo='/compose' />
+      <TopBar
+        title='Spec templates'
+        sub={projects.find((p) => p.id === projectId)?.name || 'Saved templates'}
+        back
+        backTo='/compose'
+      />
       <Feed>
         <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
           <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.5}}>
@@ -1126,14 +1753,32 @@ export function SpecTemplatesPage() {
           </div>
         </Card>
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {projects.length > 0 && (
           <>
             <SectionHeader>Project</SectionHeader>
             <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
               {projects.map((p) => (
-                <Chip key={p.id} kind={p.id === projectId ? 'active' : 'default'} onClick={() => setProjectId(p.id)}>
+                <Chip
+                  key={p.id}
+                  kind={p.id === projectId ? 'active' : 'default'}
+                  onClick={() => setProjectId(p.id)}
+                >
                   {p.name}
                 </Chip>
               ))}
@@ -1144,17 +1789,32 @@ export function SpecTemplatesPage() {
         {projectId && <SectionHeader>Templates · {templates?.length ?? 0}</SectionHeader>}
         {!projectId ? (
           <Card>
-            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              Templates are project-scoped. <a href='/projects' style={{color: 'var(--signal-coral)'}}>Create a project →</a> to start saving specs.
+            <p
+              style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}
+            >
+              Templates are project-scoped.{' '}
+              <a href='/projects' style={{color: 'var(--signal-coral)'}}>
+                Create a project →
+              </a>{' '}
+              to start saving specs.
             </p>
           </Card>
         ) : templates === null ? (
-          <LoadingState label="Loading templates…" />
+          <LoadingState label='Loading templates…' />
         ) : templates.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No templates yet. Save one to reuse common specs.</p></Card>
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No templates yet. Save one to reuse common specs.
+            </p>
+          </Card>
         ) : (
           templates.map((t) => {
-            const tAny = t as unknown as {id?: string; name?: string; body?: string; createdAt?: string};
+            const tAny = t as unknown as {
+              id?: string;
+              name?: string;
+              body?: string;
+              createdAt?: string;
+            };
             return (
               <Row
                 key={tAny.id}
@@ -1163,11 +1823,27 @@ export function SpecTemplatesPage() {
                 meta={<span>{(tAny.body || '').slice(0, 60)}…</span>}
                 trailing={
                   <div style={{display: 'flex', gap: 4}}>
-                    <Button kind='secondary' sm onClick={() => {
-                      sessionStorage.setItem('signal:pending-spec', tAny.body || '');
-                      window.location.href = '/compose';
-                    }}>Use</Button>
-                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => tAny.id && setConfirmDelete({id: tAny.id, name: tAny.name || 'this template'})}>×</Button>
+                    <Button
+                      kind='secondary'
+                      sm
+                      onClick={() => {
+                        sessionStorage.setItem('signal:pending-spec', tAny.body || '');
+                        window.location.href = '/compose';
+                      }}
+                    >
+                      Use
+                    </Button>
+                    <Button
+                      kind='ghost'
+                      sm
+                      style={{color: 'var(--signal-coral-text)'}}
+                      onClick={() =>
+                        tAny.id &&
+                        setConfirmDelete({id: tAny.id, name: tAny.name || 'this template'})
+                      }
+                    >
+                      ×
+                    </Button>
                   </div>
                 }
               />
@@ -1176,7 +1852,12 @@ export function SpecTemplatesPage() {
         )}
 
         {projectId && (
-          <Button kind='secondary' block style={{marginTop: 14}} onClick={() => setCreateOpen(true)}>
+          <Button
+            kind='secondary'
+            block
+            style={{marginTop: 14}}
+            onClick={() => setCreateOpen(true)}
+          >
             <Plus size={16} /> New template
           </Button>
         )}
@@ -1187,8 +1868,19 @@ export function SpecTemplatesPage() {
         title='New spec template'
         body='Save reusable spec scaffolding. The body pre-fills the composer when you pick this template.'
         fields={[
-          {name: 'name', label: 'Template name', placeholder: 'e.g. CRUD endpoint scaffold', required: true},
-          {name: 'body', label: 'Spec body', placeholder: 'Describe the spec…', multiline: true, required: true},
+          {
+            name: 'name',
+            label: 'Template name',
+            placeholder: 'e.g. CRUD endpoint scaffold',
+            required: true,
+          },
+          {
+            name: 'body',
+            label: 'Spec body',
+            placeholder: 'Describe the spec…',
+            multiline: true,
+            required: true,
+          },
         ]}
         submitLabel='Save template'
         busy={createBusy}
@@ -1203,7 +1895,9 @@ export function SpecTemplatesPage() {
         danger
         busy={deleteBusy}
         onClose={() => setConfirmDelete(null)}
-        onConfirm={() => { if (confirmDelete) void performDelete(confirmDelete.id); }}
+        onConfirm={() => {
+          if (confirmDelete) void performDelete(confirmDelete.id);
+        }}
       />
     </>
   );

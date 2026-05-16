@@ -110,7 +110,12 @@ export default function PlanPage() {
   if (loading && !run) {
     return (
       <>
-        <TopBar title='Plan ready' sub={`R-${runId.slice(0, 6)} · loading`} back backTo='/compose' />
+        <TopBar
+          title='Plan ready'
+          sub={`R-${runId.slice(0, 6)} · loading`}
+          back
+          backTo='/compose'
+        />
         <Feed>
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>
@@ -125,18 +130,25 @@ export default function PlanPage() {
   const status = run?.status as string | undefined;
   const awaiting = status === 'AWAITING_APPROVAL';
   // RunDetail shape varies by version — try a few common task fields safely.
-  const rawTasks = ((run as unknown as {tasks?: PlanTask[]; plan?: {tasks?: PlanTask[]}})
-    ?.tasks ||
+  const rawTasks = ((run as unknown as {tasks?: PlanTask[]; plan?: {tasks?: PlanTask[]}})?.tasks ||
     (run as unknown as {plan?: {tasks?: PlanTask[]}})?.plan?.tasks ||
     []) as PlanTask[];
   const planSummary =
     (run as unknown as {planSummary?: string})?.planSummary ||
     (run as unknown as {userRequest?: string})?.userRequest ||
     'Plan ready for review.';
-  const credits = (run as unknown as {credits?: number; estimatedCredits?: number})?.estimatedCredits || (run as unknown as {credits?: number})?.credits || 3;
-  const costCap = (run as unknown as {userCostCap?: number; costCap?: number})?.costCap || (run as unknown as {userCostCap?: number})?.userCostCap || 2.0;
-  const classifier = (run as unknown as {complexity?: string; classification?: string})?.classification ||
-    (run as unknown as {complexity?: string})?.complexity || 'SMALL';
+  const credits =
+    (run as unknown as {credits?: number; estimatedCredits?: number})?.estimatedCredits ||
+    (run as unknown as {credits?: number})?.credits ||
+    3;
+  const costCap =
+    (run as unknown as {userCostCap?: number; costCap?: number})?.costCap ||
+    (run as unknown as {userCostCap?: number})?.userCostCap ||
+    2.0;
+  const classifier =
+    (run as unknown as {complexity?: string; classification?: string})?.classification ||
+    (run as unknown as {complexity?: string})?.complexity ||
+    'SMALL';
 
   return (
     <>
@@ -175,13 +187,24 @@ export default function PlanPage() {
                 marginBottom: 10,
               }}
             >
-              {awaiting ? 'Plan · approve to start' : `Plan · ${status?.toLowerCase() || 'pending'}`}
+              {awaiting
+                ? 'Plan · approve to start'
+                : `Plan · ${status?.toLowerCase() || 'pending'}`}
             </div>
-            <h3 style={{fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.25, margin: '0 0 4px'}}>
+            <h3
+              style={{
+                fontSize: 20,
+                fontWeight: 600,
+                letterSpacing: '-0.02em',
+                lineHeight: 1.25,
+                margin: '0 0 4px',
+              }}
+            >
               {planSummary.slice(0, 160)}
             </h3>
             <div style={{fontSize: 13.5, color: 'var(--signal-text-dim)', marginBottom: 18}}>
-              {rawTasks.length} {rawTasks.length === 1 ? 'task' : 'tasks'} · <Glossary term='classifier'>classifier</Glossary> read this as {classifier}.
+              {rawTasks.length} {rawTasks.length === 1 ? 'task' : 'tasks'} ·{' '}
+              <Glossary term='classifier'>classifier</Glossary> read this as {classifier}.
             </div>
 
             <div
@@ -196,12 +219,52 @@ export default function PlanPage() {
               }}
             >
               <div style={{flex: 1}}>
-                <div style={{fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--signal-y-text)', opacity: 0.75}}>Cost</div>
-                <div style={{fontSize: 24, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '-0.02em'}}>{credits} credits</div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    color: 'var(--signal-y-text)',
+                    opacity: 0.75,
+                  }}
+                >
+                  Cost
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    color: 'var(--signal-y-text)',
+                    letterSpacing: '-0.02em',
+                  }}
+                >
+                  {credits} credits
+                </div>
               </div>
               <div style={{textAlign: 'right'}}>
-                <div style={{fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--signal-y-text)', opacity: 0.75}}>Cap</div>
-                <div style={{fontSize: 24, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '-0.02em'}}>${costCap.toFixed(2)}</div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    color: 'var(--signal-y-text)',
+                    opacity: 0.75,
+                  }}
+                >
+                  Cap
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    color: 'var(--signal-y-text)',
+                    letterSpacing: '-0.02em',
+                  }}
+                >
+                  ${costCap.toFixed(2)}
+                </div>
               </div>
             </div>
 
@@ -223,7 +286,11 @@ export default function PlanPage() {
             </div>
 
             <Button kind='mint' block onClick={approve} disabled={busy || !awaiting}>
-              {busy ? 'Approving…' : awaiting ? `Approve · charge ${credits} credits` : `Status: ${status?.toLowerCase() || 'pending'}`}
+              {busy
+                ? 'Approving…'
+                : awaiting
+                  ? `Approve · charge ${credits} credits`
+                  : `Status: ${status?.toLowerCase() || 'pending'}`}
             </Button>
             <Button kind='ghost' block onClick={reject} disabled={busy}>
               Cancel

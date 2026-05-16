@@ -1,7 +1,16 @@
 import {ReactNode, useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {TopBar, TabBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
-import {Feed, Row, Card, Button, Chip, StatusPill, TabsStrip, KvList} from '@/signal/components/Primitives';
+import {
+  Feed,
+  Row,
+  Card,
+  Button,
+  Chip,
+  StatusPill,
+  TabsStrip,
+  KvList,
+} from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ScoreCard, PrCard} from '@/signal/components/Compose';
 import {Bell, Search, Settings, Plus} from '@/signal/icons/icons';
@@ -33,22 +42,35 @@ export function NotificationsPage() {
     if (!items) return [];
     if (filter === 'all') return items;
     return items.filter((n) => {
-      const t = ((n as unknown as {category?: string; type?: string}).category || (n as unknown as {type?: string}).type || '').toLowerCase();
+      const t = (
+        (n as unknown as {category?: string; type?: string}).category ||
+        (n as unknown as {type?: string}).type ||
+        ''
+      ).toLowerCase();
       if (filter === 'run') return t.includes('run') || t.includes('plan');
       if (filter === 'team') return t.includes('member') || t.includes('invite');
-      if (filter === 'billing') return t.includes('billing') || t.includes('quota') || t.includes('cap');
-      if (filter === 'system') return t.includes('system') || t.includes('flag') || t.includes('release');
+      if (filter === 'billing')
+        return t.includes('billing') || t.includes('quota') || t.includes('cap');
+      if (filter === 'system')
+        return t.includes('system') || t.includes('flag') || t.includes('release');
       return true;
     });
   }, [items, filter]);
 
-  const unreadCount = (items || []).filter((n) => !(n as unknown as {read?: boolean; readAt?: string}).read &&
-    !(n as unknown as {readAt?: string}).readAt).length;
+  const unreadCount = (items || []).filter(
+    (n) =>
+      !(n as unknown as {read?: boolean; readAt?: string}).read &&
+      !(n as unknown as {readAt?: string}).readAt,
+  ).length;
 
   async function readOne(id: string) {
     try {
       await api.markNotificationRead(id);
-      setItems((prev) => prev?.map((n) => ((n as unknown as {id?: string}).id === id ? {...n, read: true} : n)) || prev);
+      setItems(
+        (prev) =>
+          prev?.map((n) => ((n as unknown as {id?: string}).id === id ? {...n, read: true} : n)) ||
+          prev,
+      );
     } catch {
       /* ignore */
     }
@@ -79,7 +101,11 @@ export function NotificationsPage() {
       <Feed>
         <TabsStrip
           items={[
-            {label: `All · ${items?.length ?? 0}`, active: filter === 'all', onClick: () => setFilter('all')},
+            {
+              label: `All · ${items?.length ?? 0}`,
+              active: filter === 'all',
+              onClick: () => setFilter('all'),
+            },
             {label: 'Run', active: filter === 'run', onClick: () => setFilter('run')},
             {label: 'Team', active: filter === 'team', onClick: () => setFilter('team')},
             {label: 'Billing', active: filter === 'billing', onClick: () => setFilter('billing')},
@@ -87,17 +113,48 @@ export function NotificationsPage() {
           ]}
         />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {items === null ? (
-          <LoadingState label="Loading notifications…" />
+          <LoadingState label='Loading notifications…' />
         ) : filtered.length === 0 ? (
-          <Card><p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>No notifications yet.</p></Card>
+          <Card>
+            <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+              No notifications yet.
+            </p>
+          </Card>
         ) : (
           filtered.map((n) => {
-            const nAny = n as unknown as {id?: string; read?: boolean; readAt?: string; title?: string; description?: string; body?: string; link?: string | null; type?: string; category?: string; createdAt?: string; severity?: string};
+            const nAny = n as unknown as {
+              id?: string;
+              read?: boolean;
+              readAt?: string;
+              title?: string;
+              description?: string;
+              body?: string;
+              link?: string | null;
+              type?: string;
+              category?: string;
+              createdAt?: string;
+              severity?: string;
+            };
             const unread = !nAny.read && !nAny.readAt;
-            const tone = nAny.severity === 'error' ? 'coral' : nAny.severity === 'warn' ? 'signal' : 'mint';
+            const tone =
+              nAny.severity === 'error' ? 'coral' : nAny.severity === 'warn' ? 'signal' : 'mint';
             // Deep-link target: prefer the backend-provided `link`, else
             // route by event type. Falls through to /home so clicks never
             // dead-end.
@@ -157,7 +214,11 @@ function NotifRow({
   onClick?: () => void;
 }) {
   return (
-    <div className={`signal-notif ${unread ? 'unread' : ''}`} onClick={onClick} style={{cursor: onClick ? 'pointer' : undefined}}>
+    <div
+      className={`signal-notif ${unread ? 'unread' : ''}`}
+      onClick={onClick}
+      style={{cursor: onClick ? 'pointer' : undefined}}
+    >
       <div className={`icon-circle ${tone && tone !== 'default' ? tone : ''}`}>
         <Bell size={16} />
       </div>
@@ -198,14 +259,22 @@ export function SearchPage() {
     if (!needle) return [];
     const out: SearchHit[] = [];
     for (const r of runs) {
-      const txt = `${(r as unknown as {userRequest?: string}).userRequest ?? ''} ${r.runId}`.toLowerCase();
+      const txt =
+        `${(r as unknown as {userRequest?: string}).userRequest ?? ''} ${r.runId}`.toLowerCase();
       if (txt.includes(needle)) {
         const s = (r.status || '').toUpperCase();
-        const isLive = s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+        const isLive =
+          s === 'CLASSIFYING' ||
+          s === 'PLANNING' ||
+          s === 'EXECUTING' ||
+          s === 'AWAITING_APPROVAL' ||
+          s === 'RUNNING';
         out.push({
           id: r.runId,
           kind: 'run',
-          title: (r as unknown as {userRequest?: string}).userRequest?.slice(0, 80) || `Run R-${r.runId.slice(0, 6)}`,
+          title:
+            (r as unknown as {userRequest?: string}).userRequest?.slice(0, 80) ||
+            `Run R-${r.runId.slice(0, 6)}`,
           subtitle: `R-${r.runId.slice(0, 6)} · ${s.toLowerCase()}`,
           to: isLive ? `/live/${r.runId}` : `/result/${r.runId}`,
           dot: isLive ? 'live' : 'mint',
@@ -232,11 +301,28 @@ export function SearchPage() {
     <>
       <div className='signal-topbar' style={{gap: 8}}>
         <Link to='/home' className='signal-back-btn' aria-label='Back'>
-          <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2.4} strokeLinecap='round'>
+          <svg
+            viewBox='0 0 24 24'
+            style={{width: 16, height: 16}}
+            fill='none'
+            stroke='currentColor'
+            strokeWidth={2.4}
+            strokeLinecap='round'
+          >
             <path d='M19 12H5M12 19l-7-7 7-7' />
           </svg>
         </Link>
-        <div style={{flex: 1, display: 'flex', gap: 8, alignItems: 'center', background: 'var(--signal-card-elev)', borderRadius: 14, padding: '10px 14px'}}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            background: 'var(--signal-card-elev)',
+            borderRadius: 14,
+            padding: '10px 14px',
+          }}
+        >
           <Search size={16} />
           <input
             type='search'
@@ -247,25 +333,64 @@ export function SearchPage() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && hits.length > 0) navigate(hits[0].to);
             }}
-            style={{flex: 1, background: 'transparent', border: 0, outline: 0, fontSize: 14, color: 'var(--signal-ink)'}}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 0,
+              outline: 0,
+              fontSize: 14,
+              color: 'var(--signal-ink)',
+            }}
           />
         </div>
-        <span style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'var(--signal-text-mute)', background: 'var(--signal-card-elev)', padding: '3px 7px', borderRadius: 4}}>⌘K</span>
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 10,
+            color: 'var(--signal-text-mute)',
+            background: 'var(--signal-card-elev)',
+            padding: '3px 7px',
+            borderRadius: 4,
+          }}
+        >
+          ⌘K
+        </span>
       </div>
       <Feed>
         {q.trim() === '' ? (
           <>
             <SectionHeader>Quick actions</SectionHeader>
-            <Row to='/compose' dot='signal' title='New spec' meta={<span>Open the composer</span>} trailing={<Chip>⌘ ⏎</Chip>} />
-            <Row to='/projects' dot='lavender' title='Browse projects' meta={<span>All your active projects</span>} trailing={<Chip>→</Chip>} />
-            <Row to='/runs' dot='lavender' title='All runs' meta={<span>Filter and browse</span>} trailing={<Chip>→</Chip>} />
+            <Row
+              to='/compose'
+              dot='signal'
+              title='New spec'
+              meta={<span>Open the composer</span>}
+              trailing={<Chip>⌘ ⏎</Chip>}
+            />
+            <Row
+              to='/projects'
+              dot='lavender'
+              title='Browse projects'
+              meta={<span>All your active projects</span>}
+              trailing={<Chip>→</Chip>}
+            />
+            <Row
+              to='/runs'
+              dot='lavender'
+              title='All runs'
+              meta={<span>Filter and browse</span>}
+              trailing={<Chip>→</Chip>}
+            />
             <SectionHeader>Recent</SectionHeader>
             {runs.slice(0, 5).map((r) => (
               <Row
                 key={r.runId}
                 to={`/result/${r.runId}`}
                 dot='mint'
-                title={(r as unknown as {userRequest?: string}).userRequest?.slice(0, 80) || `Run R-${r.runId.slice(0, 6)}`}
+                title={
+                  (r as unknown as {userRequest?: string}).userRequest?.slice(0, 80) ||
+                  `Run R-${r.runId.slice(0, 6)}`
+                }
                 meta={<span className='mono'>R-{r.runId.slice(0, 6)}</span>}
                 trailing={<Chip>RUN</Chip>}
               />
@@ -273,9 +398,15 @@ export function SearchPage() {
           </>
         ) : (
           <>
-            <SectionHeader>{hits.length} result{hits.length === 1 ? '' : 's'} for "{q}"</SectionHeader>
+            <SectionHeader>
+              {hits.length} result{hits.length === 1 ? '' : 's'} for "{q}"
+            </SectionHeader>
             {hits.length === 0 ? (
-              <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No matches. Try a different query.</p></Card>
+              <Card>
+                <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+                  No matches. Try a different query.
+                </p>
+              </Card>
             ) : (
               hits.map((h) => (
                 <Row
@@ -312,29 +443,73 @@ export function MorePage() {
     ]).then(([u, p, r]) => {
       if (u.status === 'fulfilled') setUnread(u.value.count);
       if (p.status === 'fulfilled') setProjects(p.value.filter((x) => !x.archivedAt));
-      if (r.status === 'fulfilled') setRunCount((r.value as unknown as {totalElements?: number}).totalElements ?? r.value.content.length);
+      if (r.status === 'fulfilled')
+        setRunCount(
+          (r.value as unknown as {totalElements?: number}).totalElements ?? r.value.content.length,
+        );
     });
   }, []);
 
   return (
     <>
-      <TopBar title='More' sub='Everything else' back backTo='/home' avatar={(user?.firstName?.[0] ?? '') + (user?.lastName?.[0] ?? '')} />
+      <TopBar
+        title='More'
+        sub='Everything else'
+        back
+        backTo='/home'
+        avatar={(user?.firstName?.[0] ?? '') + (user?.lastName?.[0] ?? '')}
+      />
       <Feed>
         <SectionHeader>Workspace</SectionHeader>
-        <Row to='/projects' dot='lavender' title='Projects' meta={<span>{projects.length} active</span>} showChev />
-        <Row to='/runs' dot='lavender' title='All runs' meta={<span>{runCount != null ? `${runCount} total` : 'Loading…'}</span>} showChev />
-        <Row to='/search' dot='lavender' title='Search · ⌘K' meta={<span>Runs, projects, files</span>} showChev />
-        <Row to='/notifications' dot='coral' title='Notifications' meta={<span>{unread != null ? `${unread} unread` : '—'}</span>} showChev />
+        <Row
+          to='/projects'
+          dot='lavender'
+          title='Projects'
+          meta={<span>{projects.length} active</span>}
+          showChev
+        />
+        <Row
+          to='/runs'
+          dot='lavender'
+          title='All runs'
+          meta={<span>{runCount != null ? `${runCount} total` : 'Loading…'}</span>}
+          showChev
+        />
+        <Row
+          to='/search'
+          dot='lavender'
+          title='Search · ⌘K'
+          meta={<span>Runs, projects, files</span>}
+          showChev
+        />
+        <Row
+          to='/notifications'
+          dot='coral'
+          title='Notifications'
+          meta={<span>{unread != null ? `${unread} unread` : '—'}</span>}
+          showChev
+        />
 
         <SectionHeader>Account &amp; billing</SectionHeader>
         <Row to='/account' title='Account' meta={<span>{user?.email}</span>} showChev />
         <Row to='/billing' dot='mint' title='Billing' meta={<span>{tier} tier</span>} showChev />
-        <Row to='/topup' dot='signal' title='Top up credits' meta={<span>Buy run credits</span>} showChev />
+        <Row
+          to='/topup'
+          dot='signal'
+          title='Top up credits'
+          meta={<span>Buy run credits</span>}
+          showChev
+        />
         <Row to='/plans' title='Plans &amp; pricing' meta={<span>Compare tiers</span>} showChev />
 
         <SectionHeader>Team</SectionHeader>
         <Row to='/org-members' title='Org members' meta={<span>Invite teammates</span>} showChev />
-        <Row to='/integrations' title='Integrations' meta={<span>GitHub, Slack, Jira</span>} showChev />
+        <Row
+          to='/integrations'
+          title='Integrations'
+          meta={<span>GitHub, Slack, Jira</span>}
+          showChev
+        />
         <Row to='/api-keys' title='API keys (BYOK)' meta={<span>Provider keys</span>} showChev />
 
         <SectionHeader>Discover</SectionHeader>
@@ -345,17 +520,35 @@ export function MorePage() {
         {(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin) && (
           <Row to='/audit' title='Audit log' meta={<span>Compliance trail</span>} showChev />
         )}
-        <Row to='/deployments' title='Deployments' meta={<span>Cloud Run / Docker</span>} showChev />
+        <Row
+          to='/deployments'
+          title='Deployments'
+          meta={<span>Cloud Run / Docker</span>}
+          showChev
+        />
         <Row to='/trust' title='Trust & security' meta={<span>Compliance, SOC2</span>} showChev />
 
         {isSuperAdmin && (
           <>
             <SectionHeader>Admin</SectionHeader>
-            <Row to='/admin' dot='coral' title='Admin · SUPER_ADMIN' meta={<span style={{color: 'var(--signal-coral-text)'}}>Platform-wide controls</span>} showChev />
+            <Row
+              to='/admin'
+              dot='coral'
+              title='Admin · SUPER_ADMIN'
+              meta={<span style={{color: 'var(--signal-coral-text)'}}>Platform-wide controls</span>}
+              showChev
+            />
           </>
         )}
 
-        <p style={{textAlign: 'center', fontSize: 12, color: 'var(--signal-text-mute)', marginTop: 28}}>
+        <p
+          style={{
+            textAlign: 'center',
+            fontSize: 12,
+            color: 'var(--signal-text-mute)',
+            marginTop: 28,
+          }}
+        >
           ExecuteSpec · v1.0.0-M1
         </p>
       </Feed>
@@ -413,7 +606,16 @@ export function AdminPage() {
       <TopBar title='Admin' sub='SUPER_ADMIN · platform-wide' back backTo='/more' />
       <Feed>
         <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-coral-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-coral-text)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             Restricted area
           </div>
           <div style={{fontSize: 14, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
@@ -421,30 +623,76 @@ export function AdminPage() {
           </div>
         </Card>
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         <SectionHeader>Platform snapshot</SectionHeader>
         <div className='signal-quick-grid'>
           <div className='signal-quick-card mint'>
-            <div className='icon-bg'><Plus size={16} /></div>
+            <div className='icon-bg'>
+              <Plus size={16} />
+            </div>
             <h4>Active orgs</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{orgs.length}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {orgs.length}
+            </div>
           </div>
           {funnel && (
             <>
               <div className='signal-quick-card signal'>
-                <div className='icon-bg'><Bell size={16} /></div>
+                <div className='icon-bg'>
+                  <Bell size={16} />
+                </div>
                 <h4>Signups · 30d</h4>
-                <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>
+                <div
+                  className='count'
+                  style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+                >
                   {(funnel as unknown as {stages?: {signup?: number}}).stages?.signup ?? '—'}
                 </div>
               </div>
               <div className='signal-quick-card coral'>
-                <div className='icon-bg'><Settings size={16} /></div>
+                <div className='icon-bg'>
+                  <Settings size={16} />
+                </div>
                 <h4>Runs · 30d</h4>
-                <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>
-                  {(funnel as unknown as {stages?: {runComplete?: number}}).stages?.runComplete ?? '—'}
+                <div
+                  className='count'
+                  style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+                >
+                  {(funnel as unknown as {stages?: {runComplete?: number}}).stages?.runComplete ??
+                    '—'}
                 </div>
               </div>
             </>
@@ -453,7 +701,7 @@ export function AdminPage() {
 
         <SectionHeader>Tier lifecycle</SectionHeader>
         {tiers.length === 0 ? (
-          <LoadingState label="Loading tiers…" />
+          <LoadingState label='Loading tiers…' />
         ) : (
           tiers.map((t) => {
             const tAny = t as unknown as {tier?: string; state?: string; orgCount?: number};
@@ -463,8 +711,19 @@ export function AdminPage() {
                 key={tAny.tier}
                 dot={state === 'LISTED' ? 'mint' : state === 'HIDDEN' ? 'signal' : 'coral'}
                 title={tAny.tier || '—'}
-                meta={<span>{state}{tAny.orgCount != null ? ` · ${tAny.orgCount} orgs` : ''}</span>}
-                trailing={<StatusPill kind={state === 'LISTED' ? 'shipped' : state === 'HIDDEN' ? 'needs' : 'failed'}>{state}</StatusPill>}
+                meta={
+                  <span>
+                    {state}
+                    {tAny.orgCount != null ? ` · ${tAny.orgCount} orgs` : ''}
+                  </span>
+                }
+                trailing={
+                  <StatusPill
+                    kind={state === 'LISTED' ? 'shipped' : state === 'HIDDEN' ? 'needs' : 'failed'}
+                  >
+                    {state}
+                  </StatusPill>
+                }
               />
             );
           })
@@ -472,7 +731,7 @@ export function AdminPage() {
 
         <SectionHeader>Feature flags · {flags.length}</SectionHeader>
         {flags.length === 0 ? (
-          <LoadingState label="Loading flags…" />
+          <LoadingState label='Loading flags…' />
         ) : (
           <Card>
             <KvList
@@ -487,7 +746,16 @@ export function AdminPage() {
         <SectionHeader>Operations</SectionHeader>
         <Row dot='ocean' title='Payment audit' meta={<span>Transaction history</span>} showChev />
         <Row dot='ocean' title='Webhook event log' meta={<span>Gateway events</span>} showChev />
-        <Row dot='ocean' title='Reconcile orphan runs' meta={<span>Mark stale runs FAILED</span>} trailing={<Button kind='secondary' sm onClick={reconcile}>Run</Button>} />
+        <Row
+          dot='ocean'
+          title='Reconcile orphan runs'
+          meta={<span>Mark stale runs FAILED</span>}
+          trailing={
+            <Button kind='secondary' sm onClick={reconcile}>
+              Run
+            </Button>
+          }
+        />
       </Feed>
     </>
   );
@@ -501,7 +769,8 @@ export function SharedPage() {
 
   useEffect(() => {
     if (!token) return;
-    api.getSharedReport(token)
+    api
+      .getSharedReport(token)
       .then((d) => {
         if (d) setData(d);
         else setErr('Share link expired or revoked.');
@@ -526,17 +795,25 @@ export function SharedPage() {
     return (
       <>
         <TopBar title='Public report' sub='loading…' back backTo='/home' />
-        <Feed><LoadingState label="Loading shared report…" /></Feed>
+        <Feed>
+          <LoadingState label='Loading shared report…' />
+        </Feed>
       </>
     );
   }
 
-  const score = (data as unknown as {verifiedScore?: number; score?: number}).verifiedScore ?? (data as unknown as {score?: number}).score ?? 0;
+  const score =
+    (data as unknown as {verifiedScore?: number; score?: number}).verifiedScore ??
+    (data as unknown as {score?: number}).score ??
+    0;
   const verdict = score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const userRequest = (data as unknown as {userRequest?: string}).userRequest || '—';
-  const prUrl = (data as unknown as {prUrl?: string; githubPrUrl?: string}).prUrl ||
+  const prUrl =
+    (data as unknown as {prUrl?: string; githubPrUrl?: string}).prUrl ||
     (data as unknown as {githubPrUrl?: string}).githubPrUrl;
-  const cost = (data as unknown as {totalCost?: number; actualCost?: number}).totalCost ?? (data as unknown as {actualCost?: number}).actualCost;
+  const cost =
+    (data as unknown as {totalCost?: number; actualCost?: number}).totalCost ??
+    (data as unknown as {actualCost?: number}).actualCost;
   const tests = (data as unknown as {testsTotal?: number; testsPassed?: number}).testsTotal;
 
   return (
@@ -544,7 +821,16 @@ export function SharedPage() {
       <TopBar title='Public report' sub='read-only · no auth' back backTo='/home' />
       <Feed>
         <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: '#5443a8', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#5443a8',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
             Shared report · public link
           </div>
           <div style={{fontSize: 14, color: '#5443a8', lineHeight: 1.55}}>
@@ -557,7 +843,12 @@ export function SharedPage() {
           score={Math.round(score)}
           label='Verified score'
           cells={[
-            {v: tests ? `${(data as unknown as {testsPassed?: number}).testsPassed ?? 0}/${tests}` : '—', l: 'Tests'},
+            {
+              v: tests
+                ? `${(data as unknown as {testsPassed?: number}).testsPassed ?? 0}/${tests}`
+                : '—',
+              l: 'Tests',
+            },
             {v: cost != null ? `$${cost.toFixed(2)}` : '—', l: 'Cost'},
             {v: prUrl ? 'open' : '—', l: 'PR'},
           ]}
@@ -565,7 +856,15 @@ export function SharedPage() {
 
         <SectionHeader>Spec</SectionHeader>
         <Card>
-          <p style={{fontSize: 14, color: 'var(--signal-ink)', lineHeight: 1.55, margin: 0, whiteSpace: 'pre-wrap'}}>
+          <p
+            style={{
+              fontSize: 14,
+              color: 'var(--signal-ink)',
+              lineHeight: 1.55,
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
             {userRequest}
           </p>
         </Card>
@@ -578,13 +877,27 @@ export function SharedPage() {
               title={userRequest.slice(0, 80)}
               repo={prUrl.replace(/^https?:\/\/[^/]+\//, '').replace(/\/pull\//, '#')}
               ciStatus={<span className='ci-ok'>● open</span>}
-              actions={<button type='button' onClick={() => window.open(prUrl, '_blank', 'noopener')}>Open on GitHub</button>}
+              actions={
+                <button type='button' onClick={() => window.open(prUrl, '_blank', 'noopener')}>
+                  Open on GitHub
+                </button>
+              }
             />
           </>
         )}
 
-        <p style={{textAlign: 'center', fontSize: 12, color: 'var(--signal-text-mute)', marginTop: 16}}>
-          Shipped by <strong style={{color: 'var(--signal-ink)'}}>ExecuteSpec</strong> · <Link to='/login' style={{color: 'var(--signal-coral)'}}>Build your own →</Link>
+        <p
+          style={{
+            textAlign: 'center',
+            fontSize: 12,
+            color: 'var(--signal-text-mute)',
+            marginTop: 16,
+          }}
+        >
+          Shipped by <strong style={{color: 'var(--signal-ink)'}}>ExecuteSpec</strong> ·{' '}
+          <Link to='/login' style={{color: 'var(--signal-coral)'}}>
+            Build your own →
+          </Link>
         </p>
       </Feed>
     </>

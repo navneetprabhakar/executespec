@@ -26,11 +26,7 @@
  */
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {
-  ChevronRight,
-  FolderGit2,
-  Activity as ActivityIcon,
-} from 'lucide-react';
+import {ChevronRight, FolderGit2, Activity as ActivityIcon} from 'lucide-react';
 import {
   getProject,
   getProjectDashboard,
@@ -203,7 +199,9 @@ export default function ProjectPage() {
             {repos.slice(0, 5).map((r) => (
               <div key={r.repo.id} className='v4-list-row' style={{cursor: 'default'}}>
                 <FolderGit2 size={16} aria-hidden='true' style={{color: 'var(--v4-text-muted)'}} />
-                <div style={{flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2}}>
+                <div
+                  style={{flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2}}
+                >
                   <span
                     style={{
                       fontFamily: 'inherit',
@@ -301,7 +299,9 @@ export default function ProjectPage() {
                     }}
                   >
                     {r.status.toLowerCase()}
-                    {r.actualCostUsd != null && r.actualCostUsd > 0 ? ` · ${fmtCost(r.actualCostUsd)}` : ''}
+                    {r.actualCostUsd != null && r.actualCostUsd > 0
+                      ? ` · ${fmtCost(r.actualCostUsd)}`
+                      : ''}
                   </span>
                 </div>
                 <span
@@ -312,7 +312,11 @@ export default function ProjectPage() {
                 >
                   {timeAgo(r.completedAt ?? r.startedAt)}
                 </span>
-                <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
+                <ChevronRight
+                  size={14}
+                  aria-hidden='true'
+                  style={{color: 'var(--v4-text-subtle)'}}
+                />
               </Link>
             ))}
           </div>
@@ -322,9 +326,7 @@ export default function ProjectPage() {
       {/* Architecture / quality jump rows */}
       <section style={{marginBottom: 20}}>
         <div style={{padding: '0 4px 8px'}}>
-          <h2 style={{margin: 0, fontSize: 'var(--v4-text-base)', fontWeight: 600}}>
-            Inspect
-          </h2>
+          <h2 style={{margin: 0, fontSize: 'var(--v4-text-base)', fontWeight: 600}}>Inspect</h2>
         </div>
         <div className='v4-list'>
           <Link
@@ -344,9 +346,7 @@ export default function ProjectPage() {
             style={{textDecoration: 'none'}}
           >
             <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--v4-warn)'}} />
-            <span style={{flex: 1, fontSize: 'var(--v4-text-sm)', fontWeight: 500}}>
-              Tech debt
-            </span>
+            <span style={{flex: 1, fontSize: 'var(--v4-text-sm)', fontWeight: 500}}>Tech debt</span>
             <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
           </Link>
           <Link

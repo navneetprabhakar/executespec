@@ -38,7 +38,14 @@ function relTime(input?: Maybe<string>): string {
 
 function statusToDot(s?: string): 'live' | 'mint' | 'coral' | 'signal' | 'lavender' {
   const x = (s || '').toUpperCase();
-  if (x === 'CLASSIFYING' || x === 'PLANNING' || x === 'EXECUTING' || x === 'RUNNING' || x === 'AWAITING_APPROVAL') return 'live';
+  if (
+    x === 'CLASSIFYING' ||
+    x === 'PLANNING' ||
+    x === 'EXECUTING' ||
+    x === 'RUNNING' ||
+    x === 'AWAITING_APPROVAL'
+  )
+    return 'live';
   if (x === 'COMPLETED' || x === 'SUCCESS') return 'mint';
   if (x === 'FAILED' || x === 'CANCELLED') return 'coral';
   if (x === 'PARTIAL') return 'signal';
@@ -101,8 +108,14 @@ export default function HomePage() {
         // Live = first non-terminal run we can find.
         const liveSummary = runs.find((r) => {
           const s = (r.status || '').toUpperCase();
-          return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' ||
-            s === 'RUNNING' || s === 'AWAITING_APPROVAL' || s === 'PROVIDER_SWITCHING';
+          return (
+            s === 'CLASSIFYING' ||
+            s === 'PLANNING' ||
+            s === 'EXECUTING' ||
+            s === 'RUNNING' ||
+            s === 'AWAITING_APPROVAL' ||
+            s === 'PROVIDER_SWITCHING'
+          );
         });
         if (liveSummary) {
           // Hydrate full detail for the hero card so we get tasks + cost.
@@ -139,18 +152,26 @@ export default function HomePage() {
   }, [liveRun]);
 
   const displayName = (user?.firstName || user?.email?.split('@')[0] || 'there').trim();
-  const liveTasks = ((liveRun as unknown as {tasks?: Array<{status?: string}>})?.tasks) || [];
-  const liveDoneCount = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
+  const liveTasks = (liveRun as unknown as {tasks?: Array<{status?: string}>})?.tasks || [];
+  const liveDoneCount = liveTasks.filter(
+    (t) => t.status === 'COMPLETED' || t.status === 'DONE',
+  ).length;
   const liveTotal = liveTasks.length;
-  const liveSpent = (liveRun as unknown as {actualCost?: number; totalCost?: number})?.actualCost ??
-    (liveRun as unknown as {totalCost?: number})?.totalCost ?? 0;
-  const liveElapsed = formatElapsed((liveRun as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ||
-    (liveRun as unknown as {durationMs?: number})?.durationMs || 0);
+  const liveSpent =
+    (liveRun as unknown as {actualCost?: number; totalCost?: number})?.actualCost ??
+    (liveRun as unknown as {totalCost?: number})?.totalCost ??
+    0;
+  const liveElapsed = formatElapsed(
+    (liveRun as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ||
+      (liveRun as unknown as {durationMs?: number})?.durationMs ||
+      0,
+  );
   const liveUserReq = (liveRun as unknown as {userRequest?: string})?.userRequest || '—';
 
-  const initials = user?.firstName && user?.lastName
-    ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
-    : (user?.email?.slice(0, 2).toUpperCase() ?? 'EX');
+  const initials =
+    user?.firstName && user?.lastName
+      ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
+      : (user?.email?.slice(0, 2).toUpperCase() ?? 'EX');
 
   return (
     <>
@@ -172,15 +193,22 @@ export default function HomePage() {
       <Feed>
         {liveRun && (
           <LiveHero
-            runId={shortRunId(((liveRun as unknown as {runId?: string}).runId || ""))}
+            runId={shortRunId((liveRun as unknown as {runId?: string}).runId || '')}
             title={liveUserReq.slice(0, 120)}
             tasks={liveTotal ? `${liveDoneCount}/${liveTotal}` : '—'}
             elapsed={liveElapsed}
             spent={`$${liveSpent.toFixed(2)}`}
             actions={
               <>
-                <LiveHeroAction to={`/plan/${((liveRun as unknown as {runId?: string}).runId || "")}`}>Plan</LiveHeroAction>
-                <LiveHeroAction to={`/live/${((liveRun as unknown as {runId?: string}).runId || "")}`} primary>
+                <LiveHeroAction
+                  to={`/plan/${(liveRun as unknown as {runId?: string}).runId || ''}`}
+                >
+                  Plan
+                </LiveHeroAction>
+                <LiveHeroAction
+                  to={`/live/${(liveRun as unknown as {runId?: string}).runId || ''}`}
+                  primary
+                >
                   Watch live
                 </LiveHeroAction>
               </>
@@ -198,7 +226,14 @@ export default function HomePage() {
           </a>
           <a className='signal-quick-card mint' href='/projects'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <path d='M3 7l9-4 9 4M3 7v10l9 4m-9-14l9 4m0 0l9-4m-9 4v14' />
               </svg>
             </div>
@@ -215,18 +250,27 @@ export default function HomePage() {
                 finite cap exists; collapse to a friendlier label otherwise. */}
             <div className='count'>
               {permissions
-                ? (permissions.monthlyRunLimit === -1
-                    ? `${permissions.currentRunCount} this cycle`
-                    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} this cycle`)
-                : (recent === null ? '…' : recent.length ? `${recent.length}+ total` : 'No runs yet')}
+                ? permissions.monthlyRunLimit === -1
+                  ? `${permissions.currentRunCount} this cycle`
+                  : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} this cycle`
+                : recent === null
+                  ? '…'
+                  : recent.length
+                    ? `${recent.length}+ total`
+                    : 'No runs yet'}
             </div>
           </a>
-          <a className='signal-quick-card lavender' href={projects?.[0] ? `/projects/${projects[0].id}/chat` : '/projects'}>
+          <a
+            className='signal-quick-card lavender'
+            href={projects?.[0] ? `/projects/${projects[0].id}/chat` : '/projects'}
+          >
             <div className='icon-bg'>
               <ChatIcon size={16} />
             </div>
             <h4>Project chat</h4>
-            <div className='count'>{projects?.[0]?.name || (projects === null ? '…' : 'no project')}</div>
+            <div className='count'>
+              {projects?.[0]?.name || (projects === null ? '…' : 'no project')}
+            </div>
           </a>
         </div>
 
@@ -240,17 +284,25 @@ export default function HomePage() {
         ) : recent.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              No runs yet. <a href='/compose' style={{color: 'var(--signal-coral)'}}>Submit your first spec →</a>
+              No runs yet.{' '}
+              <a href='/compose' style={{color: 'var(--signal-coral)'}}>
+                Submit your first spec →
+              </a>
             </p>
           </Card>
         ) : (
           recent.map((r) => {
             const sc = (r as unknown as {verifiedScore?: number})?.verifiedScore;
-            const cost = (r as unknown as {actualCost?: number; totalCost?: number})?.actualCost ??
+            const cost =
+              (r as unknown as {actualCost?: number; totalCost?: number})?.actualCost ??
               (r as unknown as {totalCost?: number})?.totalCost;
             const status = (r.status || '').toUpperCase();
-            const isLive = status === 'CLASSIFYING' || status === 'PLANNING' || status === 'EXECUTING' ||
-              status === 'AWAITING_APPROVAL' || status === 'RUNNING';
+            const isLive =
+              status === 'CLASSIFYING' ||
+              status === 'PLANNING' ||
+              status === 'EXECUTING' ||
+              status === 'AWAITING_APPROVAL' ||
+              status === 'RUNNING';
             return (
               <Row
                 key={r.runId}
@@ -260,8 +312,17 @@ export default function HomePage() {
                   // Prefer the agent-generated runTitle (concise summary,
                   // <60 chars) over the raw userRequest, which is typically
                   // 200+ chars and looks terrible truncated in a list row.
-                  const rAny = r as unknown as {runTitle?: string; title?: string; userRequest?: string};
-                  return rAny.runTitle?.trim() || rAny.title?.trim() || rAny.userRequest?.trim() || `Run ${shortRunId(r.runId)}`;
+                  const rAny = r as unknown as {
+                    runTitle?: string;
+                    title?: string;
+                    userRequest?: string;
+                  };
+                  return (
+                    rAny.runTitle?.trim() ||
+                    rAny.title?.trim() ||
+                    rAny.userRequest?.trim() ||
+                    `Run ${shortRunId(r.runId)}`
+                  );
                 })()}
                 meta={
                   <>
@@ -270,7 +331,7 @@ export default function HomePage() {
                     <span>{relTime((r as unknown as {createdAt?: string})?.createdAt)}</span>
                   </>
                 }
-                trailing={sc != null ? `${Math.round(sc)}%` : (isLive ? 'live' : '—')}
+                trailing={sc != null ? `${Math.round(sc)}%` : isLive ? 'live' : '—'}
                 trailingKind={scoreKind(sc)}
                 trailingLabel={cost != null ? `$${cost.toFixed(2)}` : undefined}
               />
@@ -278,7 +339,9 @@ export default function HomePage() {
           })
         )}
 
-        <SectionHeader action={<a href='/projects'>All {projects?.length || ''}</a>}>Your projects</SectionHeader>
+        <SectionHeader action={<a href='/projects'>All {projects?.length || ''}</a>}>
+          Your projects
+        </SectionHeader>
         {projects === null ? (
           <>
             <SkeletonRow lines={2} />
@@ -287,7 +350,10 @@ export default function HomePage() {
         ) : projects.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              You don't have a project yet. <a href='/projects' style={{color: 'var(--signal-coral)'}}>Create one →</a>
+              You don't have a project yet.{' '}
+              <a href='/projects' style={{color: 'var(--signal-coral)'}}>
+                Create one →
+              </a>
             </p>
           </Card>
         ) : (
@@ -301,7 +367,14 @@ export default function HomePage() {
                 <>
                   <span>{(p as unknown as {repoCount?: number}).repoCount ?? 0} repos</span>
                   <span>·</span>
-                  {(() => { const n = (p as unknown as {totalRuns?: number}).totalRuns ?? 0; return <span>{n} {n === 1 ? 'run' : 'runs'}</span>; })()}
+                  {(() => {
+                    const n = (p as unknown as {totalRuns?: number}).totalRuns ?? 0;
+                    return (
+                      <span>
+                        {n} {n === 1 ? 'run' : 'runs'}
+                      </span>
+                    );
+                  })()}
                 </>
               }
               showChev

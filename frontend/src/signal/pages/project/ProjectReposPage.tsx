@@ -102,7 +102,9 @@ export default function ProjectReposPage() {
 
   const healthMap = new Map<string, Record<string, unknown>>();
   (health?.repos || []).forEach((r) => {
-    const key = String((r as unknown as {repoId?: string}).repoId || (r as unknown as {name?: string}).name || '');
+    const key = String(
+      (r as unknown as {repoId?: string}).repoId || (r as unknown as {name?: string}).name || '',
+    );
     if (key) healthMap.set(key, r as unknown as Record<string, unknown>);
   });
 
@@ -122,28 +124,87 @@ export default function ProjectReposPage() {
       <Feed>
         <ProjectTabs active='repos' />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         {showLink && (
           <Card>
             <div style={{fontSize: 14.5, fontWeight: 600, marginBottom: 8}}>Available repos</div>
             {available == null ? (
-              <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0}}>Loading repos…</p>
+              <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0}}>
+                Loading repos…
+              </p>
             ) : available.length === 0 ? (
               <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0}}>
-                No connected repos yet. Connect GitHub from <a href='/integrations' style={{color: 'var(--signal-coral)'}}>Integrations</a>.
+                No connected repos yet. Connect GitHub from{' '}
+                <a href='/integrations' style={{color: 'var(--signal-coral)'}}>
+                  Integrations
+                </a>
+                .
               </p>
             ) : (
               <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
                 {available.map((r) => {
                   const rId = String((r as {id?: string}).id || '');
-                  const isLinked = (repos || []).some((p) => String((p as {repoId?: string; id?: string}).repoId || (p as {id?: string}).id) === rId);
-                  const repoName = (r as {fullName?: string; name?: string}).fullName || (r as {name?: string}).name || rId;
+                  const isLinked = (repos || []).some(
+                    (p) =>
+                      String(
+                        (p as {repoId?: string; id?: string}).repoId || (p as {id?: string}).id,
+                      ) === rId,
+                  );
+                  const repoName =
+                    (r as {fullName?: string; name?: string}).fullName ||
+                    (r as {name?: string}).name ||
+                    rId;
                   return (
-                    <div key={rId} style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--signal-card-elev)', borderRadius: 8}}>
-                      <span style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5}}>{repoName}</span>
-                      <Button kind={isLinked ? 'ghost' : 'primary'} sm disabled={isLinked || busy} onClick={() => link(rId)}>
+                    <div
+                      key={rId}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        background: 'var(--signal-card-elev)',
+                        borderRadius: 8,
+                      }}
+                    >
+                      <span style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5}}>
+                        {repoName}
+                      </span>
+                      <Button
+                        kind={isLinked ? 'ghost' : 'primary'}
+                        sm
+                        disabled={isLinked || busy}
+                        onClick={() => link(rId)}
+                      >
                         {isLinked ? 'Linked' : 'Link'}
                       </Button>
                     </div>
@@ -151,12 +212,20 @@ export default function ProjectReposPage() {
                 })}
               </div>
             )}
-            <Button kind='ghost' block sm style={{marginTop: 10}} onClick={() => setShowLink(false)}>Close</Button>
+            <Button
+              kind='ghost'
+              block
+              sm
+              style={{marginTop: 10}}
+              onClick={() => setShowLink(false)}
+            >
+              Close
+            </Button>
           </Card>
         )}
 
         {repos === null ? (
-          <LoadingState label="Loading repos…" />
+          <LoadingState label='Loading repos…' />
         ) : repos.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
@@ -165,8 +234,14 @@ export default function ProjectReposPage() {
           </Card>
         ) : (
           repos.map((rep) => {
-            const repoId = String((rep as {repoId?: string; id?: string}).repoId || (rep as {id?: string}).id || '');
-            const name = String((rep as {repoName?: string; name?: string}).repoName || (rep as {name?: string}).name || repoId);
+            const repoId = String(
+              (rep as {repoId?: string; id?: string}).repoId || (rep as {id?: string}).id || '',
+            );
+            const name = String(
+              (rep as {repoName?: string; name?: string}).repoName ||
+                (rep as {name?: string}).name ||
+                repoId,
+            );
             const language = (rep as {language?: string}).language;
             const loc = (rep as {loc?: number}).loc;
             const head = (rep as {headSha?: string}).headSha;
@@ -176,17 +251,42 @@ export default function ProjectReposPage() {
             const commitsBehind = (h as {commitsBehind?: number}).commitsBehind ?? 0;
             const webhookOk = (h as {webhookInstalled?: boolean}).webhookInstalled === true;
             const openPrs = (h as {openPrs?: number}).openPrs ?? 0;
-            const archStatus = (rep as {architectureStatus?: string}).architectureStatus || (h as {architectureStatus?: string}).architectureStatus;
-            const status: 'shipped' | 'needs' | 'failed' = !webhookOk ? 'failed' : commitsBehind > 0 ? 'needs' : 'shipped';
+            const archStatus =
+              (rep as {architectureStatus?: string}).architectureStatus ||
+              (h as {architectureStatus?: string}).architectureStatus;
+            const status: 'shipped' | 'needs' | 'failed' = !webhookOk
+              ? 'failed'
+              : commitsBehind > 0
+                ? 'needs'
+                : 'shipped';
             const statusLabel = !webhookOk ? 'No webhook' : commitsBehind > 0 ? 'Drift' : 'Healthy';
             return (
               <Card key={repoId}>
                 <div style={{display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14}}>
-                  <div style={{width: 10, height: 10, borderRadius: '50%', background: status === 'shipped' ? 'var(--signal-mint)' : status === 'needs' ? 'var(--signal-y)' : 'var(--signal-coral)'}} />
+                  <div
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background:
+                        status === 'shipped'
+                          ? 'var(--signal-mint)'
+                          : status === 'needs'
+                            ? 'var(--signal-y)'
+                            : 'var(--signal-coral)',
+                    }}
+                  />
                   <div style={{flex: 1, minWidth: 0}}>
                     <div style={{fontSize: 15, fontWeight: 600}}>{name}</div>
-                    <div style={{fontSize: 11.5, color: 'var(--signal-text-dim)', fontFamily: "'JetBrains Mono', monospace"}}>
-                      {language || '—'}{loc ? ` · ${(loc / 1000).toFixed(1)}K LOC` : ''}
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: 'var(--signal-text-dim)',
+                        fontFamily: "'JetBrains Mono', monospace",
+                      }}
+                    >
+                      {language || '—'}
+                      {loc ? ` · ${(loc / 1000).toFixed(1)}K LOC` : ''}
                     </div>
                   </div>
                   <StatusPill kind={status}>{statusLabel}</StatusPill>
@@ -194,24 +294,96 @@ export default function ProjectReposPage() {
                 <KvList
                   pairs={[
                     {k: 'HEAD', v: head ? `${head.slice(0, 7)} · ${branch}` : branch},
-                    {k: 'Drift', v: <span style={{color: commitsBehind > 0 ? 'var(--signal-y-text)' : 'var(--signal-mint-text-on-light)'}}>{commitsBehind > 0 ? `${commitsBehind} commits behind origin` : 'in sync'}</span>},
-                    {k: 'Webhook', v: <span style={{color: webhookOk ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{webhookOk ? '✓ installed' : '○ not installed'}</span>},
+                    {
+                      k: 'Drift',
+                      v: (
+                        <span
+                          style={{
+                            color:
+                              commitsBehind > 0
+                                ? 'var(--signal-y-text)'
+                                : 'var(--signal-mint-text-on-light)',
+                          }}
+                        >
+                          {commitsBehind > 0 ? `${commitsBehind} commits behind origin` : 'in sync'}
+                        </span>
+                      ),
+                    },
+                    {
+                      k: 'Webhook',
+                      v: (
+                        <span
+                          style={{
+                            color: webhookOk
+                              ? 'var(--signal-mint-text-on-light)'
+                              : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          {webhookOk ? '✓ installed' : '○ not installed'}
+                        </span>
+                      ),
+                    },
                     {k: 'Open PRs', v: String(openPrs)},
-                    ...(archStatus ? [{k: 'Architecture', v: <span style={{color: archStatus.includes('STALE') ? 'var(--signal-y-text)' : 'var(--signal-mint-text-on-light)'}}>{archStatus}</span>}] : []),
+                    ...(archStatus
+                      ? [
+                          {
+                            k: 'Architecture',
+                            v: (
+                              <span
+                                style={{
+                                  color: archStatus.includes('STALE')
+                                    ? 'var(--signal-y-text)'
+                                    : 'var(--signal-mint-text-on-light)',
+                                }}
+                              >
+                                {archStatus}
+                              </span>
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
                 <div style={{display: 'flex', gap: 6, marginTop: 12}}>
-                  <Button kind='secondary' sm to={`/projects/${id}/architecture`} style={{flex: 1}}>View architecture</Button>
-                  {!webhookOk && <Button kind='primary' sm style={{flex: 1}} onClick={() => installWebhook(repoId)}>Install webhook</Button>}
-                  {commitsBehind > 0 && <Button kind='secondary' sm style={{flex: 1}} onClick={() => syncOne(repoId)}>Sync</Button>}
-                  <Button kind='ghost' sm style={{flex: 1, color: 'var(--signal-coral-text)'}} onClick={() => setConfirmUnlink({repoId, name})}>Unlink</Button>
+                  <Button kind='secondary' sm to={`/projects/${id}/architecture`} style={{flex: 1}}>
+                    View architecture
+                  </Button>
+                  {!webhookOk && (
+                    <Button
+                      kind='primary'
+                      sm
+                      style={{flex: 1}}
+                      onClick={() => installWebhook(repoId)}
+                    >
+                      Install webhook
+                    </Button>
+                  )}
+                  {commitsBehind > 0 && (
+                    <Button kind='secondary' sm style={{flex: 1}} onClick={() => syncOne(repoId)}>
+                      Sync
+                    </Button>
+                  )}
+                  <Button
+                    kind='ghost'
+                    sm
+                    style={{flex: 1, color: 'var(--signal-coral-text)'}}
+                    onClick={() => setConfirmUnlink({repoId, name})}
+                  >
+                    Unlink
+                  </Button>
                 </div>
               </Card>
             );
           })
         )}
 
-        <Button kind='secondary' block style={{marginTop: 12}} onClick={openLinkPanel} disabled={busy}>
+        <Button
+          kind='secondary'
+          block
+          style={{marginTop: 12}}
+          onClick={openLinkPanel}
+          disabled={busy}
+        >
           <Plus size={16} /> Link another repo
         </Button>
       </Feed>
@@ -224,7 +396,9 @@ export default function ProjectReposPage() {
         danger
         busy={busy}
         onClose={() => setConfirmUnlink(null)}
-        onConfirm={() => { if (confirmUnlink) void performUnlink(confirmUnlink.repoId); }}
+        onConfirm={() => {
+          if (confirmUnlink) void performUnlink(confirmUnlink.repoId);
+        }}
       />
     </>
   );

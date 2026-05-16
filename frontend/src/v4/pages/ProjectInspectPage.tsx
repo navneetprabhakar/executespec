@@ -22,11 +22,7 @@ import GeneratedDocsPanel from '@/components/project/GeneratedDocsPanel';
 import ProjectMemoryPanel from '@/components/project/ProjectMemoryPanel';
 import StandardsCompliancePanel from '@/components/project/StandardsCompliancePanel';
 import ContractCoveragePanel from '@/components/project/ContractCoveragePanel';
-import {
-  getProject,
-  getProjectRepos,
-  type ProjectDto,
-} from '@/lib/api';
+import {getProject, getProjectRepos, type ProjectDto} from '@/lib/api';
 import type {ProjectRepoLink} from '@/types/project';
 import LargeTitle from '../components/LargeTitle';
 import {useV4Context} from '../lib/useV4Context';
@@ -141,17 +137,12 @@ export default function ProjectInspectPage() {
 
       <LargeTitle title={title} subtitle={subtitle} />
 
-      <div
-        className='v4-card'
-        style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}
-      >
+      <div className='v4-card' style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}>
         {panel === 'architecture' && (
           <ArchitectureViewer projectId={projectId} repoCount={repos.length} />
         )}
         {panel === 'tech-debt' && <TechDebtPanel projectId={projectId} />}
-        {panel === 'review' && (
-          <CodeQualityPanel projectId={projectId} repos={repos} />
-        )}
+        {panel === 'review' && <CodeQualityPanel projectId={projectId} repos={repos} />}
         {panel === 'health' && <WorkspaceHealthPanel projectId={projectId} />}
         {panel === 'docs' && <GeneratedDocsPanel projectId={projectId} />}
         {panel === 'memory' && <ProjectMemoryPanel projectId={projectId} />}

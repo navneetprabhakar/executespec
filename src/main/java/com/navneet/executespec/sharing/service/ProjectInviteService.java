@@ -88,10 +88,9 @@ public class ProjectInviteService {
    *       inviting org may create external invites. Project-level admins (PROJECT_ADMIN) are not
    *       sufficient — adding outsiders to a project is an org-level decision because the outsider
    *       sees code / runs / cost that belongs to the org.
-   *   <li><b>Org-flag gate (V198)</b> — the inviter's org must have {@code
-   *       external_sharing_enabled = true}. Default is false; SUPER_ADMIN or the org's own
-   *       ORG_ADMIN can flip this via {@code PUT /api/org} (see {@link
-   *       com.navneet.executespec.auth.controller.OrgController}).
+   *   <li><b>Org-flag gate (V198)</b> — the inviter's org must have {@code external_sharing_enabled
+   *       = true}. Default is false; SUPER_ADMIN or the org's own ORG_ADMIN can flip this via
+   *       {@code PUT /api/org} (see {@link com.navneet.executespec.auth.controller.OrgController}).
    * </ol>
    *
    * <p>SUPER_ADMIN bypasses both the role and org-flag gates — useful for support/ops who need to
@@ -129,12 +128,12 @@ public class ProjectInviteService {
           HttpStatus.FORBIDDEN,
           "Only an org admin can invite external collaborators. You aren't a member of any org.");
     }
-    OrgMember membership =
-        orgMemberRepo.findByOrgIdAndUserId(orgId, inviter.getId()).orElse(null);
+    OrgMember membership = orgMemberRepo.findByOrgIdAndUserId(orgId, inviter.getId()).orElse(null);
     if (membership == null || !"ORG_ADMIN".equals(membership.getOrgRole())) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "Only an org admin can invite external collaborators. Ask your org admin to send the invite.");
+          "Only an org admin can invite external collaborators. Ask your org admin to send the"
+              + " invite.");
     }
 
     // Org-flag gate — the inviter's org must have external sharing enabled.
@@ -142,7 +141,8 @@ public class ProjectInviteService {
     if (org == null || !org.isExternalSharingEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "External sharing is disabled for your org. Enable it in Org Settings → External sharing before sending invites.");
+          "External sharing is disabled for your org. Enable it in Org Settings → External sharing"
+              + " before sending invites.");
     }
   }
 

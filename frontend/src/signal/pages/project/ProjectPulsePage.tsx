@@ -25,7 +25,14 @@ function relTime(input?: string): string {
 
 function statusToDot(s?: string): 'live' | 'mint' | 'coral' | 'signal' | 'lavender' {
   const x = (s || '').toUpperCase();
-  if (x === 'CLASSIFYING' || x === 'PLANNING' || x === 'EXECUTING' || x === 'AWAITING_APPROVAL' || x === 'RUNNING') return 'live';
+  if (
+    x === 'CLASSIFYING' ||
+    x === 'PLANNING' ||
+    x === 'EXECUTING' ||
+    x === 'AWAITING_APPROVAL' ||
+    x === 'RUNNING'
+  )
+    return 'live';
   if (x === 'COMPLETED') return 'mint';
   if (x === 'FAILED' || x === 'CANCELLED') return 'coral';
   if (x === 'PARTIAL') return 'signal';
@@ -66,8 +73,11 @@ export default function ProjectPulsePage() {
     ]).then(([d, r, rp, h]) => {
       if (cancelled) return;
       if (d.status === 'fulfilled') setDash(d.value);
-      if (r.status === 'fulfilled') setRecentRuns(r.value.content); else setRecentRuns([]);
-      if (rp.status === 'fulfilled') setRepos(rp.value as unknown as Array<Record<string, unknown>>); else setRepos([]);
+      if (r.status === 'fulfilled') setRecentRuns(r.value.content);
+      else setRecentRuns([]);
+      if (rp.status === 'fulfilled')
+        setRepos(rp.value as unknown as Array<Record<string, unknown>>);
+      else setRepos([]);
       if (h.status === 'fulfilled') setHealth(h.value);
       if (d.status === 'rejected' && r.status === 'rejected') {
         setErr('Failed to load project.');
@@ -80,10 +90,30 @@ export default function ProjectPulsePage() {
 
   const live = (recentRuns || []).find((r) => {
     const s = (r.status || '').toUpperCase();
-    return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+    return (
+      s === 'CLASSIFYING' ||
+      s === 'PLANNING' ||
+      s === 'EXECUTING' ||
+      s === 'AWAITING_APPROVAL' ||
+      s === 'RUNNING'
+    );
   });
 
-  const dashAny = (dash || {}) as {avgScore?: number; avgDurationMs?: number; totalSpent30d?: number; mergedPrs30d?: number; openPrs?: Array<{repoFullName?: string; prNumber?: number; title?: string; status?: string; additions?: number; deletions?: number}>; recentRuns?: api.RunSummary[]};
+  const dashAny = (dash || {}) as {
+    avgScore?: number;
+    avgDurationMs?: number;
+    totalSpent30d?: number;
+    mergedPrs30d?: number;
+    openPrs?: Array<{
+      repoFullName?: string;
+      prNumber?: number;
+      title?: string;
+      status?: string;
+      additions?: number;
+      deletions?: number;
+    }>;
+    recentRuns?: api.RunSummary[];
+  };
   const avgScore = dashAny.avgScore != null ? `${Math.round(dashAny.avgScore)}%` : '—';
   const avgRunTime = dashAny.avgDurationMs
     ? (() => {
@@ -102,20 +132,42 @@ export default function ProjectPulsePage() {
     <>
       <TopBar
         title={projectName}
-        sub={repos === null ? 'loading…' : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}${memberCount != null ? ` · ${memberCount} collaborators` : ''}`}
+        sub={
+          repos === null
+            ? 'loading…'
+            : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}${memberCount != null ? ` · ${memberCount} collaborators` : ''}`
+        }
         back
         backTo='/projects'
         actions={
           <>
-            <IconButton ariaLabel='Share'><Share size={18} /></IconButton>
-            <IconButton ariaLabel='More'><More size={18} /></IconButton>
+            <IconButton ariaLabel='Share'>
+              <Share size={18} />
+            </IconButton>
+            <IconButton ariaLabel='More'>
+              <More size={18} />
+            </IconButton>
           </>
         }
       />
       <Feed>
         <ProjectTabs active='pulse' />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {live && (
           <LiveHero
@@ -123,23 +175,33 @@ export default function ProjectPulsePage() {
             title={(live as unknown as {userRequest?: string})?.userRequest?.slice(0, 120) || '—'}
             tasks={(() => {
               const tasks = (live as unknown as {tasks?: Array<{status?: string}>})?.tasks || [];
-              const done = tasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
+              const done = tasks.filter(
+                (t) => t.status === 'COMPLETED' || t.status === 'DONE',
+              ).length;
               return tasks.length ? `${done}/${tasks.length}` : '—';
             })()}
             elapsed={(() => {
-              const ms = (live as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ?? (live as unknown as {durationMs?: number})?.durationMs ?? 0;
+              const ms =
+                (live as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ??
+                (live as unknown as {durationMs?: number})?.durationMs ??
+                0;
               const m = Math.floor(ms / 60000);
               const s = Math.floor((ms % 60000) / 1000);
               return m > 0 ? `${m}m ${s}s` : `${s}s`;
             })()}
             spent={(() => {
-              const c = (live as unknown as {actualCost?: number; totalCost?: number})?.actualCost ?? (live as unknown as {totalCost?: number})?.totalCost ?? 0;
+              const c =
+                (live as unknown as {actualCost?: number; totalCost?: number})?.actualCost ??
+                (live as unknown as {totalCost?: number})?.totalCost ??
+                0;
               return `$${c.toFixed(2)}`;
             })()}
             actions={
               <>
                 <LiveHeroAction to={`/plan/${live.runId}`}>Plan</LiveHeroAction>
-                <LiveHeroAction to={`/live/${live.runId}`} primary>Watch live</LiveHeroAction>
+                <LiveHeroAction to={`/live/${live.runId}`} primary>
+                  Watch live
+                </LiveHeroAction>
               </>
             }
           />
@@ -148,45 +210,95 @@ export default function ProjectPulsePage() {
         <div className='signal-quick-grid'>
           <div className='signal-quick-card mint'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <path d='M9 11l3 3L22 4' />
               </svg>
             </div>
             <h4>Avg score</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{avgScore}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {avgScore}
+            </div>
           </div>
           <div className='signal-quick-card'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <circle cx='12' cy='12' r='10' />
                 <path d='M12 6v6l4 2' />
               </svg>
             </div>
             <h4>Avg run time</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{avgRunTime}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {avgRunTime}
+            </div>
           </div>
           <div className='signal-quick-card coral'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <line x1='12' y1='1' x2='12' y2='23' />
                 <path d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' />
               </svg>
             </div>
             <h4>Spent · 30d</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{spent}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {spent}
+            </div>
           </div>
           <div className='signal-quick-card lavender'>
             <div className='icon-bg'>
-              <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 16, height: 16}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <path d='M6 3v18M18 3v18M3 6h18M3 18h18' />
               </svg>
             </div>
             <h4>PRs merged</h4>
-            <div className='count' style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}>{merged}</div>
+            <div
+              className='count'
+              style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            >
+              {merged}
+            </div>
           </div>
         </div>
 
-        <SectionHeader action={<a href={`/projects/${id}/repos`}>View all</a>}>Workspace health</SectionHeader>
+        <SectionHeader action={<a href={`/projects/${id}/repos`}>View all</a>}>
+          Workspace health
+        </SectionHeader>
         {repos === null ? (
           <>
             <SkeletonRow lines={2} />
@@ -195,44 +307,83 @@ export default function ProjectPulsePage() {
         ) : (health?.repos?.length ?? 0) === 0 && repos.length === 0 ? (
           <Card>
             <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
-              No repos linked yet. <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>Link a repo →</a>
+              No repos linked yet.{' '}
+              <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>
+                Link a repo →
+              </a>
             </p>
           </Card>
         ) : (
-          (health?.repos || repos.map((r) => ({repoId: (r as unknown as {id?: string}).id, name: (r as unknown as {name?: string}).name, headSha: (r as unknown as {headSha?: string}).headSha, webhookInstalled: false, openPrs: 0}))).slice(0, 4).map((r) => {
-            const rAny = r as unknown as {repoId?: string; name?: string; headSha?: string; commitsBehind?: number; webhookInstalled?: boolean; openPrs?: number};
-            const driftLabel = rAny.commitsBehind != null && rAny.commitsBehind > 0 ? `drift +${rAny.commitsBehind}` : (rAny.headSha?.slice(0, 7) ?? 'main');
-            const dot: 'mint' | 'signal' | 'coral' = rAny.commitsBehind && rAny.commitsBehind > 0 ? 'signal' : !rAny.webhookInstalled ? 'coral' : 'mint';
-            return (
-              <Row
-                key={rAny.repoId || rAny.name}
-                to={`/projects/${id}/repos`}
-                dot={dot}
-                title={rAny.name || '—'}
-                meta={
-                  <>
-                    <span className='mono'>{driftLabel}</span>
-                    <span>·</span>
-                    <span style={{color: rAny.webhookInstalled ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>
-                      {rAny.webhookInstalled ? '✓ webhook' : '○ install webhook'}
-                    </span>
-                    {(rAny.openPrs ?? 0) > 0 && (
-                      <>
-                        <span>·</span>
-                        <span>{rAny.openPrs} {rAny.openPrs === 1 ? 'PR' : 'PRs'}</span>
-                      </>
-                    )}
-                  </>
-                }
-                showChev
-              />
-            );
-          })
+          (
+            health?.repos ||
+            repos.map((r) => ({
+              repoId: (r as unknown as {id?: string}).id,
+              name: (r as unknown as {name?: string}).name,
+              headSha: (r as unknown as {headSha?: string}).headSha,
+              webhookInstalled: false,
+              openPrs: 0,
+            }))
+          )
+            .slice(0, 4)
+            .map((r) => {
+              const rAny = r as unknown as {
+                repoId?: string;
+                name?: string;
+                headSha?: string;
+                commitsBehind?: number;
+                webhookInstalled?: boolean;
+                openPrs?: number;
+              };
+              const driftLabel =
+                rAny.commitsBehind != null && rAny.commitsBehind > 0
+                  ? `drift +${rAny.commitsBehind}`
+                  : (rAny.headSha?.slice(0, 7) ?? 'main');
+              const dot: 'mint' | 'signal' | 'coral' =
+                rAny.commitsBehind && rAny.commitsBehind > 0
+                  ? 'signal'
+                  : !rAny.webhookInstalled
+                    ? 'coral'
+                    : 'mint';
+              return (
+                <Row
+                  key={rAny.repoId || rAny.name}
+                  to={`/projects/${id}/repos`}
+                  dot={dot}
+                  title={rAny.name || '—'}
+                  meta={
+                    <>
+                      <span className='mono'>{driftLabel}</span>
+                      <span>·</span>
+                      <span
+                        style={{
+                          color: rAny.webhookInstalled
+                            ? 'var(--signal-mint-text-on-light)'
+                            : 'var(--signal-coral-text)',
+                        }}
+                      >
+                        {rAny.webhookInstalled ? '✓ webhook' : '○ install webhook'}
+                      </span>
+                      {(rAny.openPrs ?? 0) > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>
+                            {rAny.openPrs} {rAny.openPrs === 1 ? 'PR' : 'PRs'}
+                          </span>
+                        </>
+                      )}
+                    </>
+                  }
+                  showChev
+                />
+              );
+            })
         )}
 
         {openPrs.length > 0 && (
           <>
-            <SectionHeader action={<span>{openPrs.length} open</span>}>Open pull requests</SectionHeader>
+            <SectionHeader action={<span>{openPrs.length} open</span>}>
+              Open pull requests
+            </SectionHeader>
             {openPrs.slice(0, 4).map((pr, i) => (
               <PrCard
                 key={`${pr.repoFullName}-${pr.prNumber}-${i}`}
@@ -247,7 +398,9 @@ export default function ProjectPulsePage() {
           </>
         )}
 
-        <SectionHeader action={<a href={`/projects/${id}/runs`}>All {recentRuns?.length ?? ''}</a>}>Recent runs</SectionHeader>
+        <SectionHeader action={<a href={`/projects/${id}/runs`}>All {recentRuns?.length ?? ''}</a>}>
+          Recent runs
+        </SectionHeader>
         {recentRuns === null ? (
           <>
             <SkeletonRow lines={2} />
@@ -256,21 +409,40 @@ export default function ProjectPulsePage() {
           </>
         ) : recentRuns.length === 0 ? (
           <Card>
-            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No runs yet in this project.</p>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No runs yet in this project.
+            </p>
           </Card>
         ) : (
           recentRuns.slice(0, 5).map((r) => {
             const sc = (r as unknown as {verifiedScore?: number}).verifiedScore;
-            const cost = (r as unknown as {actualCost?: number; totalCost?: number}).actualCost ?? (r as unknown as {totalCost?: number}).totalCost;
+            const cost =
+              (r as unknown as {actualCost?: number; totalCost?: number}).actualCost ??
+              (r as unknown as {totalCost?: number}).totalCost;
             const s = (r.status || '').toUpperCase();
-            const isLive = s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+            const isLive =
+              s === 'CLASSIFYING' ||
+              s === 'PLANNING' ||
+              s === 'EXECUTING' ||
+              s === 'AWAITING_APPROVAL' ||
+              s === 'RUNNING';
             return (
               <Row
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
                 dot={statusToDot(s)}
-                title={r.userRequest || (r as unknown as {runTitle?: string}).runTitle || `Run ${shortRunId(r.runId)}`}
-                meta={<><span className='mono'>{shortRunId(r.runId)}</span><span>·</span><span>{relTime((r as unknown as {createdAt?: string}).createdAt)}</span></>}
+                title={
+                  r.userRequest ||
+                  (r as unknown as {runTitle?: string}).runTitle ||
+                  `Run ${shortRunId(r.runId)}`
+                }
+                meta={
+                  <>
+                    <span className='mono'>{shortRunId(r.runId)}</span>
+                    <span>·</span>
+                    <span>{relTime((r as unknown as {createdAt?: string}).createdAt)}</span>
+                  </>
+                }
                 trailing={sc != null ? `${Math.round(sc)}%` : isLive ? 'live' : '—'}
                 trailingKind={scoreKind(sc)}
                 trailingLabel={cost != null ? `$${cost.toFixed(2)}` : undefined}

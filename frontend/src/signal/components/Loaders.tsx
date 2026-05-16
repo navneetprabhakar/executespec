@@ -31,7 +31,13 @@ export function Spinner({size = 14, color}: {size?: number; color?: string}) {
  * `<Card>Loading…</Card>` so every empty-loading state in the app looks the
  * same.
  */
-export function LoadingState({label = 'Loading…', children}: {label?: string; children?: ReactNode}) {
+export function LoadingState({
+  label = 'Loading…',
+  children,
+}: {
+  label?: string;
+  children?: ReactNode;
+}) {
   return (
     <div
       style={{
@@ -70,7 +76,16 @@ export function SkeletonRow({lines = 2}: {lines?: number}) {
         alignItems: 'center',
       }}
     >
-      <div style={{width: 10, height: 10, borderRadius: '50%', background: 'var(--signal-hairline)', margin: '0 auto', animation: 'signal-shimmer 1.6s ease-in-out infinite'}} />
+      <div
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background: 'var(--signal-hairline)',
+          margin: '0 auto',
+          animation: 'signal-shimmer 1.6s ease-in-out infinite',
+        }}
+      />
       <div style={{minWidth: 0}}>
         {Array.from({length: lines}).map((_, i) => (
           <div
@@ -87,7 +102,15 @@ export function SkeletonRow({lines = 2}: {lines?: number}) {
           />
         ))}
       </div>
-      <div style={{width: 40, height: 14, background: 'var(--signal-hairline)', borderRadius: 4, animation: 'signal-shimmer 1.6s ease-in-out infinite'}} />
+      <div
+        style={{
+          width: 40,
+          height: 14,
+          background: 'var(--signal-hairline)',
+          borderRadius: 4,
+          animation: 'signal-shimmer 1.6s ease-in-out infinite',
+        }}
+      />
     </div>
   );
 }
@@ -95,7 +118,15 @@ export function SkeletonRow({lines = 2}: {lines?: number}) {
 /** Inline message: "<spinner> Doing X…" — useful inside cards. */
 export function InlineLoader({label = 'Loading…'}: {label?: string}) {
   return (
-    <span style={{display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--signal-text-dim)'}}>
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        fontSize: 13,
+        color: 'var(--signal-text-dim)',
+      }}
+    >
       <Spinner size={12} />
       {label}
     </span>

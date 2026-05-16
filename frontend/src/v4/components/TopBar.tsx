@@ -83,8 +83,7 @@ export default function TopBar() {
             width: 28,
             height: 28,
             borderRadius: 8,
-            background:
-              'linear-gradient(135deg, var(--v4-brand), var(--c-signal-teal))',
+            background: 'linear-gradient(135deg, var(--v4-brand), var(--c-signal-teal))',
             color: '#fff',
             fontSize: 11,
             fontWeight: 800,
@@ -105,9 +104,7 @@ export default function TopBar() {
             ExecuteSpec
           </span>
         )}
-        {agentActive && (
-          <StatusDot tone='progress' aria-label='Agent active' />
-        )}
+        {agentActive && <StatusDot tone='progress' aria-label='Agent active' />}
       </Link>
 
       {/* Center — desktop only: command palette trigger + nav links. */}
@@ -170,10 +167,7 @@ export default function TopBar() {
       {/* Right — desktop nav links + identity. Mobile: identity only (nav
           is in the bottom bar). */}
       {!isPhone && user ? (
-        <nav
-          aria-label='Sections'
-          style={{display: 'flex', alignItems: 'center', gap: 4}}
-        >
+        <nav aria-label='Sections' style={{display: 'flex', alignItems: 'center', gap: 4}}>
           <NavLink to='/v4/activity' style={navLinkStyle}>
             Activity
           </NavLink>

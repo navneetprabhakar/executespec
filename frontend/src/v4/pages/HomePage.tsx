@@ -25,7 +25,14 @@ import StatusDot, {type StatusTone} from '../components/StatusDot';
 
 function greeting(name?: string | null): string {
   const hr = new Date().getHours();
-  const part = hr < 5 ? 'Working late' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+  const part =
+    hr < 5
+      ? 'Working late'
+      : hr < 12
+        ? 'Good morning'
+        : hr < 18
+          ? 'Good afternoon'
+          : 'Good evening';
   const first = (name || '').split(/\s+/)[0]?.split('@')[0];
   return first ? `${part}, ${first}` : part;
 }
@@ -56,10 +63,7 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      getRuns({scope: 'mine', page: 0, size: 6}),
-      getProjects(),
-    ])
+    Promise.all([getRuns({scope: 'mine', page: 0, size: 6}), getProjects()])
       .then(([rRes, pRes]) => {
         if (cancelled) return;
         setRuns(rRes.content);
@@ -74,9 +78,10 @@ export default function HomePage() {
   }, []);
 
   const activeCount = useMemo(
-    () => (runs ?? []).filter((r) =>
-      ['WORKING', 'PLANNING', 'REVIEWING', 'AWAITING_APPROVAL'].includes(r.status),
-    ).length,
+    () =>
+      (runs ?? []).filter((r) =>
+        ['WORKING', 'PLANNING', 'REVIEWING', 'AWAITING_APPROVAL'].includes(r.status),
+      ).length,
     [runs],
   );
 
@@ -233,8 +238,7 @@ export default function HomePage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns:
-                'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
               gap: 12,
             }}
           >
@@ -307,8 +311,7 @@ export default function HomePage() {
       <section
         style={{
           display: 'grid',
-          gridTemplateColumns:
-            'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))',
           gap: 12,
           marginBottom: 20,
         }}
@@ -359,11 +362,7 @@ export default function HomePage() {
               Ready-made solutions + migrations
             </div>
           </div>
-          <ArrowUpRight
-            size={16}
-            aria-hidden='true'
-            style={{color: 'var(--v4-text-subtle)'}}
-          />
+          <ArrowUpRight size={16} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
         </Link>
         <button
           type='button'

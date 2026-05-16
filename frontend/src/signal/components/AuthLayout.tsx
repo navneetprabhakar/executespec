@@ -29,7 +29,9 @@ export default function AuthLayout({children}: {children: ReactNode}) {
               An <em>agentic</em> engineer that ships PRs your team can actually merge.
             </h2>
             <p className='auth-brand-lede'>
-              Describe the change. ExecuteSpec classifies, plans, codes across one repo or twenty, runs your tests, files the PR — and attaches a verified score so you know whether to merge before you open the diff.
+              Describe the change. ExecuteSpec classifies, plans, codes across one repo or twenty,
+              runs your tests, files the PR — and attaches a verified score so you know whether to
+              merge before you open the diff.
             </p>
           </div>
 

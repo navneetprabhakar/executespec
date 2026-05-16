@@ -88,8 +88,7 @@ export default function AgentInput({
         right: 0,
         bottom: 'var(--v4-bottom)',
         zIndex: 35,
-        padding:
-          '8px clamp(12px, 4vw, 24px) calc(env(safe-area-inset-bottom, 0px) + 8px)',
+        padding: '8px clamp(12px, 4vw, 24px) calc(env(safe-area-inset-bottom, 0px) + 8px)',
         pointerEvents: 'none',
       }}
     >
@@ -183,16 +182,13 @@ export default function AgentInput({
               height: 34,
               borderRadius: 999,
               border: 'none',
-              background: canSubmit
-                ? 'var(--v4-brand)'
-                : 'var(--v4-surface-up)',
+              background: canSubmit ? 'var(--v4-brand)' : 'var(--v4-surface-up)',
               color: canSubmit ? '#fff' : 'var(--v4-text-subtle)',
               cursor: canSubmit ? 'pointer' : 'not-allowed',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition:
-                'background 220ms var(--v4-spring), transform 80ms var(--v4-spring)',
+              transition: 'background 220ms var(--v4-spring), transform 80ms var(--v4-spring)',
             }}
           >
             <ArrowUp size={16} aria-hidden='true' />

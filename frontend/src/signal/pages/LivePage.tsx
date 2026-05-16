@@ -108,7 +108,9 @@ export default function LivePage() {
         <TopBar title='Live run' sub='no active run' back backTo='/home' />
         <Feed>
           <Card>
-            <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>No active run. Start one from the composer.</p>
+            <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>
+              No active run. Start one from the composer.
+            </p>
           </Card>
         </Feed>
       </>
@@ -122,11 +124,15 @@ export default function LivePage() {
   const events = ((run as unknown as {events?: LiveEvent[]})?.events ||
     (run as unknown as {liveLog?: LiveEvent[]})?.liveLog ||
     []) as LiveEvent[];
-  const elapsedMs = (run as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ||
-    (run as unknown as {durationMs?: number})?.durationMs || 0;
+  const elapsedMs =
+    (run as unknown as {elapsedMs?: number; durationMs?: number})?.elapsedMs ||
+    (run as unknown as {durationMs?: number})?.durationMs ||
+    0;
   const elapsed = formatElapsed(elapsedMs);
-  const spent = (run as unknown as {actualCost?: number; totalCost?: number})?.actualCost ||
-    (run as unknown as {totalCost?: number})?.totalCost || 0;
+  const spent =
+    (run as unknown as {actualCost?: number; totalCost?: number})?.actualCost ||
+    (run as unknown as {totalCost?: number})?.totalCost ||
+    0;
   const userRequest = (run as unknown as {userRequest?: string})?.userRequest || 'Run in progress';
 
   return (
@@ -139,7 +145,14 @@ export default function LivePage() {
         actions={
           <>
             <IconButton ariaLabel='Cancel' onClick={() => setConfirmCancel(true)}>
-              <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 18, height: 18}}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={2}
+                strokeLinecap='round'
+              >
                 <circle cx='12' cy='12' r='10' />
                 <line x1='15' y1='9' x2='9' y2='15' />
                 <line x1='9' y1='9' x2='15' y2='15' />
@@ -199,7 +212,7 @@ export default function LivePage() {
           <Card style={{padding: 14, marginTop: 12, marginBottom: 4}}>
             <CostProgressBar
               spent={spent || 0}
-              cap={((run as unknown as {hardCapUsd: number}).hardCapUsd) || 0}
+              cap={(run as unknown as {hardCapUsd: number}).hardCapUsd || 0}
               label='Spend vs hard cap'
             />
           </Card>
@@ -254,10 +267,31 @@ export default function LivePage() {
               : sseStatus === 'RECONNECTING'
                 ? 'reconnecting…'
                 : 'polling';
-          const dotColor = sseConnected ? 'var(--signal-mint)' : sseStatus === 'CONNECTING' || sseStatus === 'RECONNECTING' ? 'var(--signal-y)' : 'var(--signal-text-mute)';
+          const dotColor = sseConnected
+            ? 'var(--signal-mint)'
+            : sseStatus === 'CONNECTING' || sseStatus === 'RECONNECTING'
+              ? 'var(--signal-y)'
+              : 'var(--signal-text-mute)';
           const sseStatusChip = (
-            <span style={{display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'var(--signal-text-dim)'}}>
-              <span style={{width: 7, height: 7, borderRadius: '50%', background: dotColor, boxShadow: sseConnected ? '0 0 6px var(--signal-mint)' : 'none'}} />
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: 'var(--signal-text-dim)',
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: dotColor,
+                  boxShadow: sseConnected ? '0 0 6px var(--signal-mint)' : 'none',
+                }}
+              />
               {sseLabel}
             </span>
           );
@@ -265,9 +299,18 @@ export default function LivePage() {
             return (
               <>
                 <SectionHeader action={sseStatusChip}>Live log</SectionHeader>
-                <Card style={{display: 'flex', alignItems: 'center', gap: 12, padding: '18px 16px'}}>
+                <Card
+                  style={{display: 'flex', alignItems: 'center', gap: 12, padding: '18px 16px'}}
+                >
                   <Spinner size={16} />
-                  <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+                  <p
+                    style={{
+                      fontSize: 13.5,
+                      color: 'var(--signal-text-dim)',
+                      margin: 0,
+                      lineHeight: 1.5,
+                    }}
+                  >
                     Waiting for the first tool call… the agent is warming up.
                   </p>
                 </Card>
@@ -277,42 +320,65 @@ export default function LivePage() {
           return (
             <>
               <SectionHeader action={sseStatusChip}>Live log · {list.length}</SectionHeader>
-              <div ref={logScrollRef} style={{maxHeight: '50vh', overflowY: 'auto', paddingRight: 4, borderRadius: 14, border: '1px solid var(--signal-hairline)', background: 'var(--signal-card-bg)', padding: 8}}>
-              {list.map((ev, i) => {
-                if (useSseLog) {
-                  // SSE entries: {id, type, timestamp, data:{message,payload}}
-                  const sse = ev as unknown as {id?: string; type?: string; timestamp?: number; data?: {message?: string; payload?: string}};
-                  const t = (sse.type || 'log').toLowerCase();
-                  const kind: 'tool' | 'llm' | 'warn' | 'ok' | 'default' =
-                    t.includes('tool') ? 'tool' :
-                    t.includes('llm') || t.includes('completion') ? 'llm' :
-                    t.includes('warn') ? 'warn' :
-                    t.includes('complete') || t.includes('ok') ? 'ok' : 'default';
-                  const body = sse.data?.message || sse.data?.payload || '';
+              <div
+                ref={logScrollRef}
+                style={{
+                  maxHeight: '50vh',
+                  overflowY: 'auto',
+                  paddingRight: 4,
+                  borderRadius: 14,
+                  border: '1px solid var(--signal-hairline)',
+                  background: 'var(--signal-card-bg)',
+                  padding: 8,
+                }}
+              >
+                {list.map((ev, i) => {
+                  if (useSseLog) {
+                    // SSE entries: {id, type, timestamp, data:{message,payload}}
+                    const sse = ev as unknown as {
+                      id?: string;
+                      type?: string;
+                      timestamp?: number;
+                      data?: {message?: string; payload?: string};
+                    };
+                    const t = (sse.type || 'log').toLowerCase();
+                    const kind: 'tool' | 'llm' | 'warn' | 'ok' | 'default' = t.includes('tool')
+                      ? 'tool'
+                      : t.includes('llm') || t.includes('completion')
+                        ? 'llm'
+                        : t.includes('warn')
+                          ? 'warn'
+                          : t.includes('complete') || t.includes('ok')
+                            ? 'ok'
+                            : 'default';
+                    const body = sse.data?.message || sse.data?.payload || '';
+                    return (
+                      <StreamCard
+                        key={sse.id || i}
+                        kind={kind}
+                        topLeft={sse.type || 'log'}
+                        ts={sse.timestamp ? new Date(sse.timestamp).toLocaleTimeString() : ''}
+                      >
+                        {body}
+                      </StreamCard>
+                    );
+                  }
+                  const polled = ev as unknown as LiveEvent;
                   return (
                     <StreamCard
-                      key={sse.id || i}
-                      kind={kind}
-                      topLeft={sse.type || 'log'}
-                      ts={sse.timestamp ? new Date(sse.timestamp).toLocaleTimeString() : ''}
+                      key={i}
+                      kind={
+                        (polled.kind as 'tool' | 'llm' | 'warn' | 'ok' | 'default' | undefined) ||
+                        'default'
+                      }
+                      topLeft={polled.topLeft || polled.kind || 'log'}
+                      ts={polled.ts || ''}
                     >
-                      {body}
+                      {polled.body || ''}
                     </StreamCard>
                   );
-                }
-                const polled = ev as unknown as LiveEvent;
-                return (
-                  <StreamCard
-                    key={i}
-                    kind={(polled.kind as 'tool' | 'llm' | 'warn' | 'ok' | 'default' | undefined) || 'default'}
-                    topLeft={polled.topLeft || polled.kind || 'log'}
-                    ts={polled.ts || ''}
-                  >
-                    {polled.body || ''}
-                  </StreamCard>
-                );
-              })}
-              <div ref={logBottomRef} />
+                })}
+                <div ref={logBottomRef} />
               </div>
             </>
           );

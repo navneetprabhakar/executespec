@@ -61,13 +61,11 @@ export default function ProjectsPage() {
             api.getRuns({projectId: p.id, page: 0, size: 10}).catch(() => null),
           ]).then(([d, r]) => {
             if (cancelled) return;
-            const merged: Record<string, unknown> = {...(d ?? {}) as Record<string, unknown>};
+            const merged: Record<string, unknown> = {...((d ?? {}) as Record<string, unknown>)};
             // Compute recency-biased avg: weights decay 1.0 → 0.4 over the
             // last 10 runs. Only scored runs count.
             const runs = (r?.content || []) as Array<{verifiedScore?: number; status?: string}>;
-            const scored = runs
-              .filter((rr) => typeof rr.verifiedScore === 'number')
-              .slice(0, 10);
+            const scored = runs.filter((rr) => typeof rr.verifiedScore === 'number').slice(0, 10);
             if (scored.length > 0) {
               let weightSum = 0;
               let scoreSum = 0;
@@ -95,8 +93,13 @@ export default function ProjectsPage() {
     const myOrg = user?.orgId;
     if (tab === 'archived') return list.filter((p) => p.archivedAt);
     if (tab === 'shared') {
-      return list.filter((p) => !p.archivedAt && myOrg && (p as unknown as {ownerOrgId?: string}).ownerOrgId &&
-        (p as unknown as {ownerOrgId?: string}).ownerOrgId !== myOrg);
+      return list.filter(
+        (p) =>
+          !p.archivedAt &&
+          myOrg &&
+          (p as unknown as {ownerOrgId?: string}).ownerOrgId &&
+          (p as unknown as {ownerOrgId?: string}).ownerOrgId !== myOrg,
+      );
     }
     return list.filter((p) => !p.archivedAt);
   }, [all, tab, user?.orgId]);
@@ -111,7 +114,10 @@ export default function ProjectsPage() {
     setCreating(true);
     setErr('');
     try {
-      const created = await api.createProject({name, description: (values.description || '').trim() || undefined});
+      const created = await api.createProject({
+        name,
+        description: (values.description || '').trim() || undefined,
+      });
       setCreateOpen(false);
       navigate(`/projects/${created.id}`);
     } catch (e: unknown) {
@@ -163,13 +169,19 @@ export default function ProjectsPage() {
           items={[
             {label: `Mine · ${mineCount}`, active: tab === 'mine', onClick: () => setTab('mine')},
             {label: 'Shared with me', active: tab === 'shared', onClick: () => setTab('shared')},
-            {label: `Archived · ${archivedCount}`, active: tab === 'archived', onClick: () => setTab('archived')},
+            {
+              label: `Archived · ${archivedCount}`,
+              active: tab === 'archived',
+              onClick: () => setTab('archived'),
+            },
           ]}
         />
 
         {all === null ? (
           <Card>
-            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading projects…</p>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              Loading projects…
+            </p>
           </Card>
         ) : filtered.length === 0 ? (
           <Card>
@@ -200,20 +212,37 @@ export default function ProjectsPage() {
               const totalRuns = activeRuns + completedRuns + failedRuns;
               const recentPrs = ((s as Record<string, unknown>).recentPrs as unknown[]) || [];
               const openPrs = recentPrs.filter((pr) => {
-                const st = (pr as {status?: string; state?: string}).status || (pr as {state?: string}).state || '';
+                const st =
+                  (pr as {status?: string; state?: string}).status ||
+                  (pr as {state?: string}).state ||
+                  '';
                 return st.toUpperCase() === 'OPEN';
               }).length;
               // Repo count not in dashboard payload — approximate from recentPrs
               // distinct repos. Falls back to 0 if no PRs.
-              const repoCount = new Set(recentPrs.map((pr) => (pr as {repoFullName?: string}).repoFullName).filter(Boolean)).size;
+              const repoCount = new Set(
+                recentPrs.map((pr) => (pr as {repoFullName?: string}).repoFullName).filter(Boolean),
+              ).size;
               // Prefer the recency-weighted average so the card reflects how
               // the project is performing now, not 6 months ago.
               const avg = num('recencyAvgScore') ?? num('avgScore');
               const spent = num('totalCostUsd');
               const debtCount = 0;
               const debtKind = debtCount >= 3 ? 'fail' : debtCount > 0 ? 'warn' : 'good';
-              const status = p.archivedAt ? undefined : (openPrs > 0 ? 'live' : totalRuns > 0 ? 'shipped' : undefined);
-              const statusLabel = p.archivedAt ? 'Archived' : openPrs > 0 ? 'Live' : totalRuns > 0 ? 'Healthy' : 'New';
+              const status = p.archivedAt
+                ? undefined
+                : openPrs > 0
+                  ? 'live'
+                  : totalRuns > 0
+                    ? 'shipped'
+                    : undefined;
+              const statusLabel = p.archivedAt
+                ? 'Archived'
+                : openPrs > 0
+                  ? 'Live'
+                  : totalRuns > 0
+                    ? 'Healthy'
+                    : 'New';
               return (
                 <Card key={p.id} to={`/projects/${p.id}`}>
                   <div style={{display: 'flex', gap: 14, marginBottom: 14}}>
@@ -235,11 +264,23 @@ export default function ProjectsPage() {
                     </div>
                     <div style={{flex: 1, minWidth: 0}}>
                       <div style={{fontSize: 16, fontWeight: 600, marginBottom: 2}}>{p.name}</div>
-                      <div style={{fontSize: 12, color: 'var(--signal-text-dim)', fontFamily: "'JetBrains Mono', monospace"}}>
-                        {repoCount} {repoCount === 1 ? 'repo' : 'repos'} · {totalRuns} {totalRuns === 1 ? 'run' : 'runs'} · {openPrs} {openPrs === 1 ? 'PR' : 'PRs'} open
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--signal-text-dim)',
+                          fontFamily: "'JetBrains Mono', monospace",
+                        }}
+                      >
+                        {repoCount} {repoCount === 1 ? 'repo' : 'repos'} · {totalRuns}{' '}
+                        {totalRuns === 1 ? 'run' : 'runs'} · {openPrs}{' '}
+                        {openPrs === 1 ? 'PR' : 'PRs'} open
                       </div>
                     </div>
-                    <StatusPill kind={status as 'live' | 'shipped' | 'needs' | 'failed' | undefined}>{statusLabel}</StatusPill>
+                    <StatusPill
+                      kind={status as 'live' | 'shipped' | 'needs' | 'failed' | undefined}
+                    >
+                      {statusLabel}
+                    </StatusPill>
                   </div>
                   <div
                     style={{
@@ -253,11 +294,15 @@ export default function ProjectsPage() {
                   >
                     <div>
                       <div style={{color: 'var(--signal-text-dim)', fontSize: 11}}>Avg score</div>
-                      <div style={{fontWeight: 600, fontSize: 15, marginTop: 2}}>{avg != null ? `${Math.round(avg)}%` : '—'}</div>
+                      <div style={{fontWeight: 600, fontSize: 15, marginTop: 2}}>
+                        {avg != null ? `${Math.round(avg)}%` : '—'}
+                      </div>
                     </div>
                     <div>
                       <div style={{color: 'var(--signal-text-dim)', fontSize: 11}}>Spent</div>
-                      <div style={{fontWeight: 600, fontSize: 15, marginTop: 2}}>{spent != null ? `$${spent.toFixed(2)}` : '—'}</div>
+                      <div style={{fontWeight: 600, fontSize: 15, marginTop: 2}}>
+                        {spent != null ? `$${spent.toFixed(2)}` : '—'}
+                      </div>
                     </div>
                     <div>
                       <div style={{color: 'var(--signal-text-dim)', fontSize: 11}}>Tech debt</div>
@@ -270,8 +315,8 @@ export default function ProjectsPage() {
                             debtKind === 'fail'
                               ? 'var(--signal-coral)'
                               : debtKind === 'warn'
-                              ? 'var(--signal-y-text)'
-                              : undefined,
+                                ? 'var(--signal-y-text)'
+                                : undefined,
                         }}
                       >
                         {debtCount > 0 ? debtCount : '—'}
@@ -284,7 +329,13 @@ export default function ProjectsPage() {
           </div>
         )}
 
-        <Button kind='secondary' block style={{marginTop: 12}} onClick={() => setCreateOpen(true)} disabled={creating}>
+        <Button
+          kind='secondary'
+          block
+          style={{marginTop: 12}}
+          onClick={() => setCreateOpen(true)}
+          disabled={creating}
+        >
           <Plus size={16} />
           {creating ? 'Creating…' : 'New project'}
         </Button>
@@ -297,7 +348,12 @@ export default function ProjectsPage() {
         body='Projects bundle related repos + runs together so memory, codemaps, and chat persist across runs.'
         fields={[
           {name: 'name', label: 'Name', placeholder: 'e.g. Acme Billing', required: true},
-          {name: 'description', label: 'Description (optional)', placeholder: 'What does this codebase do?', multiline: true},
+          {
+            name: 'description',
+            label: 'Description (optional)',
+            placeholder: 'What does this codebase do?',
+            multiline: true,
+          },
         ]}
         submitLabel='Create project'
         busy={creating}

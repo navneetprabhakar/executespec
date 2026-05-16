@@ -37,14 +37,18 @@ export function useProjectMeta(projectId: string | undefined): api.ProjectDto | 
         const hit = list.find((p) => p.id === projectId);
         if (hit) setProject(hit);
       })
-      .catch(() => {/* swallow */});
+      .catch(() => {
+        /* swallow */
+      });
     // Best-effort detail fetch (may take a while or fail).
     api
       .getProject(projectId)
       .then((p) => {
         if (!cancelled && p) setProject(p);
       })
-      .catch(() => {/* keep the list value */});
+      .catch(() => {
+        /* keep the list value */
+      });
     return () => {
       cancelled = true;
     };

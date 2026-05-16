@@ -145,10 +145,7 @@ export default function RunPage() {
       {/* Full v3 run detail embedded inside v4 chrome. Same tabs, same
           data, same SSE wiring — RunDetailTabs reads from useRunStore
           which we seeded above. No escape to /runs/:id. */}
-      <section
-        className='v4-card'
-        style={{padding: 0, overflow: 'hidden', marginBottom: 24}}
-      >
+      <section className='v4-card' style={{padding: 0, overflow: 'hidden', marginBottom: 24}}>
         <RunDetailTabs />
       </section>
     </>

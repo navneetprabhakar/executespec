@@ -5,12 +5,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import SignalShell from '@/signal/components/Shell';
 
 // Auth + onboarding
-import {
-  LoginPage,
-  SignupPage,
-  VerifyPage,
-  WelcomePage,
-} from '@/signal/pages/AuthPages';
+import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
 import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
 
 // Run loop — each in its own file with default export

@@ -32,13 +32,17 @@ export function Modal({
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     dialogRef.current?.focus();
-    return () => { document.body.style.overflow = prevOverflow; };
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open]);
 
   // ESC to close.
   useEffect(() => {
     if (!open || disableDismiss) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, disableDismiss, onClose]);
@@ -82,8 +86,18 @@ export function Modal({
           outline: 'none',
         }}
       >
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--signal-hairline)'}}>
-          <h3 style={{fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', margin: 0}}>{title}</h3>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '14px 18px',
+            borderBottom: '1px solid var(--signal-hairline)',
+          }}
+        >
+          <h3 style={{fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', margin: 0}}>
+            {title}
+          </h3>
           {!hideCloseButton && (
             <button
               type='button'
@@ -103,9 +117,7 @@ export function Modal({
             </button>
           )}
         </div>
-        <div style={{padding: 18}}>
-          {children}
-        </div>
+        <div style={{padding: 18}}>{children}</div>
       </div>
     </div>
   );
@@ -142,9 +154,15 @@ export function ConfirmModal({
 }) {
   return (
     <Modal open={open} title={title} onClose={onClose} size='sm'>
-      <div style={{fontSize: 14, color: 'var(--signal-text-dim)', lineHeight: 1.55, marginBottom: 16}}>{body}</div>
+      <div
+        style={{fontSize: 14, color: 'var(--signal-text-dim)', lineHeight: 1.55, marginBottom: 16}}
+      >
+        {body}
+      </div>
       <div style={{display: 'flex', gap: 8, justifyContent: 'flex-end'}}>
-        <Button kind='ghost' sm onClick={onClose} disabled={busy}>{cancelLabel}</Button>
+        <Button kind='ghost' sm onClick={onClose} disabled={busy}>
+          {cancelLabel}
+        </Button>
         <Button
           kind={danger ? 'coral' : 'primary'}
           sm
@@ -178,7 +196,14 @@ export function PromptModal({
   open: boolean;
   title: string;
   body?: ReactNode;
-  fields: Array<{name: string; label: string; placeholder?: string; multiline?: boolean; defaultValue?: string; required?: boolean}>;
+  fields: Array<{
+    name: string;
+    label: string;
+    placeholder?: string;
+    multiline?: boolean;
+    defaultValue?: string;
+    required?: boolean;
+  }>;
   submitLabel?: string;
   busy?: boolean;
   onSubmit: (values: Record<string, string>) => void | Promise<void>;
@@ -188,20 +213,43 @@ export function PromptModal({
   const formRef = useRef<HTMLFormElement | null>(null);
   return (
     <Modal open={open} title={title} onClose={onClose} size='md'>
-      {body && <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.55, marginBottom: 14}}>{body}</div>}
+      {body && (
+        <div
+          style={{
+            fontSize: 13,
+            color: 'var(--signal-text-dim)',
+            lineHeight: 1.55,
+            marginBottom: 14,
+          }}
+        >
+          {body}
+        </div>
+      )}
       <form
         ref={formRef}
         onSubmit={(e) => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
           const values: Record<string, string> = {};
-          fields.forEach((f) => { values[f.name] = String(fd.get(f.name) || ''); });
+          fields.forEach((f) => {
+            values[f.name] = String(fd.get(f.name) || '');
+          });
           void onSubmit(values);
         }}
       >
         {fields.map((f) => (
           <div key={f.name} style={{marginBottom: 12}}>
-            <label style={{display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--signal-text-mute)', marginBottom: 6}}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: 'var(--signal-text-mute)',
+                marginBottom: 6,
+              }}
+            >
               {f.label}
             </label>
             {f.multiline ? (
@@ -226,8 +274,12 @@ export function PromptModal({
           </div>
         ))}
         <div style={{display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8}}>
-          <Button kind='ghost' sm onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button kind='primary' sm type='submit' disabled={busy}>{busy ? '…' : submitLabel}</Button>
+          <Button kind='ghost' sm onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button kind='primary' sm type='submit' disabled={busy}>
+            {busy ? '…' : submitLabel}
+          </Button>
         </div>
       </form>
     </Modal>

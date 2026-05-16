@@ -105,8 +105,7 @@ export default function BottomNav() {
             height: 3,
             borderRadius: 9999,
             background: 'var(--v4-brand)',
-            transition:
-              'left 260ms var(--v4-spring), width 260ms var(--v4-spring)',
+            transition: 'left 260ms var(--v4-spring), width 260ms var(--v4-spring)',
           }}
         />
       )}

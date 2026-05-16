@@ -45,24 +45,30 @@ export function isTerminalStatus(status?: string | null): boolean {
 export function toRunView(r: RunSummary | RunDetail): RunView {
   const id = (r as unknown as {runId?: string}).runId || '';
   const status = (r.status || '').toUpperCase();
-  const score = (r as unknown as {verifiedScore?: number; accuracyScore?: number}).verifiedScore ??
-    (r as unknown as {accuracyScore?: number}).accuracyScore ?? null;
+  const score =
+    (r as unknown as {verifiedScore?: number; accuracyScore?: number}).verifiedScore ??
+    (r as unknown as {accuracyScore?: number}).accuracyScore ??
+    null;
   return {
     id,
     short: id ? `R-${id.slice(0, 6)}` : 'R-—',
     status,
     isLive: isLiveStatus(status),
     isTerminal: isTerminalStatus(status),
-    title: (r as unknown as {runTitle?: string; userRequest?: string}).runTitle ||
-      r.userRequest || `Run R-${id.slice(0, 6)}`,
+    title:
+      (r as unknown as {runTitle?: string; userRequest?: string}).runTitle ||
+      r.userRequest ||
+      `Run R-${id.slice(0, 6)}`,
     projectName: (r as unknown as {projectName?: string | null}).projectName ?? null,
     projectId: (r as unknown as {projectId?: string | null}).projectId ?? null,
     startedAt: r.startedAt ?? null,
     completedAt: r.completedAt ?? null,
     cost: (r as unknown as {actualCostUsd?: number | null}).actualCostUsd ?? null,
     score,
-    prUrl: (r as unknown as {scmPrUrl?: string | null}).scmPrUrl ??
-      (r as unknown as {githubPrUrl?: string | null}).githubPrUrl ?? null,
+    prUrl:
+      (r as unknown as {scmPrUrl?: string | null}).scmPrUrl ??
+      (r as unknown as {githubPrUrl?: string | null}).githubPrUrl ??
+      null,
     archived: !!(r as unknown as {archivedAt?: string | null}).archivedAt,
   };
 }

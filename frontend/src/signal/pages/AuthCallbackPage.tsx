@@ -71,14 +71,31 @@ export default function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div style={{display: 'grid', placeItems: 'center', minHeight: '100dvh', background: 'var(--signal-bg)', color: 'var(--signal-coral-text)', padding: 24, textAlign: 'center'}}>
+      <div
+        style={{
+          display: 'grid',
+          placeItems: 'center',
+          minHeight: '100dvh',
+          background: 'var(--signal-bg)',
+          color: 'var(--signal-coral-text)',
+          padding: 24,
+          textAlign: 'center',
+        }}
+      >
         <p style={{fontSize: 14, margin: 0}}>{error}</p>
       </div>
     );
   }
 
   return (
-    <div style={{display: 'grid', placeItems: 'center', minHeight: '100dvh', background: 'var(--signal-bg)'}}>
+    <div
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        minHeight: '100dvh',
+        background: 'var(--signal-bg)',
+      }}
+    >
       <div style={{textAlign: 'center'}}>
         <div
           style={{
@@ -91,7 +108,9 @@ export default function AuthCallbackPage() {
             animation: 'spin 0.9s linear infinite',
           }}
         />
-        <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>Completing sign in...</p>
+        <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>
+          Completing sign in...
+        </p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
