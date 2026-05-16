@@ -7,6 +7,7 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {Plus} from '@/signal/icons/icons';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 type RepoRow = Record<string, unknown>;
@@ -173,17 +174,9 @@ export default function ProjectReposPage() {
             ) : (
               <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
                 {available.map((r) => {
-                  const rId = String((r as {id?: string}).id || '');
-                  const isLinked = (repos || []).some(
-                    (p) =>
-                      String(
-                        (p as {repoId?: string; id?: string}).repoId || (p as {id?: string}).id,
-                      ) === rId,
-                  );
-                  const repoName =
-                    (r as {fullName?: string; name?: string}).fullName ||
-                    (r as {name?: string}).name ||
-                    rId;
+                  const rId = repoIdFor(r);
+                  const isLinked = (repos || []).some((p) => repoIdFor(p) === rId);
+                  const repoName = repoDisplayName(r);
                   return (
                     <div
                       key={rId}
@@ -234,14 +227,8 @@ export default function ProjectReposPage() {
           </Card>
         ) : (
           repos.map((rep) => {
-            const repoId = String(
-              (rep as {repoId?: string; id?: string}).repoId || (rep as {id?: string}).id || '',
-            );
-            const name = String(
-              (rep as {repoName?: string; name?: string}).repoName ||
-                (rep as {name?: string}).name ||
-                repoId,
-            );
+            const repoId = repoIdFor(rep);
+            const name = repoDisplayName(rep);
             const language = (rep as {language?: string}).language;
             const loc = (rep as {loc?: number}).loc;
             const head = (rep as {headSha?: string}).headSha;

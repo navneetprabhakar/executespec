@@ -5,6 +5,7 @@ import {Feed, Row, Card, Button, StatusPill, TabsStrip} from '@/signal/component
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 /* useProjectMeta delivers project name from cached project list quickly,
@@ -84,15 +85,12 @@ export default function ProjectCodePage() {
     let cancelled = false;
     Promise.all(
       repos.map(async (r) => {
-        const repoId = String(
-          (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
-        );
-        const repoName = String(
-          (r as {repoName?: string; name?: string}).repoName ||
-            (r as {name?: string}).name ||
-            repoId,
-        );
+        const repoId = repoIdFor(r);
+        const repoName = repoDisplayName(r);
         try {
+          // Backend's /api/code-reviews?repo= expects the GitHub slug (e.g.
+          // owner/repo) when present; fall back to the same display we show
+          // the user. The repoDisplayName helper already prefers slug.
           const review = await fetch(
             `/api/code-reviews?projectId=${id}&latest=true&repo=${encodeURIComponent(repoName)}`,
             {

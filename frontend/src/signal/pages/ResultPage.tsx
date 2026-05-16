@@ -8,7 +8,9 @@ import {Share} from '@/signal/icons/icons';
 import {Glossary} from '@/signal/components/Glossary';
 import {GitHubLogo} from '@/signal/components/BrandLogos';
 import {CodeView} from '@/signal/components/CodeView';
+import {FileTree, type FileEntry} from '@/signal/components/FileTree';
 import {Markdown} from '@/signal/components/Markdown';
+import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
 type ResultTab =
@@ -30,6 +32,11 @@ function shortStatusReason(r?: string | null): string {
 export default function ResultPage() {
   const {runId, runShort} = useParams<{runId?: string; runShort?: string}>();
   const id = runId || runShort;
+  // Permissions drive whether the "Preview deploy" and "Push to GitHub"
+  // affordances even render. FREE-tier users have canDeploy=false and
+  // maxPreviewStarts=5; clicking Start used to surface a generic 403
+  // without context.
+  const permissions = useAuthStore((s) => s.permissions);
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
   const [tab, setTab] = useState<ResultTab>('overview');
@@ -215,11 +222,46 @@ export default function ResultPage() {
     testsTotal?: number;
     coverageDelta?: number;
     reviewerStatus?: string;
+    reviewerVerdict?: string;
     securityStatus?: string;
     architectureStatus?: string;
     statusReason?: string;
     issues?: api.ReportIssue[];
+    accuracyScore?: number;
+    rubricScore?: number;
+    finalBuildPassed?: boolean;
+    accuracyJson?: string;
   };
+  // PR-R: when no concrete tests ran (testsTotal=0), surface the LLM-judged
+  // testCoverageLevel from accuracyJson so the row isn't a blank dash.
+  // Same for endpoint coverage — both are persisted on the report but
+  // currently only the multiplicative scorer reads them.
+  const accuracyJsonParsed = (() => {
+    if (!reportAny.accuracyJson)
+      return null as null | {
+        testCoverageLevel?: string;
+        endpointCoverage?: {coveragePercent?: number};
+        implementedRequirements?: string[];
+        missingRequirements?: string[];
+      };
+    try {
+      return JSON.parse(reportAny.accuracyJson);
+    } catch {
+      return null;
+    }
+  })();
+  const testCoverageLevel = accuracyJsonParsed?.testCoverageLevel as
+    | 'NONE'
+    | 'PARTIAL'
+    | 'GOOD'
+    | 'COMPREHENSIVE'
+    | undefined;
+  const endpointCoveragePct = accuracyJsonParsed?.endpointCoverage?.coveragePercent;
+  // Reviewer verdict / build-passed mirror the multiplicative formula's
+  // "trust" signals — surface them on the breakdown so a reader can sanity-
+  // check the score without opening the JSON.
+  const reviewerVerdict = reportAny.reviewerVerdict;
+  const finalBuildPassed = reportAny.finalBuildPassed;
 
   const tokensTotal = (run?.totalInputTokens ?? 0) + (run?.totalOutputTokens ?? 0);
   const elapsed = useMemo(() => {
@@ -283,13 +325,27 @@ export default function ResultPage() {
     }
   }
 
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const canPreview = permissions ? permissions.canDeploy !== false : true;
   async function startPreview() {
     if (!id) return;
+    if (!canPreview) {
+      setErr('Preview deploys are gated to PRO+ tiers. Upgrade your plan to enable.');
+      return;
+    }
+    setPreviewBusy(true);
     try {
-      await api.startPreview(id);
-      setMsg('Preview starting. Check Deployments in 30s.');
+      const resp = await api.startPreview(id);
+      const url =
+        (resp as unknown as {previewUrl?: string; url?: string})?.previewUrl ||
+        (resp as unknown as {url?: string})?.url;
+      setMsg(
+        url ? `Preview live at ${url} (5-min TTL).` : 'Preview starting. Check Deployments in 30s.',
+      );
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Preview start failed.');
+    } finally {
+      setPreviewBusy(false);
     }
   }
 
@@ -476,26 +532,48 @@ export default function ResultPage() {
                   // and the page is broken; "not measured" is honest.
                   {
                     k: 'Build',
-                    v: reportAny.buildStatus ? (
-                      <span
-                        style={{
-                          color:
-                            reportAny.buildStatus === 'PASSING'
-                              ? 'var(--signal-mint-text-on-light)'
-                              : 'var(--signal-coral-text)',
-                        }}
-                      >
-                        {reportAny.buildStatus}
-                      </span>
-                    ) : (
-                      <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                    ),
+                    v:
+                      reportAny.buildStatus || finalBuildPassed != null ? (
+                        <span
+                          style={{
+                            color:
+                              reportAny.buildStatus === 'PASSING' || finalBuildPassed === true
+                                ? 'var(--signal-mint-text-on-light)'
+                                : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          {reportAny.buildStatus ??
+                            (finalBuildPassed === true ? 'PASSED' : 'FAILED')}
+                        </span>
+                      ) : (
+                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
+                      ),
                   },
                   {
                     k: 'Tests',
                     v:
-                      reportAny.testsTotal != null ? (
+                      reportAny.testsTotal != null && reportAny.testsTotal > 0 ? (
                         `${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal}`
+                      ) : testCoverageLevel ? (
+                        // Fall back to the LLM-judged coverage level when no
+                        // concrete tests ran. "GOOD" / "PARTIAL" / "NONE" /
+                        // "COMPREHENSIVE" — same labels used by the scorer's
+                        // trust gate. Mute the colour for non-positive grades.
+                        <span
+                          style={{
+                            color:
+                              testCoverageLevel === 'GOOD' || testCoverageLevel === 'COMPREHENSIVE'
+                                ? 'var(--signal-mint-text-on-light)'
+                                : testCoverageLevel === 'NONE'
+                                  ? 'var(--signal-coral-text)'
+                                  : 'var(--signal-text-dim)',
+                          }}
+                        >
+                          {testCoverageLevel.toLowerCase()} coverage{' '}
+                          <span style={{color: 'var(--signal-text-mute)', fontSize: 11}}>
+                            (LLM-judged)
+                          </span>
+                        </span>
                       ) : (
                         <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
                       ),
@@ -505,18 +583,56 @@ export default function ResultPage() {
                     v:
                       reportAny.coverageDelta != null ? (
                         `${reportAny.coverageDelta >= 0 ? '+' : ''}${reportAny.coverageDelta.toFixed(1)}%`
+                      ) : endpointCoveragePct != null ? (
+                        <span
+                          style={{
+                            color:
+                              endpointCoveragePct >= 95
+                                ? 'var(--signal-mint-text-on-light)'
+                                : endpointCoveragePct >= 70
+                                  ? 'var(--signal-text-dim)'
+                                  : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          endpoints {endpointCoveragePct}%
+                        </span>
                       ) : (
                         <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
                       ),
                   },
                   {
                     k: <Glossary term='wiring pass'>Reviewer</Glossary>,
-                    v: reportAny.reviewerStatus ? (
-                      <span>{reportAny.reviewerStatus}</span>
-                    ) : (
-                      <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                    ),
+                    v:
+                      reportAny.reviewerStatus || reviewerVerdict ? (
+                        <span
+                          style={{
+                            color:
+                              reviewerVerdict === 'CLEAN'
+                                ? 'var(--signal-mint-text-on-light)'
+                                : reviewerVerdict === 'REVIEW_FAILED' ||
+                                    reviewerVerdict === 'UNRESOLVED_ISSUES'
+                                  ? 'var(--signal-coral-text)'
+                                  : undefined,
+                          }}
+                        >
+                          {reportAny.reviewerStatus || reviewerVerdict}
+                        </span>
+                      ) : (
+                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
+                      ),
                   },
+                  ...(reportAny.accuracyScore != null
+                    ? [
+                        {
+                          k: <Glossary term='verified score'>Accuracy (LLM)</Glossary>,
+                          v: (
+                            <span style={{color: 'var(--signal-text-dim)'}}>
+                              {reportAny.accuracyScore}/100
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                   {
                     k: 'Security',
                     v: reportAny.securityStatus ? (
@@ -603,10 +719,20 @@ export default function ResultPage() {
             <Row
               dot='lavender'
               title='Preview deploy'
-              meta={<span>Cloud Run · 5min TTL</span>}
+              meta={
+                <span>
+                  Cloud Run · 5min TTL
+                  {!canPreview && ' · PRO+ feature'}
+                </span>
+              }
               trailing={
-                <Button kind='secondary' sm onClick={startPreview}>
-                  Start
+                <Button
+                  kind='secondary'
+                  sm
+                  onClick={startPreview}
+                  disabled={previewBusy || !canPreview}
+                >
+                  {previewBusy ? 'Starting…' : !canPreview ? 'Upgrade' : 'Start'}
                 </Button>
               }
             />
@@ -1037,48 +1163,21 @@ export default function ResultPage() {
               </p>
             </Card>
           ) : (
-            <div className='signal-split-runs'>
+            <div className='signal-split-runs signal-split-code'>
               <div
                 className='split-list'
                 style={{maxHeight: 'calc(100dvh - 200px)', overflowY: 'auto'}}
               >
-                {files.map((f) => {
-                  const fAny = f as unknown as {path?: string; status?: string};
-                  const isSelected = selectedFile === fAny.path;
-                  const status = (fAny.status || 'MODIFIED').toUpperCase();
-                  const dot: 'mint' | 'signal' | 'lavender' =
-                    status === 'ADDED' ? 'mint' : status === 'MODIFIED' ? 'signal' : 'lavender';
-                  return (
-                    <div
-                      key={fAny.path}
-                      className='signal-row'
-                      style={{
-                        cursor: 'pointer',
-                        borderColor: isSelected ? 'var(--signal-ink)' : undefined,
-                        padding: '10px 12px',
-                      }}
-                      onClick={() => fAny.path && setSelectedFile(fAny.path)}
-                    >
-                      <div className={`pill-dot ${dot}`} />
-                      <div style={{minWidth: 0}}>
-                        <div
-                          className='row-title'
-                          style={{fontSize: 13, fontFamily: "'JetBrains Mono', monospace"}}
-                        >
-                          {fAny.path}
-                        </div>
-                        <div className='row-meta'>
-                          <span>{status.toLowerCase()}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                <FileTree
+                  files={files as FileEntry[]}
+                  selectedPath={selectedFile}
+                  onSelect={(p) => setSelectedFile(p)}
+                />
                 <Button
                   kind='secondary'
                   sm
                   block
-                  style={{marginTop: 8}}
+                  style={{marginTop: 12}}
                   onClick={() => id && api.downloadWorkspace(id).catch(() => undefined)}
                 >
                   Download workspace

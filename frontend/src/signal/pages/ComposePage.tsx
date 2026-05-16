@@ -5,6 +5,7 @@ import {Feed, Row, Chip, KvList, Card} from '@/signal/components/Primitives';
 import {ComposerCard} from '@/signal/components/Compose';
 import {SpecChat} from '@/signal/components/SpecChat';
 import * as api from '@/lib/api';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 
 type Provider = 'anthropic' | 'openai' | 'gemini';
@@ -279,14 +280,8 @@ export default function ComposePage() {
             <div className='signal-composer-card' style={{padding: 14}}>
               <div className='composer-chips'>
                 {projectRepos.map((r) => {
-                  const rId = String(
-                    (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
-                  );
-                  const rName = String(
-                    (r as {repoName?: string; name?: string}).repoName ||
-                      (r as {name?: string}).name ||
-                      rId,
-                  );
+                  const rId = repoIdFor(r);
+                  const rName = repoDisplayName(r);
                   const selected = selectedRepoIds.includes(rId);
                   return (
                     <Chip

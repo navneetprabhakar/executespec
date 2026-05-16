@@ -20,6 +20,11 @@ export default function ProjectChatPage() {
   const [err, setErr] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearBusy, setClearBusy] = useState(false);
+  // Backend gates project chat behind `TierConfig.isExecutionViewEnabled`
+  // (TEAM+/ENTERPRISE only). FREE / PRO hit a 403 on `chat/info`. Track that
+  // here so we render a clear "upgrade to use chat" card instead of a
+  // half-broken chat shell.
+  const [chatGated, setChatGated] = useState(false);
   const project = useProjectMeta(id);
   const tail = useRef<HTMLDivElement | null>(null);
 
@@ -38,8 +43,13 @@ export default function ProjectChatPage() {
         const cAny = c as unknown as {messages?: ChatMsg[]};
         if (cAny?.messages) setMessages(cAny.messages);
       })
-      .catch(() => {
-        /* swallow */
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : '';
+        if (/403|forbidden|Team or Enterprise/i.test(msg)) {
+          setChatGated(true);
+        }
+        // Otherwise swallow — chat may still be usable even if /info fails.
       });
     function refreshMemory() {
       api
@@ -227,7 +237,30 @@ export default function ProjectChatPage() {
         )}
 
         <div style={{display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16}}>
-          {messages.length === 0 && !busy && (
+          {chatGated && (
+            <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#5443a8',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 6,
+                }}
+              >
+                Project chat is a TEAM+ feature
+              </div>
+              <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.5}}>
+                The agent uses your project's memory + codemap + linked docs to answer questions —
+                gated to TEAM and ENTERPRISE plans.{' '}
+                <a href='/plans' style={{color: '#5443a8', textDecoration: 'underline'}}>
+                  Compare plans →
+                </a>
+              </div>
+            </Card>
+          )}
+          {!chatGated && messages.length === 0 && !busy && (
             <Card>
               <p
                 style={{
@@ -321,9 +354,9 @@ export default function ProjectChatPage() {
                 void send();
               }
             }}
-            placeholder='Ask the project…'
+            placeholder={chatGated ? 'Upgrade to TEAM to enable project chat.' : 'Ask the project…'}
             rows={2}
-            disabled={busy}
+            disabled={busy || chatGated}
             style={{
               flex: 1,
               background: 'var(--signal-card-elev)',
@@ -341,7 +374,7 @@ export default function ProjectChatPage() {
           />
           <button
             type='button'
-            disabled={busy || !input.trim()}
+            disabled={busy || chatGated || !input.trim()}
             onClick={send}
             style={{
               width: 44,
