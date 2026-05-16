@@ -1630,6 +1630,19 @@ body {
 }
 
 /* ─────────── Tabs strip (horizontal scroll) ─────────── */
+/* SDET 2026-05-16 (BUG-013) — the tab strip used to clip silently on narrow
+   viewports (project page has 6+ tabs at 375 px wide). Without a fade or
+   chevron, users didn't know to scroll. We:
+   1. Wrap the strip in a positioned container via inline-block trick so a
+      pseudo-element can paint a right-edge fade.
+   2. Use `mask-image` on the strip ITSELF so the rightmost 22px fade out
+      gradually — the fade follows the visible viewport (not the scroll-end)
+      so it stays present until the user actually scrolls to the right edge,
+      at which point browsers reveal the full last tab (because mask-image is
+      applied to the scrollport, not the content's right edge).
+   The mask-image is layered as a hint, not a hard mask: even when the strip
+   doesn't overflow (e.g. desktop with 4 tabs) the rightmost 22px have nothing
+   to fade so the cost is zero. */
 .signal-tabs-strip {
   display: flex;
   gap: 4px;
@@ -1637,6 +1650,9 @@ body {
   padding: 2px 0 14px;
   margin: 6px -4px 8px;
   scroll-snap-type: x mandatory;
+  /* Right-edge fade — hints "there's more →" on narrow viewports. */
+  mask-image: linear-gradient(to right, black calc(100% - 22px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 22px), transparent 100%);
 }
 .signal-tabs-strip::-webkit-scrollbar {
   display: none;

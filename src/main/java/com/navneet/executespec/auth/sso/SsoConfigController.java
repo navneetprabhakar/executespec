@@ -3,6 +3,7 @@ package com.navneet.executespec.auth.sso;
 import java.time.Instant;
 import java.util.Set;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -10,6 +11,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
+import org.hibernate.validator.constraints.URL;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -59,7 +61,7 @@ public class SsoConfigController {
   @PutMapping("/config")
   @PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")
   public SsoConfigDto putConfig(
-      @AuthenticationPrincipal AppUserDetails principal, @RequestBody SsoConfigUpdate body) {
+      @AuthenticationPrincipal AppUserDetails principal, @Valid @RequestBody SsoConfigUpdate body) {
     Org org = requireOrgFromPrincipal(principal);
 
     if (body.provider != null && !ALLOWED_PROVIDERS.contains(body.provider)) {
@@ -163,10 +165,24 @@ public class SsoConfigController {
   }
 
   public record SsoConfigUpdate(
-      @Pattern(regexp = "GOOGLE_OIDC|OKTA_SAML|AZURE_AD_SAML") String provider,
+      @Pattern(
+              regexp = "GOOGLE_OIDC|OKTA_SAML|AZURE_AD_SAML",
+              message = "provider must be one of GOOGLE_OIDC, OKTA_SAML, AZURE_AD_SAML")
+          String provider,
       Boolean enforced,
-      @Size(max = 1024) String metadataUrl,
-      @Size(max = 255) String domain) {}
+      // SDET 2026-05-16 (BUG-005) — refuse non-URL metadataUrl values so a typo can't lock the org
+      // out of SSO after save. Pure validation: @URL accepts http/https/ftp etc; @Pattern narrows
+      // to https-only (the IdP metadata endpoints are HTTPS-only in production). Empty-string is
+      // allowed because the PUT is a partial update and unset fields shouldn't trip the validator.
+      @Size(max = 1024, message = "metadataUrl must not exceed 1024 characters")
+          @URL(message = "metadataUrl must be a valid URL")
+          @Pattern(regexp = "^$|^https://.+", message = "metadataUrl must use HTTPS")
+          String metadataUrl,
+      @Size(max = 255, message = "domain must not exceed 255 characters")
+          @Pattern(
+              regexp = "^$|^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$",
+              message = "domain must be a valid DNS name")
+          String domain) {}
 
   public record SsoConfigDto(
       String provider, boolean enforced, String metadataUrl, String domain, boolean configured) {

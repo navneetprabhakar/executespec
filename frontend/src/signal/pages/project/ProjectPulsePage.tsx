@@ -7,7 +7,7 @@ import {SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {Share, More} from '@/signal/icons/icons';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
-import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {repoDisplayName, repoIdFor, runTitleFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 function relTime(input?: string): string {
@@ -432,11 +432,9 @@ export default function ProjectPulsePage() {
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
                 dot={statusToDot(s)}
-                title={
-                  r.userRequest ||
-                  (r as unknown as {runTitle?: string}).runTitle ||
-                  `Run ${shortRunId(r.runId)}`
-                }
+                // SDET 2026-05-16 (BUG-022) — shared runTitleFor helper trims
+                // empty / whitespace-only runTitle before falling back.
+                title={runTitleFor(r)}
                 meta={
                   <>
                     <span className='mono'>{shortRunId(r.runId)}</span>

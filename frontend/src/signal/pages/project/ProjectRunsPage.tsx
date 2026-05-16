@@ -6,6 +6,7 @@ import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
+import {runTitleFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 type Sub = 'runs' | 'prs';
@@ -439,9 +440,9 @@ export default function ProjectRunsPage() {
                           <div className={`pill-dot ${dotFor(s)}`} />
                           <div style={{minWidth: 0}}>
                             <div className='row-title'>
-                              {r.userRequest ||
-                                (r as unknown as {runTitle?: string}).runTitle ||
-                                `Run R-${r.runId.slice(0, 6)}`}
+                              {/* SDET 2026-05-16 (BUG-022) — shared runTitleFor helper trims
+                                  empty / whitespace-only runTitle before falling back. */}
+                              {runTitleFor(r)}
                             </div>
                             <div className='row-meta'>
                               <span className='mono'>R-{r.runId.slice(0, 6)}</span>
