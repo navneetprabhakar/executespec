@@ -193,9 +193,7 @@ export default function ActivityPage() {
       </section>
 
       {runs == null ? (
-        <p style={{color: 'var(--v4-text-subtle)', fontSize: 'var(--v4-text-sm)'}}>
-          Loading…
-        </p>
+        <p style={{color: 'var(--v4-text-subtle)', fontSize: 'var(--v4-text-sm)'}}>Loading…</p>
       ) : runs.length === 0 ? (
         <div
           className='v4-card'

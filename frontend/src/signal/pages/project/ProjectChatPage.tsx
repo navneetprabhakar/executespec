@@ -31,17 +31,25 @@ export default function ProjectChatPage() {
     if (!id) return;
     let cancelled = false;
     let memTimer: number | undefined;
-    api.getProjectChatInfo(id)
+    api
+      .getProjectChatInfo(id)
       .then((c) => {
         if (cancelled) return;
         const cAny = c as unknown as {messages?: ChatMsg[]};
         if (cAny?.messages) setMessages(cAny.messages);
       })
-      .catch(() => {/* swallow */});
+      .catch(() => {
+        /* swallow */
+      });
     function refreshMemory() {
-      api.getProjectMemory(id)
-        .then((m) => { if (!cancelled) setMemory(m); })
-        .catch(() => {/* swallow */})
+      api
+        .getProjectMemory(id)
+        .then((m) => {
+          if (!cancelled) setMemory(m);
+        })
+        .catch(() => {
+          /* swallow */
+        })
         .finally(() => {
           if (!cancelled) memTimer = window.setTimeout(refreshMemory, 30_000);
         });
@@ -80,12 +88,23 @@ export default function ProjectChatPage() {
       });
       if (!r.ok) throw new Error(`Project chat failed (${r.status}).`);
       const data = await r.json();
-      const reply = (data as unknown as {reply?: string; message?: string; content?: string; assistantMessage?: string}).reply ||
+      const reply =
+        (
+          data as unknown as {
+            reply?: string;
+            message?: string;
+            content?: string;
+            assistantMessage?: string;
+          }
+        ).reply ||
         (data as unknown as {message?: string}).message ||
         (data as unknown as {content?: string}).content ||
         (data as unknown as {assistantMessage?: string}).assistantMessage ||
         '(no reply)';
-      setMessages((prev) => [...prev, {role: 'assistant', content: reply, ts: new Date().toISOString()}]);
+      setMessages((prev) => [
+        ...prev,
+        {role: 'assistant', content: reply, ts: new Date().toISOString()},
+      ]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Chat failed.');
     } finally {
@@ -132,10 +151,13 @@ export default function ProjectChatPage() {
     }
   }
 
-  const memDigest = (memory as unknown as {summary?: string; digest?: string})?.summary ||
+  const memDigest =
+    (memory as unknown as {summary?: string; digest?: string})?.summary ||
     (memory as unknown as {digest?: string})?.digest;
-  const memRunCount = (memory as unknown as {runCount?: number; totalRuns?: number})?.runCount ??
-    (memory as unknown as {totalRuns?: number})?.totalRuns ?? 0;
+  const memRunCount =
+    (memory as unknown as {runCount?: number; totalRuns?: number})?.runCount ??
+    (memory as unknown as {totalRuns?: number})?.totalRuns ??
+    0;
 
   return (
     <>
@@ -146,23 +168,59 @@ export default function ProjectChatPage() {
         backTo={`/projects/${id}`}
         actions={
           <>
-            <Button kind='primary' sm onClick={compileToSpec} disabled={busy}>Compile to spec</Button>
-            <Button kind='ghost' sm onClick={compactChat}>Compact</Button>
-            <Button kind='ghost' sm onClick={() => setConfirmClear(true)}>Clear</Button>
+            <Button kind='primary' sm onClick={compileToSpec} disabled={busy}>
+              Compile to spec
+            </Button>
+            <Button kind='ghost' sm onClick={compactChat}>
+              Compact
+            </Button>
+            <Button kind='ghost' sm onClick={() => setConfirmClear(true)}>
+              Clear
+            </Button>
           </>
         }
       />
       <Feed padBottom={140}>
         <ProjectTabs active='chat' />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {memDigest && (
           <Card style={{background: 'var(--signal-y-soft)', borderColor: 'transparent'}}>
-            <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--signal-y-text)',
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                marginBottom: 6,
+              }}
+            >
               Memory digest · {memRunCount} runs
             </div>
-            <div style={{fontSize: 13.5, color: 'var(--signal-y-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
+            <div
+              style={{
+                fontSize: 13.5,
+                color: 'var(--signal-y-text)',
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
               {memDigest}
             </div>
           </Card>
@@ -171,8 +229,16 @@ export default function ProjectChatPage() {
         <div style={{display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16}}>
           {messages.length === 0 && !busy && (
             <Card>
-              <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-                Ask anything about this project — recent runs, architecture, common pitfalls, what's been shipped.
+              <p
+                style={{
+                  fontSize: 13.5,
+                  color: 'var(--signal-text-dim)',
+                  margin: 0,
+                  lineHeight: 1.5,
+                }}
+              >
+                Ask anything about this project — recent runs, architecture, common pitfalls, what's
+                been shipped.
               </p>
             </Card>
           )}
@@ -186,21 +252,40 @@ export default function ProjectChatPage() {
                 background: m.role === 'user' ? 'var(--signal-ink)' : 'var(--signal-card-bg)',
                 color: m.role === 'user' ? 'var(--signal-bg)' : 'var(--signal-ink)',
                 borderRadius: 14,
-                ...(m.role === 'user' ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4, border: '1px solid var(--signal-hairline)'}),
+                ...(m.role === 'user'
+                  ? {borderBottomRightRadius: 4}
+                  : {borderBottomLeftRadius: 4, border: '1px solid var(--signal-hairline)'}),
               }}
             >
-              <div style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 10, opacity: 0.6, marginBottom: 4}}>
-                {m.role === 'user' ? 'YOU' : 'PROJECT'}{m.ts && ` · ${new Date(m.ts).toLocaleTimeString()}`}
+              <div
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10,
+                  opacity: 0.6,
+                  marginBottom: 4,
+                }}
+              >
+                {m.role === 'user' ? 'YOU' : 'PROJECT'}
+                {m.ts && ` · ${new Date(m.ts).toLocaleTimeString()}`}
               </div>
               {m.role === 'user' ? (
-                <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>{m.content}</div>
+                <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
+                  {m.content}
+                </div>
               ) : (
                 <Markdown>{m.content}</Markdown>
               )}
             </div>
           ))}
           {busy && (
-            <div style={{alignSelf: 'flex-start', padding: '10px 14px', color: 'var(--signal-text-dim)', fontSize: 13}}>
+            <div
+              style={{
+                alignSelf: 'flex-start',
+                padding: '10px 14px',
+                color: 'var(--signal-text-dim)',
+                fontSize: 13,
+              }}
+            >
               Thinking…
             </div>
           )}
@@ -254,38 +339,45 @@ export default function ProjectChatPage() {
               maxHeight: 200,
             }}
           />
-        <button
-          type='button'
-          disabled={busy || !input.trim()}
-          onClick={send}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            background: 'var(--signal-ink)',
-            color: 'var(--signal-bg)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            border: 0,
-            cursor: busy ? 'wait' : 'pointer',
-            opacity: !input.trim() ? 0.5 : 1,
-          }}
-          aria-label='Send'
-        >
-          <svg viewBox='0 0 24 24' style={{width: 16, height: 16}} fill='none' stroke='currentColor' strokeWidth={2.4} strokeLinecap='round'>
-            <line x1='22' y1='2' x2='11' y2='13' />
-            <polygon points='22 2 15 22 11 13 2 9 22 2' />
-          </svg>
-        </button>
+          <button
+            type='button'
+            disabled={busy || !input.trim()}
+            onClick={send}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              background: 'var(--signal-ink)',
+              color: 'var(--signal-bg)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              border: 0,
+              cursor: busy ? 'wait' : 'pointer',
+              opacity: !input.trim() ? 0.5 : 1,
+            }}
+            aria-label='Send'
+          >
+            <svg
+              viewBox='0 0 24 24'
+              style={{width: 16, height: 16}}
+              fill='none'
+              stroke='currentColor'
+              strokeWidth={2.4}
+              strokeLinecap='round'
+            >
+              <line x1='22' y1='2' x2='11' y2='13' />
+              <polygon points='22 2 15 22 11 13 2 9 22 2' />
+            </svg>
+          </button>
         </div>
       </Feed>
 
       <ConfirmModal
         open={confirmClear}
         title='Clear chat history?'
-        body="All messages will be deleted permanently. The project memory snapshot is unaffected — past runs and their digests survive."
+        body='All messages will be deleted permanently. The project memory snapshot is unaffected — past runs and their digests survive.'
         confirmLabel='Clear'
         danger
         busy={clearBusy}

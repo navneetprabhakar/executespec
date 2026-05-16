@@ -46,9 +46,7 @@ export default function V4Shell({withAgentInput = true}: Props) {
     '/v4/verify-email',
   ];
   const inputHidden =
-    !withAgentInput ||
-    !user ||
-    HIDE_INPUT_PREFIXES.some((p) => location.pathname.startsWith(p));
+    !withAgentInput || !user || HIDE_INPUT_PREFIXES.some((p) => location.pathname.startsWith(p));
 
   return (
     <div className='v4-root v4-shell'>

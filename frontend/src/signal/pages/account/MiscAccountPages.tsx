@@ -5,7 +5,13 @@ import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, Chip, StatusPill} from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {Plus} from '@/signal/icons/icons';
-import {GitHubLogo, SlackLogo, JiraLogo, ConfluenceLogo, BitbucketLogo} from '@/signal/components/BrandLogos';
+import {
+  GitHubLogo,
+  SlackLogo,
+  JiraLogo,
+  ConfluenceLogo,
+  BitbucketLogo,
+} from '@/signal/components/BrandLogos';
 import {PromptModal, ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -34,9 +40,30 @@ export function TopupPage() {
         // sensible default static set so the UI still renders.
         if (!cancelled) {
           setPacks([
-            {id: 'pack-100', credits: 100, priceCents: 1500, currency: 'USD', label: '100 credits', description: '~25 small runs'} as unknown as api.TopupPackageAdmin,
-            {id: 'pack-500', credits: 500, priceCents: 6400, currency: 'USD', label: '500 credits', description: '~120 small runs · save 15%'} as unknown as api.TopupPackageAdmin,
-            {id: 'pack-2000', credits: 2000, priceCents: 23400, currency: 'USD', label: '2000 credits', description: '~500 small runs · save 22%'} as unknown as api.TopupPackageAdmin,
+            {
+              id: 'pack-100',
+              credits: 100,
+              priceCents: 1500,
+              currency: 'USD',
+              label: '100 credits',
+              description: '~25 small runs',
+            } as unknown as api.TopupPackageAdmin,
+            {
+              id: 'pack-500',
+              credits: 500,
+              priceCents: 6400,
+              currency: 'USD',
+              label: '500 credits',
+              description: '~120 small runs · save 15%',
+            } as unknown as api.TopupPackageAdmin,
+            {
+              id: 'pack-2000',
+              credits: 2000,
+              priceCents: 23400,
+              currency: 'USD',
+              label: '2000 credits',
+              description: '~500 small runs · save 22%',
+            } as unknown as api.TopupPackageAdmin,
           ]);
         }
       });
@@ -69,55 +96,121 @@ export function TopupPage() {
     }
   }
 
-  const runsUsed = permissions ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}` : '— / —';
+  const runsUsed = permissions
+    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
+    : '— / —';
 
   return (
     <>
       <TopBar title='Top up credits' sub={`${runsUsed} runs this month`} back backTo='/account' />
       <Feed>
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         <Card style={{background: 'var(--signal-y-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-y-text)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--signal-y-text)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
             Heads up
           </div>
           <div style={{fontSize: 14, color: 'var(--signal-y-text)', lineHeight: 1.5}}>
-            Credits never expire. Top-ups stack on top of your monthly quota and roll over indefinitely.
+            Credits never expire. Top-ups stack on top of your monthly quota and roll over
+            indefinitely.
           </div>
         </Card>
 
         <SectionHeader>Pick a pack</SectionHeader>
         {packs == null ? (
-          <LoadingState label="Loading packs…" />
+          <LoadingState label='Loading packs…' />
         ) : (
           packs.map((p) => {
             // Match the real TopupPackageAdmin shape: {id, name, runCount,
             // amountUsd, amountInr, active, sortOrder}. The earlier code
             // was reading non-existent `label`/`credits`/`priceCents` fields
             // and rendered "undefined credits $—" for every pack.
-            const pAny = p as unknown as {id?: string; name?: string; runCount?: number; amountUsd?: number; amountInr?: number; active?: boolean};
+            const pAny = p as unknown as {
+              id?: string;
+              name?: string;
+              runCount?: number;
+              amountUsd?: number;
+              amountInr?: number;
+              active?: boolean;
+            };
             const label = pAny.name || (pAny.runCount != null ? `${pAny.runCount} runs` : 'Pack');
             const desc = pAny.runCount != null ? `~${pAny.runCount} small runs` : '';
-            const price = pAny.amountUsd != null ? `$${pAny.amountUsd.toFixed(2)}` : pAny.amountInr != null ? `₹${pAny.amountInr.toFixed(2)}` : '—';
+            const price =
+              pAny.amountUsd != null
+                ? `$${pAny.amountUsd.toFixed(2)}`
+                : pAny.amountInr != null
+                  ? `₹${pAny.amountInr.toFixed(2)}`
+                  : '—';
             const isPicked = pAny.id === picked;
             return (
               <Card
                 key={pAny.id || label}
-                style={{position: 'relative', borderColor: isPicked ? 'var(--signal-ink)' : undefined, cursor: 'pointer'}}
+                style={{
+                  position: 'relative',
+                  borderColor: isPicked ? 'var(--signal-ink)' : undefined,
+                  cursor: 'pointer',
+                }}
               >
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}} onClick={() => setPicked(pAny.id ?? null)}>
+                <div
+                  style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}
+                  onClick={() => setPicked(pAny.id ?? null)}
+                >
                   <div style={{minWidth: 0, flex: 1}}>
-                    <div style={{fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{label}</div>
-                    <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2}}>{desc}</div>
+                    <div
+                      style={{
+                        fontSize: 17,
+                        fontWeight: 700,
+                        letterSpacing: '-0.01em',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {label}
+                    </div>
+                    <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2}}>
+                      {desc}
+                    </div>
                   </div>
-                  <div style={{fontSize: 19, fontWeight: 700, marginLeft: 12, flexShrink: 0}}>{price}</div>
+                  <div style={{fontSize: 19, fontWeight: 700, marginLeft: 12, flexShrink: 0}}>
+                    {price}
+                  </div>
                 </div>
               </Card>
             );
           })
         )}
 
-        <Button kind='primary' block style={{marginTop: 16}} onClick={buy} disabled={busy || !picked}>
+        <Button
+          kind='primary'
+          block
+          style={{marginTop: 16}}
+          onClick={buy}
+          disabled={busy || !picked}
+        >
           {busy ? 'Opening checkout…' : 'Buy selected pack'}
         </Button>
       </Feed>
@@ -200,26 +293,55 @@ export function IntegrationsPage() {
   }
 
   const slackAny = (slack || {}) as unknown as {connected?: boolean; teamName?: string};
-  const githubAny = (github || {}) as unknown as {installed?: boolean; accountLogin?: string; account?: string};
+  const githubAny = (github || {}) as unknown as {
+    installed?: boolean;
+    accountLogin?: string;
+    account?: string;
+  };
   const enabled = status?.enabledSources || [];
-  const connectedCount = (slackAny.connected ? 1 : 0) + (githubAny.installed ? 1 : 0) + enabled.length;
+  const connectedCount =
+    (slackAny.connected ? 1 : 0) + (githubAny.installed ? 1 : 0) + enabled.length;
 
   return (
     <>
       <TopBar title='Integrations' sub={`${connectedCount} connected`} back backTo='/account' />
       <Feed>
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         <SectionHeader>Source control</SectionHeader>
         <IntegrationRow
           logo={<GitHubLogo size={20} />}
           connected={!!githubAny.installed}
           title='GitHub'
-          desc={githubAny.installed ? `${githubAny.accountLogin || githubAny.account || 'connected'} · webhooks healthy` : 'Required for repo cloning + PR creation'}
-          action={
+          desc={
             githubAny.installed
-              ? <Button kind='secondary' sm onClick={() => setDisconnectOpen('github')}>Uninstall</Button>
-              : <Button kind='primary' sm onClick={installGithub}>Connect</Button>
+              ? `${githubAny.accountLogin || githubAny.account || 'connected'} · webhooks healthy`
+              : 'Required for repo cloning + PR creation'
+          }
+          action={
+            githubAny.installed ? (
+              <Button kind='secondary' sm onClick={() => setDisconnectOpen('github')}>
+                Uninstall
+              </Button>
+            ) : (
+              <Button kind='primary' sm onClick={installGithub}>
+                Connect
+              </Button>
+            )
           }
         />
         <IntegrationRow
@@ -228,9 +350,13 @@ export function IntegrationsPage() {
           title='Bitbucket'
           desc='Same UX as GitHub'
           action={
-            enabled.includes('bitbucket')
-              ? <Chip kind='mint'>Connected</Chip>
-              : <Button kind='primary' sm onClick={() => setConnectOpen('bitbucket')}>Connect</Button>
+            enabled.includes('bitbucket') ? (
+              <Chip kind='mint'>Connected</Chip>
+            ) : (
+              <Button kind='primary' sm onClick={() => setConnectOpen('bitbucket')}>
+                Connect
+              </Button>
+            )
           }
         />
 
@@ -239,11 +365,21 @@ export function IntegrationsPage() {
           logo={<SlackLogo size={20} />}
           connected={!!slackAny.connected}
           title='Slack'
-          desc={slackAny.connected ? `${slackAny.teamName || 'connected'} · run alerts` : 'Run completion alerts in your channel'}
-          action={
+          desc={
             slackAny.connected
-              ? <Button kind='secondary' sm onClick={() => setDisconnectOpen('slack')}>Disconnect</Button>
-              : <Button kind='primary' sm onClick={installSlack}>Connect</Button>
+              ? `${slackAny.teamName || 'connected'} · run alerts`
+              : 'Run completion alerts in your channel'
+          }
+          action={
+            slackAny.connected ? (
+              <Button kind='secondary' sm onClick={() => setDisconnectOpen('slack')}>
+                Disconnect
+              </Button>
+            ) : (
+              <Button kind='primary' sm onClick={installSlack}>
+                Connect
+              </Button>
+            )
           }
         />
 
@@ -254,9 +390,13 @@ export function IntegrationsPage() {
           title='Jira'
           desc='Trigger runs from issues'
           action={
-            enabled.includes('jira')
-              ? <Chip kind='mint'>Connected</Chip>
-              : <Button kind='primary' sm onClick={() => setConnectOpen('jira')}>Connect</Button>
+            enabled.includes('jira') ? (
+              <Chip kind='mint'>Connected</Chip>
+            ) : (
+              <Button kind='primary' sm onClick={() => setConnectOpen('jira')}>
+                Connect
+              </Button>
+            )
           }
         />
         <IntegrationRow
@@ -265,9 +405,13 @@ export function IntegrationsPage() {
           title='Confluence'
           desc='Trigger runs from pages'
           action={
-            enabled.includes('confluence')
-              ? <Chip kind='mint'>Connected</Chip>
-              : <Button kind='primary' sm onClick={() => setConnectOpen('confluence')}>Connect</Button>
+            enabled.includes('confluence') ? (
+              <Chip kind='mint'>Connected</Chip>
+            ) : (
+              <Button kind='primary' sm onClick={() => setConnectOpen('confluence')}>
+                Connect
+              </Button>
+            )
           }
         />
       </Feed>
@@ -279,7 +423,12 @@ export function IntegrationsPage() {
         title='Connect Jira'
         body='Paste your Jira Cloud credentials. The API token is stored encrypted at rest.'
         fields={[
-          {name: 'baseUrl', label: 'Base URL', placeholder: 'https://yourco.atlassian.net', required: true},
+          {
+            name: 'baseUrl',
+            label: 'Base URL',
+            placeholder: 'https://yourco.atlassian.net',
+            required: true,
+          },
           {name: 'email', label: 'Email', placeholder: 'you@yourco.com', required: true},
           {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
         ]}
@@ -304,7 +453,12 @@ export function IntegrationsPage() {
         title='Connect Confluence'
         body='Paste your Confluence Cloud credentials.'
         fields={[
-          {name: 'baseUrl', label: 'Base URL', placeholder: 'https://yourco.atlassian.net/wiki', required: true},
+          {
+            name: 'baseUrl',
+            label: 'Base URL',
+            placeholder: 'https://yourco.atlassian.net/wiki',
+            required: true,
+          },
           {name: 'email', label: 'Email', placeholder: 'you@yourco.com', required: true},
           {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
         ]}
@@ -420,7 +574,12 @@ export function ApiKeysPage() {
     }
   }
 
-  function providerCard(label: string, provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', value: string, set: (v: string) => void) {
+  function providerCard(
+    label: string,
+    provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI',
+    value: string,
+    set: (v: string) => void,
+  ) {
     return (
       <Card key={provider}>
         <div style={{fontSize: 14.5, fontWeight: 600, marginBottom: 8}}>{label}</div>
@@ -444,7 +603,13 @@ export function ApiKeysPage() {
             outline: 'none',
           }}
         />
-        <Button kind='primary' sm block disabled={!canManage || busy === provider} onClick={() => saveProviderKey(provider, value)}>
+        <Button
+          kind='primary'
+          sm
+          block
+          disabled={!canManage || busy === provider}
+          onClick={() => saveProviderKey(provider, value)}
+        >
           {busy === provider ? 'Validating…' : 'Save & validate'}
         </Button>
       </Card>
@@ -456,22 +621,70 @@ export function ApiKeysPage() {
       <TopBar title='API keys' sub='BYOK · bypass platform cost cap' back backTo='/account' />
       <Feed>
         <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
-          <div style={{fontSize: 11, fontWeight: 700, color: '#5443a8', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#5443a8',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 8,
+            }}
+          >
             Bring your own keys
           </div>
           <div style={{fontSize: 14, color: '#5443a8', lineHeight: 1.55}}>
-            When you connect a provider key, runs against that provider <strong>bypass our cost cap</strong> entirely. Keys are encrypted at rest. Available on PRO/TEAM/ENTERPRISE tiers.
+            When you connect a provider key, runs against that provider{' '}
+            <strong>bypass our cost cap</strong> entirely. Keys are encrypted at rest. Available on
+            PRO/TEAM/ENTERPRISE tiers.
           </div>
         </Card>
         {!canManage && (
-          <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent', marginTop: 10}}>
+          <Card
+            style={{
+              background: 'var(--signal-coral-soft)',
+              borderColor: 'transparent',
+              marginTop: 10,
+            }}
+          >
             <div style={{fontSize: 13, color: 'var(--signal-coral-text)'}}>
-              BYOK is a PRO+ feature. <a href='/plans' style={{color: 'var(--signal-coral)', fontWeight: 600}}>Upgrade →</a>
+              BYOK is a PRO+ feature.{' '}
+              <a href='/plans' style={{color: 'var(--signal-coral)', fontWeight: 600}}>
+                Upgrade →
+              </a>
             </div>
           </Card>
         )}
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginTop: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         <SectionHeader>Providers</SectionHeader>
         {providerCard('Anthropic', 'ANTHROPIC', anthropicKey, setAnthropicKey)}
@@ -490,7 +703,9 @@ export function OrgMembersPage() {
   const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
   const [invites, setInvites] = useState<api.OrgInvitation[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'DEVELOPER' | 'BILLING_ADMIN' | 'ORG_ADMIN'>('DEVELOPER');
+  const [inviteRole, setInviteRole] = useState<'DEVELOPER' | 'BILLING_ADMIN' | 'ORG_ADMIN'>(
+    'DEVELOPER',
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -499,12 +714,14 @@ export function OrgMembersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.allSettled([api.getMyOrg(), api.getOrgMembers(), api.getOrgInvitations()]).then(([o, m, i]) => {
-      if (cancelled) return;
-      if (o.status === 'fulfilled') setOrg(o.value);
-      if (m.status === 'fulfilled') setMembers(m.value);
-      if (i.status === 'fulfilled') setInvites(i.value);
-    });
+    Promise.allSettled([api.getMyOrg(), api.getOrgMembers(), api.getOrgInvitations()]).then(
+      ([o, m, i]) => {
+        if (cancelled) return;
+        if (o.status === 'fulfilled') setOrg(o.value);
+        if (m.status === 'fulfilled') setMembers(m.value);
+        if (i.status === 'fulfilled') setInvites(i.value);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -574,16 +791,67 @@ export function OrgMembersPage() {
 
   return (
     <>
-      <TopBar title='Org members' sub={`${orgAny.name || 'Personal org'} · ${members.length} member${members.length === 1 ? '' : 's'} · ${tier}`} back backTo='/account' />
+      <TopBar
+        title='Org members'
+        sub={`${orgAny.name || 'Personal org'} · ${members.length} member${members.length === 1 ? '' : 's'} · ${tier}`}
+        back
+        backTo='/account'
+      />
       <Feed>
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         <Card style={{background: 'var(--signal-mint-soft)', borderColor: 'transparent'}}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
             <div>
-              <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-mint-text-on-light)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4}}>Seats used</div>
-              <div style={{fontSize: 22, fontWeight: 700, color: 'var(--signal-mint-text-on-light)', letterSpacing: '-0.02em'}}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--signal-mint-text-on-light)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 4,
+                }}
+              >
+                Seats used
+              </div>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: 'var(--signal-mint-text-on-light)',
+                  letterSpacing: '-0.02em',
+                }}
+              >
                 {members.length} / {seats}
               </div>
             </div>
@@ -622,7 +890,8 @@ export function OrgMembersPage() {
                   <option value='ORG_ADMIN'>ORG_ADMIN</option>
                 </select>
                 <Button kind='primary' sm onClick={invite} disabled={busy || !inviteEmail.trim()}>
-                  <Plus size={14} /> {busy ? 'Inviting…' : `Send ${inviteRole.toLowerCase()} invite`}
+                  <Plus size={14} />{' '}
+                  {busy ? 'Inviting…' : `Send ${inviteRole.toLowerCase()} invite`}
                 </Button>
               </div>
             )}
@@ -631,22 +900,42 @@ export function OrgMembersPage() {
 
         <SectionHeader>Members · {members.length}</SectionHeader>
         {members.length === 0 ? (
-          <LoadingState label="Loading members…" />
+          <LoadingState label='Loading members…' />
         ) : (
           members.map((m) => {
-            const mAny = m as unknown as {id?: string; userId?: string; email?: string; firstName?: string; lastName?: string; orgRole?: string; lastSeen?: string};
+            const mAny = m as unknown as {
+              id?: string;
+              userId?: string;
+              email?: string;
+              firstName?: string;
+              lastName?: string;
+              orgRole?: string;
+              lastSeen?: string;
+            };
             const isMe = mAny.userId === user?.id;
-            const av = ((mAny.firstName?.[0] ?? '') + (mAny.lastName?.[0] ?? '') || (mAny.email?.slice(0, 2) ?? 'EX')).toUpperCase();
+            const av = (
+              (mAny.firstName?.[0] ?? '') + (mAny.lastName?.[0] ?? '') ||
+              (mAny.email?.slice(0, 2) ?? 'EX')
+            ).toUpperCase();
             const uid = mAny.userId || mAny.id || '';
             const roleBusy = rowBusy === `role-${uid}`;
             const removeBusy = rowBusy === `remove-${uid}`;
-            const displayName = ((mAny.firstName || mAny.email?.split('@')[0]) ?? '—') + (mAny.lastName ? ` ${mAny.lastName}` : '');
+            const displayName =
+              ((mAny.firstName || mAny.email?.split('@')[0]) ?? '—') +
+              (mAny.lastName ? ` ${mAny.lastName}` : '');
             return (
-              <div key={mAny.id || mAny.userId} className='signal-row' style={{gridTemplateColumns: 'auto 1fr auto'}}>
+              <div
+                key={mAny.id || mAny.userId}
+                className='signal-row'
+                style={{gridTemplateColumns: 'auto 1fr auto'}}
+              >
                 <div className='signal-avatar'>{av}</div>
                 <div style={{minWidth: 0}}>
                   <div className='row-title'>
-                    {(mAny.firstName || mAny.email?.split('@')[0]) ?? '—'} {mAny.lastName ?? ''} {isMe && <span style={{color: 'var(--signal-text-dim)', fontWeight: 400}}>· you</span>}
+                    {(mAny.firstName || mAny.email?.split('@')[0]) ?? '—'} {mAny.lastName ?? ''}{' '}
+                    {isMe && (
+                      <span style={{color: 'var(--signal-text-dim)', fontWeight: 400}}>· you</span>
+                    )}
                   </div>
                   <div className='row-meta'>
                     <span>{mAny.email}</span>
@@ -684,7 +973,12 @@ export function OrgMembersPage() {
                         kind='secondary'
                         sm
                         disabled={removeBusy || roleBusy}
-                        onClick={() => setConfirmRemove({userId: uid, label: displayName.trim() || mAny.email || 'this member'})}
+                        onClick={() =>
+                          setConfirmRemove({
+                            userId: uid,
+                            label: displayName.trim() || mAny.email || 'this member',
+                          })
+                        }
                       >
                         {removeBusy ? '…' : 'Remove'}
                       </Button>
@@ -704,14 +998,38 @@ export function OrgMembersPage() {
           <>
             <SectionHeader>Pending invites · {invites.length}</SectionHeader>
             {invites.map((iv) => {
-              const ivAny = iv as unknown as {id?: string; email?: string; orgRole?: string; expiresAt?: string; status?: string};
+              const ivAny = iv as unknown as {
+                id?: string;
+                email?: string;
+                orgRole?: string;
+                expiresAt?: string;
+                status?: string;
+              };
               return (
                 <Row
                   key={ivAny.id}
                   dot='signal'
                   title={ivAny.email}
-                  meta={<><span>{ivAny.orgRole || 'DEVELOPER'}</span>{ivAny.expiresAt && <><span>·</span><span>expires {new Date(ivAny.expiresAt).toLocaleDateString()}</span></>}</>}
-                  trailing={canInvite ? <Button kind='secondary' sm onClick={() => resend(ivAny.id || '')}>Resend</Button> : <Chip>{ivAny.status || 'pending'}</Chip>}
+                  meta={
+                    <>
+                      <span>{ivAny.orgRole || 'DEVELOPER'}</span>
+                      {ivAny.expiresAt && (
+                        <>
+                          <span>·</span>
+                          <span>expires {new Date(ivAny.expiresAt).toLocaleDateString()}</span>
+                        </>
+                      )}
+                    </>
+                  }
+                  trailing={
+                    canInvite ? (
+                      <Button kind='secondary' sm onClick={() => resend(ivAny.id || '')}>
+                        Resend
+                      </Button>
+                    ) : (
+                      <Chip>{ivAny.status || 'pending'}</Chip>
+                    )
+                  }
                 />
               );
             })}
@@ -727,7 +1045,9 @@ export function OrgMembersPage() {
         danger
         busy={!!confirmRemove && rowBusy === `remove-${confirmRemove.userId}`}
         onClose={() => setConfirmRemove(null)}
-        onConfirm={() => { if (confirmRemove) void removeOne(confirmRemove.userId); }}
+        onConfirm={() => {
+          if (confirmRemove) void removeOne(confirmRemove.userId);
+        }}
       />
     </>
   );
@@ -736,20 +1056,54 @@ export function OrgMembersPage() {
 // Tight row variant for integrations — leads with the brand logo so the
 // service is recognisable at a glance, drops the generic dot in favour of a
 // real mark.
-function IntegrationRow({logo, connected, title, desc, action}: {logo: React.ReactNode; connected: boolean; title: string; desc: string; action: React.ReactNode}) {
+function IntegrationRow({
+  logo,
+  connected,
+  title,
+  desc,
+  action,
+}: {
+  logo: React.ReactNode;
+  connected: boolean;
+  title: string;
+  desc: string;
+  action: React.ReactNode;
+}) {
   return (
     <div className='signal-row' style={{gridTemplateColumns: 'auto 1fr auto'}}>
-      <div style={{width: 32, height: 32, borderRadius: 8, background: 'var(--signal-card-elev)', display: 'grid', placeItems: 'center', flexShrink: 0, opacity: connected ? 1 : 0.65}}>
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          background: 'var(--signal-card-elev)',
+          display: 'grid',
+          placeItems: 'center',
+          flexShrink: 0,
+          opacity: connected ? 1 : 0.65,
+        }}
+      >
         {logo}
       </div>
       <div style={{minWidth: 0}}>
         <div className='row-title' style={{display: 'flex', alignItems: 'center', gap: 6}}>
           {title}
           {connected && (
-            <span style={{display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--signal-mint)', boxShadow: '0 0 6px rgba(124,227,180,0.6)'}} />
+            <span
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--signal-mint)',
+                boxShadow: '0 0 6px rgba(124,227,180,0.6)',
+              }}
+            />
           )}
         </div>
-        <div className='row-meta'><span>{desc}</span></div>
+        <div className='row-meta'>
+          <span>{desc}</span>
+        </div>
       </div>
       <div style={{display: 'flex', alignItems: 'center'}}>{action}</div>
     </div>

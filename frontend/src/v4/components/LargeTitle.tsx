@@ -24,10 +24,10 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => setCompact(!entry.isIntersecting),
-      {threshold: 0, rootMargin: '-44px 0px 0px 0px'},
-    );
+    const io = new IntersectionObserver(([entry]) => setCompact(!entry.isIntersecting), {
+      threshold: 0,
+      rootMargin: '-44px 0px 0px 0px',
+    });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -60,8 +60,7 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
               lineHeight: 1.1,
               color: 'var(--v4-text)',
               fontFamily: 'inherit',
-              transition:
-                'transform 220ms var(--v4-spring), opacity 220ms var(--v4-spring)',
+              transition: 'transform 220ms var(--v4-spring), opacity 220ms var(--v4-spring)',
               transform: compact ? 'translateY(-2px) scale(0.85)' : 'none',
               transformOrigin: 'left bottom',
             }}

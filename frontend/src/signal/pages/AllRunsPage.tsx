@@ -24,7 +24,14 @@ function relTime(input?: string | null): string {
 
 function statusToDot(s?: string): 'live' | 'mint' | 'coral' | 'signal' | 'lavender' {
   const x = (s || '').toUpperCase();
-  if (x === 'CLASSIFYING' || x === 'PLANNING' || x === 'EXECUTING' || x === 'AWAITING_APPROVAL' || x === 'RUNNING') return 'live';
+  if (
+    x === 'CLASSIFYING' ||
+    x === 'PLANNING' ||
+    x === 'EXECUTING' ||
+    x === 'AWAITING_APPROVAL' ||
+    x === 'RUNNING'
+  )
+    return 'live';
   if (x === 'COMPLETED') return 'mint';
   if (x === 'FAILED' || x === 'CANCELLED') return 'coral';
   if (x === 'PARTIAL') return 'signal';
@@ -84,12 +91,23 @@ export default function AllRunsPage() {
 
   const counts = useMemo(() => {
     const list = runs || [];
-    let live = 0, ship = 0, needs = 0, fail = 0, arch = 0;
+    let live = 0,
+      ship = 0,
+      needs = 0,
+      fail = 0,
+      arch = 0;
     for (const r of list) {
       const s = (r.status || '').toUpperCase();
       const score = (r as unknown as {verifiedScore?: number}).verifiedScore;
       if ((r as unknown as {archived?: boolean}).archived) arch++;
-      else if (s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING') live++;
+      else if (
+        s === 'CLASSIFYING' ||
+        s === 'PLANNING' ||
+        s === 'EXECUTING' ||
+        s === 'AWAITING_APPROVAL' ||
+        s === 'RUNNING'
+      )
+        live++;
       else if (s === 'COMPLETED' && (score == null || score >= 85)) ship++;
       else if (s === 'COMPLETED' || s === 'PARTIAL') needs++;
       else if (s === 'FAILED' || s === 'CANCELLED') fail++;
@@ -106,9 +124,17 @@ export default function AllRunsPage() {
       if (filter === 'archived') return !!archived;
       if (archived) return false;
       if (filter === 'all') return true;
-      if (filter === 'live') return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+      if (filter === 'live')
+        return (
+          s === 'CLASSIFYING' ||
+          s === 'PLANNING' ||
+          s === 'EXECUTING' ||
+          s === 'AWAITING_APPROVAL' ||
+          s === 'RUNNING'
+        );
       if (filter === 'shipped') return s === 'COMPLETED' && (score == null || score >= 85);
-      if (filter === 'needs') return (s === 'COMPLETED' && score != null && score < 85) || s === 'PARTIAL';
+      if (filter === 'needs')
+        return (s === 'COMPLETED' && score != null && score < 85) || s === 'PARTIAL';
       if (filter === 'failed') return s === 'FAILED' || s === 'CANCELLED';
       return true;
     });
@@ -132,11 +158,31 @@ export default function AllRunsPage() {
         <TabsStrip
           items={[
             {label: `All · ${total}`, active: filter === 'all', onClick: () => setFilter('all')},
-            {label: `Live · ${counts.live}`, active: filter === 'live', onClick: () => setFilter('live')},
-            {label: `Shipped · ${counts.ship}`, active: filter === 'shipped', onClick: () => setFilter('shipped')},
-            {label: `Needs · ${counts.needs}`, active: filter === 'needs', onClick: () => setFilter('needs')},
-            {label: `Failed · ${counts.fail}`, active: filter === 'failed', onClick: () => setFilter('failed')},
-            {label: `Archived · ${counts.arch}`, active: filter === 'archived', onClick: () => setFilter('archived')},
+            {
+              label: `Live · ${counts.live}`,
+              active: filter === 'live',
+              onClick: () => setFilter('live'),
+            },
+            {
+              label: `Shipped · ${counts.ship}`,
+              active: filter === 'shipped',
+              onClick: () => setFilter('shipped'),
+            },
+            {
+              label: `Needs · ${counts.needs}`,
+              active: filter === 'needs',
+              onClick: () => setFilter('needs'),
+            },
+            {
+              label: `Failed · ${counts.fail}`,
+              active: filter === 'failed',
+              onClick: () => setFilter('failed'),
+            },
+            {
+              label: `Archived · ${counts.arch}`,
+              active: filter === 'archived',
+              onClick: () => setFilter('archived'),
+            },
           ]}
         />
 
@@ -158,23 +204,44 @@ export default function AllRunsPage() {
 
         {runs === null ? (
           <Card>
-            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading runs…</p>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              Loading runs…
+            </p>
           </Card>
         ) : filtered.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              No runs match this filter. {filter !== 'all' && <a href='#' onClick={(e) => {e.preventDefault(); setFilter('all');}} style={{color: 'var(--signal-coral)'}}>Show all →</a>}
+              No runs match this filter.{' '}
+              {filter !== 'all' && (
+                <a
+                  href='#'
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setFilter('all');
+                  }}
+                  style={{color: 'var(--signal-coral)'}}
+                >
+                  Show all →
+                </a>
+              )}
             </p>
           </Card>
         ) : (
           filtered.map((r) => {
             const score = (r as unknown as {verifiedScore?: number}).verifiedScore;
-            const cost = (r as unknown as {actualCost?: number; totalCost?: number}).actualCost ??
+            const cost =
+              (r as unknown as {actualCost?: number; totalCost?: number}).actualCost ??
               (r as unknown as {totalCost?: number}).totalCost;
-            const proj = (r as unknown as {projectName?: string; projectId?: string}).projectName ||
+            const proj =
+              (r as unknown as {projectName?: string; projectId?: string}).projectName ||
               (r as unknown as {projectId?: string}).projectId;
             const s = (r.status || '').toUpperCase();
-            const isLive = s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+            const isLive =
+              s === 'CLASSIFYING' ||
+              s === 'PLANNING' ||
+              s === 'EXECUTING' ||
+              s === 'AWAITING_APPROVAL' ||
+              s === 'RUNNING';
             return (
               <Row
                 key={r.runId}
@@ -185,7 +252,9 @@ export default function AllRunsPage() {
                   // spec for the same reason as HomePage — list rows look
                   // ridiculous when filled with 600-char spec dumps.
                   const rAny = r as unknown as {runTitle?: string};
-                  return rAny.runTitle?.trim() || r.userRequest?.trim() || `Run ${shortRunId(r.runId)}`;
+                  return (
+                    rAny.runTitle?.trim() || r.userRequest?.trim() || `Run ${shortRunId(r.runId)}`
+                  );
                 })()}
                 meta={
                   <>
@@ -200,7 +269,9 @@ export default function AllRunsPage() {
                     <span>{relTime((r as unknown as {createdAt?: string}).createdAt)}</span>
                   </>
                 }
-                trailing={score != null ? `${Math.round(score)}%` : isLive ? 'live' : s.toLowerCase()}
+                trailing={
+                  score != null ? `${Math.round(score)}%` : isLive ? 'live' : s.toLowerCase()
+                }
                 trailingKind={scoreKind(score)}
                 trailingLabel={cost != null ? `$${cost.toFixed(2)}` : undefined}
               />

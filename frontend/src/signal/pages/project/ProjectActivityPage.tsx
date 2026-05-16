@@ -49,9 +49,14 @@ export default function ProjectActivityPage() {
     let cancelled = false;
     let timer: number | undefined;
     function load() {
-      api.getActivityFeed(id, {limit: 50, sinceDays: 90})
-        .then((a) => { if (!cancelled) setPage(a); })
-        .catch(() => { if (!cancelled) setErr('Failed to load activity.'); })
+      api
+        .getActivityFeed(id, {limit: 50, sinceDays: 90})
+        .then((a) => {
+          if (!cancelled) setPage(a);
+        })
+        .catch(() => {
+          if (!cancelled) setErr('Failed to load activity.');
+        })
         .finally(() => {
           if (!cancelled) timer = window.setTimeout(load, 30_000);
         });
@@ -71,32 +76,64 @@ export default function ProjectActivityPage() {
       if (filter === 'runs') return t.includes('RUN_');
       if (filter === 'prs') return t.includes('PR_');
       if (filter === 'members') return t.includes('MEMBER') || t.includes('INVITE');
-      if (filter === 'standards') return t.includes('STANDARD') || t.includes('ADR') || t.includes('INVARIANT');
+      if (filter === 'standards')
+        return t.includes('STANDARD') || t.includes('ADR') || t.includes('INVARIANT');
       return true;
     });
   }, [entries, filter]);
 
   return (
     <>
-      <TopBar title='Activity' sub={`${project?.name || 'project'} · ${entries.length} events`} back backTo={`/projects/${id}`} />
+      <TopBar
+        title='Activity'
+        sub={`${project?.name || 'project'} · ${entries.length} events`}
+        back
+        backTo={`/projects/${id}`}
+      />
       <Feed>
         <ProjectTabs active='activity' />
         <TabsStrip
           items={[
-            {label: `All · ${entries.length}`, active: filter === 'all', onClick: () => setFilter('all')},
+            {
+              label: `All · ${entries.length}`,
+              active: filter === 'all',
+              onClick: () => setFilter('all'),
+            },
             {label: 'Runs', active: filter === 'runs', onClick: () => setFilter('runs')},
             {label: 'PRs', active: filter === 'prs', onClick: () => setFilter('prs')},
             {label: 'Members', active: filter === 'members', onClick: () => setFilter('members')},
-            {label: 'Standards', active: filter === 'standards', onClick: () => setFilter('standards')},
+            {
+              label: 'Standards',
+              active: filter === 'standards',
+              onClick: () => setFilter('standards'),
+            },
           ]}
         />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {page == null ? (
-          <LoadingState label="Loading activity…" />
+          <LoadingState label='Loading activity…' />
         ) : filtered.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No activity yet for this filter.</p></Card>
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No activity yet for this filter.
+            </p>
+          </Card>
         ) : (
           filtered.map((e: api.ActivityEntry, i: number) => {
             const eAny = e as unknown as {actorEmail?: string; actorUserId?: string};
@@ -107,7 +144,9 @@ export default function ProjectActivityPage() {
                 title={e.summary || e.eventType || 'event'}
                 meta={
                   <>
-                    {(eAny.actorEmail || eAny.actorUserId) && <span>{eAny.actorEmail || eAny.actorUserId}</span>}
+                    {(eAny.actorEmail || eAny.actorUserId) && (
+                      <span>{eAny.actorEmail || eAny.actorUserId}</span>
+                    )}
                     {e.eventType && (
                       <>
                         {(eAny.actorEmail || eAny.actorUserId) && <span>·</span>}
@@ -123,20 +162,28 @@ export default function ProjectActivityPage() {
           })
         )}
 
-        <Button kind='secondary' block style={{marginTop: 14}} onClick={() => {
-          const csv = ['type,summary,actor,occurredAt', ...filtered.map((e: api.ActivityEntry) => {
-            const eAny = e as unknown as {actorEmail?: string; actorUserId?: string};
-            const actor = eAny.actorEmail || eAny.actorUserId || '';
-            return `${e.eventType ?? ''},${(e.summary ?? '').replace(/,/g, ';')},${actor},${e.occurredAt ?? ''}`;
-          })].join('\n');
-          const blob = new Blob([csv], {type: 'text/csv'});
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `activity-${id}-${new Date().toISOString().slice(0, 10)}.csv`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }}>
+        <Button
+          kind='secondary'
+          block
+          style={{marginTop: 14}}
+          onClick={() => {
+            const csv = [
+              'type,summary,actor,occurredAt',
+              ...filtered.map((e: api.ActivityEntry) => {
+                const eAny = e as unknown as {actorEmail?: string; actorUserId?: string};
+                const actor = eAny.actorEmail || eAny.actorUserId || '';
+                return `${e.eventType ?? ''},${(e.summary ?? '').replace(/,/g, ';')},${actor},${e.occurredAt ?? ''}`;
+              }),
+            ].join('\n');
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `activity-${id}-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
           Export filtered as CSV
         </Button>
       </Feed>

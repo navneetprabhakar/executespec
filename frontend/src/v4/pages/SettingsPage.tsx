@@ -43,7 +43,11 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const theme = useUiStore((s) => s.theme);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
-  const [billing, setBilling] = useState<{tier?: string; runsUsed?: number; runsLimit?: number} | null>(null);
+  const [billing, setBilling] = useState<{
+    tier?: string;
+    runsUsed?: number;
+    runsLimit?: number;
+  } | null>(null);
 
   useEffect(() => {
     // Best-effort fetch — silent on failure (FREE users without billing
@@ -75,10 +79,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <LargeTitle
-        title='You'
-        subtitle={user?.email ?? 'Account & preferences'}
-      />
+      <LargeTitle title='You' subtitle={user?.email ?? 'Account & preferences'} />
 
       {/* Identity card */}
       <section

@@ -59,15 +59,9 @@ export default function ProjectReposPage() {
         {project?.name ?? 'Workspace'}
       </Link>
 
-      <LargeTitle
-        title='Repos'
-        subtitle='Linked repositories · branch · webhook · relationships'
-      />
+      <LargeTitle title='Repos' subtitle='Linked repositories · branch · webhook · relationships' />
 
-      <div
-        className='v4-card'
-        style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}
-      >
+      <div className='v4-card' style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}>
         <ProjectRepoManager projectId={projectId} />
       </div>
     </>

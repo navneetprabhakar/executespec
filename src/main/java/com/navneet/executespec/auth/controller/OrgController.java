@@ -233,8 +233,7 @@ public class OrgController {
     String orgId = userDetails.getUser().getOrgId();
     if (orgId == null) return ResponseEntity.badRequest().build();
     return ResponseEntity.ok(
-        orgService.updateExternalSharing(
-            orgId, req.enabled(), userDetails.getUser().getId()));
+        orgService.updateExternalSharing(orgId, req.enabled(), userDetails.getUser().getId()));
   }
 
   // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────

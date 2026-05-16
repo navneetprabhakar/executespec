@@ -10,7 +10,11 @@ type SidebarGroup = {title: string; items: SidebarItem[]};
 
 // Build the sidebar groups based on the current user's tier + role. This is a
 // pure function so we can re-evaluate on auth changes without React state.
-function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSuperAdmin: boolean; canDeploy: boolean}): SidebarGroup[] {
+function buildSidebar(opts: {
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  isSuperAdmin: boolean;
+  canDeploy: boolean;
+}): SidebarGroup[] {
   const groups: SidebarGroup[] = [
     {
       title: 'Daily',
@@ -28,7 +32,9 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/library', label: 'Library', icon: '✦'},
         {path: '/migrations', label: 'Migrations', icon: '⇄'},
         {path: '/templates', label: 'Templates', icon: '✎'},
-        ...(opts.canDeploy ? [{path: '/deployments', label: 'Deployments', icon: '⌁'} satisfies SidebarItem] : []),
+        ...(opts.canDeploy
+          ? [{path: '/deployments', label: 'Deployments', icon: '⌁'} satisfies SidebarItem]
+          : []),
       ],
     },
     {
@@ -38,10 +44,12 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/integrations', label: 'Integrations', icon: '◇'},
         // BYOK is PRO+. Hide for FREE so the sidebar matches what the user
         // can actually do (the page itself also gates).
-        ...(opts.tier !== 'FREE' ? [{path: '/api-keys', label: 'API keys', icon: '⎈'} satisfies SidebarItem] : []),
+        ...(opts.tier !== 'FREE'
+          ? [{path: '/api-keys', label: 'API keys', icon: '⎈'} satisfies SidebarItem]
+          : []),
         {path: '/org-members', label: 'Team', icon: '◐'},
         // Audit log is TEAM+ only.
-        ...((opts.tier === 'TEAM' || opts.tier === 'ENTERPRISE' || opts.isSuperAdmin)
+        ...(opts.tier === 'TEAM' || opts.tier === 'ENTERPRISE' || opts.isSuperAdmin
           ? [{path: '/audit', label: 'Audit log', icon: '☷'} satisfies SidebarItem]
           : []),
       ],
@@ -53,7 +61,9 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/search', label: 'Search', icon: '⌕'},
         {path: '/account', label: 'Account', icon: '◍'},
         // Admin link only for SUPER_ADMIN — non-admins were getting bounced to /home.
-        ...(opts.isSuperAdmin ? [{path: '/admin', label: 'Admin', icon: '✦'} satisfies SidebarItem] : []),
+        ...(opts.isSuperAdmin
+          ? [{path: '/admin', label: 'Admin', icon: '✦'} satisfies SidebarItem]
+          : []),
       ],
     },
   ];
@@ -76,7 +86,7 @@ export default function SignalShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const tier = useAuthStore(selectNormalizedTier);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
-  const canDeploy = useAuthStore((s) => s.permissions?.canDeploy ?? (tier !== 'FREE'));
+  const canDeploy = useAuthStore((s) => s.permissions?.canDeploy ?? tier !== 'FREE');
   const sidebarGroups = buildSidebar({tier, isSuperAdmin, canDeploy});
 
   // Close the drawer whenever route changes (tap-on-nav-item dismisses)
@@ -95,7 +105,10 @@ export default function SignalShell() {
   return (
     <div className='signal-app signal-shell' ref={rootRef} data-signal-theme={theme}>
       {/* Sidebar (persistent on desktop, drawer on mobile) */}
-      <aside className={`signal-sidebar${drawerOpen ? ' is-open' : ''}`} aria-label='Primary navigation'>
+      <aside
+        className={`signal-sidebar${drawerOpen ? ' is-open' : ''}`}
+        aria-label='Primary navigation'
+      >
         <div className='sidebar-head'>
           <div className='sidebar-brand'>
             <span className='logo-chip'>E</span>
@@ -121,7 +134,9 @@ export default function SignalShell() {
                   end={item.path === '/home'}
                   className={({isActive}) => `nav-link${isActive ? ' active' : ''}`}
                 >
-                  <span className='nav-icon' aria-hidden='true'>{item.icon}</span>
+                  <span className='nav-icon' aria-hidden='true'>
+                    {item.icon}
+                  </span>
                   <span className='nav-label'>{item.label}</span>
                 </NavLink>
               ))}
@@ -131,8 +146,12 @@ export default function SignalShell() {
 
         <div className='sidebar-foot'>
           <button className='sidebar-theme' onClick={toggle} aria-label='Toggle theme'>
-            <span className='theme-moon'><Moon size={14} /></span>
-            <span className='theme-sun'><Sun size={14} /></span>
+            <span className='theme-moon'>
+              <Moon size={14} />
+            </span>
+            <span className='theme-sun'>
+              <Sun size={14} />
+            </span>
             <span className='theme-lbl-dark'>Dark mode</span>
             <span className='theme-lbl-light'>Light mode</span>
           </button>
@@ -151,15 +170,21 @@ export default function SignalShell() {
             onClick={() => setDrawerOpen(true)}
             aria-label='Open menu'
           >
-            <span /><span /><span />
+            <span />
+            <span />
+            <span />
           </button>
           <div className='mobile-brand'>
             <span className='logo-chip-sm'>E</span>
             ExecuteSpec
           </div>
           <button className='mobile-theme' onClick={toggle} aria-label='Toggle theme'>
-            <span className='theme-moon'><Moon size={14} /></span>
-            <span className='theme-sun'><Sun size={14} /></span>
+            <span className='theme-moon'>
+              <Moon size={14} />
+            </span>
+            <span className='theme-sun'>
+              <Sun size={14} />
+            </span>
           </button>
         </div>
 
@@ -174,7 +199,9 @@ export default function SignalShell() {
               key={t.path}
               to={t.path}
               end={t.path === '/home'}
-              className={({isActive}) => `tab${isActive ? ' active' : ''}${t.label === 'New' ? ' fab' : ''}`}
+              className={({isActive}) =>
+                `tab${isActive ? ' active' : ''}${t.label === 'New' ? ' fab' : ''}`
+              }
             >
               <span className='tab-label'>{t.label}</span>
             </NavLink>

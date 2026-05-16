@@ -43,7 +43,8 @@ export default function ProjectCodePage() {
       const explanation = await api.getProjectDoc(id, 'EXPLANATION').catch(() => null);
       const setup = await api.getProjectDoc(id, 'SETUP').catch(() => null);
       const list: api.GeneratedDocRow[] = [];
-      if (explanation) list.push({docType: 'EXPLANATION', ...(explanation as object)} as api.GeneratedDocRow);
+      if (explanation)
+        list.push({docType: 'EXPLANATION', ...(explanation as object)} as api.GeneratedDocRow);
       if (setup) list.push({docType: 'SETUP', ...(setup as object)} as api.GeneratedDocRow);
       setDocs(list);
     } catch {
@@ -59,7 +60,10 @@ export default function ProjectCodePage() {
   // Workspace health — per-repo coverage/lint/build pass status. Lazy on tab open.
   useEffect(() => {
     if (sub !== 'health' || !id || health != null) return;
-    api.getWorkspaceHealth(id).then(setHealth).catch(() => setHealth(null));
+    api
+      .getWorkspaceHealth(id)
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, [sub, id, health]);
 
   // Org standards compliance — TEAM+ feature. Loads on tab open.
@@ -67,7 +71,10 @@ export default function ProjectCodePage() {
     if (sub !== 'standards' || !id || standards != null) return;
     const orgId = user?.orgId;
     if (!orgId) return;
-    api.getStandardsReport(id, orgId, 30).then(setStandards).catch(() => setStandards({violations: [], summary: {}} as unknown as api.ComplianceReport));
+    api
+      .getStandardsReport(id, orgId, 30)
+      .then(setStandards)
+      .catch(() => setStandards({violations: [], summary: {}} as unknown as api.ComplianceReport));
   }, [sub, id, standards, user?.orgId]);
 
   useEffect(() => {
@@ -77,12 +84,21 @@ export default function ProjectCodePage() {
     let cancelled = false;
     Promise.all(
       repos.map(async (r) => {
-        const repoId = String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '');
-        const repoName = String((r as {repoName?: string; name?: string}).repoName || (r as {name?: string}).name || repoId);
+        const repoId = String(
+          (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
+        );
+        const repoName = String(
+          (r as {repoName?: string; name?: string}).repoName ||
+            (r as {name?: string}).name ||
+            repoId,
+        );
         try {
-          const review = await fetch(`/api/code-reviews?projectId=${id}&latest=true&repo=${encodeURIComponent(repoName)}`, {
-            headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
-          }).then((res) => res.ok ? res.json() : null);
+          const review = await fetch(
+            `/api/code-reviews?projectId=${id}&latest=true&repo=${encodeURIComponent(repoName)}`,
+            {
+              headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
+            },
+          ).then((res) => (res.ok ? res.json() : null));
           return [repoId, {repoName, review}];
         } catch {
           return [repoId, {repoName, review: null}];
@@ -91,7 +107,9 @@ export default function ProjectCodePage() {
     ).then((entries) => {
       if (!cancelled) setReviews(Object.fromEntries(entries));
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sub, id, repos]);
 
   async function autofixCategory(category: string) {
@@ -155,33 +173,88 @@ export default function ProjectCodePage() {
     }
   }
 
-  const cats = (debt as unknown as {categories?: Array<{name?: string; count?: number; criticalCount?: number; majorCount?: number; minorCount?: number; description?: string}>})?.categories || [];
+  const cats =
+    (
+      debt as unknown as {
+        categories?: Array<{
+          name?: string;
+          count?: number;
+          criticalCount?: number;
+          majorCount?: number;
+          minorCount?: number;
+          description?: string;
+        }>;
+      }
+    )?.categories || [];
   const projectName = project?.name || 'project';
 
   return (
     <>
-      <TopBar title='Code & quality' sub={`${projectName} · ${debt && (debt as unknown as {lastScannedAt?: string}).lastScannedAt ? `last scan ${new Date((debt as unknown as {lastScannedAt: string}).lastScannedAt).toLocaleString()}` : 'no scan yet'}`} back backTo={`/projects/${id}`} />
+      <TopBar
+        title='Code & quality'
+        sub={`${projectName} · ${debt && (debt as unknown as {lastScannedAt?: string}).lastScannedAt ? `last scan ${new Date((debt as unknown as {lastScannedAt: string}).lastScannedAt).toLocaleString()}` : 'no scan yet'}`}
+        back
+        backTo={`/projects/${id}`}
+      />
       <Feed>
         <ProjectTabs active='code' />
         <TabsStrip
           items={[
-            {label: `Tech debt · ${cats.length}`, active: sub === 'debt', onClick: () => setSub('debt')},
+            {
+              label: `Tech debt · ${cats.length}`,
+              active: sub === 'debt',
+              onClick: () => setSub('debt'),
+            },
             {label: 'Code review', active: sub === 'review', onClick: () => setSub('review')},
             {label: 'Health', active: sub === 'health', onClick: () => setSub('health')},
             {label: 'Standards', active: sub === 'standards', onClick: () => setSub('standards')},
-            {label: `Docs · ${docs?.length ?? 0}`, active: sub === 'docs', onClick: () => setSub('docs')},
+            {
+              label: `Docs · ${docs?.length ?? 0}`,
+              active: sub === 'docs',
+              onClick: () => setSub('docs'),
+            },
           ]}
         />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
-        {sub === 'debt' && (
-          debt == null ? (
-            <LoadingState label="Loading tech debt…" />
+        {sub === 'debt' &&
+          (debt == null ? (
+            <LoadingState label='Loading tech debt…' />
           ) : cats.length === 0 ? (
             <Card>
-              <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+              <p
+                style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}
+              >
                 No tech debt detected. Run a code-review scan to surface issues.
               </p>
             </Card>
@@ -191,13 +264,43 @@ export default function ProjectCodePage() {
               const crit = c.criticalCount ?? 0;
               const maj = c.majorCount ?? 0;
               const min = c.minorCount ?? 0;
-              const total = c.count ?? (crit + maj + min);
+              const total = c.count ?? crit + maj + min;
               return (
                 <Card key={name} style={{padding: 0}}>
-                  <div style={{padding: '14px 16px', borderBottom: '1px solid var(--signal-hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10}}>
+                  <div
+                    style={{
+                      padding: '14px 16px',
+                      borderBottom: '1px solid var(--signal-hairline)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
                     <div style={{minWidth: 0, flex: 1}}>
-                      <div style={{fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{name}</div>
-                      <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{c.description || `${total} issues`}</div>
+                      <div
+                        style={{
+                          fontSize: 14.5,
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--signal-text-dim)',
+                          marginTop: 2,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {c.description || `${total} issues`}
+                      </div>
                     </div>
                     <div style={{display: 'flex', gap: 4, flexShrink: 0}}>
                       {crit > 0 && <StatusPill kind='failed'>{crit} CRIT</StatusPill>}
@@ -206,55 +309,113 @@ export default function ProjectCodePage() {
                     </div>
                   </div>
                   <div style={{padding: '12px 16px'}}>
-                    <Button kind='primary' sm block disabled={busy === name} onClick={() => autofixCategory(name)}>
+                    <Button
+                      kind='primary'
+                      sm
+                      block
+                      disabled={busy === name}
+                      onClick={() => autofixCategory(name)}
+                    >
                       {busy === name ? 'Dispatching…' : `Autofix ${total} →`}
                     </Button>
                   </div>
                 </Card>
               );
             })
-          )
-        )}
+          ))}
 
-        {sub === 'review' && (
-          repos.length === 0 ? (
+        {sub === 'review' &&
+          (repos.length === 0 ? (
             <Card>
-              <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-                No repos linked. <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>Link one →</a> to enable per-repo code review.
+              <p
+                style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}
+              >
+                No repos linked.{' '}
+                <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>
+                  Link one →
+                </a>{' '}
+                to enable per-repo code review.
               </p>
             </Card>
           ) : reviews == null ? (
-            <LoadingState label="Loading scan results…" />
+            <LoadingState label='Loading scan results…' />
           ) : (
             <>
               <SectionHeader>Per-repo scan</SectionHeader>
               {Object.entries(reviews).map(([repoId, val]) => {
-                const v = val as {repoName?: string; review?: {id?: string; critical?: number; major?: number; minor?: number; info?: number; scannedAt?: string; reportUrl?: string}};
+                const v = val as {
+                  repoName?: string;
+                  review?: {
+                    id?: string;
+                    critical?: number;
+                    major?: number;
+                    minor?: number;
+                    info?: number;
+                    scannedAt?: string;
+                    reportUrl?: string;
+                  };
+                };
                 const r = v.review;
                 return (
                   <Card key={repoId} style={{marginBottom: 10}}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, gap: 10}}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        marginBottom: 10,
+                        gap: 10,
+                      }}
+                    >
                       <div style={{minWidth: 0, flex: 1}}>
-                        <div style={{fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{v.repoName}</div>
+                        <div
+                          style={{
+                            fontSize: 14.5,
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {v.repoName}
+                        </div>
                         <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
-                          {r?.scannedAt ? `Last scan ${new Date(r.scannedAt).toLocaleString()}` : 'No scan yet'}
+                          {r?.scannedAt
+                            ? `Last scan ${new Date(r.scannedAt).toLocaleString()}`
+                            : 'No scan yet'}
                         </div>
                       </div>
-                      <Button kind='secondary' sm disabled={busy === `scan-${repoId}`} onClick={() => rescanReview(repoId)}>
+                      <Button
+                        kind='secondary'
+                        sm
+                        disabled={busy === `scan-${repoId}`}
+                        onClick={() => rescanReview(repoId)}
+                      >
                         {busy === `scan-${repoId}` ? 'Queuing…' : 'New scan'}
                       </Button>
                     </div>
                     {r && (
                       <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                        {(r.critical ?? 0) > 0 && <StatusPill kind='failed'>{r.critical} CRITICAL</StatusPill>}
-                        {(r.major ?? 0) > 0 && <StatusPill kind='needs'>{r.major} MAJOR</StatusPill>}
+                        {(r.critical ?? 0) > 0 && (
+                          <StatusPill kind='failed'>{r.critical} CRITICAL</StatusPill>
+                        )}
+                        {(r.major ?? 0) > 0 && (
+                          <StatusPill kind='needs'>{r.major} MAJOR</StatusPill>
+                        )}
                         {(r.minor ?? 0) > 0 && <StatusPill>{r.minor} MINOR</StatusPill>}
                         {(r.info ?? 0) > 0 && <StatusPill>{r.info} INFO</StatusPill>}
-                        {!r.critical && !r.major && !r.minor && !r.info && <StatusPill kind='shipped'>CLEAN</StatusPill>}
+                        {!r.critical && !r.major && !r.minor && !r.info && (
+                          <StatusPill kind='shipped'>CLEAN</StatusPill>
+                        )}
                       </div>
                     )}
                     {r?.reportUrl && (
-                      <Button kind='ghost' sm block onClick={() => window.open(r.reportUrl, '_blank', 'noopener')}>
+                      <Button
+                        kind='ghost'
+                        sm
+                        block
+                        onClick={() => window.open(r.reportUrl, '_blank', 'noopener')}
+                      >
                         Download report (Markdown)
                       </Button>
                     )}
@@ -262,75 +423,228 @@ export default function ProjectCodePage() {
                 );
               })}
             </>
-          )
-        )}
+          ))}
 
-        {sub === 'health' && (
-          health == null ? (
+        {sub === 'health' &&
+          (health == null ? (
             <LoadingState label='Loading workspace health…' />
           ) : (health.repos || []).length === 0 ? (
-            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No repos linked. <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>Link a repo →</a></p></Card>
+            <Card>
+              <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+                No repos linked.{' '}
+                <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>
+                  Link a repo →
+                </a>
+              </p>
+            </Card>
           ) : (
             <>
               <SectionHeader>Per-repo workspace health</SectionHeader>
               {health.repos.map((r) => {
-                const rAny = r as unknown as {repoId?: string; name?: string; headSha?: string; commitsBehind?: number; webhookInstalled?: boolean; openPrs?: number; coveragePct?: number; buildStatus?: string; lintStatus?: string; lastAnalysedAt?: string};
+                const rAny = r as unknown as {
+                  repoId?: string;
+                  name?: string;
+                  headSha?: string;
+                  commitsBehind?: number;
+                  webhookInstalled?: boolean;
+                  openPrs?: number;
+                  coveragePct?: number;
+                  buildStatus?: string;
+                  lintStatus?: string;
+                  lastAnalysedAt?: string;
+                };
                 const cov = rAny.coveragePct != null ? `${rAny.coveragePct.toFixed(1)}%` : '—';
                 return (
                   <Card key={rAny.repoId || rAny.name} style={{marginBottom: 10}}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, gap: 10}}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        marginBottom: 10,
+                        gap: 10,
+                      }}
+                    >
                       <div style={{minWidth: 0, flex: 1}}>
-                        <div style={{fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{rAny.name}</div>
+                        <div
+                          style={{
+                            fontSize: 14.5,
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {rAny.name}
+                        </div>
                         <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
-                          {rAny.headSha?.slice(0, 7)} {rAny.commitsBehind && rAny.commitsBehind > 0 ? `· ${rAny.commitsBehind} commits behind origin` : '· in sync'}
+                          {rAny.headSha?.slice(0, 7)}{' '}
+                          {rAny.commitsBehind && rAny.commitsBehind > 0
+                            ? `· ${rAny.commitsBehind} commits behind origin`
+                            : '· in sync'}
                         </div>
                       </div>
-                      <StatusPill kind={(rAny.commitsBehind ?? 0) > 0 ? 'needs' : 'shipped'}>{(rAny.commitsBehind ?? 0) > 0 ? 'Drift' : 'Healthy'}</StatusPill>
+                      <StatusPill kind={(rAny.commitsBehind ?? 0) > 0 ? 'needs' : 'shipped'}>
+                        {(rAny.commitsBehind ?? 0) > 0 ? 'Drift' : 'Healthy'}
+                      </StatusPill>
                     </div>
-                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, paddingTop: 10, borderTop: '1px solid var(--signal-hairline)', fontSize: 12}}>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: 10,
+                        paddingTop: 10,
+                        borderTop: '1px solid var(--signal-hairline)',
+                        fontSize: 12,
+                      }}
+                    >
                       <div>
-                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Coverage</div>
+                        <div
+                          style={{
+                            color: 'var(--signal-text-dim)',
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                          }}
+                        >
+                          Coverage
+                        </div>
                         <div style={{fontWeight: 600, marginTop: 2}}>{cov}</div>
                       </div>
                       <div>
-                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Build</div>
-                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.buildStatus === 'PASSING' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.buildStatus ?? '—'}</div>
+                        <div
+                          style={{
+                            color: 'var(--signal-text-dim)',
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                          }}
+                        >
+                          Build
+                        </div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            marginTop: 2,
+                            color:
+                              rAny.buildStatus === 'PASSING'
+                                ? 'var(--signal-mint-text-on-light)'
+                                : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          {rAny.buildStatus ?? '—'}
+                        </div>
                       </div>
                       <div>
-                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Lint</div>
-                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.lintStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.lintStatus ?? '—'}</div>
+                        <div
+                          style={{
+                            color: 'var(--signal-text-dim)',
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                          }}
+                        >
+                          Lint
+                        </div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            marginTop: 2,
+                            color:
+                              rAny.lintStatus === 'CLEAN'
+                                ? 'var(--signal-mint-text-on-light)'
+                                : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          {rAny.lintStatus ?? '—'}
+                        </div>
                       </div>
                       <div>
-                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Webhook</div>
-                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.webhookInstalled ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.webhookInstalled ? '✓' : '○'}</div>
+                        <div
+                          style={{
+                            color: 'var(--signal-text-dim)',
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                          }}
+                        >
+                          Webhook
+                        </div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            marginTop: 2,
+                            color: rAny.webhookInstalled
+                              ? 'var(--signal-mint-text-on-light)'
+                              : 'var(--signal-coral-text)',
+                          }}
+                        >
+                          {rAny.webhookInstalled ? '✓' : '○'}
+                        </div>
                       </div>
                     </div>
                   </Card>
                 );
               })}
             </>
-          )
-        )}
+          ))}
 
-        {sub === 'standards' && (
-          standards == null ? (
+        {sub === 'standards' &&
+          (standards == null ? (
             <LoadingState label='Loading standards compliance…' />
           ) : (
             <>
-              <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent', marginBottom: 12}}>
-                <div style={{fontSize: 11, fontWeight: 700, color: '#5443a8', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>Org standards · last 30 days</div>
+              <Card
+                style={{
+                  background: 'var(--signal-lavender-soft)',
+                  borderColor: 'transparent',
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#5443a8',
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    marginBottom: 6,
+                  }}
+                >
+                  Org standards · last 30 days
+                </div>
                 <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.5}}>
-                  Naming conventions, lint rules, coverage SLAs and other policies your org has set. PROJECT_ADMIN can request overrides per finding.
+                  Naming conventions, lint rules, coverage SLAs and other policies your org has set.
+                  PROJECT_ADMIN can request overrides per finding.
                 </div>
               </Card>
               {(() => {
-                const sAny = standards as unknown as {violations?: api.ViolationEntry[]; summary?: Record<string, number>; standardCount?: number};
+                const sAny = standards as unknown as {
+                  violations?: api.ViolationEntry[];
+                  summary?: Record<string, number>;
+                  standardCount?: number;
+                };
                 const viols = sAny.violations || [];
                 if (viols.length === 0) {
-                  return <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No standards violations in the last 30 days.</p></Card>;
+                  return (
+                    <Card>
+                      <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+                        No standards violations in the last 30 days.
+                      </p>
+                    </Card>
+                  );
                 }
                 return viols.map((v, i) => {
-                  const vAny = v as unknown as {id?: string; standardId?: string; standardName?: string; severity?: string; description?: string; filePath?: string; line?: number; createdAt?: string};
+                  const vAny = v as unknown as {
+                    id?: string;
+                    standardId?: string;
+                    standardName?: string;
+                    severity?: string;
+                    description?: string;
+                    filePath?: string;
+                    line?: number;
+                    createdAt?: string;
+                  };
                   const sev = (vAny.severity || 'MINOR').toUpperCase();
                   return (
                     <Row
@@ -339,8 +653,18 @@ export default function ProjectCodePage() {
                       title={vAny.standardName || vAny.standardId || 'Standard violation'}
                       meta={
                         <>
-                          {vAny.filePath && <span className='mono'>{vAny.filePath}{vAny.line ? `:${vAny.line}` : ''}</span>}
-                          {vAny.description && <><span>·</span><span>{vAny.description.slice(0, 60)}</span></>}
+                          {vAny.filePath && (
+                            <span className='mono'>
+                              {vAny.filePath}
+                              {vAny.line ? `:${vAny.line}` : ''}
+                            </span>
+                          )}
+                          {vAny.description && (
+                            <>
+                              <span>·</span>
+                              <span>{vAny.description.slice(0, 60)}</span>
+                            </>
+                          )}
                         </>
                       }
                       trailing={sev}
@@ -349,14 +673,20 @@ export default function ProjectCodePage() {
                 });
               })()}
             </>
-          )
-        )}
+          ))}
 
         {sub === 'docs' && (
           <>
             {(docs || []).length === 0 ? (
               <Card>
-                <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+                <p
+                  style={{
+                    fontSize: 13.5,
+                    color: 'var(--signal-text-dim)',
+                    margin: 0,
+                    lineHeight: 1.5,
+                  }}
+                >
                   No docs generated yet. Use the buttons below.
                 </p>
               </Card>
@@ -369,11 +699,29 @@ export default function ProjectCodePage() {
                     key={dt}
                     dot='lavender'
                     title={`${dt}.md`}
-                    meta={updated ? <span>updated {new Date(updated).toLocaleDateString()}</span> : <span>fresh</span>}
+                    meta={
+                      updated ? (
+                        <span>updated {new Date(updated).toLocaleDateString()}</span>
+                      ) : (
+                        <span>fresh</span>
+                      )
+                    }
                     trailing={
                       <div style={{display: 'flex', gap: 4}}>
-                        <Button kind='secondary' sm onClick={() => downloadDoc(dt as 'EXPLANATION' | 'SETUP')}>Download</Button>
-                        <Button kind='ghost' sm onClick={() => generateDoc(dt as 'EXPLANATION' | 'SETUP')}>Regen</Button>
+                        <Button
+                          kind='secondary'
+                          sm
+                          onClick={() => downloadDoc(dt as 'EXPLANATION' | 'SETUP')}
+                        >
+                          Download
+                        </Button>
+                        <Button
+                          kind='ghost'
+                          sm
+                          onClick={() => generateDoc(dt as 'EXPLANATION' | 'SETUP')}
+                        >
+                          Regen
+                        </Button>
                       </div>
                     }
                   />
@@ -381,10 +729,22 @@ export default function ProjectCodePage() {
               })
             )}
             <div style={{display: 'flex', gap: 8, marginTop: 8}}>
-              <Button kind='secondary' block sm onClick={() => generateDoc('EXPLANATION')} disabled={busy === 'gen-EXPLANATION'}>
+              <Button
+                kind='secondary'
+                block
+                sm
+                onClick={() => generateDoc('EXPLANATION')}
+                disabled={busy === 'gen-EXPLANATION'}
+              >
                 {busy === 'gen-EXPLANATION' ? 'Generating…' : 'Generate EXPLANATION.md'}
               </Button>
-              <Button kind='secondary' block sm onClick={() => generateDoc('SETUP')} disabled={busy === 'gen-SETUP'}>
+              <Button
+                kind='secondary'
+                block
+                sm
+                onClick={() => generateDoc('SETUP')}
+                disabled={busy === 'gen-SETUP'}
+              >
                 {busy === 'gen-SETUP' ? 'Generating…' : 'Generate SETUP.md'}
               </Button>
             </div>

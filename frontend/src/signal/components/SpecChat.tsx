@@ -7,7 +7,11 @@ import * as api from '@/lib/api';
 // Sparkle / "build" mark used on the chat trigger + bubble label.
 function SparkleIcon({size = 14, color}: {size?: number; color?: string}) {
   return (
-    <svg viewBox='0 0 24 24' style={{width: size, height: size, color: color ?? 'currentColor'}} aria-hidden>
+    <svg
+      viewBox='0 0 24 24'
+      style={{width: size, height: size, color: color ?? 'currentColor'}}
+      aria-hidden
+    >
       <path
         fill='currentColor'
         d='M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2zm6 12l.9 2.6L21.5 17l-2.6.4L18 20l-.9-2.6L14.5 17l2.6-.4L18 14zm-13 2l.7 2L8 17l-2.3.0L5 19l-.7-2L2 17l2.3-.0L5 16z'
@@ -41,7 +45,9 @@ export function SpecChat({
   onApply: (refined: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Array<{role: 'user' | 'assistant'; content: string; ts: string}>>([]);
+  const [messages, setMessages] = useState<
+    Array<{role: 'user' | 'assistant'; content: string; ts: string}>
+  >([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -67,11 +73,15 @@ export function SpecChat({
     setInput('');
     try {
       const resp = await api.conversationChat([{role: 'user', content: context}]);
-      const reply = (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
+      const reply =
+        (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
         (resp as unknown as {message?: string}).message ||
         (resp as unknown as {content?: string}).content ||
         '(no reply)';
-      setMessages((prev) => [...prev, {role: 'assistant', content: reply, ts: new Date().toISOString()}]);
+      setMessages((prev) => [
+        ...prev,
+        {role: 'assistant', content: reply, ts: new Date().toISOString()},
+      ]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Chat failed.');
     } finally {
@@ -103,20 +113,50 @@ export function SpecChat({
         overflow: 'hidden',
       }}
     >
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--signal-hairline)'}}>
-        <div style={{fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--signal-text-mute)', display: 'inline-flex', alignItems: 'center', gap: 6}}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '10px 14px',
+          borderBottom: '1px solid var(--signal-hairline)',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: 'var(--signal-text-mute)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
           <SparkleIcon size={12} color='var(--signal-coral)' />
           Build my spec{projectId ? ' · project-scoped' : ''}
         </div>
-        <Button kind='ghost' sm onClick={() => setOpen(false)}>Close</Button>
+        <Button kind='ghost' sm onClick={() => setOpen(false)}>
+          Close
+        </Button>
       </div>
 
-      <div style={{display: 'flex', flexDirection: 'column', gap: 8, padding: 14, maxHeight: 320, overflowY: 'auto'}}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          padding: 14,
+          maxHeight: 320,
+          overflowY: 'auto',
+        }}
+      >
         {messages.length === 0 && !busy && (
           <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
             Refine your spec before launching. Ask the agent to clarify scope, suggest test cases,
-            or split a big change into smaller specs. Project-scoped chats also have access to
-            your codebase memory.
+            or split a big change into smaller specs. Project-scoped chats also have access to your
+            codebase memory.
           </p>
         )}
         {messages.map((m, i) => (
@@ -132,11 +172,20 @@ export function SpecChat({
               ...(m.role === 'user' ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4}),
             }}
           >
-            <div style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 10, opacity: 0.6, marginBottom: 3}}>
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 10,
+                opacity: 0.6,
+                marginBottom: 3,
+              }}
+            >
               {m.role === 'user' ? 'YOU' : 'AGENT'} · {new Date(m.ts).toLocaleTimeString()}
             </div>
             {m.role === 'user' ? (
-              <div style={{fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>{m.content}</div>
+              <div style={{fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
+                {m.content}
+              </div>
             ) : (
               // Agent replies render as Markdown — same workflow ("Use as spec"
               // still copies the raw `content`), just nicer to read.
@@ -145,7 +194,17 @@ export function SpecChat({
           </div>
         ))}
         {busy && (
-          <div style={{alignSelf: 'flex-start', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--signal-text-dim)', fontSize: 12}}>
+          <div
+            style={{
+              alignSelf: 'flex-start',
+              padding: '6px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'var(--signal-text-dim)',
+              fontSize: 12,
+            }}
+          >
             <Spinner size={11} /> Thinking…
           </div>
         )}
@@ -153,10 +212,27 @@ export function SpecChat({
       </div>
 
       {err && (
-        <div style={{padding: '8px 14px', fontSize: 12, color: 'var(--signal-coral-text)', background: 'var(--signal-coral-soft)'}}>{err}</div>
+        <div
+          style={{
+            padding: '8px 14px',
+            fontSize: 12,
+            color: 'var(--signal-coral-text)',
+            background: 'var(--signal-coral-soft)',
+          }}
+        >
+          {err}
+        </div>
       )}
 
-      <div style={{padding: 10, borderTop: '1px solid var(--signal-hairline)', display: 'flex', gap: 6, alignItems: 'flex-end'}}>
+      <div
+        style={{
+          padding: 10,
+          borderTop: '1px solid var(--signal-hairline)',
+          display: 'flex',
+          gap: 6,
+          alignItems: 'flex-end',
+        }}
+      >
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -185,7 +261,9 @@ export function SpecChat({
           }}
         />
         <div style={{display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0}}>
-          <Button kind='primary' sm onClick={send} disabled={busy || !input.trim()}>Send</Button>
+          <Button kind='primary' sm onClick={send} disabled={busy || !input.trim()}>
+            Send
+          </Button>
           {lastAssistant && (
             <Button kind='secondary' sm onClick={() => onApply(lastAssistant.content)}>
               Use as spec

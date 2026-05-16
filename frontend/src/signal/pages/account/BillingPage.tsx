@@ -40,7 +40,11 @@ export default function BillingPage() {
           if (!raw.ok) return [];
           const data = (await raw.json()) as unknown;
           if (Array.isArray(data)) return data as PaymentRowLite[];
-          if (data && typeof data === 'object' && Array.isArray((data as {content?: PaymentRowLite[]}).content)) {
+          if (
+            data &&
+            typeof data === 'object' &&
+            Array.isArray((data as {content?: PaymentRowLite[]}).content)
+          ) {
             return (data as {content: PaymentRowLite[]}).content;
           }
           return [];
@@ -72,25 +76,65 @@ export default function BillingPage() {
   const seats = billingAny.seats ?? 1;
   const totalSpend = (billingAny.totalSpend ?? billingAny.amountPaid ?? 0) as number;
   const next = billingAny.nextInvoiceDate || billingAny.cycleEnd || '';
-  const usageAny = (usage || {}) as unknown as {totalRuns?: number; spend?: number; tokens?: number};
+  const usageAny = (usage || {}) as unknown as {
+    totalRuns?: number;
+    spend?: number;
+    tokens?: number;
+  };
   const totalRuns = usageAny.totalRuns ?? permissions?.currentRunCount ?? 0;
-  const runCap = permissions?.monthlyRunLimit && permissions.monthlyRunLimit !== -1 ? permissions.monthlyRunLimit : '∞';
+  const runCap =
+    permissions?.monthlyRunLimit && permissions.monthlyRunLimit !== -1
+      ? permissions.monthlyRunLimit
+      : '∞';
   const pm = billingAny.paymentMethod;
 
   return (
     <>
-      <TopBar title='Billing' sub={`${tier} · ${seats} seat${seats === 1 ? '' : 's'}`} back backTo='/account' />
+      <TopBar
+        title='Billing'
+        sub={`${tier} · ${seats} seat${seats === 1 ? '' : 's'}`}
+        back
+        backTo='/account'
+      />
       <Feed>
         {err && (
-          <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
             {err}
           </div>
         )}
 
         <Card style={{padding: 18}}>
-          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 14}}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
             <div>
-              <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-text-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 4}}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--signal-text-mute)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 4,
+                }}
+              >
                 {tier} tier
               </div>
               <div style={{fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em'}}>
@@ -101,61 +145,139 @@ export default function BillingPage() {
                     : 'Subscription active'}
               </div>
               <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2}}>
-                {seats} seat{seats === 1 ? '' : 's'}{pm?.brand && ` · billed via ${pm.brand}`}
+                {seats} seat{seats === 1 ? '' : 's'}
+                {pm?.brand && ` · billed via ${pm.brand}`}
                 {next && ` · renews ${new Date(next).toLocaleDateString()}`}
               </div>
             </div>
             <div style={{display: 'flex', gap: 6}}>
-              <Button kind='secondary' sm to='/plans'>Change plan</Button>
-              <Button kind='primary' sm to='/topup'>Top up credits</Button>
+              <Button kind='secondary' sm to='/plans'>
+                Change plan
+              </Button>
+              <Button kind='primary' sm to='/topup'>
+                Top up credits
+              </Button>
             </div>
           </div>
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingTop: 12, borderTop: '1px solid var(--signal-hairline)', fontSize: 12}}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 12,
+              paddingTop: 12,
+              borderTop: '1px solid var(--signal-hairline)',
+              fontSize: 12,
+            }}
+          >
             <div>
-              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>Runs</div>
-              <div style={{fontWeight: 700, fontSize: 16}}>{totalRuns} / {runCap}</div>
+              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>
+                Runs
+              </div>
+              <div style={{fontWeight: 700, fontSize: 16}}>
+                {totalRuns} / {runCap}
+              </div>
             </div>
             <div>
-              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>Spent</div>
+              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>
+                Spent
+              </div>
               <div style={{fontWeight: 700, fontSize: 16}}>${totalSpend.toFixed(2)}</div>
             </div>
             <div>
-              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>Next invoice</div>
-              <div style={{fontWeight: 700, fontSize: 16}}>{next ? new Date(next).toLocaleDateString() : '—'}</div>
+              <div style={{color: 'var(--signal-text-dim)', fontSize: 11, marginBottom: 2}}>
+                Next invoice
+              </div>
+              <div style={{fontWeight: 700, fontSize: 16}}>
+                {next ? new Date(next).toLocaleDateString() : '—'}
+              </div>
             </div>
           </div>
         </Card>
 
         <SectionHeader>This cycle</SectionHeader>
         <Card>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8}}>
-            <div style={{fontSize: 11, fontWeight: 700, color: 'var(--signal-text-mute)', letterSpacing: '0.14em', textTransform: 'uppercase'}}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'baseline',
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--signal-text-mute)',
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+              }}
+            >
               Runs used
             </div>
-            <div style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--signal-text-dim)'}}>
-              {billingAny.cycleStart ? new Date(billingAny.cycleStart).toLocaleDateString() : '—'}{' '}–{' '}
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 12,
+                color: 'var(--signal-text-dim)',
+              }}
+            >
+              {billingAny.cycleStart ? new Date(billingAny.cycleStart).toLocaleDateString() : '—'} –{' '}
               {billingAny.cycleEnd ? new Date(billingAny.cycleEnd).toLocaleDateString() : '—'}
             </div>
           </div>
-          <div style={{fontSize: 36, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, marginBottom: 8}}>
+          <div
+            style={{
+              fontSize: 36,
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+              marginBottom: 8,
+            }}
+          >
             {totalRuns}
-            <span style={{fontSize: 18, color: 'var(--signal-text-mute)', fontWeight: 400}}> / {runCap}</span>
+            <span style={{fontSize: 18, color: 'var(--signal-text-mute)', fontWeight: 400}}>
+              {' '}
+              / {runCap}
+            </span>
           </div>
           {typeof runCap === 'number' && runCap > 0 && (
-            <div style={{height: 6, background: 'var(--signal-card-elev)', borderRadius: 3, overflow: 'hidden', marginBottom: 14}}>
-              <div style={{height: '100%', width: `${Math.min(100, (totalRuns / runCap) * 100)}%`, background: 'linear-gradient(90deg, var(--signal-mint), var(--signal-y))', borderRadius: 3}} />
+            <div
+              style={{
+                height: 6,
+                background: 'var(--signal-card-elev)',
+                borderRadius: 3,
+                overflow: 'hidden',
+                marginBottom: 14,
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${Math.min(100, (totalRuns / runCap) * 100)}%`,
+                  background: 'linear-gradient(90deg, var(--signal-mint), var(--signal-y))',
+                  borderRadius: 3,
+                }}
+              />
             </div>
           )}
           <KvList
             pairs={[
               {k: 'Tier', v: tier},
               {k: 'Spend (cycle)', v: `$${totalSpend.toFixed(2)}`},
-              {k: 'Tokens (30d)', v: usageAny.tokens != null ? usageAny.tokens.toLocaleString() : '—'},
+              {
+                k: 'Tokens (30d)',
+                v: usageAny.tokens != null ? usageAny.tokens.toLocaleString() : '—',
+              },
             ]}
           />
         </Card>
 
-        <SectionHeader action={payments.length > 6 ? <span>All {payments.length}</span> : undefined}>Invoices</SectionHeader>
+        <SectionHeader
+          action={payments.length > 6 ? <span>All {payments.length}</span> : undefined}
+        >
+          Invoices
+        </SectionHeader>
         {payments.length === 0 ? (
           <Card>
             <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
@@ -176,7 +298,7 @@ export default function BillingPage() {
                   <>
                     <span className='mono'>{p.gateway || 'card'}</span>
                     <span>·</span>
-                    <span>{paid ? 'Paid' : (p.status || 'pending')}</span>
+                    <span>{paid ? 'Paid' : p.status || 'pending'}</span>
                     {p.createdAt && (
                       <>
                         <span>·</span>
@@ -212,10 +334,14 @@ export default function BillingPage() {
           <div style={{flex: 1}}>
             <div style={{fontSize: 14, fontWeight: 500}}>•••• {pm?.last4 || '—'}</div>
             <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
-              {pm?.expMonth && pm?.expYear ? `Expires ${pm.expMonth.toString().padStart(2, '0')}/${(pm.expYear % 100).toString().padStart(2, '0')}` : 'No card on file'}
+              {pm?.expMonth && pm?.expYear
+                ? `Expires ${pm.expMonth.toString().padStart(2, '0')}/${(pm.expYear % 100).toString().padStart(2, '0')}`
+                : 'No card on file'}
             </div>
           </div>
-          <Button kind='secondary' sm>Update</Button>
+          <Button kind='secondary' sm>
+            Update
+          </Button>
         </Card>
       </Feed>
     </>

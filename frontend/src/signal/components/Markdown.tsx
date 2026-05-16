@@ -10,11 +10,7 @@ import {ReactNode} from 'react';
  */
 export function Markdown({children}: {children: string}) {
   const blocks = parseBlocks(children || '');
-  return (
-    <div className='signal-md'>
-      {blocks.map((b, i) => renderBlock(b, i))}
-    </div>
-  );
+  return <div className='signal-md'>{blocks.map((b, i) => renderBlock(b, i))}</div>;
 }
 
 type Block =
@@ -96,7 +92,16 @@ function parseBlocks(src: string): Block[] {
     }
     // Paragraph — accumulate until empty line / block boundary.
     const buf: string[] = [];
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^#{1,6}\s/.test(lines[i]) && !/^>\s?/.test(lines[i]) && !/^\s*[-*+]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i]) && !/^---+\s*$/.test(lines[i])) {
+    while (
+      i < lines.length &&
+      !/^\s*$/.test(lines[i]) &&
+      !/^```/.test(lines[i]) &&
+      !/^#{1,6}\s/.test(lines[i]) &&
+      !/^>\s?/.test(lines[i]) &&
+      !/^\s*[-*+]\s+/.test(lines[i]) &&
+      !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !/^---+\s*$/.test(lines[i])
+    ) {
       buf.push(lines[i]);
       i++;
     }
@@ -128,11 +133,30 @@ function renderInline(text: string): ReactNode[] {
   if (last < text.length) tokens.push({type: 'text', value: text.slice(last)});
   return tokens.map((t, i) => {
     switch (t.type) {
-      case 'code': return <code key={i} className='signal-md-code'>{t.value}</code>;
-      case 'bold': return <strong key={i}>{t.value}</strong>;
-      case 'italic': return <em key={i}>{t.value}</em>;
-      case 'link': return <a key={i} href={t.href} target='_blank' rel='noopener noreferrer' className='signal-md-link'>{t.text}</a>;
-      default: return <span key={i}>{t.value}</span>;
+      case 'code':
+        return (
+          <code key={i} className='signal-md-code'>
+            {t.value}
+          </code>
+        );
+      case 'bold':
+        return <strong key={i}>{t.value}</strong>;
+      case 'italic':
+        return <em key={i}>{t.value}</em>;
+      case 'link':
+        return (
+          <a
+            key={i}
+            href={t.href}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='signal-md-link'
+          >
+            {t.text}
+          </a>
+        );
+      default:
+        return <span key={i}>{t.value}</span>;
     }
   });
 }
@@ -140,11 +164,19 @@ function renderInline(text: string): ReactNode[] {
 function renderBlock(b: Block, i: number): ReactNode {
   switch (b.kind) {
     case 'h': {
-      const Tag = (`h${Math.min(b.level + 2, 6)}` as unknown) as 'h3';
-      return <Tag key={i} className={`signal-md-h signal-md-h${b.level}`}>{renderInline(b.text)}</Tag>;
+      const Tag = `h${Math.min(b.level + 2, 6)}` as unknown as 'h3';
+      return (
+        <Tag key={i} className={`signal-md-h signal-md-h${b.level}`}>
+          {renderInline(b.text)}
+        </Tag>
+      );
     }
     case 'p':
-      return <p key={i} className='signal-md-p'>{renderInline(b.text)}</p>;
+      return (
+        <p key={i} className='signal-md-p'>
+          {renderInline(b.text)}
+        </p>
+      );
     case 'code':
       return (
         <pre key={i} className='signal-md-codeblock'>
@@ -153,11 +185,27 @@ function renderBlock(b: Block, i: number): ReactNode {
         </pre>
       );
     case 'ul':
-      return <ul key={i} className='signal-md-list'>{b.items.map((it, j) => <li key={j}>{renderInline(it)}</li>)}</ul>;
+      return (
+        <ul key={i} className='signal-md-list'>
+          {b.items.map((it, j) => (
+            <li key={j}>{renderInline(it)}</li>
+          ))}
+        </ul>
+      );
     case 'ol':
-      return <ol key={i} className='signal-md-list'>{b.items.map((it, j) => <li key={j}>{renderInline(it)}</li>)}</ol>;
+      return (
+        <ol key={i} className='signal-md-list'>
+          {b.items.map((it, j) => (
+            <li key={j}>{renderInline(it)}</li>
+          ))}
+        </ol>
+      );
     case 'quote':
-      return <blockquote key={i} className='signal-md-quote'>{renderInline(b.text)}</blockquote>;
+      return (
+        <blockquote key={i} className='signal-md-quote'>
+          {renderInline(b.text)}
+        </blockquote>
+      );
     case 'hr':
       return <hr key={i} className='signal-md-hr' />;
   }

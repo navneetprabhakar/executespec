@@ -30,8 +30,11 @@ export default function ComposePage() {
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState<Provider>(
-    ((user as unknown as {defaultProvider?: string})?.defaultProvider?.toLowerCase() === 'openai' ? 'openai' :
-      (user as unknown as {defaultProvider?: string})?.defaultProvider?.toLowerCase() === 'gemini' ? 'gemini' : 'anthropic'),
+    (user as unknown as {defaultProvider?: string})?.defaultProvider?.toLowerCase() === 'openai'
+      ? 'openai'
+      : (user as unknown as {defaultProvider?: string})?.defaultProvider?.toLowerCase() === 'gemini'
+        ? 'gemini'
+        : 'anthropic',
   );
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -53,7 +56,10 @@ export default function ComposePage() {
       setSpec(pending);
       sessionStorage.removeItem('signal:pending-spec');
     }
-    api.getProjects().then((p) => setProjects(p.filter((x) => !x.archivedAt))).catch(() => {});
+    api
+      .getProjects()
+      .then((p) => setProjects(p.filter((x) => !x.archivedAt)))
+      .catch(() => {});
   }, []);
 
   // Load repos when project changes.
@@ -63,11 +69,14 @@ export default function ComposePage() {
       setSelectedRepoIds([]);
       return;
     }
-    api.getProjectRepos(projectId)
+    api
+      .getProjectRepos(projectId)
       .then((rs) => {
         setProjectRepos(rs as unknown as Array<Record<string, unknown>>);
         const allIds = (rs as unknown as Array<Record<string, unknown>>)
-          .map((r) => String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || ''))
+          .map((r) =>
+            String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || ''),
+          )
           .filter(Boolean);
         setSelectedRepoIds(allIds);
       })
@@ -86,13 +95,18 @@ export default function ComposePage() {
       return;
     }
     const t = setTimeout(() => {
-      api.estimateRun(projectId, spec.trim()).then(setEstimate).catch(() => setEstimate(null));
+      api
+        .estimateRun(projectId, spec.trim())
+        .then(setEstimate)
+        .catch(() => setEstimate(null));
     }, 600);
     return () => clearTimeout(t);
   }, [projectId, spec]);
 
   function toggleRepo(repoId: string) {
-    setSelectedRepoIds((prev) => prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId]);
+    setSelectedRepoIds((prev) =>
+      prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId],
+    );
   }
 
   async function onSubmit() {
@@ -121,18 +135,42 @@ export default function ComposePage() {
     }
   }
 
-  const runsUsed = permissions ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}` : '— / —';
-  const isAtCap = permissions != null && permissions.monthlyRunLimit !== -1 && permissions.currentRunCount >= permissions.monthlyRunLimit;
-  const estimateCells = estimate ? [
-    {k: 'Tasks (p25)', v: String((estimate as unknown as {p25Tasks?: number}).p25Tasks ?? '—')},
-    {k: 'Tasks (p75)', v: String((estimate as unknown as {p75Tasks?: number}).p75Tasks ?? '—')},
-    {k: 'Cost (p25)', v: (estimate as unknown as {p25CostUsd?: number}).p25CostUsd != null ? `$${(estimate as unknown as {p25CostUsd: number}).p25CostUsd.toFixed(2)}` : '—'},
-    {k: 'Cost (p75)', v: (estimate as unknown as {p75CostUsd?: number}).p75CostUsd != null ? `$${(estimate as unknown as {p75CostUsd: number}).p75CostUsd.toFixed(2)}` : '—'},
-  ] : null;
+  const runsUsed = permissions
+    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
+    : '— / —';
+  const isAtCap =
+    permissions != null &&
+    permissions.monthlyRunLimit !== -1 &&
+    permissions.currentRunCount >= permissions.monthlyRunLimit;
+  const estimateCells = estimate
+    ? [
+        {k: 'Tasks (p25)', v: String((estimate as unknown as {p25Tasks?: number}).p25Tasks ?? '—')},
+        {k: 'Tasks (p75)', v: String((estimate as unknown as {p75Tasks?: number}).p75Tasks ?? '—')},
+        {
+          k: 'Cost (p25)',
+          v:
+            (estimate as unknown as {p25CostUsd?: number}).p25CostUsd != null
+              ? `$${(estimate as unknown as {p25CostUsd: number}).p25CostUsd.toFixed(2)}`
+              : '—',
+        },
+        {
+          k: 'Cost (p75)',
+          v:
+            (estimate as unknown as {p75CostUsd?: number}).p75CostUsd != null
+              ? `$${(estimate as unknown as {p75CostUsd: number}).p75CostUsd.toFixed(2)}`
+              : '—',
+        },
+      ]
+    : null;
 
   return (
     <>
-      <TopBar title='New spec' sub={`${PROVIDER_LABEL[provider]} · ${tier} tier`} back backTo='/home' />
+      <TopBar
+        title='New spec'
+        sub={`${PROVIDER_LABEL[provider]} · ${tier} tier`}
+        back
+        backTo='/home'
+      />
       <Feed>
         {err && (
           <div
@@ -151,12 +189,24 @@ export default function ComposePage() {
         )}
 
         {isAtCap && (
-          <Card style={{background: 'var(--signal-y-soft)', borderColor: 'transparent', marginBottom: 12}}>
+          <Card
+            style={{
+              background: 'var(--signal-y-soft)',
+              borderColor: 'transparent',
+              marginBottom: 12,
+            }}
+          >
             <div style={{fontSize: 13, color: 'var(--signal-y-text)', lineHeight: 1.5}}>
-              You've used all <strong>{permissions?.monthlyRunLimit}</strong> runs in this billing cycle.{' '}
-              <a href='/topup' style={{color: 'var(--signal-coral)', fontWeight: 600}}>Top up credits →</a>{' '}
+              You've used all <strong>{permissions?.monthlyRunLimit}</strong> runs in this billing
+              cycle.{' '}
+              <a href='/topup' style={{color: 'var(--signal-coral)', fontWeight: 600}}>
+                Top up credits →
+              </a>{' '}
               or{' '}
-              <a href='/plans' style={{color: 'var(--signal-coral)', fontWeight: 600}}>upgrade your plan →</a>.
+              <a href='/plans' style={{color: 'var(--signal-coral)', fontWeight: 600}}>
+                upgrade your plan →
+              </a>
+              .
             </div>
           </Card>
         )}
@@ -169,13 +219,22 @@ export default function ComposePage() {
           submitBusy={busy}
           chips={
             <>
-              <Chip kind={provider === 'anthropic' ? 'active' : 'default'} onClick={() => setProvider('anthropic')}>
+              <Chip
+                kind={provider === 'anthropic' ? 'active' : 'default'}
+                onClick={() => setProvider('anthropic')}
+              >
                 Anthropic
               </Chip>
-              <Chip kind={provider === 'openai' ? 'active' : 'default'} onClick={() => setProvider('openai')}>
+              <Chip
+                kind={provider === 'openai' ? 'active' : 'default'}
+                onClick={() => setProvider('openai')}
+              >
                 OpenAI
               </Chip>
-              <Chip kind={provider === 'gemini' ? 'active' : 'default'} onClick={() => setProvider('gemini')}>
+              <Chip
+                kind={provider === 'gemini' ? 'active' : 'default'}
+                onClick={() => setProvider('gemini')}
+              >
                 Gemini
               </Chip>
             </>
@@ -191,11 +250,18 @@ export default function ComposePage() {
         <SectionHeader>Project</SectionHeader>
         <div className='signal-composer-card' style={{padding: 14}}>
           <div className='composer-chips'>
-            <Chip kind={projectId == null ? 'active' : 'default'} onClick={() => setProjectId(null)}>
+            <Chip
+              kind={projectId == null ? 'active' : 'default'}
+              onClick={() => setProjectId(null)}
+            >
               ✓ Sandbox (no repo)
             </Chip>
             {projects.map((p) => (
-              <Chip key={p.id} kind={projectId === p.id ? 'active' : 'default'} onClick={() => setProjectId(p.id)}>
+              <Chip
+                key={p.id}
+                kind={projectId === p.id ? 'active' : 'default'}
+                onClick={() => setProjectId(p.id)}
+              >
                 {p.name}
               </Chip>
             ))}
@@ -213,12 +279,23 @@ export default function ComposePage() {
             <div className='signal-composer-card' style={{padding: 14}}>
               <div className='composer-chips'>
                 {projectRepos.map((r) => {
-                  const rId = String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '');
-                  const rName = String((r as {repoName?: string; name?: string}).repoName || (r as {name?: string}).name || rId);
+                  const rId = String(
+                    (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
+                  );
+                  const rName = String(
+                    (r as {repoName?: string; name?: string}).repoName ||
+                      (r as {name?: string}).name ||
+                      rId,
+                  );
                   const selected = selectedRepoIds.includes(rId);
                   return (
-                    <Chip key={rId} kind={selected ? 'active' : 'default'} onClick={() => toggleRepo(rId)}>
-                      {selected ? '✓ ' : ''}{rName}
+                    <Chip
+                      key={rId}
+                      kind={selected ? 'active' : 'default'}
+                      onClick={() => toggleRepo(rId)}
+                    >
+                      {selected ? '✓ ' : ''}
+                      {rName}
                     </Chip>
                   );
                 })}
@@ -244,7 +321,9 @@ export default function ComposePage() {
                       min='0.5'
                       max={tierMaxCap}
                       value={costCap}
-                      onChange={(e) => setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))}
+                      onChange={(e) =>
+                        setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
+                      }
                       style={{
                         width: 80,
                         background: 'var(--signal-card-elev)',
@@ -257,7 +336,9 @@ export default function ComposePage() {
                         outline: 'none',
                       }}
                     />
-                    <span style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>USD · max ${tierMaxCap === 1000 ? '∞' : tierMaxCap} ({tier})</span>
+                    <span style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
+                      USD · max ${tierMaxCap === 1000 ? '∞' : tierMaxCap} ({tier})
+                    </span>
                   </div>
                 ),
               },
@@ -268,7 +349,9 @@ export default function ComposePage() {
         {estimateCells && (
           <>
             <SectionHeader>Estimate from project history</SectionHeader>
-            <Card><KvList pairs={estimateCells} /></Card>
+            <Card>
+              <KvList pairs={estimateCells} />
+            </Card>
           </>
         )}
 

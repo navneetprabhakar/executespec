@@ -23,19 +23,9 @@ import V2IntegrationsPage from '@/pages/IntegrationsPage';
 import V2PricingPage from '@/pages/PricingPage';
 import LargeTitle from '../components/LargeTitle';
 
-type Surface =
-  | 'account'
-  | 'billing'
-  | 'integrations'
-  | 'team'
-  | 'trust'
-  | 'insights'
-  | 'pricing';
+type Surface = 'account' | 'billing' | 'integrations' | 'team' | 'trust' | 'insights' | 'pricing';
 
-const SURFACE_META: Record<
-  Surface,
-  {title: string; subtitle: string; Comp: () => JSX.Element}
-> = {
+const SURFACE_META: Record<Surface, {title: string; subtitle: string; Comp: () => JSX.Element}> = {
   account: {
     title: 'Account',
     subtitle: 'Profile · password · MFA · email preferences',
@@ -108,10 +98,7 @@ export default function EmbedPage() {
         Settings
       </Link>
       <LargeTitle title={title} subtitle={subtitle} />
-      <div
-        className='v4-card'
-        style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}
-      >
+      <div className='v4-card' style={{padding: 'clamp(12px, 3vw, 18px)', marginBottom: 24}}>
         <Comp />
       </div>
     </>

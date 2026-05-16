@@ -19,11 +19,30 @@ import * as api from '@/lib/api';
  *     was Repos → "View architecture", which 404'd on projects with no linked
  *     repos.
  */
-export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | 'runs' | 'code' | 'chat' | 'activity' | 'members' | 'architecture' | 'settings'}) {
+export function ProjectTabs({
+  active,
+}: {
+  active:
+    | 'compose'
+    | 'pulse'
+    | 'repos'
+    | 'runs'
+    | 'code'
+    | 'chat'
+    | 'activity'
+    | 'members'
+    | 'architecture'
+    | 'settings';
+}) {
   const {projectId} = useParams();
   const id = projectId || '';
   const base = `/projects/${id}`;
-  const [counts, setCounts] = useState<{repos?: number; runs?: number; code?: number; members?: number}>({});
+  const [counts, setCounts] = useState<{
+    repos?: number;
+    runs?: number;
+    code?: number;
+    members?: number;
+  }>({});
 
   useEffect(() => {
     if (!id) return;
@@ -35,13 +54,19 @@ export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | '
     ]).then(([dash, members, repos]) => {
       if (cancelled) return;
       const d = (dash.status === 'fulfilled' ? dash.value : null) as unknown as {
-        activeRuns?: number; completedRuns?: number; failedRuns?: number;
-        openFindings?: number; totalRepos?: number;
+        activeRuns?: number;
+        completedRuns?: number;
+        failedRuns?: number;
+        openFindings?: number;
+        totalRepos?: number;
       } | null;
-      const memberArr: api.ProjectMemberDto[] = members.status === 'fulfilled' && Array.isArray(members.value) ? members.value : [];
+      const memberArr: api.ProjectMemberDto[] =
+        members.status === 'fulfilled' && Array.isArray(members.value) ? members.value : [];
       const repoArr = repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value : [];
 
-      const totalRuns = d ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0) : undefined;
+      const totalRuns = d
+        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0)
+        : undefined;
       // Clamp every count to `>= 0` so any garbage signed-int leak (the bug
       // that produced "Members · -1") can never reach the badge.
       const safe = (n?: number) => (typeof n === 'number' && n >= 0 ? n : undefined);
@@ -70,7 +95,11 @@ export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | '
         {label: label('Code', counts.code), to: `${base}/code`, active: active === 'code'},
         {label: 'Chat', to: `${base}/chat`, active: active === 'chat'},
         {label: 'Activity', to: `${base}/activity`, active: active === 'activity'},
-        {label: label('Members', counts.members), to: `${base}/members`, active: active === 'members'},
+        {
+          label: label('Members', counts.members),
+          to: `${base}/members`,
+          active: active === 'members',
+        },
         {label: 'Architecture', to: `${base}/architecture`, active: active === 'architecture'},
         {label: 'Settings', to: `${base}/settings`, active: active === 'settings'},
       ]}

@@ -5,7 +5,13 @@ interface IconProps {
   className?: string;
 }
 
-const stroke = {stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none'};
+const stroke = {
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  fill: 'none',
+};
 
 export function ArrowLeft({size = 18, className}: IconProps) {
   return (

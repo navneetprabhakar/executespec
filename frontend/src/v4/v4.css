@@ -49,10 +49,8 @@
   --v4-dur-slow: 360ms;
 
   /* ── Depth ──────────────────────────────────────────────────────── */
-  --v4-shadow-rest:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
-  --v4-shadow-hover:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.55);
+  --v4-shadow-rest: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --v4-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.55);
   --v4-shadow-sheet: 0 -16px 48px rgba(0, 0, 0, 0.55);
   --v4-shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.65);
 
@@ -75,8 +73,7 @@
 
   background: var(--v4-bg);
   color: var(--v4-text);
-  font-family:
-    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-feature-settings: 'cv11' 1;
   min-height: 100vh;
   min-height: 100dvh;
@@ -108,10 +105,8 @@
   --v4-fail: #dc2626;
   --v4-warn: #d97706;
 
-  --v4-shadow-rest:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --v4-shadow-hover:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 8px 24px rgba(15, 23, 42, 0.1);
+  --v4-shadow-rest: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --v4-shadow-hover: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 8px 24px rgba(15, 23, 42, 0.1);
 }
 
 /* ── Chrome heights (shared with JS via getComputedStyle / data attrs) ─ */
@@ -141,8 +136,7 @@
   width: 100%;
   margin: 0 auto;
   max-width: 880px;
-  padding: 12px clamp(16px, 4vw, 24px)
-    calc(env(safe-area-inset-bottom, 0px) + 96px);
+  padding: 12px clamp(16px, 4vw, 24px) calc(env(safe-area-inset-bottom, 0px) + 96px);
 }
 @media (min-width: 768px) {
   .v4-main {
@@ -266,8 +260,13 @@
   background: var(--v4-queued);
 }
 @keyframes v4-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--v4-progress) 22%, transparent); }
-  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--v4-progress) 12%, transparent); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--v4-progress) 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--v4-progress) 12%, transparent);
+  }
 }
 
 /* ── Reduced motion ──────────────────────────────────────────────── */

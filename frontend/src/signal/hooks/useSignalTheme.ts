@@ -21,7 +21,10 @@ function resolveInitial(): SignalTheme {
   } catch {
     // localStorage might be unavailable (SSR, private mode)
   }
-  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches
+  ) {
     return 'dark';
   }
   return 'light';

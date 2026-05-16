@@ -132,23 +132,13 @@ function Row({
           {trailing}
         </span>
       )}
-      {chevron && (
-        <ChevronRight
-          size={16}
-          aria-hidden='true'
-          className='v4-list-row__chevron'
-        />
-      )}
+      {chevron && <ChevronRight size={16} aria-hidden='true' className='v4-list-row__chevron' />}
     </>
   );
 
   if (href) {
     return (
-      <a
-        href={href}
-        className='v4-list-row v4-press'
-        style={{textDecoration: 'none'}}
-      >
+      <a href={href} className='v4-list-row v4-press' style={{textDecoration: 'none'}}>
         {inner}
       </a>
     );
@@ -160,7 +150,11 @@ function Row({
       </button>
     );
   }
-  return <div className='v4-list-row' style={{cursor: 'default'}}>{inner}</div>;
+  return (
+    <div className='v4-list-row' style={{cursor: 'default'}}>
+      {inner}
+    </div>
+  );
 }
 
 ListGroup.Row = Row;

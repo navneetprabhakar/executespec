@@ -50,8 +50,11 @@ export default function ProjectComposePage() {
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState<Provider>(
-    ((project?.aiProvider || '').toLowerCase() === 'openai' ? 'openai' :
-     (project?.aiProvider || '').toLowerCase() === 'gemini' ? 'gemini' : 'anthropic'),
+    (project?.aiProvider || '').toLowerCase() === 'openai'
+      ? 'openai'
+      : (project?.aiProvider || '').toLowerCase() === 'gemini'
+        ? 'gemini'
+        : 'anthropic',
   );
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
@@ -82,12 +85,15 @@ export default function ProjectComposePage() {
   // Project repos — checked by default so a spec lands against all linked code.
   useEffect(() => {
     if (!id) return;
-    api.getProjectRepos(id)
+    api
+      .getProjectRepos(id)
       .then((rs) => {
         const list = rs as unknown as Array<Record<string, unknown>>;
         setRepos(list);
         const ids = list
-          .map((r) => String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || ''))
+          .map((r) =>
+            String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || ''),
+          )
           .filter(Boolean);
         setSelectedRepoIds(ids);
       })
@@ -101,14 +107,25 @@ export default function ProjectComposePage() {
   // user has context about what's already shipped before writing the next spec.
   useEffect(() => {
     if (!id) return;
-    api.getRuns({projectId: id, page: 0, size: 5}).then((p) => {
-      setRecent(p.content);
-      const live = p.content.find((r) => {
-        const s = (r.status || '').toUpperCase();
-        return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+    api
+      .getRuns({projectId: id, page: 0, size: 5})
+      .then((p) => {
+        setRecent(p.content);
+        const live = p.content.find((r) => {
+          const s = (r.status || '').toUpperCase();
+          return (
+            s === 'CLASSIFYING' ||
+            s === 'PLANNING' ||
+            s === 'EXECUTING' ||
+            s === 'AWAITING_APPROVAL' ||
+            s === 'RUNNING'
+          );
+        });
+        setLiveRun(live ?? null);
+      })
+      .catch(() => {
+        setRecent([]);
       });
-      setLiveRun(live ?? null);
-    }).catch(() => { setRecent([]); });
   }, [id]);
 
   // Estimate p25/p75 cost + tasks for the current spec.
@@ -118,13 +135,18 @@ export default function ProjectComposePage() {
       return;
     }
     const t = setTimeout(() => {
-      api.estimateRun(id, spec.trim()).then(setEstimate).catch(() => setEstimate(null));
+      api
+        .estimateRun(id, spec.trim())
+        .then(setEstimate)
+        .catch(() => setEstimate(null));
     }, 600);
     return () => clearTimeout(t);
   }, [id, spec]);
 
   function toggleRepo(repoId: string) {
-    setSelectedRepoIds((prev) => prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId]);
+    setSelectedRepoIds((prev) =>
+      prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId],
+    );
   }
 
   async function onSubmit() {
@@ -152,8 +174,11 @@ export default function ProjectComposePage() {
   }
 
   const projectName = project?.name || 'project';
-  const repoSummary = repos.length === 0 ? '0 repos' : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}`;
-  const runsUsed = permissions ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}` : '— / —';
+  const repoSummary =
+    repos.length === 0 ? '0 repos' : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}`;
+  const runsUsed = permissions
+    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
+    : '— / —';
 
   return (
     <>
@@ -164,15 +189,33 @@ export default function ProjectComposePage() {
         backTo='/projects'
         actions={
           <>
-            <IconButton ariaLabel='Share' to={`/projects/${id}/members`}><Share size={18} /></IconButton>
-            <IconButton ariaLabel='More' to={`/projects/${id}/settings`}><More size={18} /></IconButton>
+            <IconButton ariaLabel='Share' to={`/projects/${id}/members`}>
+              <Share size={18} />
+            </IconButton>
+            <IconButton ariaLabel='More' to={`/projects/${id}/settings`}>
+              <More size={18} />
+            </IconButton>
           </>
         }
       />
       <Feed>
         <ProjectTabs active='compose' />
 
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
         {liveRun && (
           <LiveHero
@@ -180,13 +223,17 @@ export default function ProjectComposePage() {
             title={liveRun.userRequest?.slice(0, 120) || '—'}
             tasks='—'
             elapsed={relTime(liveRun.startedAt)}
-            spent={(liveRun as unknown as {actualCostUsd?: number}).actualCostUsd != null
-              ? `$${((liveRun as unknown as {actualCostUsd: number}).actualCostUsd).toFixed(2)}`
-              : '$0.00'}
+            spent={
+              (liveRun as unknown as {actualCostUsd?: number}).actualCostUsd != null
+                ? `$${(liveRun as unknown as {actualCostUsd: number}).actualCostUsd.toFixed(2)}`
+                : '$0.00'
+            }
             actions={
               <>
                 <LiveHeroAction to={`/plan/${liveRun.runId}`}>Plan</LiveHeroAction>
-                <LiveHeroAction to={`/live/${liveRun.runId}`} primary>Watch live</LiveHeroAction>
+                <LiveHeroAction to={`/live/${liveRun.runId}`} primary>
+                  Watch live
+                </LiveHeroAction>
               </>
             }
           />
@@ -200,18 +247,29 @@ export default function ProjectComposePage() {
           submitBusy={busy}
           chips={
             <>
-              <Chip kind={provider === 'anthropic' ? 'active' : 'default'} onClick={() => setProvider('anthropic')}>Anthropic</Chip>
-              <Chip kind={provider === 'openai' ? 'active' : 'default'} onClick={() => setProvider('openai')}>OpenAI</Chip>
-              <Chip kind={provider === 'gemini' ? 'active' : 'default'} onClick={() => setProvider('gemini')}>Gemini</Chip>
+              <Chip
+                kind={provider === 'anthropic' ? 'active' : 'default'}
+                onClick={() => setProvider('anthropic')}
+              >
+                Anthropic
+              </Chip>
+              <Chip
+                kind={provider === 'openai' ? 'active' : 'default'}
+                onClick={() => setProvider('openai')}
+              >
+                OpenAI
+              </Chip>
+              <Chip
+                kind={provider === 'gemini' ? 'active' : 'default'}
+                onClick={() => setProvider('gemini')}
+              >
+                Gemini
+              </Chip>
             </>
           }
         />
 
-        <SpecChat
-          projectId={id}
-          draftSpec={spec}
-          onApply={(refined) => setSpec(refined)}
-        />
+        <SpecChat projectId={id} draftSpec={spec} onApply={(refined) => setSpec(refined)} />
 
         {repos.length > 0 && (
           <>
@@ -219,12 +277,23 @@ export default function ProjectComposePage() {
             <div className='signal-composer-card' style={{padding: 14}}>
               <div className='composer-chips'>
                 {repos.map((r) => {
-                  const rId = String((r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '');
-                  const rName = String((r as {repoName?: string; name?: string}).repoName || (r as {name?: string}).name || rId);
+                  const rId = String(
+                    (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
+                  );
+                  const rName = String(
+                    (r as {repoName?: string; name?: string}).repoName ||
+                      (r as {name?: string}).name ||
+                      rId,
+                  );
                   const selected = selectedRepoIds.includes(rId);
                   return (
-                    <Chip key={rId} kind={selected ? 'active' : 'default'} onClick={() => toggleRepo(rId)}>
-                      {selected ? '✓ ' : ''}{rName}
+                    <Chip
+                      key={rId}
+                      kind={selected ? 'active' : 'default'}
+                      onClick={() => toggleRepo(rId)}
+                    >
+                      {selected ? '✓ ' : ''}
+                      {rName}
                     </Chip>
                   );
                 })}
@@ -244,36 +313,77 @@ export default function ProjectComposePage() {
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Tasks (p25)', v: String((estimate as unknown as {p25Tasks?: number}).p25Tasks ?? '—')},
-                  {k: 'Tasks (p75)', v: String((estimate as unknown as {p75Tasks?: number}).p75Tasks ?? '—')},
-                  {k: 'Cost (p25)', v: (estimate as unknown as {p25CostUsd?: number}).p25CostUsd != null ? `$${(estimate as unknown as {p25CostUsd: number}).p25CostUsd.toFixed(2)}` : '—'},
-                  {k: 'Cost (p75)', v: (estimate as unknown as {p75CostUsd?: number}).p75CostUsd != null ? `$${(estimate as unknown as {p75CostUsd: number}).p75CostUsd.toFixed(2)}` : '—'},
+                  {
+                    k: 'Tasks (p25)',
+                    v: String((estimate as unknown as {p25Tasks?: number}).p25Tasks ?? '—'),
+                  },
+                  {
+                    k: 'Tasks (p75)',
+                    v: String((estimate as unknown as {p75Tasks?: number}).p75Tasks ?? '—'),
+                  },
+                  {
+                    k: 'Cost (p25)',
+                    v:
+                      (estimate as unknown as {p25CostUsd?: number}).p25CostUsd != null
+                        ? `$${(estimate as unknown as {p25CostUsd: number}).p25CostUsd.toFixed(2)}`
+                        : '—',
+                  },
+                  {
+                    k: 'Cost (p75)',
+                    v:
+                      (estimate as unknown as {p75CostUsd?: number}).p75CostUsd != null
+                        ? `$${(estimate as unknown as {p75CostUsd: number}).p75CostUsd.toFixed(2)}`
+                        : '—',
+                  },
                 ]}
               />
             </Card>
           </>
         )}
 
-        <SectionHeader action={<a href={`/projects/${id}/runs`}>All runs</a>}>Recent runs in this project</SectionHeader>
+        <SectionHeader action={<a href={`/projects/${id}/runs`}>All runs</a>}>
+          Recent runs in this project
+        </SectionHeader>
         {recent === null ? (
           <>
             <SkeletonRow lines={2} />
             <SkeletonRow lines={2} />
           </>
         ) : recent.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No runs yet. Submit a spec above to start.</p></Card>
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No runs yet. Submit a spec above to start.
+            </p>
+          </Card>
         ) : (
           recent.slice(0, 4).map((r) => {
             const s = (r.status || '').toUpperCase();
             const score = (r as unknown as {verifiedScore?: number}).verifiedScore;
             const cost = (r as unknown as {actualCostUsd?: number}).actualCostUsd;
-            const isLive = s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
+            const isLive =
+              s === 'CLASSIFYING' ||
+              s === 'PLANNING' ||
+              s === 'EXECUTING' ||
+              s === 'AWAITING_APPROVAL' ||
+              s === 'RUNNING';
             return (
               <Row
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
-                dot={isLive ? 'live' : s === 'COMPLETED' ? 'mint' : s === 'FAILED' || s === 'CANCELLED' ? 'coral' : 'lavender'}
-                title={r.userRequest || (r as unknown as {runTitle?: string}).runTitle || `Run R-${r.runId.slice(0, 6)}`}
+                dot={
+                  isLive
+                    ? 'live'
+                    : s === 'COMPLETED'
+                      ? 'mint'
+                      : s === 'FAILED' || s === 'CANCELLED'
+                        ? 'coral'
+                        : 'lavender'
+                }
+                title={
+                  r.userRequest ||
+                  (r as unknown as {runTitle?: string}).runTitle ||
+                  `Run R-${r.runId.slice(0, 6)}`
+                }
                 meta={
                   <>
                     <span className='mono'>R-{r.runId.slice(0, 6)}</span>
@@ -281,8 +391,12 @@ export default function ProjectComposePage() {
                     <span>{relTime(r.startedAt)}</span>
                   </>
                 }
-                trailing={score != null ? `${Math.round(score)}%` : isLive ? 'live' : s.toLowerCase()}
-                trailingKind={score == null ? 'default' : score >= 85 ? 'good' : score >= 70 ? 'warn' : 'fail'}
+                trailing={
+                  score != null ? `${Math.round(score)}%` : isLive ? 'live' : s.toLowerCase()
+                }
+                trailingKind={
+                  score == null ? 'default' : score >= 85 ? 'good' : score >= 70 ? 'warn' : 'fail'
+                }
                 trailingLabel={cost != null ? `$${cost.toFixed(2)}` : undefined}
               />
             );
@@ -293,16 +407,27 @@ export default function ProjectComposePage() {
         <KvList
           pairs={[
             {k: 'Provider', v: PROVIDER_LABEL[provider]},
-            {k: 'Tier', v: <StatusPill kind={tier === 'FREE' ? 'needs' : 'shipped'}>{tier}</StatusPill>},
+            {
+              k: 'Tier',
+              v: <StatusPill kind={tier === 'FREE' ? 'needs' : 'shipped'}>{tier}</StatusPill>,
+            },
             {k: 'Mode', v: 'PRODUCTION (plan gate)'},
             {k: 'Repos linked', v: String(repos.length)},
           ]}
         />
         <div style={{display: 'flex', gap: 8, marginTop: 10}}>
-          <Button kind='secondary' block sm to={`/projects/${id}/pulse`}>Pulse</Button>
-          <Button kind='secondary' block sm to={`/projects/${id}/code`}>Code</Button>
-          <Button kind='secondary' block sm to={`/projects/${id}/chat`}>Chat</Button>
-          <Button kind='secondary' block sm to={`/projects/${id}/settings`}>Settings</Button>
+          <Button kind='secondary' block sm to={`/projects/${id}/pulse`}>
+            Pulse
+          </Button>
+          <Button kind='secondary' block sm to={`/projects/${id}/code`}>
+            Code
+          </Button>
+          <Button kind='secondary' block sm to={`/projects/${id}/chat`}>
+            Chat
+          </Button>
+          <Button kind='secondary' block sm to={`/projects/${id}/settings`}>
+            Settings
+          </Button>
         </div>
       </Feed>
     </>

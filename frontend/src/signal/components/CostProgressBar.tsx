@@ -14,13 +14,17 @@ export function CostProgressBar({
   const pct = cap > 0 ? Math.min(100, (spent / cap) * 100) : 0;
   const tone = pct >= 100 ? 'fail' : pct >= 80 ? 'warn' : 'good';
   const fillColor =
-    tone === 'fail' ? 'var(--signal-coral)' :
-    tone === 'warn' ? 'var(--signal-y)' :
-    'var(--signal-mint)';
+    tone === 'fail'
+      ? 'var(--signal-coral)'
+      : tone === 'warn'
+        ? 'var(--signal-y)'
+        : 'var(--signal-mint)';
   const labelColor =
-    tone === 'fail' ? 'var(--signal-coral-text)' :
-    tone === 'warn' ? 'var(--signal-y-text)' :
-    'var(--signal-mint-text-on-light)';
+    tone === 'fail'
+      ? 'var(--signal-coral-text)'
+      : tone === 'warn'
+        ? 'var(--signal-y-text)'
+        : 'var(--signal-mint-text-on-light)';
   return (
     <div
       role='progressbar'

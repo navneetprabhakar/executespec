@@ -72,10 +72,7 @@ export default function MissionCard({run}: {run: MissionRun}) {
       : run.status.replace(/_/g, ' ').toLowerCase();
 
   return (
-    <article
-      className='v4-card v4-reveal'
-      style={{padding: '18px 18px 14px'}}
-    >
+    <article className='v4-card v4-reveal' style={{padding: '18px 18px 14px'}}>
       {/* Header — status dot + verdict label inline */}
       <div
         style={{
@@ -135,8 +132,7 @@ export default function MissionCard({run}: {run: MissionRun}) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns:
-            score != null ? 'auto 1fr' : '1fr',
+          gridTemplateColumns: score != null ? 'auto 1fr' : '1fr',
           gap: 16,
           marginTop: 14,
           alignItems: 'center',
@@ -195,11 +191,11 @@ export default function MissionCard({run}: {run: MissionRun}) {
           }}
         >
           {run.buildOk != null && (
-            <Chip tone={run.buildOk ? 'success' : 'fail'}>
-              build {run.buildOk ? '✓' : '✗'}
-            </Chip>
+            <Chip tone={run.buildOk ? 'success' : 'fail'}>build {run.buildOk ? '✓' : '✗'}</Chip>
           )}
-          {run.reviewerVerdict && <Chip tone='neutral'>reviewer {run.reviewerVerdict.toLowerCase()}</Chip>}
+          {run.reviewerVerdict && (
+            <Chip tone='neutral'>reviewer {run.reviewerVerdict.toLowerCase()}</Chip>
+          )}
           {run.testRatio && <Chip tone='neutral'>tests {run.testRatio}</Chip>}
           {run.actualCostUsd != null && run.actualCostUsd > 0 && (
             <Chip tone='neutral'>{fmtCost(run.actualCostUsd)}</Chip>
@@ -281,7 +277,13 @@ export default function MissionCard({run}: {run: MissionRun}) {
   );
 }
 
-function Chip({tone, children}: {tone: 'success' | 'fail' | 'warn' | 'neutral'; children: React.ReactNode}) {
+function Chip({
+  tone,
+  children,
+}: {
+  tone: 'success' | 'fail' | 'warn' | 'neutral';
+  children: React.ReactNode;
+}) {
   const colour =
     tone === 'success'
       ? 'var(--v4-success)'

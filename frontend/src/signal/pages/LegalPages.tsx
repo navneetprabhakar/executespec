@@ -18,16 +18,37 @@ export function TermsPage() {
     <LegalShell title='Terms of Service' subtitle='Last updated 1 May 2026'>
       <p>By using ExecuteSpec ("we", "us") you agree to these terms.</p>
       <h3>Acceptable use</h3>
-      <p>You may use the platform to plan, build, test, and ship code via AI agents. You may NOT use it to generate malware, target individuals, scrape services in violation of their terms, or run any workload that violates applicable law.</p>
+      <p>
+        You may use the platform to plan, build, test, and ship code via AI agents. You may NOT use
+        it to generate malware, target individuals, scrape services in violation of their terms, or
+        run any workload that violates applicable law.
+      </p>
       <h3>Billing</h3>
-      <p>Paid plans are billed monthly or annually as selected. Credits never expire; subscription cancellation stops future renewals but does not refund the current period.</p>
+      <p>
+        Paid plans are billed monthly or annually as selected. Credits never expire; subscription
+        cancellation stops future renewals but does not refund the current period.
+      </p>
       <h3>Data ownership</h3>
-      <p>You own everything you submit and everything the agent produces. We process it solely to operate the service. We do not train foundation models on your code.</p>
+      <p>
+        You own everything you submit and everything the agent produces. We process it solely to
+        operate the service. We do not train foundation models on your code.
+      </p>
       <h3>Termination</h3>
-      <p>Either party may terminate at any time. We retain audit metadata for 30 days; you can request a full GDPR-export ZIP from Account → Security & data.</p>
+      <p>
+        Either party may terminate at any time. We retain audit metadata for 30 days; you can
+        request a full GDPR-export ZIP from Account → Security & data.
+      </p>
       <h3>Governing law</h3>
-      <p>These terms are governed by the laws of England and Wales. Disputes go to the courts of London.</p>
-      <p>Questions: <a href='mailto:legal@executespec.ai' className='signal-md-link'>legal@executespec.ai</a></p>
+      <p>
+        These terms are governed by the laws of England and Wales. Disputes go to the courts of
+        London.
+      </p>
+      <p>
+        Questions:{' '}
+        <a href='mailto:legal@executespec.ai' className='signal-md-link'>
+          legal@executespec.ai
+        </a>
+      </p>
     </LegalShell>
   );
 }
@@ -37,15 +58,35 @@ export function PrivacyPage() {
   return (
     <LegalShell title='Privacy Policy' subtitle='Last updated 1 May 2026'>
       <h3>What we collect</h3>
-      <p>Account data (email, name, OAuth provider IDs), usage data (runs, repos linked, spec text, cost), and operational logs. No payment-card data ever touches our servers — Stripe + Razorpay handle it directly.</p>
+      <p>
+        Account data (email, name, OAuth provider IDs), usage data (runs, repos linked, spec text,
+        cost), and operational logs. No payment-card data ever touches our servers — Stripe +
+        Razorpay handle it directly.
+      </p>
       <h3>Where it lives</h3>
-      <p>Data is stored in EU (eu-west-2) by default; US (us-east4) for customers who explicitly opt in. All in transit via TLS 1.3, at rest via AES-256.</p>
+      <p>
+        Data is stored in EU (eu-west-2) by default; US (us-east4) for customers who explicitly opt
+        in. All in transit via TLS 1.3, at rest via AES-256.
+      </p>
       <h3>Who we share with</h3>
-      <p>Anthropic, OpenAI, and Google as inference providers; Stripe + Razorpay as payment processors; AWS/GCP as infra. Standard DPAs in place with each.</p>
+      <p>
+        Anthropic, OpenAI, and Google as inference providers; Stripe + Razorpay as payment
+        processors; AWS/GCP as infra. Standard DPAs in place with each.
+      </p>
       <h3>Your rights (GDPR)</h3>
-      <p>Access, rectify, delete, export, restrict, object. Use Account → Security & data → "Export my data" to download a full ZIP, or email <a href='mailto:privacy@executespec.ai' className='signal-md-link'>privacy@executespec.ai</a>.</p>
+      <p>
+        Access, rectify, delete, export, restrict, object. Use Account → Security & data → "Export
+        my data" to download a full ZIP, or email{' '}
+        <a href='mailto:privacy@executespec.ai' className='signal-md-link'>
+          privacy@executespec.ai
+        </a>
+        .
+      </p>
       <h3>Retention</h3>
-      <p>Account data while the account is active. Run data for as long as you keep your account, or until you delete the run. Audit logs for 30 days. Deleted accounts purge within 14 days.</p>
+      <p>
+        Account data while the account is active. Run data for as long as you keep your account, or
+        until you delete the run. Audit logs for 30 days. Deleted accounts purge within 14 days.
+      </p>
       <h3>Cookies</h3>
       <p>Strictly necessary (auth session) and functional (theme). No advertising cookies.</p>
     </LegalShell>
@@ -55,34 +96,95 @@ export function PrivacyPage() {
 // ──────────────────── Data Processing Addendum ────────────────────
 export function DpaPage() {
   return (
-    <LegalShell title='Data Processing Addendum' subtitle='GDPR Article 28 — for TEAM + ENTERPRISE customers'>
-      <p>This DPA forms part of your subscription agreement. It governs ExecuteSpec's processing of personal data on your behalf as a Processor.</p>
+    <LegalShell
+      title='Data Processing Addendum'
+      subtitle='GDPR Article 28 — for TEAM + ENTERPRISE customers'
+    >
+      <p>
+        This DPA forms part of your subscription agreement. It governs ExecuteSpec's processing of
+        personal data on your behalf as a Processor.
+      </p>
       <h3>1. Scope</h3>
-      <p>Personal data your authorised users submit through specs, repos, chat messages, and integration sources (Jira, Confluence, GitHub).</p>
+      <p>
+        Personal data your authorised users submit through specs, repos, chat messages, and
+        integration sources (Jira, Confluence, GitHub).
+      </p>
       <h3>2. Sub-processors</h3>
-      <p>Current sub-processors: AWS, GCP, Anthropic, OpenAI, Google, Stripe, Razorpay. Updated list at <a href='mailto:legal@executespec.ai' className='signal-md-link'>legal@executespec.ai</a>. 30-day prior notice on changes for ENTERPRISE customers.</p>
+      <p>
+        Current sub-processors: AWS, GCP, Anthropic, OpenAI, Google, Stripe, Razorpay. Updated list
+        at{' '}
+        <a href='mailto:legal@executespec.ai' className='signal-md-link'>
+          legal@executespec.ai
+        </a>
+        . 30-day prior notice on changes for ENTERPRISE customers.
+      </p>
       <h3>3. Security measures</h3>
-      <p>SOC 2 Type II controls (audit underway). ISO 27001 alignment. TLS 1.3 + AES-256, role-based access, audit-log retention 30 days, mandatory MFA for employees.</p>
+      <p>
+        SOC 2 Type II controls (audit underway). ISO 27001 alignment. TLS 1.3 + AES-256, role-based
+        access, audit-log retention 30 days, mandatory MFA for employees.
+      </p>
       <h3>4. Cross-border transfers</h3>
-      <p>SCCs (2021/914) in place for any transfer outside the UK/EEA. Customers can pin to EU-only inference where the chosen model supports it.</p>
+      <p>
+        SCCs (2021/914) in place for any transfer outside the UK/EEA. Customers can pin to EU-only
+        inference where the chosen model supports it.
+      </p>
       <h3>5. Breach notification</h3>
       <p>We notify affected customers within 72 hours of confirming a personal-data breach.</p>
       <h3>6. Audit + termination</h3>
-      <p>ENTERPRISE customers may request a SOC 2 report annually under NDA. Upon termination, customer data is purged within 14 days; backups roll off within 35 days.</p>
-      <p>To request a signed copy: <a href='mailto:legal@executespec.ai' className='signal-md-link'>legal@executespec.ai</a></p>
+      <p>
+        ENTERPRISE customers may request a SOC 2 report annually under NDA. Upon termination,
+        customer data is purged within 14 days; backups roll off within 35 days.
+      </p>
+      <p>
+        To request a signed copy:{' '}
+        <a href='mailto:legal@executespec.ai' className='signal-md-link'>
+          legal@executespec.ai
+        </a>
+      </p>
     </LegalShell>
   );
 }
 
-function LegalShell({title, subtitle, children}: {title: string; subtitle: string; children: React.ReactNode}) {
+function LegalShell({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
   return (
     <div style={{minHeight: '100dvh', background: 'var(--signal-bg)', color: 'var(--signal-ink)'}}>
       <div style={{maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px'}}>
-        <Link to='/login' style={{display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--signal-text-dim)', textDecoration: 'none', marginBottom: 32}}>
+        <Link
+          to='/login'
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 13,
+            color: 'var(--signal-text-dim)',
+            textDecoration: 'none',
+            marginBottom: 32,
+          }}
+        >
           ← Back to ExecuteSpec
         </Link>
-        <h1 style={{fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, marginBottom: 6}}>{title}</h1>
-        <p style={{fontSize: 13, color: 'var(--signal-text-dim)', marginTop: 0, marginBottom: 28}}>{subtitle}</p>
+        <h1
+          style={{
+            fontSize: 28,
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            margin: 0,
+            marginBottom: 6,
+          }}
+        >
+          {title}
+        </h1>
+        <p style={{fontSize: 13, color: 'var(--signal-text-dim)', marginTop: 0, marginBottom: 28}}>
+          {subtitle}
+        </p>
         <article style={{fontSize: 14, lineHeight: 1.7, color: 'var(--signal-ink)'}}>
           <style>{`
             article h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; margin: 24px 0 6px; }
@@ -143,7 +245,12 @@ export function OrgSettingsPage() {
     try {
       await api.updateOrg({
         name: name.trim() || undefined,
-        domains: domains ? domains.split(',').map((d) => d.trim()).filter(Boolean) : undefined,
+        domains: domains
+          ? domains
+              .split(',')
+              .map((d) => d.trim())
+              .filter(Boolean)
+          : undefined,
       });
       setMsg('Org saved.');
     } catch (e: unknown) {
@@ -191,26 +298,81 @@ export function OrgSettingsPage() {
 
   return (
     <>
-      <TopBar title='Org settings' sub={`${org.name || 'Personal org'} · ${(org as unknown as {seats?: number}).seats ?? 1} seats`} back backTo='/account' />
+      <TopBar
+        title='Org settings'
+        sub={`${org.name || 'Personal org'} · ${(org as unknown as {seats?: number}).seats ?? 1} seats`}
+        back
+        backTo='/account'
+      />
       <Feed>
-        {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
-        {msg && <div style={{background: 'var(--signal-mint-soft)', color: 'var(--signal-mint-text-on-light)', border: '1px solid var(--signal-mint)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{msg}</div>}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+        {msg && (
+          <div
+            style={{
+              background: 'var(--signal-mint-soft)',
+              color: 'var(--signal-mint-text-on-light)',
+              border: '1px solid var(--signal-mint)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         <SectionHeader>Profile</SectionHeader>
         <Card>
           <Field label='Org name'>
-            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!canEdit} style={inputStyle} />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={!canEdit}
+              style={inputStyle}
+            />
           </Field>
           <Field label='Authorised email domains (comma-separated)'>
-            <input value={domains} onChange={(e) => setDomains(e.target.value)} disabled={!canEdit} placeholder='acme.co, acme.com' style={inputStyle} />
+            <input
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+              disabled={!canEdit}
+              placeholder='acme.co, acme.com'
+              style={inputStyle}
+            />
           </Field>
-          {canEdit && <Button kind='primary' block disabled={busy} onClick={saveOrg}>{busy ? 'Saving…' : 'Save org profile'}</Button>}
+          {canEdit && (
+            <Button kind='primary' block disabled={busy} onClick={saveOrg}>
+              {busy ? 'Saving…' : 'Save org profile'}
+            </Button>
+          )}
         </Card>
 
         <SectionHeader>Single sign-on (SSO)</SectionHeader>
-        <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent', marginBottom: 12}}>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
           <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
-            Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Members signing in with another method are blocked once SSO is enforced.
+            Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Members signing in
+            with another method are blocked once SSO is enforced.
           </div>
         </Card>
 
@@ -232,36 +394,79 @@ export function OrgSettingsPage() {
             </div>
           </Field>
           <Field label='Metadata URL'>
-            <input value={ssoMetadataUrl} onChange={(e) => setSsoMetadataUrl(e.target.value)} disabled={!canEdit} placeholder='https://accounts.google.com/.well-known/openid-configuration' style={inputStyle} />
+            <input
+              value={ssoMetadataUrl}
+              onChange={(e) => setSsoMetadataUrl(e.target.value)}
+              disabled={!canEdit}
+              placeholder='https://accounts.google.com/.well-known/openid-configuration'
+              style={inputStyle}
+            />
           </Field>
           <Field label='Login domain'>
-            <input value={ssoDomain} onChange={(e) => setSsoDomain(e.target.value)} disabled={!canEdit} placeholder='acme.com' style={inputStyle} />
+            <input
+              value={ssoDomain}
+              onChange={(e) => setSsoDomain(e.target.value)}
+              disabled={!canEdit}
+              placeholder='acme.com'
+              style={inputStyle}
+            />
           </Field>
           <Field label='Enforce SSO'>
-            <label style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--signal-text-dim)'}}>
-              <input type='checkbox' checked={ssoEnforced} disabled={!canEdit} onChange={(e) => setSsoEnforced(e.target.checked)} />
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                color: 'var(--signal-text-dim)',
+              }}
+            >
+              <input
+                type='checkbox'
+                checked={ssoEnforced}
+                disabled={!canEdit}
+                onChange={(e) => setSsoEnforced(e.target.checked)}
+              />
               Require SSO for all members on the login domain.
             </label>
           </Field>
           {canEdit && (
             <div style={{display: 'flex', gap: 8}}>
-              <Button kind='primary' block disabled={busy} onClick={saveSso}>{busy ? 'Saving…' : 'Save SSO'}</Button>
-              {sso && <Button kind='ghost' sm onClick={() => setConfirmClearSso(true)} style={{color: 'var(--signal-coral-text)'}}>Clear</Button>}
+              <Button kind='primary' block disabled={busy} onClick={saveSso}>
+                {busy ? 'Saving…' : 'Save SSO'}
+              </Button>
+              {sso && (
+                <Button
+                  kind='ghost'
+                  sm
+                  onClick={() => setConfirmClearSso(true)}
+                  style={{color: 'var(--signal-coral-text)'}}
+                >
+                  Clear
+                </Button>
+              )}
             </div>
           )}
         </Card>
 
         <SectionHeader>External sharing</SectionHeader>
         <Card>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12}}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+            }}
+          >
             <div style={{minWidth: 0, flex: 1}}>
               <div style={{fontSize: 14.5, fontWeight: 600, marginBottom: 4}}>
                 Allow inviting people outside your org
               </div>
               <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.5}}>
-                When on, you (org admin) or a super admin can invite any email — including
-                gmail / outlook — as a read-only or developer collaborator on a single project.
-                When off, project invites are restricted to existing org members.
+                When on, you (org admin) or a super admin can invite any email — including gmail /
+                outlook — as a read-only or developer collaborator on a single project. When off,
+                project invites are restricted to existing org members.
               </div>
             </div>
             {/* Reuse the same toggle pattern as the notification preference rows on
@@ -278,7 +483,9 @@ export function OrgSettingsPage() {
                 try {
                   const next = await api.updateExternalSharing(!org.externalSharingEnabled);
                   setOrg(next);
-                  setMsg(`External sharing ${next.externalSharingEnabled ? 'enabled' : 'disabled'}.`);
+                  setMsg(
+                    `External sharing ${next.externalSharingEnabled ? 'enabled' : 'disabled'}.`,
+                  );
                 } catch (e: unknown) {
                   setErr(e instanceof Error ? e.message : 'Toggle failed.');
                 } finally {
@@ -289,7 +496,9 @@ export function OrgSettingsPage() {
                 position: 'relative',
                 width: 44,
                 height: 24,
-                background: org.externalSharingEnabled ? 'var(--signal-mint)' : 'var(--signal-card-elev)',
+                background: org.externalSharingEnabled
+                  ? 'var(--signal-mint)'
+                  : 'var(--signal-card-elev)',
                 border: '1px solid var(--signal-hairline)',
                 borderRadius: 999,
                 cursor: canEdit ? 'pointer' : 'not-allowed',
@@ -320,8 +529,22 @@ export function OrgSettingsPage() {
             pairs={[
               {k: 'SOC 2', v: <StatusPill kind='shipped'>Type II ready</StatusPill>},
               {k: 'GDPR', v: <StatusPill kind='shipped'>Compliant</StatusPill>},
-              {k: 'DPA', v: <a href='/dpa' style={{color: 'var(--signal-coral)'}}>View DPA</a>},
-              {k: 'Audit log', v: <a href='/audit' style={{color: 'var(--signal-coral)'}}>Open audit log</a>},
+              {
+                k: 'DPA',
+                v: (
+                  <a href='/dpa' style={{color: 'var(--signal-coral)'}}>
+                    View DPA
+                  </a>
+                ),
+              },
+              {
+                k: 'Audit log',
+                v: (
+                  <a href='/audit' style={{color: 'var(--signal-coral)'}}>
+                    Open audit log
+                  </a>
+                ),
+              },
             ]}
           />
         </Card>
@@ -344,7 +567,18 @@ export function OrgSettingsPage() {
 function Field({label, children}: {label: string; children: React.ReactNode}) {
   return (
     <div style={{marginBottom: 12}}>
-      <div style={{fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--signal-text-mute)', marginBottom: 6}}>{label}</div>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--signal-text-mute)',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
       {children}
     </div>
   );

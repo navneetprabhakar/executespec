@@ -41,7 +41,10 @@ function GoogleIcon() {
 function GitHubIcon() {
   return (
     <svg viewBox='0 0 24 24' style={{width: 18, height: 18}}>
-      <path fill='currentColor' d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z' />
+      <path
+        fill='currentColor'
+        d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z'
+      />
     </svg>
   );
 }
@@ -144,80 +147,82 @@ export function LoginPage() {
 
   return (
     <AuthLayout>
-    <div className='signal-splash'>
-      <div className='brand'>
-        <div className='logo'>E</div>
-        <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
-      </div>
-      <h1>
-        Welcome back, <em>builder.</em>
-      </h1>
-      <p className='lede'>Sign in to pick up your runs, projects and pull requests right where you left them.</p>
-
-      <ErrorBanner msg={err} />
-
-      <OAuthBtn href='/api/auth/oauth2/authorize/google'>
-        <GoogleIcon /> Continue with Google
-      </OAuthBtn>
-      <OAuthBtn href='/api/auth/oauth2/authorize/github'>
-        <GitHubIcon /> Continue with GitHub
-      </OAuthBtn>
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          color: 'var(--signal-text-mute)',
-          fontSize: 12,
-          fontWeight: 600,
-          margin: '14px 0',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-        }}
-      >
-        <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-        or
-        <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-      </div>
-
-      <form onSubmit={onSubmit}>
-        <div className='signal-field'>
-          <label>Email</label>
-          <input
-            type='email'
-            autoComplete='email'
-            placeholder='you@company.com'
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+      <div className='signal-splash'>
+        <div className='brand'>
+          <div className='logo'>E</div>
+          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <div className='signal-field'>
-          <label>Password</label>
-          <input
-            type='password'
-            autoComplete='current-password'
-            placeholder='••••••••'
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <div className='hint' style={{textAlign: 'right'}}>
-            <Link to='/forgot-password' style={{color: 'var(--signal-coral)'}}>
-              Forgot password?
-            </Link>
+        <h1>
+          Welcome back, <em>builder.</em>
+        </h1>
+        <p className='lede'>
+          Sign in to pick up your runs, projects and pull requests right where you left them.
+        </p>
+
+        <ErrorBanner msg={err} />
+
+        <OAuthBtn href='/api/auth/oauth2/authorize/google'>
+          <GoogleIcon /> Continue with Google
+        </OAuthBtn>
+        <OAuthBtn href='/api/auth/oauth2/authorize/github'>
+          <GitHubIcon /> Continue with GitHub
+        </OAuthBtn>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--signal-text-mute)',
+            fontSize: 12,
+            fontWeight: 600,
+            margin: '14px 0',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+          }}
+        >
+          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
+          or
+          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
+        </div>
+
+        <form onSubmit={onSubmit}>
+          <div className='signal-field'>
+            <label>Email</label>
+            <input
+              type='email'
+              autoComplete='email'
+              placeholder='you@company.com'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
-        </div>
-        <Button kind='primary' block type='submit' disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </Button>
-      </form>
+          <div className='signal-field'>
+            <label>Password</label>
+            <input
+              type='password'
+              autoComplete='current-password'
+              placeholder='••••••••'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <div className='hint' style={{textAlign: 'right'}}>
+              <Link to='/forgot-password' style={{color: 'var(--signal-coral)'}}>
+                Forgot password?
+              </Link>
+            </div>
+          </div>
+          <Button kind='primary' block type='submit' disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </Button>
+        </form>
 
-      <div className='footer-link'>
-        New here? <Link to='/signup'>Create an account</Link>
+        <div className='footer-link'>
+          New here? <Link to='/signup'>Create an account</Link>
+        </div>
       </div>
-    </div>
     </AuthLayout>
   );
 }
@@ -237,7 +242,9 @@ export function SignupPage() {
     const parts = local.split(/\s+/).filter(Boolean);
     const firstName = parts[0] ? parts[0][0].toUpperCase() + parts[0].slice(1) : 'New';
     const lastName =
-      parts.length > 1 ? parts[parts.length - 1][0].toUpperCase() + parts[parts.length - 1].slice(1) : 'User';
+      parts.length > 1
+        ? parts[parts.length - 1][0].toUpperCase() + parts[parts.length - 1].slice(1)
+        : 'User';
     return {firstName, lastName};
   }
 
@@ -259,89 +266,97 @@ export function SignupPage() {
 
   return (
     <AuthLayout>
-    <div className='signal-splash'>
-      <div className='brand'>
-        <div className='logo'>E</div>
-        <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
-      </div>
-      <h1>
-        Create an <em>account.</em>
-      </h1>
-      <p className='lede'>Free tier · no card · 5 runs/month. You can upgrade any time.</p>
-
-      <ErrorBanner msg={err} />
-
-      <OAuthBtn href='/api/auth/oauth2/authorize/google'>
-        <GoogleIcon /> Continue with Google
-      </OAuthBtn>
-      <OAuthBtn href='/api/auth/oauth2/authorize/github'>
-        <GitHubIcon /> Continue with GitHub
-      </OAuthBtn>
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          color: 'var(--signal-text-mute)',
-          fontSize: 12,
-          fontWeight: 600,
-          margin: '14px 0',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-        }}
-      >
-        <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-        or
-        <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-      </div>
-
-      <form onSubmit={onSubmit}>
-        <div className='signal-field'>
-          <label>Email</label>
-          <input
-            type='email'
-            autoComplete='email'
-            placeholder='you@company.com'
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+      <div className='signal-splash'>
+        <div className='brand'>
+          <div className='logo'>E</div>
+          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <div className='signal-field'>
-          <label>Password</label>
-          <input
-            type='password'
-            autoComplete='new-password'
-            placeholder='At least 12 characters'
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={12}
-            required
-          />
-          <div className='hint'>12+ characters.</div>
+        <h1>
+          Create an <em>account.</em>
+        </h1>
+        <p className='lede'>Free tier · no card · 5 runs/month. You can upgrade any time.</p>
+
+        <ErrorBanner msg={err} />
+
+        <OAuthBtn href='/api/auth/oauth2/authorize/google'>
+          <GoogleIcon /> Continue with Google
+        </OAuthBtn>
+        <OAuthBtn href='/api/auth/oauth2/authorize/github'>
+          <GitHubIcon /> Continue with GitHub
+        </OAuthBtn>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--signal-text-mute)',
+            fontSize: 12,
+            fontWeight: 600,
+            margin: '14px 0',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+          }}
+        >
+          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
+          or
+          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
         </div>
-        <Button kind='primary' block type='submit' disabled={busy}>
-          {busy ? 'Creating…' : 'Create account'}
-        </Button>
-      </form>
 
-      <p style={{fontSize: 12, color: 'var(--signal-text-mute)', textAlign: 'center', marginTop: 14, lineHeight: 1.5}}>
-        By signing up you agree to our{' '}
-        <a href='/terms' style={{color: 'var(--signal-coral)'}}>
-          Terms
-        </a>{' '}
-        &amp;{' '}
-        <a href='/privacy' style={{color: 'var(--signal-coral)'}}>
-          Privacy
-        </a>
-        .
-      </p>
+        <form onSubmit={onSubmit}>
+          <div className='signal-field'>
+            <label>Email</label>
+            <input
+              type='email'
+              autoComplete='email'
+              placeholder='you@company.com'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className='signal-field'>
+            <label>Password</label>
+            <input
+              type='password'
+              autoComplete='new-password'
+              placeholder='At least 12 characters'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={12}
+              required
+            />
+            <div className='hint'>12+ characters.</div>
+          </div>
+          <Button kind='primary' block type='submit' disabled={busy}>
+            {busy ? 'Creating…' : 'Create account'}
+          </Button>
+        </form>
 
-      <div className='footer-link'>
-        Already have an account? <Link to='/login'>Sign in</Link>
+        <p
+          style={{
+            fontSize: 12,
+            color: 'var(--signal-text-mute)',
+            textAlign: 'center',
+            marginTop: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          By signing up you agree to our{' '}
+          <a href='/terms' style={{color: 'var(--signal-coral)'}}>
+            Terms
+          </a>{' '}
+          &amp;{' '}
+          <a href='/privacy' style={{color: 'var(--signal-coral)'}}>
+            Privacy
+          </a>
+          .
+        </p>
+
+        <div className='footer-link'>
+          Already have an account? <Link to='/login'>Sign in</Link>
+        </div>
       </div>
-    </div>
     </AuthLayout>
   );
 }
@@ -383,51 +398,51 @@ export function VerifyPage() {
 
   return (
     <AuthLayout>
-    <div className='signal-splash' style={{paddingTop: 60}}>
-      <div
-        style={{
-          width: 80,
-          height: 80,
-          borderRadius: 24,
-          background: err ? 'var(--signal-coral-soft)' : 'var(--signal-mint-soft)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 28,
-        }}
-      >
-        <svg
-          viewBox='0 0 24 24'
-          fill='none'
-          stroke={err ? 'var(--signal-coral-text)' : '#1d6543'}
-          strokeWidth={2}
-          strokeLinecap='round'
-          strokeLinejoin='round'
-          style={{width: 36, height: 36}}
+      <div className='signal-splash' style={{paddingTop: 60}}>
+        <div
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: 24,
+            background: err ? 'var(--signal-coral-soft)' : 'var(--signal-mint-soft)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 28,
+          }}
         >
-          <path d='M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z' />
-          <polyline points='22,6 12,13 2,6' />
-        </svg>
+          <svg
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke={err ? 'var(--signal-coral-text)' : '#1d6543'}
+            strokeWidth={2}
+            strokeLinecap='round'
+            strokeLinejoin='round'
+            style={{width: 36, height: 36}}
+          >
+            <path d='M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z' />
+            <polyline points='22,6 12,13 2,6' />
+          </svg>
+        </div>
+        <h1>{err ? 'Something went wrong.' : msg ? 'One sec…' : 'Check your inbox.'}</h1>
+        <p className='lede'>
+          {err
+            ? err
+            : msg
+              ? msg
+              : `We've sent a verification link to your inbox. Tap the link to finish setting up your account.`}
+        </p>
+        {!err && !msg && (
+          <Button kind='primary' block to='/login'>
+            I've verified — sign in
+          </Button>
+        )}
+        {err && (
+          <Button kind='secondary' block to='/login'>
+            Back to sign-in
+          </Button>
+        )}
       </div>
-      <h1>{err ? 'Something went wrong.' : msg ? 'One sec…' : 'Check your inbox.'}</h1>
-      <p className='lede'>
-        {err
-          ? err
-          : msg
-            ? msg
-            : `We've sent a verification link to your inbox. Tap the link to finish setting up your account.`}
-      </p>
-      {!err && !msg && (
-        <Button kind='primary' block to='/login'>
-          I've verified — sign in
-        </Button>
-      )}
-      {err && (
-        <Button kind='secondary' block to='/login'>
-          Back to sign-in
-        </Button>
-      )}
-    </div>
     </AuthLayout>
   );
 }
@@ -487,54 +502,93 @@ export function WelcomePage() {
 
   return (
     <AuthLayout>
-    {step === 1 ? (
-      <div className='welcome-step'>
-        <div className='step-indicator'>STEP <b>1</b> · OF 2</div>
-        <h2>Pick a starter spec to see ExecuteSpec in action.</h2>
-        <p>We'll run it in a sandbox project — no card required, no commits to your repos. You can edit the spec before we kick off.</p>
-        {presets.map((p) => (
-          <button key={p.title} type='button' className={`preset-card ${p.tone}`} onClick={() => pick(p.spec)}>
-            <div className='icon'>{p.icon}</div>
-            <h4>{p.title}</h4>
-            <p className='desc'>{p.desc}</p>
-            <div className='meta'>
-              {p.meta.split('·').map((s, i) => (
-                <span key={i}>{s.trim()}</span>
-              ))}
-            </div>
-          </button>
-        ))}
-        <Button kind='ghost' block onClick={() => navigate('/compose')} style={{marginTop: 12}}>
-          Skip the sandbox — write my own spec →
-        </Button>
-      </div>
-    ) : (
-      <div className='welcome-step'>
-        <div className='step-indicator'>STEP <b>2</b> · OF 2</div>
-        <h2>Want the agent to work on your real code?</h2>
-        <p>Link a GitHub repo and we'll point your first run at it instead of the sandbox. You can always link more later from Integrations.</p>
-        <button type='button' className='preset-card signal' onClick={connectGitHubAndContinue} disabled={linkBusy}>
-          <div className='icon'>
-            <svg viewBox='0 0 24 24' style={{width: 28, height: 28}} fill='currentColor' aria-hidden>
-              <path d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z' />
-            </svg>
+      {step === 1 ? (
+        <div className='welcome-step'>
+          <div className='step-indicator'>
+            STEP <b>1</b> · OF 2
           </div>
-          <h4>Install the GitHub App</h4>
-          <p className='desc'>One click. You pick which repos. Webhooks installed automatically.</p>
-        </button>
-        <Button kind='secondary' block onClick={() => navigate('/compose')} style={{marginTop: 12}}>
-          Use sandbox for now →
-        </Button>
-        <Button kind='ghost' block onClick={() => setStep(1)} style={{marginTop: 6}}>
-          ← Back to spec
-        </Button>
-        {pickedSpec && (
-          <p style={{fontSize: 12, color: 'var(--signal-text-mute)', marginTop: 14, textAlign: 'center'}}>
-            Your starter spec is queued. We'll prefill the composer once you continue.
+          <h2>Pick a starter spec to see ExecuteSpec in action.</h2>
+          <p>
+            We'll run it in a sandbox project — no card required, no commits to your repos. You can
+            edit the spec before we kick off.
           </p>
-        )}
-      </div>
-    )}
+          {presets.map((p) => (
+            <button
+              key={p.title}
+              type='button'
+              className={`preset-card ${p.tone}`}
+              onClick={() => pick(p.spec)}
+            >
+              <div className='icon'>{p.icon}</div>
+              <h4>{p.title}</h4>
+              <p className='desc'>{p.desc}</p>
+              <div className='meta'>
+                {p.meta.split('·').map((s, i) => (
+                  <span key={i}>{s.trim()}</span>
+                ))}
+              </div>
+            </button>
+          ))}
+          <Button kind='ghost' block onClick={() => navigate('/compose')} style={{marginTop: 12}}>
+            Skip the sandbox — write my own spec →
+          </Button>
+        </div>
+      ) : (
+        <div className='welcome-step'>
+          <div className='step-indicator'>
+            STEP <b>2</b> · OF 2
+          </div>
+          <h2>Want the agent to work on your real code?</h2>
+          <p>
+            Link a GitHub repo and we'll point your first run at it instead of the sandbox. You can
+            always link more later from Integrations.
+          </p>
+          <button
+            type='button'
+            className='preset-card signal'
+            onClick={connectGitHubAndContinue}
+            disabled={linkBusy}
+          >
+            <div className='icon'>
+              <svg
+                viewBox='0 0 24 24'
+                style={{width: 28, height: 28}}
+                fill='currentColor'
+                aria-hidden
+              >
+                <path d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z' />
+              </svg>
+            </div>
+            <h4>Install the GitHub App</h4>
+            <p className='desc'>
+              One click. You pick which repos. Webhooks installed automatically.
+            </p>
+          </button>
+          <Button
+            kind='secondary'
+            block
+            onClick={() => navigate('/compose')}
+            style={{marginTop: 12}}
+          >
+            Use sandbox for now →
+          </Button>
+          <Button kind='ghost' block onClick={() => setStep(1)} style={{marginTop: 6}}>
+            ← Back to spec
+          </Button>
+          {pickedSpec && (
+            <p
+              style={{
+                fontSize: 12,
+                color: 'var(--signal-text-mute)',
+                marginTop: 14,
+                textAlign: 'center',
+              }}
+            >
+              Your starter spec is queued. We'll prefill the composer once you continue.
+            </p>
+          )}
+        </div>
+      )}
     </AuthLayout>
   );
 }

@@ -35,9 +35,7 @@ interface CatalogItem {
 
 function humanize(s?: string | null): string {
   if (!s) return '';
-  return s
-    .replace(/[_-]/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return s.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function LibraryPage() {
@@ -51,12 +49,8 @@ export default function LibraryPage() {
     setItems(null);
     const p =
       mode === 'solutions'
-        ? listLibrary().then((rows) =>
-            rows.map((w) => ({...w.solution, locked: w.locked})),
-          )
-        : listMigrations().then((rows) =>
-            rows.map((w) => ({...w.recipe, locked: w.locked})),
-          );
+        ? listLibrary().then((rows) => rows.map((w) => ({...w.solution, locked: w.locked})))
+        : listMigrations().then((rows) => rows.map((w) => ({...w.recipe, locked: w.locked})));
     p.then((list) => {
       if (!cancelled) setItems(list);
     }).catch(() => !cancelled && setItems([]));
@@ -131,8 +125,7 @@ export default function LibraryPage() {
                 fontSize: 11.5,
                 fontWeight: 600,
                 color: mode === 'solutions' ? '#fff' : 'var(--v4-text-muted)',
-                background:
-                  mode === 'solutions' ? 'var(--v4-brand)' : 'transparent',
+                background: mode === 'solutions' ? 'var(--v4-brand)' : 'transparent',
                 border: 'none',
                 borderRadius: 9999,
                 cursor: 'pointer',
@@ -152,8 +145,7 @@ export default function LibraryPage() {
                 fontSize: 11.5,
                 fontWeight: 600,
                 color: mode === 'migrations' ? '#fff' : 'var(--v4-text-muted)',
-                background:
-                  mode === 'migrations' ? 'var(--v4-brand)' : 'transparent',
+                background: mode === 'migrations' ? 'var(--v4-brand)' : 'transparent',
                 border: 'none',
                 borderRadius: 9999,
                 cursor: 'pointer',
@@ -187,11 +179,7 @@ export default function LibraryPage() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={
-            mode === 'solutions'
-              ? 'Search solutions…'
-              : 'Search migration recipes…'
-          }
+          placeholder={mode === 'solutions' ? 'Search solutions…' : 'Search migration recipes…'}
           style={{
             width: '100%',
             padding: '10px 12px 10px 34px',
@@ -256,8 +244,7 @@ export default function LibraryPage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns:
-              'repeat(auto-fill, minmax(min(260px, 100%), 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))',
             gap: 12,
           }}
         >
@@ -296,11 +283,7 @@ export default function LibraryPage() {
                     flexShrink: 0,
                   }}
                 >
-                  {mode === 'solutions' ? (
-                    <Library size={14} />
-                  ) : (
-                    <Wrench size={14} />
-                  )}
+                  {mode === 'solutions' ? <Library size={14} /> : <Wrench size={14} />}
                 </span>
                 <span
                   style={{

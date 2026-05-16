@@ -284,9 +284,7 @@ export default function RepoCard({
             <span aria-hidden='true' className='text-subtle'>
               ·
             </span>
-            <span title='Last synced commit SHA'>
-              sync {repo.lastSyncedSha.slice(0, 7)}
-            </span>
+            <span title='Last synced commit SHA'>sync {repo.lastSyncedSha.slice(0, 7)}</span>
           </>
         )}
       </div>

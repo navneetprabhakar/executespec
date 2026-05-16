@@ -48,7 +48,7 @@ interface TabBarProps {
 
 export function TabBar({active}: TabBarProps) {
   const tabs = [
-    {id: 'home' as const, to: '/signal/home', label: 'Today', icon: <HomeIcon /> },
+    {id: 'home' as const, to: '/signal/home', label: 'Today', icon: <HomeIcon />},
     {id: 'runs' as const, to: '/signal/runs', label: 'Runs', icon: <Check />},
     {id: 'fab' as const, to: '/signal/compose', label: 'New', icon: <Plus />},
     {id: 'chat' as const, to: '/signal/projects/checkout-api/chat', label: 'Chat', icon: <Chat />},
