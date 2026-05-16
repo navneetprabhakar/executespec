@@ -1,5 +1,5 @@
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
-import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
 // Signal — the only design now. v2/v3/v4 chromes retired 2026-05-15.
 import SignalShell from '@/signal/components/Shell';

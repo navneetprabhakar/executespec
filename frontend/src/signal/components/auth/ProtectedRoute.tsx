@@ -20,6 +20,10 @@ import {useAuthStore} from '@/stores/useAuthStore';
  * back after signing in.
  *
  * When used as a route element wrapper, renders <Outlet /> for nested routes.
+ *
+ * Moved from `frontend/src/components/auth/ProtectedRoute.tsx` to live
+ * alongside the rest of the Signal chrome (2026-05-16, after the v2/v3/v4
+ * directories were retired).
  */
 export default function ProtectedRoute() {
   const {isAuthenticated, isLoading, loadMe, user} = useAuthStore();

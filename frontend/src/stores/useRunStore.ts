@@ -2,7 +2,11 @@ import {create} from 'zustand';
 import {errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
-import {refreshUsageBadge} from '@/components/billing/UsageBadge';
+
+// Inlined from the retired `@/components/billing/UsageBadge` — fire a window event
+// for usage-badge consumers (legacy UsageBadge is gone after the 2026-05-16
+// chrome cleanup; the event is harmless without a listener).
+const refreshUsageBadge = () => window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
 
 interface RunStore {
   runs: api.RunSummary[];

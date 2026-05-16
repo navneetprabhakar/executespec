@@ -2,7 +2,12 @@ import {useEffect, useRef} from 'react';
 import {useSseStore} from '@/stores/useSseStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {getMessages, getSseToken} from '@/lib/api';
-import {refreshUsageBadge} from '@/components/billing/UsageBadge';
+
+// Inlined from the retired `@/components/billing/UsageBadge` — fire a window event
+// that any usage-badge / quota display can listen for. Signal pages don't render
+// the legacy UsageBadge anymore, but other surfaces may; the event is a no-op
+// when no listener is attached.
+const refreshUsageBadge = () => window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
