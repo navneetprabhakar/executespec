@@ -995,9 +995,40 @@ function BrowseTab({
                       lineHeight: 1.5,
                     }}
                   >
-                    The codemap is present but didn't extract any source files — possibly because
-                    the repo's file extensions aren't in the function-extraction allowlist (Java,
-                    Python, TS/JS, Go, Rust, Ruby). Regenerate architecture to retry.
+                    {/*
+                     * 2026-05-16 — distinguish two empty-states: codemap generated
+                     * but the GitHub listing failed (fileCount=0), vs an older
+                     * codemap that pre-dates the `## Files (listing)` section.
+                     */}
+                    {codemap.fileCount === 0 ? (
+                      <>
+                        The codemap was generated but couldn&apos;t read any files from this repo.
+                        Usually means the GitHub PAT used at codemap-generation time was missing,
+                        expired, or lacked read access. Reconnect GitHub from{' '}
+                        <a href='/integrations' style={{color: 'var(--signal-coral)'}}>
+                          Integrations
+                        </a>
+                        , then regenerate the architecture from{' '}
+                        <a
+                          href={`/projects/${id}/architecture`}
+                          style={{color: 'var(--signal-coral)'}}
+                        >
+                          here →
+                        </a>
+                      </>
+                    ) : (
+                      <>
+                        This codemap pre-dates the full file-listing format. Regenerate the
+                        architecture from{' '}
+                        <a
+                          href={`/projects/${id}/architecture`}
+                          style={{color: 'var(--signal-coral)'}}
+                        >
+                          here →
+                        </a>{' '}
+                        to pick up the new section.
+                      </>
+                    )}
                   </p>
                 </Card>
               ) : (
