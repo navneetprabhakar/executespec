@@ -1582,7 +1582,10 @@ function AdminPageInner() {
           targetName={grantTarget.name}
           onClose={() => setGrantTarget(null)}
           onSuccess={() => {
-            grantTarget.type === 'user' ? loadUsers() : loadOrgs();
+            // TS-eslint v8 flags the ternary-as-statement form as a no-unused-expressions
+            // violation; refactor to an if/else so the side effects are explicit.
+            if (grantTarget.type === 'user') loadUsers();
+            else loadOrgs();
           }}
         />
       )}

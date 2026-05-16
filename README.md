@@ -2,7 +2,7 @@
 
 **v1.0.0-M1** · Spec-driven AI coding platform. Submit a natural-language spec; ExecuteSpec plans the work, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves the plan; everything after is automatic.
 
-**Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.4 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind CSS · GCP (us-east4)
+**Stack:** Java 21 · Spring Boot 3.5 · Spring AI 1.1.6 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind CSS 4 · TypeScript 6 · GCP (us-east4)
 
 ---
 

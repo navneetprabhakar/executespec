@@ -174,12 +174,9 @@ public class SsoConfigController {
       // out of SSO after save. Pure validation: @URL accepts http/https/ftp etc; @Pattern narrows
       // to https-only (the IdP metadata endpoints are HTTPS-only in production). Empty-string is
       // allowed because the PUT is a partial update and unset fields shouldn't trip the validator.
-      @Size(max = 1024, message = "metadataUrl must not exceed 1024 characters")
-          @URL(message = "metadataUrl must be a valid URL")
-          @Pattern(regexp = "^$|^https://.+", message = "metadataUrl must use HTTPS")
-          String metadataUrl,
-      @Size(max = 255, message = "domain must not exceed 255 characters")
-          @Pattern(
+      @Size(max = 1024, message = "metadataUrl must not exceed 1024 characters") @URL(message = "metadataUrl must be a valid URL")
+          @Pattern(regexp = "^$|^https://.+", message = "metadataUrl must use HTTPS") String metadataUrl,
+      @Size(max = 255, message = "domain must not exceed 255 characters") @Pattern(
               regexp = "^$|^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$",
               message = "domain must be a valid DNS name")
           String domain) {}

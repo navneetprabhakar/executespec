@@ -3,9 +3,14 @@
 @import './design-system/primitives.css';
 @import './tokens.css';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * 2026-05-16 (Dependabot #130) — Tailwind 4 collapsed the three @tailwind
+ * directives into a single @import. The compat layer in `tailwind.config.ts`
+ * (loaded via `@config` below) keeps the v3-style config working with v4.
+ */
+@import 'tailwindcss';
+@config '../tailwind.config.ts';
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 /* ── Mobile / iOS Safari fixes ─────────────────────────────────── */
 html,
