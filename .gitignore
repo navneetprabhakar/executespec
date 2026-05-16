@@ -44,6 +44,7 @@ scripts/*.json
 # Frontend build outputs (rebuilt by npm run build)
 frontend/dist/
 src/main/resources/static/assets/
+src/main/resources/static/index.html
 
 
 # OS
