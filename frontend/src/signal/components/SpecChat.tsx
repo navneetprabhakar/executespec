@@ -65,14 +65,29 @@ export function SpecChat({
     if (!text || busy) return;
     setBusy(true);
     setErr('');
-    // Always include the current draft spec as context, prefixed once.
-    const context = draftSpec.trim()
-      ? `My current draft spec is:\n\n${draftSpec.trim()}\n\n${text}`
-      : text;
-    setMessages((prev) => [...prev, {role: 'user', content: text, ts: new Date().toISOString()}]);
+    // Prepend the draft spec ONLY on the first user turn so the agent
+    // has the starting context. Subsequent turns rely on conversation
+    // history. Earlier the draft was prepended every turn, which both
+    // (a) burned tokens and (b) only sent the latest message — the
+    // agent had no memory of prior turns. Now we send the FULL message
+    // history so the chat is genuinely multi-turn.
+    const isFirstTurn = messages.length === 0;
+    const firstTurnText =
+      isFirstTurn && draftSpec.trim()
+        ? `My current draft spec is:\n\n${draftSpec.trim()}\n\n${text}`
+        : text;
+    const next: Array<{role: 'user' | 'assistant'; content: string; ts: string}> = [
+      ...messages,
+      {role: 'user', content: text, ts: new Date().toISOString()},
+    ];
+    setMessages(next);
     setInput('');
     try {
-      const resp = await api.conversationChat([{role: 'user', content: context}]);
+      const wireHistory: api.ConversationMessage[] = next.map((m, i) => ({
+        role: m.role,
+        content: i === 0 && isFirstTurn ? firstTurnText : m.content,
+      }));
+      const resp = await api.conversationChat(wireHistory);
       const reply =
         (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
         (resp as unknown as {message?: string}).message ||
@@ -229,8 +244,8 @@ export function SpecChat({
           padding: 10,
           borderTop: '1px solid var(--signal-hairline)',
           display: 'flex',
-          gap: 6,
-          alignItems: 'flex-end',
+          flexDirection: 'column',
+          gap: 8,
         }}
       >
         <textarea
@@ -246,7 +261,7 @@ export function SpecChat({
           rows={2}
           disabled={busy}
           style={{
-            flex: 1,
+            width: '100%',
             background: 'var(--signal-card-elev)',
             border: '1px solid var(--signal-hairline)',
             borderRadius: 10,
@@ -258,17 +273,35 @@ export function SpecChat({
             outline: 'none',
             minHeight: 50,
             maxHeight: 140,
+            boxSizing: 'border-box',
           }}
         />
-        <div style={{display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0}}>
-          <Button kind='primary' sm onClick={send} disabled={busy || !input.trim()}>
-            Send
-          </Button>
+        {/* Buttons in a horizontal row UNDER the textarea — same layout on
+            every viewport. Earlier the buttons were stacked in a column
+            next to the textarea; on a narrow mobile screen that column was
+            taller than the textarea and visually overlapped the chat
+            thread above. Below-the-textarea pattern is what every modern
+            chat app uses and works at any width. */}
+        <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
           {lastAssistant && (
-            <Button kind='secondary' sm onClick={() => onApply(lastAssistant.content)}>
+            <Button
+              kind='secondary'
+              sm
+              onClick={() => onApply(lastAssistant.content)}
+              style={{flex: '1 1 0', minWidth: 130}}
+            >
               Use as spec
             </Button>
           )}
+          <Button
+            kind='primary'
+            sm
+            onClick={send}
+            disabled={busy || !input.trim()}
+            style={{flex: '1 1 0', minWidth: 90}}
+          >
+            Send
+          </Button>
         </div>
       </div>
     </div>
