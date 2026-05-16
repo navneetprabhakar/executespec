@@ -287,7 +287,14 @@ export function SpecChat({
             <Button
               kind='secondary'
               sm
-              onClick={() => onApply(lastAssistant.content)}
+              onClick={() => {
+                // Apply the assistant's reply to the parent's spec textarea
+                // AND collapse this panel — without the collapse, the chat
+                // stays open below the composer and the user can't see that
+                // the textarea above was updated (they read "nothing happened").
+                onApply(lastAssistant.content);
+                setOpen(false);
+              }}
               style={{flex: '1 1 0', minWidth: 130}}
             >
               Use as spec

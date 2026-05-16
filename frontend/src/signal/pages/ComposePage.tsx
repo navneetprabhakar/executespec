@@ -245,7 +245,17 @@ export default function ComposePage() {
         <SpecChat
           projectId={projectId || undefined}
           draftSpec={spec}
-          onApply={(refined) => setSpec(refined)}
+          onApply={(refined) => {
+            setSpec(refined);
+            // SpecChat sits BELOW the composer card. After apply, the user
+            // is scrolled to the chat panel — scroll the composer back into
+            // view so they can see (and edit) the spec that just landed.
+            setTimeout(() => {
+              document
+                .querySelector('.signal-composer-card')
+                ?.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }, 50);
+          }}
         />
 
         <SectionHeader>Project</SectionHeader>

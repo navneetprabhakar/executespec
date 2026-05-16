@@ -270,7 +270,18 @@ export default function ProjectComposePage() {
           }
         />
 
-        <SpecChat projectId={id} draftSpec={spec} onApply={(refined) => setSpec(refined)} />
+        <SpecChat
+          projectId={id}
+          draftSpec={spec}
+          onApply={(refined) => {
+            setSpec(refined);
+            setTimeout(() => {
+              document
+                .querySelector('.signal-composer-card')
+                ?.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }, 50);
+          }}
+        />
 
         {repos.length > 0 && (
           <>
