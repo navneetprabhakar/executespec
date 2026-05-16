@@ -58,12 +58,8 @@ public class ProjectInviteController {
    * {@code @Pattern} now reject unknown roles loud at the controller boundary.
    */
   public record CreateInviteRequest(
-      @NotBlank(message = "email is required")
-          @Email(message = "email must be a valid address")
-          @Size(max = 254, message = "email must not exceed 254 characters")
-          String email,
-      @NotBlank(message = "projectRole is required")
-          @Pattern(
+      @NotBlank(message = "email is required") @Email(message = "email must be a valid address") @Size(max = 254, message = "email must not exceed 254 characters") String email,
+      @NotBlank(message = "projectRole is required") @Pattern(
               regexp = "PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER",
               message = "projectRole must be PROJECT_ADMIN, PROJECT_DEVELOPER, or PROJECT_VIEWER")
           @JsonAlias("role")

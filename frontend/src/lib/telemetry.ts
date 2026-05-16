@@ -1,7 +1,10 @@
 import {WebTracerProvider, BatchSpanProcessor} from '@opentelemetry/sdk-trace-web';
 import {OTLPTraceExporter} from '@opentelemetry/exporter-trace-otlp-http';
 import {ZoneContextManager} from '@opentelemetry/context-zone';
-import {Resource} from '@opentelemetry/resources';
+// 2026-05-16 (Dependabot #128) — @opentelemetry/resources v2 removed the `Resource`
+// constructor export in favour of the `resourceFromAttributes` helper. The new helper
+// returns a `Resource` value that's directly passable to `WebTracerProvider`.
+import {resourceFromAttributes} from '@opentelemetry/resources';
 import {ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION} from '@opentelemetry/semantic-conventions';
 
 /**
@@ -23,7 +26,7 @@ export function initTelemetry() {
     return;
   }
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: 'executespec-ui',
     [ATTR_SERVICE_VERSION]: '0.1.0',
   });
