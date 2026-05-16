@@ -2,6 +2,7 @@ import {ReactNode, useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {TopBar, TabBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, Chip, StatusPill, TabsStrip, KvList} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ScoreCard, PrCard} from '@/signal/components/Compose';
 import {Bell, Search, Settings, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
@@ -89,14 +90,29 @@ export function NotificationsPage() {
         {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
 
         {items === null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading notifications…</p></Card>
+          <LoadingState label="Loading notifications…" />
         ) : filtered.length === 0 ? (
           <Card><p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>No notifications yet.</p></Card>
         ) : (
           filtered.map((n) => {
-            const nAny = n as unknown as {id?: string; read?: boolean; readAt?: string; title?: string; description?: string; body?: string; category?: string; createdAt?: string; severity?: string};
+            const nAny = n as unknown as {id?: string; read?: boolean; readAt?: string; title?: string; description?: string; body?: string; link?: string | null; type?: string; category?: string; createdAt?: string; severity?: string};
             const unread = !nAny.read && !nAny.readAt;
             const tone = nAny.severity === 'error' ? 'coral' : nAny.severity === 'warn' ? 'signal' : 'mint';
+            // Deep-link target: prefer the backend-provided `link`, else
+            // route by event type. Falls through to /home so clicks never
+            // dead-end.
+            const t = (nAny.type || nAny.category || '').toUpperCase();
+            const linkTarget = nAny.link
+              ? nAny.link
+              : t.includes('PLAN_READY') || t.includes('RUN')
+                ? '/runs'
+                : t.includes('PR')
+                  ? '/runs'
+                  : t.includes('BILLING') || t.includes('QUOTA') || t.includes('CAP')
+                    ? '/billing'
+                    : t.includes('MEMBER') || t.includes('INVITE')
+                      ? '/org-members'
+                      : '/home';
             return (
               <NotifRow
                 key={nAny.id}
@@ -105,7 +121,17 @@ export function NotificationsPage() {
                 title={nAny.title || nAny.category || 'Notification'}
                 desc={nAny.description || nAny.body || ''}
                 ts={nAny.createdAt ? new Date(nAny.createdAt).toLocaleString() : ''}
-                onClick={() => nAny.id && readOne(nAny.id)}
+                onClick={() => {
+                  if (nAny.id) void readOne(nAny.id);
+                  // Use window.location for absolute backend-provided links;
+                  // otherwise SPA-navigate via history.pushState so React Router catches it.
+                  if (linkTarget.startsWith('http')) {
+                    window.location.href = linkTarget;
+                  } else {
+                    window.history.pushState({}, '', linkTarget);
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                  }
+                }}
               />
             );
           })
@@ -427,7 +453,7 @@ export function AdminPage() {
 
         <SectionHeader>Tier lifecycle</SectionHeader>
         {tiers.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading tiers…</p></Card>
+          <LoadingState label="Loading tiers…" />
         ) : (
           tiers.map((t) => {
             const tAny = t as unknown as {tier?: string; state?: string; orgCount?: number};
@@ -446,7 +472,7 @@ export function AdminPage() {
 
         <SectionHeader>Feature flags · {flags.length}</SectionHeader>
         {flags.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading flags…</p></Card>
+          <LoadingState label="Loading flags…" />
         ) : (
           <Card>
             <KvList
@@ -500,7 +526,7 @@ export function SharedPage() {
     return (
       <>
         <TopBar title='Public report' sub='loading…' back backTo='/home' />
-        <Feed><Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading shared report…</p></Card></Feed>
+        <Feed><LoadingState label="Loading shared report…" /></Feed>
       </>
     );
   }

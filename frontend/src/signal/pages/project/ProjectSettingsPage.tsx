@@ -2,6 +2,8 @@ import {useEffect, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, KvList, TabsStrip, Chip, StatusPill} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -75,23 +77,34 @@ export default function ProjectSettingsPage() {
     }
   }
 
-  async function onArchive() {
-    if (!window.confirm('Archive this project? It will be hidden but can be restored.')) return;
+  // Modal state for destructive actions (replaces window.confirm for proper a11y).
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<{docId: string; name: string} | null>(null);
+  const [dangerBusy, setDangerBusy] = useState(false);
+
+  async function performArchive() {
+    setDangerBusy(true);
     try {
       await api.archiveProject(id);
       setMsg('Project archived. It now lives under "Archived" in /projects.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Archive failed.');
+    } finally {
+      setDangerBusy(false);
+      setConfirmArchive(false);
     }
   }
 
-  async function onDelete() {
-    if (!window.confirm("Delete this project permanently? This can't be undone via UI.")) return;
+  async function performDelete() {
+    setDangerBusy(true);
     try {
       await api.deleteProject(id);
       window.location.href = '/projects';
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Delete failed.');
+      setDangerBusy(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -131,13 +144,16 @@ export default function ProjectSettingsPage() {
     }
   }
 
-  async function deleteDoc(docId: string) {
-    if (!window.confirm('Delete this document?')) return;
+  async function performDeleteDoc(docId: string) {
+    setDangerBusy(true);
     try {
       await api.deleteProjectDocument(id, docId);
       await refreshDocs();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Delete failed.');
+    } finally {
+      setDangerBusy(false);
+      setConfirmDeleteDoc(null);
     }
   }
 
@@ -245,8 +261,8 @@ export default function ProjectSettingsPage() {
                 <SectionHeader>Danger zone</SectionHeader>
                 <Card>
                   <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
-                    <Button kind='secondary' sm onClick={onArchive}>Archive project</Button>
-                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={onDelete}>Delete project</Button>
+                    <Button kind='secondary' sm onClick={() => setConfirmArchive(true)}>Archive project</Button>
+                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => setConfirmDelete(true)}>Delete project</Button>
                   </div>
                   <p style={{fontSize: 12, color: 'var(--signal-text-mute)', marginTop: 10, lineHeight: 1.5}}>
                     Archived projects can be restored from <a href='/projects' style={{color: 'var(--signal-coral)'}}>/projects → Archived</a>. Deletion is permanent.
@@ -277,7 +293,7 @@ export default function ProjectSettingsPage() {
             </Button>
 
             {docs === null ? (
-              <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading documents…</p></Card>
+              <LoadingState label="Loading documents…" />
             ) : docs.length === 0 ? (
               <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No documents yet. Upload one above to start.</p></Card>
             ) : (
@@ -301,7 +317,7 @@ export default function ProjectSettingsPage() {
                     trailing={
                       <div style={{display: 'flex', gap: 4}}>
                         <StatusPill kind={status === 'READY' ? 'shipped' : status === 'FAILED' ? 'failed' : 'needs'}>{status}</StatusPill>
-                        <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => dAny.id && deleteDoc(dAny.id)}>×</Button>
+                        <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => dAny.id && setConfirmDeleteDoc({docId: dAny.id, name: dAny.filename || dAny.name || 'this document'})}>×</Button>
                       </div>
                     }
                   />
@@ -339,6 +355,36 @@ export default function ProjectSettingsPage() {
           </>
         )}
       </Feed>
+
+      <ConfirmModal
+        open={confirmArchive}
+        title='Archive this project?'
+        body={`${projectName} will be hidden from your projects list. You can restore it from /projects → Archived. No runs, repos, or docs are deleted.`}
+        confirmLabel='Archive'
+        busy={dangerBusy}
+        onClose={() => setConfirmArchive(false)}
+        onConfirm={performArchive}
+      />
+      <ConfirmModal
+        open={confirmDelete}
+        title='Delete this project?'
+        body={`${projectName} and all linked repos, runs, docs, chat history, and memory snapshots will be permanently deleted. This cannot be undone.`}
+        confirmLabel='Delete forever'
+        danger
+        busy={dangerBusy}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={performDelete}
+      />
+      <ConfirmModal
+        open={!!confirmDeleteDoc}
+        title='Delete this document?'
+        body={`"${confirmDeleteDoc?.name || 'document'}" will be removed from the RAG index. Future runs and chats will no longer reference it.`}
+        confirmLabel='Delete'
+        danger
+        busy={dangerBusy}
+        onClose={() => setConfirmDeleteDoc(null)}
+        onConfirm={() => { if (confirmDeleteDoc) void performDeleteDoc(confirmDeleteDoc.docId); }}
+      />
     </>
   );
 }

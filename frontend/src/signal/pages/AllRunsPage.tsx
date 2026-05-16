@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {TopBar, TabBar, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, TabsStrip, Button} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {Search} from '@/signal/icons/icons';
 import * as api from '@/lib/api';
 
@@ -179,8 +180,13 @@ export default function AllRunsPage() {
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
                 dot={statusToDot(s)}
-                title={r.userRequest ||
-                  (r as unknown as {runTitle?: string}).runTitle || `Run ${shortRunId(r.runId)}`}
+                title={(() => {
+                  // Prefer the agent-generated short runTitle over the raw
+                  // spec for the same reason as HomePage — list rows look
+                  // ridiculous when filled with 600-char spec dumps.
+                  const rAny = r as unknown as {runTitle?: string};
+                  return rAny.runTitle?.trim() || r.userRequest?.trim() || `Run ${shortRunId(r.runId)}`;
+                })()}
                 meta={
                   <>
                     <span className='mono'>{shortRunId(r.runId)}</span>

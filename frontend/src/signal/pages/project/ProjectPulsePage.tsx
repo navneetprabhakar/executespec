@@ -3,6 +3,7 @@ import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card} from '@/signal/components/Primitives';
 import {LiveHero, LiveHeroAction, PrCard} from '@/signal/components/Compose';
+import {SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {Share, More} from '@/signal/icons/icons';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
@@ -48,8 +49,9 @@ export default function ProjectPulsePage() {
   const id = projectId || '';
   const project = useProjectMeta(id);
   const [dash, setDash] = useState<unknown>(null);
-  const [recentRuns, setRecentRuns] = useState<api.RunSummary[]>([]);
-  const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
+  // null = still loading; [] = loaded with no results.
+  const [recentRuns, setRecentRuns] = useState<api.RunSummary[] | null>(null);
+  const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
   const [err, setErr] = useState('');
 
@@ -64,8 +66,8 @@ export default function ProjectPulsePage() {
     ]).then(([d, r, rp, h]) => {
       if (cancelled) return;
       if (d.status === 'fulfilled') setDash(d.value);
-      if (r.status === 'fulfilled') setRecentRuns(r.value.content);
-      if (rp.status === 'fulfilled') setRepos(rp.value as unknown as Array<Record<string, unknown>>);
+      if (r.status === 'fulfilled') setRecentRuns(r.value.content); else setRecentRuns([]);
+      if (rp.status === 'fulfilled') setRepos(rp.value as unknown as Array<Record<string, unknown>>); else setRepos([]);
       if (h.status === 'fulfilled') setHealth(h.value);
       if (d.status === 'rejected' && r.status === 'rejected') {
         setErr('Failed to load project.');
@@ -76,7 +78,7 @@ export default function ProjectPulsePage() {
     };
   }, [id]);
 
-  const live = recentRuns.find((r) => {
+  const live = (recentRuns || []).find((r) => {
     const s = (r.status || '').toUpperCase();
     return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
   });
@@ -100,7 +102,7 @@ export default function ProjectPulsePage() {
     <>
       <TopBar
         title={projectName}
-        sub={`${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}${memberCount != null ? ` · ${memberCount} collaborators` : ''}`}
+        sub={repos === null ? 'loading…' : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'}${memberCount != null ? ` · ${memberCount} collaborators` : ''}`}
         back
         backTo='/projects'
         actions={
@@ -185,7 +187,12 @@ export default function ProjectPulsePage() {
         </div>
 
         <SectionHeader action={<a href={`/projects/${id}/repos`}>View all</a>}>Workspace health</SectionHeader>
-        {(health?.repos?.length ?? 0) === 0 && repos.length === 0 ? (
+        {repos === null ? (
+          <>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </>
+        ) : (health?.repos?.length ?? 0) === 0 && repos.length === 0 ? (
           <Card>
             <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
               No repos linked yet. <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>Link a repo →</a>
@@ -240,8 +247,14 @@ export default function ProjectPulsePage() {
           </>
         )}
 
-        <SectionHeader action={<a href={`/projects/${id}/runs`}>All {recentRuns.length}</a>}>Recent runs</SectionHeader>
-        {recentRuns.length === 0 ? (
+        <SectionHeader action={<a href={`/projects/${id}/runs`}>All {recentRuns?.length ?? ''}</a>}>Recent runs</SectionHeader>
+        {recentRuns === null ? (
+          <>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </>
+        ) : recentRuns.length === 0 ? (
           <Card>
             <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No runs yet in this project.</p>
           </Card>

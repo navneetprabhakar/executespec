@@ -1364,6 +1364,12 @@ export interface OrgDto {
   // Confluence integration flags (raw credentials never returned)
   hasConfluenceCredentials?: boolean;
   confluenceBaseUrl?: string | null;
+  /**
+   * V198 — when true, ORG_ADMIN / SUPER_ADMIN may invite any email domain
+   * (gmail, outlook, etc.) as cross-org collaborators on a project. Defaults
+   * to false on new orgs. Toggle via {@link updateExternalSharing}.
+   */
+  externalSharingEnabled?: boolean;
 }
 
 export interface OrgMemberDto {
@@ -1462,6 +1468,18 @@ export const updateOrgKeySourceSettings = (
   req<OrgDto>('/org/me/settings/key-source', {
     method: 'PUT',
     body: JSON.stringify({keySourceMode, enabledProviders}),
+  });
+
+/**
+ * V198 — toggle per-org external project sharing. When true, ORG_ADMIN or
+ * SUPER_ADMIN may invite any email domain (gmail, outlook, etc.) as a
+ * cross-org collaborator on a project. Default is false; existing tenants
+ * are opt-in.
+ */
+export const updateExternalSharing = (enabled: boolean) =>
+  req<OrgDto>('/org/me/settings/external-sharing', {
+    method: 'PUT',
+    body: JSON.stringify({enabled}),
   });
 
 /** Saves org-level JIRA credentials (ORG_ADMIN only). Pass empty strings to clear. */

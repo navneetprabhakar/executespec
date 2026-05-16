@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V197**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V198**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -37,7 +37,7 @@ Workspaces: `<agent.workspace>/<runId>/` (local disk on the VM). Multi-repo runs
 
 Workers (`agent/WorkerAgent.java`) — sequential, multi-turn. Per-complexity caps (set in `SequentialExecutor.tierConfigFor`): LOW=30 iters / 4k tokens, MEDIUM=50 / 8k, HIGH=75 / 16k. Per-provider PATCH-mode caps: Anthropic 150, OpenAI 100, Gemini 120. Outcomes: `COMPLETED | COMPLETED_BY_STAGNATION | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | BUDGET_EXCEEDED | ERROR`. Two resilience levers fire at end-of-budget: **Lever A** (force-edit watchdog injects "commit to ANY edit now" UserMessage at 0.7×maxIter when `totalWriteCalls=0`) and **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / stagnation-force when no writes have happened). Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL).
 
-Scoring (`scoring/`, `report/`): `verifiedScore` is **multiplicative** since 264cca58 — `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`. `accuracyScore` (LLM-judged) survives as a legacy fallback for pre-V106 rows; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip.
+Scoring (`scoring/`, `report/`): `verifiedScore` is **multiplicative** since 264cca58 — `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`. `accuracyScore` (LLM-judged) survives as a legacy fallback for pre-V106 rows; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip. **Two trust gates** floor specific factors at `reviewerFactor` when the reviewer says CLEAN/FIXED_ISSUES: (1) `endpointFactor` (since 2026-05-10, PR #95) prevents the AccuracyAssessment LLM's read-budget-limited endpoint count from dragging down a healthy wiring pass; (2) `testFactor` (since 2026-05-16) blocks the same class of false-negative for `testCoverageLevel=PARTIAL` when the spec asked for minimal tests and they actually shipped. Gate fires only when `testsTotal==0 && endpointCoveragePercent>=95 && reviewer in {CLEAN, FIXED_ISSUES}`.
 
 ### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
 
@@ -60,7 +60,7 @@ Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(
 
 ### Auth + RBAC
 
-JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`).
+JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`).
 
 `AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard. Ten legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators fail the build.
 
@@ -95,12 +95,12 @@ Agent tier mapping (`application.yml`):
 | Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
 | ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
-| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-pro-preview`   | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
+| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 
 Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
 
-Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING.
+Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. PLANNING tier still uses Pro so the outline / coherence-planner / arch-doc keep deep-reasoning quality.
 
 Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain.
 
@@ -123,7 +123,7 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V197**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V198**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
 ### Patterns: MUST follow
 
@@ -293,14 +293,15 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/code-reviews`                                                                              | Submit whole-repo scan (PRO+).                                                     |
 | GET    | `/api/code-reviews/{id}` + `/report` (markdown) + `/api/projects/{id}/code-reviews/latest?repo=` | Read endpoints.                                                                    |
 
-### External project sharing (V175)
+### External project sharing (V175 + V198)
 
-| Method | Path                                                                                  | Description                                |
-| ------ | ------------------------------------------------------------------------------------- | ------------------------------------------ |
-| POST   | `/api/projects/{id}/invites` + GET + DELETE                                           | Cross-org `ProjectMember` invite by email. |
-| GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                     | Accept invite (email-match required).      |
-| POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). |
-| GET    | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                     |
+| Method | Path                                                                                  | Description                                                                                                                                                                                                                                |
+| ------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/projects/{id}/invites` + GET + DELETE                                           | Cross-org `ProjectMember` invite by email. **V198 (2026-05-16):** create now requires tier PRO+ AND ORG_ADMIN-of-own-org (or SUPER_ADMIN) AND `org.external_sharing_enabled=true`. PROJECT_ADMIN alone is no longer enough. |
+| GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                     | Accept invite (email-match required).                                                                                                                                                                                                       |
+| POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). Unchanged by V198 — gates the cross-org `ProjectMember` path, not the public-link path.                                                                                                          |
+| GET    | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                                                                                                                                                                                                                      |
+| PUT    | `/api/org/me/settings/external-sharing`                                               | **V198** — toggle the per-org flag. Body `{enabled: bool}`. ORG_ADMIN-of-own-org or SUPER_ADMIN only. Emits `ORG_EXTERNAL_SHARING_CHANGED` audit row.                                                                                       |
 
 ### Auth + org
 
@@ -398,7 +399,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V197)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V198)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
@@ -413,7 +414,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - Per-run codemap + 3-step project architecture pipeline + Generate Docs.
 - Project memory + project chat with compaction.
 - Always-on RAG over user docs via pgvector + Tika + OpenAI embeddings.
-- External project sharing: cross-org `ProjectMember` invites + public read-only share links (V175).
+- External project sharing: cross-org `ProjectMember` invites + public read-only share links (V175). Per-org feature flag `org.external_sharing_enabled` (V198, default false; ORG_ADMIN/SUPER_ADMIN to toggle) gates the cross-org invite surface; share-links are independent.
 - PR Review + Code Review agents with markdown report download (V172).
 - Multi-repo runs: per-repo workspace + per-repo codemap + per-repo PR + cross-link.
 - Tier lifecycle state machine + SUPER_ADMIN tier console.

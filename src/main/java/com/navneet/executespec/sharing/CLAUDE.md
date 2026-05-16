@@ -1,12 +1,16 @@
-# `sharing/` — External project sharing (V175)
+# `sharing/` — External project sharing (V175 + V198)
 
-> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+> Last reviewed: 2026-05-16 (1.0.0-M1). **Merged to dev/main.**
 >
 > Two complementary surfaces for sharing project visibility outside the host org:
 > 1. **Project invites** — cross-org `ProjectMember` rows (collaboration)
 > 2. **Public share links** — signed read-only links per surface (one-off viewing)
 >
-> Both tier-aware.
+> Both tier-aware. **V198 (2026-05-16)** added a per-org feature flag
+> `org.external_sharing_enabled` (default false) plus a role gate (ORG_ADMIN
+> or SUPER_ADMIN only) on `ProjectInviteService.createInvite`. PROJECT_ADMIN
+> on its own is no longer enough — adding outsiders is an org-level decision.
+> Flag is toggled via `PUT /api/org/me/settings/external-sharing`.
 
 ## Files
 

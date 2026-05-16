@@ -2,6 +2,8 @@ import {useEffect, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, IconButton} from '@/signal/components/Chrome';
 import {Feed, Card, KvList, Button, StatusPill} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {Plus} from '@/signal/icons/icons';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
@@ -20,6 +22,7 @@ export default function ProjectReposPage() {
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmUnlink, setConfirmUnlink] = useState<{repoId: string; name: string} | null>(null);
 
   async function refresh() {
     if (!id) return;
@@ -63,8 +66,7 @@ export default function ProjectReposPage() {
     }
   }
 
-  async function unlink(repoId: string) {
-    if (!window.confirm('Unlink this repo from the project?')) return;
+  async function performUnlink(repoId: string) {
     setBusy(true);
     try {
       await api.unlinkProjectRepo(id, repoId);
@@ -74,6 +76,7 @@ export default function ProjectReposPage() {
       setErr(e instanceof Error ? e.message : 'Unlink failed.');
     } finally {
       setBusy(false);
+      setConfirmUnlink(null);
     }
   }
 
@@ -153,7 +156,7 @@ export default function ProjectReposPage() {
         )}
 
         {repos === null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading repos…</p></Card>
+          <LoadingState label="Loading repos…" />
         ) : repos.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
@@ -201,7 +204,7 @@ export default function ProjectReposPage() {
                   <Button kind='secondary' sm to={`/projects/${id}/architecture`} style={{flex: 1}}>View architecture</Button>
                   {!webhookOk && <Button kind='primary' sm style={{flex: 1}} onClick={() => installWebhook(repoId)}>Install webhook</Button>}
                   {commitsBehind > 0 && <Button kind='secondary' sm style={{flex: 1}} onClick={() => syncOne(repoId)}>Sync</Button>}
-                  <Button kind='ghost' sm style={{flex: 1, color: 'var(--signal-coral-text)'}} onClick={() => unlink(repoId)}>Unlink</Button>
+                  <Button kind='ghost' sm style={{flex: 1, color: 'var(--signal-coral-text)'}} onClick={() => setConfirmUnlink({repoId, name})}>Unlink</Button>
                 </div>
               </Card>
             );
@@ -212,6 +215,17 @@ export default function ProjectReposPage() {
           <Plus size={16} /> Link another repo
         </Button>
       </Feed>
+
+      <ConfirmModal
+        open={!!confirmUnlink}
+        title='Unlink this repo?'
+        body={`"${confirmUnlink?.name || 'this repo'}" will no longer be cloned or referenced by future runs. Existing runs and PRs are unaffected.`}
+        confirmLabel='Unlink'
+        danger
+        busy={busy}
+        onClose={() => setConfirmUnlink(null)}
+        onConfirm={() => { if (confirmUnlink) void performUnlink(confirmUnlink.repoId); }}
+      />
     </>
   );
 }

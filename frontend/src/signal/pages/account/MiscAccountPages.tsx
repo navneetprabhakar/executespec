@@ -3,7 +3,10 @@
 import {useEffect, useMemo, useState} from 'react';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, Chip, StatusPill} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {Plus} from '@/signal/icons/icons';
+import {GitHubLogo, SlackLogo, JiraLogo, ConfluenceLogo, BitbucketLogo} from '@/signal/components/BrandLogos';
+import {PromptModal, ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
@@ -85,7 +88,7 @@ export function TopupPage() {
 
         <SectionHeader>Pick a pack</SectionHeader>
         {packs == null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading packs…</p></Card>
+          <LoadingState label="Loading packs…" />
         ) : (
           packs.map((p) => {
             // Match the real TopupPackageAdmin shape: {id, name, runCount,
@@ -128,6 +131,12 @@ export function IntegrationsPage() {
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [github, setGithub] = useState<api.GitHubAppStatus | null>(null);
   const [err, setErr] = useState('');
+  // Per-provider credential modal (Jira / Confluence / Bitbucket).
+  const [connectOpen, setConnectOpen] = useState<null | 'jira' | 'confluence' | 'bitbucket'>(null);
+  const [connectBusy, setConnectBusy] = useState(false);
+  // Disconnect confirmation state — replaces window.confirm for proper a11y.
+  const [disconnectOpen, setDisconnectOpen] = useState<null | 'slack' | 'github'>(null);
+  const [disconnectBusy, setDisconnectBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,24 +172,30 @@ export function IntegrationsPage() {
       setErr(e instanceof Error ? e.message : 'Failed to start GitHub install.');
     }
   }
-  async function disconnectSlack() {
-    if (!window.confirm('Disconnect Slack?')) return;
+  async function performSlackDisconnect() {
+    setDisconnectBusy(true);
     try {
       await api.disconnectSlack();
       const next = await api.getSlackStatus();
       setSlack(next);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Disconnect failed.');
+    } finally {
+      setDisconnectBusy(false);
+      setDisconnectOpen(null);
     }
   }
-  async function uninstallGithub() {
-    if (!window.confirm('Uninstall GitHub app?')) return;
+  async function performGithubUninstall() {
+    setDisconnectBusy(true);
     try {
       await api.uninstallGitHubApp();
       const next = await api.getGitHubAppStatus();
       setGithub(next);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Uninstall failed.');
+    } finally {
+      setDisconnectBusy(false);
+      setDisconnectOpen(null);
     }
   }
 
@@ -196,34 +211,166 @@ export function IntegrationsPage() {
         {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
 
         <SectionHeader>Source control</SectionHeader>
-        <Row
-          dot={githubAny.installed ? 'mint' : 'mute'}
+        <IntegrationRow
+          logo={<GitHubLogo size={20} />}
+          connected={!!githubAny.installed}
           title='GitHub'
-          meta={<span>{githubAny.installed ? `${githubAny.accountLogin || githubAny.account || 'connected'} · webhooks healthy` : 'Required for repo cloning + PR creation'}</span>}
-          trailing={
+          desc={githubAny.installed ? `${githubAny.accountLogin || githubAny.account || 'connected'} · webhooks healthy` : 'Required for repo cloning + PR creation'}
+          action={
             githubAny.installed
-              ? <Button kind='secondary' sm onClick={uninstallGithub}>Uninstall</Button>
+              ? <Button kind='secondary' sm onClick={() => setDisconnectOpen('github')}>Uninstall</Button>
               : <Button kind='primary' sm onClick={installGithub}>Connect</Button>
+          }
+        />
+        <IntegrationRow
+          logo={<BitbucketLogo size={20} />}
+          connected={enabled.includes('bitbucket')}
+          title='Bitbucket'
+          desc='Same UX as GitHub'
+          action={
+            enabled.includes('bitbucket')
+              ? <Chip kind='mint'>Connected</Chip>
+              : <Button kind='primary' sm onClick={() => setConnectOpen('bitbucket')}>Connect</Button>
           }
         />
 
         <SectionHeader>Notifications</SectionHeader>
-        <Row
-          dot={slackAny.connected ? 'mint' : 'mute'}
+        <IntegrationRow
+          logo={<SlackLogo size={20} />}
+          connected={!!slackAny.connected}
           title='Slack'
-          meta={<span>{slackAny.connected ? `${slackAny.teamName || 'connected'} · run alerts` : 'Run completion alerts in your channel'}</span>}
-          trailing={
+          desc={slackAny.connected ? `${slackAny.teamName || 'connected'} · run alerts` : 'Run completion alerts in your channel'}
+          action={
             slackAny.connected
-              ? <Button kind='secondary' sm onClick={disconnectSlack}>Disconnect</Button>
+              ? <Button kind='secondary' sm onClick={() => setDisconnectOpen('slack')}>Disconnect</Button>
               : <Button kind='primary' sm onClick={installSlack}>Connect</Button>
           }
         />
 
         <SectionHeader>Issue trackers</SectionHeader>
-        <Row dot={enabled.includes('jira') ? 'mint' : 'mute'} title='Jira' meta={<span>Trigger runs from issues</span>} trailing={<Chip>{enabled.includes('jira') ? 'Connected' : 'Connect'}</Chip>} />
-        <Row dot={enabled.includes('confluence') ? 'mint' : 'mute'} title='Confluence' meta={<span>Trigger runs from pages</span>} trailing={<Chip>{enabled.includes('confluence') ? 'Connected' : 'Connect'}</Chip>} />
-        <Row dot={enabled.includes('bitbucket') ? 'mint' : 'mute'} title='Bitbucket' meta={<span>Same UX as GitHub</span>} trailing={<Chip>{enabled.includes('bitbucket') ? 'Connected' : 'Connect'}</Chip>} />
+        <IntegrationRow
+          logo={<JiraLogo size={20} />}
+          connected={enabled.includes('jira')}
+          title='Jira'
+          desc='Trigger runs from issues'
+          action={
+            enabled.includes('jira')
+              ? <Chip kind='mint'>Connected</Chip>
+              : <Button kind='primary' sm onClick={() => setConnectOpen('jira')}>Connect</Button>
+          }
+        />
+        <IntegrationRow
+          logo={<ConfluenceLogo size={20} />}
+          connected={enabled.includes('confluence')}
+          title='Confluence'
+          desc='Trigger runs from pages'
+          action={
+            enabled.includes('confluence')
+              ? <Chip kind='mint'>Connected</Chip>
+              : <Button kind='primary' sm onClick={() => setConnectOpen('confluence')}>Connect</Button>
+          }
+        />
       </Feed>
+
+      {/* Per-provider credential prompts. Each posts to its dedicated
+          /api/auth/settings/{provider} endpoint via the typed api helpers. */}
+      <PromptModal
+        open={connectOpen === 'jira'}
+        title='Connect Jira'
+        body='Paste your Jira Cloud credentials. The API token is stored encrypted at rest.'
+        fields={[
+          {name: 'baseUrl', label: 'Base URL', placeholder: 'https://yourco.atlassian.net', required: true},
+          {name: 'email', label: 'Email', placeholder: 'you@yourco.com', required: true},
+          {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
+        ]}
+        busy={connectBusy}
+        onClose={() => setConnectOpen(null)}
+        onSubmit={async (v) => {
+          setConnectBusy(true);
+          try {
+            await api.updateJiraSettings(v.baseUrl, v.email, v.apiToken);
+            setConnectOpen(null);
+            const next = await api.getIntegrationStatus();
+            setStatus(next);
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Jira connect failed.');
+          } finally {
+            setConnectBusy(false);
+          }
+        }}
+      />
+      <PromptModal
+        open={connectOpen === 'confluence'}
+        title='Connect Confluence'
+        body='Paste your Confluence Cloud credentials.'
+        fields={[
+          {name: 'baseUrl', label: 'Base URL', placeholder: 'https://yourco.atlassian.net/wiki', required: true},
+          {name: 'email', label: 'Email', placeholder: 'you@yourco.com', required: true},
+          {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
+        ]}
+        busy={connectBusy}
+        onClose={() => setConnectOpen(null)}
+        onSubmit={async (v) => {
+          setConnectBusy(true);
+          try {
+            await api.updateConfluenceSettings(v.baseUrl, v.email, v.apiToken);
+            setConnectOpen(null);
+            const next = await api.getIntegrationStatus();
+            setStatus(next);
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Confluence connect failed.');
+          } finally {
+            setConnectBusy(false);
+          }
+        }}
+      />
+      <PromptModal
+        open={connectOpen === 'bitbucket'}
+        title='Connect Bitbucket'
+        body='Provide a Bitbucket workspace + repo + app password (scopes: repository, pullrequest).'
+        fields={[
+          {name: 'workspace', label: 'Workspace', placeholder: 'your-workspace', required: true},
+          {name: 'repoSlug', label: 'Default repo slug', placeholder: 'main-repo', required: true},
+          {name: 'username', label: 'Username', placeholder: 'you', required: true},
+          {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
+        ]}
+        busy={connectBusy}
+        onClose={() => setConnectOpen(null)}
+        onSubmit={async (v) => {
+          setConnectBusy(true);
+          try {
+            await api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, v.repoSlug);
+            setConnectOpen(null);
+            const next = await api.getIntegrationStatus();
+            setStatus(next);
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Bitbucket connect failed.');
+          } finally {
+            setConnectBusy(false);
+          }
+        }}
+      />
+
+      <ConfirmModal
+        open={disconnectOpen === 'slack'}
+        title='Disconnect Slack?'
+        body='Run-completion alerts will stop firing in your Slack workspace. You can reconnect at any time.'
+        confirmLabel='Disconnect'
+        danger
+        busy={disconnectBusy}
+        onClose={() => setDisconnectOpen(null)}
+        onConfirm={performSlackDisconnect}
+      />
+      <ConfirmModal
+        open={disconnectOpen === 'github'}
+        title='Uninstall GitHub app?'
+        body='The agent will lose access to your repos — runs that need GitHub for cloning, PRs, or webhooks will fail until you reinstall.'
+        confirmLabel='Uninstall'
+        danger
+        busy={disconnectBusy}
+        onClose={() => setDisconnectOpen(null)}
+        onConfirm={performGithubUninstall}
+      />
     </>
   );
 }
@@ -343,9 +490,12 @@ export function OrgMembersPage() {
   const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
   const [invites, setInvites] = useState<api.OrgInvitation[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'DEVELOPER' | 'BILLING_ADMIN' | 'ORG_ADMIN'>('DEVELOPER');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<{userId: string; label: string} | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,7 +521,7 @@ export function OrgMembersPage() {
     setErr('');
     setMsg('');
     try {
-      await api.inviteMember({email, orgRole: 'DEVELOPER'});
+      await api.inviteMember({email, orgRole: inviteRole});
       setMsg(`Invite sent to ${email}.`);
       setInviteEmail('');
       const i = await api.getOrgInvitations();
@@ -384,11 +534,41 @@ export function OrgMembersPage() {
   }
 
   async function resend(id: string) {
+    setRowBusy(`resend-${id}`);
     try {
       await api.resendInvitation(id);
       setMsg('Invite re-sent.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Resend failed.');
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function removeOne(userId: string) {
+    setRowBusy(`remove-${userId}`);
+    try {
+      await api.removeMember(userId);
+      setMembers(await api.getOrgMembers());
+      setMsg('Member removed.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Remove failed.');
+    } finally {
+      setRowBusy(null);
+      setConfirmRemove(null);
+    }
+  }
+
+  async function changeRole(userId: string, role: string) {
+    setRowBusy(`role-${userId}`);
+    try {
+      await api.changeMemberRole(userId, role);
+      setMembers(await api.getOrgMembers());
+      setMsg('Role updated.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Role change failed.');
+    } finally {
+      setRowBusy(null);
     }
   }
 
@@ -408,7 +588,7 @@ export function OrgMembersPage() {
               </div>
             </div>
             {canInvite && (
-              <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 220}}>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240}}>
                 <input
                   type='email'
                   placeholder='teammate@company.com'
@@ -424,8 +604,25 @@ export function OrgMembersPage() {
                     outline: 'none',
                   }}
                 />
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
+                  style={{
+                    background: 'var(--signal-card-bg)',
+                    border: '1px solid var(--signal-hairline)',
+                    borderRadius: 8,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: 'var(--signal-ink)',
+                    outline: 'none',
+                  }}
+                >
+                  <option value='DEVELOPER'>DEVELOPER</option>
+                  <option value='BILLING_ADMIN'>BILLING_ADMIN</option>
+                  <option value='ORG_ADMIN'>ORG_ADMIN</option>
+                </select>
                 <Button kind='primary' sm onClick={invite} disabled={busy || !inviteEmail.trim()}>
-                  <Plus size={14} /> {busy ? 'Inviting…' : 'Send invite'}
+                  <Plus size={14} /> {busy ? 'Inviting…' : `Send ${inviteRole.toLowerCase()} invite`}
                 </Button>
               </div>
             )}
@@ -434,16 +631,20 @@ export function OrgMembersPage() {
 
         <SectionHeader>Members · {members.length}</SectionHeader>
         {members.length === 0 ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading members…</p></Card>
+          <LoadingState label="Loading members…" />
         ) : (
           members.map((m) => {
             const mAny = m as unknown as {id?: string; userId?: string; email?: string; firstName?: string; lastName?: string; orgRole?: string; lastSeen?: string};
             const isMe = mAny.userId === user?.id;
             const av = ((mAny.firstName?.[0] ?? '') + (mAny.lastName?.[0] ?? '') || (mAny.email?.slice(0, 2) ?? 'EX')).toUpperCase();
+            const uid = mAny.userId || mAny.id || '';
+            const roleBusy = rowBusy === `role-${uid}`;
+            const removeBusy = rowBusy === `remove-${uid}`;
+            const displayName = ((mAny.firstName || mAny.email?.split('@')[0]) ?? '—') + (mAny.lastName ? ` ${mAny.lastName}` : '');
             return (
-              <div key={mAny.id || mAny.userId} className='signal-row'>
+              <div key={mAny.id || mAny.userId} className='signal-row' style={{gridTemplateColumns: 'auto 1fr auto'}}>
                 <div className='signal-avatar'>{av}</div>
-                <div>
+                <div style={{minWidth: 0}}>
                   <div className='row-title'>
                     {(mAny.firstName || mAny.email?.split('@')[0]) ?? '—'} {mAny.lastName ?? ''} {isMe && <span style={{color: 'var(--signal-text-dim)', fontWeight: 400}}>· you</span>}
                   </div>
@@ -457,11 +658,43 @@ export function OrgMembersPage() {
                     )}
                   </div>
                 </div>
-                {mAny.orgRole === 'ORG_ADMIN' ? (
-                  <StatusPill kind='shipped'>{mAny.orgRole}</StatusPill>
-                ) : (
-                  <Chip>{mAny.orgRole || 'DEVELOPER'}</Chip>
-                )}
+                <div style={{display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0}}>
+                  {canInvite && !isMe ? (
+                    <>
+                      <select
+                        value={mAny.orgRole || 'DEVELOPER'}
+                        disabled={roleBusy || removeBusy}
+                        onChange={(e) => changeRole(uid, e.target.value)}
+                        style={{
+                          background: 'var(--signal-card-elev)',
+                          border: '1px solid var(--signal-hairline)',
+                          borderRadius: 8,
+                          padding: '5px 8px',
+                          fontSize: 12,
+                          color: 'var(--signal-ink)',
+                          outline: 'none',
+                          cursor: roleBusy ? 'wait' : 'pointer',
+                        }}
+                      >
+                        <option value='DEVELOPER'>DEVELOPER</option>
+                        <option value='BILLING_ADMIN'>BILLING_ADMIN</option>
+                        <option value='ORG_ADMIN'>ORG_ADMIN</option>
+                      </select>
+                      <Button
+                        kind='secondary'
+                        sm
+                        disabled={removeBusy || roleBusy}
+                        onClick={() => setConfirmRemove({userId: uid, label: displayName.trim() || mAny.email || 'this member'})}
+                      >
+                        {removeBusy ? '…' : 'Remove'}
+                      </Button>
+                    </>
+                  ) : mAny.orgRole === 'ORG_ADMIN' ? (
+                    <StatusPill kind='shipped'>{mAny.orgRole}</StatusPill>
+                  ) : (
+                    <Chip>{mAny.orgRole || 'DEVELOPER'}</Chip>
+                  )}
+                </div>
               </div>
             );
           })
@@ -485,6 +718,40 @@ export function OrgMembersPage() {
           </>
         )}
       </Feed>
+
+      <ConfirmModal
+        open={!!confirmRemove}
+        title='Remove member?'
+        body={`${confirmRemove?.label || 'This member'} will lose access to all org projects, runs, and billing. This action is irreversible.`}
+        confirmLabel='Remove'
+        danger
+        busy={!!confirmRemove && rowBusy === `remove-${confirmRemove.userId}`}
+        onClose={() => setConfirmRemove(null)}
+        onConfirm={() => { if (confirmRemove) void removeOne(confirmRemove.userId); }}
+      />
     </>
+  );
+}
+
+// Tight row variant for integrations — leads with the brand logo so the
+// service is recognisable at a glance, drops the generic dot in favour of a
+// real mark.
+function IntegrationRow({logo, connected, title, desc, action}: {logo: React.ReactNode; connected: boolean; title: string; desc: string; action: React.ReactNode}) {
+  return (
+    <div className='signal-row' style={{gridTemplateColumns: 'auto 1fr auto'}}>
+      <div style={{width: 32, height: 32, borderRadius: 8, background: 'var(--signal-card-elev)', display: 'grid', placeItems: 'center', flexShrink: 0, opacity: connected ? 1 : 0.65}}>
+        {logo}
+      </div>
+      <div style={{minWidth: 0}}>
+        <div className='row-title' style={{display: 'flex', alignItems: 'center', gap: 6}}>
+          {title}
+          {connected && (
+            <span style={{display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--signal-mint)', boxShadow: '0 0 6px rgba(124,227,180,0.6)'}} />
+          )}
+        </div>
+        <div className='row-meta'><span>{desc}</span></div>
+      </div>
+      <div style={{display: 'flex', alignItems: 'center'}}>{action}</div>
+    </div>
   );
 }

@@ -6,9 +6,12 @@ import {useEffect, useState} from 'react';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, Chip, StatusPill, TabsStrip, KvList} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
 import AuthLayout from '@/signal/components/AuthLayout';
 import {Search, Plus} from '@/signal/icons/icons';
+import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
 // ──────────────────── Insights (analytics) ────────────────────
@@ -798,6 +801,9 @@ export function AcceptInvitePage() {
 
 // ──────────────────── Audit log (org-scoped) ────────────────────
 export function AuditLogPage() {
+  const tier = useAuthStore(selectNormalizedTier);
+  const user = useAuthStore((s) => s.user);
+  const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
   const [logs, setLogs] = useState<api.AuditLogEntry[] | null>(null);
   const [filter, setFilter] = useState<'all' | 'auth' | 'billing' | 'members' | 'admin'>('all');
   const [err, setErr] = useState('');
@@ -812,13 +818,21 @@ export function AuditLogPage() {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        // Distinguish "no permission" from generic load errors so the empty
-        // state is clear and the loading spinner disappears. The audit
-        // endpoint requires ORG_ADMIN AND a paid tier on the running JVM;
-        // the exact gate varies by deployment so we keep the message vague.
+        // Tailor the 403 message to what the caller can actually do about it:
+        //   - FREE/PRO tier  → upsell, audit is a TEAM+ feature
+        //   - TEAM+ but not ORG_ADMIN → "ask your org admin"
+        //   - TEAM+ ORG_ADMIN → org-level flag isn't on yet; link them to
+        //     Org Settings where they can enable it (or contact support if
+        //     that page doesn't expose the toggle on their tier).
         const msg = e instanceof Error ? e.message : 'Failed to load audit log.';
         if (/403|permission|forbidden/i.test(msg)) {
-          setErr("You don't have access to this org's audit log. Ask an admin to enable it for your role.");
+          if (tier === 'FREE' || tier === 'PRO') {
+            setErr('Audit log is a TEAM+ feature. Upgrade your plan to enable it.');
+          } else if (!isOrgAdmin) {
+            setErr('Audit log is restricted to org admins. Ask your org admin to grant you access.');
+          } else {
+            setErr("Audit log isn't enabled for your org yet. Open Org Settings → Compliance to turn it on, or contact support if the toggle isn't visible.");
+          }
         } else {
           setErr(msg);
         }
@@ -827,7 +841,7 @@ export function AuditLogPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tier, isOrgAdmin]);
 
   const filtered = (logs || []).filter((l) => {
     if (filter === 'all') return true;
@@ -884,7 +898,7 @@ export function AuditLogPage() {
         {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
 
         {logs === null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading audit log…</p></Card>
+          <LoadingState label="Loading audit log…" />
         ) : filtered.length === 0 ? (
           <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No audit events for this filter.</p></Card>
         ) : (
@@ -927,6 +941,9 @@ export function AuditLogPage() {
 export function DeploymentsPage() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [err, setErr] = useState('');
+  const [confirmRollback, setConfirmRollback] = useState<{id: string; name: string} | null>(null);
+  const [confirmDestroy, setConfirmDestroy] = useState<{id: string; name: string} | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     api.getDeployments().then(setItems).catch((e: unknown) => {
@@ -934,23 +951,29 @@ export function DeploymentsPage() {
     });
   }, []);
 
-  async function rollback(id: string) {
-    if (!window.confirm('Roll back this deployment?')) return;
+  async function performRollback(id: string) {
+    setConfirmBusy(true);
     try {
       await api.rollbackDeployment(id);
       setItems(await api.getDeployments());
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Rollback failed.');
+    } finally {
+      setConfirmBusy(false);
+      setConfirmRollback(null);
     }
   }
 
-  async function remove(id: string) {
-    if (!window.confirm('Destroy this deployment?')) return;
+  async function performRemove(id: string) {
+    setConfirmBusy(true);
     try {
       await api.deleteDeployment(id);
       setItems(await api.getDeployments());
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Delete failed.');
+    } finally {
+      setConfirmBusy(false);
+      setConfirmDestroy(null);
     }
   }
 
@@ -971,7 +994,7 @@ export function DeploymentsPage() {
 
         <SectionHeader>Deployments</SectionHeader>
         {items === null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading deployments…</p></Card>
+          <LoadingState label="Loading deployments…" />
         ) : items.length === 0 ? (
           <Card><p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>No deployments yet. Run a spec to ship one.</p></Card>
         ) : (
@@ -998,8 +1021,8 @@ export function DeploymentsPage() {
                 trailing={
                   <div style={{display: 'flex', gap: 4}}>
                     {dAny.url && <Button kind='secondary' sm onClick={() => window.open(dAny.url!, '_blank', 'noopener')}>Open</Button>}
-                    <Button kind='ghost' sm onClick={() => dAny.id && rollback(dAny.id)}>Rollback</Button>
-                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => dAny.id && remove(dAny.id)}>×</Button>
+                    <Button kind='ghost' sm onClick={() => dAny.id && setConfirmRollback({id: dAny.id, name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`})}>Rollback</Button>
+                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => dAny.id && setConfirmDestroy({id: dAny.id, name: dAny.name || `deployment ${dAny.id.slice(0, 8)}`})}>×</Button>
                   </div>
                 }
               />
@@ -1007,6 +1030,26 @@ export function DeploymentsPage() {
           })
         )}
       </Feed>
+
+      <ConfirmModal
+        open={!!confirmRollback}
+        title='Roll back this deployment?'
+        body={`"${confirmRollback?.name || 'this deployment'}" will revert to the previous revision. Live traffic stays online — no downtime.`}
+        confirmLabel='Roll back'
+        busy={confirmBusy}
+        onClose={() => setConfirmRollback(null)}
+        onConfirm={() => { if (confirmRollback) void performRollback(confirmRollback.id); }}
+      />
+      <ConfirmModal
+        open={!!confirmDestroy}
+        title='Destroy this deployment?'
+        body={`"${confirmDestroy?.name || 'this deployment'}" will be torn down. The URL stops serving immediately and cannot be restored from this UI.`}
+        confirmLabel='Destroy'
+        danger
+        busy={confirmBusy}
+        onClose={() => setConfirmDestroy(null)}
+        onConfirm={() => { if (confirmDestroy) void performRemove(confirmDestroy.id); }}
+      />
     </>
   );
 }
@@ -1017,6 +1060,10 @@ export function SpecTemplatesPage() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<api.SpecTemplate[] | null>(null);
   const [err, setErr] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{id: string; name: string} | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     api.getProjects().then((p) => {
@@ -1037,28 +1084,35 @@ export function SpecTemplatesPage() {
     });
   }, [projectId]);
 
-  async function createTemplate() {
+  async function performCreate(values: Record<string, string>) {
     if (!projectId) return;
-    const name = window.prompt('Template name?');
-    if (!name) return;
-    const body = window.prompt('Template body (spec text)?');
-    if (!body) return;
+    const name = (values.name || '').trim();
+    const body = (values.body || '').trim();
+    if (!name || !body) return;
+    setCreateBusy(true);
+    setErr('');
     try {
       await api.createProjectSpecTemplate(projectId, {name, body} as unknown as Parameters<typeof api.createProjectSpecTemplate>[1]);
       setTemplates(await api.listSpecTemplates(projectId));
+      setCreateOpen(false);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to create template.');
+    } finally {
+      setCreateBusy(false);
     }
   }
 
-  async function deleteOne(id: string) {
+  async function performDelete(id: string) {
     if (!projectId) return;
-    if (!window.confirm('Delete this template?')) return;
+    setDeleteBusy(true);
     try {
       await api.deleteSpecTemplate(projectId, id);
       setTemplates(await api.listSpecTemplates(projectId));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Delete failed.');
+    } finally {
+      setDeleteBusy(false);
+      setConfirmDelete(null);
     }
   }
 
@@ -1095,7 +1149,7 @@ export function SpecTemplatesPage() {
             </p>
           </Card>
         ) : templates === null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading templates…</p></Card>
+          <LoadingState label="Loading templates…" />
         ) : templates.length === 0 ? (
           <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No templates yet. Save one to reuse common specs.</p></Card>
         ) : (
@@ -1113,7 +1167,7 @@ export function SpecTemplatesPage() {
                       sessionStorage.setItem('signal:pending-spec', tAny.body || '');
                       window.location.href = '/compose';
                     }}>Use</Button>
-                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => tAny.id && deleteOne(tAny.id)}>×</Button>
+                    <Button kind='ghost' sm style={{color: 'var(--signal-coral-text)'}} onClick={() => tAny.id && setConfirmDelete({id: tAny.id, name: tAny.name || 'this template'})}>×</Button>
                   </div>
                 }
               />
@@ -1122,11 +1176,35 @@ export function SpecTemplatesPage() {
         )}
 
         {projectId && (
-          <Button kind='secondary' block style={{marginTop: 14}} onClick={createTemplate}>
+          <Button kind='secondary' block style={{marginTop: 14}} onClick={() => setCreateOpen(true)}>
             <Plus size={16} /> New template
           </Button>
         )}
       </Feed>
+
+      <PromptModal
+        open={createOpen}
+        title='New spec template'
+        body='Save reusable spec scaffolding. The body pre-fills the composer when you pick this template.'
+        fields={[
+          {name: 'name', label: 'Template name', placeholder: 'e.g. CRUD endpoint scaffold', required: true},
+          {name: 'body', label: 'Spec body', placeholder: 'Describe the spec…', multiline: true, required: true},
+        ]}
+        submitLabel='Save template'
+        busy={createBusy}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={performCreate}
+      />
+      <ConfirmModal
+        open={!!confirmDelete}
+        title='Delete this template?'
+        body={`"${confirmDelete?.name || 'this template'}" will be removed. Existing runs that used it are unaffected.`}
+        confirmLabel='Delete'
+        danger
+        busy={deleteBusy}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={() => { if (confirmDelete) void performDelete(confirmDelete.id); }}
+      />
     </>
   );
 }

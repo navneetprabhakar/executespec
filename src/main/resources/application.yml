@@ -181,8 +181,24 @@ model-matrix:
       # already on gemini-3-flash-preview so the preview-tier risk envelope
       # is unchanged. Stable fallback would be gemini-2.5-pro (older
       # generation but no preview suffix).
+      #
+      # 2026-05-16 — WORKHORSE rebalanced to Flash. Root cause from todo-app
+      # eval (run b943a58d, Gemini): worker on Pro tier burned 108k input
+      # tokens with 0 % implicit-cache hits, costing $0.41 against
+      # Anthropic's $0.23 (sonnet-4-6) and OpenAI's $0.05 (gpt-5.4-mini)
+      # for the same single-shot spec. Pro's 4096-token byte-identical
+      # prefix requirement loses every cache hit on a WorkerAgent whose
+      # system prompt is rebuilt per call (tool schemas + dynamic
+      # substitutions drift). Flash's 1024 threshold actually catches.
+      #
+      # This mirrors the reviewer fix from e9d0b6e8 (Reviewer was on Pro
+      # at 0 % cache → moved to Flash). PLANNING tier stays Pro so outline
+      # / coherence-planner / arch-doc keep deep reasoning. Worker on
+      # LOW/MEDIUM tasks is plumbing — Flash is the right call. Per
+      # CLAUDE.md the tier ladder already routes HIGH-complexity tasks to
+      # PLANNING tier so structurally demanding workers still get Pro.
       planning: gemini-3-pro-preview
-      workhorse: gemini-3-pro-preview
+      workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4

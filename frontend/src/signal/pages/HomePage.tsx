@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {TopBar, TabBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card} from '@/signal/components/Primitives';
 import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
+import {SkeletonRow} from '@/signal/components/Loaders';
 import {Search, Bell, Plus, Check, Chat as ChatIcon} from '@/signal/icons/icons';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -68,10 +69,14 @@ function formatElapsed(ms?: number): string {
 
 export default function HomePage() {
   const user = useAuthStore((s) => s.user);
+  const permissions = useAuthStore((s) => s.permissions);
   const [now, setNow] = useState(new Date());
   const [liveRun, setLiveRun] = useState<api.RunDetail | null>(null);
-  const [recent, setRecent] = useState<api.RunSummary[]>([]);
-  const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  // null = still loading; [] = loaded with no results. Without this distinction
+  // the page renders the empty state immediately on mount and the user thinks
+  // the API is broken.
+  const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
+  const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
 
   // Refresh the clock at 60s so the topbar stays current without re-fetching.
   useEffect(() => {
@@ -116,7 +121,13 @@ export default function HomePage() {
           setProjects(allProjects.filter((p) => !p.archivedAt).slice(0, 4));
         }
       } catch {
-        /* swallow — keep UI in last-known state */
+        /* On error, fall out of the loading state so the user sees the empty
+           state instead of skeletons spinning forever. Existing data is kept
+           if we already had any. */
+        if (!cancelled) {
+          setRecent((prev) => prev ?? []);
+          setProjects((prev) => prev ?? []);
+        }
       }
       timer = window.setTimeout(tick, liveRun ? 5_000 : 30_000);
     }
@@ -192,26 +203,41 @@ export default function HomePage() {
               </svg>
             </div>
             <h4>Projects</h4>
-            <div className='count'>{projects.length} active</div>
+            <div className='count'>{projects === null ? '…' : `${projects.length} active`}</div>
           </a>
           <a className='signal-quick-card coral' href='/runs'>
             <div className='icon-bg'>
               <Check size={16} />
             </div>
             <h4>All runs</h4>
-            <div className='count'>{recent.length ? `${recent.length}+ total` : 'No runs yet'}</div>
+            {/* Surface the monthly run cap up front so FREE users discover the
+                limit BEFORE submitting their 6th spec. Show used/limit when a
+                finite cap exists; collapse to a friendlier label otherwise. */}
+            <div className='count'>
+              {permissions
+                ? (permissions.monthlyRunLimit === -1
+                    ? `${permissions.currentRunCount} this cycle`
+                    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} this cycle`)
+                : (recent === null ? '…' : recent.length ? `${recent.length}+ total` : 'No runs yet')}
+            </div>
           </a>
-          <a className='signal-quick-card lavender' href={projects[0] ? `/projects/${projects[0].id}/chat` : '/projects'}>
+          <a className='signal-quick-card lavender' href={projects?.[0] ? `/projects/${projects[0].id}/chat` : '/projects'}>
             <div className='icon-bg'>
               <ChatIcon size={16} />
             </div>
             <h4>Project chat</h4>
-            <div className='count'>{projects[0]?.name || 'no project'}</div>
+            <div className='count'>{projects?.[0]?.name || (projects === null ? '…' : 'no project')}</div>
           </a>
         </div>
 
         <SectionHeader action={<a href='/runs'>See all</a>}>Recent runs</SectionHeader>
-        {recent.length === 0 ? (
+        {recent === null ? (
+          <>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </>
+        ) : recent.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
               No runs yet. <a href='/compose' style={{color: 'var(--signal-coral)'}}>Submit your first spec →</a>
@@ -230,8 +256,13 @@ export default function HomePage() {
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
                 dot={statusToDot(status)}
-                title={(r as unknown as {userRequest?: string; title?: string})?.userRequest ||
-                  (r as unknown as {title?: string})?.title || `Run ${shortRunId(r.runId)}`}
+                title={(() => {
+                  // Prefer the agent-generated runTitle (concise summary,
+                  // <60 chars) over the raw userRequest, which is typically
+                  // 200+ chars and looks terrible truncated in a list row.
+                  const rAny = r as unknown as {runTitle?: string; title?: string; userRequest?: string};
+                  return rAny.runTitle?.trim() || rAny.title?.trim() || rAny.userRequest?.trim() || `Run ${shortRunId(r.runId)}`;
+                })()}
                 meta={
                   <>
                     <span className='mono'>{shortRunId(r.runId)}</span>
@@ -247,8 +278,13 @@ export default function HomePage() {
           })
         )}
 
-        <SectionHeader action={<a href='/projects'>All {projects.length || ''}</a>}>Your projects</SectionHeader>
-        {projects.length === 0 ? (
+        <SectionHeader action={<a href='/projects'>All {projects?.length || ''}</a>}>Your projects</SectionHeader>
+        {projects === null ? (
+          <>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </>
+        ) : projects.length === 0 ? (
           <Card>
             <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
               You don't have a project yet. <a href='/projects' style={{color: 'var(--signal-coral)'}}>Create one →</a>
@@ -265,7 +301,7 @@ export default function HomePage() {
                 <>
                   <span>{(p as unknown as {repoCount?: number}).repoCount ?? 0} repos</span>
                   <span>·</span>
-                  <span>{(p as unknown as {totalRuns?: number}).totalRuns ?? 0} runs</span>
+                  {(() => { const n = (p as unknown as {totalRuns?: number}).totalRuns ?? 0; return <span>{n} {n === 1 ? 'run' : 'runs'}</span>; })()}
                 </>
               }
               showChev

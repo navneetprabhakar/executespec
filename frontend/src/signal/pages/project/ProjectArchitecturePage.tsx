@@ -2,6 +2,9 @@ import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, StatusPill, TabsStrip} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {Markdown} from '@/signal/components/Markdown';
+import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import * as api from '@/lib/api';
 
@@ -19,6 +22,11 @@ export default function ProjectArchitecturePage() {
   const [coverage, setCoverage] = useState<Record<string, api.ContractCoverageResponse | null> | null>(null);
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [contractBusy, setContractBusy] = useState<string | null>(null);
+  // Diff between two arch versions — wired to /api/projects/{id}/architecture/diff?from=&to=.
+  const [diffFrom, setDiffFrom] = useState<number | null>(null);
+  const [diffTo, setDiffTo] = useState<number | null>(null);
+  const [diffReport, setDiffReport] = useState<api.ArchDiffReport | null>(null);
+  const [diffBusy, setDiffBusy] = useState(false);
   const project = useProjectMeta(id);
   const [tab, setTab] = useState<ArchTab>('current');
   const [busy, setBusy] = useState(false);
@@ -167,6 +175,7 @@ export default function ProjectArchitecturePage() {
         }
       />
       <Feed>
+        <ProjectTabs active='architecture' />
         <TabsStrip
           items={[
             {label: 'Current', active: tab === 'current', onClick: () => setTab('current')},
@@ -197,21 +206,8 @@ export default function ProjectArchitecturePage() {
                 </StatusPill>
               </div>
               {docMarkdown ? (
-                <div
-                  style={{
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 12.5,
-                    lineHeight: 1.85,
-                    color: 'var(--signal-text-dim)',
-                    background: 'var(--signal-card-elev)',
-                    padding: '14px 16px',
-                    borderRadius: 10,
-                    maxHeight: 360,
-                    overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {docMarkdown.slice(0, 4000)}
+                <div style={{background: 'var(--signal-card-elev)', padding: '14px 16px', borderRadius: 10, maxHeight: 480, overflow: 'auto'}}>
+                  <Markdown>{docMarkdown.slice(0, 8000)}</Markdown>
                 </div>
               ) : (
                 <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
@@ -229,13 +225,87 @@ export default function ProjectArchitecturePage() {
           versions.length === 0 ? (
             <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No previous versions yet.</p></Card>
           ) : (
-            versions.map((v, i) => {
-              const vAny = v as unknown as {version?: number; createdAt?: string; commitSha?: string};
-              return (
-                <Row
-                  key={vAny.version ?? i}
-                  dot='lavender'
-                  title={`v${vAny.version ?? i + 1}`}
+            <>
+              {/* Diff picker — pick two versions, hit Compare, see the source-file changes. */}
+              <Card style={{marginBottom: 12, padding: 14}}>
+                <div style={{fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--signal-text-mute)', marginBottom: 10}}>Compare versions</div>
+                <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
+                  <select
+                    value={diffFrom ?? ''}
+                    onChange={(e) => setDiffFrom(e.target.value ? Number(e.target.value) : null)}
+                    style={{background: 'var(--signal-card-elev)', border: '1px solid var(--signal-hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 13, color: 'var(--signal-ink)'}}
+                  >
+                    <option value=''>From version…</option>
+                    {versions.map((v, i) => {
+                      const ver = (v as unknown as {version?: number}).version ?? i + 1;
+                      return <option key={ver} value={ver}>v{ver}</option>;
+                    })}
+                  </select>
+                  <span style={{color: 'var(--signal-text-mute)'}}>→</span>
+                  <select
+                    value={diffTo ?? ''}
+                    onChange={(e) => setDiffTo(e.target.value ? Number(e.target.value) : null)}
+                    style={{background: 'var(--signal-card-elev)', border: '1px solid var(--signal-hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 13, color: 'var(--signal-ink)'}}
+                  >
+                    <option value=''>To version…</option>
+                    {versions.map((v, i) => {
+                      const ver = (v as unknown as {version?: number}).version ?? i + 1;
+                      return <option key={ver} value={ver}>v{ver}</option>;
+                    })}
+                  </select>
+                  <Button
+                    kind='primary'
+                    sm
+                    disabled={diffBusy || diffFrom == null || diffTo == null}
+                    onClick={async () => {
+                      if (diffFrom == null || diffTo == null) return;
+                      setDiffBusy(true);
+                      setErr('');
+                      try {
+                        const r = await api.getArchitectureDiff(id, diffFrom, diffTo);
+                        setDiffReport(r);
+                      } catch (e: unknown) {
+                        setErr(e instanceof Error ? e.message : 'Diff failed.');
+                      } finally {
+                        setDiffBusy(false);
+                      }
+                    }}
+                  >
+                    {diffBusy ? 'Comparing…' : 'Compare'}
+                  </Button>
+                </div>
+                {diffReport && (
+                  <div style={{marginTop: 12, fontSize: 13, color: 'var(--signal-text-dim)'}}>
+                    <div style={{fontWeight: 600, color: 'var(--signal-ink)', marginBottom: 6}}>
+                      v{(diffReport as unknown as {fromVersion?: number}).fromVersion} → v{(diffReport as unknown as {toVersion?: number}).toVersion}
+                    </div>
+                    {((diffReport as unknown as {changedFiles?: api.ArchChangedFile[]}).changedFiles || []).length === 0 ? (
+                      <span>No source-file changes.</span>
+                    ) : (
+                      <ul style={{listStyle: 'none', padding: 0, margin: 0, maxHeight: 240, overflowY: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: 12}}>
+                        {((diffReport as unknown as {changedFiles?: api.ArchChangedFile[]}).changedFiles || []).map((f, i) => {
+                          const fAny = f as unknown as {path?: string; status?: string};
+                          const status = (fAny.status || 'MODIFIED').toUpperCase();
+                          const color = status === 'ADDED' ? 'var(--signal-mint-text-on-light)' : status === 'REMOVED' ? 'var(--signal-coral-text)' : 'var(--signal-y-text)';
+                          return (
+                            <li key={i} style={{padding: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
+                              <span style={{color, fontWeight: 600, marginRight: 8}}>{status[0]}</span>
+                              {fAny.path}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </Card>
+              {versions.map((v, i) => {
+                const vAny = v as unknown as {version?: number; createdAt?: string; commitSha?: string};
+                return (
+                  <Row
+                    key={vAny.version ?? i}
+                    dot='lavender'
+                    title={`v${vAny.version ?? i + 1}`}
                   meta={
                     <>
                       {vAny.createdAt && <span>{new Date(vAny.createdAt).toLocaleString()}</span>}
@@ -250,7 +320,8 @@ export default function ProjectArchitecturePage() {
                   showChev
                 />
               );
-            })
+            })}
+            </>
           )
         )}
 
@@ -319,7 +390,7 @@ export default function ProjectArchitecturePage() {
               </p>
             </Card>
           ) : coverage == null ? (
-            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading coverage…</p></Card>
+            <LoadingState label="Loading coverage…" />
           ) : (
             <>
               <SectionHeader>Per-repo coverage</SectionHeader>
