@@ -1,324 +1,89 @@
-# Project — User Journeys & Workflows
+# Project-scoped user journeys
 
-> End-to-end flows for the project-centric workbench.
-> Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (the "how") — this doc is the
-> "what happens, in what order, for a given user intent".
->
-> Last updated: 2026-05-12 (1.0.0-M1). Reflects multi-repo Launch, 3-step
-> architecture pipeline, Generate Docs, project memory + chat, RAG, tech-debt
-> autofix (Phase 2), external sharing (V175), PR + Code review agents (V172),
-> and patch-mode autofix surfaces (V183).
->
-> Audience: product, QA, support; also onboarding engineers who want to see the
-> pieces fit together without reading the full codebase map.
+> Five named, end-to-end journeys against the project workbench (`/projects/:id/*`). Each step cites the endpoint and the file that owns it. Derived from the code on this branch (migration head V199).
 
----
+## Journey 1 — Onboard a new repo to autopilot
 
-## 0. Glossary
+The team's first project is fresh. Goal: have ExecuteSpec aware of the repo, see an architecture doc, see an initial code-quality scan, and resolve the first batch of tech debt.
 
-- **Project** — the top-level workspace. Owns the AI provider, a set of linked GitHub repos, a running architecture doc, a ledger/memory, and a docs corpus.
-- **Repo** — a `ProjectRepo` row, either `USER`-scoped (private to a creator) or `ORG`-scoped (shared across the org). A repo is registered once and can be linked to multiple projects.
-- **Run (V2)** — a single-turn pipeline that takes a natural-language spec + optional repo(s), plans → works → reviews → pushes. Stored in `pipeline_run`.
-- **Launch (Execution)** — a higher-level, multi-repo, multi-solution orchestration that plans across repos, kicks off one or more V2 runs, and rolls them up. Stored in `execution_run` + `execution_solution`.
-- **Codemap** — a per-repo markdown file (`codemaps/<repo>.md`) summarising the repo's file layout + detected routes + models.
-- **Architecture doc** — a project-wide markdown (`architecture.md`) synthesised from all codemaps + user annotations.
-- **Summary** — 2-4 sentence plain-prose overview (`summary.md`) derived from the architecture doc, shown on the Project dashboard Overview tab.
-- **Memory** — the project's compacted ledger of prior runs. Fed into every planner prompt as `{{PROJECT_MEMORY}}`.
-- **Docs** — user-uploaded documents (PDF/DOCX/MD) chunked + embedded into pgvector for retrieval into planner + chat prompts.
+1. **Create the project.** UI: `/projects` → "New project". `PromptModal` collects `{name, description?}`. Posts `POST /api/projects {name, description?, aiProvider?, githubOwner?}` (`auth/controller/ProjectController`). Capped by `tier_config.max_projects_per_org`.
+2. **Link the GitHub repo.** UI: `/projects/:projectId/repos` → "Add repo". Calls `POST /api/projects/{id}/repos {repoUrl}` (`project/controller/ProjectRepoController`). Backend resolves the repo via the user's PAT, stores `project_repo` row with default branch + GitHub installation id. Capped by `tier_config.max_repos_per_project`.
+3. **Install the webhook.** Same page → "Install webhook" → `POST /api/repos/{repoId}/webhook` writes a `pull_request` + `check_run` webhook to GitHub using the user's PAT. Sets `project_repo.webhook_installed=TRUE` (V101).
+4. **Regenerate architecture.** UI: `/projects/:projectId/architecture` → "Regenerate". Calls `POST /api/projects/{id}/architecture/generate`. `codeintel/ProjectArchitectureService.regenerate` runs the 3-step pipeline (per-repo codemap → per-repo HLD/LLD → cross-repo synthesis). Status visible via SSE / poll on `GET /api/projects/{id}/architecture/versions`.
+5. **Run a whole-repo code review scan.** UI: `/projects/:projectId/code` → Code review sub-tab → "Run scan". Calls `POST /api/code-reviews {projectId, repoFullName}` (`codereview/CodeReviewController`). `CodeReviewAgent` walks the repo on PLANNING tier, writes findings to `code_review_finding`. Quota-gated by `tier_config.code_review_monthly_quota`.
+6. **Apply a tech-debt autofix.** UI: `/projects/:projectId/code` → Tech debt sub-tab. `TechDebtPanel` shows categories × severities × file hotspots from `GET /api/projects/{id}/tech-debt?since=30`. Click "Fix" on the top-cost category → `POST /api/projects/{id}/tech-debt/dispatch-fix {category}` (`project/techdebt/TechDebtFixService`). Routed through `FindingPatchSubmitter` as a PATCH-mode run with `source="finding:TECH_DEBT_<CATEGORY>"`. Opens a new PR for that category.
+7. **Review and merge the PR.** `pull_request_record` row visible on `/projects/:projectId/pulse`. Click through to GitHub, review, merge. Webhook fires `pull_request.closed` → `GitHubWebhookController` updates `pull_request_record.ci_status` and `merged_at`.
+8. **Architecture re-runs automatically?** Not yet — the user needs to click "Regenerate" again or wait for the next manual trigger. `StalenessService` will flag the architecture doc as STALE on the dashboard once the merged SHA differs from `project_architecture_doc.generated_from_sha`.
 
----
+## Journey 2 — Spec a feature against an existing project
 
-## 1. Journey: **Start a new project from scratch**
+Goal: implement a new feature spec against the project's already-linked repos with multi-repo awareness, plan approval, and a verified score on the resulting PR.
 
-**Who:** a developer who wants a project-shaped workbench for one-or-more new repos.
+1. **Open the project compose surface.** UI: `/projects/:projectId` (the default sub-page is `ProjectComposePage.tsx`). Pre-fills the project context — composer auto-selects all linked repos in `selectedRepoIds`.
+2. **Refine the spec.** Use the embedded `SpecChat` ("Build my spec") which calls `POST /api/conversation` (`api/controller/ConversationController`) to assist drafting. The estimate chip surfaces p25/p75 task + cost predictions via `GET /api/projects/{id}/estimate?requirement=<spec>` once spec length ≥12 chars (debounced 600ms).
+3. **Pick repos to scope.** Toggle chips drop or include specific `selectedRepoIds`. If the user wants to limit blast radius (e.g. only touch the backend repo), they un-toggle the frontend repo here.
+4. **Set the hard cap.** Numeric input clamps at the tier's `tierMaxCap` (FREE $3 / PRO-TEAM $25 / ENTERPRISE $1000). Defaults to `min(2, tierMaxCap)`.
+5. **Submit.** `POST /api/runs {userRequest, aiProvider, executionMode: 'PRODUCTION', projectId, selectedRepoIds, userCostCap}` → 202 + RunSummary. Navigates to `/plan/:runId`.
+6. **Approve the plan.** `PlanPage.tsx` polls `GET /api/runs/{id}` until status `AWAITING_APPROVAL`, shows the plan card with classifier verdict + estimated credits + cap. "Approve · charge N credits" calls `POST /api/runs/{id}/approve {approved: true, creditsConfirmed}`. Charges credits via `tierEnforcementService.assertAndIncrementRunCount(userId, credits)`.
+7. **Watch live.** Auto-redirect to `/live/:runId`. SSE stream (`useSse(runId)`) populates the live log + task progress + cost chip. `CostProgressBar` shows spend vs hard cap.
+8. **Review the PR.** Terminal status → auto-navigates to `/result/:runId`. `ScoreCard` shows the verifiedScore + verdict (≥85 Shippable / 70-84 Needs review / <70 Failed). For multi-repo, the PR tab shows one row per repo with cross-link summary text in each PR body. Open each PR on GitHub, review, merge.
 
-```
-Dashboard → "+ New project" → fill name, description, AI provider → Create
-    │
-    ▼
-ProjectRepoManager tab → "+ Add repo"
-    │
-    ├─ Pick existing GitHub repo (by full_name, scope=USER or ORG)
-    │     └─ Registers ProjectRepo, detects stack, links to project
-    │
-    └─ Create new GitHub repo (name, description, visibility)
-          └─ Calls GitHubRepoService.createRepo → registers ProjectRepo
-            → links to project
-    │
-    ▼
-Architecture tab → click "Generate" or "Analyse" on Overview tab
-    │
-    ▼
-Codemaps + architecture.md + summary.md land on disk +
-DB rows written. StalenessService cache invalidated.
-```
+## Journey 3 — Migrate the project's tech stack (e.g. JS → TS)
 
-**Cost:** ~$0.005 per repo for codemap + one LIGHTWEIGHT-tier LLM call for the summary.
+Goal: incrementally migrate the project's source files to a new stack using a modernization recipe, with parity tests + plan-gate per cluster.
 
-**What the user sees now:**
-- Overview tab: project summary, tokens/cost tiles (both 0), recent runs/PRs panels (empty), score trend (empty).
-- Architecture tab: v1 of the arch doc.
-- Memory tab: empty.
-- Docs tab: empty.
+1. **Pick a migration recipe.** UI: `/migrations` (sidebar tagged `BETA`). Grid of recipes (JS→TS, Express→Fastify, Mongoose→Prisma, React class→hooks, Webpack→Vite, Pages→App Router). Click "JavaScript → TypeScript".
+2. **Configure.** Detail page (`MigrationDetailPage` in `ExtraPages.tsx`) shows step-by-step ("Scan all .js/.jsx files → cluster by dependency graph → start at leaves → rename + infer types → run `tsc --noEmit` → open one PR per cluster ~30 files"). KvList configures target repo, strictness flags, PR-size cap, test command, est total cost.
+3. **Dry-run.** UI calls `POST /api/migrations/recipes/{slug}/dry-run {projectId, repoId, config}` (`migration/controller/MigrationController`). Returns the per-cluster plan: number of files, estimated cost, estimated time. UI surfaces the dry-run summary inline.
+4. **Apply.** "Kick off migration" → `POST /api/migrations/recipes/{slug}/apply {projectId, repoId, config}`. Backend dispatches a sequence of V2 BUILD-mode runs through `RunOrchestrator.submitRun` — one per cluster (~30 files).
+5. **Approve each cluster's plan gate.** Each cluster pauses at `AWAITING_APPROVAL`. Heads-up copy from the detail page: "We pause at every plan gate. You're never further than one approval away from the next batch."
+6. **Merge cluster PRs incrementally.** Each cluster's `ScmPushService.push` opens a PR with `tsc --noEmit` already passing. Merge → CI stays green → next cluster fires.
+7. **Watch project memory build.** Each completed run appends a digest to `project_run_ledger` (`memory/RunLedgerAgent`). After 10 runs, `MemoryCompactionService` rewrites a `project_memory_snapshot`. The planner reads this on subsequent runs via `ProjectMemoryProvider.buildPlannerContext(projectId)` so each cluster has context on what the previous ones did.
+8. **Regenerate architecture when done.** `/projects/:projectId/architecture` → "Regenerate" → the 3-step pipeline picks up the new file structure. `StalenessService` clears the STALE badge.
 
----
+## Journey 4 — Use a readymade library piece (e.g. Stripe checkout)
 
-## 2. Journey: **Build the first feature on this project**
+Goal: drop a pre-built solution (Stripe checkout, OAuth login, RAG-with-pgvector, etc.) into the project with minimal spec authoring.
 
-**Who:** developer who has a project with 1+ linked repos, wants to ship a feature.
+1. **Open the library.** UI: `/library` (sidebar tagged `BETA`). Grid of solutions from `LIBRARY_SOLUTIONS` static catalogue (Stripe checkout, OAuth login, RAG with pgvector, GitHub Actions CI, Docker compose dev, Razorpay checkout). Each card shows estimated time + credit cost.
+2. **Pick a solution.** Click "Stripe checkout" → `/library/stripe-checkout` (`LibraryDetailPage`). Shows "What you'll get" checklist + pre-filled spec textarea + "Used by 1,247 orgs" stats.
+3. **Tweak the spec.** Edit the textarea. The default text reads: "Add Stripe checkout to the API. Both subscription and one-time charge endpoints. Webhook handler at /webhooks/stripe with HMAC SHA-256 signature verification. Persist customer + invoice. Failed-payment retry with 3-attempt dunning. Add test-mode env var + sandbox keys. Tests must still pass."
+4. **Fill slot values (when wired through the API).** `GET /api/readymade/solutions/{slug}` returns slot definitions (e.g. currency, env-var prefix). UI presents slot inputs.
+5. **Instantiate.** UI calls `POST /api/readymade/solutions/{slug}/instantiate {slots, projectId}` (`readymade/controller/ReadymadeController`). Backend renders the spec template with slot substitutions and calls `RunOrchestrator.submitRun(...)` to dispatch a normal V2 BUILD-mode run. Returns the new `runId`.
+6. **Approve and ship.** From here the flow matches Journey 2 steps 6-8 — `/plan/:runId` → approve → `/live/:runId` → `/result/:runId` with the PR ready for review.
 
-**Two flavours** — simple (single-repo V2 Run) and compound (multi-repo Launch).
+## Journey 5 — Triage a failed or low-score PR with autofix
 
-### 2a. Single-repo feature → **V2 Run**
+Goal: a PR opened against the project has either a CI failure, a low verifiedScore, or unresolved review comments. Use one of the four autofix surfaces to push targeted fixes without re-typing the spec.
 
-Use this when the feature lives entirely inside one repo.
+### Path 5a — Address PR review comments (autofix phase 1)
 
-```
-Project Dashboard → "Launch" button in header
-    │
-    ▼
-"New Execution" modal
-  • Requirement: "Add a POST /payments endpoint that ..."
-  • Existing repos: pick ONE (checkbox)
-  • AI provider: inherited from project default (can override)
-  • Confluence / Figma URLs: optional
-    │
-    ▼
-Backend creates ExecutionRun → dispatches a single solution →
-RunOrchestrator.submitRun(...)
-    │
-    ▼ (runs in background)
-Plan → Approve (auto if skipApproval=true) → Work → Review → Push PR
-    │
-    ▼
-User sees the new run in Dashboard → Executions list.
-Auto-push flag opens a PR on <repo>'s main automatically.
-```
+1. **Open the PR.** UI: `/projects/:projectId/pulse` → recent PR card, or directly from `/result/:runId` → PR tab.
+2. **Run a PR Review.** Click "PR Review" on the PR row. UI calls `POST /api/pr-reviews {projectId, repoFullName, prNumber}` (`prreview/PrReviewController`). PRO+ only; quota-gated by `tier_config.pr_review_monthly_quota`. `PrReviewAgent` polls GitHub for review comments + diff hunks, persists verdict to `pr_review`.
+3. **Click the verdict popover.** `PrReviewButton` (in `components/runs/`) opens the verdict popover with the review's findings.
+4. **Autofix.** "Autofix N comments" → `POST /api/pr-reviews/{id}/autofix`. `PrReviewAutofixService.dispatch` builds a synthetic spec from the comments, dispatches via `FindingPatchSubmitter.submit` with `runMode=PATCH` + `branchOverride=<PR head branch>` so commits land on the same branch.
+5. **Watch the patch run.** New runId visible on `/runs`. Auto-pushes on terminal — new commits appear on the PR. CI re-runs.
 
-Key file locations:
-- Orchestrator entry: [RunOrchestrator.submitRun](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)
-- UI: [ExecutionSetup.tsx](../frontend/src/components/execution/ExecutionSetup.tsx)
+### Path 5b — Bucket-fix code-review findings (autofix phase 4)
 
-### 2b. Multi-repo feature → **Launch**
+1. **Run a whole-repo code review scan.** UI: `/projects/:projectId/code` → Code review sub-tab → "Run scan". `POST /api/code-reviews {projectId, repoFullName}`. `CodeReviewAgent` (PLANNING tier) writes findings to `code_review_finding` with severities CRITICAL / MAJOR / MINOR.
+2. **Read the severity chips.** `CodeQualityPanel` shows "3 CRITICAL", "8 MAJOR", "21 MINOR".
+3. **Pick a severity to fix.** Click "3 CRITICAL" → `POST /api/code-reviews/{scanId}/autofix {severity: 'CRITICAL'}`. `CodeReviewAutofixService.dispatch` aggregates the CRITICAL-severity findings into a focused spec, dispatches PATCH-mode run with `source="finding:CODE_REVIEW_CRITICAL"`. One PR per severity.
+4. **Review the new PR.** Same shape as Journey 2 step 8.
 
-Use this when a feature spans FE + BE (or multiple services) and you want one orchestrated "mission" instead of juggling multiple runs.
+### Path 5c — Resolve a CI failure (autofix phase 3, webhook-driven, OFF by default)
 
-```
-Project Dashboard → "Launch" button
-    │
-    ▼
-ExecutionSetup: pick ≥2 existing repos (or add new-repo specs)
-    │
-    ▼ Setup
-ExecutionRun created with status=SETUP → orchestrator.triggerAnalysis()
-    │
-    ▼ Analysis    (uses the caller's GitHub PAT)
-Per-repo codemaps regenerated → unified architecture.md → summary.md
-Status → ARCH_REVIEW
-    │
-    ▼ Arch review (human gate)
-User reviews + optionally annotates → Approve
-    │
-    ▼ Planning
-ExecutionPlannerService decomposes into ordered ExecutionSolutions
-Each solution is tagged with its target repo (by short-name match)
-    │
-    ▼ Plan review (human gate)
-User Approves
-    │
-    ▼ Executing
-SolutionDependencyResolver builds dependency layers.
-Each solution dispatches a V2 run (SolutionExecutionService.submitSolutionRun).
-When a solution hits FAILED, the Launch PAUSES and surfaces
-SKIP / RETRY / FIX / ATTEMPT_ANYWAY on the Paused card.
-    │
-    ▼ Complete
-Per-repo PRs opened. Cross-linked in the PR bodies.
-ExecutionReportPanel shows the full rollup.
-```
+1. **GitHub CI fails.** A PR check fires `check_run.completed` with `conclusion=failure`. Webhook delivered to `POST /webhooks/github` (`project/pr/GitHubWebhookController`). HMAC SHA-256 verified.
+2. **Webhook decoder.** Locates the matching `pull_request_record` by `head_sha`. Increments `ci_auto_fix_attempts` (V170; max 3 per PR).
+3. **Feature flag check.** `featureFlagService.isEnabled("ci.autofix.enabled")` (default OFF). When OFF, just logs and returns 202.
+4. **When enabled (TEAM+ org operator action):** `CiFailureAutoFixService.handle` builds a spec from the failing job's log tail and dispatches via `FindingPatchSubmitter.submit` with `runMode=PATCH` + `branchOverride=<PR head branch>` + `source="finding:CI_FAILURE"`.
+5. **New commits push to PR.** CI re-runs automatically. After 3 attempts on the same PR, the webhook stops auto-firing (cap enforced by `ci_auto_fix_attempts`).
 
-Key file locations:
-- [ExecutionOrchestrator.java](../src/main/java/com/navneet/executespec/execution/service/ExecutionOrchestrator.java)
-- [SolutionExecutionService.java](../src/main/java/com/navneet/executespec/execution/service/SolutionExecutionService.java)
-- [ExecutionPlannerService.java](../src/main/java/com/navneet/executespec/execution/service/ExecutionPlannerService.java)
+### Path 5d — Iterate on a low-score run
 
-**Escape hatches at any step:**
-- **Cancel** (header, visible Analysis → Paused) — aborts the Launch cleanly.
-- **Abort** (Execute step) — same as Cancel, fails faster.
-- **Resume** (Execute step) — re-kicks `executeApprovedPlan` on the existing Launch when the JVM hiccuped or a transient error paused things. Avoids redoing Setup → Analysis → Arch review → Plan.
-
----
-
-## 3. Journey: **Merge a PR, continue building**
-
-**Who:** developer who shipped one or more PRs from ExecuteSpec, merged them on GitHub, now wants the next round to build on merged code.
-
-```
-PR merged on GitHub (outside ExecuteSpec)
-    │
-    ▼
-Project dashboard → PRs tab → click "Refresh"
-    │
-    ▼ POST /api/projects/{id}/prs/refresh
-PrRefreshService polls every non-terminal PR against GitHub.
-For any OPEN → MERGED transition:
-    │
-    ▼ PostMergeCascadeService.onMerged(record)
-    ├─ StalenessService.invalidate(projectId)
-    ├─ ProjectArchitectureService.generate(projectId) — regenerates
-    │    codemaps + architecture.md + summary.md from the new main SHA
-    └─ InAppNotificationService.create(...) — "PR merged: <repo>#<n>"
-    │
-    ▼
-Architecture tab now shows v{N+1} of the arch doc; the Diff button
-shows exactly what landed.
-    │
-    ▼
-User fires the next Launch. Each solution's V2 run clones the
-repo fresh at submit time, so the worker starts from the merged code.
-```
-
-**Note:** if webhooks are wired on the GitHub repo (`github.webhook.secret` + `/webhooks/github`), the Refresh button is unnecessary — merge status flips automatically. Refresh is the fallback for brand-new repos created via Launch where no one has configured a webhook yet.
-
----
-
-## 4. Journey: **I need to inspect or re-review an old run against merged code**
-
-**Who:** developer whose old V2 run produced code that's since been merged; wants to re-run review / tests / preview against the post-merge state.
-
-```
-Project dashboard → Tasks tab → pick run
-    │
-    ▼
-InlineRunDetail (only for terminal runs: COMPLETE / PARTIAL / FAILED / CANCELLED)
-    ├─ Branch input: leave empty for each repo's default, OR specify
-    ├─ Click "Sync"
-    │
-    ▼ POST /api/runs/{id}/sync?branch=<name>
-RunSyncService walks every repo in the workspace, git fetch + git
-reset --hard origin/<branch>. Uncommitted local edits are wiped.
-    │
-    ▼
-User can now re-trigger validation / tests / preview against fresh code
-without restarting the whole pipeline.
-```
-
----
-
-## 5. Journey: **Upload supporting documents so the planner + chat know about them**
-
-**Who:** developer or PM with a spec PDF / API contract / billing rules doc that the planner should respect.
-
-```
-Project dashboard → Docs tab → drag-drop OR pick file
-    │
-    ▼ POST /api/projects/{id}/documents
-ProjectDocumentService.upload(file, user)
-    ├─ Writes original to workspace/projects/<id>/docs/<sanitised>
-    ├─ Persists project_document row with status=UPLOADED
-    └─ Fires async indexAsync:
-       UPLOADED → EXTRACTING → Tika parse → sibling .md written
-                → EMBEDDING → ChunkingService + EmbeddingService +
-                              ChunkStore (pgvector)
-                → READY
-    │
-    ▼
-Every subsequent Launch / V2 run:
-  • OutlinePlannerAgent receives {{REFERENCE_DOCS}} — top-3 chunks, 1500-token cap.
-  • ProjectChatService injects the same block, keyed off the last user turn.
-```
-
-**Retrieval is always-on** — no separate toggle. If no docs are READY the block is empty; no cost impact.
-
----
-
-## 6. Journey: **Ask a question about my project**
-
-**Who:** developer wants architectural or historical context without scrolling through runs.
-
-```
-Project dashboard → Chat tab → type question
-    │
-    ▼ POST /api/projects/{id}/chat
-ProjectChatService.buildMessages:
-    ├─ System prompt: "You are the ExecuteSpec project assistant…"
-    ├─ {{PROJECT_MEMORY}} — compacted ledger of past runs
-    ├─ architecture.md content (if present)
-    ├─ ## REFERENCE DOCS — retrieval from uploaded docs, keyed off
-    │   the latest user turn
-    └─ Prior chat history (last 30 messages)
-    │
-    ▼
-LLM answers strictly from context (no fabrication). Users can also
-"Launch from chat" to distil the transcript into an execution spec
-via compileToSpec, which opens the ExecutionSetup pre-filled.
-```
-
----
-
-## 7. Journey: **Monitor project health**
-
-**Who:** tech lead / PM checking the state of a project.
-
-Dashboard Overview tab = single pane:
-- **Metric tiles:** Active / Completed / Failed / Avg score / Tokens / Cost.
-- **Project summary** panel: 2-4 sentence overview, Analyse button to regenerate.
-- **Recent submissions** panel: last 8 runs/tasks with status + score.
-- **Recent pull requests** panel: top PRs with open/merged badge.
-- **Score trend** chart: last N runs' overall + per-dimension score (recharts LineChart).
-
-Other tabs:
-- **Launches** — full list of cross-repo executions.
-- **PRs** — rollup across all runs + launches with Refresh button.
-- **Tasks** — every V2 run, with InlineRunDetail.
-- **Repos** — the linked catalogue, with staleness badges.
-- **Architecture** — current doc + version picker + Diff vs previous.
-- **Docs** — uploaded corpus + per-doc status.
-- **Memory** — compacted snapshot + recent ledger + token budget bar + Compact button.
-- **Chat** — the assistant.
-- **Team** — member management (inherits existing org flows).
-
----
-
-## 8. Workflow: **Which tab / endpoint for which intent?**
-
-| Intent | Where | Endpoint |
-|---|---|---|
-| Start a one-off coding task in a single repo | Launch → pick 1 existing repo | `POST /api/runs` via ExecutionSetup |
-| Start a cross-repo feature | Launch → pick ≥2 repos | `POST /api/projects/{id}/executions` |
-| Regenerate architecture after external code changes | Architecture tab → Analyse | `POST /api/projects/{id}/analyse[?branch=]` |
-| See what changed in architecture between two runs | Architecture tab → Diff vs v{N-1} | (client-side LCS) |
-| Update PR status after merging on GitHub | PRs tab → Refresh | `POST /api/projects/{id}/prs/refresh` |
-| Re-run review on merged code | Tasks tab → pick run → Sync | `POST /api/runs/{id}/sync[?branch=]` |
-| Un-stick a Launch stuck in Executing | Execute step → Resume | `POST /api/executions/{id}/resume` |
-| Abort a Launch at any step | Header → Cancel (or Execute → Abort) | `POST /api/executions/{id}/abort` |
-| Ask the project a question | Chat tab | `POST /api/projects/{id}/chat` |
-| Distil chat into a Launch | Chat → "Launch from chat" | `POST /api/projects/{id}/chat/compile` → prefill ExecutionSetup |
-| Upload a supporting doc for retrieval | Docs tab → Upload | `POST /api/projects/{id}/documents` |
-| Compact the project memory | Memory tab → Compact | `POST /api/projects/{id}/memory/compact` |
-
----
-
-## 9. Error journeys: known pitfalls + how the UI surfaces them
-
-| Situation | Symptom | Recovery |
-|---|---|---|
-| Private repo + user has no PAT | `/analyse` produces 69-byte "Files: 0" codemaps | Add PAT to user profile; re-Analyse |
-| Launch stuck in Executing after JVM hiccup | UI shows tasks QUEUED forever | Click **Resume** on Execute step |
-| Launch stuck in Plan | UI shows "Waiting for plan…" for minutes | Cancel + relaunch; check server logs |
-| Launch's new-repo creation failed mid-flight | ExecutionSetup returns error; no run created | Retry setup after fixing owner/visibility |
-| `abort` fails silently | Check Cancel button disabled state | Refresh; check status — may already be ABORTED |
-| Planner produces empty workspace (no code) | `repos/<scratch-name>/` instead of `repos/<repo>/` | Upgrade past v2.5.1 (name-match fallback) |
-| Worker runs on wrong provider | Logs show `openai gpt-5.4-mini` despite project=ANTHROPIC | Upgrade past v2.5.1 (provider passthrough fix) |
-| PR status stuck at OPEN | No webhook configured on the repo | PRs tab → Refresh (or configure webhook) |
-| Doc upload fails with "No EmbeddingModel" | Spring AI 1.1.4 bean not registered | Upgrade past v2.5.0 late-patch (REST-based EmbeddingService) |
-
----
-
-## 10. What deliberately isn't supported (yet)
-
-- **Editing a running Launch's requirement** — have to Cancel + relaunch.
-- **Resuming a FAILED V2 run** — Abort + create a new run; old one is a read-only artefact.
-- **Cross-project memory / docs retrieval** — scoped to one project only.
-- **Webhook auto-provisioning on new repos** — Launch flow doesn't install a PR webhook; use Refresh in the PRs tab, or configure the webhook manually.
-<!-- Worker-side `{{REFERENCE_DOCS}}` injection shipped v2.5.2 via SequentialExecutor.fetchReferenceDocs — bullet retired 2026-04-18. -->
+1. **Open the failed/low-score run.** UI: `/result/:runId` shows `verifiedScore < 70` → "Failed" verdict, or 70–84 → "Needs review".
+2. **Try another provider.** "Try another provider" row on the Overview tab. Click "Anthropic" / "OpenAI" / "Gemini" → `api.createRun({userRequest, aiProvider, executionMode: <same>, skipApproval: <if PROTOTYPE>, projectId})` → routes to `/live/:newRunId`.
+3. **Iterate on the spec.** Chat tab → write a refinement message → "Iterate as new run" → `POST /api/runs/{id}/iterate {userRequest}` (`api/controller/RunConversationController`). Creates a fresh run from the source run's codebase as starting point. Routes to `/plan/:newRunId`.
+4. **Retry a single failed task.** Tasks tab → on a FAILED or PARTIAL task → "Retry task" → `POST /api/runs/{runId}/tasks/{taskId}/retry`. Re-runs just that task with `requireBuildVerification=true`. Does NOT auto-push; the user clicks "Update PR" afterwards to push the result.
+</content>
+</invoke>

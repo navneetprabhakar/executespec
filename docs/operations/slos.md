@@ -1,223 +1,255 @@
-# Service-Level Objectives (SLOs)
+# Service Level Objectives
 
-> **Created:** 2026-05-06.
-> **Last reviewed:** 2026-05-12 (1.0.0-M1).
-> **Status:** PROPOSED — alert rules + Grafana dashboard land alongside the
-> on-call rotation in the next pass.
-> **Audience:** founding eng team + incoming on-call rotation.
+This file is code-truth: every SLO listed below is backed by a metric registered in the code and visible on the Grafana overview dashboard. SLOs that don't have a code-backed metric are intentionally omitted rather than aspirational-but-unmeasurable.
 
-These are the production health targets ExecuteSpec commits to. Each SLO
-has a clearly stated indicator (the metric we measure), a target (the
-acceptable level over a 30-day rolling window), an alert threshold (when
-we page someone), and an owner.
+The metric namespace is `executespec.*` for the cross-cutting cohort (`config/CustomMetricsConfig.java`) and `executespec.v2.*` for V2 pipeline-specific metrics (`observability/Metrics.java`).
 
-The bar: **all 5 SLOs must be GREEN over 30 consecutive days before
-GA cutover** (per §11 of the GA-readiness plan).
+## Where the data comes from
 
----
+| Layer                          | Source                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| Custom application metrics     | `Counter.builder` / `Timer.builder` / `Gauge.builder` / `DistributionSummary.builder` sites |
+| HTTP server timing             | Spring Boot auto-instrumented `http.server.request.duration`                              |
+| LLM call timing                | Spring AI auto-instrumented `spring.ai.chat.client.duration`                              |
+| JVM, HikariCP, Redis, threads  | Spring Boot Actuator + Micrometer auto-config                                              |
+| Custom histogram buckets       | `application.yml management.metrics.distribution.percentiles-histogram` (both above are explicitly enabled) |
 
-## SLO 1 — Run reaches a terminal status within 15 minutes
+Exposure: `management.endpoints.web.exposure.include: health,info,metrics,prometheus` (`application.yml`). Only those four actuator endpoints are reachable; everything else is closed. Base path `/actuator`.
 
-**Why.** A run stuck in `WORKING` / `REVIEWING` past 15 minutes is a
-poor customer experience and almost always indicates a JVM crash, an
-LLM timeout cascade, or a stuck plan-approval gate. Hierarchical
-planner LARGE-band timeout is 20 minutes, so we set the SLO at 15
-minutes which is still safely above the 95% historical p95.
+Local stack: Prometheus + Tempo + Grafana via `observability/docker-compose.yml`. Prometheus scrapes every 15s. Two dashboards ship: `executespec-overview.json` and `jvm-http-overview.json`.
 
-**Indicator.** Of all `pipeline_run` rows that started in the window,
-percent that reached a terminal status (`COMPLETE` / `PARTIAL` /
-`FAILED` / `CANCELLED`) within 15 minutes of `started_at`.
+Prod stack: GCP Cloud Trace + Cloud Monitoring via OpenTelemetry exporters (`exporter-trace` and `exporter-metrics` from `pom.xml`; activated by Spring profile `gcp`).
 
-```sql
--- Run this query on a 7-day rolling window for the SLO calc.
-SELECT
-  100.0 * SUM(CASE WHEN ended_at IS NOT NULL
-                   AND ended_at - started_at <= INTERVAL '15 minutes'
-                   THEN 1 ELSE 0 END)
-        / COUNT(*) AS pct_within_15min
-FROM pipeline_run
-WHERE started_at >= NOW() - INTERVAL '7 days'
-  AND status IN ('COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED');
+## Published SLOs
+
+Each SLO below is backed by a code-registered metric. If you change the metric name, update this table in the same commit.
+
+### SLO 1 — Pipeline run reaches a terminal state in 15 minutes
+
+**Target.** ≥95% of pipeline runs end in a terminal `Run.Status` (`COMPLETED`, `PARTIAL`, `FAILED`, `CANCELLED`) within 15 minutes of submission, measured weekly.
+
+**Metric.** `executespec.v2.run.latency` (timer, tagged `overall`). Registered in `observability/Metrics.java` via `recordRunLatency(String overall, Duration elapsed)`. Histogram buckets are enabled via the global `management.metrics.distribution.percentiles-histogram` setting + Micrometer's per-Timer histogram support.
+
+**Counter.** `executespec.v2.run.outcome` (tagged `overall`) — denominator for the SLO. Counts terminal-state transitions.
+
+**Code anchors.**
+
+- `agent.concurrency.max-task-duration-minutes: 25` (`application.yml`) — single-task ceiling. Multi-task runs can exceed 15 min and still complete; the SLO is a percentile, not a hard cap.
+- `agent.concurrency.safety-iteration-cap: 500` — absolute backstop in the worker loop.
+- `RunOrchestrator.cancel(runId)` is invoked by `AdminReconciliationService` (`@Scheduled(fixedDelay = 15 * 60_000)`) for runs left non-terminal past the reconciliation window. Failing in that path counts toward the outcome counter with `overall=FAILED`.
+
+**Prometheus query.**
+
+```promql
+histogram_quantile(0.95,
+  rate(executespec_v2_run_latency_seconds_bucket[7d])
+)
 ```
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 95% over 30d rolling |
-| **Stretch (post-GA)** | ≥ 99.5% |
+Target ≤ 900 seconds.
 
-**Alert.** Page on-call when 3 consecutive 1h windows fall below 90%.
-Dashboard: `executespec-slos.json` panel "Run terminal in <15min".
+**Surfaced on.** `executespec-overview.json` panel `Run Duration (p50 / p95 / p99)` (legacy panel keyed off `executespec_run_duration_seconds_bucket`; for V2 runs query `executespec_v2_run_latency_seconds_bucket`).
 
-**Metric source.** `pipeline_run.ended_at` (DB) +
-`executespec.v2.run.latency` Prometheus histogram.
+### SLO 2 — Plan-gate wait time
 
-**Owner.** Backend/AI lead.
+**Target.** ≥95% of plan-gate waits complete (approval or timeout) within 30 minutes, measured weekly.
 
----
+**Metric.** `executespec.gate.wait_time` (timer, tagged `gate`). Defined in `config/CustomMetricsConfig.java` as `GATE_WAIT_TIME`. Surfaced on the overview dashboard at panel `Gate Wait Times`.
 
-## SLO 2 — Verified score reflects true delivery
+**Prometheus query.**
 
-**Why.** Audit Risk #1 (catastrophic): if the dashboard shows 45/100
-on working code, customers churn. After the P1.1 + P1.2 fixes, we
-need confidence the score is now anchored on real signals.
-
-**Indicator.** On a weekly random-sample audit of 10 COMPLETE runs,
-what fraction of `verifiedScore` values fall within ±10 points of the
-human-graded score (manual review by the on-call engineer).
-
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 90% (i.e. ≥ 9 of 10 in agreement) |
-| **Stretch** | ≥ 95% |
-
-**Process.** Friday afternoon — engineer pulls 10 random runs from
-the past week, walks the validation report + the actual diff in
-GitHub, scores 0-100 by hand. Disagreements logged; recurring
-disagreement patterns drive a follow-up to the formula.
-
-**Alert.** No automatic alert (manual process); track in a `metrics`
-sheet shared with the team.
-
-**Metric source.** Manual + `validation_report.verified_score`.
-
-**Owner.** Backend/AI lead.
-
----
-
-## SLO 3 — Cost estimate vs actual within 30%
-
-**Why.** Audit Risk #6 (medium-high): customers will dispute a $20
-charge if the pre-approval estimate said $5. The 2026-04-19 estimator
-recalibration closed the gap from −42% to a documented band; we
-need to confirm it stays there.
-
-**Indicator.** Per row in `run_cost_log` (which logs estimate +
-actual at run-end), percent where `|actual - estimate| / estimate <=
-0.30`.
-
-```sql
-SELECT
-  100.0 * SUM(CASE WHEN ABS(actual_cost_usd - estimated_cost_usd)
-                          / NULLIF(estimated_cost_usd, 0) <= 0.30
-                   THEN 1 ELSE 0 END)
-        / COUNT(*) AS pct_within_30pct_band
-FROM run_cost_log
-WHERE created_at >= NOW() - INTERVAL '7 days';
+```promql
+histogram_quantile(0.95,
+  rate(executespec_gate_wait_time_seconds_bucket[7d])
+)
 ```
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 80% within ±30% |
-| **Stretch** | ≥ 90% |
+Target ≤ 1800 seconds.
 
-**Alert.** Page when more than 20% of runs in any rolling 24h window
-are >50% off (either direction).
+**Code anchor.** Gate lifecycle is managed by `harness/GateStore.java`. Gate-loss fallback (`approve()` → if gate missing → auto-fail with message) is documented in the CLAUDE.md MUST-follow patterns.
 
-**Metric source.** `run_cost_log` (DB).
+### SLO 3 — Verified-score correctness on BUILD-mode runs
 
-**Owner.** Backend/AI lead.
+**Target.** No code-backed metric currently exists for `verifiedScore` correctness as an SLO. The `verifiedScore` value is persisted per run (`ValidationReportService`), surfaced in the UI, and pinned by `ReviewerVerdict` (counter `executespec.v2.reviewer.verdict`) — but there is no Prometheus-friendly accuracy gauge.
 
----
+**Gap.** Auditing whether the multiplicative score model produces the right outcome per run requires offline analysis against the `validation_report.issues_json` table; it cannot be evaluated from metrics alone.
 
-## SLO 4 — Webhook processed within 60 seconds
+**Available proxy.** `executespec.v2.reviewer.verdict` (counter, tagged `verdict`) tracks CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED distribution. A regression in the CLEAN ratio is an early signal.
 
-**Why.** GitHub PR webhooks drive the merge-status update + the
-post-merge cascade banner. Razorpay/Stripe webhooks drive subscription
-state. A webhook delayed > 60s leaves customers staring at stale UI
-and risks billing-state desync.
+### SLO 4 — LLM call latency
 
-**Indicator.** Per row in `webhook_event` (V147 hash chain audit
-log), percent where `processed_at - received_at <= 60s`.
+**Target.** ≥95% of LLM calls return within their tier-appropriate ceiling, measured weekly. PLANNING tier: ≤180s. WORKHORSE tier: ≤120s. LIGHTWEIGHT tier: ≤45s.
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | ≥ 99% |
-| **Stretch** | ≥ 99.9% |
+**Metric.** `executespec.v2.llm.latency` (timer, tagged `provider`, `model`, `outcome`). `observability/Metrics.java` records this per dispatch. The histogram bucket is enabled via `management.metrics.distribution.percentiles-histogram.spring.ai.chat.client.duration: true` (`application.yml`), AND via the custom timer above which is independently histogram-bucketed.
 
-**Alert.** Page when any single webhook takes > 5 minutes (real lag,
-not just slow), OR when the 99% target slips below 95% in a 1h window.
+**Code anchors.**
 
-**Metric source.** `webhook_event` (DB) + `executespec.v2.webhook.*`
-meters.
+- Per-tier model resolution: `application.yml model-matrix.agent-tier-map`.
+- Provider failover: `application.yml model-matrix.failover-order`.
+- Retry backoff: `spring.ai.retry` — max 3 attempts, 2s → 4s → 8s backoff capped at 10s (`application.yml`).
+- Companion counter: `executespec.llm.errors` (legacy) / `executespec.v2.llm.latency{outcome="ERROR"}` (V2).
 
-**Owner.** Full-stack lead.
+**Prometheus query (PLANNING tier).**
 
----
+```promql
+histogram_quantile(0.95,
+  rate(executespec_v2_llm_latency_seconds_bucket{model="claude-sonnet-4-6"}[7d])
+)
+```
 
-## SLO 5 — Hot-path 5xx rate stays below 0.5%
+Target ≤ 180 seconds.
 
-**Why.** "Just keep the lights on." A page rendering `/projects/{id}/dashboard`
-that 500s makes the product look broken regardless of what the agent
-is doing.
+### SLO 5 — Webhook ingestion latency
 
-**Indicator.** Per Prometheus `http_server_requests_seconds_count`
-filtered to:
-- Method: `GET` (read paths only — POST/PUT/DELETE have legitimate
-  user-input-driven errors that we don't count toward this SLO).
-- URI: in the hot-path allowlist (`/api/projects/*/dashboard`,
-  `/api/runs/*`, `/api/runs/*/report`, `/api/billing/plans`,
-  `/api/billing/status`, `/api/auth/me/permissions`).
-- Status: 5xx vs 2xx ratio.
+**Target.** ≥99% of webhook deliveries are persisted and a 2xx response is returned within 60 seconds, measured weekly.
 
-| Bar | Target |
-| --- | ------ |
-| **GA cutover requirement** | < 0.5% over 30d rolling |
-| **Stretch** | < 0.1% |
+**Metric (auto-instrumented).** `http.server.request.duration` (timer, Spring Boot Actuator default; histogram explicitly enabled in `application.yml` `management.metrics.distribution.percentiles-histogram.http.server.request.duration: true`, range 1ms to 30s).
 
-**Alert.** Page on > 2% sustained for 10 minutes.
+**Prometheus query (GitHub webhook).**
 
-**Metric source.** Prometheus `http_server_requests_seconds_count` +
-Spring Boot Actuator.
+```promql
+histogram_quantile(0.99,
+  rate(http_server_request_duration_seconds_bucket{uri="/webhooks/github",method="POST"}[7d])
+)
+```
 
-**Owner.** Backend/AI lead.
+Target ≤ 60 seconds.
 
----
+**Code anchors.**
 
-## Burn-down rules
+- HMAC SHA-256 verification of the GitHub webhook payload is done before any DB work; see `repo/` package.
+- Razorpay HMAC + Stripe `Stripe-Signature` verification happens at the controller boundary.
 
-1. Track each SLO on a 30d rolling window. Mark each day RED / AMBER /
-   GREEN based on the alert thresholds above.
-2. Two consecutive RED days on any SLO → file an incident, post in
-   `#exec-spec-eng`, schedule a fix in the current sprint.
-3. Three consecutive RED weeks → SLO becomes a sprint blocker until
-   GREEN-trajectory restored.
-4. Stretch targets are aspirational; missing them is not an incident,
-   but they drive the post-GA SLO ratchet.
+### SLO 6 — Hot-path 5xx error rate
 
-## SLO ownership matrix
+**Target.** ≥99.5% of API requests return < 500 status (i.e. 5xx rate < 0.5%), measured weekly.
 
-| SLO | Owner | Backup |
-| --- | ----- | ------ |
-| 1 — Run terminal in 15min | Backend/AI lead | Founder |
-| 2 — Verified score correct | Backend/AI lead | Frontend lead |
-| 3 — Cost estimate within 30% | Backend/AI lead | Founder |
-| 4 — Webhook in 60s | Full-stack lead | Backend/AI lead |
-| 5 — Hot-path 5xx < 0.5% | Backend/AI lead | Founder |
+**Metric.** `http.server.request.duration` count split by `status` tag (auto-instrumented). The metric is a histogram; counting any status ≥ 500 over the total request count gives the error rate.
 
-## What's NOT an SLO yet
+**Prometheus query.**
 
-- LLM provider success rate (depends on Anthropic / OpenAI / Gemini —
-  we'd need to commit to a target we can't actually control).
-- Frontend bundle size (a build-time concern, not runtime SLO).
-- TTFB / Core Web Vitals (worthy goals; track separately on the
-  marketing site, not the app).
-- Semgrep static-analysis runtime (best-effort — graceful degradation
-  is the contract, see `codereview/SemgrepRunner`).
+```promql
+1 -
+(
+  sum(rate(http_server_request_duration_seconds_count{status=~"5.."}[7d]))
+  /
+  sum(rate(http_server_request_duration_seconds_count[7d]))
+)
+```
 
-These may be promoted to SLOs post-GA once we have baseline data.
+Target ≥ 0.995.
 
----
+## Operational metrics that don't drive an SLO (but are watched)
 
-## Alert rules — to be added in `observability/grafana/alerts/`
+These metrics exist in the codebase and on the dashboards. They are early indicators rather than SLO denominators.
 
-Each SLO above will spawn a corresponding YAML rule in the Grafana
-config. This file is the canonical source — the alert YAML is
-generated/maintained to match. P4.2-followup: wire each rule + page
-target (PagerDuty integration key TBD; ops to confirm pricing tier).
+### Run lifecycle gauges
 
-## Customer-facing rollup
+Defined in `config/CustomMetricsConfig.java`. Backed by `AtomicInteger` updated from service code.
 
-A subset of these (1, 4, 5) appears on `status.executespec.ai` (P4.3)
-as up/down/degraded indicators. Customers don't see the actual SLO
-percentage — that's an internal trust commitment. They see "API
-healthy / degraded / outage" derived from the SLO state.
+| Metric                           | Type   | Updated by                                       | Why it matters                                         |
+| -------------------------------- | ------ | ------------------------------------------------ | ------------------------------------------------------ |
+| `executespec.run.active`         | gauge  | Pipeline submit / terminal hooks                  | Live count of in-flight runs                            |
+| `executespec.run.queued`         | gauge  | Per-provider pool queue                          | Queue depth — sustained > 0 means provider saturation   |
+| `executespec.preview.active`     | gauge  | Preview lifecycle                                 | Live preview sessions                                   |
+| `executespec.deploy.active`      | gauge  | Deploy lifecycle                                  | In-progress Cloud Run deploys                           |
+
+Dashboard: top-row stat panels on `executespec-overview.json` with thresholds (green / yellow / red).
+
+### V2 pipeline counters
+
+| Metric                                       | Type                  | Source                                                                              |
+| -------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
+| `executespec.v2.run.outcome`                 | counter               | `observability/Metrics.java#recordRunOutcome`                                       |
+| `executespec.v2.task.status`                 | counter               | `observability/Metrics.java#recordTaskStatus`                                       |
+| `executespec.v2.task.smoketest`              | counter               | `observability/Metrics.java#recordSmokeTest`                                        |
+| `executespec.v2.worker.outcome`              | counter               | `observability/Metrics.java#recordWorkerOutcome`                                    |
+| `executespec.v2.worker.iterations`           | distribution summary  | `observability/Metrics.java#recordWorkerIterations`                                 |
+| `executespec.v2.worker.toolcall`             | counter               | `observability/Metrics.java#recordToolCall`                                         |
+| `executespec.v2.reviewer.verdict`            | counter               | `observability/Metrics.java#recordReviewerVerdict`                                  |
+| `executespec.v2.context.save`                | counter               | `observability/Metrics.java#recordContextSave`                                      |
+| `executespec.v2.context.save.bytes`          | distribution summary  | `observability/Metrics.java#recordContextSave`                                      |
+| `executespec.v2.classifier.verifier.engaged` | counter               | `observability/Metrics.java#recordClassifierVerifier`                               |
+| `executespec.v2.llm.key_source`              | counter               | `observability/Metrics.java#recordKeySource` (V165 BYOK split: USER / ORG / PLATFORM) |
+| `executespec.v2.planner.latency`             | timer                 | `observability/Metrics.java#recordPlannerLatency`                                   |
+| `executespec.v2.planner.tasks`               | distribution summary  | `observability/Metrics.java#recordPlannerTaskCount`                                 |
+
+### Legacy / shared counters
+
+Registered in `config/CustomMetricsConfig.java` as name constants; recorded ad-hoc by various services.
+
+| Metric                                       | What it tracks                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `executespec.llm.calls`                      | Total LLM calls (legacy path)                                                                |
+| `executespec.llm.tokens.input` / `.output`   | Input + output tokens                                                                          |
+| `executespec.llm.tokens.input.dist` / `.dist` | Distribution summaries on tokens per call                                                     |
+| `executespec.llm.errors`                     | LLM errors                                                                                     |
+| `executespec.llm.fallback`                   | Provider fallbacks (legacy `FallbackLlmRouter`)                                                |
+| `executespec.llm.duration`                   | Legacy LLM duration (V2 uses `executespec.v2.llm.latency`)                                     |
+| `executespec.llm.retry_count`                | Retry counter                                                                                  |
+| `executespec.deploy.total` / `.duration` / `.build_duration` / `.health_check_duration` / `.failures` | Deploy lifecycle (`deployment/DeploymentService.java`)                |
+| `executespec.preview.starts` / `.duration` / `.build_duration` / `.deploy_duration` / `.failures` | Preview lifecycle                                                          |
+| `executespec.tool.calls`                     | Tool dispatch (legacy)                                                                          |
+| `executespec.validation.total`               | `validator/CodeValidatorImpl.java`                                                              |
+| `executespec.gate.wait_time`                 | Plan-gate wait                                                                                  |
+| `executespec.handover.duration`              | Agent-to-agent handover                                                                          |
+| `executespec.monitor.stuck_detected`         | Stuck-run detector                                                                              |
+| `executespec.provider.pool.active` / `.queued` / `.capacity` | Per-provider concurrency pool                                                      |
+| `executespec.redis.connection_failures`      | Redis connectivity                                                                              |
+| `executespec.gate.db_fallback`               | DB fallback when Redis-backed gate path fails                                                    |
+| `executespec.redis.failopen`                 | Fail-open count when Redis is down                                                              |
+| `executespec.scm.cleanup.skipped` / `.closed` / `.deleted` | `compliance/StaleScmCleanupJob.java`                                              |
+| `executespec.workspace.disk.reaped`          | `compliance/WorkspaceDiskCleanupJob.java`                                                       |
+| `executespec.sse.emitters.active` / `.rejected` | `sse/SseBroadcaster.java`                                                                    |
+| `executespec.side_effect.completed` / `.failed` / `.retried` | `saga/SideEffectExecutor.java`                                                  |
+| `executespec.async.uncaught.exception`       | `config/AsyncObservabilityConfig.java` — uncaught exceptions on async dispatches                |
+| `executespec.security.guardrail.blocked`     | `security/guardrail/GuardrailLevelResolver.java`                                                |
+| `executespec.prompt.optimisation.applied` / `.rolledback` | `optimiser/PromptAuditService.java`, `config/PromptVersioningService.java`        |
+| `executespec.stack.refresh.changed` / `.unchanged` / `.failed` | `project/service/StackRefreshJob.java`                                       |
+
+## Actuator endpoint summary
+
+`application.yml management.endpoints.web.exposure.include` exposes exactly four:
+
+| Path                         | Purpose                                                       |
+| ---------------------------- | ------------------------------------------------------------- |
+| `GET /actuator/health`       | Health check (used by the deploy gate)                        |
+| `GET /actuator/info`         | Build / version info                                          |
+| `GET /actuator/metrics`      | Per-meter metric introspection (`/actuator/metrics/{name}`)   |
+| `GET /actuator/prometheus`   | Scrape endpoint for Prometheus (text/plain exposition)         |
+
+`management.endpoint.health.show-details: when_authorized` — health detail is hidden from unauthenticated callers.
+
+The custom `HealthController` at `/api/health` and `/api/health/ready` is separate from the actuator. It exists for the dashboard header status badge + MIG/LB health checks; it does NOT use the `HealthIndicator` SPI. There are no Spring `HealthIndicator` bean implementations in the codebase (verified by grepping the source tree for `implements HealthIndicator`).
+
+## Error budget
+
+There is no automated error-budget tracking in the codebase. Targets are documented here; consumption is computed manually via Prometheus queries against the metrics above.
+
+A future error-budget pipeline would need:
+
+1. A per-SLO target row (probably in a YAML file under `observability/`).
+2. A scheduled job to compute consumption and publish a gauge.
+3. A Grafana panel and an alert on > 80% consumption.
+
+None of those exist today; flagging as a gap rather than an SLO.
+
+## SLO change procedure
+
+1. Add or modify a metric in `observability/Metrics.java` or `config/CustomMetricsConfig.java`.
+2. Add the Prometheus query to this file.
+3. Add or update a panel on `observability/grafana/dashboards/executespec-overview.json` (or `jvm-http-overview.json` for JVM-internal metrics).
+4. Commit all four touch points in the same change.
+
+## Tracing
+
+`management.tracing.sampling.probability: 1.0` in the base `application.yml` and on the `gcp` profile. Prod sets `OTEL_SAMPLING_PROBABILITY` to `0.1` by default (`application-prod.yml`). Annotation-driven `@Observed` is enabled via `management.observations.annotations.enabled: true`.
+
+OTLP traces:
+
+- Local (no profile or default profile): emitted to `http://localhost:4318/v1/traces`. Tempo (in `observability/docker-compose.yml`) accepts on the same port.
+- `local` profile: tracing disabled (no collector running).
+- `dev` profile: `OtlpAutoConfiguration` excluded entirely (no dev-VM collector).
+- `gcp` profile: shipped to GCP Cloud Trace via `GcpOtelExporterConfig`.
+
+MDC propagation: `micrometer-tracing-bridge-otel` populates traceId / spanId into the SLF4J context. Logback JSON encoder is configured via `logstash-logback-encoder` (from `pom.xml`).
