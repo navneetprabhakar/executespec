@@ -9,6 +9,8 @@ import java.util.stream.Collectors;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 
+import com.navneet.executespec.billing.exception.BillingException;
+
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -223,6 +225,25 @@ public class ValidationAdvice {
             HttpStatus.BAD_REQUEST,
             "bad_request",
             "Missing required parameter '" + ex.getParameterName() + "'"));
+  }
+
+  /**
+   * SDET 2026-05-16 (retest discovery) — {@link BillingException} carries an
+   * {@code @ResponseStatus(PAYMENT_REQUIRED)} annotation, but the
+   * {@code @ExceptionHandler(Throwable.class)} catch-all in {@link GlobalExceptionAdvice} runs
+   * first and produces a 500 envelope before Spring's {@code ResponseStatusExceptionResolver} gets
+   * a chance to honour the annotation. Add an explicit handler so quota-exceeded responses surface
+   * as 402 with the canonical envelope instead of leaking as 500. The "RUNS limit reached" message
+   * from {@code UsageTrackingService.assertWithinLimits} is already user-facing-safe.
+   */
+  @ExceptionHandler(BillingException.class)
+  public ResponseEntity<Map<String, Object>> onBilling(BillingException ex) {
+    String msg = ex.getMessage();
+    if (msg == null || msg.isBlank()) msg = "Billing limit exceeded.";
+    log.debug("BillingException: {}", msg);
+    return jsonError(
+        HttpStatus.PAYMENT_REQUIRED,
+        baseBody(HttpStatus.PAYMENT_REQUIRED, "payment_required", msg));
   }
 
   /**
