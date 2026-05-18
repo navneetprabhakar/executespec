@@ -463,7 +463,7 @@
         <!-- 2026-05-16: Dependabot #134 bumped 2.43 → 3.4. Major version change; config
              schema unchanged for the slots we use (googleJavaFormat, removeUnusedImports,
              importOrder, formatAnnotations). -->
-        <version>3.4.0</version>
+        <version>3.5.1</version>
         <configuration>
           <java>
             <includes>
