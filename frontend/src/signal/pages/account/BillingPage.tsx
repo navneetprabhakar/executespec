@@ -34,9 +34,12 @@ export default function BillingPage() {
       // Best-effort: paymentHistory may not return a typed shape; fail soft.
       (async () => {
         try {
-          const raw = await fetch('/api/billing/payment-history', {
-            headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
-          });
+          const raw = await fetch(
+            `/api/billing/payment-history?orgId=${encodeURIComponent(user.orgId ?? '')}`,
+            {
+              headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
+            },
+          );
           if (!raw.ok) return [];
           const data = (await raw.json()) as unknown;
           if (Array.isArray(data)) return data as PaymentRowLite[];
@@ -151,11 +154,8 @@ export default function BillingPage() {
               </div>
             </div>
             <div style={{display: 'flex', gap: 6}}>
-              <Button kind='secondary' sm to='/plans'>
+              <Button kind='primary' sm to='/plans'>
                 Change plan
-              </Button>
-              <Button kind='primary' sm to='/topup'>
-                Top up credits
               </Button>
             </div>
           </div>

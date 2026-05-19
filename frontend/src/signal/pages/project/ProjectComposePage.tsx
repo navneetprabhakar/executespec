@@ -415,7 +415,7 @@ export default function ProjectComposePage() {
               k: 'Tier',
               v: <StatusPill kind={tier === 'FREE' ? 'needs' : 'shipped'}>{tier}</StatusPill>,
             },
-            {k: 'Mode', v: 'PRODUCTION (plan gate)'},
+            {k: 'Pause for approval', v: 'On'},
             {k: 'Repos linked', v: String(repos.length)},
           ]}
         />
