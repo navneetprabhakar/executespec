@@ -304,7 +304,7 @@ export default function PlansPage() {
                   {p.tier === 'FREE'
                     ? 'Try ExecuteSpec without a card'
                     : p.tier === 'TEAM'
-                      ? 'Minimum 2 seats. Annual billing.'
+                      ? 'Add seats as your team grows. Annual billing.'
                       : p.tier === 'ENTERPRISE'
                         ? 'SSO, SLA, dedicated support'
                         : 'Hidden plan — grandfathered users only'}
