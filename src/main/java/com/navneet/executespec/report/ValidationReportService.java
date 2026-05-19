@@ -57,13 +57,13 @@ public class ValidationReportService {
    *
    * <p>When ON (default true), {@code verifiedScore} is computed as a weighted-additive average
    * over measured signals with CODE_DELIVERED as the primary factor. When OFF, the legacy
-   * multiplicative formula stays. Kept as a flag because (a) the multiplicative formula is
-   * pinned by ValidationReportServiceVerifiedScoreTest, which lets us roll back without code
-   * churn if customer data shows the new shape misranking real runs, and (b) the previous
-   * V145/V167 thrash on the FREE-tier limit taught us to keep scoring changes reversible.
+   * multiplicative formula stays. Kept as a flag because (a) the multiplicative formula is pinned
+   * by ValidationReportServiceVerifiedScoreTest, which lets us roll back without code churn if
+   * customer data shows the new shape misranking real runs, and (b) the previous V145/V167 thrash
+   * on the FREE-tier limit taught us to keep scoring changes reversible.
    *
-   * <p>See {@link #computeVerifiedScoreAdditive} for the rationale on the weights and the
-   * "code delivered" hard floor.
+   * <p>See {@link #computeVerifiedScoreAdditive} for the rationale on the weights and the "code
+   * delivered" hard floor.
    */
   private static final String FLAG_ADDITIVE_SCORE = "scoring.additive-v2";
 
@@ -908,9 +908,9 @@ public class ValidationReportService {
   }
 
   /**
-   * 2026-05-19 — primary entry. Dispatches to additive (default) or legacy multiplicative based
-   * on the {@code scoring.additive-v2} feature flag. Both formulae get all the inputs they need;
-   * the multiplicative path simply ignores {@code filesGenerated}.
+   * 2026-05-19 — primary entry. Dispatches to additive (default) or legacy multiplicative based on
+   * the {@code scoring.additive-v2} feature flag. Both formulae get all the inputs they need; the
+   * multiplicative path simply ignores {@code filesGenerated}.
    */
   int computeVerifiedScore(
       Boolean finalBuildPassed,
@@ -944,41 +944,40 @@ public class ValidationReportService {
   }
 
   /**
-   * 2026-05-19 — additive rebuild. Replaces the multiplicative cliff with a weighted average
-   * over the signals that actually fired.
+   * 2026-05-19 — additive rebuild. Replaces the multiplicative cliff with a weighted average over
+   * the signals that actually fired.
    *
    * <p>Weights:
    *
    * <ul>
-   *   <li><b>CODE_DELIVERED (30)</b> — primary factor. {@code filesGenerated > 0} ⇒ 100,
-   *       otherwise 0. When this is 0 the headline floors to 0 regardless of other signals —
-   *       the platform's job is to ship code; nothing else matters if it didn't.
+   *   <li><b>CODE_DELIVERED (30)</b> — primary factor. {@code filesGenerated > 0} ⇒ 100, otherwise
+   *       0. When this is 0 the headline floors to 0 regardless of other signals — the platform's
+   *       job is to ship code; nothing else matters if it didn't.
    *   <li><b>BUILD (25)</b> — PASSING ⇒ 100, FAILING ⇒ 0. Skipped from the weighted average when
-   *       {@code finalBuildPassed} is null (single-shot or patch-mode runs that don't run
-   *       compile).
-   *   <li><b>TESTS (20)</b> — when real tests ran: linear {@code passed/total × 100}. When no
-   *       tests ran but {@link AccuracyReport#getTestCoverageLevel()} graded coverage: damped
-   *       scale capped at 70 (GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10) — LLM grading is fuzzy
-   *       and shouldn't earn full credit. Null/missing ⇒ skipped.
+   *       {@code finalBuildPassed} is null (single-shot or patch-mode runs that don't run compile).
+   *   <li><b>TESTS (20)</b> — when real tests ran: linear {@code passed/total × 100}. When no tests
+   *       ran but {@link AccuracyReport#getTestCoverageLevel()} graded coverage: damped scale
+   *       capped at 70 (GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10) — LLM grading is fuzzy and
+   *       shouldn't earn full credit. Null/missing ⇒ skipped.
    *   <li><b>REVIEWER (20)</b> — CLEAN=100, FIXED_ISSUES=85, UNRESOLVED_ISSUES=40,
    *       REVIEW_FAILED=10. Null ⇒ skipped.
-   *   <li><b>CRITICALS (5)</b> — 100 − 20 × unfixedCriticalCount, floored at 0. Always counts
-   *       (zero criticals earns the full 5 pts).
+   *   <li><b>CRITICALS (5)</b> — 100 − 20 × unfixedCriticalCount, floored at 0. Always counts (zero
+   *       criticals earns the full 5 pts).
    * </ul>
    *
-   * <p>Why additive over multiplicative: the multiplicative formula treats every factor as a
-   * gate — one low factor crushes the headline. That produced "Failed 50%" banners on runs
-   * where the build passed and the reviewer ran clean, just because the AccuracyAssessment LLM
-   * happened to grade test coverage as PARTIAL. The customer-facing read of those runs was a
-   * lie. Additive lets the user see "build passed + reviewer clean + tests light" and decide.
+   * <p>Why additive over multiplicative: the multiplicative formula treats every factor as a gate —
+   * one low factor crushes the headline. That produced "Failed 50%" banners on runs where the build
+   * passed and the reviewer ran clean, just because the AccuracyAssessment LLM happened to grade
+   * test coverage as PARTIAL. The customer-facing read of those runs was a lie. Additive lets the
+   * user see "build passed + reviewer clean + tests light" and decide.
    *
-   * <p>Why CODE_DELIVERED at 30: it's the only signal that maps directly to "the platform did
-   * its job." Build/tests/reviewer are quality measures on top. When code wasn't generated the
-   * other signals are theatre — hence the hard floor.
+   * <p>Why CODE_DELIVERED at 30: it's the only signal that maps directly to "the platform did its
+   * job." Build/tests/reviewer are quality measures on top. When code wasn't generated the other
+   * signals are theatre — hence the hard floor.
    *
-   * <p>Why endpointFactor is gone: the reviewer's wiring pass already catches the same class of
-   * bug the endpoint count was meant to catch. Double-counting forced two trust gates into the
-   * old formula. Drop the signal, drop the gates.
+   * <p>Why endpointFactor is gone: the reviewer's wiring pass already catches the same class of bug
+   * the endpoint count was meant to catch. Double-counting forced two trust gates into the old
+   * formula. Drop the signal, drop the gates.
    */
   int computeVerifiedScoreAdditive(
       Boolean finalBuildPassed,

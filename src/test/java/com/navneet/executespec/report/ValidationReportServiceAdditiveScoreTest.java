@@ -24,14 +24,14 @@ import org.junit.jupiter.api.Test;
  *   <li>CRITICALS (5) — 100 − 20×N, floor 0
  * </ul>
  *
- * <p>When a signal is "not measured", it's dropped from both the numerator and denominator so
- * the headline reflects only what fired. Tests below document each branch.
+ * <p>When a signal is "not measured", it's dropped from both the numerator and denominator so the
+ * headline reflects only what fired. Tests below document each branch.
  */
 class ValidationReportServiceAdditiveScoreTest {
 
   /**
-   * Build a service with the additive flag forced ON via a Mockito stub. The other constructor
-   * args don't matter for the pure-function tests in this class.
+   * Build a service with the additive flag forced ON via a Mockito stub. The other constructor args
+   * don't matter for the pure-function tests in this class.
    */
   private ValidationReportService svcAdditiveOn() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
@@ -58,7 +58,8 @@ class ValidationReportServiceAdditiveScoreTest {
 
   @Test
   void perfect_run_is_100() {
-    // weights: 30 * 100 (code) + 25 * 100 (build) + 20 * 100 (tests) + 20 * 100 (reviewer) + 5 * 100 (criticals)
+    // weights: 30 * 100 (code) + 25 * 100 (build) + 20 * 100 (tests) + 20 * 100 (reviewer) + 5 *
+    // 100 (criticals)
     //        = 10000 / 100 = 100
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 0, null, null, 4);
     assertEquals(100, score);
@@ -107,7 +108,8 @@ class ValidationReportServiceAdditiveScoreTest {
   @Test
   void testsTotal_zero_with_no_coverage_signal_drops_test_slot() {
     // testsTotal=0 AND testCoverageLevel=null → drop test slot entirely.
-    // Denominator becomes 30 + 25 + 20 + 5 = 80. Numerator: 30*100 + 25*100 + 20*100 + 5*100 = 8000.
+    // Denominator becomes 30 + 25 + 20 + 5 = 80. Numerator: 30*100 + 25*100 + 20*100 + 5*100 =
+    // 8000.
     // 8000 / 80 = 100.
     int score = svcAdditiveOn().computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4);
     assertEquals(100, score, "Unmeasured tests must not penalize.");
