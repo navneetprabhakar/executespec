@@ -194,6 +194,40 @@ export default function BillingPage() {
           </div>
         </Card>
 
+        {tier === 'FREE' && (
+          // 2026-05-19 — surface BYOK on the FREE billing page. Without this,
+          // FREE users don't know that upgrading to PRO collapses the $3
+          // per-run cap to "whatever your own LLM keys cost you". Single
+          // line, no animation, no urgency banner — it primes the upgrade
+          // without screaming at the user.
+          <Card style={{padding: '12px 16px', marginTop: 12}}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 10,
+                fontSize: 13,
+                lineHeight: 1.45,
+              }}
+            >
+              <div>
+                <strong style={{color: 'var(--signal-text)'}}>
+                  Bring your own keys, bypass the $3 cap.
+                </strong>{' '}
+                <span style={{color: 'var(--signal-text-dim)'}}>
+                  PRO uses your Anthropic / OpenAI / Gemini keys directly. You pay the LLM
+                  bill, not us — no platform cost cap, no surprise overage.
+                </span>
+              </div>
+              <Button kind='secondary' sm to='/plans'>
+                See PRO
+              </Button>
+            </div>
+          </Card>
+        )}
+
         <SectionHeader>This cycle</SectionHeader>
         <Card>
           <div

@@ -274,7 +274,7 @@ export function SignupPage() {
         <h1>
           Create an <em>account.</em>
         </h1>
-        <p className='lede'>Free tier · no card · 5 runs/month. You can upgrade any time.</p>
+        <p className='lede'>Free tier · no card · 15 runs/month. You can upgrade any time.</p>
 
         <ErrorBanner msg={err} />
 
