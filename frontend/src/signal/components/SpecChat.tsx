@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {Button} from '@/signal/components/Primitives';
 import {Spinner} from '@/signal/components/Loaders';
 import {Markdown} from '@/signal/components/Markdown';
+import {Modal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
 
 // Sparkle / "build" mark used on the chat trigger + bubble label.
@@ -65,14 +66,29 @@ export function SpecChat({
     if (!text || busy) return;
     setBusy(true);
     setErr('');
-    // Always include the current draft spec as context, prefixed once.
-    const context = draftSpec.trim()
-      ? `My current draft spec is:\n\n${draftSpec.trim()}\n\n${text}`
-      : text;
-    setMessages((prev) => [...prev, {role: 'user', content: text, ts: new Date().toISOString()}]);
+    // Prepend the draft spec ONLY on the first user turn so the agent
+    // has the starting context. Subsequent turns rely on conversation
+    // history. Earlier the draft was prepended every turn, which both
+    // (a) burned tokens and (b) only sent the latest message — the
+    // agent had no memory of prior turns. Now we send the FULL message
+    // history so the chat is genuinely multi-turn.
+    const isFirstTurn = messages.length === 0;
+    const firstTurnText =
+      isFirstTurn && draftSpec.trim()
+        ? `My current draft spec is:\n\n${draftSpec.trim()}\n\n${text}`
+        : text;
+    const next: Array<{role: 'user' | 'assistant'; content: string; ts: string}> = [
+      ...messages,
+      {role: 'user', content: text, ts: new Date().toISOString()},
+    ];
+    setMessages(next);
     setInput('');
     try {
-      const resp = await api.conversationChat([{role: 'user', content: context}]);
+      const wireHistory: api.ConversationMessage[] = next.map((m, i) => ({
+        role: m.role,
+        content: i === 0 && isFirstTurn ? firstTurnText : m.content,
+      }));
+      const resp = await api.conversationChat(wireHistory);
       const reply =
         (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
         (resp as unknown as {message?: string}).message ||
@@ -89,8 +105,8 @@ export function SpecChat({
     }
   }
 
-  if (!open) {
-    return (
+  return (
+    <>
       <Button
         kind='secondary'
         sm
@@ -100,177 +116,169 @@ export function SpecChat({
         <SparkleIcon size={14} color='var(--signal-coral)' />
         Build my spec
       </Button>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        marginTop: 10,
-        background: 'var(--signal-card-bg)',
-        border: '1px solid var(--signal-hairline)',
-        borderRadius: 14,
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '10px 14px',
-          borderBottom: '1px solid var(--signal-hairline)',
-        }}
+      <Modal
+        open={open}
+        title={`Build my spec${projectId ? ' · project-scoped' : ''}`}
+        onClose={() => setOpen(false)}
+        size='lg'
       >
         <div
           style={{
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--signal-text-mute)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            maxHeight: '50vh',
+            overflowY: 'auto',
+            marginBottom: 12,
           }}
         >
-          <SparkleIcon size={12} color='var(--signal-coral)' />
-          Build my spec{projectId ? ' · project-scoped' : ''}
-        </div>
-        <Button kind='ghost' sm onClick={() => setOpen(false)}>
-          Close
-        </Button>
-      </div>
-
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          padding: 14,
-          maxHeight: 320,
-          overflowY: 'auto',
-        }}
-      >
-        {messages.length === 0 && !busy && (
-          <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-            Refine your spec before launching. Ask the agent to clarify scope, suggest test cases,
-            or split a big change into smaller specs. Project-scoped chats also have access to your
-            codebase memory.
-          </p>
-        )}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '90%',
-              padding: '8px 12px',
-              background: m.role === 'user' ? 'var(--signal-ink)' : 'var(--signal-card-elev)',
-              color: m.role === 'user' ? 'var(--signal-bg)' : 'var(--signal-ink)',
-              borderRadius: 12,
-              ...(m.role === 'user' ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4}),
-            }}
-          >
+          {messages.length === 0 && !busy && (
+            <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+              Refine your spec before launching. Ask the agent to clarify scope, suggest test cases,
+              or split a big change into smaller specs. Project-scoped chats also have access to
+              your codebase memory.
+            </p>
+          )}
+          {messages.map((m, i) => (
             <div
+              key={i}
               style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 10,
-                opacity: 0.6,
-                marginBottom: 3,
+                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                maxWidth: '90%',
+                padding: '8px 12px',
+                background: m.role === 'user' ? 'var(--signal-ink)' : 'var(--signal-card-elev)',
+                color: m.role === 'user' ? 'var(--signal-bg)' : 'var(--signal-ink)',
+                borderRadius: 12,
+                ...(m.role === 'user' ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4}),
               }}
             >
-              {m.role === 'user' ? 'YOU' : 'AGENT'} · {new Date(m.ts).toLocaleTimeString()}
-            </div>
-            {m.role === 'user' ? (
-              <div style={{fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-                {m.content}
+              <div
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10,
+                  opacity: 0.6,
+                  marginBottom: 3,
+                }}
+              >
+                {m.role === 'user' ? 'YOU' : 'AGENT'} · {new Date(m.ts).toLocaleTimeString()}
               </div>
-            ) : (
-              // Agent replies render as Markdown — same workflow ("Use as spec"
-              // still copies the raw `content`), just nicer to read.
-              <Markdown>{m.content}</Markdown>
-            )}
-          </div>
-        ))}
-        {busy && (
+              {m.role === 'user' ? (
+                <div style={{fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
+                  {m.content}
+                </div>
+              ) : (
+                // Agent replies render as Markdown — same workflow ("Use as spec"
+                // still copies the raw `content`), just nicer to read.
+                <Markdown>{m.content}</Markdown>
+              )}
+            </div>
+          ))}
+          {busy && (
+            <div
+              style={{
+                alignSelf: 'flex-start',
+                padding: '6px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                color: 'var(--signal-text-dim)',
+                fontSize: 12,
+              }}
+            >
+              <Spinner size={11} /> Thinking…
+            </div>
+          )}
+          <div ref={tail} />
+        </div>
+
+        {err && (
           <div
             style={{
-              alignSelf: 'flex-start',
-              padding: '6px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              color: 'var(--signal-text-dim)',
+              padding: '8px 14px',
               fontSize: 12,
+              color: 'var(--signal-coral-text)',
+              background: 'var(--signal-coral-soft)',
+              borderRadius: 10,
+              marginBottom: 10,
             }}
           >
-            <Spinner size={11} /> Thinking…
+            {err}
           </div>
         )}
-        <div ref={tail} />
-      </div>
 
-      {err && (
         <div
           style={{
-            padding: '8px 14px',
-            fontSize: 12,
-            color: 'var(--signal-coral-text)',
-            background: 'var(--signal-coral-soft)',
+            borderTop: '1px solid var(--signal-hairline)',
+            paddingTop: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
           }}
         >
-          {err}
-        </div>
-      )}
-
-      <div
-        style={{
-          padding: 10,
-          borderTop: '1px solid var(--signal-hairline)',
-          display: 'flex',
-          gap: 6,
-          alignItems: 'flex-end',
-        }}
-      >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          placeholder='Ask the agent — e.g. "are there edge cases I should handle?"'
-          rows={2}
-          disabled={busy}
-          style={{
-            flex: 1,
-            background: 'var(--signal-card-elev)',
-            border: '1px solid var(--signal-hairline)',
-            borderRadius: 10,
-            padding: '8px 12px',
-            fontFamily: 'inherit',
-            fontSize: 13,
-            color: 'var(--signal-ink)',
-            resize: 'vertical',
-            outline: 'none',
-            minHeight: 50,
-            maxHeight: 140,
-          }}
-        />
-        <div style={{display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0}}>
-          <Button kind='primary' sm onClick={send} disabled={busy || !input.trim()}>
-            Send
-          </Button>
-          {lastAssistant && (
-            <Button kind='secondary' sm onClick={() => onApply(lastAssistant.content)}>
-              Use as spec
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            placeholder='Ask the agent — e.g. "are there edge cases I should handle?"'
+            rows={2}
+            disabled={busy}
+            style={{
+              width: '100%',
+              background: 'var(--signal-card-elev)',
+              border: '1px solid var(--signal-hairline)',
+              borderRadius: 10,
+              padding: '8px 12px',
+              fontFamily: 'inherit',
+              fontSize: 13,
+              color: 'var(--signal-ink)',
+              resize: 'vertical',
+              outline: 'none',
+              minHeight: 50,
+              maxHeight: 140,
+              boxSizing: 'border-box',
+            }}
+          />
+          {/* Buttons in a horizontal row UNDER the textarea — same layout on
+            every viewport. Earlier the buttons were stacked in a column
+            next to the textarea; on a narrow mobile screen that column was
+            taller than the textarea and visually overlapped the chat
+            thread above. Below-the-textarea pattern is what every modern
+            chat app uses and works at any width. */}
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+            {lastAssistant && (
+              <Button
+                kind='secondary'
+                sm
+                onClick={() => {
+                  // Apply the assistant's reply to the parent's spec textarea
+                  // AND collapse this panel — without the collapse, the chat
+                  // stays open below the composer and the user can't see that
+                  // the textarea above was updated (they read "nothing happened").
+                  onApply(lastAssistant.content);
+                  setOpen(false);
+                }}
+                style={{flex: '1 1 0', minWidth: 130}}
+              >
+                Use as spec
+              </Button>
+            )}
+            <Button
+              kind='primary'
+              sm
+              onClick={send}
+              disabled={busy || !input.trim()}
+              style={{flex: '1 1 0', minWidth: 90}}
+            >
+              Send
             </Button>
-          )}
+          </div>
         </div>
-      </div>
-    </div>
+      </Modal>
+    </>
   );
 }
