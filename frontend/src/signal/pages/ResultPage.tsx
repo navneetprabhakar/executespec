@@ -283,10 +283,7 @@ export default function ResultPage() {
     }
     if (reviewerVerdict === 'CLEAN' || reportAny.reviewerStatus === 'CLEAN') {
       parts.push('Reviewer ran clean.');
-    } else if (
-      reviewerVerdict === 'REVIEW_FAILED' ||
-      reviewerVerdict === 'UNRESOLVED_ISSUES'
-    ) {
+    } else if (reviewerVerdict === 'REVIEW_FAILED' || reviewerVerdict === 'UNRESOLVED_ISSUES') {
       parts.push('Reviewer flagged unresolved issues.');
     }
     if (parts.length === 0) return null;
@@ -296,13 +293,9 @@ export default function ResultPage() {
   // the breakdown rather than as four separate dashes in the body.
   const unmeasured: string[] = [];
   if (!(reportAny.buildStatus || finalBuildPassed != null)) unmeasured.push('Build');
-  if (
-    !(reportAny.testsTotal != null && reportAny.testsTotal > 0) &&
-    !testCoverageLevel
-  )
+  if (!(reportAny.testsTotal != null && reportAny.testsTotal > 0) && !testCoverageLevel)
     unmeasured.push('Tests');
-  if (reportAny.coverageDelta == null && endpointCoveragePct == null)
-    unmeasured.push('Coverage');
+  if (reportAny.coverageDelta == null && endpointCoveragePct == null) unmeasured.push('Coverage');
   if (!(reportAny.reviewerStatus || reviewerVerdict)) unmeasured.push('Reviewer');
   if (!reportAny.securityStatus) unmeasured.push('Security');
   if (!reportAny.architectureStatus) unmeasured.push('Architecture');
