@@ -217,8 +217,8 @@ export default function BillingPage() {
                   Bring your own keys, bypass the $3 cap.
                 </strong>{' '}
                 <span style={{color: 'var(--signal-text-dim)'}}>
-                  PRO uses your Anthropic / OpenAI / Gemini keys directly. You pay the LLM
-                  bill, not us — no platform cost cap, no surprise overage.
+                  PRO uses your Anthropic / OpenAI / Gemini keys directly. You pay the LLM bill, not
+                  us — no platform cost cap, no surprise overage.
                 </span>
               </div>
               <Button kind='secondary' sm to='/plans'>
