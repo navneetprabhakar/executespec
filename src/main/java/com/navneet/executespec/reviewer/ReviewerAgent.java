@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.WorkerAgent;
 import com.navneet.executespec.agent.WorkerResult;
 import com.navneet.executespec.agent.WorkerTaskRequest;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -67,6 +68,27 @@ public class ReviewerAgent {
   public static final int DEFAULT_MAX_ITER_PER_PASS = 50;
 
   /**
+   * 2026-05-19 — Phase 2 auto-fix. Iteration cap for the third "fix-the-red-build" pass. Smaller
+   * than the general/wiring caps because this pass is targeted: the user message names the exact
+   * build error, the LLM only needs enough budget to read the affected file(s) and patch the
+   * specific failure — not to scan the whole repo. 25 iterations ≈ 5–10 minutes on PLANNING tier,
+   * which is the budget a junior engineer would need to fix a "missing import" or "wrong type"
+   * compile error.
+   */
+  public static final int FIX_BUILD_PASS_MAX_ITER = 25;
+
+  /** Wall-clock cap on the fix-build pass — narrower scope than general/wiring. */
+  public static final long FIX_BUILD_PASS_TIMEOUT_SECONDS = 360;
+
+  /**
+   * Flag key for the Phase 2 fix-the-build third pass. Default ON — the pass only fires when the
+   * final build is already red, so the worst case is "spend a few extra LLM seconds without
+   * improving the verdict." Flip off via {@code FeatureFlagService} to compare verdict
+   * distributions A/B per provider.
+   */
+  public static final String FLAG_THIRD_PASS = "reviewer.third-pass.enabled";
+
+  /**
    * Wall-clock cap on the general pass — long enough for thorough review, short enough that a stuck
    * LLM does not freeze the whole run. See v2.5.10 eval Bug C: a Gemini reviewer hung indefinitely
    * with all worker tasks complete, blocking terminate + score persistence.
@@ -87,6 +109,7 @@ public class ReviewerAgent {
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
+  private final FeatureFlagService featureFlagService;
   // 2026-05-13 — post-edit formatter pass. Audit run 6024f510 RC-1: reviewer's
   // surgical async→def edits introduced black-incompatible formatting drift
   // that broke the customer's `black --check app/` CI step. Runs after both
@@ -292,21 +315,81 @@ public class ReviewerAgent {
       buildOutput = "tool error: " + err.message();
     }
 
+    // ── Phase 2 third pass — fix the red build (2026-05-19) ──────────────
+    // When the final build is still red after general + wiring, give the
+    // reviewer one more targeted pass with the exact build error as input.
+    // This is the class of failure where the agent was one typo away from
+    // CLEAN — a stray import, a wrong type, a missing decorator — and the
+    // earlier passes either didn't trip the build or were timing-out on the
+    // last edit. Empirically (audit 2026-05-19, admin's 30 run sample):
+    // 4 of the 30 "complete" runs in the admin list had a passing reviewer
+    // BUT a red final build, landing in UNRESOLVED_ISSUES / partial. Phase
+    // 2 rescues that class, pushing them toward FIXED_ISSUES.
+    //
+    // Gate: build red + we have meaningful build-output text + flag on.
+    // We never run the pass on a clean build — there's nothing to fix.
+    boolean thirdPassEnabled =
+        featureFlagService == null || featureFlagService.isEnabled(FLAG_THIRD_PASS);
+    WorkerResult fixBuild = null;
+    if (!buildPassed && thirdPassEnabled && buildOutput != null && !buildOutput.isBlank()) {
+      log.info(
+          "ReviewerAgent run={} third pass START — build red after general+wiring, retrying",
+          req.context().runId());
+      fixBuild =
+          runPassWithTimeout(
+              req,
+              FIX_BUILD_PASS_MAX_ITER,
+              "reviewer-fixbuild",
+              loadPrompt("prompts/reviewer-general.md"),
+              FIX_BUILD_PASS_TIMEOUT_SECONDS,
+              buildOutput);
+      // Re-run final build to capture the post-third-pass state.
+      ObjectNode rebuildArgs = objectMapper.createObjectNode();
+      if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
+        rebuildArgs.put("plannerCommand", req.buildCommand());
+      }
+      ToolResult rebuildResult = buildProjectTool.execute(rebuildArgs, req.context());
+      if (rebuildResult instanceof ToolResult.Ok ok2) {
+        buildOutput = ok2.content();
+        buildExit = extractExitCode(buildOutput);
+        buildPassed = buildExit == 0;
+      } else if (rebuildResult instanceof ToolResult.Err err2) {
+        buildOutput = "tool error: " + err2.message();
+        buildPassed = false;
+      }
+      log.info(
+          "ReviewerAgent run={} third pass DONE — buildPassedAfter={}",
+          req.context().runId(),
+          buildPassed);
+    }
+
     ReviewerResult.Overall overall = determineOverall(general, wiring, buildPassed);
     long elapsed = System.currentTimeMillis() - start;
     log.info(
-        "ReviewerAgent DONE run={} overall={} buildPassed={} elapsed={}ms",
+        "ReviewerAgent DONE run={} overall={} buildPassed={} thirdPassFired={} elapsed={}ms",
         req.context().runId(),
         overall,
         buildPassed,
+        fixBuild != null,
         elapsed);
+
+    // Compose pass summary including third-pass note if it fired, so the UI
+    // changelog ("Reviewer auto-fixed …") reflects the third pass's work.
+    String generalSummary = general.completionSummary();
+    String wiringSummary = wiring == null ? null : wiring.completionSummary();
+    if (fixBuild != null && fixBuild.completionSummary() != null) {
+      wiringSummary =
+          (wiringSummary == null ? "" : wiringSummary + " | ")
+              + "fix-build pass: "
+              + fixBuild.completionSummary();
+    }
 
     return ReviewerResult.builder()
         .overall(overall)
         .generalPassOutcome(general)
-        .generalPassSummary(general.completionSummary())
+        .generalPassSummary(generalSummary)
         .wiringPassOutcome(wiring)
-        .wiringPassSummary(wiring == null ? null : wiring.completionSummary())
+        .wiringPassSummary(wiringSummary)
         .finalBuildPassed(buildPassed)
         .finalBuildExitCode(buildExit)
         .finalBuildOutput(buildOutput)

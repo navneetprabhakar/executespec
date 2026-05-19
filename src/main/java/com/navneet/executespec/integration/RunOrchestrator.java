@@ -3768,8 +3768,28 @@ public class RunOrchestrator {
                     .autoFixed(false)
                     .fixSucceeded(false)
                     .build());
+        case FIXED_ISSUES -> {
+          // 2026-05-19 — Phase 1 auto-fix surface. Emit an informational issue
+          // with autoFixed=true so the Issues panel reflects that the reviewer
+          // pass actually made edits (and they landed — build is green when
+          // verdict is FIXED_ISSUES). Pre-2026-05-19 these flags were always
+          // false even when the agent had done real work, so the UI made the
+          // pass invisible. countUnfixedCritical filters SYNTH-FIX-* out of the
+          // critical penalty (severity MINOR + autoFixed=true), so this is
+          // visibility-only — doesn't double-count against the score.
+          String summary = describeReviewerFixes(reviewResult);
+          out.add(
+              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                  .id("SYNTH-FIX-1")
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
+                  .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
+                  .description(summary)
+                  .autoFixed(true)
+                  .fixSucceeded(true)
+                  .build());
+        }
         default -> {
-          /* CLEAN / FIXED_ISSUES — no synthetic */
+          /* CLEAN — no synthetic */
         }
       }
     }
@@ -3830,6 +3850,25 @@ public class RunOrchestrator {
   private static String truncate(String s, int max) {
     if (s == null) return "";
     return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+  }
+
+  /**
+   * Build a short user-facing description of what the reviewer auto-fixed during this run. Prefers
+   * the reviewer's own pass-summary text (the model's completeTask() output) so the description
+   * reads like a human-written changelog line. Falls back to a generic message if both passes were
+   * silent.
+   */
+  private static String describeReviewerFixes(ReviewerResult result) {
+    String general = result.generalPassSummary();
+    String wiring = result.wiringPassSummary();
+    StringBuilder sb = new StringBuilder("Reviewer auto-fixed issues during the review pass.");
+    if (general != null && !general.isBlank()) {
+      sb.append(" General pass: ").append(truncate(general.trim(), 160));
+    }
+    if (wiring != null && !wiring.isBlank()) {
+      sb.append(" Wiring pass: ").append(truncate(wiring.trim(), 160));
+    }
+    return truncate(sb.toString(), 480);
   }
 
   /**
