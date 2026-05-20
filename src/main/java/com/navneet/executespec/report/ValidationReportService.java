@@ -1017,10 +1017,15 @@ public class ValidationReportService {
       weightedSum += 20.0 * 100.0 * ratio;
       weightTotal += 20.0;
     } else if (testCoverageLevel != null) {
+      // UNKNOWN damps to 50, it does NOT drop the slot. Rationale: RL-2026-05-003.
+      // Dropping UNKNOWN let a run with no confirmed tests score 100 via the
+      // "unmeasured signals don't count" path. A conservative 50 closes that hole
+      // until real test execution (RL-2026-05-001) replaces the LLM grade entirely.
       Double dampedScore =
           switch (testCoverageLevel) {
             case "GOOD", "COMPREHENSIVE" -> 70.0; // capped — LLM grade, not measured
             case "PARTIAL" -> 40.0;
+            case "UNKNOWN" -> 50.0;
             case "NONE" -> 10.0;
             default -> null;
           };

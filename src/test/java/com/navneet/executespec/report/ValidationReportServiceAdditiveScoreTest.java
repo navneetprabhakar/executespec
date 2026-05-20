@@ -115,6 +115,15 @@ class ValidationReportServiceAdditiveScoreTest {
     assertEquals(100, score, "Unmeasured tests must not penalize.");
   }
 
+  @Test
+  void testsTotal_zero_with_UNKNOWN_coverage_damps_to_50_not_dropped() {
+    // RL-2026-05-003: UNKNOWN must NOT drop the slot (which would give 100 on a run
+    // with no confirmed tests). It damps to 50:
+    //   30*100 + 25*100 + 20*50 + 20*100 + 5*100 = 3000+2500+1000+2000+500 = 9000/100 = 90
+    int score = svcAdditiveOn().computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, "UNKNOWN", 4);
+    assertEquals(90, score, "UNKNOWN coverage damps the slot; it must not be dropped.");
+  }
+
   // ── REVIEWER ──────────────────────────────────────────────────────────
 
   @Test
