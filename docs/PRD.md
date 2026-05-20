@@ -81,11 +81,11 @@ Two run modes (`pipeline_run.run_mode`, V182): **BUILD** (the diagram above — 
 
 Tiers are configured at runtime via the `tier_config` table ([`TierConfig`](../src/main/java/com/navneet/executespec/auth/entity/TierConfig.java)) and seeded by Flyway migrations. SUPER_ADMIN can edit cell values live through `PUT /api/admin/tier-config/{tier}`. Lifecycle state (`LISTED | HIDDEN | SUNSETTING`) is managed by [`TierLifecycleService`](../src/main/java/com/navneet/executespec/billing/lifecycle/TierLifecycleService.java) with a 14-day observation window between `HIDDEN` and `SUNSETTING`.
 
-The current live ladder (as of V199):
+The current live ladder (as of V202):
 
 ### FREE — "Try ExecuteSpec"
 
-- **Monthly cap:** 5 runs/month (`tier_config.monthly_run_limit=5`, set by V167 reverting V145/V166).
+- **Monthly cap:** 15 runs/month (`tier_config.monthly_run_limit=15`, set by V200 on 2026-05-19 — bumped from 5 so evaluation users have room to form an opinion; reverses V167). The quota is read from `tier_config` keyed by `EntitlementResolver.resolveTier(user)`, not `billing_plan_limit` (the post-V199 quota fix).
 - **Per-run cost ceiling:** $3.00 USD (`max_run_cost_usd=3.00`).
 - **Lifetime run credit balance:** 5 starter credits at signup, cap 25 (`app_user.lifetime_run_credit_balance`, V152). Referral grants top this up (R-161).
 - **Concurrent runs:** 1.
@@ -429,51 +429,44 @@ Set by `RunOrchestrator.resolveTerminalStatus` / `derivedStatusReason` — deriv
 
 ## 8. Verified score
 
-Source of truth: [`ValidationReportService.computeVerifiedScoreMultiplicative`](../src/main/java/com/navneet/executespec/report/ValidationReportService.java). Persisted to `validation_report.verified_score` (V106) and surfaced everywhere a run's headline number is shown.
+Source of truth: [`ValidationReportService.computeVerifiedScore`](../src/main/java/com/navneet/executespec/report/ValidationReportService.java), which dispatches on the `scoring.additive-v2` feature flag (default ON, seeded by V201). Persisted to `validation_report.verified_score` (V106) and surfaced everywhere a run's headline number is shown. The column is set at generate-and-persist time, so a flag flip only affects new runs — existing rows are not recomputed.
 
-### Formula
+### Additive formula (default, since 2026-05-19)
+
+`computeVerifiedScoreAdditive` — a **weighted average over the signals that actually fired**, with CODE_DELIVERED as the primary factor. Unmeasured signals drop out of both numerator and denominator rather than defaulting to a multiplier of 1.0.
+
+| Slot               | Weight | Score                                                                                                                                                   |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODE_DELIVERED`   | 30     | `filesGenerated > 0` ⇒ 100, else 0. **Hard floor:** when `filesGenerated == 0` the headline is 0 regardless of other signals. (`-1` = unknown legacy call ⇒ treated as delivered.) |
+| `BUILD`            | 25     | PASSING ⇒ 100, FAILING ⇒ 0. Skipped when `finalBuildPassed == null` (single-shot / patch-mode runs that don't compile).                                  |
+| `TESTS`            | 20     | Real run data preferred: `passed/total × 100`. When no tests ran, **damped** LLM-judged coverage capped at 70: GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10. Null ⇒ skipped. |
+| `REVIEWER`         | 20     | CLEAN=100, FIXED_ISSUES=85, UNRESOLVED_ISSUES=40, REVIEW_FAILED=10. Null ⇒ skipped.                                                                       |
+| `CRITICALS`        | 5      | `100 − 20 × unfixedCriticalCount`, floored at 0. Always counts.                                                                                           |
 
 ```
-verifiedScore = clamp(0, 100,
-                      100 × buildFactor
-                          × testFactor
-                          × reviewerFactor
-                          × endpointFactor
-                          × criticalDamper)
+verifiedScore = clamp(0, 100, round( Σ(weight × slotScore) / Σ(weight) ))   // over fired slots
+              = 0                                                            // if filesGenerated == 0
+```
+
+Why additive over multiplicative: the multiplicative formula treated every factor as a gate, so one low factor crushed the headline — producing "Failed 50%" banners on runs where the build passed and the reviewer ran clean, just because the AccuracyAssessment LLM graded test coverage PARTIAL. The customer-facing read of those runs was a lie. The additive shape is pinned by `ValidationReportServiceAdditiveScoreTest`.
+
+**`endpointFactor` and the two trust gates are gone.** The reviewer's wiring pass already catches the bug class the endpoint count was meant to catch; double-counting it forced the two factor-floor gates (2026-05-10 endpoint floor PR #95, 2026-05-16 test floor) into the old formula. Dropping the signal drops the gates.
+
+### Legacy multiplicative formula (flag OFF)
+
+`computeVerifiedScoreMultiplicative` survives behind `scoring.additive-v2=false` and is pinned by `ValidationReportServiceVerifiedScoreTest`, so a rollback is a flag flip with no code churn:
+
+```
+verifiedScore = clamp(0, 100, 100 × buildFactor × testFactor × reviewerFactor × endpointFactor × criticalDamper)
 ```
 
 | Factor             | Range     | Computation                                                                                                                                                |
 | ------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `buildFactor`      | 0.0 / 1.0 | `1.0` if `finalBuildPassed == true`, else `0.5` (we still ship a number even on broken build; the reviewer captures the failure).                          |
-| `testFactor`       | 0.3 – 1.0 | `(testsPassed / testsTotal)` if `testsTotal > 0`; otherwise derived from `testCoverageLevel`: COMPREHENSIVE/GOOD=1.0, PARTIAL=0.7, NONE=0.3, default=0.5.   |
+| `buildFactor`      | 0.0 / 1.0 | `1.0` if `finalBuildPassed == true`, else `0.5`.                                                                                                            |
+| `testFactor`       | 0.3 – 1.0 | `(testsPassed / testsTotal)` if `testsTotal > 0`; otherwise from `testCoverageLevel`: COMPREHENSIVE/GOOD=1.0, PARTIAL=0.7, NONE=0.3, default=0.5.           |
 | `reviewerFactor`   | 0.5 – 1.0 | CLEAN=1.0, FIXED_ISSUES=0.95, UNRESOLVED_ISSUES=0.75, REVIEW_FAILED=0.5.                                                                                  |
-| `endpointFactor`   | 0.5 – 1.0 | `endpointCoveragePercent / 100`, floored at 0.5.                                                                                                            |
+| `endpointFactor`   | 0.5 – 1.0 | `endpointCoveragePercent / 100`, floored at 0.5 (+ the two retired trust-gate floors).                                                                      |
 | `criticalDamper`   | 0.4 – 1.0 | `1.0 - 0.1 × unfixedCriticalCount` (clamped to ≥ 0.4). Excludes synthesized `SYNTH-ACC-*` accuracy hallucinations.                                          |
-
-### Trust gates (factor floors)
-
-Two trust gates lift specific factors back to `reviewerFactor` when the reviewer is confident; they prevent the AccuracyAssessment LLM's read-budget-limited counters from dragging down a run that the reviewer says is fine.
-
-**Gate 1 — `endpointFactor` floor** (since 2026-05-10, PR #95):
-
-```
-if (reviewerVerdict in {CLEAN, FIXED_ISSUES}) {
-    endpointFactor = max(endpointFactor, reviewerFactor)
-}
-```
-
-**Gate 2 — `testFactor` floor** (since 2026-05-16):
-
-```
-if (testsTotal == 0
-    && endpointCoveragePercent >= 95
-    && reviewerVerdict in {CLEAN, FIXED_ISSUES}
-    && testCoverageLevel == PARTIAL) {
-    testFactor = max(testFactor, reviewerFactor)
-}
-```
-
-Gate 2 fires only when the spec asked for minimal tests, the AccuracyAssessment endpoint count is high (≥95% coverage), and the reviewer is happy — closing the false-negative class where a run shipped a clean PR but `testCoverageLevel=PARTIAL` was scoring it 70 instead of 95.
 
 ### 4-band thresholds
 
@@ -490,7 +483,7 @@ The frontend buckets runs by score for the All Runs filter tabs in [`AllRunsPage
 
 ### Companion: `rubricScore` (V194 / PR-E)
 
-Additive sibling to the multiplicative score, persisted to `validation_report.rubric_score`. Computed by `ValidationReportService.computeRubricScore`:
+Additive sibling persisted to `validation_report.rubric_score` since V194 — predates the 2026-05-19 rebuild of the headline `verifiedScore` itself into an additive shape. Computed by `ValidationReportService.computeRubricScore`:
 
 ```
 rubricScore = buildPoints (25)
@@ -502,11 +495,11 @@ rubricScore = buildPoints (25)
             = 100 total
 ```
 
-Spec-aware via `rubricTestPointsFromCoverageLevel` when `testsTotal==0` (PR-R, 2026-05-14). The multiplicative `verifiedScore` remains the headline number; `rubricScore` is shown alongside for transparency and is the easier number to explain to a non-technical stakeholder ("you lost 5 of the 20 reviewer points because there were two unresolved minor issues").
+Spec-aware via `rubricTestPointsFromCoverageLevel` when `testsTotal==0` (PR-R, 2026-05-14). Since 2026-05-19 the headline `verifiedScore` is itself additive (see above), so `rubricScore` is now a closely-related companion rather than the only additive view; it is still shown alongside for transparency and is easy to explain to a non-technical stakeholder ("you lost 5 of the 20 reviewer points because there were two unresolved minor issues").
 
 ### Backfill
 
-[`VerifiedScoreBackfillService`](../src/main/java/com/navneet/executespec/report/VerifiedScoreBackfillService.java) — SUPER_ADMIN-triggered idempotent recompute of every row using the corrected formula plus the `SYNTH-ACC-*` filter for hallucinated accuracy issues. Caveat: the backfill currently calls the 6-arg overload (without `testCoverageLevel`), so the 2026-05-16 Gate-2 floor is **not** retroactively applied to historical rows; only Gate-1 (endpoint) fires for them.
+[`VerifiedScoreBackfillService`](../src/main/java/com/navneet/executespec/report/VerifiedScoreBackfillService.java) — SUPER_ADMIN-triggered idempotent recompute of every row, with the `SYNTH-ACC-*` filter for hallucinated accuracy issues. Note: the backfill predates the additive rebuild and calls the legacy overload, so it recomputes against the multiplicative formula; new runs persist the additive score directly at generate time.
 
 ---
 
@@ -563,8 +556,8 @@ What ExecuteSpec explicitly does **not** do today:
 | Score backfill                         | [`report/VerifiedScoreBackfillService.java`](../src/main/java/com/navneet/executespec/report/VerifiedScoreBackfillService.java)                                                                                                            |
 | Sharing (cross-org invites + share links) | V175, V198 migrations; [`auth/sso/SsoConfigController.java`](../src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java); `OrgService.updateExternalSharing`                                                            |
 | Application config (tiers, models)     | [`src/main/resources/application.yml`](../src/main/resources/application.yml) (`model-matrix.*`, `app.tiers.*`)                                                                                                                            |
-| Tier seed migrations                   | V21 (caps + concurrent runs), V27 (apply-suggestion), V29 (preview-starts), V35 (deploy), V42 (auto-retries), V58 (FREE max cost USD), V145 → V167 (FREE = 5 runs flop), V164 (TEAM deploy fix), V165 (drop MAX), V172 (PR/Code Review quotas), V175 (share-link cap), V198 (external sharing flag) |
+| Tier seed migrations                   | V21 (caps + concurrent runs), V27 (apply-suggestion), V29 (preview-starts), V35 (deploy), V42 (auto-retries), V58 (FREE max cost USD), V145 → V167 (FREE = 5 runs flop), V164 (TEAM deploy fix), V165 (drop MAX), V172 (PR/Code Review quotas), V175 (share-link cap), V198 (external sharing flag), V200 (FREE → 15 runs) |
 | Finding patch submitter (4 autofix)    | [`finding/FindingPatchSubmitter.java`](../src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java)                                                                                                                       |
 | Multi-repo PR push                     | [`integration/scm/ScmPushService.java`](../src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)                                                                                                                      |
 
-Head migration: **V199** (org/user tier drift backfill, closes BUG-009).
+Head migration: **V202** (`reviewer.third-pass.enabled` flag seed). V199 (org/user tier drift backfill, closes BUG-009) → V200 (FREE → 15 runs) → V201 (`scoring.additive-v2` flag seed) → V202.

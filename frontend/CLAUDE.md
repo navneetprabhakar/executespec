@@ -16,7 +16,7 @@ The reusable surface that every Signal page builds on. **Net-new this round (202
 - `BrandLogos.tsx` — real multicolour SVG logos for Google, GitHub, Slack, Jira, Confluence, Bitbucket, Stripe, Razorpay.
 - `SpecChat.tsx` — "Build my spec" trigger + assistant chat with Markdown rendering. The launcher is also exposed on ComposePage / ProjectComposePage.
 
-The shared 4-band score palette + multiplicative `verifiedScore` thresholds live in `Primitives.tsx` (Button kinds: `primary | secondary | mint | coral | ghost`). `VerdictPill` thresholds align with `RunCard` / `ScoreRing` / HomePage / AllRunsPage: **≥85 = Shippable**, 70–84 = Needs review, <70 = Failed (since 2026-05-16; previously ResultPage used 90).
+The shared 4-band score palette + `verifiedScore` thresholds live in `Primitives.tsx` (Button kinds: `primary | secondary | mint | coral | ghost`). `VerdictPill` thresholds align with `RunCard` / `ScoreRing` / HomePage / AllRunsPage: **≥85 = Shippable**, 70–84 = Needs review, <70 = Failed (since 2026-05-16; previously ResultPage used 90).
 
 ## Top-level layout
 
@@ -108,7 +108,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 ### Run detail
 
 - `RunDetailTabs` — main run detail with live cost polling (5s while non-terminal) + file auto-refresh + SSE event subscription.
-- `ScoreCard` + `ScoreRing` — multiplicative verifiedScore visualization (4-band colour, 132px hero ring).
+- `ScoreCard` + `ScoreRing` — verifiedScore visualization (4-band colour, 132px hero ring). Backed by the additive scorer (`scoring.additive-v2`) since 2026-05-19. `ResultPage` (2026-05-19 honesty pass) leads with a plain-English verdict sentence built only from the *measured* signals (build / tests / reviewer) plus an explicit "not measured" list, so the headline can't read "Failed 50%" on a run with a passing build + clean reviewer.
 - `VerdictPill` — Shippable / Needs review / Blocked derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
 - `SignalBreakdown` — "Build ✓ · Tests N/M · Reviewer CLEAN · Verified N" chip row on patch-mode runs.
 - `CostProgressBar` — live spend vs budget on Credits panel (green 0-80% / amber 80-100% / red ≥100%, aria-progressbar attributes).

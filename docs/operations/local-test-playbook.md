@@ -85,7 +85,7 @@ docker exec executespec-pg pg_isready -U postgres        # expect: accepting con
 docker exec executespec-redis redis-cli ping             # expect: PONG
 ```
 
-Flyway will run on backend boot. Migration head is `V199`; locations are
+Flyway will run on backend boot. Migration head is `V202`; locations are
 `classpath:db/migration` per `application.yml`
 (`spring.flyway.locations=classpath:db/migration`). The base profile carries
 `baseline-on-migrate=true`, `baseline-version=0`, and
@@ -156,7 +156,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 ```
 
 The JVM binds to `localhost:8080`. First boot will run all Flyway migrations
-through V199, which can take ~30-60s on a cold DB.
+through V202, which can take ~30-60s on a cold DB.
 
 ### Liveness probe
 
@@ -359,7 +359,7 @@ scripts/v2-eval-strict.sh --providers anthropic,openai,gemini
 
 Uses the `s3-medium.txt`, `s4-large.txt`, `s5-integration.txt` specs under
 `scripts/v2-eval-specs/`. Captures both `accuracyScore` (legacy LLM-judged) and
-`verifiedScore` (the deterministic multiplicative score), plus
+`verifiedScore` (the deterministic additive-weighted score, `scoring.additive-v2`), plus
 `reviewerVerdict`, `finalBuildPassed`, `testsPassed/Total`, `statusReason`.
 
 ### Multi-provider regression
