@@ -1038,11 +1038,14 @@ end and only call completeTask if it exits 0.
         // counted the cleanroom's original binary).
       case LOW -> {
         tier = AgentTier.LIGHTWEIGHT;
-        maxIter = 30;
+        // RL-2026-05-004: caps loosened so they're a safety net, not a frequent
+        // PARTIAL-maker. The $ budget cap is the real guard; clock/iter only catch
+        // genuinely stuck runs. 30→40 iter, 15→30 min.
+        maxIter = 40;
         maxTokens = 4096;
         stagnationWarnAfter = 8; // matches WorkerAgent.STAGNATION_WARN_AFTER_N default
         stagnationForceAfter = 12;
-        wallClockSeconds = 15 * 60; // 15 min — small file edit, mostly LLM-call latency
+        wallClockSeconds = 30 * 60;
       }
       case HIGH -> {
         tier = AgentTier.PLANNING;
@@ -1062,7 +1065,9 @@ end and only call completeTask if it exits 0.
         // That's <22% of the 120-iter budget — safe headroom.
         stagnationWarnAfter = 18;
         stagnationForceAfter = 26;
-        wallClockSeconds = 45 * 60; // 45 min
+        // RL-2026-05-004: 45→75 min. Gemini is genuinely slow per turn; a real HIGH
+        // task was being wall-clock-killed mid-work → PARTIAL. $ cap still backstops.
+        wallClockSeconds = 75 * 60;
       }
       default -> {
         tier = AgentTier.WORKHORSE;
@@ -1075,7 +1080,7 @@ end and only call completeTask if it exits 0.
         maxTokens = 8192;
         stagnationWarnAfter = 12;
         stagnationForceAfter = 20;
-        wallClockSeconds = 25 * 60; // 25 min
+        wallClockSeconds = 45 * 60; // RL-2026-05-004: 25→45 min (PARTIAL reduction)
       }
     }
     // Project runs (Launches on an existing cloned codebase) need more
