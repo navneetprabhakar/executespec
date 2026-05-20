@@ -108,7 +108,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 ### Run detail
 
 - `RunDetailTabs` — main run detail with live cost polling (5s while non-terminal) + file auto-refresh + SSE event subscription.
-- `ScoreCard` + `ScoreRing` — verifiedScore visualization (4-band colour, 132px hero ring). Backed by the additive scorer (`scoring.additive-v2`) since 2026-05-19. `ResultPage` (2026-05-19 honesty pass) leads with a plain-English verdict sentence built only from the *measured* signals (build / tests / reviewer) plus an explicit "not measured" list, so the headline can't read "Failed 50%" on a run with a passing build + clean reviewer.
+- `ScoreCard` + `ScoreRing` — verifiedScore visualization (4-band colour, 132px hero ring). Backed by the additive scorer (`scoring.additive-v2`) since 2026-05-19. `ResultPage` (2026-05-19 honesty pass) leads with a plain-English verdict sentence built only from the _measured_ signals (build / tests / reviewer) plus an explicit "not measured" list, so the headline can't read "Failed 50%" on a run with a passing build + clean reviewer.
 - `VerdictPill` — Shippable / Needs review / Blocked derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
 - `SignalBreakdown` — "Build ✓ · Tests N/M · Reviewer CLEAN · Verified N" chip row on patch-mode runs.
 - `CostProgressBar` — live spend vs budget on Credits panel (green 0-80% / amber 80-100% / red ≥100%, aria-progressbar attributes).

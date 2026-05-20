@@ -111,8 +111,7 @@ public final class PlanningCases {
       String name, String spec, int minTasks, int maxTasks, String description) {
     String body = loadPrompt("prompts/outline-planner.md");
     String userPrompt = "Spec:\n\n" + spec + "\n\nProduce the plan now.";
-    List<Message> messages =
-        List.of(new SystemMessage(body), new UserMessage(userPrompt));
+    List<Message> messages = List.of(new SystemMessage(body), new UserMessage(userPrompt));
     ToolCallback submitOutline = buildSubmitOutlineShim();
     return new TierEvalCase() {
       @Override
@@ -183,8 +182,7 @@ public final class PlanningCases {
           } else {
             // Partial credit: out of band but plausible (within 50%).
             score += 10;
-            notes.add(
-                "tasks=" + count + " (out of band " + minTasks + "-" + maxTasks + ")");
+            notes.add("tasks=" + count + " (out of band " + minTasks + "-" + maxTasks + ")");
           }
           boolean allHaveIdTitle = true;
           boolean anyMeetsReq = false;
@@ -223,7 +221,8 @@ public final class PlanningCases {
         DefaultToolDefinition.builder()
             .name("submitOutline")
             .description(
-                "Submit the final outline-mode execution plan. Call exactly once with the complete plan.")
+                "Submit the final outline-mode execution plan. Call exactly once with the complete"
+                    + " plan.")
             .inputSchema(
                 """
 {

@@ -19,9 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Tier-eval v2 admin endpoint. Production-shaped per-tier evaluation that exercises the same
- * prompts + tool schemas the live agents use. Distinct from {@code /api/admin/eval/run} (the
- * legacy text-quality benchmark) — keep both, pick whichever question matches what you're
- * answering.
+ * prompts + tool schemas the live agents use. Distinct from {@code /api/admin/eval/run} (the legacy
+ * text-quality benchmark) — keep both, pick whichever question matches what you're answering.
  */
 @Slf4j
 @RestController
@@ -36,8 +35,7 @@ public class TierEvalController {
    *
    * @param tiers comma-separated subset of {@code LIGHTWEIGHT,PLANNING} (case-insensitive). Omit
    *     for both.
-   * @param providers comma-separated subset of {@code anthropic,openai,gemini}. Omit for all
-   *     three.
+   * @param providers comma-separated subset of {@code anthropic,openai,gemini}. Omit for all three.
    */
   @PostMapping("/run")
   public ResponseEntity<?> run(
@@ -46,12 +44,16 @@ public class TierEvalController {
     List<String> tierList =
         (tiers == null || tiers.isBlank())
             ? List.of("LIGHTWEIGHT", "PLANNING", "WORKHORSE")
-            : java.util.Arrays.stream(tiers.split(",")).map(String::trim).map(String::toUpperCase)
+            : java.util.Arrays.stream(tiers.split(","))
+                .map(String::trim)
+                .map(String::toUpperCase)
                 .toList();
     List<String> providerList =
         (providers == null || providers.isBlank())
             ? List.of("anthropic", "openai", "gemini")
-            : java.util.Arrays.stream(providers.split(",")).map(String::trim).map(String::toLowerCase)
+            : java.util.Arrays.stream(providers.split(","))
+                .map(String::trim)
+                .map(String::toLowerCase)
                 .toList();
 
     List<TierEvalCase> singleShot = new ArrayList<>();
