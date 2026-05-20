@@ -25,8 +25,6 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.springframework.core.io.ClassPathResource;
-
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
@@ -368,7 +366,11 @@ public class TierEvalRunner {
     String model = resolved.getModel();
     String resolvedProvider = resolved.getActualProvider().name().toLowerCase();
     ExecutionContext ctx = new ExecutionContext(runId, testCase.name(), workspace);
-    String workerPrompt = loadClasspath("prompts/worker.txt");
+    // Use the EXACT production worker system prompt (native tool calling), not the legacy
+    // XML-style prompts/worker.txt — otherwise the worker is told to emit <tool_call> tags while
+    // the router does native tool calling, and the loop never makes real tool calls.
+    String workerPrompt =
+        com.navneet.executespec.harness.SequentialExecutor.workerSystemPromptBase();
 
     long start = System.currentTimeMillis();
     try {
@@ -436,14 +438,6 @@ public class TierEvalRunner {
           });
     } catch (Exception ignored) {
       // best-effort
-    }
-  }
-
-  private static String loadClasspath(String path) {
-    try {
-      return new ClassPathResource(path).getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      throw new IllegalStateException("classpath resource missing: " + path, e);
     }
   }
 
