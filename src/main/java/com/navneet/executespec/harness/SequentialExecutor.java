@@ -99,6 +99,19 @@ tool — attempts to call it return FORBIDDEN. Do not run shell commands that
 mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
 `git push`). Edit files; call completeTask. That's it.
 
+TESTS ARE PART OF THE TASK — NOT OPTIONAL.
+If your task adds or changes a function, endpoint, route, or module, you MUST
+also create or extend a test that exercises it before calling completeTask:
+  - At least one happy-path test per public function / endpoint you touched.
+  - At least one error / edge-case test (invalid input, not-found, failure path)
+    where the spec or the code has an obvious failure mode.
+  - Put tests in the project's conventional location + framework (pytest
+    `test_*.py`, Jest `*.test.ts` / `__tests__/`, Go `*_test.go`, JUnit
+    `src/test/java/...`). If no test scaffold exists, create the minimal one.
+Untested code is an INCOMPLETE task. Do not call completeTask on a code change
+with zero tests unless the task is genuinely untestable (pure static asset, a
+one-line config) — and if so, say why in your completeTask summary.
+
 Efficiency — BATCH AGGRESSIVELY. Every extra turn costs tokens and latency:
 - Emit ALL independent tool calls in ONE turn (reads, writes, edits, builds).
 - If you just wrote a file, DO NOT re-read it to verify — trust writeFile's
