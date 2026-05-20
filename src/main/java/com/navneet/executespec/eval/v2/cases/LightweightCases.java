@@ -18,14 +18,15 @@ import org.springframework.core.io.ClassPathResource;
 /**
  * Production-shaped LIGHTWEIGHT-tier eval cases.
  *
- * <p>Mirrors {@link com.navneet.executespec.agent.SmartClassifierAgent}'s invocation shape: synthetic
- * "JSON-only spec classifier" system message + the verbatim classpath {@code classifier.md} body
- * with the production variables substituted. No tools — the classifier emits raw JSON.
+ * <p>Mirrors {@link com.navneet.executespec.agent.SmartClassifierAgent}'s invocation shape:
+ * synthetic "JSON-only spec classifier" system message + the verbatim classpath {@code
+ * classifier.md} body with the production variables substituted. No tools — the classifier emits
+ * raw JSON.
  *
- * <p>Three cases cover the three production input bands the classifier actually has to
- * discriminate between: a SINGLE_SHOT spec, a MEDIUM REST + auth + DB spec, and a LEGACY
- * cross-cutting migration spec. Each carries the EXPECTED strategy in its name + validator so
- * we can score whether the model classified correctly.
+ * <p>Three cases cover the three production input bands the classifier actually has to discriminate
+ * between: a SINGLE_SHOT spec, a MEDIUM REST + auth + DB spec, and a LEGACY cross-cutting migration
+ * spec. Each carries the EXPECTED strategy in its name + validator so we can score whether the
+ * model classified correctly.
  */
 public final class LightweightCases {
 
@@ -38,8 +39,10 @@ public final class LightweightCases {
   }
 
   private static TierEvalCase singleShotCase() {
-    String spec = "Add a /healthz endpoint to the existing Spring Boot service that returns {\"ok\": true}.";
-    return classifierCase("lightweight-classify-single-shot", spec, "SINGLE_SHOT", "single-feature");
+    String spec =
+        "Add a /healthz endpoint to the existing Spring Boot service that returns {\"ok\": true}.";
+    return classifierCase(
+        "lightweight-classify-single-shot", spec, "SINGLE_SHOT", "single-feature");
   }
 
   private static TierEvalCase mediumCase() {
@@ -60,13 +63,13 @@ public final class LightweightCases {
   private static TierEvalCase legacyCase() {
     String spec =
         """
-        Migrate our payments stack from synchronous Stripe charges to an event-driven model using AWS SQS.
-        Every checkout, refund, and webhook handler across the api, admin, and web repos must switch from
-        direct Stripe API calls to a producer-consumer pattern: producers enqueue a job into payments-queue,
-        a worker consumes it, idempotency keys carry through end-to-end, the dashboard shows live job state,
-        and we keep PCI-DSS scope unchanged. Backfill the last 30 days of charges into the new event store
-        so historical reports keep working. Update SDKs in 3 backend services + 1 mobile app.
-        """;
+Migrate our payments stack from synchronous Stripe charges to an event-driven model using AWS SQS.
+Every checkout, refund, and webhook handler across the api, admin, and web repos must switch from
+direct Stripe API calls to a producer-consumer pattern: producers enqueue a job into payments-queue,
+a worker consumes it, idempotency keys carry through end-to-end, the dashboard shows live job state,
+and we keep PCI-DSS scope unchanged. Backfill the last 30 days of charges into the new event store
+so historical reports keep working. Update SDKs in 3 backend services + 1 mobile app.
+""";
     return classifierCase("lightweight-classify-legacy", spec, "LEGACY", "cross-cutting migration");
   }
 
@@ -76,7 +79,8 @@ public final class LightweightCases {
     List<Message> messages =
         List.of(
             new SystemMessage(
-                "You are a JSON-only spec classifier. Respond with one JSON object and nothing else."),
+                "You are a JSON-only spec classifier. Respond with one JSON object and nothing"
+                    + " else."),
             new UserMessage(classifierBody));
     return new TierEvalCase() {
       @Override
@@ -125,20 +129,20 @@ public final class LightweightCases {
           return new ValidationVerdict(20, "missing strategy field");
         }
         String strategy = node.get("strategy").asText();
-        List<String> validValues =
-            List.of("SINGLE_SHOT", "SMALL", "MEDIUM", "LARGE", "LEGACY");
+        List<String> validValues = List.of("SINGLE_SHOT", "SMALL", "MEDIUM", "LARGE", "LEGACY");
         if (!validValues.contains(strategy)) {
           return new ValidationVerdict(
               40, "strategy not in enum: '" + strategy + "' (" + description + ")");
         }
         // Correctness band: exact match = 100, neighbor band = 70, far = 40.
         int distance = distanceBetween(strategy, expectedStrategy, validValues);
-        int correctness = switch (distance) {
-          case 0 -> 100;
-          case 1 -> 70;
-          case 2 -> 50;
-          default -> 30;
-        };
+        int correctness =
+            switch (distance) {
+              case 0 -> 100;
+              case 1 -> 70;
+              case 2 -> 50;
+              default -> 30;
+            };
         return new ValidationVerdict(
             correctness, "classified " + strategy + " (expected " + expectedStrategy + ")");
       }
@@ -148,13 +152,13 @@ public final class LightweightCases {
   private static String loadClassifierPrompt(String spec) {
     String body;
     try {
-      body = new ClassPathResource("prompts/classifier.md").getContentAsString(StandardCharsets.UTF_8);
+      body =
+          new ClassPathResource("prompts/classifier.md").getContentAsString(StandardCharsets.UTF_8);
     } catch (IOException e) {
       throw new IllegalStateException("classifier.md missing from classpath", e);
     }
     // Substitute the same variables the production PromptAssembler would.
-    return body
-        .replace("{{HEURISTIC_VERDICT}}", "SMALL")
+    return body.replace("{{HEURISTIC_VERDICT}}", "SMALL")
         .replace("{{REPO_COUNT}}", "1")
         .replace("{{REPO_NAMES}}", "(none)")
         .replace("{{PROJECT_TYPE}}", "unknown")

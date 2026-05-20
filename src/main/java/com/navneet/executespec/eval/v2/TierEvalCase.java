@@ -11,12 +11,12 @@ import org.springframework.ai.tool.ToolCallback;
  * One production-shaped tier-eval test case.
  *
  * <p>Each case mirrors a real production agent invocation exactly: same system prompt, same tool
- * schema, same user message shape. The {@link TierEvalRunner} feeds {@link #messages()} and
- * {@link #tools()} into {@link com.navneet.executespec.agent.LlmRouter} and then asks the case to
- * validate the response with {@link #validate}.
+ * schema, same user message shape. The {@link TierEvalRunner} feeds {@link #messages()} and {@link
+ * #tools()} into {@link com.navneet.executespec.agent.LlmRouter} and then asks the case to validate
+ * the response with {@link #validate}.
  *
- * <p>Splitting "what to send" from "how to grade" lets one runner serve every tier — the runner
- * is generic, the case carries the production-specific shape.
+ * <p>Splitting "what to send" from "how to grade" lets one runner serve every tier — the runner is
+ * generic, the case carries the production-specific shape.
  */
 public interface TierEvalCase {
 
@@ -29,9 +29,9 @@ public interface TierEvalCase {
 
   /**
    * Tool callbacks the model may call. Either real production callbacks (in which case the model
-   * can dispatch them) or shim callbacks (router returns the tool-call args without executing).
-   * For single-shot eval cases, shim callbacks are sufficient — we're only measuring whether the
-   * model produced a well-formed tool call.
+   * can dispatch them) or shim callbacks (router returns the tool-call args without executing). For
+   * single-shot eval cases, shim callbacks are sufficient — we're only measuring whether the model
+   * produced a well-formed tool call.
    */
   List<ToolCallback> tools();
 

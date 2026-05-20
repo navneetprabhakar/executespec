@@ -9,10 +9,10 @@ import com.navneet.executespec.agent.WorkerResult;
  * a workhorse case drives the real multi-turn {@link com.navneet.executespec.agent.WorkerAgent}
  * loop against a seeded scratch workspace and grades the resulting file-system state.
  *
- * <p>This is the closest the eval gets to production: same worker prompt, same tool set
- * (readFile / writeFile / editFile / listFiles / completeTask bound through the real
- * ToolRegistry), same completion semantics. The grade looks at what actually landed on disk plus
- * the worker's terminal {@link WorkerResult.Outcome}.
+ * <p>This is the closest the eval gets to production: same worker prompt, same tool set (readFile /
+ * writeFile / editFile / listFiles / completeTask bound through the real ToolRegistry), same
+ * completion semantics. The grade looks at what actually landed on disk plus the worker's terminal
+ * {@link WorkerResult.Outcome}.
  */
 public interface WorkhorseEvalCase {
 
@@ -22,8 +22,8 @@ public interface WorkhorseEvalCase {
   String taskPrompt();
 
   /**
-   * Seed the scratch workspace with the starting files for this case. Called once before the
-   * worker runs, with an empty freshly-created directory.
+   * Seed the scratch workspace with the starting files for this case. Called once before the worker
+   * runs, with an empty freshly-created directory.
    */
   void seedWorkspace(Path workspaceDir) throws Exception;
 

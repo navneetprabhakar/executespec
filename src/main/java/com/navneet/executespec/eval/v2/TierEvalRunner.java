@@ -67,7 +67,8 @@ public class TierEvalRunner {
     String runId = "eval-v2-" + UUID.randomUUID();
     String taskId = testCase.name();
     ExecutionContext ctx =
-        new ExecutionContext(runId, taskId, java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")));
+        new ExecutionContext(
+            runId, taskId, java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")));
     LlmProvider providerEnum;
     try {
       providerEnum = LlmProvider.valueOf(provider.toUpperCase());
@@ -124,8 +125,16 @@ public class TierEvalRunner {
       return grade(testCase, resolvedProvider, model, resp, elapsed, runId);
     } catch (TimeoutException e) {
       long elapsed = System.currentTimeMillis() - start;
-      log.warn("tier-eval-v2 timeout case={} provider={} elapsed={}ms", testCase.name(), provider, elapsed);
-      return failureResult(testCase, resolvedProvider(provider), model, TierEvalFailureMode.TIMEOUT,
+      log.warn(
+          "tier-eval-v2 timeout case={} provider={} elapsed={}ms",
+          testCase.name(),
+          provider,
+          elapsed);
+      return failureResult(
+          testCase,
+          resolvedProvider(provider),
+          model,
+          TierEvalFailureMode.TIMEOUT,
           "exceeded " + PER_CALL_TIMEOUT_SECONDS + "s");
     } catch (Exception e) {
       log.warn(
@@ -147,7 +156,12 @@ public class TierEvalRunner {
   }
 
   private TierEvalResult grade(
-      TierEvalCase testCase, String provider, String model, ChatResponse resp, long elapsedMs, String runId) {
+      TierEvalCase testCase,
+      String provider,
+      String model,
+      ChatResponse resp,
+      long elapsedMs,
+      String runId) {
     // Scan ALL generations, not just resp.getResult() (the first). Anthropic via Spring AI can
     // split a response into multiple generations (e.g. a thinking block + a tool_use block); the
     // tool call may live in a generation other than the first, so reading only getResult() misses
@@ -202,22 +216,34 @@ public class TierEvalRunner {
         // returned instead so we can tell text-plan from integration failure.
         String snippet =
             assistantText == null ? "(null assistant text)" : truncate(assistantText.strip(), 220);
-        return baseBuilder(testCase, provider, model, elapsedMs, inputTokens, outputTokens,
-            cacheReadTokens, cost)
+        return baseBuilder(
+                testCase,
+                provider,
+                model,
+                elapsedMs,
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cost)
             .toolCallsAttempted(toolCallCount)
             .toolCallsMalformed(toolCallMalformed)
             .firstToolCallName(null)
             .correctnessScore(0)
             .failureMode(TierEvalFailureMode.WRONG_TOOL)
-            .detail(
-                "no tool call (expected " + testCase.expectedToolName() + "). text="
-                    + snippet)
+            .detail("no tool call (expected " + testCase.expectedToolName() + "). text=" + snippet)
             .build();
       }
       String expected = testCase.expectedToolName();
       if (expected != null && !expected.equals(firstToolName)) {
-        return baseBuilder(testCase, provider, model, elapsedMs, inputTokens, outputTokens,
-            cacheReadTokens, cost)
+        return baseBuilder(
+                testCase,
+                provider,
+                model,
+                elapsedMs,
+                inputTokens,
+                outputTokens,
+                cacheReadTokens,
+                cost)
             .toolCallsAttempted(toolCallCount)
             .toolCallsMalformed(toolCallMalformed)
             .firstToolCallName(firstToolName)
@@ -230,8 +256,15 @@ public class TierEvalRunner {
         try {
           objectMapper.readTree(firstToolArgs);
         } catch (Exception e) {
-          return baseBuilder(testCase, provider, model, elapsedMs, inputTokens, outputTokens,
-              cacheReadTokens, cost)
+          return baseBuilder(
+                  testCase,
+                  provider,
+                  model,
+                  elapsedMs,
+                  inputTokens,
+                  outputTokens,
+                  cacheReadTokens,
+                  cost)
               .toolCallsAttempted(toolCallCount)
               .toolCallsMalformed(toolCallMalformed)
               .firstToolCallName(firstToolName)
@@ -250,8 +283,8 @@ public class TierEvalRunner {
       verdict = new TierEvalCase.ValidationVerdict(0, "validator threw: " + e.getMessage());
     }
 
-    return baseBuilder(testCase, provider, model, elapsedMs, inputTokens, outputTokens,
-        cacheReadTokens, cost)
+    return baseBuilder(
+            testCase, provider, model, elapsedMs, inputTokens, outputTokens, cacheReadTokens, cost)
         .toolCallsAttempted(toolCallCount)
         .toolCallsMalformed(toolCallMalformed)
         .firstToolCallName(firstToolName)
@@ -283,7 +316,11 @@ public class TierEvalRunner {
   }
 
   private TierEvalResult failureResult(
-      TierEvalCase testCase, String provider, String model, TierEvalFailureMode mode, String detail) {
+      TierEvalCase testCase,
+      String provider,
+      String model,
+      TierEvalFailureMode mode,
+      String detail) {
     return failureResult(testCase.name(), testCase.tier(), provider, model, mode, detail);
   }
 
@@ -333,8 +370,8 @@ public class TierEvalRunner {
 
   /**
    * Drive the real {@link WorkerAgent} multi-turn loop for one workhorse case against one provider.
-   * Seeds a scratch workspace under the temp dir, runs the worker with the production worker prompt,
-   * grades the resulting files, then cleans up. Never throws.
+   * Seeds a scratch workspace under the temp dir, runs the worker with the production worker
+   * prompt, grades the resulting files, then cleans up. Never throws.
    */
   public TierEvalResult runWorkhorse(WorkhorseEvalCase testCase, String provider) {
     String runId = "eval-v2-wh-" + UUID.randomUUID();
@@ -344,24 +381,38 @@ public class TierEvalRunner {
       testCase.seedWorkspace(workspace);
     } catch (Exception e) {
       return failureResult(
-          testCase.name(), AgentTier.WORKHORSE, provider, "?",
-          TierEvalFailureMode.RUNTIME_ERROR, "workspace seed failed: " + e.getMessage());
+          testCase.name(),
+          AgentTier.WORKHORSE,
+          provider,
+          "?",
+          TierEvalFailureMode.RUNTIME_ERROR,
+          "workspace seed failed: " + e.getMessage());
     }
     LlmProvider providerEnum;
     try {
       providerEnum = LlmProvider.valueOf(provider.toUpperCase());
     } catch (IllegalArgumentException e) {
       cleanup(workspace);
-      return failureResult(testCase.name(), AgentTier.WORKHORSE, provider, "?",
-          TierEvalFailureMode.RUNTIME_ERROR, "unknown provider: " + provider);
+      return failureResult(
+          testCase.name(),
+          AgentTier.WORKHORSE,
+          provider,
+          "?",
+          TierEvalFailureMode.RUNTIME_ERROR,
+          "unknown provider: " + provider);
     }
     ResolvedModel resolved;
     try {
       resolved = modelResolver.resolve("WorkerAgent", providerEnum, AgentTier.WORKHORSE);
     } catch (Exception e) {
       cleanup(workspace);
-      return failureResult(testCase.name(), AgentTier.WORKHORSE, provider, "?",
-          TierEvalFailureMode.RUNTIME_ERROR, "model resolve failed: " + e.getMessage());
+      return failureResult(
+          testCase.name(),
+          AgentTier.WORKHORSE,
+          provider,
+          "?",
+          TierEvalFailureMode.RUNTIME_ERROR,
+          "model resolve failed: " + e.getMessage());
     }
     String model = resolved.getModel();
     String resolvedProvider = resolved.getActualProvider().name().toLowerCase();
@@ -412,14 +463,29 @@ public class TierEvalRunner {
           .iterationsUsed(wr.iterations())
           .correctnessScore(v.correctness())
           .failureMode(ok ? TierEvalFailureMode.OK : TierEvalFailureMode.RUNTIME_ERROR)
-          .detail(v.detail() + " [" + wr.iterations() + " iters, " + wr.toolCallsDispatched()
-              + " tool calls, outcome=" + wr.outcome() + "]")
+          .detail(
+              v.detail()
+                  + " ["
+                  + wr.iterations()
+                  + " iters, "
+                  + wr.toolCallsDispatched()
+                  + " tool calls, outcome="
+                  + wr.outcome()
+                  + "]")
           .build();
     } catch (Exception e) {
-      log.warn("tier-eval-v2 workhorse error case={} provider={}: {}", testCase.name(), provider,
+      log.warn(
+          "tier-eval-v2 workhorse error case={} provider={}: {}",
+          testCase.name(),
+          provider,
           e.getMessage());
-      return failureResult(testCase.name(), AgentTier.WORKHORSE, resolvedProvider, model,
-          TierEvalFailureMode.RUNTIME_ERROR, truncate(e.getMessage(), 200));
+      return failureResult(
+          testCase.name(),
+          AgentTier.WORKHORSE,
+          resolvedProvider,
+          model,
+          TierEvalFailureMode.RUNTIME_ERROR,
+          truncate(e.getMessage(), 200));
     } finally {
       cleanup(workspace);
     }
@@ -429,13 +495,14 @@ public class TierEvalRunner {
     if (dir == null) return;
     try (var walk = Files.walk(dir)) {
       walk.sorted(java.util.Comparator.reverseOrder())
-          .forEach(p -> {
-            try {
-              Files.deleteIfExists(p);
-            } catch (Exception ignored) {
-              // best-effort
-            }
-          });
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                  // best-effort
+                }
+              });
     } catch (Exception ignored) {
       // best-effort
     }
@@ -452,7 +519,11 @@ public class TierEvalRunner {
         results.add(r);
         log.info(
             "tier-eval-v2 workhorse done case={} provider={} score={} iters={} mode={}",
-            c.name(), p, r.correctnessScore(), r.iterationsUsed(), r.failureMode());
+            c.name(),
+            p,
+            r.correctnessScore(),
+            r.iterationsUsed(),
+            r.failureMode());
       }
     }
     return results;
@@ -472,7 +543,8 @@ public class TierEvalRunner {
         TierEvalResult r = run(c, p);
         results.add(r);
         log.info(
-            "tier-eval-v2 done case={} provider={} model={} correctness={} mode={} latency={}ms cost=${}",
+            "tier-eval-v2 done case={} provider={} model={} correctness={} mode={} latency={}ms"
+                + " cost=${}",
             c.name(),
             p,
             r.model(),

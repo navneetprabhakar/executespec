@@ -9,9 +9,9 @@ import lombok.Builder;
  * validity, cache hit rate, latency, and cost — not just text content matches.
  *
  * <p>{@link #correctnessScore} is 0–100 from the case's validator. 100 means "the model produced
- * the expected output for this case." {@link #failureMode} captures runtime failures that
- * prevented the validator from running at all; in that case correctnessScore is 0 and the
- * detail string carries the error.
+ * the expected output for this case." {@link #failureMode} captures runtime failures that prevented
+ * the validator from running at all; in that case correctnessScore is 0 and the detail string
+ * carries the error.
  *
  * <p>Cache stats: {@link #cacheReadTokens} is the count of input tokens that hit the provider's
  * prompt cache (Anthropic cache_read_input_tokens, Gemini cachedContentTokenCount, OpenAI

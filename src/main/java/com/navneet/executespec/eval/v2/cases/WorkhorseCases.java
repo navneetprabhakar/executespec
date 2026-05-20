@@ -10,9 +10,9 @@ import com.navneet.executespec.eval.v2.TierEvalCase.ValidationVerdict;
 import com.navneet.executespec.eval.v2.WorkhorseEvalCase;
 
 /**
- * Production-shaped WORKHORSE-tier agentic eval cases. Each drives the real
- * {@link com.navneet.executespec.agent.WorkerAgent} multi-turn loop against a seeded scratch
- * workspace and grades the file-system result.
+ * Production-shaped WORKHORSE-tier agentic eval cases. Each drives the real {@link
+ * com.navneet.executespec.agent.WorkerAgent} multi-turn loop against a seeded scratch workspace and
+ * grades the file-system result.
  *
  * <p>Three cases span the worker's bread-and-butter:
  *
@@ -51,9 +51,7 @@ public final class WorkhorseCases {
       @Override
       public void seedWorkspace(Path dir) throws Exception {
         Files.writeString(
-            dir.resolve("calc.py"),
-            "def add(a, b):\n    return a + b\n",
-            StandardCharsets.UTF_8);
+            dir.resolve("calc.py"), "def add(a, b):\n    return a + b\n", StandardCharsets.UTF_8);
       }
 
       @Override
@@ -157,10 +155,10 @@ public final class WorkhorseCases {
 
       @Override
       public String taskPrompt() {
-        return "The function is_even(n) in numbers.py is buggy — it returns the wrong answer. "
-            + "There is a test test_numbers.py that asserts is_even(4) is True and is_even(3) is "
-            + "False. Read the code, find the bug, and fix is_even so the test would pass. Keep the "
-            + "function signature. Then call completeTask.";
+        return "The function is_even(n) in numbers.py is buggy — it returns the wrong answer. There"
+            + " is a test test_numbers.py that asserts is_even(4) is True and is_even(3) is"
+            + " False. Read the code, find the bug, and fix is_even so the test would pass."
+            + " Keep the function signature. Then call completeTask.";
       }
 
       @Override
