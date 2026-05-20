@@ -183,7 +183,10 @@ public final class WorkhorseCases {
         String content = readOrEmpty(dir.resolve("numbers.py")).replaceAll("\\s", "");
         int score = 0;
         java.util.List<String> notes = new java.util.ArrayList<>();
-        if (content.contains("def is_even(n)")) {
+        // content is whitespace-stripped, so the signature check must be stripped too
+        // ("def is_even(n)" with spaces can never match stripped content — that was a
+        // validator bug that under-scored every correct fix by 20 pts).
+        if (content.contains("defis_even(n)")) {
           score += 20;
         } else {
           notes.add("signature changed");

@@ -64,6 +64,15 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SequentialExecutor {
 
+  /**
+   * Accessor for the worker base system prompt so the tier-eval-v2 WORKHORSE cases can drive the
+   * worker loop with the EXACT production prompt (native tool calling) instead of the legacy
+   * XML-style {@code prompts/worker.txt}. Read-only; the eval never mutates it.
+   */
+  public static String workerSystemPromptBase() {
+    return SYSTEM_PROMPT_BASE;
+  }
+
   /** System prompt template for worker invocations. */
   private static final String SYSTEM_PROMPT_BASE =
       """
