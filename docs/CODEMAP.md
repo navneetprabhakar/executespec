@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V199**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
+Migration head: **V202**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
 
 ---
 
@@ -36,7 +36,7 @@ Migration head: **V199**. Frontend chrome: **Signal** (production), under `front
 | `credit` | - | 1 | - | - | LifetimeCreditService — R-161 5+5 referral lifetime credits |
 | `crypto` | - | 3 | - | - | EncryptedValueConverter + KeyMigrationRunner + crypto props |
 | `deployment` | 2 | 13 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS |
-| `eval` | 1 | 5 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) |
+| `eval` | 2 | 16 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) + `eval/v2/` tier-eval-v2 (production-shaped per-tier × provider eval driving live agent prompts) |
 | `execution` | 3 | 11 | - | - | V3 ExecutionRun "Launches" (multi-solution, multi-repo orchestration) |
 | `export` | 1 | 1 | - | - | Project-level ZIP export of `.executespec/` artefacts |
 | `finding` | - | 1 | - | - | FindingPatchSubmitter chokepoint — 4 autofix surfaces |
@@ -202,7 +202,8 @@ Migration head: **V199**. Frontend chrome: **Signal** (production), under `front
 | --- | --- | --- |
 | `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
-| `eval/EvalController` | `/api/admin/eval` | Model evaluation runs |
+| `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |
+| `eval/v2/TierEvalController` | `/api/admin/eval/v2` | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params) |
 
 ### Repo / deployment / preview
 
@@ -464,9 +465,9 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 ---
 
-## 6. Flyway migrations — last 30 (V170..V199)
+## 6. Flyway migrations — last 33 (V170..V202)
 
-Head: **V199**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V202**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -500,6 +501,9 @@ Head: **V199**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V197 | `run_rubric_row` (Scoring Revamp Phase A — planner-emitted rubric rows) |
 | V198 | `org.external_sharing_enabled` BOOLEAN (V175 invite gate; default false) |
 | V199 | One-time backfill — resolve `org.tier` vs `app_user.tier` / `billing_subscription` drift (BUG-009) |
+| V200 | Bump FREE tier 5 → 15 runs/month (reverses V167) across `tier_config` / `billing_plan` / `billing_plan_limit` |
+| V201 | Seed `scoring.additive-v2` PLATFORM flag (default true) — additive verifiedScore rebuild |
+| V202 | Seed `reviewer.third-pass.enabled` GLOBAL flag (default true) — fix-the-red-build reviewer pass |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -658,8 +662,10 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
 | `harness.v2.batch_enabled` | (cfg) | V2 batch-mode execution |
 | `lint.autofix.enabled` | true (V180) | Phase L1 deterministic auto-formatter pass between executor and reviewer |
+| `reviewer.third-pass.enabled` | **true** (V202) | Fix-the-red-build reviewer third pass (25-iter, 360s) when final build red after general+wiring |
 | `routing.adaptive-routing.enabled` | (cfg) | Adaptive provider selection |
-| `scoring.v2-verified` | (cfg) | Multiplicative verifiedScore (vs legacy accuracyScore fallback) |
+| `scoring.additive-v2` | **true** (V201) | Additive verifiedScore (CODE_DELIVERED+BUILD+TESTS+REVIEWER+CRITICALS); off ⇒ legacy multiplicative |
+| `scoring.v2-verified` | (cfg) | Enables verifiedScore (vs legacy accuracyScore fallback) |
 | `security.guardrail_level` | MEDIUM | LOW / MEDIUM / HIGH guardrail policy |
 | `v2.pause.enabled` | **false** (V168) | V2 run pause/resume |
 | `v3.anonymous-trial.real-dispatch` | false | R-111 real LLM dispatch for anonymous trial (vs stub) |
@@ -712,6 +718,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V199) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V202) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
