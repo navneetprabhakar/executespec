@@ -16,14 +16,13 @@
 -- generate-and-persist time, so a flag flip only affects new runs.
 -- =====================================================================
 
-INSERT INTO feature_flag (flag_key, flag_value, flag_type, scope, description, created_at, updated_at)
+INSERT INTO feature_flag (flag_key, flag_value, value_type, scope, description, updated_at)
 VALUES (
     'scoring.additive-v2',
     'true',
     'BOOLEAN',
     'PLATFORM',
     'Additive verifiedScore: CODE_DELIVERED+BUILD+TESTS+REVIEWER+CRITICALS, weighted-avg over measured signals. Replaces the 2026-05-08 multiplicative cliff.',
-    NOW(),
     NOW()
 )
 ON CONFLICT (flag_key) DO UPDATE
