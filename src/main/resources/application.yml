@@ -160,7 +160,7 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     gemini:
-      planning: gemini-3-pro-preview
+      planning: gemini-3.1-pro-preview
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
@@ -235,6 +235,17 @@ model-matrix:
         cached-input-per-1m: 0.875
         output-per-1m: 21.00
       notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
+    "[gemini-3.1-pro-preview]":
+      provider: gemini
+      chain-tier: ARCHITECT
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.1 Pro Preview"
+      pricing:
+        input-per-1m: 2.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 12.00
+      notes: "Gemini 3.1 Pro Preview — flagship; Google PLANNING tier. List pricing is tiered ($4/$18 per 1M above 200k input); base-tier rates here. Cached at 25% of input per the matrix's Gemini convention."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -265,17 +276,16 @@ model-matrix:
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
     gemini-3-flash: gemini-3-flash-preview
-    gemini-3.1-pro-preview: gemini-3-flash-preview
 
   fallback-chains:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-pro-preview }
+      - { provider: gemini, model: gemini-3.1-pro-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-pro-preview }
+      - { provider: gemini, model: gemini-3.1-pro-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
       - { provider: gemini, model: gemini-3-flash-preview }
