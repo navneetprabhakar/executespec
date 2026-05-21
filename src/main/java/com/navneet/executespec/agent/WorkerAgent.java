@@ -239,23 +239,30 @@ public class WorkerAgent {
     int toolsDispatched = 0;
     String lastText = "";
 
-    // Stagnation guard state — counts consecutive iterations without a
-    // write-class tool call. Reset to 0 on any writeFile / editFile.
-    // Per-task override (req.stagnationWarnAfter / req.stagnationForceAfter): SequentialExecutor
-    // sets these per complexity (LOW=8/12 default, MEDIUM=12/18, HIGH=18/28) so that legitimate
-    // reverse-engineering / multi-file-read iterations on HIGH tasks (e.g. ProgramBench cmatrix)
-    // don't trip the guard before the worker can write. Falls through to the static defaults
-    // when null, preserving prior behaviour for callers that don't set the override.
-    final int stagnationWarnAfter =
+    // RL-2026-05-005 — the worker's single progress signal. `itersSinceProgress` counts
+    // consecutive iterations with no write-class tool call (writeFile / editFile); it resets to 0
+    // on any write. ONE counter, TWO thresholds, ONE nudge replaces the old set of six overlapping
+    // guardrails (Lever A force-edit watchdog + Lever C completion nudge + stagnation warn/force).
+    //   • progressWarnAfter  → inject ONE corrective UserMessage (the unified nudge).
+    //   • progressForceAfter → force-terminate (Lever B salvage first if nothing was ever written).
+    // The same one-shot nudge also fires when the model stops text-only without calling
+    // completeTask. Per-task override (req.stagnationWarnAfter / req.stagnationForceAfter):
+    // SequentialExecutor sets these per complexity (LOW=8/12, MEDIUM=12/18, HIGH=18/28) so that
+    // legitimate reverse-engineering / multi-file-read iterations on HIGH tasks don't trip the
+    // guard before the worker can write. Falls through to the static defaults when null.
+    final int progressWarnAfter =
         req.stagnationWarnAfter() != null && req.stagnationWarnAfter() > 0
             ? req.stagnationWarnAfter()
             : STAGNATION_WARN_AFTER_N;
-    final int stagnationForceAfter =
-        req.stagnationForceAfter() != null && req.stagnationForceAfter() > stagnationWarnAfter
+    final int progressForceAfter =
+        req.stagnationForceAfter() != null && req.stagnationForceAfter() > progressWarnAfter
             ? req.stagnationForceAfter()
-            : Math.max(STAGNATION_FORCE_AFTER_N, stagnationWarnAfter + 4);
-    int stagnantIters = 0;
-    boolean stagnationWarned = false;
+            : Math.max(STAGNATION_FORCE_AFTER_N, progressWarnAfter + 4);
+    int itersSinceProgress = 0;
+    // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
+    // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
+    // the next failure terminates (force threshold, or another text-only stop).
+    boolean progressNudged = false;
 
     // V182 layer-3 — last iteration on which a runTests call returned an ok envelope.
     // -1 means "never". Refreshed inside the per-tool-call dispatch when name=runTests
@@ -271,42 +278,10 @@ public class WorkerAgent {
     int lastBuildPassIter = -1;
     final boolean buildGateOn = Boolean.TRUE.equals(req.requireBuildVerification());
 
-    // 2026-05-08 — Lever A: force-edit watchdog. Counts total write-class tool calls (writeFile,
-    // editFile) across the whole run. When the worker passes 70% of maxIter without any write,
-    // we inject a one-shot UserMessage that breaks investigation paralysis: "you've read enough,
-    // commit to an edit now or empty patch is automatic failure." This targets the SWE-bench
-    // empty-patch failure mode (sqlfluff-1733 et al) where the agent reads 60+ files without
-    // ever writing one. Stagnation guard catches consecutive non-write streaks; this watchdog
-    // catches the slower "always-investigating" pattern across the whole run.
-    //
-    // 2026-05-09 — RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): a LOW BUILD task with
-    // maxIter=60 (project-run 2× multiplier on LOW=30) had forceEditAtIter=42, but the
-    // per-tier stagnationForceAfter=12 killed the worker at iter 12 — Lever A never had a
-    // chance to fire. Same pattern bites every LOW + MEDIUM task: stagnation force kills
-    // before 70%-of-iter ever lands. Fix: clamp the threshold so it fires BEFORE the
-    // stagnation force, not after. We use `min(0.7×maxIter, stagnationForceAfter - 1)` so the
-    // nudge always lands at least one iter before the worker is force-terminated, AND we keep
-    // the original 70%-of-iter ceiling for HIGH/PATCH where the iter cap is the binding
-    // constraint (e.g. PATCH maxIter=120, stagnationForce=disabled → forceEditAtIter=84).
+    // Total write-class tool calls (writeFile / editFile) across the whole run. Distinct from
+    // itersSinceProgress (which resets): this never decreases, and gates the Lever B salvage —
+    // a run that has written SOMETHING doesn't need a best-guess salvage call. RL-2026-05-005.
     int totalWriteCalls = 0;
-    boolean forceEditNudged = false;
-    final int forceEditAtIter =
-        Math.max(
-            5, Math.min((int) Math.round(maxIter * 0.7), Math.max(1, stagnationForceAfter - 1)));
-
-    // 2026-05-10 — Lever C: completion-gate nudge. T8 on dev run a59f9798 wrote 10 files,
-    // emitted "Excellent! The implementation is complete and correct. Let me create a summary…",
-    // and stopped without ever calling completeTask. The model went into "summary mode" instead
-    // of invoking the tool — no iter-cap, stagnation, or budget signal could rescue it because
-    // the loop's exit condition is "model returned no tool calls" and the model gave us text-only.
-    //
-    // Lever C fires once per task: when the assistant emits a final text-only response containing
-    // a summary keyword (case-insensitive: summary, complete, done, finished, all set,
-    // implementation is complete, ready) AND the worker has written at least one file AND the
-    // iter is past 0.5×maxIter, inject a UserMessage telling the model to call completeTask now
-    // (with the summary text as completionNotes) or list the next concrete edit. Mirrors Lever A's
-    // shape but for the completion gate, not the investigation gate.
-    boolean completionNudgeFired = false;
 
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
@@ -493,29 +468,16 @@ public class WorkerAgent {
 
       // No tool calls → model is done (either text-only stop or stopped early).
       if (calls.isEmpty()) {
-        // 2026-05-10 — Lever C: completion-gate nudge. T8 on dev run a59f9798 wrote 10 files
-        // and emitted "Excellent! The implementation is complete and correct. ## Summary…" but
-        // never invoked completeTask. The model effectively produced a status report instead of
-        // closing the loop. Cost: full task counted as STOPPED_WITHOUT_COMPLETE → soft-PARTIAL.
-        //
-        // 2026-05-10 update — dropped the original `iter ≥ 0.5×maxIter` threshold gate. Dev run
-        // 61c9fffa T12 + T18 reproduced the same failure mode at iter 31/150 and iter 18/150
-        // (both well below the 75-iter threshold), and the soft-completion gate accepted the
-        // bypassed work. The threshold was a defensive heuristic to "let the model do real
-        // work first" — but `totalWriteCalls > 0` already gates that signal correctly. The
-        // iter check just blocked early-bailout cases without adding safety.
-        //
-        // Lever C now fires once per task on three conditions: text-only response + writes
-        // already happened + assistant text matches a summary keyword. We append the assistant
-        // turn AND a UserMessage telling the model to call completeTask with the summary as
-        // completionNotes (or list the next concrete edit if it isn't actually done). Then
-        // continue the loop — the model gets one more iter to do the right thing.
-        // STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns text-only
-        // (we don't fire the nudge twice).
-        if (!completionNudgeFired && totalWriteCalls > 0 && looksLikeSummary(assistantText)) {
-          completionNudgeFired = true;
+        // RL-2026-05-005 — text-only stop without calling completeTask: the model produced a
+        // status report instead of closing the loop (the dominant "summary mode" failure, e.g.
+        // dev run a59f9798/T8 — wrote 10 files, said "implementation is complete", never called
+        // the tool). Fire the SAME one-shot progress nudge used mid-loop: if we haven't nudged
+        // yet, give the model one more iteration to either call completeTask or make the next
+        // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
+        if (!progressNudged) {
+          progressNudged = true;
           log.info(
-              "WorkerAgent LEVER_C completionNudge run={} task={} iter={} writes={}"
+              "WorkerAgent PROGRESS_NUDGE (text-only stop) run={} task={} iter={} writes={}"
                   + " textPreview={}",
               runId,
               req.context().taskId(),
@@ -523,19 +485,7 @@ public class WorkerAgent {
               totalWriteCalls,
               previewThought(assistantText));
           history.add(new AssistantMessage(assistantText));
-          history.add(
-              new UserMessage(
-                  "COMPLETION GATE — you have written "
-                      + totalWriteCalls
-                      + " file"
-                      + (totalWriteCalls == 1 ? "" : "s")
-                      + " and your last message reads like a status summary, but you did NOT"
-                      + " call the `completeTask` tool. The pipeline scores tasks based on that"
-                      + " tool call. If you genuinely believe the work is done, call"
-                      + " `completeTask` now and pass your summary as the `completionNotes`"
-                      + " argument. If something is still missing, list the next concrete edit"
-                      + " (writeFile/editFile) you intend to make and execute it. Do not produce"
-                      + " another text-only response."));
+          history.add(new UserMessage(progressNudgeMessage(totalWriteCalls)));
           continue; // Re-enter the loop; iter increments; model gets another shot.
         }
         history.add(new AssistantMessage(assistantText));
@@ -707,82 +657,47 @@ public class WorkerAgent {
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
 
-      // ─── Stagnation guard ─────────────────────────────────────────────
-      // Reset the stagnation counter on any write-class tool call this iter
-      // (writeFile / editFile); otherwise increment. A run of 8 stagnant
-      // iters injects a one-shot PROGRESS CHECK system message; another 4
-      // stagnant iters force-terminates the worker with
-      // COMPLETED_BY_STAGNATION so the smoke gate downstream can decide
-      // final task status.
+      // ─── Progress signal (RL-2026-05-005) ─────────────────────────────
+      // Reset the counter on any write-class tool call (writeFile / editFile); otherwise
+      // increment. Crossing progressWarnAfter injects ONE corrective nudge (the same message the
+      // text-only-stop path uses); crossing progressForceAfter force-terminates with
+      // COMPLETED_BY_STAGNATION (Lever B salvage first if nothing was ever written). One counter,
+      // one nudge — this replaces the old Lever A + Lever C + stagnation-warn trio.
       boolean wroteThisIter = calls.stream().anyMatch(tc -> WRITE_CLASS_TOOLS.contains(tc.name()));
       if (wroteThisIter) {
-        stagnantIters = 0;
-        // 2026-05-08 Lever A — count writes across the whole run for the force-edit watchdog.
+        itersSinceProgress = 0;
         for (AssistantMessage.ToolCall tc : calls) {
           if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) totalWriteCalls++;
         }
       } else {
-        stagnantIters++;
+        itersSinceProgress++;
       }
-      // 2026-05-08 Lever A: force-edit nudge. If we've crossed the 70% iter threshold with
-      // ZERO writes total (not just this iter — investigation paralysis pattern from SWE-bench
-      // sqlfluff-1733: 75 iter cap, 0 edits, empty patch), inject a one-shot UserMessage telling
-      // the agent to commit to ANY edit. UserMessage (not SystemMessage) for the same Gemini
-      // cache-prefix reason as the stagnation warning above.
-      if (!forceEditNudged && iter >= forceEditAtIter && totalWriteCalls == 0) {
+      if (!progressNudged && itersSinceProgress >= progressWarnAfter) {
         log.info(
-            "WorkerAgent FORCE_EDIT_NUDGE run={} task={} iter={}/{} totalWrites=0",
-            req.context().runId(),
-            req.context().taskId(),
-            iter,
-            maxIter);
-        history.add(
-            new UserMessage(
-                "INVESTIGATION PHASE OVER. You've used "
-                    + iter
-                    + " of "
-                    + maxIter
-                    + " iterations reading files without writing anything. An empty patch"
-                    + " is automatic failure — even a wrong-file edit is better than zero."
-                    + " Pick the file that most likely contains the bug based on what you've"
-                    + " read, edit it, and call buildProject (build mode) or runTests (patch"
-                    + " mode) to verify. Do NOT do another round of reads — commit to an"
-                    + " edit on your VERY NEXT response."));
-        forceEditNudged = true;
-      }
-      if (!stagnationWarned && stagnantIters >= stagnationWarnAfter) {
-        log.info(
-            "WorkerAgent STAGNATION_WARN run={} task={} iter={} stagnantIters={} threshold={}",
-            req.context().runId(),
-            req.context().taskId(),
-            iter,
-            stagnantIters,
-            stagnationWarnAfter);
-        // 2026-05-08 — must be a UserMessage, NOT a SystemMessage. GeminiNativeToolClient
-        // concatenates every SystemMessage into systemInstruction (see GeminiNativeToolClient.java
-        // ~line 240); appending one mid-run mutates the cache prefix and invalidates implicit
-        // prompt caching for the rest of the task. UserMessage stays in the contents[] list
-        // where Gemini treats it as a normal turn — cache prefix preserved. Anthropic + OpenAI
-        // honour the warning equally well as a user turn.
-        history.add(
-            new UserMessage(
-                "PROGRESS CHECK: "
-                    + stagnationWarnAfter
-                    + " consecutive iterations with no new file writes. If your task is done,"
-                    + " call completeTask now. If a build error blocks you, fix the file. Do"
-                    + " NOT re-read files you have already verified, do NOT re-inspect git"
-                    + " state, do NOT add 'one more verification' round-trips."));
-        stagnationWarned = true;
-      }
-      if (stagnantIters >= stagnationForceAfter) {
-        log.warn(
-            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={} threshold={}"
+            "WorkerAgent PROGRESS_NUDGE run={} task={} iter={} itersSinceProgress={} threshold={}"
                 + " totalWrites={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
-            stagnantIters,
-            stagnationForceAfter,
+            itersSinceProgress,
+            progressWarnAfter,
+            totalWriteCalls);
+        // UserMessage (NOT SystemMessage): GeminiNativeToolClient folds every SystemMessage into
+        // systemInstruction, so a mid-run SystemMessage mutates the implicit-cache prefix and
+        // kills caching for the rest of the task. A UserMessage stays in contents[] as a normal
+        // turn — cache prefix preserved; Anthropic + OpenAI honour it equally.
+        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls)));
+        progressNudged = true;
+      }
+      if (itersSinceProgress >= progressForceAfter) {
+        log.warn(
+            "WorkerAgent PROGRESS_FORCE run={} task={} iter={} itersSinceProgress={} threshold={}"
+                + " totalWrites={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            itersSinceProgress,
+            progressForceAfter,
             totalWriteCalls);
         // 2026-05-09 Lever B extension — salvage on STAGNATION_FORCE with zero writes.
         // RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): LOW BUILD task spent 12 iters
@@ -1175,42 +1090,31 @@ public class WorkerAgent {
   }
 
   /**
-   * Heuristic for the "model emitted a status report instead of calling completeTask" pattern.
-   *
-   * <p>Used by Lever C: when an assistant turn returns no tool calls and we want to decide whether
-   * to fire a one-shot completion nudge or accept the early termination. Match is intentionally
-   * loose — we want the false-positive rate (nudge a model that genuinely had nothing left to say)
-   * far higher than the false-negative rate (let a finished task fall through to PARTIAL).
-   *
-   * <p>Keywords cribbed from real T8 final assistant text on dev run a59f9798 ("Excellent! The
-   * implementation is complete and correct. Let me create a summary of what was done") plus the
-   * standard "summary / done / finished / all set / ready" cluster that Anthropic Sonnet and OpenAI
-   * GPT both default to when wrapping up a task.
+   * The single corrective nudge (RL-2026-05-005). Shared by both trigger points — the mid-loop
+   * progress counter crossing {@code progressWarnAfter}, and a premature text-only stop. It folds
+   * together everything the old Lever A ("commit to an edit"), Lever C ("call completeTask, a
+   * summary doesn't close the task"), and stagnation-warn ("stop re-reading") messages said into
+   * one. Wording is UserMessage-safe — never injected as a SystemMessage (would break Gemini's
+   * implicit cache prefix mid-run).
    */
-  static boolean looksLikeSummary(String text) {
-    if (text == null || text.length() < 12) return false;
-    String lower = text.toLowerCase(java.util.Locale.ROOT);
-    // Single-shot indicator phrases. Any one match → fire the nudge.
-    String[] needles = {
-      "## summary",
-      "summary of changes",
-      "summary of what",
-      "implementation is complete",
-      "task is complete",
-      "task complete",
-      "all done",
-      "all set",
-      "i've completed",
-      "i have completed",
-      "i've successfully",
-      "i have successfully",
-      "everything is in place",
-      "ready for review",
-      "ready to ship"
-    };
-    for (String n : needles) {
-      if (lower.contains(n)) return true;
-    }
-    return false;
+  static String progressNudgeMessage(int totalWriteCalls) {
+    String lead =
+        totalWriteCalls > 0
+            ? "PROGRESS CHECK — you have written "
+                + totalWriteCalls
+                + " file"
+                + (totalWriteCalls == 1 ? "" : "s")
+                + " but made no new write in your recent turns and have NOT called `completeTask`."
+            : "PROGRESS CHECK — you have used several iterations without writing any file.";
+    return lead
+        + " Pick ONE:\n"
+        + "1. If the task is DONE, call the `completeTask` tool now with your summary as the"
+        + " `completionNotes` argument. A text-only summary does NOT close the task — only the"
+        + " tool does.\n"
+        + "2. If you are still working, stop reading and commit to the single most likely edit"
+        + " (writeFile/editFile), then verify with buildProject (build mode) or runTests (patch"
+        + " mode). An empty result is an automatic failure — even an imperfect edit beats zero.\n"
+        + "3. If a build or test error is blocking you, fix that file now.\n"
+        + "Do NOT do another round of reads or re-verify state you have already checked.";
   }
 }

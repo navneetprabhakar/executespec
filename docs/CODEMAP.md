@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V202**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
+Migration head: **V203**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
 
 ---
 
@@ -72,7 +72,7 @@ Migration head: **V202**. Frontend chrome: **Signal** (production), under `front
 | `security/dependency` | - | 3 | - | - | DependencySecurityPolicy + SupplyChainScanner |
 | `security/guardrail` | - | 1 | - | - | GuardrailLevel enum + resolver (LOW/MEDIUM/HIGH) |
 | `sharing` | 3 | 2 | - | - | V175 cross-org project invites + public share links |
-| `smoketest` | - | 2 | - | - | CliSmokeRunner + BuildCommandResolver |
+| `smoketest` | - | 5 | - | - | CliSmokeRunner + BuildCommandResolver + TestCommandResolver + TestOutputParser + WorkspaceTestRunner (RL-2026-05-001 real test exec) |
 | `sse` | - | 2 | - | - | SseBroadcaster + RunDetailSseService (live event stream) |
 | `standards` | 4 | 3 | - | - | Org standards (lint/AST/LLM-review/file-pattern enforcement) |
 | `state` | - | 2 | - | - | StateStore + InboxService — central persistence facade |
@@ -465,9 +465,9 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 ---
 
-## 6. Flyway migrations — last 33 (V170..V202)
+## 6. Flyway migrations — last 34 (V170..V203)
 
-Head: **V202**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V203**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -504,6 +504,7 @@ Head: **V202**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V200 | Bump FREE tier 5 → 15 runs/month (reverses V167) across `tier_config` / `billing_plan` / `billing_plan_limit` |
 | V201 | Seed `scoring.additive-v2` PLATFORM flag (default true) — additive verifiedScore rebuild |
 | V202 | Seed `reviewer.third-pass.enabled` GLOBAL flag (default true) — fix-the-red-build reviewer pass |
+| V203 | Seed `scoring.real-test-exec` GLOBAL flag (default true) — run worker tests in BUILD mode → real passed/total into TESTS slot (RL-2026-05-001) |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -665,6 +666,7 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `reviewer.third-pass.enabled` | **true** (V202) | Fix-the-red-build reviewer third pass (25-iter, 360s) when final build red after general+wiring |
 | `routing.adaptive-routing.enabled` | (cfg) | Adaptive provider selection |
 | `scoring.additive-v2` | **true** (V201) | Additive verifiedScore (CODE_DELIVERED+BUILD+TESTS+REVIEWER+CRITICALS); off ⇒ legacy multiplicative |
+| `scoring.real-test-exec` | **true** (V203) | BUILD mode runs worker tests in workspace → real passed/total into TESTS slot; off ⇒ LLM-coverage fallback (RL-2026-05-001) |
 | `scoring.v2-verified` | (cfg) | Enables verifiedScore (vs legacy accuracyScore fallback) |
 | `security.guardrail_level` | MEDIUM | LOW / MEDIUM / HIGH guardrail policy |
 | `v2.pause.enabled` | **false** (V168) | V2 run pause/resume |
@@ -718,6 +720,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V202) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V203) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
