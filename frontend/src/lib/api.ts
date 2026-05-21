@@ -1355,6 +1355,8 @@ export interface OrgDto {
   hasAnthropicKey?: boolean;
   hasOpenAiKey?: boolean;
   hasGeminiKey?: boolean;
+  /** Enterprise OpenRouter gateway key flag. */
+  hasOpenRouterKey?: boolean;
   // Key source mode & provider restrictions
   keySourceMode?: string;
   enabledProviders?: string[] | null;
@@ -1454,10 +1456,11 @@ export const updateOrgAiKeySettings = (
   anthropicApiKey: string,
   openAiApiKey: string,
   geminiApiKey: string,
+  openRouterApiKey = '',
 ) =>
   req<OrgDto>('/org/me/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey}),
+    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey, openRouterApiKey}),
   });
 
 /** Updates org key source mode and provider restrictions (ORG_ADMIN only). */

@@ -8,12 +8,13 @@ import * as api from '@/lib/api';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 
-type Provider = 'anthropic' | 'openai' | 'gemini';
+type Provider = 'anthropic' | 'openai' | 'gemini' | 'openrouter';
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  openrouter: 'OpenRouter',
 };
 
 // Backend's validator accepts upper-case ANTHROPIC | OPENAI | GEMINI | GOOGLE.
@@ -238,6 +239,14 @@ export default function ComposePage() {
               >
                 Gemini
               </Chip>
+              {tier === 'ENTERPRISE' && (
+                <Chip
+                  kind={provider === 'openrouter' ? 'active' : 'default'}
+                  onClick={() => setProvider('openrouter')}
+                >
+                  OpenRouter
+                </Chip>
+              )}
             </>
           }
         />
