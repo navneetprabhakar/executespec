@@ -94,7 +94,12 @@ public class ConversationController {
 
     // Pre-flight conversation has no project context — use default provider
     ResolvedModel resolved = modelResolver.resolve("ConversationAgent", LlmProvider.ANTHROPIC);
-    var options = AnthropicChatOptions.builder().model(resolved.getModel()).maxTokens(512).build();
+    // 4096 (not 512): the LIGHTWEIGHT tier resolves to a thinking model
+    // (gemini-3-flash-preview), whose reasoning tokens count against this cap. At
+    // 512 the "Use as spec" finalize turn — which must emit a full consolidated
+    // spec — was truncated mid-sentence after ~20 visible tokens. Clarifying
+    // questions are short and stop early, so the higher cap costs nothing there.
+    var options = AnthropicChatOptions.builder().model(resolved.getModel()).maxTokens(4096).build();
 
     var response =
         fallbackLlmRouter.callWithFallback(
