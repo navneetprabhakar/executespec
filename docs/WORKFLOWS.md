@@ -54,7 +54,7 @@ register -> verify-email -> auto-session -> submit run
 10. Auto-push: `integration/scm/ScmPushService.push` runs because `repoMode=NEW`. `repo/GitHubRepoService.createRepo` provisions the repo under the caller's PAT, the workspace is pushed to a branch, and a PR is opened against the default branch. The PR URL is stamped on `pipeline_run.github_pr_url`.
 11. The run terminates as COMPLETE/PARTIAL/FAILED with `statusReason` captured. `PipelineEvent.RunCompleted` fires; in-app notifications go out via `notification/InAppNotificationService`.
 
-Tier gate: FREE = 5 runs/month, 1-credit specs only, no high-complexity plans (`TierEnforcementService.assertComplexityAllowed`).
+Tier gate: FREE = 15 runs/month (V200, up from 5), 1-credit specs only, no high-complexity plans (`TierEnforcementService.assertComplexityAllowed`).
 
 ---
 

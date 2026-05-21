@@ -493,13 +493,6 @@ export function MorePage() {
         <SectionHeader>Account &amp; billing</SectionHeader>
         <Row to='/account' title='Account' meta={<span>{user?.email}</span>} showChev />
         <Row to='/billing' dot='mint' title='Billing' meta={<span>{tier} tier</span>} showChev />
-        <Row
-          to='/topup'
-          dot='signal'
-          title='Top up credits'
-          meta={<span>Buy run credits</span>}
-          showChev
-        />
         <Row to='/plans' title='Plans &amp; pricing' meta={<span>Compare tiers</span>} showChev />
 
         <SectionHeader>Team</SectionHeader>

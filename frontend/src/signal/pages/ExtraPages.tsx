@@ -912,7 +912,7 @@ export function PublicPricingPage() {
               price: '$0',
               sub: 'No card required',
               features: [
-                '5 runs / month',
+                '15 runs / month',
                 '1-credit specs only',
                 '$3 hard cost cap',
                 'Single repo',

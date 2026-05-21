@@ -75,7 +75,7 @@ Plan gate → Approve → Live → Result
 
 ## Journey 2: FREE to TEAM upgrade
 
-Goal: a FREE user has hit the 5/month cap and wants to upgrade to TEAM (BYOK, $39/seat/month, min 2 seats).
+Goal: a FREE user has hit the 15/month cap (V200; was 5) and wants to upgrade to TEAM (BYOK, $39/seat/month, min 2 seats).
 
 ```
 Plans page    GET /api/billing/plans

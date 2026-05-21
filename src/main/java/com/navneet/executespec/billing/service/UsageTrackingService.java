@@ -9,13 +9,16 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingPlanLimit;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.entity.BillingUsage;
 import com.navneet.executespec.billing.exception.BillingException;
 import com.navneet.executespec.billing.repository.*;
+import com.navneet.executespec.entitlements.EntitlementResolver;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +37,8 @@ public class UsageTrackingService {
   private final BillingPlanRepository planRepo;
   private final RunTopupRepository runTopupRepo;
   private final AppUserRepository userRepo;
+  private final EntitlementResolver entitlementResolver;
+  private final TierConfigRepository tierConfigRepo;
 
   /**
    * Check if user is within limits for a given metric. Throws BillingException if limit exceeded.
@@ -63,14 +68,29 @@ public class UsageTrackingService {
       log.debug("No subscription for user {} — using FREE plan limits as fallback", userId);
     }
 
-    Optional<BillingPlanLimit> limitOpt = limitRepo.findByBillingPlanIdAndMetric(planId, metric);
-    if (limitOpt.isEmpty()) {
-      // No limit defined for this metric on this plan — allow
-      return;
+    long maxValue;
+    if ("RUNS".equals(metric) && user != null) {
+      // Canonical RUNS quota source: tier_config keyed by the resolved tier
+      // (higher-of org.tier and user.tier). The legacy billing_plan_limit
+      // path stays in place for other metrics, but for RUNS it produced
+      // false positives when org.tier had been promoted past
+      // billing_subscription.billing_plan_id (e.g. ENTERPRISE org on a
+      // stale FREE subscription row, or a still-pending payment webhook).
+      String tierKey = entitlementResolver.resolveTier(user);
+      TierConfig cfg = tierConfigRepo.findById(tierKey).orElse(null);
+      if (cfg == null) {
+        log.warn("No tier_config row for tier={} — allowing RUNS for user {}", tierKey, userId);
+        return;
+      }
+      maxValue = cfg.getMonthlyRunLimit();
+    } else {
+      Optional<BillingPlanLimit> limitOpt = limitRepo.findByBillingPlanIdAndMetric(planId, metric);
+      if (limitOpt.isEmpty()) {
+        return;
+      }
+      maxValue = limitOpt.get().getMaxValue();
     }
-
-    long maxValue = limitOpt.get().getMaxValue();
-    if (maxValue <= 0) return; // unlimited
+    if (maxValue <= 0) return; // unlimited sentinel
 
     Instant now = Instant.now();
     String orgId = sub != null ? sub.getOrgId() : null;

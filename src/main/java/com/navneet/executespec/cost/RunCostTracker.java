@@ -612,7 +612,8 @@ public class RunCostTracker {
    * cached-input-per-1m} field on each model in the YAML matrix, NOT from a hardcoded per-provider
    * multiplier. The audit (docs/reports/model-mapping-audit-2026-05-06.md §4 #4) found the prior
    * multiplier-based code ignored YAML's cache rate for OpenAI + Gemini — YAML now reflects each
-   * provider's documented rate (Anthropic 10%, OpenAI 50%, Gemini 25% of input) and this method
+   * provider's documented rate (Anthropic 10%, OpenAI 50%, Gemini 10% of input — corrected from a
+   * mistaken 25% on 2026-05-21 against ai.google.dev's 90% context-cache discount) and this method
    * does the math directly.
    *
    * <p>Token-input semantics still differ by provider:

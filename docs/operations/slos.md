@@ -43,7 +43,7 @@ wouldn't emit a `_bucket` series for `histogram_quantile()`.
 | # | SLO statement | Target | Backing metric(s) | Window |
 | - | --- | --- | --- | --- |
 | 1 | A submitted run reaches a terminal status (`COMPLETE`, `PARTIAL`, `FAILED`, `CANCELLED`) within 15 minutes for at least 95% of runs. | >= 95% | `executespec.v2.run.latency{overall}` (Timer, histogram) | rolling 7 days |
-| 2 | The reported `verifiedScore` matches the underlying signals — multiplicative `baseAccuracy x buildOK x testRatio x reviewerMultiplier - criticalPenalty` is computed and persisted; no NULL `verifiedScore` rows for terminal runs. | >= 90% non-null | `executespec.v2.run.outcome{overall=COMPLETE|PARTIAL}` x DB query `SELECT count(*) FROM pipeline_run WHERE status IN (...) AND verified_score IS NULL` | rolling 30 days |
+| 2 | The reported `verifiedScore` matches the underlying signals — additive-weighted `CODE_DELIVERED + BUILD + TESTS + REVIEWER + CRITICALS` over fired slots (`scoring.additive-v2`, default ON) is computed and persisted; no NULL `verifiedScore` rows for terminal runs. | >= 90% non-null | `executespec.v2.run.outcome{overall=COMPLETE|PARTIAL}` x DB query `SELECT count(*) FROM pipeline_run WHERE status IN (...) AND verified_score IS NULL` | rolling 30 days |
 | 3 | Cost estimate accuracy: 80% of completed runs land within 30% of the planner-estimated buffered cost (`actualCostUsd` vs `costEstimateHigh`). | >= 80% | `executespec.v2.planner.latency{classification,provider,model}` for the estimate side; DB column `pipeline_run.actual_cost_usd` for the actual. Composed at report time, no live metric. | rolling 30 days |
 | 4 | Webhook ingestion (`POST /webhooks/github`, `POST /api/webhooks/{stripe,razorpay}`) completes server-side processing within 60s. | >= 99% | `http.server.requests{uri=~"/webhooks/.*"}` Timer (Spring AutoConfig) | rolling 7 days |
 | 5 | Hot-path 5xx rate on customer-facing API (`/api/runs/**`, `/api/projects/**`, `/api/auth/**`) stays below 0.5%. | < 0.5% | `http.server.requests{status=~"5..", uri=~"/api/(runs|projects|auth).*"}` / total | rolling 1 day |
@@ -84,7 +84,7 @@ the verdict distribution, but there is no Timer measuring the score's
 correctness directly — correctness has to be measured against the spec via the
 strict eval harness (`scripts/v2-eval-strict.sh`) and the resulting JSON,
 which carries both `accuracyScore` (legacy LLM-judged) and `verifiedScore`
-(the multiplicative product).
+(the additive-weighted score, `scoring.additive-v2`).
 
 Operational signal: a count of terminal runs with `verified_score IS NULL`
 indicates a scoring pipeline regression. There is no Prometheus query for this

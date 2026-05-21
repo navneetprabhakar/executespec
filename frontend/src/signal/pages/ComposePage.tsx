@@ -313,11 +313,10 @@ export default function ComposePage() {
         <Card>
           <KvList
             pairs={[
-              {k: 'Provider', v: PROVIDER_LABEL[provider]},
-              {k: 'Plan strategy', v: 'AUTO (classifier)'},
-              {k: 'Mode', v: 'PRODUCTION (plan gate)'},
+              {k: 'Model', v: PROVIDER_LABEL[provider]},
+              {k: 'Pause for approval', v: 'On — review the plan before any code is written'},
               {
-                k: 'Hard cap',
+                k: 'Spending limit',
                 v: (
                   <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
                     <input

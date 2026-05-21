@@ -182,6 +182,11 @@ public class RunOrchestrator {
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
+  /**
+   * RL-2026-05-001 — runs the worker's own tests in the workspace for the verifiedScore TESTS slot.
+   */
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
@@ -3370,7 +3375,26 @@ public class RunOrchestrator {
       // actually move when things go wrong.
       review.setIssues(synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
 
-      ReportInput input = new ReportInput(run, workerReports, review, compile, tasks);
+      // RL-2026-05-001 — run the worker-written tests in the workspace and feed the REAL
+      // passed/total into the verifiedScore TESTS slot, instead of an LLM coverage guess. The
+      // command is resolver-derived (not worker text), validated by ShellSandboxPolicy, and run in
+      // the cleanroom container where one exists. Empty → the scorer falls back to LLM coverage, so
+      // this can only ever make the TESTS slot more honest, never break report generation.
+      com.navneet.executespec.testgen.model.TestExecutionSummary testSummary = null;
+      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
+        try {
+          Path testWorkspace =
+              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+          testSummary = workspaceTestRunner.runTests(runId, testWorkspace).orElse(null);
+        } catch (Exception e) {
+          log.warn(
+              "RunOrchestrator run={} workspace test execution failed (fallback to coverage): {}",
+              runId,
+              e.getMessage());
+        }
+      }
+      ReportInput input =
+          new ReportInput(run, workerReports, review, compile, tasks, testSummary, List.of());
       // ValidationReportGenerator uses V1's FallbackLlmRouter which triggers Spring AI 1.1.4's
       // `extra_body` bug on OpenAI (400 Unknown parameter). V2's native wrapper fixes
       // this for the main pipeline, but the report generator runs through Spring AI.
@@ -3768,8 +3792,28 @@ public class RunOrchestrator {
                     .autoFixed(false)
                     .fixSucceeded(false)
                     .build());
+        case FIXED_ISSUES -> {
+          // 2026-05-19 — Phase 1 auto-fix surface. Emit an informational issue
+          // with autoFixed=true so the Issues panel reflects that the reviewer
+          // pass actually made edits (and they landed — build is green when
+          // verdict is FIXED_ISSUES). Pre-2026-05-19 these flags were always
+          // false even when the agent had done real work, so the UI made the
+          // pass invisible. countUnfixedCritical filters SYNTH-FIX-* out of the
+          // critical penalty (severity MINOR + autoFixed=true), so this is
+          // visibility-only — doesn't double-count against the score.
+          String summary = describeReviewerFixes(reviewResult);
+          out.add(
+              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                  .id("SYNTH-FIX-1")
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
+                  .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
+                  .description(summary)
+                  .autoFixed(true)
+                  .fixSucceeded(true)
+                  .build());
+        }
         default -> {
-          /* CLEAN / FIXED_ISSUES — no synthetic */
+          /* CLEAN — no synthetic */
         }
       }
     }
@@ -3830,6 +3874,25 @@ public class RunOrchestrator {
   private static String truncate(String s, int max) {
     if (s == null) return "";
     return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+  }
+
+  /**
+   * Build a short user-facing description of what the reviewer auto-fixed during this run. Prefers
+   * the reviewer's own pass-summary text (the model's completeTask() output) so the description
+   * reads like a human-written changelog line. Falls back to a generic message if both passes were
+   * silent.
+   */
+  private static String describeReviewerFixes(ReviewerResult result) {
+    String general = result.generalPassSummary();
+    String wiring = result.wiringPassSummary();
+    StringBuilder sb = new StringBuilder("Reviewer auto-fixed issues during the review pass.");
+    if (general != null && !general.isBlank()) {
+      sb.append(" General pass: ").append(truncate(general.trim(), 160));
+    }
+    if (wiring != null && !wiring.isBlank()) {
+      sb.append(" Wiring pass: ").append(truncate(wiring.trim(), 160));
+    }
+    return truncate(sb.toString(), 480);
   }
 
   /**

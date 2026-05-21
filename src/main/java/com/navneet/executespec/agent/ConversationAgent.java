@@ -121,17 +121,11 @@ public class ConversationAgent {
    * @return the assistant's reply text
    */
   public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
-    // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
-    // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
-    // OpenAiNativeToolClient, but FallbackLlmRouter used here still goes through Spring AI.
-    // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
-    com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
-    if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
-      chatProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
-    }
-    ResolvedModel resolved = modelResolver.resolve("ConversationAgent", chatProvider);
-    String selectedModel = resolved.getModel();
-    String selectedProvider = resolved.providerName();
+    // Pin run chat to Anthropic Haiku (LIGHTWEIGHT) straight from the matrix — see
+    // ConversationController. Avoids the adaptive-switch / failover drift to Gemini
+    // Flash; FallbackLlmRouter still fails over only if Anthropic is unhealthy.
+    String selectedModel = modelRegistry.lightweightModelFor("anthropic");
+    String selectedProvider = "anthropic";
     log.info(
         "[ConversationAgent] run={} historySize={} model={} provider={}",
         run.getRunId(),
@@ -169,16 +163,10 @@ public class ConversationAgent {
             .build();
     Prompt prompt = new Prompt(messages, opts);
 
-    var response =
-        fallbackLlmRouter.callWithFallback(
-            selectedProvider,
-            selectedModel,
-            prompt,
-            run.getRunId(),
-            "conversation",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+    // callDirect bypasses the fallback chain + per-run provider pin so the chat
+    // always uses Anthropic Haiku (selectedProvider/selectedModel) instead of
+    // drifting to a pinned Gemini provider. See ConversationController.
+    var response = fallbackLlmRouter.callDirect(selectedProvider, selectedModel, prompt).response();
 
     // Track tokens for billing accuracy
     try {

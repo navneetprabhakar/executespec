@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V199**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V203**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -22,7 +22,7 @@ RunOrchestrator
   │   └─ for LARGE/LEGACY: SKELETON_ONLY → parallel TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
   ├─ plan gate (PRODUCTION pauses at AWAITING_APPROVAL; PROTOTYPE bypasses)
   ├─ SequentialExecutor                            per-task tier-routed WorkerAgent + per-task buildProject smoke
-  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware) + PostEditFormatter
+  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware) + PostEditFormatter + fix-build third pass (if final build red)
   ├─ ValidationReport persistence + verifiedScore
   └─ auto-preview kickoff + test generation in background
 ```
@@ -35,9 +35,11 @@ LLM router (`agent/LlmRouter.java`): native tool calling end-to-end across all t
 
 Workspaces: `<agent.workspace>/<runId>/` (local disk on the VM). Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/`. Worker writes flow through tool dispatchers; cleanroom container mounts (SWE-bench, ProgramBench) bind the workspace dir at `/workspace` so host-side tools and container-side tools see the same files.
 
-Workers (`agent/WorkerAgent.java`) — sequential, multi-turn. Per-complexity caps (set in `SequentialExecutor.tierConfigFor`): LOW=30 iters / 4k tokens, MEDIUM=50 / 8k, HIGH=75 / 16k. Per-provider PATCH-mode caps: Anthropic 150, OpenAI 100, Gemini 120. Outcomes: `COMPLETED | COMPLETED_BY_STAGNATION | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | BUDGET_EXCEEDED | ERROR`. Two resilience levers fire at end-of-budget: **Lever A** (force-edit watchdog injects "commit to ANY edit now" UserMessage at 0.7×maxIter when `totalWriteCalls=0`) and **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / stagnation-force when no writes have happened). Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL).
+Workers (`agent/WorkerAgent.java`) — sequential, multi-turn. Per-complexity caps (set in `SequentialExecutor.tierConfigFor`): LOW=30 iters / 4k tokens, MEDIUM=50 / 8k, HIGH=75 / 16k. Per-provider PATCH-mode caps: Anthropic 150, OpenAI 100, Gemini 120. Outcomes: `COMPLETED | COMPLETED_BY_STAGNATION | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | BUDGET_EXCEEDED | ERROR`. Resilience is **one progress signal** since 2026-05-19 (RL-2026-05-005, unifying the old Lever A + Lever C + stagnation warn/force): `itersSinceProgress` counts iterations with no `writeFile`/`editFile`; crossing `progressWarnAfter` (per-tier `req.stagnationWarnAfter`, default 8) injects ONE corrective UserMessage nudge — commit to an edit / call `completeTask` / fix the build — which also fires on a premature text-only stop; crossing `progressForceAfter` (default 12) force-terminates with `COMPLETED_BY_STAGNATION`. **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / progress-force when `totalWriteCalls=0`) and the dollar budget cap survive unchanged. Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL). The worker base system prompt (`SequentialExecutor.SYSTEM_PROMPT_BASE`, exposed read-only via `workerSystemPromptBase()` for the tier-eval) carries a **tests-are-mandatory** directive since 2026-05-19: any task that touches a function / endpoint / module must ship at least a happy-path test + an error/edge test before `completeTask`, or justify in the summary why it's genuinely untestable.
 
-Scoring (`scoring/`, `report/`): `verifiedScore` is **multiplicative** since 264cca58 — `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`. `accuracyScore` (LLM-judged) survives as a legacy fallback for pre-V106 rows; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip. **Two trust gates** floor specific factors at `reviewerFactor` when the reviewer says CLEAN/FIXED_ISSUES: (1) `endpointFactor` (since 2026-05-10, PR #95) prevents the AccuracyAssessment LLM's read-budget-limited endpoint count from dragging down a healthy wiring pass; (2) `testFactor` (since 2026-05-16) blocks the same class of false-negative for `testCoverageLevel=PARTIAL` when the spec asked for minimal tests and they actually shipped. Gate fires only when `testsTotal==0 && endpointCoveragePercent>=95 && reviewer in {CLEAN, FIXED_ISSUES}`.
+Scoring (`scoring/`, `report/`): `verifiedScore` is **additive-weighted** since 2026-05-19 (flag `scoring.additive-v2`, default ON, seeded by V201) — five slots with documented weights: **CODE_DELIVERED (30)** + **BUILD (25)** + **TESTS (20)** + **REVIEWER (20)** + **CRITICALS (5)**. Weighted-average over slots that actually fired; unmeasured signals drop from both numerator and denominator instead of defaulting to 1.0. Hard floor: `filesGenerated == 0` ⇒ headline 0. Test slot reads real `passed/total`: BUILD mode runs the worker's own tests in the workspace post-build via `smoketest/WorkspaceTestRunner` (flag `scoring.real-test-exec`, default ON, seeded by V203 — RL-2026-05-001), sandboxed (resolver-derived command + `ShellSandboxPolicy` + cleanroom container where one exists). Falls back to **damped** LLM-judged coverage (GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10) when no runner resolves or output is unparseable — LLM grades cap at 70/100. `endpointFactor` and the two 2026-05-10 / 2026-05-16 trust gates are retired; the reviewer's wiring pass already catches the bug class they were guarding against. Legacy multiplicative formula stays in `computeVerifiedScoreMultiplicative` and runs when the flag is off — pinned by `ValidationReportServiceVerifiedScoreTest`; the new shape is pinned by `ValidationReportServiceAdditiveScoreTest`. `accuracyScore` (LLM-judged) survives as a pre-V106 fallback; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip.
+
+Reviewer (`reviewer/ReviewerAgent.java`): general pass → wiring pass → `PostEditFormatter` → final `buildProject` smoke. **Fix-build third pass** (2026-05-19, flag `reviewer.third-pass.enabled`, default ON, seeded by V202): when the final build is still red after the earlier passes, run ONE more targeted pass with the verbatim build error as the user message (reviewer-general prompt, `FIX_BUILD_PASS_MAX_ITER=25` iters, `FIX_BUILD_PASS_TIMEOUT_SECONDS=360`), then re-run `buildProject` and keep the post-pass state. Rescues the "one typo from CLEAN" class (stray import / wrong type / missing decorator) — empirically 4 of 30 sampled "complete" runs had a passing reviewer but a red final build. `FIXED_ISSUES` verdicts now also emit a synthetic visibility issue (`SYNTH-FIX-1`, severity MINOR, `autoFixed=true`) via `RunOrchestrator.describeReviewerFixes` so the Issues panel shows what the reviewer actually changed; `countUnfixedCritical` filters `SYNTH-FIX-*` out of the critical penalty, so it's visibility-only. `AccuracyAssessmentService` now grades `testCoverageLevel` against explicit NONE/PARTIAL/GOOD/COMPREHENSIVE bands instead of defaulting to PARTIAL.
 
 ### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
 
@@ -54,7 +56,7 @@ Phase 3's webhook stays OFF until SWE-bench Lite resolved% justifies the unatten
 
 ### Tier ladder (live on `dev` + `main`)
 
-**FREE** (5 runs/month, 1-credit specs only) → **PRO** (HIDDEN — grandfathered, new buyers can't pick) → **TEAM** ($39/seat/month BYOK, min 2 seats) → **ENTERPRISE** (custom, unlimited). The V143 `product_id` consumer/B2B surface split was prototyped then rolled back by V179 + V185 — all accounts on a single `executespec` surface; `TierProductSurfaceMapper` is dormant.
+**FREE** (15 runs/month, 1-credit specs only — bumped from 5 in V200 on 2026-05-19 so evaluation users have room to form an opinion) → **PRO** (HIDDEN — grandfathered, new buyers can't pick) → **TEAM** ($39/seat/month BYOK, min 2 seats) → **ENTERPRISE** (custom, unlimited). The V143 `product_id` consumer/B2B surface split was prototyped then rolled back by V179 + V185 — all accounts on a single `executespec` surface; `TierProductSurfaceMapper` is dormant.
 
 Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`. Charged at plan approval (not submission); refunded on FAILURE. Customer can voluntarily lower the ceiling via `RunRequest.userCostCap` (clamped against the platform cap). BYOK orgs (`keySourceMode=OWN_KEYS`) skip the platform cap entirely; HYBRID + SYSTEM stay capped.
 
@@ -94,13 +96,13 @@ Agent tier mapping (`application.yml`):
 
 | Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
 | ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
-| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.5-flash`        | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
+| WORKHORSE   | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 
 Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
 
-Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. PLANNING tier still uses Pro so the outline / coherence-planner / arch-doc keep deep-reasoning quality.
+Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. **2026-05-21 (RL-2026-05-010):** Gemini PLANNING also moved Pro → `gemini-3.5-flash` (the eval-best Gemini — ties Sonnet at verifiedScore 94 on the HIGH band, cheaper than Pro). All Gemini tiers now run Flash-class models; `gemini-3-pro-preview` is no longer tier-routed (it survives only as the `GeminiNativeToolClient` default-model constant).
 
 Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain.
 
@@ -123,7 +125,7 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V199**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V203**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
 ### Patterns: MUST follow
 
@@ -333,6 +335,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/admin/tiers` + PUT `/{tier}`                        | Tier lifecycle (LISTED/HIDDEN/SUNSETTING).             |
 | POST   | `/api/admin/executions/reconcile`                         | Mark orphaned non-terminal ExecutionRuns FAILED.       |
 | POST   | `/api/admin/swebench/run` + `/api/admin/programbench/run` | Bench-mode submission.                                 |
+| POST   | `/api/admin/eval/v2/run`                                  | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params). |
 | POST   | `/api/admin/projects/{id}/migrate-codemaps`               | Migrate legacy codemaps into `.executespec/codemaps/`. |
 
 ### Enterprise readiness — `.executespec/` folder, contracts, standards, ADRs, activity
@@ -399,11 +402,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V199)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V203)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
 | V2 eval framework               | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt`                                                                                                                                 |
+| Tier-eval-v2                    | [`eval/v2/`](src/main/java/com/navneet/executespec/eval/v2/) (`TierEvalRunner` + `TierEvalController` + `cases/`) + `scripts/tier-eval-v2.sh`                                                          |
 
 ## Current state
 
@@ -429,7 +433,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - GDPR data-export endpoint.
 - `AccessGuardCoverageTest` ArchUnit pin + known-legacy ledger (10 sites remaining).
 - Local Grafana dashboards + GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
-- Model evaluation framework (`eval/`).
+- Model evaluation framework (`eval/`) + tier-eval-v2 (`eval/v2/`) — production-shaped per-tier (LIGHTWEIGHT / PLANNING / WORKHORSE) × provider eval that drives the live agent prompts + tool schemas through `LlmRouter` and scores tool-call validity, cache hit rate, latency, cost. Admin endpoint `POST /api/admin/eval/v2/run`; CLI wrapper `scripts/tier-eval-v2.sh`.
 
 ### In progress / not-yet-merged
 

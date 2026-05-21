@@ -176,7 +176,10 @@ export default function App() {
           <Route path='/settings/manage' element={<AccountPage />} />
           <Route path='/billing' element={<BillingPage />} />
           <Route path='/plans' element={<PlansPage />} />
-          <Route path='/topup' element={<TopupPage />} />
+          {/* /topup intentionally removed 2026-05-19 — backend endpoints (topup/packs,
+              topup/purchase, credits) are not implemented; the page rendered 3 empty
+              "Pack —" cards. Restore once BillingService.purchaseTopUp() ships. */}
+          <Route path='/topup' element={<Navigate to='/billing' replace />} />
           <Route path='/integrations' element={<IntegrationsPage />} />
           <Route path='/api-keys' element={<ApiKeysPage />} />
           <Route path='/org-members' element={<OrgMembersPage />} />
