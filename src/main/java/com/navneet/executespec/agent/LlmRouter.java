@@ -13,6 +13,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -28,6 +29,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -103,6 +105,15 @@ public class LlmRouter {
   @Autowired(required = false)
   @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
 
+  // OpenRouter (Enterprise) — OpenAI-wire-compatible gateway, so it reuses OpenAiNativeToolClient
+  // with a per-call base-URL + the verified slug map. Org BYOK keys flow through
+  // RunKeyContext.keyFor("openrouter") like every other provider; this is the system fallback.
+  @Value("${spring.ai.openrouter.api-key:}")
+  private String openRouterApiKey;
+
+  @Value("${spring.ai.openrouter.base-url:https://openrouter.ai/api}")
+  private String openRouterBaseUrl;
+
   /**
    * Dispatch a single LLM call.
    *
@@ -170,9 +181,12 @@ public class LlmRouter {
       case "anthropic" -> callAnthropic(request, tools, apiKey);
       case "openai" -> callOpenAi(request, tools, apiKey);
       case "gemini" -> callGemini(request, tools, apiKey);
+      case "openrouter" -> callOpenRouter(request, tools, apiKey);
       default ->
           throw new IllegalArgumentException(
-              "Unknown provider: " + request.provider() + " (expected anthropic|openai|gemini)");
+              "Unknown provider: "
+                  + request.provider()
+                  + " (expected anthropic|openai|gemini|openrouter)");
     };
   }
 
@@ -318,6 +332,30 @@ public class LlmRouter {
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
             .apiKey(apiKey)
+            .build());
+  }
+
+  /**
+   * OpenRouter (Enterprise) — OpenAI-wire-compatible gateway. Reuses {@link OpenAiNativeToolClient}
+   * with a per-call base-URL override + the verified matrix-id → slug map. The model is constrained
+   * to the matrix allow-list ({@link OpenRouterModelMapper}); an unmapped model fails fast so we
+   * never send an unverified slug.
+   */
+  private ChatResponse callOpenRouter(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : openRouterApiKey;
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException(
+          "OpenRouter api-key not configured (org BYOK key or spring.ai.openrouter.api-key)");
+    }
+    return openAiNativeToolClient.call(
+        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+            .model(OpenRouterModelMapper.toSlug(r.model()))
+            .messages(r.messages())
+            .tools(tools)
+            .temperature(r.temperature())
+            .maxCompletionTokens(r.maxTokens())
+            .apiKey(key)
+            .baseUrl(openRouterBaseUrl)
             .build());
   }
 }

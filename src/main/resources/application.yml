@@ -151,6 +151,13 @@ spring:
         chat:
           options:
             model: gemini-3-flash-preview     # bean-init only; V2 router resolves per-call (2026-05-06: was gemini-2.5-flash, retired)
+    # OpenRouter (Enterprise) — OpenAI-wire-compatible gateway, NOT a Spring AI starter.
+    # Read by LlmRouter.callOpenRouter via @Value. api-key is the system fallback; org
+    # BYOK keys flow through RunKeyContext.keyFor("openrouter"). Models are constrained to
+    # the matrix allow-list by OpenRouterModelMapper.
+    openrouter:
+      base-url: https://openrouter.ai/api
+      api-key: ""                   # Enterprise system fallback; org BYOK preferred
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
