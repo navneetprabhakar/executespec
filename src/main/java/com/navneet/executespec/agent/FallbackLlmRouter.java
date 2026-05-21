@@ -813,7 +813,12 @@ public class FallbackLlmRouter {
           throw new ProviderUnavailableException(
               "Anthropic key not provided, mode=OWN_KEYS — no system fallback");
         }
-        yield ctx.getBean(AnthropicChatModel.class);
+        // Resolve the system bean BY NAME: AgentModelConfig registers 3 extra
+        // AnthropicChatModel beans (plannerModel / workerModel / reviewerModel)
+        // alongside the auto-config default, so getBean(class) throws
+        // NoUniqueBeanDefinitionException. That ambiguity made EVERY system
+        // Anthropic call through this router fail and silently fail over to Gemini.
+        yield ctx.getBean("anthropicChatModel", AnthropicChatModel.class);
       }
       case "openai" -> {
         String key = keys.openAiKey();
