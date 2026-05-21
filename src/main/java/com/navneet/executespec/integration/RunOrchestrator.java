@@ -182,6 +182,11 @@ public class RunOrchestrator {
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
+  /**
+   * RL-2026-05-001 — runs the worker's own tests in the workspace for the verifiedScore TESTS slot.
+   */
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
@@ -3370,7 +3375,26 @@ public class RunOrchestrator {
       // actually move when things go wrong.
       review.setIssues(synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
 
-      ReportInput input = new ReportInput(run, workerReports, review, compile, tasks);
+      // RL-2026-05-001 — run the worker-written tests in the workspace and feed the REAL
+      // passed/total into the verifiedScore TESTS slot, instead of an LLM coverage guess. The
+      // command is resolver-derived (not worker text), validated by ShellSandboxPolicy, and run in
+      // the cleanroom container where one exists. Empty → the scorer falls back to LLM coverage, so
+      // this can only ever make the TESTS slot more honest, never break report generation.
+      com.navneet.executespec.testgen.model.TestExecutionSummary testSummary = null;
+      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
+        try {
+          Path testWorkspace =
+              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+          testSummary = workspaceTestRunner.runTests(runId, testWorkspace).orElse(null);
+        } catch (Exception e) {
+          log.warn(
+              "RunOrchestrator run={} workspace test execution failed (fallback to coverage): {}",
+              runId,
+              e.getMessage());
+        }
+      }
+      ReportInput input =
+          new ReportInput(run, workerReports, review, compile, tasks, testSummary, List.of());
       // ValidationReportGenerator uses V1's FallbackLlmRouter which triggers Spring AI 1.1.4's
       // `extra_body` bug on OpenAI (400 Unknown parameter). V2's native wrapper fixes
       // this for the main pipeline, but the report generator runs through Spring AI.
