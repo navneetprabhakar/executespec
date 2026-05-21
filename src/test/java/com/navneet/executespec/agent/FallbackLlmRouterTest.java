@@ -81,7 +81,8 @@ class FallbackLlmRouterTest {
     @Test
     @DisplayName("claude-opus-4-6 uses ARCHITECT chain")
     void opusUsesArchitectChain() {
-      when(ctx.getBean(AnthropicChatModel.class)).thenReturn(anthropicChatModel);
+      when(ctx.getBean("anthropicChatModel", AnthropicChatModel.class))
+          .thenReturn(anthropicChatModel);
       when(anthropicChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
 
       var result =
@@ -102,7 +103,8 @@ class FallbackLlmRouterTest {
     @Test
     @DisplayName("claude-sonnet uses CAPABLE chain")
     void sonnetUsesCapableChain() {
-      when(ctx.getBean(AnthropicChatModel.class)).thenReturn(anthropicChatModel);
+      when(ctx.getBean("anthropicChatModel", AnthropicChatModel.class))
+          .thenReturn(anthropicChatModel);
       when(anthropicChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
 
       var result =

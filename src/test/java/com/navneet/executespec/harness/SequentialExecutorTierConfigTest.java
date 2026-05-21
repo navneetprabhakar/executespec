@@ -29,8 +29,9 @@ import org.junit.jupiter.api.Test;
  * <ul>
  *   <li>MEDIUM iter cap 50 → 75 (T12 hit project-run 100-iter cap mid-test-suite at 0.92
  *       writes/iter — genuine progress strangled by iter cap).
- *   <li>New per-tier wall-clock budget: LOW=15min, MEDIUM=25min, HIGH=45min. Doubled for project
- *       runs (mirrors the iter-cap multiplier).
+ *   <li>Per-tier wall-clock budget, loosened again by RL-2026-05-004 to cut PARTIAL: LOW=30min
+ *       (+LOW iter 30→40), MEDIUM=45min, HIGH=75min. Doubled for project runs (mirrors the iter-cap
+ *       multiplier).
  *   <li>Project-run LOW stagnation force 12 → 18 (T9 force-terminated at 12 reads on a LOW project
  *       task that needed to readFile a real codebase before writing the audit fix). MEDIUM 20 → 24
  *       on project runs. HIGH unchanged.
@@ -120,9 +121,9 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
-  void low_project_iter_cap_unchanged() throws Exception {
+  void low_project_iter_cap_is_80() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "claude-foo", true);
-    assertEquals(60, c.maxIter, "LOW iter cap untouched: 30 × 2 = 60");
+    assertEquals(80, c.maxIter, "LOW iter cap 30 → 40 (RL-2026-05-004); project ×2 = 80");
   }
 
   @Test
@@ -134,27 +135,27 @@ class SequentialExecutorTierConfigTest {
   // ── Wall-clock caps ──
 
   @Test
-  void low_wall_clock_15min_fresh_30min_project() throws Exception {
+  void low_wall_clock_30min_fresh_60min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", true);
-    assertEquals(15 * 60, fresh.wallClockSeconds);
-    assertEquals(30 * 60, proj.wallClockSeconds);
+    assertEquals(30 * 60, fresh.wallClockSeconds, "LOW wall-clock 15 → 30min (RL-2026-05-004)");
+    assertEquals(60 * 60, proj.wallClockSeconds, "project ×2 = 60min");
   }
 
   @Test
-  void medium_wall_clock_25min_fresh_50min_project() throws Exception {
+  void medium_wall_clock_45min_fresh_90min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", true);
-    assertEquals(25 * 60, fresh.wallClockSeconds);
-    assertEquals(50 * 60, proj.wallClockSeconds);
+    assertEquals(45 * 60, fresh.wallClockSeconds, "MEDIUM wall-clock 25 → 45min (RL-2026-05-004)");
+    assertEquals(90 * 60, proj.wallClockSeconds, "project ×2 = 90min");
   }
 
   @Test
-  void high_wall_clock_45min_fresh_90min_project() throws Exception {
+  void high_wall_clock_75min_fresh_150min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", true);
-    assertEquals(45 * 60, fresh.wallClockSeconds);
-    assertEquals(90 * 60, proj.wallClockSeconds);
+    assertEquals(75 * 60, fresh.wallClockSeconds, "HIGH wall-clock 45 → 75min (RL-2026-05-004)");
+    assertEquals(150 * 60, proj.wallClockSeconds, "project ×2 = 150min");
   }
 
   @Test
