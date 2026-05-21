@@ -206,7 +206,7 @@
         "name": "How does ExecuteSpec compare to Devin?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Devin (from Cognition Labs) is an autonomous coding agent that goes from ticket to merged PR with minimal human input. ExecuteSpec shares the ambition but differs on transparency and pricing. ExecuteSpec always pauses at a plan-approval gate before burning compute, surfaces every tool call via live SSE, produces a deterministic Ready / Needs review / Failed verdict from real signals (build status, test pass rate, reviewer outcome — not LLM self-rating), and starts at $20/mo. Devin starts at $500+/mo and is optimised for full autonomy. Choose Devin for pure autonomy; ExecuteSpec for autonomy with a reviewable plan gate and transparent scoring."
+          "text": "Devin (from Cognition Labs) is an autonomous coding agent that goes from ticket to merged PR with minimal human input. ExecuteSpec shares the ambition but differs on transparency and pricing. ExecuteSpec always pauses at a plan-approval gate before burning compute, surfaces every tool call via live SSE, produces a deterministic Ready / Needs review / Failed verdict from real signals (build status, test pass rate, reviewer outcome — not LLM self-rating), and starts free, then $29/mo. Devin starts at $500+/mo and is optimised for full autonomy. Choose Devin for pure autonomy; ExecuteSpec for autonomy with a reviewable plan gate and transparent scoring."
         }
       }]
     }
@@ -962,6 +962,25 @@
         .price-card.best .btn {
             background: var(--ink); color: var(--bg); border-color: var(--ink);
         }
+        /* Currency toggle */
+        .cur-wrap { text-align: center; margin-bottom: 22px; }
+        .cur-toggle {
+            display: inline-flex; gap: 2px; padding: 3px;
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: 999px;
+        }
+        .cur-toggle button {
+            appearance: none; border: 0; background: transparent;
+            color: var(--text-dim); font: inherit;
+            font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+            padding: 6px 18px; border-radius: 999px; cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .cur-toggle button.active { background: var(--ink); color: var(--bg); }
+        .price .cur.inr { display: none; }
+        .pricing-grid.show-inr .cur.usd { display: none; }
+        .pricing-grid.show-inr .cur.inr { display: inline; }
 
         /* ─────────── Compare table (mobile-friendly) ─────────── */
         .compare-grid {
@@ -1337,13 +1356,20 @@
         <div class='section-eyebrow signal'>Pricing</div>
         <h2>Simple. Start free. Scale up.</h2>
         <p class='lede'>
-            Credits never expire. BYOK bypasses the cost cap entirely. Cancel any time. Annual billing saves 20%.
+            Credits never expire. BYOK bypasses the cost cap entirely. Cancel any time. Solo annual billing saves 17%.
         </p>
+
+        <div class='cur-wrap'>
+            <div class='cur-toggle' role='group' aria-label='Currency'>
+                <button type='button' class='active' data-cur='usd'>USD</button>
+                <button type='button' data-cur='inr'>INR</button>
+            </div>
+        </div>
 
         <div class='pricing-grid'>
             <div class='price-card'>
                 <div class='tier'>FREE</div>
-                <div class='price'>$0</div>
+                <div class='price'><span class='cur usd'>$0</span><span class='cur inr'>₹0</span></div>
                 <div class='sub'>No card required</div>
                 <ul>
                     <li>15 runs / month</li>
@@ -1356,14 +1382,14 @@
             </div>
             <div class='price-card'>
                 <div class='tier'>SOLO</div>
-                <div class='price'>$29<span class='unit'>/mo</span></div>
+                <div class='price'><span class='cur usd'>$29<span class='unit'>/mo</span></span><span class='cur inr'>₹2,499<span class='unit'>/mo</span></span></div>
                 <div class='sub'>Indie devs · single workspace</div>
                 <ul>
-                    <li>100 runs / month</li>
+                    <li>30 runs / month</li>
                     <li>200 credits / month</li>
                     <li>$10 hard cost cap</li>
                     <li>Multi-repo</li>
-                    <li>1 BYOK provider</li>
+                    <li>Managed keys · 3 providers</li>
                     <li>Library + migrations</li>
                 </ul>
                 <a class='btn' href='https://dev.executespec.ai/signal/signup'>Start 14d trial</a>
@@ -1371,8 +1397,8 @@
             <div class='price-card best'>
                 <div class='best-pip'>RECOMMENDED</div>
                 <div class='tier'>TEAM</div>
-                <div class='price'>$31<span class='unit'>/seat/mo</span></div>
-                <div class='sub'>Min 2 seats · annual billing</div>
+                <div class='price'><span class='cur usd'>$39<span class='unit'>/seat/mo</span></span><span class='cur inr'>₹3,199<span class='unit'>/seat/mo</span></span></div>
+                <div class='sub'>Min 2 seats · monthly</div>
                 <ul>
                     <li>Unlimited runs</li>
                     <li>500 credits / seat / month</li>
@@ -1561,6 +1587,20 @@
         <a href='/dpa'>DPA</a>
     </div>
 </footer>
+
+<script>
+  (function () {
+    var grid = document.querySelector('.pricing-grid');
+    var btns = document.querySelectorAll('.cur-toggle button');
+    if (!grid || !btns.length) return;
+    btns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        grid.classList.toggle('show-inr', b.getAttribute('data-cur') === 'inr');
+        btns.forEach(function (x) { x.classList.toggle('active', x === b); });
+      });
+    });
+  })();
+</script>
 
 </body>
 </html>
