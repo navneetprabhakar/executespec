@@ -626,8 +626,12 @@ public class RunCostTracker {
    */
   private double priceCall(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
+    // OpenRouter is a gateway — pricing (and the Anthropic token-shape rule below) follows the
+    // underlying model's vendor, not the literal "openrouter" provider, which has no pricing rows.
+    String pricingProvider =
+        "openrouter".equalsIgnoreCase(provider) ? ownerProviderFor(model) : provider;
     Optional<ModelPricing> found =
-        pricingRepo.findByIdProviderAndIdModel(providerKey(provider), model);
+        pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
     if (found.isEmpty()) {
       log.debug(
           "RunCostTracker: no pricing for {}/{} — recording tokens without cost", provider, model);
@@ -646,7 +650,7 @@ public class RunCostTracker {
     // into a single count and require subtraction. This is a wire-level distinction, not a
     // pricing one — the rates above already capture the discount.
     final int normalIn =
-        "anthropic".equalsIgnoreCase(provider) ? inTok : Math.max(0, inTok - cacheRead);
+        "anthropic".equalsIgnoreCase(pricingProvider) ? inTok : Math.max(0, inTok - cacheRead);
 
     double cost = 0.0;
     cost += (normalIn / 1_000_000.0) * inRate;
@@ -668,6 +672,20 @@ public class RunCostTracker {
     // Legacy compat — any remaining DB rows still seeded as "google"
     // before v2.5.13 will still be found when the caller passes "gemini".
     return v;
+  }
+
+  /**
+   * Maps a matrix model id to its owning vendor for OpenRouter cost lookup — pricing rows are keyed
+   * by the real vendor (anthropic/openai/gemini), so an "openrouter" run reuses the underlying
+   * model's pricing. Prefix-based: every matrix model is claude-* / gpt-* / gemini-*.
+   */
+  private static String ownerProviderFor(String model) {
+    if (model == null) return "openai";
+    String m = model.toLowerCase();
+    if (m.startsWith("claude")) return "anthropic";
+    if (m.startsWith("gpt")) return "openai";
+    if (m.startsWith("gemini")) return "gemini";
+    return "openai";
   }
 
   /**

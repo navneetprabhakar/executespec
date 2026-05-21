@@ -73,6 +73,9 @@ public class AvailableProviderResolver {
       if (keys.anthropicKey() != null) available.add(LlmProvider.ANTHROPIC);
       if (keys.openAiKey() != null) available.add(LlmProvider.OPENAI);
       if (keys.geminiKey() != null) available.add(LlmProvider.GEMINI);
+      // OpenRouter (Enterprise gateway) — offered whenever the org key is present. Only Enterprise
+      // org admins can set the key (gated at OrgController), so key-present implies Enterprise.
+      if (keys.openRouterKey() != null) available.add(LlmProvider.OPENROUTER);
     }
 
     // Apply org-level enabled provider policy

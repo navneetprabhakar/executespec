@@ -499,7 +499,12 @@ public class OrgService {
 
   @Transactional
   public OrgDto updateAiKeySettings(
-      String orgId, String anthropicKey, String openAiKey, String geminiKey, String actorId) {
+      String orgId,
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String openRouterKey,
+      String actorId) {
     Org org =
         orgRepo
             .findById(orgId)
@@ -507,13 +512,22 @@ public class OrgService {
     org.setAnthropicApiKey(blankToNull(anthropicKey));
     org.setOpenAiApiKey(blankToNull(openAiKey));
     org.setGeminiApiKey(blankToNull(geminiKey));
+    // OpenRouter (gateway) is Enterprise-only — reject the key on lower tiers so the provider can
+    // never be offered (AvailableProviderResolver treats key-present as the Enterprise signal).
+    String openRouter = blankToNull(openRouterKey);
+    if (openRouter != null && !"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN, "OpenRouter is an Enterprise-tier feature");
+    }
+    org.setOpenRouterApiKey(openRouter);
     org.setUpdatedAt(Instant.now());
     log.info(
-        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}",
+        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}, openrouter={}",
         orgId,
         org.getAnthropicApiKey() != null,
         org.getOpenAiApiKey() != null,
-        org.getGeminiApiKey() != null);
+        org.getGeminiApiKey() != null,
+        org.getOpenRouterApiKey() != null);
     OrgDto result = OrgDto.from(orgRepo.save(org));
 
     auditOrgEvent(

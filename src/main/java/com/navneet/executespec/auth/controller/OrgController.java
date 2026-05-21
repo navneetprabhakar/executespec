@@ -239,7 +239,7 @@ public class OrgController {
   // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
 
   record OrgAiKeySettingsRequest(
-      String anthropicApiKey, String openAiApiKey, String geminiApiKey) {}
+      String anthropicApiKey, String openAiApiKey, String geminiApiKey, String openRouterApiKey) {}
 
   /**
    * Saves org-wide AI provider API keys. Used by all org members who have not set a personal key.
@@ -259,6 +259,7 @@ public class OrgController {
             req.anthropicApiKey(),
             req.openAiApiKey(),
             req.geminiApiKey(),
+            req.openRouterApiKey(),
             userDetails.getUser().getId()));
   }
 

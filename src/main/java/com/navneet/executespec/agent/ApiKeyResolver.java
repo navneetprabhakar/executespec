@@ -51,6 +51,7 @@ public class ApiKeyResolver {
     String anthropic = null;
     String openAi = null;
     String gemini = null;
+    String openRouter = null;
     String orgId = null;
     String keySourceMode = "HYBRID";
     Set<String> enabledProviders = null;
@@ -80,17 +81,20 @@ public class ApiKeyResolver {
         anthropic = null;
         openAi = null;
         gemini = null;
+        openRouter = null;
       } else {
         // Fill in gaps from org-level keys (OWN_KEYS and HYBRID both resolve org keys)
         if (anthropic == null) anthropic = blankToNull(org.getAnthropicApiKey());
         if (openAi == null) openAi = blankToNull(org.getOpenAiApiKey());
         if (gemini == null) gemini = blankToNull(org.getGeminiApiKey());
+        // OpenRouter is org-level only (Enterprise gateway) — no user-level key.
+        openRouter = blankToNull(org.getOpenRouterApiKey());
       }
     }
 
     // ── Level 3: system keys (null = FallbackLlmRouter uses the system singleton bean) ─
     ResolvedKeys keys =
-        new ResolvedKeys(anthropic, openAi, gemini, keySourceMode, enabledProviders);
+        new ResolvedKeys(anthropic, openAi, gemini, openRouter, keySourceMode, enabledProviders);
     log.debug(
         "[ApiKeyResolver] userId={} orgId={} mode={} providers={} → anthropic={} openai={}"
             + " gemini={}",
