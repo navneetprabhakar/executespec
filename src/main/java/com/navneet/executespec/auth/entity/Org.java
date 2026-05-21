@@ -90,6 +90,13 @@ public class Org {
   @Column(name = "gemini_api_key")
   private String geminiApiKey;
 
+  /**
+   * OpenRouter API key (Enterprise gateway). Org-level only; set by org admins, ENTERPRISE tier.
+   */
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "open_router_api_key")
+  private String openRouterApiKey;
+
   // ── Key source mode & provider restrictions ──────────────────────────────
   // Controls how API keys are resolved for runs created by this org's members.
   // SYSTEM = always use platform keys; OWN_KEYS = only user/org keys (no fallback);

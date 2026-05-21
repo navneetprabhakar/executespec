@@ -61,6 +61,9 @@ public class RunKeyContextStore {
         (keys.openAiKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
     RunKeyContext.Source geminiSrc =
         (keys.geminiKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
+    // OpenRouter is org-level only (Enterprise gateway) — attribute to ORG when present.
+    RunKeyContext.Source openRouterSrc =
+        (keys.openRouterKey() != null) ? RunKeyContext.Source.ORG : RunKeyContext.Source.PLATFORM;
     // ApiKeyResolver merges user-level and org-level keys without
     // distinguishing which level won. We can't tell from the
     // ResolvedKeys output whether a non-null Anthropic key came from
@@ -88,9 +91,11 @@ public class RunKeyContextStore {
             keys.anthropicKey(),
             keys.openAiKey(),
             keys.geminiKey(),
+            keys.openRouterKey(),
             anthropicSrc,
             openAiSrc,
             geminiSrc,
+            openRouterSrc,
             userId,
             orgId);
     cache.put(runId, ctx);
