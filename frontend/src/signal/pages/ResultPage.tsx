@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, KvList, TabsStrip, Button} from '@/signal/components/Primitives';
@@ -43,6 +43,8 @@ export default function ResultPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   // Timeline / Code / Chat — three regression fixes for v3-parity.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [files, setFiles] = useState<api.FileWithStatus[] | null>(null);
@@ -128,6 +130,18 @@ export default function ResultPage() {
     };
   }, [id, selectedFile]);
 
+  // Auto-scroll the chat thread to the newest message as it grows / while the
+  // assistant is replying. Without this the view stayed pinned at the top and
+  // the latest message landed below the fold.
+  useEffect(() => {
+    if (tab !== 'chat') return;
+    // Scroll the messages box (the end-marker's parent) straight to the bottom.
+    // Direct scrollTop is deterministic where scrollIntoView raced the Markdown
+    // content settling its height on a long thread.
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [tab, chatMessages, chatBusy]);
+
   async function sendChat() {
     if (!id || !chatInput.trim() || chatBusy) return;
     setChatBusy(true);
@@ -152,12 +166,68 @@ export default function ResultPage() {
   }
 
   async function iterateAsNewRun() {
-    if (!id || !chatInput.trim()) return;
+    if (!id || chatBusy) return;
+    const baseSpec = (run as unknown as {userRequest?: string})?.userRequest?.trim();
+    if (!baseSpec) {
+      setErr('Cannot iterate: source spec is missing.');
+      return;
+    }
+    const convo = chatMessages || [];
+    if (convo.length === 0) {
+      setErr(
+        'Start a conversation first — "Iterate as new run" summarizes the discussion into the next run.',
+      );
+      return;
+    }
     setChatBusy(true);
+    setErr('');
     try {
-      const resp = await api.iterateRun(id, chatInput.trim());
+      // Purpose: summarize the run conversation into one iteration instruction,
+      // then fork the original spec + that instruction into a fresh run. (The
+      // /iterate endpoint is 410 in V2, so we compose the new spec client-side and
+      // submit via createRun.) Summarized by the lightweight conversation model.
+      const wire: api.ConversationMessage[] = [
+        ...convo.map((m) => ({
+          role: ((m as unknown as {role?: string}).role === 'user' ? 'user' : 'assistant') as
+            | 'user'
+            | 'assistant',
+          content: (m as unknown as {content?: string}).content || '',
+        })),
+        ...(chatInput.trim() ? [{role: 'user' as const, content: chatInput.trim()}] : []),
+        {
+          role: 'user' as const,
+          content:
+            'Summarize the refinements we discussed above into ONE consolidated instruction for the next iteration of this run. Output only the instruction text — no preamble, no questions.',
+        },
+      ];
+      const summaryResp = await api.conversationChat(wire);
+      const summary = (
+        (summaryResp as unknown as {reply?: string; message?: string}).reply ||
+        (summaryResp as unknown as {message?: string}).message ||
+        ''
+      ).trim();
+      const spec = summary
+        ? `${baseSpec}\n\nIterate on the current implementation with these refinements (summarized from the run discussion):\n${summary}`
+        : baseSpec;
+      const provider = (run as unknown as {aiProvider?: string})?.aiProvider;
+      const projectId = (run as unknown as {projectId?: string})?.projectId;
+      const execMode = (
+        (run as unknown as {executionMode?: string})?.executionMode === 'PRODUCTION'
+          ? 'PRODUCTION'
+          : 'PROTOTYPE'
+      ) as 'PROTOTYPE' | 'PRODUCTION';
+      const resp = await api.createRun({
+        userRequest: spec,
+        aiProvider: provider,
+        executionMode: execMode,
+        skipApproval: execMode === 'PROTOTYPE',
+        projectId,
+      });
       const newId = (resp as unknown as {runId?: string}).runId;
-      if (newId) window.location.href = `/plan/${newId}`;
+      if (newId) {
+        setChatInput('');
+        window.location.href = execMode === 'PROTOTYPE' ? `/live/${newId}` : `/plan/${newId}`;
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Iterate failed.');
     } finally {
@@ -569,6 +639,40 @@ export default function ResultPage() {
                 {v: prUrl ? 'open' : '—', l: 'Pull request'},
               ]}
             />
+
+            {userRequest && (
+              <>
+                <SectionHeader>Submitted prompt</SectionHeader>
+                <Card style={{position: 'relative', padding: '14px 16px', marginBottom: 12}}>
+                  <Button
+                    kind='secondary'
+                    sm
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(userRequest).catch(() => undefined);
+                      setPromptCopied(true);
+                      setTimeout(() => setPromptCopied(false), 2000);
+                    }}
+                    style={{position: 'absolute', top: 10, right: 10, zIndex: 1}}
+                  >
+                    {promptCopied ? 'Copied' : 'Copy'}
+                  </Button>
+                  <div
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: 13.5,
+                      lineHeight: 1.55,
+                      color: 'var(--signal-ink)',
+                      maxHeight: 320,
+                      overflowY: 'auto',
+                      paddingRight: 72,
+                    }}
+                  >
+                    {userRequest}
+                  </div>
+                </Card>
+              </>
+            )}
 
             <SectionHeader>Signal breakdown</SectionHeader>
             <Card>
@@ -1284,7 +1388,7 @@ export default function ResultPage() {
                       path={selectedFile}
                       content={showDiff ? undefined : (fileContent ?? '')}
                       diff={showDiff ? (fileDiff ?? '') : undefined}
-                      maxHeight={520}
+                      maxHeight={'calc(100dvh - 290px)'}
                     />
                   </>
                 )}
@@ -1509,7 +1613,8 @@ export default function ResultPage() {
                 flexDirection: 'column',
                 gap: 10,
                 marginBottom: 12,
-                maxHeight: 360,
+                maxHeight: 'calc(100dvh - 360px)',
+                minHeight: 260,
                 overflowY: 'auto',
               }}
             >
@@ -1580,8 +1685,9 @@ export default function ResultPage() {
                   Thinking…
                 </div>
               )}
+              <div ref={chatEndRef} />
             </div>
-            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap'}}>
               <textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
@@ -1622,7 +1728,7 @@ export default function ResultPage() {
                   kind='secondary'
                   sm
                   onClick={iterateAsNewRun}
-                  disabled={chatBusy || !chatInput.trim()}
+                  disabled={chatBusy || !(chatMessages && chatMessages.length > 0)}
                 >
                   Iterate as new run
                 </Button>
