@@ -226,6 +226,38 @@ body {
   border-top: 1px solid var(--signal-hairline);
   margin: 12px 0;
 }
+/* GFM tables — wrapped so wide tables scroll horizontally on mobile instead of
+ * blowing out the chat bubble width. */
+.signal-md-tablewrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 8px 0;
+}
+.signal-md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+.signal-md-table th,
+.signal-md-table td {
+  border: 1px solid var(--signal-hairline);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+.signal-md-table th {
+  font-weight: 700;
+  background: var(--signal-card-elev);
+}
+/* GFM task-list checkboxes */
+.signal-md li > input[type='checkbox'] {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+/* Nested lists keep a tight top gap rather than the 8px block margin. */
+.signal-md-list .signal-md-list {
+  margin: 4px 0 0;
+}
 
 /* Loading primitives — keyframes used by <Spinner /> + <SkeletonRow /> in
  * frontend/src/signal/components/Loaders.tsx */
