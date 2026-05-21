@@ -96,7 +96,7 @@ Agent tier mapping (`application.yml`):
 
 | Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
 | ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.1-pro-preview` | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.5-flash`        | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
 | WORKHORSE   | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 

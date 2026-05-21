@@ -160,7 +160,7 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     gemini:
-      planning: gemini-3.1-pro-preview
+      planning: gemini-3.5-flash
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
@@ -235,17 +235,17 @@ model-matrix:
         cached-input-per-1m: 0.875
         output-per-1m: 21.00
       notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
-    "[gemini-3.1-pro-preview]":
+    "[gemini-3.5-flash]":
       provider: gemini
-      chain-tier: ARCHITECT
+      chain-tier: CAPABLE
       context-limit: 1048576
       max-output-tokens: 65536
-      display-label: "Gemini 3.1 Pro Preview"
+      display-label: "Gemini 3.5 Flash"
       pricing:
-        input-per-1m: 2.00
-        cached-input-per-1m: 0.50
-        output-per-1m: 12.00
-      notes: "Gemini 3.1 Pro Preview — flagship; Google PLANNING tier. List pricing is tiered ($4/$18 per 1M above 200k input); base-tier rates here. Cached at 25% of input per the matrix's Gemini convention."
+        input-per-1m: 1.50
+        cached-input-per-1m: 0.375
+        output-per-1m: 9.00
+      notes: "Gemini 3.5 Flash — Google PLANNING tier. Eval: completes the HIGH band at verifiedScore 94 (best Gemini, ties Sonnet) in ~49min — slower than Anthropic/OpenAI but higher quality + cheaper than Pro. Cached at 25% of input per the matrix's Gemini convention."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -281,11 +281,11 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3.1-pro-preview }
+      - { provider: gemini, model: gemini-3.5-flash }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3.1-pro-preview }
+      - { provider: gemini, model: gemini-3.5-flash }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
       - { provider: gemini, model: gemini-3-flash-preview }
