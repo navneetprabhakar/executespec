@@ -653,7 +653,7 @@ deps (`pom.xml`).
 
 | Setting               | Value                                |
 | --------------------- | ------------------------------------ |
-| Head migration        | **V199**                              |
+| Head migration        | **V202**                              |
 | Locations             | `classpath:db/migration`             |
 | Baseline              | `baseline-on-migrate=true`, `baseline-version=0` |
 | Ignore patterns       | `*:missing` (tolerates applied-but-missing rows; see below) |
@@ -966,7 +966,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
 | Dev profile                    | `src/main/resources/application-dev.yml`                                                                                   |
 | Prod profile                   | `src/main/resources/application-prod.yml`                                                                                  |
 | Local profile                  | `src/main/resources/application-local.yml`                                                                                 |
-| Flyway migrations              | `src/main/resources/db/migration/V*.sql` (head V199)                                                                       |
+| Flyway migrations              | `src/main/resources/db/migration/V*.sql` (head V202)                                                                       |
 | Terraform root                 | `infra/main.tf`, `infra/variables.tf`, `infra/outputs.tf`, `infra/backend.tf`                                              |
 | Terraform modules              | `infra/modules/{network,database,cache,storage,compute,compute/sa,loadbalancer,secrets}/`                                   |
 | GCE startup script             | `infra/scripts/startup.sh`                                                                                                 |

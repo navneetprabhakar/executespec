@@ -167,8 +167,20 @@ SCORE COMPUTATION GUIDANCE:
 - If spec has no explicit endpoints (non-API project), set endpointCoverage to null.
 - schemaAccuracy = HIGH if spec defines schemas and code matches them; MEDIUM if minor
   deviations; LOW if major mismatches.
-- testCoverageLevel = based on what the spec REQUIRED (if spec says "add unit tests", assess
-  against that).
+- testCoverageLevel = grade against what the spec REQUIRED, using these bands precisely. Do NOT
+  default to PARTIAL out of caution — pick the band the evidence supports:
+    * NONE — no test files exist, or tests are present but don't exercise any spec target.
+    * PARTIAL — SOME spec-required test targets have a test, but at least one required target has
+      NO test at all. (Use this only when a required target is genuinely untested.)
+    * GOOD — EVERY spec-required test target has at least a happy-path test. If the spec says
+      "tests covering each endpoint" and every endpoint has a passing-shape test, that is GOOD —
+      not PARTIAL. This is the correct grade for a run that did what the spec's test ask required.
+    * COMPREHENSIVE — every target has a happy-path test AND at least one error/edge-case test
+      (e.g. 404/validation-failure paths), or the spec explicitly asked for thorough coverage and
+      the suite delivers it.
+  When the spec only implies tests loosely ("include a unit test"), one meaningful test = GOOD.
+  Reserve PARTIAL for real gaps (a required endpoint/module with zero test), not for "could be
+  more thorough."
 - Return valid JSON. Do not wrap in markdown fences.
 """;
 

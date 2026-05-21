@@ -53,6 +53,21 @@ public class ValidationReportService {
   private static final String FLAG_VERIFIED_SCORE = "scoring.v2-verified";
 
   /**
+   * 2026-05-19 — additive scoring rebuild.
+   *
+   * <p>When ON (default true), {@code verifiedScore} is computed as a weighted-additive average
+   * over measured signals with CODE_DELIVERED as the primary factor. When OFF, the legacy
+   * multiplicative formula stays. Kept as a flag because (a) the multiplicative formula is pinned
+   * by ValidationReportServiceVerifiedScoreTest, which lets us roll back without code churn if
+   * customer data shows the new shape misranking real runs, and (b) the previous V145/V167 thrash
+   * on the FREE-tier limit taught us to keep scoring changes reversible.
+   *
+   * <p>See {@link #computeVerifiedScoreAdditive} for the rationale on the weights and the "code
+   * delivered" hard floor.
+   */
+  private static final String FLAG_ADDITIVE_SCORE = "scoring.additive-v2";
+
+  /**
    * Main entry point — called after ReviewerAgent completes, before MergeGate. Non-blocking on
    * failure: catches all exceptions and returns Optional.empty().
    */
@@ -142,7 +157,8 @@ public class ValidationReportService {
               reviewerVerdict,
               unfixedCritical,
               endpointCoveragePercent,
-              testCoverageLevel);
+              testCoverageLevel,
+              filesGenerated);
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
@@ -877,14 +893,170 @@ public class ValidationReportService {
       int unfixedCriticalCount,
       Integer endpointCoveragePercent,
       String testCoverageLevel) {
-    return computeVerifiedScoreMultiplicative(
+    // 6-arg / 7-arg call sites pre-date the 2026-05-19 additive rebuild; they
+    // don't know filesGenerated. Pass -1 to mean "unknown" and let the new
+    // formula fall back to its non-CODE_DELIVERED branch.
+    return computeVerifiedScore(
         finalBuildPassed,
         testsPassed,
         testsTotal,
         reviewerVerdictName,
         unfixedCriticalCount,
         endpointCoveragePercent,
-        testCoverageLevel);
+        testCoverageLevel,
+        -1);
+  }
+
+  /**
+   * 2026-05-19 — primary entry. Dispatches to additive (default) or legacy multiplicative based on
+   * the {@code scoring.additive-v2} feature flag. Both formulae get all the inputs they need; the
+   * multiplicative path simply ignores {@code filesGenerated}.
+   */
+  int computeVerifiedScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated) {
+    boolean additive =
+        featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
+    if (!additive) {
+      return computeVerifiedScoreMultiplicative(
+          finalBuildPassed,
+          testsPassed,
+          testsTotal,
+          reviewerVerdictName,
+          unfixedCriticalCount,
+          endpointCoveragePercent,
+          testCoverageLevel);
+    }
+    return computeVerifiedScoreAdditive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated);
+  }
+
+  /**
+   * 2026-05-19 — additive rebuild. Replaces the multiplicative cliff with a weighted average over
+   * the signals that actually fired.
+   *
+   * <p>Weights:
+   *
+   * <ul>
+   *   <li><b>CODE_DELIVERED (30)</b> — primary factor. {@code filesGenerated > 0} ⇒ 100, otherwise
+   *       0. When this is 0 the headline floors to 0 regardless of other signals — the platform's
+   *       job is to ship code; nothing else matters if it didn't.
+   *   <li><b>BUILD (25)</b> — PASSING ⇒ 100, FAILING ⇒ 0. Skipped from the weighted average when
+   *       {@code finalBuildPassed} is null (single-shot or patch-mode runs that don't run compile).
+   *   <li><b>TESTS (20)</b> — when real tests ran: linear {@code passed/total × 100}. When no tests
+   *       ran but {@link AccuracyReport#getTestCoverageLevel()} graded coverage: damped scale
+   *       capped at 70 (GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10) — LLM grading is fuzzy and
+   *       shouldn't earn full credit. Null/missing ⇒ skipped.
+   *   <li><b>REVIEWER (20)</b> — CLEAN=100, FIXED_ISSUES=85, UNRESOLVED_ISSUES=40,
+   *       REVIEW_FAILED=10. Null ⇒ skipped.
+   *   <li><b>CRITICALS (5)</b> — 100 − 20 × unfixedCriticalCount, floored at 0. Always counts (zero
+   *       criticals earns the full 5 pts).
+   * </ul>
+   *
+   * <p>Why additive over multiplicative: the multiplicative formula treats every factor as a gate —
+   * one low factor crushes the headline. That produced "Failed 50%" banners on runs where the build
+   * passed and the reviewer ran clean, just because the AccuracyAssessment LLM happened to grade
+   * test coverage as PARTIAL. The customer-facing read of those runs was a lie. Additive lets the
+   * user see "build passed + reviewer clean + tests light" and decide.
+   *
+   * <p>Why CODE_DELIVERED at 30: it's the only signal that maps directly to "the platform did its
+   * job." Build/tests/reviewer are quality measures on top. When code wasn't generated the other
+   * signals are theatre — hence the hard floor.
+   *
+   * <p>Why endpointFactor is gone: the reviewer's wiring pass already catches the same class of bug
+   * the endpoint count was meant to catch. Double-counting forced two trust gates into the old
+   * formula. Drop the signal, drop the gates.
+   */
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated) {
+
+    // CODE_DELIVERED hard floor. -1 = unknown (legacy 7-arg call) → treat as
+    // "delivered" so the call site doesn't accidentally tank scores it can't see.
+    boolean codeKnown = filesGenerated >= 0;
+    boolean codeDelivered = !codeKnown || filesGenerated > 0;
+    if (codeKnown && filesGenerated == 0) {
+      return 0;
+    }
+
+    double weightedSum = 0.0;
+    double weightTotal = 0.0;
+
+    // CODE_DELIVERED — 30 pts, always counted when known (we just guarded the 0 case).
+    if (codeKnown) {
+      weightedSum += 30.0 * (codeDelivered ? 100.0 : 0.0);
+      weightTotal += 30.0;
+    }
+
+    // BUILD — 25 pts, skipped when not measured.
+    if (finalBuildPassed != null) {
+      weightedSum += 25.0 * (Boolean.TRUE.equals(finalBuildPassed) ? 100.0 : 0.0);
+      weightTotal += 25.0;
+    }
+
+    // TESTS — 20 pts. Real run data > LLM grade. Skip entirely if neither present.
+    if (testsTotal > 0) {
+      double ratio = Math.max(0.0, Math.min(1.0, (double) testsPassed / Math.max(1, testsTotal)));
+      weightedSum += 20.0 * 100.0 * ratio;
+      weightTotal += 20.0;
+    } else if (testCoverageLevel != null) {
+      // UNKNOWN damps to 50, it does NOT drop the slot. Rationale: RL-2026-05-003.
+      // Dropping UNKNOWN let a run with no confirmed tests score 100 via the
+      // "unmeasured signals don't count" path. A conservative 50 closes that hole
+      // until real test execution (RL-2026-05-001) replaces the LLM grade entirely.
+      Double dampedScore =
+          switch (testCoverageLevel) {
+            case "GOOD", "COMPREHENSIVE" -> 70.0; // capped — LLM grade, not measured
+            case "PARTIAL" -> 40.0;
+            case "UNKNOWN" -> 50.0;
+            case "NONE" -> 10.0;
+            default -> null;
+          };
+      if (dampedScore != null) {
+        weightedSum += 20.0 * dampedScore;
+        weightTotal += 20.0;
+      }
+    }
+
+    // REVIEWER — 20 pts.
+    if (reviewerVerdictName != null) {
+      double reviewerScore =
+          switch (reviewerVerdictName) {
+            case "CLEAN" -> 100.0;
+            case "FIXED_ISSUES" -> 85.0;
+            case "UNRESOLVED_ISSUES" -> 40.0;
+            case "REVIEW_FAILED" -> 10.0;
+            default -> 50.0;
+          };
+      weightedSum += 20.0 * reviewerScore;
+      weightTotal += 20.0;
+    }
+
+    // CRITICALS — 5 pts. Always present.
+    double criticalsScore = Math.max(0.0, 100.0 - 20.0 * Math.max(0, unfixedCriticalCount));
+    weightedSum += 5.0 * criticalsScore;
+    weightTotal += 5.0;
+
+    if (weightTotal <= 0.0) return 0;
+    double raw = weightedSum / weightTotal;
+    return (int) Math.max(0, Math.min(100, Math.round(raw)));
   }
 
   /**

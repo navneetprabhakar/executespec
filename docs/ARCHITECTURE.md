@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head: `V199`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head: `V202`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -74,7 +74,7 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V199       │             │   → GitHub / Bitbucket    │
+   │ Flyway V1..V202       │             │   → GitHub / Bitbucket    │
    │ ~115 entities         │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
@@ -354,22 +354,22 @@ synthesises `WorkerReports`/`ReviewReport`, runs
 - LLM-rendered narrative via
   [`report/ValidationReportGenerator`](../src/main/java/com/navneet/executespec/report/ValidationReportGenerator.java)
   through `FallbackLlmRouter` with `FallbackMode.IMMEDIATE`.
-- Computes `verifiedScore` (multiplicative since 264cca58):
+- Computes `verifiedScore` — additive-weighted by default since 2026-05-19
+  (flag `scoring.additive-v2`, seeded by V201; `computeVerifiedScoreAdditive`):
   ```
-  verifiedScore = clamp(0, 100,
-       100 × buildFactor
-           × testFactor
-           × reviewerFactor
-           × endpointFactor
-           × criticalDamper)
+  verifiedScore = clamp(0, 100, round( Σ(weight × slotScore) / Σ(weight) ))   // over fired slots
+  CODE_DELIVERED(30)  filesGenerated>0 ⇒ 100 else 0 (hard 0-floor on the headline)
+  BUILD(25)           PASSING 100 / FAILING 0; skipped when finalBuildPassed null
+  TESTS(20)           passed/total ×100 if tests ran; else damped LLM grade (G/C=70, P=40, N=10)
+  REVIEWER(20)        CLEAN 100 / FIXED 85 / UNRESOLVED 40 / FAILED 10
+  CRITICALS(5)        100 − 20×unfixedCriticalCount, floored 0
   ```
-  Trust gates:
-  - `endpointFactor` floors at `reviewerFactor` when reviewer ∈ {CLEAN,
-    FIXED_ISSUES} (2026-05-10, PR #95): blocks the AccuracyAssessment LLM's
-    read-budget-limited endpoint count from dragging down a healthy wiring pass.
-  - `testFactor` floors at `reviewerFactor` when `testsTotal==0 &&
-    endpointCoveragePercent>=95 && reviewer ∈ {CLEAN, FIXED_ISSUES}` (2026-05-16):
-    blocks the same false-negative for spec-minimal-tests runs.
+  Unmeasured signals drop from both numerator and denominator (no implicit
+  ×1.0). `endpointFactor` and the two old trust-gate floors are retired — the
+  reviewer's wiring pass already covers the bug class they guarded. The legacy
+  multiplicative formula (`buildFactor × testFactor × reviewerFactor ×
+  endpointFactor × criticalDamper`, multiplicative since 264cca58) survives
+  behind `scoring.additive-v2=false`.
 - Computes `rubricScore` (additive 25/20/20/15/10/10 dimension breakdown, PR-E
   Phase A, 2026-05-13 / V194). Spec-aware via `rubricTestPointsFromCoverageLevel`.
 - Reroutes provider OPENAI → ANTHROPIC for the report LLM call to dodge Spring AI
@@ -551,7 +551,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head is `V199`. All migrations live in
+Schema is managed by Flyway. Migration head is `V202`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.

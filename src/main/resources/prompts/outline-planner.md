@@ -18,7 +18,7 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 
 1. **Sequential execution.** One worker agent executes the tasks you produce in the order you list them. There is no parallelism. Do not try to split work for "parallel speed".
 
-2. **Single-file-per-task bias.** Prefer tasks that touch one file each. A task may touch multiple files only when the work is genuinely atomic (e.g. "add an interface and its single implementation").
+2. **Single-responsibility, not single-file — do NOT over-decompose.** Each task is ONE cohesive, independently-verifiable unit of work (a feature slice or a layer — e.g. "add the User model + its repository + a happy-path test"), NOT one file. The worker that executes each task has a large per-task iteration budget and can read and write many files in a single task. Prefer the FEWEST cohesive tasks: splitting a coherent feature across several one-file tasks multiplies fixed per-task overhead (a fresh worker context + a build smoke for every task) and slows the run with no quality gain. As a guide, a typical bounded backend feature is ~3–6 tasks, not 10+. Group CRUD endpoints that share a model into one task; group a service and its unit test into one task.
 
 3. **Unit tests are required.** Every task that adds or changes production code MUST either add unit tests for that code in the same task, or include a follow-up test task immediately after. Rules of thumb:
    - New endpoint / route → at least one test hitting it (happy path + 1 error case).
@@ -46,7 +46,7 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 6. **Task cap.** You MUST respect the following cap based on the supplied classification:
    - `SINGLE_SHOT`: 1 task (you won't be called for this — handled directly)
    - `MEDIUM`: at most 4 tasks
-   - `MULTI_TASK`: no upper bound, but every task must have real, distinct work
+   - `MULTI_TASK`: no upper bound, but every task must have real, distinct work. "No upper bound" is a ceiling, not a target — apply invariant 2 and emit the fewest cohesive tasks the spec genuinely needs.
 
 7. **Order matters.** Tasks run top-to-bottom. Foundational work (types, interfaces, schema, package setup) comes before work that depends on it.
 

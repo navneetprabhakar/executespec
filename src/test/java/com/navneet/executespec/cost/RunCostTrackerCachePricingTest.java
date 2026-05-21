@@ -110,28 +110,30 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(10.0, within(0.001));
   }
 
-  // ── Gemini — same shape as OpenAI. Cache rate $0.875 (25% of $3.50 input). ─
+  // ── Gemini — same shape as OpenAI. Cache rate = 10% of input (Google's 90% context-cache
+  // discount, ai.google.dev pricing; corrected from the earlier 25% matrix convention 2026-05-21).
+  // ─
 
   @Test
-  void gemini_cacheRead_billedAtYaml0_875_perM() throws Exception {
-    // YAML post-2026-05-06: cached-input-per-1m = $0.875 (25% of $3.50 input).
-    seedPricing("gemini", "gemini-3-pro-preview", 3.50, 0.875, 21.00);
+  void gemini_cacheRead_billedAtYaml0_35_perM() throws Exception {
+    // YAML 2026-05-21: cached-input-per-1m = $0.35 (10% of $3.50 input).
+    seedPricing("gemini", "gemini-3-pro-preview", 3.50, 0.35, 21.00);
     // 1M promptTokenCount (includes 200K cachedContentTokenCount).
     // Uncached portion = 800K × $3.50 = $2.80.
-    // Cache portion = 200K × $0.875 = $0.175.
-    // Total = $2.975.
+    // Cache portion = 200K × $0.35 = $0.07.
+    // Total = $2.87.
     double cost = price("gemini", "gemini-3-pro-preview", 1_000_000, 0, 0, 200_000);
-    assertThat(cost).isEqualTo(2.975, within(0.001));
+    assertThat(cost).isEqualTo(2.87, within(0.001));
   }
 
   @Test
-  void gemini_flash_cacheRate_0_125_perM() throws Exception {
-    // YAML: gemini-3-flash-preview input $0.50, cached $0.125.
-    seedPricing("gemini", "gemini-3-flash-preview", 0.50, 0.125, 3.00);
-    // 100K total in, 50K cached → 50K uncached × $0.50/M + 50K cached × $0.125/M
-    // = $0.025 + $0.00625 = $0.03125
+  void gemini_flash_cacheRate_0_05_perM() throws Exception {
+    // YAML 2026-05-21: gemini-3-flash-preview input $0.50, cached $0.05 (10% of input).
+    seedPricing("gemini", "gemini-3-flash-preview", 0.50, 0.05, 3.00);
+    // 100K total in, 50K cached → 50K uncached × $0.50/M + 50K cached × $0.05/M
+    // = $0.025 + $0.0025 = $0.0275
     double cost = price("gemini", "gemini-3-flash-preview", 100_000, 0, 0, 50_000);
-    assertThat(cost).isEqualTo(0.03125, within(0.0001));
+    assertThat(cost).isEqualTo(0.0275, within(0.0001));
   }
 
   // ── YAML cached rate missing — defensive fallback to 10% of input ─

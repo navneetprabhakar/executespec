@@ -62,7 +62,7 @@ For LARGE specs (15-50 tasks) and LEGACY specs (50+ tasks):
 
 1. **Sequential execution.** Worker runs tasks in plan order. No parallelism at execution time — parallelism happens during expansion only.
 
-2. **Single-feature-per-task bias.** Each task is one cohesive change. Multi-file is OK only when the work is genuinely atomic.
+2. **Single-responsibility, not single-file — do NOT over-decompose.** Each task is one cohesive change (a feature or a layer) and may span several files. The worker has a large per-task iteration budget, so prefer the FEWEST cohesive tasks over many fine-grained ones — over-fragmentation multiplies fixed per-task overhead (fresh worker context + a build smoke each) and slows the run without improving quality. Cohesion, not file count, is the unit.
 
 3. **Unit tests must be planned.** If the spec adds production code, plan a test task immediately after (same file or sibling test file). If the project genuinely cannot be tested (one-file static page), say so in `planSummary`.
 
