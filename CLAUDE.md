@@ -9,7 +9,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 ## Architecture (5-minute orientation)
 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
-- **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 6. Two coexisting chromes share Zustand stores: V2 sidebar shell (under `frontend/src/components/layout/`) and V3 top-bar shell (under `frontend/src/v3/`).
+- **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. Single active chrome — **Signal** (under `frontend/src/signal/`); the legacy V2 sidebar / V3 / V4 shells were retired 2026-05-15 (commit `5f5e4aaa`), with `App.tsx` keeping a `LegacyRedirect` for old bookmarks.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
 - **Codebase shape:** 72 top-level packages under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). 98 REST controllers, 78 entities, 186 Flyway migrations, ~88 prompt files. Frontend ~75K LOC.
 
@@ -156,7 +156,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 2. **Per-package `CLAUDE.md`** (e.g. `agent/CLAUDE.md`, `state/CLAUDE.md`) when entities, repository methods, agents, or migrations change in that package.
 3. **`docs/CODEMAP.md`** when new top-level packages, entities, agents, or DB migrations are added.
 4. **`docs/document_map.md`** when a doc is added or removed under `docs/`.
-5. **`docs/plans/pending.md`** when an in-flight item changes status or a new pending plan is added.
+5. **`docs/reason-log/2026-05.md`** (the in-flight tracker since `docs/plans/pending.md` was retired) when an in-flight item changes status or a new decision is recorded.
 6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`docs/design/*`** when tokens / theming / a11y commitments change.
 7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
 
@@ -437,12 +437,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 ### In progress / not-yet-merged
 
-- **`feature/full-project-review-2026-05-11`** — current branch; doc-refresh pass on top of the 2026-05-11 full-project review.
+- **dev → main release (PR #157, honesty pass V199→V203)** — merged to `dev` via PRs #155 + #156 (2026-05-21); promotion to `main` pending. Includes the planner over-decomposition relaxation (RL-2026-05-011) whose validating eval is in flight.
 - **`feature/programbench-benchmark`** — V2/V3 unification pass (88+18 file moves, 25 class renames) + ProgramBench adapter + step-2 wire-in into V2 worker stack. Validated locally across 3 providers (OpenAI / Anthropic / Gemini) on a Python single-shot spec; pipeline healthy. PR open against dev.
 - **`feature/swebench-adapter`** (PR #88, NOT merged) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Empirical: medium matrix 67% / hard matrix 60% across 3 providers.
-- **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/plans/pending.md` (consolidated) and per-package `CLAUDE.md` files.
-- Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`docs/plans/pending.md`](docs/plans/pending.md) §1.3 Gap 2.
-- V2 batch execution — scoped in [`docs/plans/pending.md`](docs/plans/pending.md) §3; not started.
+- **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/reason-log/2026-05.md` and per-package `CLAUDE.md` files.
+- Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md).
+- V2 batch execution — scoped in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md); not started.
 
 ### Known tech debt
 
