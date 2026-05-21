@@ -51,6 +51,7 @@ The user-shaped view of the system. Useful for PMs, support, and anyone writing 
 | Workflows | [`docs/WORKFLOWS.md`](WORKFLOWS.md) | The canonical workflow catalogue: BUILD mode, PATCH mode, the four autofix surfaces (PR Review / TechDebt / CI-failure webhook / Code Review), multi-repo runs, project chat, PR review submission. | When you need a step-by-step of a specific user workflow. |
 | Project user journeys | [`docs/project-user-journeys.md`](project-user-journeys.md) | Project-scoped journeys: create project, link repos, run architecture refresh, project chat, tech-debt fix, code review, share-link invite. | When designing or QA-ing a project-workspace feature. |
 | User journeys | [`docs/user-journeys.md`](user-journeys.md) | Non-project journeys: anonymous landing, register, first run, upgrade, billing change, account close. | When designing or QA-ing the unauthenticated and solo-user surfaces. |
+| Benchmark strategy | [`docs/plans/benchmark-strategy.md`](plans/benchmark-strategy.md) | Proposed plan for publishable PATCH (SWE-bench Lite/Verified) and BUILD (Commit0/BaxBench/DevBench) benchmarks — ranked by publishability, with the cost model and a staged rollout. | When deciding which benchmark to run, what it costs, or how to publish the result. |
 
 ## 4. Auth + Enterprise
 

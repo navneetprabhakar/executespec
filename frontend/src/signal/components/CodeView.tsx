@@ -21,7 +21,7 @@ export function CodeView({
   path: string;
   content?: string;
   diff?: string;
-  maxHeight?: number;
+  maxHeight?: number | string;
 }) {
   const lang = guessLang(path);
   const isDiff = typeof diff === 'string' && diff.length > 0;

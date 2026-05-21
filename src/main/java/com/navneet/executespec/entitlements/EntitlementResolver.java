@@ -134,7 +134,7 @@ public class EntitlementResolver {
    * Tier key — picks the higher rank between user.tier and org.tier. See class doc for the
    * rationale.
    */
-  String resolveTier(AppUser user) {
+  public String resolveTier(AppUser user) {
     String userTier = normalize(user.getTier() != null ? user.getTier() : "FREE");
     String orgTier = userTier;
     if (user.getOrgId() != null) {

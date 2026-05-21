@@ -75,7 +75,9 @@ class ReviewerAgentVerdictParsingTest {
    * private helper without a Spring context.
    */
   private static ReviewerAgent agent() {
-    return new ReviewerAgent(null, null, null, null, null, null);
+    // 7 nulls: WorkerAgent, BuildProjectTool, ObjectMapper, Metrics, FeatureFlagService,
+    // PostEditFormatter, ModelResolver. determineOverall touches none of them.
+    return new ReviewerAgent(null, null, null, null, null, null, null);
   }
 
   // ── Structured-verdict path ─────────────────────────────────────────────

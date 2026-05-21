@@ -157,47 +157,10 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      # 2026-04-19 — bumped workhorse from haiku-4.5 to sonnet-4.6 for better
-      # code quality on MEDIUM tasks. Higher $/call but planner classifies most
-      # tasks as LOW (lightweight stays haiku) so net cost rise is modest.
-      workhorse: claude-sonnet-4-6
+      workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     gemini:
-      # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
-      # ("print(default_api.submitPlan(...))") causing MALFORMED_FUNCTION_CALL.
-      # gemini-3-flash-preview is the newer tool-call-reliable model.
-      #
-      # 2026-05-04 — eval-matrix data showed Gemini was 3.5-4× slower than
-      # Anthropic/OpenAI on the medium band (1049s vs 295s/225s) when ALL
-      # tiers were on flash. Bumping PLANNING + WORKHORSE to gemini-3-pro-
-      # preview to match the strength of Anthropic Sonnet / OpenAI gpt-5.4
-      # in those tiers; LIGHTWEIGHT stays on flash since LOW-band scaffolds
-      # don't benefit from Pro and the cost/speed trade-off favours flash
-      # for plumbing tasks. Pro is ~6-8× per-token vs flash; medium-band
-      # runs jump from ~$0.10 to ~$0.70 — still cheaper than equivalent
-      # Anthropic Sonnet runs.
-      #
-      # NOTE: gemini-3-pro is preview-only as of 2026-05-04. Codebase was
-      # already on gemini-3-flash-preview so the preview-tier risk envelope
-      # is unchanged. Stable fallback would be gemini-2.5-pro (older
-      # generation but no preview suffix).
-      #
-      # 2026-05-16 — WORKHORSE rebalanced to Flash. Root cause from todo-app
-      # eval (run b943a58d, Gemini): worker on Pro tier burned 108k input
-      # tokens with 0 % implicit-cache hits, costing $0.41 against
-      # Anthropic's $0.23 (sonnet-4-6) and OpenAI's $0.05 (gpt-5.4-mini)
-      # for the same single-shot spec. Pro's 4096-token byte-identical
-      # prefix requirement loses every cache hit on a WorkerAgent whose
-      # system prompt is rebuilt per call (tool schemas + dynamic
-      # substitutions drift). Flash's 1024 threshold actually catches.
-      #
-      # This mirrors the reviewer fix from e9d0b6e8 (Reviewer was on Pro
-      # at 0 % cache → moved to Flash). PLANNING tier stays Pro so outline
-      # / coherence-planner / arch-doc keep deep reasoning. Worker on
-      # LOW/MEDIUM tasks is plumbing — Flash is the right call. Per
-      # CLAUDE.md the tier ladder already routes HIGH-complexity tasks to
-      # PLANNING tier so structurally demanding workers still get Pro.
-      planning: gemini-3-pro-preview
+      planning: gemini-3.5-flash
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
@@ -205,7 +168,6 @@ model-matrix:
       workhorse: gpt-5.4-mini
       lightweight: gpt-5.4-mini
 
-  # ── Canonical model registry (single source of truth for all model metadata) ──
   models:
     claude-opus-4-6:
       provider: anthropic
@@ -259,14 +221,9 @@ model-matrix:
       display-label: "Gemini 3 Flash Preview"
       pricing:
         input-per-1m: 0.50
-        # 2026-05-06 — Gemini context-cache reads are billed at 25% of input rate per
-        # Vertex AI pricing (https://cloud.google.com/vertex-ai/generative-ai/pricing).
-        # Prior value 0.05 (10%) was wrong and was being overridden by a hardcoded
-        # 0.25 multiplier inside RunCostTracker. After the 2026-05-06 consolidation
-        # YAML is the only knob; updating to the real rate restores cost accuracy.
-        cached-input-per-1m: 0.125
+        cached-input-per-1m: 0.05
         output-per-1m: 3.00
-      notes: "Gemini 3 Flash Preview — LIGHTWEIGHT tier for Google (LOW-band scaffolds)."
+      notes: "Gemini 3 Flash Preview — WORKHORSE + LIGHTWEIGHT tier for Google. Cached at 10% of input (Google's 90% context-cache discount)."
     "[gemini-3-pro-preview]":
       provider: gemini
       chain-tier: ARCHITECT
@@ -274,13 +231,21 @@ model-matrix:
       max-output-tokens: 65536
       display-label: "Gemini 3 Pro Preview"
       pricing:
-        # 2026-05-04 — Pro pricing per Google AI list (~6-8× flash). Verified
-        # on https://ai.google.dev/gemini-api/docs/pricing (preview tier).
         input-per-1m: 3.50
-        # 2026-05-06 — 25% of input per Vertex AI cached-read rate.
-        cached-input-per-1m: 0.875
+        cached-input-per-1m: 0.35
         output-per-1m: 21.00
-      notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
+      notes: "Gemini 3 Pro Preview — registry entry retained as the GeminiNativeToolClient default-model constant; not tier-routed (PLANNING moved to gemini-3.5-flash, WORKHORSE/LIGHTWEIGHT to gemini-3-flash-preview). Cached at 10% of input (Google's 90% context-cache discount)."
+    "[gemini-3.5-flash]":
+      provider: gemini
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.5 Flash"
+      pricing:
+        input-per-1m: 1.50
+        cached-input-per-1m: 0.15
+        output-per-1m: 9.00
+      notes: "Gemini 3.5 Flash — Google PLANNING tier. Eval: completes the HIGH band at verifiedScore 94 (best Gemini, ties Sonnet) in ~49min — slower than Anthropic/OpenAI but higher quality + cheaper than Pro. Cached at 10% of input (Google's 90% context-cache discount; input/output from ai.google.dev pricing)."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -289,11 +254,6 @@ model-matrix:
       display-label: "GPT-5.4"
       pricing:
         input-per-1m: 2.50
-        # 2026-05-06 — OpenAI prompt caching bills cached_tokens at 50% of input rate
-        # for the gpt-4o / gpt-5.x family (https://platform.openai.com/docs/guides/prompt-caching).
-        # The o1 / o3 reasoning family is 25% but those aren't in the matrix today.
-        # Prior value 0.25 (10%) was wrong and was being overridden by a hardcoded
-        # 0.50 multiplier inside RunCostTracker — fixed after the 2026-05-06 consolidation.
         cached-input-per-1m: 1.25
         output-per-1m: 15.00
       notes: "All tiers for OpenAI (PLANNING + WORKHORSE + LIGHTWEIGHT)."
@@ -305,12 +265,10 @@ model-matrix:
       display-label: "GPT-5.4 Mini"
       pricing:
         input-per-1m: 0.75
-        # 2026-05-06 — 50% of input per gpt-5.x family rate (see gpt-5.4 above).
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
 
-  # ── Legacy model name aliases (for in-flight runs and DB backward compat) ─────
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
     claude-sonnet-4-5: claude-sonnet-4-6
@@ -318,37 +276,32 @@ model-matrix:
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
     gemini-3-flash: gemini-3-flash-preview
-    gemini-3.1-pro-preview: gemini-3-flash-preview
 
-  # ── Fallback chains by tier (replaces hardcoded FallbackLlmRouter chains) ─────────────
   fallback-chains:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-pro-preview }
+      - { provider: gemini, model: gemini-3.5-flash }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-pro-preview }
+      - { provider: gemini, model: gemini-3.5-flash }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
       - { provider: gemini, model: gemini-3-flash-preview }
       - { provider: openai, model: gpt-5.4 }
 
-  # ── FREE tier model lock ──────────────────────────────────────────────────────
   free-tier:
     provider: openai
     model: gpt-5.4-mini
 
   agent-tier-map:
-    # V2 agents
-    OutlinePlannerAgent: PLANNING           # v2.6.2 hierarchical-planner phase 1
-    TaskExpanderAgent: WORKHORSE            # v2.6.2 hierarchical-planner phase 2 (parallel)
-    CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
+    OutlinePlannerAgent: PLANNING
+    TaskExpanderAgent: WORKHORSE
+    CoherencePlannerAgent: LIGHTWEIGHT
     ReviewerAgent: PLANNING
-    SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
+    SmartClassifierAgent: LIGHTWEIGHT
     WorkerAgent: WORKHORSE
-    # Shared non-tool-calling agents (use FallbackLlmRouter)
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
     ApiTestSuiteAgent: WORKHORSE
@@ -356,27 +309,18 @@ model-matrix:
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
     ProjectChatCompiler: PLANNING
-    ProjectChatCompactor: LIGHTWEIGHT       # v2.6.1 — chat history compaction
+    ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
-    # v2.5.12 — 3-step architecture pipeline (bumped to PLANNING v2.6.1 — Haiku/WORKHORSE missed cross-repo wiring and mangled spec compilation)
-    RepoArchitectureGenerator: PLANNING      # per-repo HLD+LLD from codemap
-    ArchitectureDocGenerator: PLANNING       # cross-repo synthesis from per-repo docs
-    ProjectDocGeneratorService: WORKHORSE    # EXPLANATION / SETUP docs
+    RepoArchitectureGenerator: PLANNING
+    ArchitectureDocGenerator: PLANNING
+    ProjectDocGeneratorService: WORKHORSE
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE
-    # v2.6.4 — PR review + code review agents. Both PLANNING because review-class
-    # quality is the whole point; cost is amortised across a single review per PR
-    # (PR Review) or a single scan per repo (Code Review LLM augmentation pass).
     PrReviewAgent: PLANNING
     CodeReviewAgent: PLANNING
   failover-order:
-    # v2.6.0 — was `google`; enum was renamed GOOGLE → GEMINI in v2.5.13 but
-    # this yaml list was missed. `ModelResolver.selectAdaptiveProvider` calls
-    # `LlmProvider.valueOf(name.toUpperCase())` on each list entry and crashed
-    # the planner with "No enum constant LlmProvider.GOOGLE". See memory rule
-    # feedback_v2_provider_naming.md: "V2 uses 'gemini' not 'google'".
     anthropic:
       - openai
       - gemini

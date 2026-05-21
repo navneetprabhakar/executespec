@@ -6,6 +6,7 @@ import {SkeletonRow} from '@/signal/components/Loaders';
 import {Search, Bell, Plus, Check, Chat as ChatIcon} from '@/signal/icons/icons';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
+import {runTitleFor} from '@/signal/lib/runUtils';
 
 type Maybe<T> = T | null | undefined;
 
@@ -313,22 +314,7 @@ export default function HomePage() {
                 key={r.runId}
                 to={isLive ? `/live/${r.runId}` : `/result/${r.runId}`}
                 dot={statusToDot(status)}
-                title={(() => {
-                  // Prefer the agent-generated runTitle (concise summary,
-                  // <60 chars) over the raw userRequest, which is typically
-                  // 200+ chars and looks terrible truncated in a list row.
-                  const rAny = r as unknown as {
-                    runTitle?: string;
-                    title?: string;
-                    userRequest?: string;
-                  };
-                  return (
-                    rAny.runTitle?.trim() ||
-                    rAny.title?.trim() ||
-                    rAny.userRequest?.trim() ||
-                    `Run ${shortRunId(r.runId)}`
-                  );
-                })()}
+                title={runTitleFor(r)}
                 meta={
                   <>
                     <span className='mono'>{shortRunId(r.runId)}</span>

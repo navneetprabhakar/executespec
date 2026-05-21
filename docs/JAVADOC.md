@@ -1,6 +1,6 @@
 # JAVADOC
 
-> Compact reference of the public Java surface for ExecuteSpec backend. Version `1.0.0-M1`. Migration head `V199`. All paths are relative to `src/main/java/com/navneet/executespec/` unless otherwise noted. Grep-friendly: one entity / method / class per line where possible.
+> Compact reference of the public Java surface for ExecuteSpec backend. Version `1.0.0-M1`. Migration head `V202`. All paths are relative to `src/main/java/com/navneet/executespec/` unless otherwise noted. Grep-friendly: one entity / method / class per line where possible.
 
 ## 1. Controllers (REST surface)
 
@@ -1749,7 +1749,7 @@ Format: `EntityName  @Table(name="...")  approx N columns  notable FK columns / 
 
 ## Verification
 
-All API contracts, agent tier mappings, tool schemas, and entity schemas reflect the codebase as of `1.0.0-M1` / V199. Tier mappings driven by `application.yml model-matrix.agent-tier-map`. Default LLM provider is **anthropic** since 1.0.0-M1.
+All API contracts, agent tier mappings, tool schemas, and entity schemas reflect the codebase as of `1.0.0-M1` / V202. Tier mappings driven by `application.yml model-matrix.agent-tier-map`. Default LLM provider is **anthropic** since 1.0.0-M1.
 
 Known anomalies / engineering-honest notes:
 

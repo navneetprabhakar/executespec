@@ -7,9 +7,18 @@ The pre-1.0 development history (the v2.5.x line that ran from 2026-04-04 throug
 
 ---
 
-## [Unreleased] — work on `dev` since 1.0.0-M1 (range 2026-05-02 → 2026-05-12)
+## [Unreleased] — work on `dev` since 1.0.0-M1 (range 2026-05-02 → 2026-05-19)
 
-Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-track feature push around the V2 patch-mode pipeline, four customer-facing autofix surfaces, and the structural fixes that came out of the 2026-05-08 SWE-bench Lite eval.
+Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-track feature push around the V2 patch-mode pipeline, four customer-facing autofix surfaces, and the structural fixes that came out of the 2026-05-08 SWE-bench Lite eval. The 2026-05-19 **honesty pass** (`feature/honesty-pass-2026-05-19`, V199 → V202) follows up with scoring, quota, reviewer, and eval changes.
+
+### Changed — honesty pass (2026-05-19, V199 → V202)
+
+- **Additive `verifiedScore`** (V201, flag `scoring.additive-v2`, default ON) — rebuilds the headline score as a weighted average over the signals that actually fired: `CODE_DELIVERED(30) + BUILD(25) + TESTS(20) + REVIEWER(20) + CRITICALS(5)`. Unmeasured signals drop from numerator and denominator instead of multiplying by 1.0; hard 0-floor when `filesGenerated == 0`; no-real-tests falls back to damped LLM-graded coverage capped at 70. Replaces the multiplicative cliff that produced "Failed 50%" banners on runs with a passing build + clean reviewer. `endpointFactor` and the two 2026-05-10 / 2026-05-16 trust gates are retired. Legacy multiplicative formula stays behind the flag-off path (`ValidationReportServiceVerifiedScoreTest`); new shape pinned by `ValidationReportServiceAdditiveScoreTest`. `ResultPage` now leads with a plain-English verdict sentence over measured signals + an explicit "not measured" list.
+- **FREE tier 5 → 15 runs/month** (V200, reverses V167) — rewrites `tier_config.monthly_run_limit` / `billing_plan.run_limit` / `billing_plan_limit`. `UsageTrackingService` now reads the RUNS quota from `tier_config` keyed by `EntitlementResolver.resolveTier(user)` (canonical higher-of org/user tier) instead of `billing_plan_limit`, fixing false-positive limit hits when a promoted org sat on a stale FREE subscription row (the V199 BUG-009 drift).
+- **Reviewer fix-the-red-build third pass** (V202, flag `reviewer.third-pass.enabled`, default ON) — when the final build is still red after general + wiring + post-edit-formatter, runs one targeted pass with the verbatim build error as input (25-iter / 360s), then re-runs `buildProject` and keeps the post-pass state. `FIXED_ISSUES` verdicts now emit a synthetic visibility issue (`SYNTH-FIX-1`, `autoFixed=true`) so the Issues panel reflects what the reviewer changed (filtered out of the critical penalty).
+- **Worker tests-are-mandatory directive** — `SequentialExecutor.SYSTEM_PROMPT_BASE` now requires a happy-path + error/edge test for any task touching a function / endpoint / module before `completeTask`. `AccuracyAssessmentService` grades `testCoverageLevel` against explicit NONE/PARTIAL/GOOD/COMPREHENSIVE bands instead of defaulting to PARTIAL.
+- **Tier-eval-v2** (`eval/v2/`, `POST /api/admin/eval/v2/run`, `scripts/tier-eval-v2.sh`) — production-shaped per-tier (LIGHTWEIGHT / PLANNING / WORKHORSE) × provider eval that drives the live agent prompts + tool schemas through `LlmRouter` and scores tool-call validity, cache hit rate, latency, cost.
+- **`FeatureFlag.Scope.GLOBAL`** added (synonym for `PLATFORM`) — a `GLOBAL`-scoped seed row previously threw `No enum constant ...Scope.GLOBAL` on `repository.findAll()`, emptying the entire flag cache and silently disabling every flag.
 
 ### Added — patch mode + SWE-bench adapter (`RunMode.PATCH`, V182, V183)
 

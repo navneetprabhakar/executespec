@@ -11,7 +11,7 @@ type CycleTab = 'monthly' | 'yearly';
 // price + currency; this map is the source for the bullet list.
 const FEATURES: Record<string, string[]> = {
   FREE: [
-    '✓ 5 runs / month',
+    '✓ 15 runs / month',
     '✓ 1-credit specs only',
     '✓ $3 hard cost cap',
     '○ Single repo only',
@@ -304,7 +304,7 @@ export default function PlansPage() {
                   {p.tier === 'FREE'
                     ? 'Try ExecuteSpec without a card'
                     : p.tier === 'TEAM'
-                      ? 'Minimum 2 seats. Annual billing.'
+                      ? 'Add seats as your team grows. Annual billing.'
                       : p.tier === 'ENTERPRISE'
                         ? 'SSO, SLA, dedicated support'
                         : 'Hidden plan — grandfathered users only'}

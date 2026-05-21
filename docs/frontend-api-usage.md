@@ -821,7 +821,7 @@ The minimum checklist for landing a new endpoint without breaking either side:
 
 6. **Migration trail** — if the endpoint reads / writes a new entity:
 
-   - Add the `Vxxx__*.sql` migration. Migration head as of this writing is **V199**.
+   - Add the `Vxxx__*.sql` migration. Migration head as of this writing is **V202**.
    - Cross-link it from the entity row in the touching package's `CLAUDE.md`.
 
 7. **Tests**:
