@@ -221,9 +221,9 @@ model-matrix:
       display-label: "Gemini 3 Flash Preview"
       pricing:
         input-per-1m: 0.50
-        cached-input-per-1m: 0.125
+        cached-input-per-1m: 0.05
         output-per-1m: 3.00
-      notes: "Gemini 3 Flash Preview — LIGHTWEIGHT tier for Google (LOW-band scaffolds)."
+      notes: "Gemini 3 Flash Preview — WORKHORSE + LIGHTWEIGHT tier for Google. Cached at 10% of input (Google's 90% context-cache discount)."
     "[gemini-3-pro-preview]":
       provider: gemini
       chain-tier: ARCHITECT
@@ -232,9 +232,9 @@ model-matrix:
       display-label: "Gemini 3 Pro Preview"
       pricing:
         input-per-1m: 3.50
-        cached-input-per-1m: 0.875
+        cached-input-per-1m: 0.35
         output-per-1m: 21.00
-      notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
+      notes: "Gemini 3 Pro Preview — registry entry retained as the GeminiNativeToolClient default-model constant; not tier-routed (PLANNING moved to gemini-3.5-flash, WORKHORSE/LIGHTWEIGHT to gemini-3-flash-preview). Cached at 10% of input (Google's 90% context-cache discount)."
     "[gemini-3.5-flash]":
       provider: gemini
       chain-tier: CAPABLE
@@ -243,9 +243,9 @@ model-matrix:
       display-label: "Gemini 3.5 Flash"
       pricing:
         input-per-1m: 1.50
-        cached-input-per-1m: 0.375
+        cached-input-per-1m: 0.15
         output-per-1m: 9.00
-      notes: "Gemini 3.5 Flash — Google PLANNING tier. Eval: completes the HIGH band at verifiedScore 94 (best Gemini, ties Sonnet) in ~49min — slower than Anthropic/OpenAI but higher quality + cheaper than Pro. Cached at 25% of input per the matrix's Gemini convention."
+      notes: "Gemini 3.5 Flash — Google PLANNING tier. Eval: completes the HIGH band at verifiedScore 94 (best Gemini, ties Sonnet) in ~49min — slower than Anthropic/OpenAI but higher quality + cheaper than Pro. Cached at 10% of input (Google's 90% context-cache discount; input/output from ai.google.dev pricing)."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
