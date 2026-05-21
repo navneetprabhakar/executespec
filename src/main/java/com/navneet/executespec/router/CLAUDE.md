@@ -21,8 +21,8 @@ User-selected provider routing with YAML as the single source of truth and a Red
 
 | Tier | Anthropic | OpenAI | Gemini | Agents |
 |------|-----------|--------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-pro-preview` | OutlinePlannerAgent, ReviewerAgent (Anthropic + OpenAI only — Gemini reviewer routes to WORKHORSE since `e9d0b6e8`), RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
-| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-pro-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
+| PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.1-pro-preview` | OutlinePlannerAgent, ReviewerAgent (Anthropic + OpenAI only — Gemini reviewer routes to WORKHORSE since `e9d0b6e8`), RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
+| WORKHORSE | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-pro-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 
 Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). User-selectable per project.
