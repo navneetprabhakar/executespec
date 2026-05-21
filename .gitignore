@@ -219,5 +219,6 @@ scripts/e2e-preview-results.json
 .wrangler/
 scripts/v2-eval-results/*-raw/
 
-# Demo media (hero video + feature GIFs) — kept in the working tree, not committed
-website/media/
+# Demo media — track only the embedded hero video; ignore the rest (large/regenerable)
+website/media/*
+!website/media/hero.webm
