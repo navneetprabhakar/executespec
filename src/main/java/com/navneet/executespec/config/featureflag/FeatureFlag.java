@@ -52,7 +52,13 @@ public class FeatureFlag {
   }
 
   public enum Scope {
+    // PLATFORM and GLOBAL are synonyms (platform-wide); both appear in seed migrations
+    // (e.g. V96 auto-push, V202 reviewer third-pass). GLOBAL MUST be a constant or
+    // repository.findAll() throws "No enum constant ...Scope.GLOBAL" — which empties the
+    // ENTIRE feature-flag cache on every reload and silently disables every flag
+    // system-wide (incl. scoring.additive-v2). One bad row should never do that.
     PLATFORM,
+    GLOBAL,
     ORG
   }
 

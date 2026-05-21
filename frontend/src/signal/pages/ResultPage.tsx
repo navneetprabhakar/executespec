@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, KvList, TabsStrip, Button} from '@/signal/components/Primitives';
@@ -43,6 +43,8 @@ export default function ResultPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   // Timeline / Code / Chat — three regression fixes for v3-parity.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [files, setFiles] = useState<api.FileWithStatus[] | null>(null);
@@ -128,6 +130,18 @@ export default function ResultPage() {
     };
   }, [id, selectedFile]);
 
+  // Auto-scroll the chat thread to the newest message as it grows / while the
+  // assistant is replying. Without this the view stayed pinned at the top and
+  // the latest message landed below the fold.
+  useEffect(() => {
+    if (tab !== 'chat') return;
+    // Scroll the messages box (the end-marker's parent) straight to the bottom.
+    // Direct scrollTop is deterministic where scrollIntoView raced the Markdown
+    // content settling its height on a long thread.
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [tab, chatMessages, chatBusy]);
+
   async function sendChat() {
     if (!id || !chatInput.trim() || chatBusy) return;
     setChatBusy(true);
@@ -152,12 +166,68 @@ export default function ResultPage() {
   }
 
   async function iterateAsNewRun() {
-    if (!id || !chatInput.trim()) return;
+    if (!id || chatBusy) return;
+    const baseSpec = (run as unknown as {userRequest?: string})?.userRequest?.trim();
+    if (!baseSpec) {
+      setErr('Cannot iterate: source spec is missing.');
+      return;
+    }
+    const convo = chatMessages || [];
+    if (convo.length === 0) {
+      setErr(
+        'Start a conversation first — "Iterate as new run" summarizes the discussion into the next run.',
+      );
+      return;
+    }
     setChatBusy(true);
+    setErr('');
     try {
-      const resp = await api.iterateRun(id, chatInput.trim());
+      // Purpose: summarize the run conversation into one iteration instruction,
+      // then fork the original spec + that instruction into a fresh run. (The
+      // /iterate endpoint is 410 in V2, so we compose the new spec client-side and
+      // submit via createRun.) Summarized by the lightweight conversation model.
+      const wire: api.ConversationMessage[] = [
+        ...convo.map((m) => ({
+          role: ((m as unknown as {role?: string}).role === 'user' ? 'user' : 'assistant') as
+            | 'user'
+            | 'assistant',
+          content: (m as unknown as {content?: string}).content || '',
+        })),
+        ...(chatInput.trim() ? [{role: 'user' as const, content: chatInput.trim()}] : []),
+        {
+          role: 'user' as const,
+          content:
+            'Summarize the refinements we discussed above into ONE consolidated instruction for the next iteration of this run. Output only the instruction text — no preamble, no questions.',
+        },
+      ];
+      const summaryResp = await api.conversationChat(wire);
+      const summary = (
+        (summaryResp as unknown as {reply?: string; message?: string}).reply ||
+        (summaryResp as unknown as {message?: string}).message ||
+        ''
+      ).trim();
+      const spec = summary
+        ? `${baseSpec}\n\nIterate on the current implementation with these refinements (summarized from the run discussion):\n${summary}`
+        : baseSpec;
+      const provider = (run as unknown as {aiProvider?: string})?.aiProvider;
+      const projectId = (run as unknown as {projectId?: string})?.projectId;
+      const execMode = (
+        (run as unknown as {executionMode?: string})?.executionMode === 'PRODUCTION'
+          ? 'PRODUCTION'
+          : 'PROTOTYPE'
+      ) as 'PROTOTYPE' | 'PRODUCTION';
+      const resp = await api.createRun({
+        userRequest: spec,
+        aiProvider: provider,
+        executionMode: execMode,
+        skipApproval: execMode === 'PROTOTYPE',
+        projectId,
+      });
       const newId = (resp as unknown as {runId?: string}).runId;
-      if (newId) window.location.href = `/plan/${newId}`;
+      if (newId) {
+        setChatInput('');
+        window.location.href = execMode === 'PROTOTYPE' ? `/live/${newId}` : `/plan/${newId}`;
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Iterate failed.');
     } finally {
@@ -262,6 +332,43 @@ export default function ResultPage() {
   // check the score without opening the JSON.
   const reviewerVerdict = reportAny.reviewerVerdict;
   const finalBuildPassed = reportAny.finalBuildPassed;
+
+  // 2026-05-19 honesty pass — lead with a plain-English sentence derived from
+  // the actually-measured signals, not the multiplicative score number. The
+  // old "Failed 50%" banner contradicted "COMPLETE / CLEAN COMPLETION" + a
+  // passing build whenever a single unmeasured factor dragged the product
+  // toward 0. Reviewer-side rebuild of the score itself is a separate
+  // workstream — this just stops the headline from lying.
+  const verdictSentence = (() => {
+    const parts: string[] = [];
+    if (reportAny.buildStatus === 'PASSING' || finalBuildPassed === true) {
+      parts.push('Build passed.');
+    } else if (reportAny.buildStatus === 'FAILING' || finalBuildPassed === false) {
+      parts.push('Build failed.');
+    }
+    if (reportAny.testsTotal != null && reportAny.testsTotal > 0) {
+      parts.push(`${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal} tests pass.`);
+    } else if (testCoverageLevel) {
+      parts.push(`Tests: ${testCoverageLevel.toLowerCase()} coverage (LLM-judged).`);
+    }
+    if (reviewerVerdict === 'CLEAN' || reportAny.reviewerStatus === 'CLEAN') {
+      parts.push('Reviewer ran clean.');
+    } else if (reviewerVerdict === 'REVIEW_FAILED' || reviewerVerdict === 'UNRESOLVED_ISSUES') {
+      parts.push('Reviewer flagged unresolved issues.');
+    }
+    if (parts.length === 0) return null;
+    return parts.join(' ');
+  })();
+  // Names of signals that were "not measured" — surfaced once at the end of
+  // the breakdown rather than as four separate dashes in the body.
+  const unmeasured: string[] = [];
+  if (!(reportAny.buildStatus || finalBuildPassed != null)) unmeasured.push('Build');
+  if (!(reportAny.testsTotal != null && reportAny.testsTotal > 0) && !testCoverageLevel)
+    unmeasured.push('Tests');
+  if (reportAny.coverageDelta == null && endpointCoveragePct == null) unmeasured.push('Coverage');
+  if (!(reportAny.reviewerStatus || reviewerVerdict)) unmeasured.push('Reviewer');
+  if (!reportAny.securityStatus) unmeasured.push('Security');
+  if (!reportAny.architectureStatus) unmeasured.push('Architecture');
 
   const tokensTotal = (run?.totalInputTokens ?? 0) + (run?.totalOutputTokens ?? 0);
   const elapsed = useMemo(() => {
@@ -510,6 +617,18 @@ export default function ResultPage() {
 
         {tab === 'overview' && (
           <>
+            {verdictSentence && (
+              <Card
+                style={{
+                  fontSize: 15,
+                  lineHeight: 1.45,
+                  padding: '14px 16px',
+                  marginBottom: 12,
+                }}
+              >
+                {verdictSentence}
+              </Card>
+            )}
             <ScoreCard
               verdict={verdict}
               score={Math.round(score)}
@@ -521,106 +640,144 @@ export default function ResultPage() {
               ]}
             />
 
+            {userRequest && (
+              <>
+                <SectionHeader>Submitted prompt</SectionHeader>
+                <Card style={{position: 'relative', padding: '14px 16px', marginBottom: 12}}>
+                  <Button
+                    kind='secondary'
+                    sm
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(userRequest).catch(() => undefined);
+                      setPromptCopied(true);
+                      setTimeout(() => setPromptCopied(false), 2000);
+                    }}
+                    style={{position: 'absolute', top: 10, right: 10, zIndex: 1}}
+                  >
+                    {promptCopied ? 'Copied' : 'Copy'}
+                  </Button>
+                  <div
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: 13.5,
+                      lineHeight: 1.55,
+                      color: 'var(--signal-ink)',
+                      maxHeight: 320,
+                      overflowY: 'auto',
+                      paddingRight: 72,
+                    }}
+                  >
+                    {userRequest}
+                  </div>
+                </Card>
+              </>
+            )}
+
             <SectionHeader>Signal breakdown</SectionHeader>
             <Card>
               <KvList
                 pairs={[
-                  // Render "not measured" (muted) instead of "—" when the
-                  // backend simply didn't run that check (single-shot or
-                  // patch-mode runs skip parts of the validation pipeline).
-                  // A literal dash makes the user think the value is zero
-                  // and the page is broken; "not measured" is honest.
-                  {
-                    k: 'Build',
-                    v:
-                      reportAny.buildStatus || finalBuildPassed != null ? (
-                        <span
-                          style={{
-                            color:
-                              reportAny.buildStatus === 'PASSING' || finalBuildPassed === true
-                                ? 'var(--signal-mint-text-on-light)'
-                                : 'var(--signal-coral-text)',
-                          }}
-                        >
-                          {reportAny.buildStatus ??
-                            (finalBuildPassed === true ? 'PASSED' : 'FAILED')}
-                        </span>
-                      ) : (
-                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                      ),
-                  },
-                  {
-                    k: 'Tests',
-                    v:
-                      reportAny.testsTotal != null && reportAny.testsTotal > 0 ? (
-                        `${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal}`
-                      ) : testCoverageLevel ? (
-                        // Fall back to the LLM-judged coverage level when no
-                        // concrete tests ran. "GOOD" / "PARTIAL" / "NONE" /
-                        // "COMPREHENSIVE" — same labels used by the scorer's
-                        // trust gate. Mute the colour for non-positive grades.
-                        <span
-                          style={{
-                            color:
-                              testCoverageLevel === 'GOOD' || testCoverageLevel === 'COMPREHENSIVE'
-                                ? 'var(--signal-mint-text-on-light)'
-                                : testCoverageLevel === 'NONE'
-                                  ? 'var(--signal-coral-text)'
-                                  : 'var(--signal-text-dim)',
-                          }}
-                        >
-                          {testCoverageLevel.toLowerCase()} coverage{' '}
-                          <span style={{color: 'var(--signal-text-mute)', fontSize: 11}}>
-                            (LLM-judged)
-                          </span>
-                        </span>
-                      ) : (
-                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                      ),
-                  },
-                  {
-                    k: 'Coverage',
-                    v:
-                      reportAny.coverageDelta != null ? (
-                        `${reportAny.coverageDelta >= 0 ? '+' : ''}${reportAny.coverageDelta.toFixed(1)}%`
-                      ) : endpointCoveragePct != null ? (
-                        <span
-                          style={{
-                            color:
-                              endpointCoveragePct >= 95
-                                ? 'var(--signal-mint-text-on-light)'
-                                : endpointCoveragePct >= 70
-                                  ? 'var(--signal-text-dim)'
-                                  : 'var(--signal-coral-text)',
-                          }}
-                        >
-                          endpoints {endpointCoveragePct}%
-                        </span>
-                      ) : (
-                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                      ),
-                  },
-                  {
-                    k: <Glossary term='wiring pass'>Reviewer</Glossary>,
-                    v:
-                      reportAny.reviewerStatus || reviewerVerdict ? (
-                        <span
-                          style={{
-                            color:
-                              reviewerVerdict === 'CLEAN'
-                                ? 'var(--signal-mint-text-on-light)'
-                                : reviewerVerdict === 'REVIEW_FAILED' ||
-                                    reviewerVerdict === 'UNRESOLVED_ISSUES'
-                                  ? 'var(--signal-coral-text)'
-                                  : undefined,
-                          }}
-                        >
-                          {reportAny.reviewerStatus || reviewerVerdict}
-                        </span>
-                      ) : (
-                        <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                      ),
-                  },
+                  // 2026-05-19 honesty pass — only render signals that were
+                  // actually measured. Unmeasured ones collapse into a single
+                  // "Skipped" row at the end of this list. Showing four
+                  // "not measured" rows next to the verdict destroyed
+                  // credibility even when the run was legitimately fine.
+                  ...(reportAny.buildStatus || finalBuildPassed != null
+                    ? [
+                        {
+                          k: 'Build',
+                          v: (
+                            <span
+                              style={{
+                                color:
+                                  reportAny.buildStatus === 'PASSING' || finalBuildPassed === true
+                                    ? 'var(--signal-mint-text-on-light)'
+                                    : 'var(--signal-coral-text)',
+                              }}
+                            >
+                              {reportAny.buildStatus ??
+                                (finalBuildPassed === true ? 'PASSED' : 'FAILED')}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
+                  ...((reportAny.testsTotal != null && reportAny.testsTotal > 0) ||
+                  testCoverageLevel
+                    ? [
+                        {
+                          k: 'Tests',
+                          v:
+                            reportAny.testsTotal != null && reportAny.testsTotal > 0 ? (
+                              `${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal}`
+                            ) : testCoverageLevel ? (
+                              <span
+                                style={{
+                                  color:
+                                    testCoverageLevel === 'GOOD' ||
+                                    testCoverageLevel === 'COMPREHENSIVE'
+                                      ? 'var(--signal-mint-text-on-light)'
+                                      : testCoverageLevel === 'NONE'
+                                        ? 'var(--signal-coral-text)'
+                                        : 'var(--signal-text-dim)',
+                                }}
+                              >
+                                {testCoverageLevel.toLowerCase()} coverage{' '}
+                                <span style={{color: 'var(--signal-text-mute)', fontSize: 11}}>
+                                  (LLM-judged)
+                                </span>
+                              </span>
+                            ) : null,
+                        },
+                      ]
+                    : []),
+                  ...(reportAny.coverageDelta != null || endpointCoveragePct != null
+                    ? [
+                        {
+                          k: 'Coverage',
+                          v:
+                            reportAny.coverageDelta != null ? (
+                              `${reportAny.coverageDelta >= 0 ? '+' : ''}${reportAny.coverageDelta.toFixed(1)}%`
+                            ) : endpointCoveragePct != null ? (
+                              <span
+                                style={{
+                                  color:
+                                    endpointCoveragePct >= 95
+                                      ? 'var(--signal-mint-text-on-light)'
+                                      : endpointCoveragePct >= 70
+                                        ? 'var(--signal-text-dim)'
+                                        : 'var(--signal-coral-text)',
+                                }}
+                              >
+                                endpoints {endpointCoveragePct}%
+                              </span>
+                            ) : null,
+                        },
+                      ]
+                    : []),
+                  ...(reportAny.reviewerStatus || reviewerVerdict
+                    ? [
+                        {
+                          k: <Glossary term='wiring pass'>Reviewer</Glossary>,
+                          v: (
+                            <span
+                              style={{
+                                color:
+                                  reviewerVerdict === 'CLEAN'
+                                    ? 'var(--signal-mint-text-on-light)'
+                                    : reviewerVerdict === 'REVIEW_FAILED' ||
+                                        reviewerVerdict === 'UNRESOLVED_ISSUES'
+                                      ? 'var(--signal-coral-text)'
+                                      : undefined,
+                              }}
+                            >
+                              {reportAny.reviewerStatus || reviewerVerdict}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                   ...(reportAny.accuracyScore != null
                     ? [
                         {
@@ -633,44 +790,63 @@ export default function ResultPage() {
                         },
                       ]
                     : []),
-                  {
-                    k: 'Security',
-                    v: reportAny.securityStatus ? (
-                      <span
-                        style={{
-                          color:
-                            reportAny.securityStatus === 'CLEAN'
-                              ? 'var(--signal-mint-text-on-light)'
-                              : 'var(--signal-coral-text)',
-                        }}
-                      >
-                        {reportAny.securityStatus}
-                      </span>
-                    ) : (
-                      <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                    ),
-                  },
-                  {
-                    k: 'Architecture',
-                    v: reportAny.architectureStatus ? (
-                      <span
-                        style={{
-                          color:
-                            reportAny.architectureStatus === 'CLEAN'
-                              ? 'var(--signal-mint-text-on-light)'
-                              : 'var(--signal-coral-text)',
-                        }}
-                      >
-                        {reportAny.architectureStatus}
-                      </span>
-                    ) : (
-                      <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>
-                    ),
-                  },
+                  ...(reportAny.securityStatus
+                    ? [
+                        {
+                          k: 'Security',
+                          v: (
+                            <span
+                              style={{
+                                color:
+                                  reportAny.securityStatus === 'CLEAN'
+                                    ? 'var(--signal-mint-text-on-light)'
+                                    : 'var(--signal-coral-text)',
+                              }}
+                            >
+                              {reportAny.securityStatus}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
+                  ...(reportAny.architectureStatus
+                    ? [
+                        {
+                          k: 'Architecture',
+                          v: (
+                            <span
+                              style={{
+                                color:
+                                  reportAny.architectureStatus === 'CLEAN'
+                                    ? 'var(--signal-mint-text-on-light)'
+                                    : 'var(--signal-coral-text)',
+                              }}
+                            >
+                              {reportAny.architectureStatus}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                   {
                     k: <Glossary term='status reason'>Status reason</Glossary>,
                     v: shortStatusReason(reportAny.statusReason || statusReason),
                   },
+                  ...(unmeasured.length > 0
+                    ? [
+                        {
+                          k: 'Skipped',
+                          v: (
+                            <span
+                              style={{color: 'var(--signal-text-mute)', fontSize: 13}}
+                              title='These signals weren’t run for this spec/mode. They don’t indicate failure.'
+                            >
+                              {unmeasured.join(', ')}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             </Card>
@@ -1212,7 +1388,7 @@ export default function ResultPage() {
                       path={selectedFile}
                       content={showDiff ? undefined : (fileContent ?? '')}
                       diff={showDiff ? (fileDiff ?? '') : undefined}
-                      maxHeight={520}
+                      maxHeight={'calc(100dvh - 290px)'}
                     />
                   </>
                 )}
@@ -1437,7 +1613,8 @@ export default function ResultPage() {
                 flexDirection: 'column',
                 gap: 10,
                 marginBottom: 12,
-                maxHeight: 360,
+                maxHeight: 'calc(100dvh - 360px)',
+                minHeight: 260,
                 overflowY: 'auto',
               }}
             >
@@ -1508,8 +1685,9 @@ export default function ResultPage() {
                   Thinking…
                 </div>
               )}
+              <div ref={chatEndRef} />
             </div>
-            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap'}}>
               <textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
@@ -1550,7 +1728,7 @@ export default function ResultPage() {
                   kind='secondary'
                   sm
                   onClick={iterateAsNewRun}
-                  disabled={chatBusy || !chatInput.trim()}
+                  disabled={chatBusy || !(chatMessages && chatMessages.length > 0)}
                 >
                   Iterate as new run
                 </Button>

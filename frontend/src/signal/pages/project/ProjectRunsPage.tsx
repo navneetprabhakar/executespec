@@ -98,7 +98,7 @@ function InlineRunDetailPane({
       {prUrl && (
         <PrCard
           label='PR · OPEN'
-          title={run.userRequest?.slice(0, 80) || 'Pull request'}
+          title={runTitleFor(run) || 'Pull request'}
           repo={prUrl.replace(/^https?:\/\/[^/]+\//, '').replace(/\/pull\//, '#')}
           ciStatus={<span className='ci-ok'>● open</span>}
           actions={

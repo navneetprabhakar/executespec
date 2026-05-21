@@ -1,7 +1,6 @@
 package com.navneet.executespec.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -28,31 +27,25 @@ import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
 /**
- * Pins Lever C (completion-gate nudge) + wall-clock cap introduced 2026-05-10 after dev run
- * a59f9798:
+ * Pins the unified progress signal (RL-2026-05-005) + the wall-clock cap. The 2026-05-19
+ * guardrail-unification collapsed Lever A (force-edit watchdog), Lever C (completion nudge), and
+ * the stagnation warn/force counters into ONE "iterations since a file write" signal with a single
+ * one-shot nudge. These tests pin the nudge's two trigger points and its one-shot semantics:
  *
  * <ul>
- *   <li>T8 wrote 10 files, emitted "Excellent! The implementation is complete and correct. Let me
- *       create a summary…", and never called {@code completeTask}. Worker terminated as {@code
- *       STOPPED_WITHOUT_COMPLETE} → soft-PARTIAL.
- *   <li>T12 wrote 92 files at 0.92 writes/iter, hit the 100-iter MEDIUM project cap mid-test-suite.
- *       Iter cap killed an actively-progressing worker.
+ *   <li>A premature text-only stop (model emits a status report instead of calling completeTask)
+ *       fires the nudge once and gives the model one more iteration to recover.
+ *   <li>The nudge fires at most once per task — a second text-only stop terminates with {@code
+ *       STOPPED_WITHOUT_COMPLETE} rather than looping forever.
  * </ul>
  *
- * <p>Lever C: when the assistant turn returns no tool calls AND the worker has writes AND iter is
- * past 0.5×maxIter AND the text reads like a summary, inject a one-shot UserMessage telling the
- * model to call completeTask now or list the next concrete edit. Fires at most once per task.
- *
- * <p>Wall-clock cap: sibling of the iter cap. Whichever fires first wins. Protects test-suite-style
- * MEDIUM tasks where the worker is making genuine progress but the iter cap is a "writes/iter"
- * proxy that punishes verbose models.
+ * <p>Wall-clock cap: sibling of the iter cap. Whichever fires first wins.
  */
-class WorkerAgentLeverCAndWallClockTest {
+class WorkerAgentProgressNudgeAndWallClockTest {
 
   private static AssistantMessage.ToolCall toolCall(String name, String args) {
     return new AssistantMessage.ToolCall("call_" + UUID.randomUUID(), "function", name, args);
@@ -134,7 +127,7 @@ class WorkerAgentLeverCAndWallClockTest {
         .model("claude-haiku-4-5-20251001")
         .systemPrompt("system")
         .userPrompt("do thing")
-        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-leverc")))
+        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-progress")))
         .maxIterations(maxIter)
         .temperature(0.0)
         .maxTokensPerCall(4096)
@@ -142,49 +135,22 @@ class WorkerAgentLeverCAndWallClockTest {
         .build();
   }
 
-  // ── Lever C — completion-gate nudge ────────────────────────────────────────────────────────
+  // ── Progress nudge — text-only-stop trigger ──────────────────────────────────────────────────
 
   @Test
-  void looksLikeSummary_recognises_real_T8_assistant_text() {
-    String t8 =
-        "Excellent! The implementation is complete and correct. Let me create a summary of"
-            + " what was done:\n\n## Summary of Changes\n\nI've successfully audited and fixed the"
-            + " getContactMedia function...";
-    assertTrue(WorkerAgent.looksLikeSummary(t8), "should match the canonical T8 wrap-up shape");
-  }
-
-  @Test
-  void looksLikeSummary_rejects_short_text() {
-    // Below the 12-char min length → quick reject (avoids false positives on stub responses).
-    assertFalse(WorkerAgent.looksLikeSummary("done"));
-    assertFalse(WorkerAgent.looksLikeSummary(""));
-    assertFalse(WorkerAgent.looksLikeSummary(null));
-  }
-
-  @Test
-  void looksLikeSummary_rejects_text_without_keyword() {
-    // Mid-task text without summary phrasing → no match.
-    assertFalse(
-        WorkerAgent.looksLikeSummary(
-            "Reading the file to understand the current implementation pattern."));
-    assertFalse(WorkerAgent.looksLikeSummary("Need more context before making changes."));
-  }
-
-  @Test
-  void lever_c_nudges_when_summary_emitted_after_writes_and_loop_continues() {
-    // 6 writes (sets iter ≥ 0.5×maxIter=20 after iter 10), then text-only summary at iter 7,
-    // then completeTask at iter 8 (the post-nudge iter). Expected: COMPLETED, iterations=8.
+  void text_only_stop_after_writes_is_nudged_and_recovers_to_completed() {
+    // 6 writes, then a text-only summary at iter 7 (the dominant "summary mode" failure), then
+    // completeTask at iter 8 (the post-nudge iter). The nudge converts STOPPED_WITHOUT_COMPLETE
+    // into COMPLETED.
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 6; i++) {
       seq.add(
           responseWithCalls(toolCall("writeFile", "{\"path\":\"f" + i + "\",\"content\":\"x\"}")));
     }
-    // iter 7: text-only summary keyword response
     seq.add(
         responseWithText(
             "I've successfully completed the implementation. ## Summary of Changes - everything is"
                 + " in place."));
-    // iter 8: model accepts the nudge and calls completeTask
     seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"all done\"}")));
     Fixture f = newWorker(seq);
 
@@ -193,41 +159,15 @@ class WorkerAgentLeverCAndWallClockTest {
     assertEquals(
         WorkerResult.Outcome.COMPLETED,
         result.outcome(),
-        "model should land COMPLETED after Lever C nudge");
+        "model should land COMPLETED after the progress nudge");
     assertEquals(8, result.iterations(), "completed at iter 8 (the post-nudge iter)");
   }
 
   @Test
-  void lever_c_does_not_nudge_when_zero_writes() {
-    // Pre-condition: text-only summary AT iter 6 (≥ 0.5×maxIter=12) but with ZERO writes — the
-    // worker has nothing to claim done. Should fall through to STOPPED_WITHOUT_COMPLETE.
-    List<ChatResponse> seq = new ArrayList<>();
-    for (int i = 0; i < 5; i++) {
-      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
-    }
-    seq.add(
-        responseWithText(
-            "I've successfully completed the analysis. ## Summary - all set, nothing to change."));
-    Fixture f = newWorker(seq);
-
-    WorkerResult result = f.worker.run(req(12, null));
-
-    assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
-    assertEquals(6, result.iterations());
-  }
-
-  @Test
-  void lever_c_fires_at_low_iter_when_writes_present_T12_regression() {
-    // 2026-05-10 — regression for dev run 61c9fffa T12 (iter 31/150) + T18 (iter 18/150).
-    // Pre-fix: Lever C had an `iter ≥ 0.5×maxIter` threshold so an early-bailout summary
-    // (model wrote a few files, hit a natural stopping point well before 50% of the iter
-    // budget) fell through to STOPPED_WITHOUT_COMPLETE → soft-completion. The threshold
-    // didn't add safety because `totalWriteCalls > 0` already gates "real work happened".
-    // Post-fix: nudge fires regardless of iter count.
-    //
-    // Scenario: 1 writeFile then summary text at iter 2 of 40. Pre-fix this fell through
-    // (threshold = 20). Post-fix it nudges at iter 2; we let iter 3 call completeTask to
-    // pin both the nudge fire AND the recovery into COMPLETED.
+  void text_only_stop_fires_at_low_iter_even_with_one_write() {
+    // Regression for dev run 61c9fffa T12 (iter 31/150) + T18 (iter 18/150): the old Lever C had
+    // an `iter ≥ 0.5×maxIter` threshold that let an early-bailout summary fall through. The
+    // unified nudge has no iter threshold — it fires on any text-only stop.
     List<ChatResponse> seq = new ArrayList<>();
     seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"f\",\"content\":\"x\"}")));
     seq.add(responseWithText("I've completed the work. ## Summary of changes."));
@@ -236,17 +176,36 @@ class WorkerAgentLeverCAndWallClockTest {
 
     WorkerResult result = f.worker.run(req(40, null));
 
-    assertEquals(
-        WorkerResult.Outcome.COMPLETED,
-        result.outcome(),
-        "Lever C must nudge even at low iter when writes are present (T12-class)");
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
     assertEquals(3, result.iterations(), "completed at iter 3 (post-nudge)");
   }
 
   @Test
-  void lever_c_fires_only_once_then_lets_stop_propagate() {
-    // 4 writes, then summary at iter 5 (≥ 0.5×maxIter=8 with maxIter=16 → threshold=8; bump to
-    // maxIter=8 so threshold=4). Re-emit summary at iter 6 → must terminate not loop forever.
+  void text_only_stop_with_zero_writes_is_nudged_once_then_stops() {
+    // New unified contract (vs old Lever C, which required writes>0 to nudge): a zero-write
+    // text-only stop still gets ONE nudge — it's the investigation-paralysis case the old Lever A
+    // also targeted. The model gets one shot to act or call completeTask; a second text-only stop
+    // terminates with STOPPED_WITHOUT_COMPLETE.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    // iter 6 text-only → nudge; the mock repeats this last response, so iter 7 is text-only again.
+    seq.add(
+        responseWithText("I've completed the analysis. ## Summary - all set, nothing to change."));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(req(12, null));
+
+    assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
+    assertEquals(
+        7, result.iterations(), "nudged at iter 6, stops on the second text-only at iter 7");
+  }
+
+  @Test
+  void progress_nudge_fires_only_once_then_stop_propagates() {
+    // 4 writes, then two consecutive text-only summaries. First fires the one-shot nudge; the
+    // second must terminate, not loop forever.
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 4; i++) {
       seq.add(
@@ -261,7 +220,7 @@ class WorkerAgentLeverCAndWallClockTest {
     assertEquals(
         WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE,
         result.outcome(),
-        "second text-only summary must terminate (no infinite Lever C loop)");
+        "second text-only summary must terminate (no infinite nudge loop)");
     assertEquals(6, result.iterations(), "exits on the second text-only response");
   }
 
@@ -350,15 +309,13 @@ class WorkerAgentLeverCAndWallClockTest {
     assertTrue(
         elapsed < 5000,
         "Should not run far beyond the cap (allow 1 in-flight iter tail). Ran " + elapsed);
-    // The stagnation guard kicks in before wall-clock if we're unlucky on iter pacing — assert
-    // we got SOME iterations done first.
     assertTrue(result.iterations() >= 1);
   }
 
   @Test
   void wall_clock_zero_means_unbounded() {
     // Null wallClockSeconds → no enforcement. Worker terminates by some other reason (here:
-    // iter cap).
+    // iter cap, since the progress-force threshold is 12 by default and maxIter=5 is binding).
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 6; i++) {
       seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
@@ -367,12 +324,10 @@ class WorkerAgentLeverCAndWallClockTest {
 
     WorkerResult result = f.worker.run(req(5, null));
 
-    // Without wall-clock, the iter cap (5) wins; stagnation force is 12 by default so iter cap
-    // is binding here. ITERATION_LIMIT_EXCEEDED is correct, NOT WALL_CLOCK_EXCEEDED.
     assertTrue(
         result.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
             || result.outcome() == WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
-        "with no wall-clock, terminate by iter cap or stagnation; got " + result.outcome());
+        "with no wall-clock, terminate by iter cap or progress-force; got " + result.outcome());
   }
 
   @Test
@@ -387,11 +342,5 @@ class WorkerAgentLeverCAndWallClockTest {
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
     assertEquals(2, result.iterations());
-  }
-
-  /** Test helper: build a UserMessage so the assertion below has a stable type to compare. */
-  @SuppressWarnings("unused")
-  private static UserMessage userMessageProbe() {
-    return new UserMessage("");
   }
 }

@@ -217,10 +217,28 @@ export function runTitleFor(r: unknown): string {
     id?: string | null;
   };
   const title = rec.runTitle?.trim();
-  if (title) return title;
+  if (title) return condenseTitle(title);
   const spec = rec.userRequest?.trim();
-  if (spec) return spec;
+  if (spec) return condenseTitle(spec);
   const id = rec.runId || rec.id;
   if (id) return `Run R-${String(id).slice(0, 6)}`;
   return 'Untitled run';
+}
+
+// SWE-bench / harness specs embed multi-paragraph markdown (failing-test output,
+// gold-patch diff). On list views that pasted into the row title cell, making
+// rows indistinguishable. Pick the first non-blank line, strip the leading
+// markdown headers / list markers / code fences, cap at 80 chars.
+function condenseTitle(raw: string): string {
+  const firstLine =
+    raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0 && !/^```/.test(l)) || raw.trim();
+  const stripped = firstLine
+    .replace(/^#{1,6}\s+/, '') // markdown headings
+    .replace(/^[-*+>]\s+/, '') // list / blockquote markers
+    .replace(/^\d+\.\s+/, '') // ordered list
+    .trim();
+  return stripped.length > 80 ? stripped.slice(0, 77).trimEnd() + '…' : stripped;
 }

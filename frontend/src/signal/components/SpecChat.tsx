@@ -105,6 +105,62 @@ export function SpecChat({
     }
   }
 
+  // Pull the consolidated spec out of an agent reply: everything after the
+  // "REQUIREMENT SUMMARY:" marker the conversation prompt emits. Falls back to
+  // the whole reply when the marker is absent.
+  function extractSpec(text: string): string {
+    const m = text.match(/REQUIREMENT SUMMARY:?/i);
+    if (!m || m.index == null) return text.trim();
+    return text
+      .slice(m.index + m[0].length)
+      .replace(/^\s*\n/, '')
+      .trim();
+  }
+
+  // "Use as spec" — ask the agent to finalize (it will, per the prompt's
+  // FINALIZE-ON-REQUEST rule), then write the consolidated spec back to the
+  // composer. This is what makes the feature actually UPDATE the main prompt
+  // instead of dumping the agent's last clarifying question into it.
+  async function applyAsSpec() {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const finalize =
+        "I'm ready. Produce the REQUIREMENT SUMMARY and the full consolidated spec now, " +
+        'making reasonable, clearly-stated assumptions for anything not yet specified. No questions.';
+      const wire: api.ConversationMessage[] = [
+        ...messages.map((m) => ({role: m.role, content: m.content})),
+        {role: 'user' as const, content: finalize},
+      ];
+      const resp = await api.conversationChat(wire);
+      const reply =
+        (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
+        (resp as unknown as {message?: string}).message ||
+        (resp as unknown as {content?: string}).content ||
+        '';
+      const spec = extractSpec(reply) || lastAssistant?.content || '';
+      if (spec.trim()) {
+        onApply(spec.trim());
+        setOpen(false);
+      } else if (lastAssistant) {
+        onApply(lastAssistant.content);
+        setOpen(false);
+      }
+    } catch (e: unknown) {
+      // Network/agent failure — fall back to applying the last reply so the
+      // button never feels dead.
+      if (lastAssistant) {
+        onApply(lastAssistant.content);
+        setOpen(false);
+      } else {
+        setErr(e instanceof Error ? e.message : 'Could not build the spec.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <Button
@@ -254,14 +310,8 @@ export function SpecChat({
               <Button
                 kind='secondary'
                 sm
-                onClick={() => {
-                  // Apply the assistant's reply to the parent's spec textarea
-                  // AND collapse this panel — without the collapse, the chat
-                  // stays open below the composer and the user can't see that
-                  // the textarea above was updated (they read "nothing happened").
-                  onApply(lastAssistant.content);
-                  setOpen(false);
-                }}
+                disabled={busy}
+                onClick={() => void applyAsSpec()}
                 style={{flex: '1 1 0', minWidth: 130}}
               >
                 Use as spec

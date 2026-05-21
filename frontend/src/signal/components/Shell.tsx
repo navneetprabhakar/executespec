@@ -15,6 +15,12 @@ function buildSidebar(opts: {
   isSuperAdmin: boolean;
   canDeploy: boolean;
 }): SidebarGroup[] {
+  // 2026-05-19 honesty pass — collapse the sidebar to the seven surfaces a
+  // customer actually uses in their first 30 days. Library / Migrations /
+  // Templates / Deployments / Insights / API keys / Team / Audit log /
+  // Notifications / Search remain reachable via /<path> URLs (and contextually
+  // — e.g. Templates is the picker on the Compose page) but no longer eat
+  // sidebar real estate or carry BETA chips that signal "unfinished."
   const groups: SidebarGroup[] = [
     {
       title: 'Daily',
@@ -22,62 +28,28 @@ function buildSidebar(opts: {
         {path: '/home', label: 'Today', icon: '⊕'},
         {path: '/runs', label: 'All runs', icon: '◎'},
         {path: '/compose', label: 'New spec', icon: '＋'},
-        {path: '/insights', label: 'Insights', icon: '◫'},
       ],
     },
     {
       title: 'Workspace',
-      items: [
-        {path: '/projects', label: 'Projects', icon: '▤'},
-        // 2026-05-16 (user feedback) — Library + Migrations + Deployments
-        // are beta surfaces; flag with the BETA chip so users know they're
-        // pre-GA and may have rough edges. The chip renders to the right
-        // of the label without disturbing the icon column.
-        {path: '/library', label: 'Library', icon: '✦', badge: 'BETA'},
-        {path: '/migrations', label: 'Migrations', icon: '⇄', badge: 'BETA'},
-        {path: '/templates', label: 'Templates', icon: '✎'},
-        ...(opts.canDeploy
-          ? [
-              {
-                path: '/deployments',
-                label: 'Deployments',
-                icon: '⌁',
-                badge: 'BETA',
-              } satisfies SidebarItem,
-            ]
-          : []),
-      ],
+      items: [{path: '/projects', label: 'Projects', icon: '▤'}],
     },
     {
       title: 'Account',
       items: [
         {path: '/billing', label: 'Billing', icon: '$'},
         {path: '/integrations', label: 'Integrations', icon: '◇'},
-        // BYOK is PRO+. Hide for FREE so the sidebar matches what the user
-        // can actually do (the page itself also gates).
-        ...(opts.tier !== 'FREE'
-          ? [{path: '/api-keys', label: 'API keys', icon: '⎈'} satisfies SidebarItem]
-          : []),
-        {path: '/org-members', label: 'Team', icon: '◐'},
-        // Audit log is TEAM+ only.
-        ...(opts.tier === 'TEAM' || opts.tier === 'ENTERPRISE' || opts.isSuperAdmin
-          ? [{path: '/audit', label: 'Audit log', icon: '☷'} satisfies SidebarItem]
-          : []),
-      ],
-    },
-    {
-      title: 'System',
-      items: [
-        {path: '/notifications', label: 'Notifications', icon: '◉'},
-        {path: '/search', label: 'Search', icon: '⌕'},
         {path: '/account', label: 'Account', icon: '◍'},
-        // Admin link only for SUPER_ADMIN — non-admins were getting bounced to /home.
-        ...(opts.isSuperAdmin
-          ? [{path: '/admin', label: 'Admin', icon: '✦'} satisfies SidebarItem]
-          : []),
       ],
     },
   ];
+  if (opts.isSuperAdmin) {
+    groups.push({title: 'System', items: [{path: '/admin', label: 'Admin', icon: '✦'}]});
+  }
+  // Suppress unused-arg warnings without removing the typed knobs — they
+  // come back when we resurface tier-gated items contextually.
+  void opts.tier;
+  void opts.canDeploy;
   return groups;
 }
 

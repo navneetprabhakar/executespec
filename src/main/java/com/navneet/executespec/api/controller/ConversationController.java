@@ -7,14 +7,11 @@ import java.util.List;
 import jakarta.annotation.PostConstruct;
 
 import com.navneet.executespec.agent.FallbackLlmRouter;
-import com.navneet.executespec.agent.FallbackLlmRouter.FallbackMode;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -65,7 +62,7 @@ public class ConversationController {
   }
 
   private final FallbackLlmRouter fallbackLlmRouter;
-  private final ModelResolver modelResolver;
+  private final ModelRegistry modelRegistry;
 
   @PostMapping
   public ResponseEntity<ConversationResponse> chat(
@@ -92,20 +89,20 @@ public class ConversationController {
       }
     }
 
-    // Pre-flight conversation has no project context — use default provider
-    ResolvedModel resolved = modelResolver.resolve("ConversationAgent", LlmProvider.ANTHROPIC);
-    var options = AnthropicChatOptions.builder().model(resolved.getModel()).maxTokens(512).build();
+    // Pin the pre-flight chat to Anthropic Haiku (LIGHTWEIGHT) via callDirect, which
+    // bypasses the fallback chain AND the per-runId provider pin store. The shared
+    // runId="conversation" pin (set by an earlier call) was reordering the chain to
+    // Gemini Flash — a thinking model whose reasoning tokens ate the output budget
+    // and truncated the spec. callDirect forces the exact provider+model.
+    String model = modelRegistry.lightweightModelFor("anthropic");
+    // 4096 leaves room for a full consolidated spec on the "Use as spec" turn;
+    // clarifying questions stop early so the higher cap costs nothing there.
+    var options = AnthropicChatOptions.builder().model(model).maxTokens(4096).build();
 
     var response =
-        fallbackLlmRouter.callWithFallback(
-            resolved.providerName(),
-            resolved.getModel(),
-            new Prompt(springMessages, options),
-            "conversation",
-            "conversation-api",
-            FallbackMode.IMMEDIATE,
-            0,
-            false);
+        fallbackLlmRouter
+            .callDirect("anthropic", model, new Prompt(springMessages, options))
+            .response();
 
     String reply = response.getResult().getOutput().getText();
     log.info("Conversation reply: {} chars", reply != null ? reply.length() : 0);

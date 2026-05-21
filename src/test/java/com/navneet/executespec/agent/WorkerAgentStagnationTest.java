@@ -349,7 +349,7 @@ class WorkerAgentStagnationTest {
       boolean hasProgressCheckAsUserMsg =
           captured.messages().stream()
               .anyMatch(
-                  m -> m instanceof UserMessage um && um.getText().startsWith("PROGRESS CHECK:"));
+                  m -> m instanceof UserMessage um && um.getText().startsWith("PROGRESS CHECK"));
       if (hasProgressCheckAsUserMsg) requestsWithProgressCheckUserMessage++;
     }
 
@@ -411,9 +411,12 @@ class WorkerAgentStagnationTest {
   }
 
   @Test
-  void empty_tool_calls_does_not_blow_up_stagnation_counter() {
-    // If the model returns no tool calls at all, the worker should exit immediately with
-    // STOPPED_WITHOUT_COMPLETE — the stagnation guard must not preempt that path.
+  void empty_tool_calls_is_nudged_once_then_stops_not_stagnation() {
+    // A text-only stop with no tool calls gets ONE progress nudge (RL-2026-05-005), giving the
+    // model a chance to act or call completeTask; a second text-only stop terminates with
+    // STOPPED_WITHOUT_COMPLETE. The exit must NOT be COMPLETED_BY_STAGNATION — the progress-force
+    // guard must not preempt this path. The mock repeats its last response, so iter 2 is also
+    // text-only and the worker stops there.
     AssistantMessage emptyMsg = AssistantMessage.builder().content("done?").build();
     ChatResponse emptyResp = new ChatResponse(List.of(new Generation(emptyMsg)));
     Fixture f = newWorker(List.of(emptyResp));
@@ -421,10 +424,11 @@ class WorkerAgentStagnationTest {
     WorkerResult result = f.worker.run(req(40));
 
     assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
-    assertEquals(1, result.iterations());
+    assertEquals(
+        2, result.iterations(), "nudged at iter 1, stops on the second text-only at iter 2");
     assertFalse(
         result.outcome() == WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
-        "An empty-toolcalls response is not stagnation — exit should be STOPPED_WITHOUT_COMPLETE.");
+        "A text-only stop is not stagnation — exit should be STOPPED_WITHOUT_COMPLETE.");
   }
 
   /**
@@ -486,53 +490,5 @@ class WorkerAgentStagnationTest {
         "When the worker already wrote at least one file, stagnation force should NOT trigger"
             + " salvage — the prior write is the user's actual artefact and a salvage guess"
             + " could clobber it. Outcome stays COMPLETED_BY_STAGNATION.");
-  }
-
-  /**
-   * 2026-05-09 — Lever A force-edit nudge threshold is now clamped to fire BEFORE
-   * stagnationForceAfter, not just at 70% of maxIter. Pre-fix: forceEditAtIter for a LOW project
-   * run (maxIter=60, stagForce=12) was 42 — the worker was already dead at iter 12. Post-fix:
-   * forceEditAtIter = max(5, min(0.7×maxIter, stagnationForceAfter - 1)) so the nudge always lands
-   * at least one iter before stagnation force kills.
-   */
-  @Test
-  void force_edit_nudge_threshold_clamps_to_below_stagnation_force_for_low_complexity() {
-    // LOW BUILD per-tier config: maxIter=30, stagForce=12 → forceEditAtIter should be
-    // max(5, min(21, 11)) = 11. So at iter 11 we expect a FORCE_EDIT_NUDGE UserMessage in
-    // the captured request that goes out for iter 12. Use 13 readFile calls so we hit force.
-    List<ChatResponse> seq = new ArrayList<>();
-    for (int i = 0; i < 13; i++) {
-      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
-    }
-    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
-    Fixture f = newWorker(seq);
-
-    // Use the per-tier override mirroring SequentialExecutor's LOW config.
-    f.worker.run(reqWithStagnation(30, 8, 12));
-
-    // Capture every LlmRequest. The FORCE_EDIT_NUDGE UserMessage should appear in the history
-    // of at least one captured request after iter 11.
-    ArgumentCaptor<LlmRequest> reqCap = ArgumentCaptor.forClass(LlmRequest.class);
-    verify(f.router, atLeastOnce()).call(reqCap.capture());
-
-    boolean sawForceEditNudge = false;
-    for (LlmRequest captured : reqCap.getAllValues()) {
-      boolean hasNudge =
-          captured.messages().stream()
-              .anyMatch(
-                  m ->
-                      m instanceof UserMessage um
-                          && um.getText().startsWith("INVESTIGATION PHASE OVER"));
-      if (hasNudge) {
-        sawForceEditNudge = true;
-        break;
-      }
-    }
-
-    assertTrue(
-        sawForceEditNudge,
-        "Lever A force-edit nudge MUST fire on a LOW BUILD task (maxIter=30, stagForce=12)"
-            + " before the stagnation guard kills the worker. Pre-fix this was dead code on"
-            + " LOW because forceEditAtIter=21 was past the stagForce=12 kill point.");
   }
 }

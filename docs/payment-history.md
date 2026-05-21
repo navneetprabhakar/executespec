@@ -257,7 +257,7 @@ Authorization: Bearer <jwt>
 Response: text/csv (byte[])
 ```
 
-Built by `PaymentAuditService.exportCsv(records)`. The CSV is generated in-memory from `findAll(Pageable.unpaged())`. For a table with millions of rows this is a foot-gun — there's no streaming export. As of head V199 this hasn't been hit in production, but the call site is worth flagging.
+Built by `PaymentAuditService.exportCsv(records)`. The CSV is generated in-memory from `findAll(Pageable.unpaged())`. For a table with millions of rows this is a foot-gun — there's no streaming export. As of head V202 this hasn't been hit in production, but the call site is worth flagging.
 
 ### `GET /api/admin/webhook-events`
 
@@ -288,7 +288,7 @@ There is no retention or purge job for any of the three stores.
 
 The activity-audit retention story (`activity.retention.days` feature flag, seeded by V150 to 365 days) does **not** apply to these tables — it gates `activity_audit` only.
 
-Operational implication: schema head V199 doesn't ship a purge job. If you need bounded retention for compliance, you'll have to either (a) introduce a TTL job in a new package or (b) periodically `DELETE FROM payment_audit WHERE created_at < NOW() - INTERVAL '7 years'` (Indian GST law mandates 7 years; check your local equivalent).
+Operational implication: schema head V202 doesn't ship a purge job. If you need bounded retention for compliance, you'll have to either (a) introduce a TTL job in a new package or (b) periodically `DELETE FROM payment_audit WHERE created_at < NOW() - INTERVAL '7 years'` (Indian GST law mandates 7 years; check your local equivalent).
 
 There is also no archival to cold storage. If you need that, the canonical fields to preserve are `payment_audit.idempotency_key`, `payment_audit.gateway_event_id`, `webhook_event_log.payload_hash`, plus the original `webhook_event_log.raw_payload`.
 

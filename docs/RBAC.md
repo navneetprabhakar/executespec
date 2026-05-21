@@ -41,7 +41,7 @@ Constants are plain Java strings, validated against `tier_config` rows (`auth/en
 
 Tier history:
 
-- **V145** (later) raised FREE 5 → 10 runs/month, **V167** reverted to 5.
+- **V145** (later) raised FREE 5 → 10 runs/month, **V167** reverted to 5, **V200** (2026-05-19) raised it to 15.
 - **V165** (`drop_max_tier_team_at_39.sql`) collapsed legacy MAX tier into TEAM, deleted MAX from `tier_config` and `billing_plan`.
 - **V176** rebranded PRO display as "Solo" (display only).
 - **V185** rolled that branding back; tier identifier remained `PRO`.
@@ -221,7 +221,7 @@ Org-match wins over membership row. The `project_member.is_external=true` row fr
 
 ### 4.5 Known guard-coverage gap
 
-The 2026-05-12 audit identified controllers calling `assertCanRead` on endpoints that mutate state. As of head V199 the following endpoints still bypass `assertCanWrite` for `PROJECT_VIEWER`:
+The 2026-05-12 audit identified controllers calling `assertCanRead` on endpoints that mutate state. As of head V202 the following endpoints still bypass `assertCanWrite` for `PROJECT_VIEWER`:
 
 - `ProjectRepoController#linkToProject`, `#unlinkFromProject`, `#updateRelationships`
 - `SpecTemplateController#createForProject`, `#delete`

@@ -13,6 +13,7 @@ Your job:
   6. Or tell me a website you like and I'll match it!
      Include their choice in the REQUIREMENT SUMMARY as "Visual theme: <choice>".
 - Once the requirement is clear enough to build, produce a tidy summary prefixed with "REQUIREMENT SUMMARY:" on its own line, then the consolidated spec in plain English.
+- FINALIZE ON REQUEST: If the user signals they are ready — e.g. "I'm ready", "use as spec", "finalize", "build it", "just write the spec", or any request to produce the summary/spec — then IMMEDIATELY output the "REQUIREMENT SUMMARY:" line followed by the full consolidated spec in plain English. Do this even if some details are still open: make reasonable, explicitly-stated assumptions for anything not yet covered, and do NOT ask any further questions in that reply.
 
 Rules:
 
