@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Chip, Button, KvList} from '@/signal/components/Primitives';
 import {LoadingState} from '@/signal/components/Loaders';
+import {PromptModal} from '@/signal/components/Modal';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
@@ -20,6 +21,13 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
+  // Privacy & data — DSAR JSON export + right-to-erasure. `dsarBusy` covers the
+  // JSON download; the erasure flow is gated behind a typed-confirm PromptModal.
+  const [dsarBusy, setDsarBusy] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [eraseBusy, setEraseBusy] = useState(false);
+  const [eraseDone, setEraseDone] = useState<string | null>(null);
+  const [privacyErr, setPrivacyErr] = useState('');
 
   // Load notification preferences for the dedicated panel below.
   useEffect(() => {
@@ -91,6 +99,62 @@ export default function AccountPage() {
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
       window.alert(e instanceof Error ? e.message : 'Export failed.');
+    }
+  }
+
+  // DSAR self-service export — GET /api/dsar/me returns a JSON snapshot of every
+  // record we hold for the caller (distinct from the GDPR zip above). No api.ts
+  // helper exists for it, so fetch with the bearer + trigger a JSON blob download.
+  async function onDsarExport() {
+    setDsarBusy(true);
+    setPrivacyErr('');
+    try {
+      const token = localStorage.getItem('access_token') ?? '';
+      const resp = await fetch('/api/dsar/me', {
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+      });
+      if (!resp.ok) throw new Error(`Data request failed (${resp.status}).`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `executespec-dsar-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setPrivacyErr(e instanceof Error ? e.message : 'Data request failed.');
+    } finally {
+      setDsarBusy(false);
+    }
+  }
+
+  // Right-to-erasure — DELETE /api/auth/me/data soft-deletes the caller's
+  // completed/failed runs and schedules workspace teardown. Gated behind a typed
+  // "DELETE" confirm; no api.ts helper, so direct fetch with the bearer.
+  async function performErasure(values: Record<string, string>) {
+    if ((values.confirm || '').trim().toUpperCase() !== 'DELETE') {
+      setPrivacyErr('Type DELETE to confirm erasure.');
+      return;
+    }
+    setEraseBusy(true);
+    setPrivacyErr('');
+    try {
+      const token = localStorage.getItem('access_token') ?? '';
+      const resp = await fetch('/api/auth/me/data', {
+        method: 'DELETE',
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+      });
+      if (!resp.ok) throw new Error(`Erasure failed (${resp.status}).`);
+      const body = (await resp.json().catch(() => ({}))) as {runsScheduledForDeletion?: number};
+      const n = body.runsScheduledForDeletion ?? 0;
+      setEraseDone(
+        `Erasure requested — ${n} run${n === 1 ? '' : 's'} scheduled for deletion. Active runs must be cancelled first.`,
+      );
+      setEraseOpen(false);
+    } catch (e: unknown) {
+      setPrivacyErr(e instanceof Error ? e.message : 'Erasure failed.');
+    } finally {
+      setEraseBusy(false);
     }
   }
 
@@ -384,6 +448,59 @@ export default function AccountPage() {
           }
         />
 
+        <SectionHeader>Privacy &amp; data</SectionHeader>
+        {privacyErr && (
+          <Card
+            style={{
+              background: 'var(--signal-coral-soft)',
+              borderColor: 'var(--signal-coral)',
+              marginBottom: 8,
+            }}
+          >
+            <span style={{fontSize: 13, color: 'var(--signal-coral-text)'}}>{privacyErr}</span>
+          </Card>
+        )}
+        {eraseDone && (
+          <Card
+            style={{
+              background: 'var(--signal-mint-soft)',
+              borderColor: 'var(--signal-mint)',
+              marginBottom: 8,
+            }}
+          >
+            <span style={{fontSize: 13, color: 'var(--signal-mint-text-on-light)'}}>
+              {eraseDone}
+            </span>
+          </Card>
+        )}
+        <Row
+          title='Request my data (DSAR)'
+          meta={<span>JSON · everything we hold about you, GDPR Art. 15</span>}
+          trailing={
+            <Button kind='secondary' sm disabled={dsarBusy} onClick={onDsarExport}>
+              {dsarBusy ? 'Preparing…' : 'Download JSON'}
+            </Button>
+          }
+        />
+        <Row
+          title='Delete my data (right to erasure)'
+          meta={<span>Schedules your runs for permanent deletion · GDPR Art. 17</span>}
+          trailing={
+            <Button
+              kind='secondary'
+              sm
+              style={{color: 'var(--signal-coral-text)'}}
+              onClick={() => {
+                setPrivacyErr('');
+                setEraseDone(null);
+                setEraseOpen(true);
+              }}
+            >
+              Delete
+            </Button>
+          }
+        />
+
         <Button
           kind='secondary'
           block
@@ -394,6 +511,25 @@ export default function AccountPage() {
           {busy ? 'Signing out…' : 'Sign out'}
         </Button>
       </Feed>
+
+      <PromptModal
+        open={eraseOpen}
+        title='Delete my data?'
+        body={
+          <>
+            This soft-deletes every completed and failed run on your account and schedules the
+            workspaces for permanent teardown. Active runs must be cancelled first. This cannot be
+            undone. Type <strong>DELETE</strong> to confirm.
+          </>
+        }
+        fields={[
+          {name: 'confirm', label: 'Type DELETE to confirm', placeholder: 'DELETE', required: true},
+        ]}
+        submitLabel='Erase my data'
+        busy={eraseBusy}
+        onSubmit={performErasure}
+        onClose={() => setEraseOpen(false)}
+      />
     </>
   );
 }

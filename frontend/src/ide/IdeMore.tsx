@@ -261,6 +261,8 @@ export function IdeAccount() {
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [dsarBusy, setDsarBusy] = useState(false);
+  const [erasing, setErasing] = useState(false);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
@@ -316,6 +318,62 @@ export function IdeAccount() {
       setMsg(e instanceof Error ? e.message : 'Export failed.');
     } finally {
       setExporting(false);
+    }
+  }
+
+  // DSAR self-service export — GET /api/dsar/me returns a JSON snapshot of every
+  // record we hold for the caller (GDPR Art. 15), distinct from the GDPR zip
+  // above. No api helper, so fetch with the bearer + trigger a JSON download.
+  async function onDsarExport() {
+    setDsarBusy(true);
+    setMsg('');
+    try {
+      const token = localStorage.getItem('access_token') ?? '';
+      const resp = await fetch('/api/dsar/me', {
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+      });
+      if (!resp.ok) throw new Error(`Data request failed (${resp.status}).`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `executespec-dsar-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg('Data request (JSON) downloaded.');
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Data request failed.');
+    } finally {
+      setDsarBusy(false);
+    }
+  }
+
+  // Right-to-erasure — DELETE /api/auth/me/data soft-deletes the caller's
+  // completed/failed runs + schedules workspace teardown (GDPR Art. 17). Strong
+  // window.confirm warning; no api helper, so direct fetch with the bearer.
+  async function onErase() {
+    if (
+      !window.confirm(
+        'Delete your data? This soft-deletes every completed and failed run on your account and schedules the workspaces for permanent deletion. Active runs must be cancelled first. This cannot be undone.',
+      )
+    )
+      return;
+    setErasing(true);
+    setMsg('');
+    try {
+      const token = localStorage.getItem('access_token') ?? '';
+      const resp = await fetch('/api/auth/me/data', {
+        method: 'DELETE',
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+      });
+      if (!resp.ok) throw new Error(`Erasure failed (${resp.status}).`);
+      const body = (await resp.json().catch(() => ({}))) as {runsScheduledForDeletion?: number};
+      const n = body.runsScheduledForDeletion ?? 0;
+      setMsg(`Erasure requested — ${n} run${n === 1 ? '' : 's'} scheduled for deletion.`);
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erasure failed.');
+    } finally {
+      setErasing(false);
     }
   }
 
@@ -537,7 +595,14 @@ export function IdeAccount() {
       <div className='ide-h2'>Security &amp; data</div>
       <div className='ide-card'>
         <div
-          style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12}}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            paddingBottom: 12,
+            borderBottom: '1px solid var(--ide-border)',
+          }}
         >
           <span>
             <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
@@ -554,6 +619,53 @@ export function IdeAccount() {
             onClick={onExport}
           >
             {exporting ? 'Preparing…' : 'Export'}
+          </button>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 0',
+            borderBottom: '1px solid var(--ide-border)',
+          }}
+        >
+          <span>
+            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+              Request my data (DSAR)
+            </span>
+            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+              JSON · everything we hold · GDPR Art. 15
+            </span>
+          </span>
+          <button
+            className='ide-btn ghost'
+            style={{padding: '6px 14px', flexShrink: 0}}
+            disabled={dsarBusy}
+            onClick={onDsarExport}
+          >
+            {dsarBusy ? 'Preparing…' : 'Download JSON'}
+          </button>
+        </div>
+        <div
+          style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12}}
+        >
+          <span>
+            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+              Delete my data (right to erasure)
+            </span>
+            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+              Schedules your runs for permanent deletion · GDPR Art. 17
+            </span>
+          </span>
+          <button
+            className='ide-btn ghost'
+            style={{padding: '6px 14px', flexShrink: 0, color: 'var(--ide-red)'}}
+            disabled={erasing}
+            onClick={onErase}
+          >
+            {erasing ? 'Deleting…' : 'Delete'}
           </button>
         </div>
         {msg && <div style={{marginTop: 10, fontSize: 12.5, color: 'var(--ide-blue)'}}>{msg}</div>}

@@ -2569,14 +2569,17 @@ export function SpecTemplatesPage() {
   async function performCreate(values: Record<string, string>) {
     if (!projectId) return;
     const name = (values.name || '').trim();
-    const body = (values.body || '').trim();
-    if (!name || !body) return;
+    const requirementTemplate = (values.requirementTemplate || '').trim();
+    const description = (values.description || '').trim();
+    if (!name || !requirementTemplate) return;
     setCreateBusy(true);
     setErr('');
     try {
-      await api.createProjectSpecTemplate(projectId, {name, body} as unknown as Parameters<
-        typeof api.createProjectSpecTemplate
-      >[1]);
+      await api.createProjectSpecTemplate(projectId, {
+        name,
+        requirementTemplate,
+        ...(description ? {description} : {}),
+      });
       setTemplates(await api.listSpecTemplates(projectId));
       setCreateOpen(false);
     } catch (e: unknown) {
@@ -2671,25 +2674,20 @@ export function SpecTemplatesPage() {
           </Card>
         ) : (
           templates.map((t) => {
-            const tAny = t as unknown as {
-              id?: string;
-              name?: string;
-              body?: string;
-              createdAt?: string;
-            };
+            const preview = (t.description || t.requirementTemplate || '').slice(0, 60);
             return (
               <Row
-                key={tAny.id}
+                key={t.id}
                 dot='lavender'
-                title={tAny.name || 'untitled'}
-                meta={<span>{(tAny.body || '').slice(0, 60)}…</span>}
+                title={t.name || 'untitled'}
+                meta={<span>{preview}…</span>}
                 trailing={
                   <div style={{display: 'flex', gap: 4}}>
                     <Button
                       kind='secondary'
                       sm
                       onClick={() => {
-                        sessionStorage.setItem('signal:pending-spec', tAny.body || '');
+                        sessionStorage.setItem('signal:pending-spec', t.requirementTemplate || '');
                         window.location.href = '/compose';
                       }}
                     >
@@ -2699,10 +2697,7 @@ export function SpecTemplatesPage() {
                       kind='ghost'
                       sm
                       style={{color: 'var(--signal-coral-text)'}}
-                      onClick={() =>
-                        tAny.id &&
-                        setConfirmDelete({id: tAny.id, name: tAny.name || 'this template'})
-                      }
+                      onClick={() => setConfirmDelete({id: t.id, name: t.name || 'this template'})}
                     >
                       ×
                     </Button>
@@ -2737,7 +2732,12 @@ export function SpecTemplatesPage() {
             required: true,
           },
           {
-            name: 'body',
+            name: 'description',
+            label: 'Description (optional)',
+            placeholder: 'Short note about when to use this',
+          },
+          {
+            name: 'requirementTemplate',
             label: 'Spec body',
             placeholder: 'Describe the spec…',
             multiline: true,

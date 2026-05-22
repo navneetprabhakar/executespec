@@ -65,6 +65,7 @@ export default function IdeRunResult() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
+  const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
   const [files, setFiles] = useState<string[]>([]);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -82,6 +83,10 @@ export default function IdeRunResult() {
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  // Preview lifecycle — status / logs / iframe embed once a preview is live.
+  const [preview, setPreview] = useState<api.LocalPreviewStatus | null>(null);
+  const [previewLogs, setPreviewLogs] = useState<string[] | null>(null);
+  const [previewStarted, setPreviewStarted] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
@@ -111,6 +116,11 @@ export default function IdeRunResult() {
         .getTestReport(runId)
         .then(setTests)
         .catch(() => setTests(null));
+    if (tab === 'Tests' && !testPlan)
+      api
+        .getTestPlan(runId)
+        .then(setTestPlan)
+        .catch(() => setTestPlan(null));
     if (tab === 'Timeline' && !timeline)
       api
         .getTimeline(runId)
@@ -130,6 +140,34 @@ export default function IdeRunResult() {
     const box = chatEndRef.current?.parentElement;
     if (box) box.scrollTop = box.scrollHeight;
   }, [tab, chat, chatBusy]);
+
+  // Preview status poll — once a preview has been started, poll status + logs
+  // while the lifecycle is non-terminal (IDLE → BUILDING → … → RUNNING/FAILED).
+  useEffect(() => {
+    if (!runId || !previewStarted) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const TERMINAL = ['RUNNING', 'FAILED', 'STOPPED', 'TIMED_OUT', 'IDLE'];
+    const tick = async () => {
+      try {
+        const s = await api.getPreviewStatus(runId);
+        if (cancelled) return;
+        setPreview(s);
+        api
+          .getPreviewLogs(runId, 200)
+          .then((l) => !cancelled && setPreviewLogs(l.lines || []))
+          .catch(() => {});
+        if (!TERMINAL.includes(s.status)) timer = setTimeout(tick, 3000);
+      } catch {
+        if (!cancelled) timer = setTimeout(tick, 5000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, previewStarted]);
 
   async function openFile(path: string) {
     setActiveFile(path);
@@ -465,7 +503,12 @@ export default function IdeRunResult() {
                 onClick={() =>
                   action(
                     'preview',
-                    () => api.startPreview(runId),
+                    async () => {
+                      const s = await api.startPreview(runId);
+                      setPreview(s);
+                      setPreviewStarted(true);
+                      return s;
+                    },
                     (r) => `Preview: ${(r as {url?: string})?.url || 'starting'}`,
                   )
                 }
@@ -549,6 +592,161 @@ export default function IdeRunResult() {
                 </button>
               )}
             </div>
+
+            {/* Preview lifecycle — status + iframe embed + logs + rebuild/stop. */}
+            {(previewStarted || preview) &&
+              (() => {
+                const ps = (preview?.status || 'STARTING').toUpperCase();
+                const previewUrl = preview?.url || '';
+                const live = ps === 'RUNNING' && !!previewUrl;
+                const failed = ps === 'FAILED' || ps === 'TIMED_OUT';
+                const settled = live || failed || ps === 'STOPPED';
+                return (
+                  <>
+                    <div
+                      className='ide-h2'
+                      style={{display: 'flex', alignItems: 'center', gap: 10}}
+                    >
+                      Preview
+                      <IdeBadge kind={live ? 'ok' : failed ? 'bad' : 'warn'}>{ps}</IdeBadge>
+                      {preview?.ttlRemainingSeconds ? (
+                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          TTL {Math.max(0, Math.round(preview.ttlRemainingSeconds))}s
+                        </span>
+                      ) : null}
+                      <span style={{flex: 1}} />
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '4px 10px'}}
+                        disabled={busy === 'preview-rebuild'}
+                        onClick={() =>
+                          action(
+                            'preview-rebuild',
+                            async () => {
+                              const s = await api.rebuildPreview(runId);
+                              setPreview(s);
+                              setPreviewStarted(true);
+                              return s;
+                            },
+                            () => 'Rebuilding preview…',
+                          )
+                        }
+                      >
+                        {busy === 'preview-rebuild' ? 'Rebuilding…' : '↻ Rebuild'}
+                      </button>
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '4px 10px', color: 'var(--ide-red)'}}
+                        disabled={busy === 'preview-stop'}
+                        onClick={() => {
+                          if (!window.confirm('Stop this preview?')) return;
+                          action(
+                            'preview-stop',
+                            async () => {
+                              await api.stopPreview(runId);
+                              setPreviewStarted(false);
+                              setPreview((p) => (p ? {...p, status: 'STOPPED', url: null} : p));
+                              return null;
+                            },
+                            () => 'Preview stopped.',
+                          );
+                        }}
+                      >
+                        {busy === 'preview-stop' ? 'Stopping…' : '■ Stop'}
+                      </button>
+                    </div>
+
+                    {preview?.errorMessage && failed && (
+                      <div
+                        className='ide-card'
+                        style={{color: 'var(--ide-red)', fontSize: 12, marginBottom: 10}}
+                      >
+                        {preview.errorMessage}
+                      </div>
+                    )}
+
+                    {live ? (
+                      <div className='ide-card' style={{padding: 0, overflow: 'hidden'}}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 12px',
+                            borderBottom: '1px solid var(--ide-border)',
+                          }}
+                        >
+                          <span
+                            className='ide-mono'
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--ide-fg-muted)',
+                              flex: 1,
+                              minWidth: 0,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {previewUrl}
+                          </span>
+                          <a
+                            className='ide-btn ghost'
+                            style={{padding: '3px 9px'}}
+                            href={previewUrl || '#'}
+                            target='_blank'
+                            rel='noreferrer'
+                          >
+                            ↗ Open
+                          </a>
+                        </div>
+                        <iframe
+                          title='Run preview'
+                          src={previewUrl}
+                          sandbox='allow-scripts allow-same-origin allow-forms allow-popups'
+                          style={{
+                            width: '100%',
+                            height: 420,
+                            border: 'none',
+                            background: '#fff',
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      !settled && (
+                        <div
+                          className='ide-card'
+                          style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
+                        >
+                          Preview is {ps.toLowerCase()}… this can take up to a minute.
+                        </div>
+                      )
+                    )}
+
+                    {previewLogs && previewLogs.length > 0 && (
+                      <>
+                        <div className='ide-h2' style={{fontSize: 12}}>
+                          Preview logs
+                        </div>
+                        <pre
+                          className='ide-card ide-mono'
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.5,
+                            maxHeight: 220,
+                            overflow: 'auto',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                            margin: 0,
+                          }}
+                        >
+                          {previewLogs.join('\n')}
+                        </pre>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
           </div>
         )}
 
@@ -974,25 +1172,201 @@ export default function IdeRunResult() {
                     {fmtDur(tests.executionDurationMs)}
                   </div>
                 </div>
+
+                {/* Test plan — generated test tasks + compile status. */}
+                {(testPlan?.tasks?.length ?? 0) > 0 && (
+                  <>
+                    <div className='ide-h2'>Test plan · {testPlan?.tasks.length}</div>
+                    <div className='ide-card' style={{padding: 0}}>
+                      {(testPlan?.tasks ?? []).map((tk, i, arr) => (
+                        <div
+                          key={tk.id}
+                          style={{
+                            padding: '10px 16px',
+                            borderBottom:
+                              i < arr.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                          }}
+                        >
+                          <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+                            <IdeBadge
+                              kind={
+                                tk.status === 'COMPILED'
+                                  ? 'ok'
+                                  : tk.status === 'FAILED'
+                                    ? 'bad'
+                                    : 'warn'
+                              }
+                            >
+                              {tk.status}
+                            </IdeBadge>
+                            <span style={{flex: 1, fontSize: 13, fontWeight: 500}}>
+                              {tk.taskName}
+                            </span>
+                            {tk.testCategory && (
+                              <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
+                                {tk.testCategory}
+                              </span>
+                            )}
+                          </div>
+                          {tk.compilationError && (
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 4}}
+                            >
+                              {tk.compilationError}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Root-cause groups — each renders its suggestedFix via Markdown +
+                    an "Apply fix as new run" affordance (mirrors Signal ResultPage). */}
                 {tests.rootCauseGroups?.length > 0 && (
                   <>
                     <div className='ide-h2'>Root causes · {tests.rootCauseGroups.length}</div>
-                    <div className='ide-card' style={{padding: 0}}>
-                      {tests.rootCauseGroups.map((g, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            padding: '11px 16px',
-                            borderBottom:
-                              i < tests.rootCauseGroups.length - 1
-                                ? '1px solid var(--ide-border)'
-                                : 'none',
-                            fontSize: 13,
-                          }}
-                        >
-                          {(g as {signature?: string}).signature || 'Failure group'}
+                    {tests.rootCauseGroups.map((g, i) => {
+                      const gAny = g as unknown as {
+                        signature?: string;
+                        description?: string;
+                        count?: number;
+                        failureCount?: number;
+                        suggestion?: string;
+                        suggestedFix?: string;
+                      };
+                      const fix = gAny.suggestedFix || gAny.suggestion;
+                      const affected = gAny.failureCount ?? gAny.count ?? 0;
+                      return (
+                        <div className='ide-card' key={i} style={{marginBottom: 10}}>
+                          <div style={{fontSize: 13, fontWeight: 600, marginBottom: 4}}>
+                            {gAny.description || gAny.signature || `Root cause ${i + 1}`}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--ide-fg-muted)',
+                              marginBottom: fix ? 10 : 0,
+                            }}
+                          >
+                            {affected} affected test{affected === 1 ? '' : 's'}
+                          </div>
+                          {fix && (
+                            <div
+                              style={{
+                                background: 'var(--ide-bg-input)',
+                                padding: '10px 12px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              <Markdown>{fix}</Markdown>
+                            </div>
+                          )}
+                          {gAny.signature && (
+                            <button
+                              className='ide-btn'
+                              style={{marginTop: 10, padding: '4px 12px'}}
+                              disabled={busy === `applyfix-${i}`}
+                              onClick={() =>
+                                action(
+                                  `applyfix-${i}`,
+                                  async () => {
+                                    const r = (await api.applyTestFixes(
+                                      runId,
+                                      gAny.signature,
+                                    )) as unknown as {runId?: string} | undefined;
+                                    if (r?.runId) navigate(`/live/${r.runId}`);
+                                    return r;
+                                  },
+                                  (r) => {
+                                    const nid = (r as {runId?: string} | undefined)?.runId;
+                                    return nid ? 'Fix run started.' : 'Test-fix run queued.';
+                                  },
+                                )
+                              }
+                            >
+                              {busy === `applyfix-${i}` ? 'Applying…' : '⤳ Apply fix as new run'}
+                            </button>
+                          )}
                         </div>
-                      ))}
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* Per-test result rows + mark-invalid on failed/error rows. */}
+                {(tests.results?.length ?? 0) > 0 && (
+                  <>
+                    <div className='ide-h2'>All tests · {tests.results.length}</div>
+                    <div className='ide-card' style={{padding: 0}}>
+                      {tests.results.slice(0, 60).map((r, i) => {
+                        const st = (r.status || 'UNKNOWN').toUpperCase();
+                        const bad = st === 'FAILED' || st === 'ERROR';
+                        return (
+                          <div
+                            key={r.testResultId ?? i}
+                            style={{
+                              padding: '10px 16px',
+                              borderBottom:
+                                i < Math.min(tests.results.length, 60) - 1
+                                  ? '1px solid var(--ide-border)'
+                                  : 'none',
+                            }}
+                          >
+                            <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+                              <IdeBadge kind={st === 'PASSED' ? 'ok' : bad ? 'bad' : 'warn'}>
+                                {st}
+                              </IdeBadge>
+                              <span style={{flex: 1, fontSize: 13, minWidth: 0}}>
+                                <span style={{fontWeight: 500}}>{r.testMethod}</span>{' '}
+                                <span
+                                  className='ide-mono'
+                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                >
+                                  {r.testClass}
+                                </span>
+                              </span>
+                              <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                                {fmtDur(r.durationMs)}
+                              </span>
+                              {bad && r.testResultId != null && (
+                                <button
+                                  className='ide-btn ghost'
+                                  style={{padding: '3px 8px'}}
+                                  disabled={busy === `invalid-${r.testResultId}`}
+                                  onClick={() => {
+                                    if (!window.confirm('Mark this test as invalid?')) return;
+                                    action(
+                                      `invalid-${r.testResultId}`,
+                                      () => api.markTestInvalid(r.testResultId),
+                                      () => 'Marked invalid.',
+                                    );
+                                  }}
+                                >
+                                  Mark invalid
+                                </button>
+                              )}
+                            </div>
+                            {r.failureMessage && (
+                              <div
+                                className='ide-mono'
+                                style={{
+                                  fontSize: 11,
+                                  color: 'var(--ide-red)',
+                                  marginTop: 4,
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                }}
+                              >
+                                {r.failureMessage}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </>
                 )}
