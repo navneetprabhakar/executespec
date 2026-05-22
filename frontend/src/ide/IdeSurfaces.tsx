@@ -232,6 +232,10 @@ export function IdeCompose() {
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
+  // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). '' = Default (org/system
+  // matrix), i.e. send no modelName. modelsByProvider keys are lowercase provider names.
+  const [modelName, setModelName] = useState('');
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
@@ -269,6 +273,23 @@ export function IdeCompose() {
       .then(setSamples)
       .catch(() => setSamples([]));
   }, []);
+
+  // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): load the registered models
+  // per provider so the ENTERPRISE-only model selector can offer them. modelsByProvider keys are
+  // lowercase provider names (e.g. 'anthropic'). Best-effort — selector just hides if it fails.
+  useEffect(() => {
+    if (tier !== 'ENTERPRISE') return;
+    api
+      .getOrgModelMatrix()
+      .then((m) => setModelsByProvider(m.modelsByProvider || {}))
+      .catch(() => setModelsByProvider({}));
+  }, [tier]);
+
+  // Reset the per-run model pin to "Default" whenever the provider changes — a model is only valid
+  // for its own provider, so a stale selection must not leak across a provider switch.
+  useEffect(() => {
+    setModelName('');
+  }, [provider]);
 
   async function applySample(sample: api.SampleSpecDto) {
     setSampleBusyId(sample.id);
@@ -353,6 +374,9 @@ export function IdeCompose() {
       if (costCap > 0) body.userCostCap = costCap;
       if (tddMode) body.tddMode = true;
       if (figmaUrl.trim()) body.figmaUrl = figmaUrl.trim();
+      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
+      // and '' means "Default (org / system matrix)" → send no modelName at all.
+      if (tier === 'ENTERPRISE' && modelName) body.modelName = modelName;
       const res = await api.createRun(body);
       navigate(`/plan/${res.runId}`);
     } catch (e: unknown) {
@@ -485,6 +509,30 @@ export function IdeCompose() {
             {tier === 'ENTERPRISE' && <option value='OPENROUTER'>OpenRouter</option>}
           </select>
         </div>
+        {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
+            default matrix for this run only. '' = Default → no modelName sent. */}
+        {tier === 'ENTERPRISE' && (
+          <div style={{flex: 1, minWidth: 180}}>
+            <div className='ide-h2' style={{marginTop: 0}}>
+              Model · Beta
+            </div>
+            <select
+              className='ide-select'
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+            >
+              <option value=''>Default (org / system matrix)</option>
+              {(modelsByProvider[provider.toLowerCase()] || []).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+              Overrides org &amp; default matrix for this run
+            </div>
+          </div>
+        )}
         <div style={{flex: 1, minWidth: 180}}>
           <div className='ide-h2' style={{marginTop: 0}}>
             Mode

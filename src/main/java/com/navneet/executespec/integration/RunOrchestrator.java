@@ -574,8 +574,24 @@ public class RunOrchestrator {
       String runMode) {
     String runId = UUID.randomUUID().toString();
     String provider = normalizeProvider(aiProvider, projectId, runId);
-    String model =
-        modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
+
+    // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): only ENTERPRISE runs may
+    // pin a per-run model. The actual ROUTING is governed by the RunModelOverrides overlay bound
+    // in runPipeline (also ENTERPRISE-gated); we resolve the owner tier once here so the persisted
+    // plannerModel/workerModel/reviewerModel columns stay HONEST with that routing and never
+    // advertise a pin that routing will ignore for a non-ENTERPRISE caller.
+    String ownerTierAtSubmit =
+        createdByUserId != null
+            ? appUserRepository.findById(createdByUserId).map(u -> u.getTier()).orElse(null)
+            : null;
+    boolean enterpriseSubmit = "ENTERPRISE".equalsIgnoreCase(ownerTierAtSubmit);
+    boolean hasPin = modelName != null && !modelName.isBlank();
+
+    // The run-level worker model honours a supplied modelName only for ENTERPRISE; otherwise it is
+    // the YAML workhorse default (= the model the worker will actually route to). This keeps the
+    // pipeline's `model` value, the persisted workerModel column, and the tierConfigFor fallback
+    // all consistent with the overlay-driven routing.
+    String model = (hasPin && enterpriseSubmit) ? modelName.trim() : defaultModelFor(provider);
 
     // 2026-05-06 — defaultModelFor was a hardcoded provider→model fallback that drifted from
     // the YAML matrix (returned Haiku/flash/mini when YAML PLANNING wanted Sonnet/Pro/gpt-5.4).
@@ -584,8 +600,8 @@ public class RunOrchestrator {
 
     // Resolve per-tier models so RunDetail surfaces what the planner/reviewer
     // will actually call, not the run-level worker default — adversarial-test
-    // Finding 14. If a user-supplied modelName was provided (rare BYOK path),
-    // honour it for all three roles to preserve the override contract.
+    // Finding 14. An ENTERPRISE per-run pin is honoured for all three roles to
+    // preserve the override contract.
     //
     // V182 PATCH-mode override: a patch run never invokes the planner or
     // reviewer, but it *must* run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 /
@@ -596,7 +612,7 @@ public class RunOrchestrator {
     String plannerDbModel = model;
     String reviewerDbModel = model;
     boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
-    if (modelName == null || modelName.isBlank() || isPatch) {
+    if (!hasPin || isPatch || !enterpriseSubmit) {
       try {
         com.navneet.executespec.router.LlmProvider p =
             com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
@@ -696,6 +712,14 @@ public class RunOrchestrator {
         (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
     final String prReviewCommentsFinal =
         (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
+    // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). The raw, caller-supplied
+    // modelName is the ONLY unambiguous signal of an explicit pin: `model` above is already
+    // defaulted to defaultModelFor(provider) when modelName is blank, so we capture modelName
+    // directly here and thread it to the pipeline thread. ENTERPRISE-gating + validation happen at
+    // the RunModelOverrides bind site in runPipeline so the overlay is the authoritative routing
+    // mechanism for every role. Null/blank = no pin (org/YAML resolution untouched).
+    final String pinnedModelFinal =
+        (modelName == null || modelName.isBlank()) ? null : modelName.trim();
     Future<?> future =
         pool.submit(
             () -> {
@@ -712,7 +736,8 @@ public class RunOrchestrator {
                     githubPatFinal,
                     tddModeFinal,
                     branchOverrideFinal,
-                    prReviewCommentsFinal);
+                    prReviewCommentsFinal,
+                    pinnedModelFinal);
               } finally {
                 activeRuns.remove(runIdFinal);
               }
@@ -815,6 +840,8 @@ public class RunOrchestrator {
         githubPat,
         tddMode,
         branchOverride,
+        null,
+        // No per-run model pin on the resume / re-plan path — pinning is a submit-time concept.
         null);
   }
 
@@ -830,7 +857,11 @@ public class RunOrchestrator {
       String githubPat,
       boolean tddMode,
       String branchOverride,
-      String prReviewComments) {
+      String prReviewComments,
+      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Non-null only when the
+      // caller supplied an explicit RunRequest.modelName. Overlaid onto the org override map at the
+      // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
+      String pinnedModel) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -865,10 +896,74 @@ public class RunOrchestrator {
       // resolves the org's chosen model instead of the YAML default. All resolve on this
       // pipeline thread, so a ThreadLocal binding covers them; cleared in the finally below.
       // Non-fatal: any failure falls through to the matrix defaults.
+      //
+      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): when an ENTERPRISE run
+      // supplied an explicit RunRequest.modelName, overlay it onto the run-provider's three tier
+      // cells of a MUTABLE copy of the org map BEFORE binding, so the pin out-ranks both the org
+      // overrides and the YAML defaults for every role (planner / worker / reviewer) on that
+      // provider. This RunModelOverrides overlay is the single authoritative routing mechanism —
+      // the worker no longer silently re-resolves to the tier default and ignores the pin.
       try {
         PipelineRun ovProbe = runRepo.findById(runId).orElse(null);
         String orgId = ovProbe != null ? ovProbe.getOrgId() : null;
-        RunModelOverrides.bind(orgModelOverrideService.overridesForRun(orgId));
+        Map<String, String> orgOverrides = orgModelOverrideService.overridesForRun(orgId);
+
+        // Resolve the run owner's tier (same higher-of pattern the codemap-eligibility check uses
+        // below). Only ENTERPRISE runs may pin a per-run model; everything else leaves org/YAML
+        // resolution untouched.
+        String ownerTier =
+            ovProbe != null && ovProbe.getCreatedByUserId() != null
+                ? appUserRepository
+                    .findById(ovProbe.getCreatedByUserId())
+                    .map(u -> u.getTier())
+                    .orElse(null)
+                : null;
+        boolean enterprise = "ENTERPRISE".equalsIgnoreCase(ownerTier);
+
+        LlmProvider pinProvider = null;
+        String validatedPin = null;
+        if (enterprise && pinnedModel != null && !pinnedModel.isBlank()) {
+          try {
+            pinProvider = LlmProvider.valueOf(provider.toUpperCase());
+            // Validate the pin is a real model that belongs to the run's provider (lenient: if the
+            // registry can't confirm ownership we still accept it but keep it provider-scoped, so a
+            // forward-compat model id the registry doesn't yet know about isn't rejected).
+            String canonical = modelRegistry.canonicalize(pinnedModel.trim());
+            String owner = modelRegistry.providerFor(canonical);
+            if (owner == null || owner.equalsIgnoreCase(pinProvider.name())) {
+              validatedPin = canonical;
+            } else {
+              log.warn(
+                  "V2 run={} per-run model pin '{}' is not a {} model — ignoring pin",
+                  runId,
+                  pinnedModel,
+                  pinProvider.name());
+              pinProvider = null;
+            }
+          } catch (IllegalArgumentException badProvider) {
+            log.warn(
+                "V2 run={} per-run model pin skipped — unrecognised provider '{}'",
+                runId,
+                provider);
+            pinProvider = null;
+          }
+        } else if (pinnedModel != null && !pinnedModel.isBlank()) {
+          log.debug(
+              "V2 run={} per-run model pin '{}' ignored — owner tier {} is not ENTERPRISE",
+              runId,
+              pinnedModel,
+              ownerTier);
+        }
+
+        if (validatedPin != null) {
+          log.info(
+              "V2 run={} ENTERPRISE per-run pin: {} ({}) overrides org+YAML for all tiers",
+              runId,
+              validatedPin,
+              pinProvider.name());
+        }
+        RunModelOverrides.bind(
+            RunModelOverrides.withRunPin(orgOverrides, pinProvider, validatedPin));
       } catch (Exception ovEx) {
         RunModelOverrides.clear();
         log.warn(
