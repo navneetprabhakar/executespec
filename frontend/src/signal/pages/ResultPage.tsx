@@ -1777,13 +1777,8 @@ export default function ResultPage() {
                         {isUser ? 'YOU' : 'RUN COPILOT'}
                         {ts && ` · ${new Date(ts).toLocaleTimeString()}`}
                       </div>
-                      {isUser ? (
-                        <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-                          {content}
-                        </div>
-                      ) : (
-                        <Markdown>{content}</Markdown>
-                      )}
+                      {/* Both sides render Markdown so the chat fully supports formatting. */}
+                      <Markdown>{content}</Markdown>
                     </div>
                   );
                 })

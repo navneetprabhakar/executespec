@@ -13,7 +13,7 @@ The reusable surface that every Signal page builds on. **Net-new this round (202
 - `Modal.tsx` — `Modal`, `ConfirmModal`, `PromptModal` with focus-trap, ESC dismiss, click-backdrop dismiss. Mobile-friendly (slides up on narrow screens). Replaces every `window.confirm` / `window.prompt` across Signal pages (9 destructive surfaces + 3 prompt surfaces verified).
 - `Loaders.tsx` — `Spinner`, `LoadingState`, `SkeletonRow`, `InlineLoader`. Wired on HomePage / ProjectPulsePage / ProjectComposePage so the first paint shows shimmer rows instead of the empty state.
 - `CodeView.tsx` — regex-tokenised syntax highlighter with Content/Diff toggle. Replaces V3's Monaco editor (saves ~600 KB on the bundle). Languages: TS/JS/Java/Python/JSON/SQL/Bash/YAML.
-- `Markdown.tsx` — ~3 KB custom GFM-subset parser (no react-markdown). Used by SpecChat replies + ProjectChatPage assistant bubbles.
+- `Markdown.tsx` — ~3 KB custom GFM-subset parser (no react-markdown). **All chat UI renders every message (both user + assistant) through it** — SpecChat, ProjectChatPage, ResultPage run chat, and the IDE project chat. `.signal-md*` classes are styled in `signal.css` (Signal) and re-mapped to `--ide-*` tokens via `.ide-root .signal-md*` in `ide.css` so markdown looks native in both chromes.
 - `CostProgressBar.tsx` — green 0–80 % / amber 80–100 % / red ≥100 % of hard cap, `role='progressbar'`, `aria-valuenow`. Wired on LivePage.
 - `BrandLogos.tsx` — real multicolour SVG logos for Google, GitHub, Slack, Jira, Confluence, Bitbucket, Stripe, Razorpay.
 - `SpecChat.tsx` — "Build my spec" trigger + assistant chat with Markdown rendering. The launcher is also exposed on ComposePage / ProjectComposePage.
