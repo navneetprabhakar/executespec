@@ -115,6 +115,11 @@ export default function ResultPage() {
   const [fileDiff, setFileDiff] = useState<string | null>(null);
   const [testReport, setTestReport] = useState<api.TestReportData | null>(null);
   const [testReportLoading, setTestReportLoading] = useState(false);
+  const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
+  // Preview lifecycle — status / logs / iframe embed once a preview is running.
+  const [previewStatus, setPreviewStatus] = useState<api.LocalPreviewStatus | null>(null);
+  const [previewLogs, setPreviewLogs] = useState<string[] | null>(null);
+  const [previewWatch, setPreviewWatch] = useState(false);
   // Re-run on a different provider — fires `createRun` with the same spec
   // against the chosen provider so the user can A/B providers without
   // re-typing. Used to ship as a single "Iterate" row that always rebuilt on
@@ -195,7 +200,13 @@ export default function ResultPage() {
         .catch(() => setTestReport({results: []} as unknown as api.TestReportData))
         .finally(() => setTestReportLoading(false));
     }
-  }, [id, tab, timeline, files, chatMessages, testReport, testReportLoading]);
+    if (tab === 'tests' && testPlan == null) {
+      api
+        .getTestPlan(id)
+        .then(setTestPlan)
+        .catch(() => setTestPlan(null));
+    }
+  }, [id, tab, timeline, files, chatMessages, testReport, testReportLoading, testPlan]);
 
   // Load file content when user picks a file from the Code tab list.
   useEffect(() => {
@@ -531,6 +542,8 @@ export default function ResultPage() {
     setPreviewBusy(true);
     try {
       const resp = await api.startPreview(id);
+      setPreviewStatus(resp);
+      setPreviewWatch(true);
       const url =
         (resp as unknown as {previewUrl?: string; url?: string})?.previewUrl ||
         (resp as unknown as {url?: string})?.url;
@@ -543,6 +556,69 @@ export default function ResultPage() {
       setPreviewBusy(false);
     }
   }
+
+  // Rebuild — re-runs the build/deploy pipeline for an existing preview.
+  const [previewRebuildBusy, setPreviewRebuildBusy] = useState(false);
+  async function rebuildPreview() {
+    if (!id) return;
+    setPreviewRebuildBusy(true);
+    setErr('');
+    try {
+      const s = await api.rebuildPreview(id);
+      setPreviewStatus(s);
+      setPreviewWatch(true);
+      setMsg('Rebuilding preview…');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Rebuild failed.');
+    } finally {
+      setPreviewRebuildBusy(false);
+    }
+  }
+
+  const [previewStopBusy, setPreviewStopBusy] = useState(false);
+  async function stopPreview() {
+    if (!id) return;
+    if (!window.confirm('Stop this preview?')) return;
+    setPreviewStopBusy(true);
+    setErr('');
+    try {
+      await api.stopPreview(id);
+      setPreviewWatch(false);
+      setPreviewStatus((p) => (p ? {...p, status: 'STOPPED', url: null} : p));
+      setMsg('Preview stopped.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Stop failed.');
+    } finally {
+      setPreviewStopBusy(false);
+    }
+  }
+
+  // Poll preview status + logs while the lifecycle is non-terminal.
+  useEffect(() => {
+    if (!id || !previewWatch) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const TERMINAL = ['RUNNING', 'FAILED', 'STOPPED', 'TIMED_OUT', 'IDLE'];
+    const tick = async () => {
+      try {
+        const s = await api.getPreviewStatus(id);
+        if (cancelled) return;
+        setPreviewStatus(s);
+        api
+          .getPreviewLogs(id, 200)
+          .then((l) => !cancelled && setPreviewLogs(l.lines || []))
+          .catch(() => undefined);
+        if (!TERMINAL.includes(s.status)) timer = setTimeout(tick, 3000);
+      } catch {
+        if (!cancelled) timer = setTimeout(tick, 5000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [id, previewWatch]);
 
   // Permanent Cloud Run deploy (createDeployment) — was wired into no screen.
   const [deployBusy, setDeployBusy] = useState(false);
@@ -619,6 +695,30 @@ export default function ResultPage() {
       setMsg('Push triggered.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Push failed.');
+    }
+  }
+
+  // Mark a flaky / wrong-by-construction failing test as invalid so it stops
+  // dragging the test slot. Optimistically flips the local row to SKIPPED.
+  const [markingInvalidId, setMarkingInvalidId] = useState<number | null>(null);
+  async function markTestInvalid(testResultId: number) {
+    if (!window.confirm('Mark this test as invalid? It will be excluded from the score.')) return;
+    setMarkingInvalidId(testResultId);
+    setErr('');
+    try {
+      await api.markTestInvalid(testResultId);
+      setTestReport((prev) => {
+        if (!prev) return prev;
+        const results = (prev.results || []).map((r) =>
+          r.testResultId === testResultId ? {...r, status: 'SKIPPED' as const} : r,
+        );
+        return {...prev, results};
+      });
+      setMsg('Test marked invalid.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Mark-invalid failed.');
+    } finally {
+      setMarkingInvalidId(null);
     }
   }
 
@@ -1048,6 +1148,144 @@ export default function ResultPage() {
                 </Button>
               }
             />
+            {(previewWatch || previewStatus) &&
+              (() => {
+                const ps = (previewStatus?.status || 'STARTING').toUpperCase();
+                const previewUrl = previewStatus?.url || '';
+                const live = ps === 'RUNNING' && !!previewUrl;
+                const failed = ps === 'FAILED' || ps === 'TIMED_OUT';
+                const settled = live || failed || ps === 'STOPPED';
+                const ttl = previewStatus?.ttlRemainingSeconds;
+                return (
+                  <Card style={{marginBottom: 12, padding: 14}}>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          letterSpacing: 0.4,
+                          color: live
+                            ? 'var(--signal-mint-text-on-light)'
+                            : failed
+                              ? 'var(--signal-coral-text)'
+                              : 'var(--signal-text-dim)',
+                        }}
+                      >
+                        Preview · {ps}
+                      </span>
+                      {ttl ? (
+                        <span style={{fontSize: 11, color: 'var(--signal-text-mute)'}}>
+                          TTL {Math.max(0, Math.round(ttl))}s
+                        </span>
+                      ) : null}
+                      <span style={{flex: 1}} />
+                      <Button
+                        kind='secondary'
+                        sm
+                        onClick={rebuildPreview}
+                        disabled={previewRebuildBusy}
+                      >
+                        {previewRebuildBusy ? 'Rebuilding…' : 'Rebuild'}
+                      </Button>
+                      <Button kind='secondary' sm onClick={stopPreview} disabled={previewStopBusy}>
+                        {previewStopBusy ? 'Stopping…' : 'Stop'}
+                      </Button>
+                    </div>
+
+                    {failed && previewStatus?.errorMessage && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          fontSize: 12,
+                          color: 'var(--signal-coral-text)',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {previewStatus.errorMessage}
+                      </div>
+                    )}
+
+                    {live ? (
+                      <div style={{marginTop: 12}}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span
+                            className='mono'
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--signal-text-dim)',
+                              flex: 1,
+                              minWidth: 0,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {previewUrl}
+                          </span>
+                          <a href={previewUrl} target='_blank' rel='noreferrer'>
+                            <Button kind='secondary' sm>
+                              Open ↗
+                            </Button>
+                          </a>
+                        </div>
+                        <iframe
+                          title='Run preview'
+                          src={previewUrl}
+                          sandbox='allow-scripts allow-same-origin allow-forms allow-popups'
+                          style={{
+                            width: '100%',
+                            height: 420,
+                            border: '1px solid var(--signal-hairline)',
+                            borderRadius: 10,
+                            background: '#fff',
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      !settled && (
+                        <div
+                          style={{
+                            marginTop: 10,
+                            fontSize: 12.5,
+                            color: 'var(--signal-text-dim)',
+                          }}
+                        >
+                          Preview is {ps.toLowerCase()}… this can take up to a minute.
+                        </div>
+                      )
+                    )}
+
+                    {previewLogs && previewLogs.length > 0 && (
+                      <pre
+                        className='mono'
+                        style={{
+                          marginTop: 12,
+                          marginBottom: 0,
+                          background: 'var(--signal-card-elev)',
+                          borderRadius: 8,
+                          padding: '10px 12px',
+                          fontSize: 11,
+                          lineHeight: 1.5,
+                          maxHeight: 200,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {previewLogs.join('\n')}
+                      </pre>
+                    )}
+                  </Card>
+                );
+              })()}
             <Row
               dot='lavender'
               title='Deploy to Cloud Run'
@@ -1618,6 +1856,46 @@ export default function ResultPage() {
                     Re-run tests
                   </Button>
 
+                  {(testPlan?.tasks?.length ?? 0) > 0 && (
+                    <>
+                      <SectionHeader>Test plan · {testPlan?.tasks.length}</SectionHeader>
+                      {(testPlan?.tasks ?? []).map((tk) => (
+                        <Row
+                          key={tk.id}
+                          dot={
+                            tk.status === 'COMPILED'
+                              ? 'mint'
+                              : tk.status === 'FAILED'
+                                ? 'coral'
+                                : 'lavender'
+                          }
+                          title={tk.taskName}
+                          meta={
+                            <>
+                              {tk.testCategory && <span>{tk.testCategory}</span>}
+                              {tk.compilationError && (
+                                <>
+                                  <span>·</span>
+                                  <span style={{color: 'var(--signal-coral-text)'}}>
+                                    {tk.compilationError.slice(0, 80)}
+                                  </span>
+                                </>
+                              )}
+                            </>
+                          }
+                          trailing={tk.status}
+                          trailingKind={
+                            tk.status === 'COMPILED'
+                              ? 'good'
+                              : tk.status === 'FAILED'
+                                ? 'fail'
+                                : 'default'
+                          }
+                        />
+                      ))}
+                    </>
+                  )}
+
                   {rootCauses.length > 0 && (
                     <>
                       <SectionHeader>Root causes · {rootCauses.length}</SectionHeader>
@@ -1710,20 +1988,22 @@ export default function ResultPage() {
                   {results.slice(0, 30).map((r, i) => {
                     const rAny = r as unknown as {
                       id?: string | number;
+                      testResultId?: number;
                       testName?: string;
+                      testMethod?: string;
                       testClass?: string;
                       status?: string;
                       durationMs?: number;
                       failureMessage?: string;
                     };
                     const status = (rAny.status || 'UNKNOWN').toUpperCase();
+                    const bad = status === 'FAILED' || status === 'ERROR';
+                    const trid = rAny.testResultId;
                     return (
                       <Row
-                        key={rAny.id || i}
-                        dot={
-                          status === 'PASSED' ? 'mint' : status === 'FAILED' ? 'coral' : 'lavender'
-                        }
-                        title={rAny.testName || `Test ${i + 1}`}
+                        key={trid ?? rAny.id ?? i}
+                        dot={status === 'PASSED' ? 'mint' : bad ? 'coral' : 'lavender'}
+                        title={rAny.testName || rAny.testMethod || `Test ${i + 1}`}
                         meta={
                           <>
                             {rAny.testClass && <span className='mono'>{rAny.testClass}</span>}
@@ -1735,9 +2015,33 @@ export default function ResultPage() {
                             )}
                           </>
                         }
-                        trailing={status}
+                        trailing={
+                          bad && trid != null ? (
+                            <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                              <span style={{fontSize: 11, color: 'var(--signal-coral-text)'}}>
+                                {status}
+                              </span>
+                              <Button
+                                kind='secondary'
+                                sm
+                                disabled={markingInvalidId === trid}
+                                onClick={() => markTestInvalid(trid)}
+                              >
+                                {markingInvalidId === trid ? '…' : 'Mark invalid'}
+                              </Button>
+                            </div>
+                          ) : (
+                            status
+                          )
+                        }
                         trailingKind={
-                          status === 'PASSED' ? 'good' : status === 'FAILED' ? 'fail' : 'default'
+                          bad && trid != null
+                            ? 'default'
+                            : status === 'PASSED'
+                              ? 'good'
+                              : bad
+                                ? 'fail'
+                                : 'default'
                         }
                       />
                     );

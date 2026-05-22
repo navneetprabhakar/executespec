@@ -235,28 +235,44 @@ export function OrgSettingsPage() {
   const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
   const [matrixOverrides, setMatrixOverrides] = useState<Record<string, string>>({});
   const [matrixBusy, setMatrixBusy] = useState(false);
+  // Seat adjustment (TEAM tier) — current value seeded from the org seat count.
+  const [seats, setSeats] = useState(1);
+  const [seatBusy, setSeatBusy] = useState(false);
+  // Org members — drives the per-member suspend control.
+  const [members, setMembers] = useState<api.OrgMemberDto[] | null>(null);
+  const [suspendBusy, setSuspendBusy] = useState<string | null>(null);
+  // Org audit log — loaded lazily on first expand to keep first paint cheap.
+  const [audit, setAudit] = useState<api.AuditLogEntry[] | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditBusy, setAuditBusy] = useState(false);
 
   useEffect(() => {
-    Promise.allSettled([api.getMyOrg(), api.getSsoConfig(), api.getOrgModelMatrix()]).then(
-      ([o, s, m]) => {
-        if (o.status === 'fulfilled') {
-          setOrg(o.value);
-          setName(o.value.name || '');
-          setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
-        }
-        if (s.status === 'fulfilled') {
-          setSso(s.value);
-          if (s.value.provider) setSsoProvider(s.value.provider);
-          if (s.value.metadataUrl) setSsoMetadataUrl(s.value.metadataUrl);
-          if (s.value.domain) setSsoDomain(s.value.domain);
-          setSsoEnforced(!!s.value.enforced);
-        }
-        if (m.status === 'fulfilled') {
-          setMatrix(m.value);
-          setMatrixOverrides(m.value.overrides || {});
-        }
-      },
-    );
+    Promise.allSettled([
+      api.getMyOrg(),
+      api.getSsoConfig(),
+      api.getOrgModelMatrix(),
+      api.getOrgMembers(),
+    ]).then(([o, s, m, mem]) => {
+      if (o.status === 'fulfilled') {
+        setOrg(o.value);
+        setName(o.value.name || '');
+        setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
+        setSeats(o.value.seatCount ?? 1);
+      }
+      if (s.status === 'fulfilled') {
+        setSso(s.value);
+        if (s.value.provider) setSsoProvider(s.value.provider);
+        if (s.value.metadataUrl) setSsoMetadataUrl(s.value.metadataUrl);
+        if (s.value.domain) setSsoDomain(s.value.domain);
+        setSsoEnforced(!!s.value.enforced);
+      }
+      if (m.status === 'fulfilled') {
+        setMatrix(m.value);
+        setMatrixOverrides(m.value.overrides || {});
+      }
+      if (mem.status === 'fulfilled') setMembers(mem.value);
+      else setMembers([]);
+    });
   }, []);
 
   async function saveMatrix() {
@@ -328,6 +344,53 @@ export function OrgSettingsPage() {
     } finally {
       setClearSsoBusy(false);
       setConfirmClearSso(false);
+    }
+  }
+
+  async function saveSeats() {
+    setSeatBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await api.adjustOrgSeats(seats);
+      setMsg(res.message || `Seats updated to ${res.newSeats}.`);
+      setSeats(res.newSeats);
+      // Reflect the new count in the local org snapshot + topbar subtitle.
+      setOrg((prev) => (prev ? {...prev, seatCount: res.newSeats} : prev));
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Seat update failed.');
+    } finally {
+      setSeatBusy(false);
+    }
+  }
+
+  async function toggleSuspend(userId: string, suspended: boolean) {
+    setSuspendBusy(userId);
+    setErr('');
+    setMsg('');
+    try {
+      await api.orgSuspendMember(userId, suspended);
+      setMembers(await api.getOrgMembers());
+      setMsg(suspended ? 'Member suspended.' : 'Member reinstated.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Suspend failed.');
+    } finally {
+      setSuspendBusy(null);
+    }
+  }
+
+  async function loadAudit() {
+    setAuditOpen(true);
+    if (audit !== null) return;
+    setAuditBusy(true);
+    try {
+      const page = await api.getAuditLogs({orgScoped: true, size: 50});
+      setAudit(page.content);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Audit load failed.');
+      setAudit([]);
+    } finally {
+      setAuditBusy(false);
     }
   }
 
@@ -439,6 +502,44 @@ export function OrgSettingsPage() {
               {busy ? 'Saving…' : 'Save org profile'}
             </Button>
           )}
+        </Card>
+
+        <SectionHeader>Seats</SectionHeader>
+        <Card>
+          <div
+            style={{
+              fontSize: 13,
+              color: 'var(--signal-text-dim)',
+              lineHeight: 1.5,
+              marginBottom: 12,
+            }}
+          >
+            TEAM-tier orgs share a seat pool (min 2). Changing the count syncs the prorated quantity
+            to your billing gateway. You can&apos;t reduce below the current active member count.
+          </div>
+          <Field label='Seats'>
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <input
+                type='number'
+                min={1}
+                max={20}
+                value={seats}
+                onChange={(e) => setSeats(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                disabled={!canEdit}
+                style={{...inputStyle, width: 120, marginBottom: 0}}
+              />
+              {canEdit && (
+                <Button
+                  kind='primary'
+                  sm
+                  disabled={seatBusy || seats === (org.seatCount ?? 1)}
+                  onClick={saveSeats}
+                >
+                  {seatBusy ? 'Updating…' : 'Update seats'}
+                </Button>
+              )}
+            </div>
+          </Field>
         </Card>
 
         <SectionHeader>Single sign-on (SSO)</SectionHeader>
@@ -758,6 +859,137 @@ export function OrgSettingsPage() {
               />
             </button>
           </div>
+        </Card>
+
+        <SectionHeader>Members</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Suspend a member to block their access without removing them from the org. Reinstate to
+            restore it. Manage roles + invites from{' '}
+            <Link to='/org-members' style={{color: 'var(--signal-coral)'}}>
+              Org members
+            </Link>
+            .
+          </div>
+        </Card>
+        {members === null ? (
+          <LoadingState label='Loading members…' />
+        ) : members.length === 0 ? (
+          <Card>
+            <span style={{fontSize: 13, color: 'var(--signal-text-dim)'}}>No members found.</span>
+          </Card>
+        ) : (
+          <Card style={{padding: 0}}>
+            {members.map((m, i) => {
+              const mName = [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || m.email;
+              const isSelf = m.userId === user?.id;
+              return (
+                <div
+                  key={m.userId}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 16px',
+                    borderBottom: i < members.length - 1 ? '1px solid var(--signal-hairline)' : 0,
+                  }}
+                >
+                  <div style={{minWidth: 0, flex: 1}}>
+                    <div style={{fontSize: 14, fontWeight: 600, color: 'var(--signal-ink)'}}>
+                      {mName}
+                      {isSelf && (
+                        <span style={{fontSize: 11, color: 'var(--signal-text-mute)'}}> · you</span>
+                      )}
+                    </div>
+                    <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
+                      {m.email} · {m.orgRole}
+                    </div>
+                  </div>
+                  {canEdit && !isSelf && (
+                    <div style={{display: 'flex', gap: 6, flexShrink: 0}}>
+                      <Button
+                        kind='ghost'
+                        sm
+                        disabled={suspendBusy === m.userId}
+                        style={{color: 'var(--signal-coral-text)'}}
+                        onClick={() => toggleSuspend(m.userId, true)}
+                      >
+                        {suspendBusy === m.userId ? '…' : 'Suspend'}
+                      </Button>
+                      <Button
+                        kind='ghost'
+                        sm
+                        disabled={suspendBusy === m.userId}
+                        onClick={() => toggleSuspend(m.userId, false)}
+                      >
+                        Reinstate
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+        )}
+
+        <SectionHeader>Audit log</SectionHeader>
+        <Card style={{padding: 0}}>
+          {!auditOpen ? (
+            <div style={{padding: 16}}>
+              <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 12}}>
+                Org-scoped audit trail — role changes, SSO + sharing toggles, member actions.
+              </div>
+              <Button kind='secondary' sm onClick={loadAudit}>
+                Load audit log
+              </Button>
+            </div>
+          ) : auditBusy || audit === null ? (
+            <div style={{padding: 16}}>
+              <LoadingState label='Loading audit log…' />
+            </div>
+          ) : audit.length === 0 ? (
+            <div style={{padding: 16, fontSize: 13, color: 'var(--signal-text-dim)'}}>
+              No audit entries yet.
+            </div>
+          ) : (
+            audit.map((a, i) => (
+              <div
+                key={a.id}
+                style={{
+                  padding: '11px 16px',
+                  borderBottom: i < audit.length - 1 ? '1px solid var(--signal-hairline)' : 0,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    alignItems: 'baseline',
+                  }}
+                >
+                  <span style={{fontSize: 13, fontWeight: 600, color: 'var(--signal-ink)'}}>
+                    {a.eventType}
+                  </span>
+                  <span style={{fontSize: 11, color: 'var(--signal-text-mute)', flexShrink: 0}}>
+                    {a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}
+                  </span>
+                </div>
+                <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2}}>
+                  {a.entityType}
+                  {a.entityId ? ` · ${a.entityId.slice(0, 12)}` : ''}
+                  {a.actorEmail ? ` · by ${a.actorEmail}` : ''}
+                </div>
+              </div>
+            ))
+          )}
         </Card>
 
         <SectionHeader>Compliance</SectionHeader>

@@ -246,6 +246,8 @@ export function IdeCompose() {
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
+  const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!permissions) {
@@ -259,6 +261,29 @@ export function IdeCompose() {
       .then((p) => setProjects(p.filter((x) => !x.archivedAt)))
       .catch(() => {});
   }, [permissions]);
+
+  // Onboarding sample specs — a quick "start from a sample" row.
+  useEffect(() => {
+    api
+      .listOnboardingSamples()
+      .then(setSamples)
+      .catch(() => setSamples([]));
+  }, []);
+
+  async function applySample(sample: api.SampleSpecDto) {
+    setSampleBusyId(sample.id);
+    setErr('');
+    try {
+      const picked = await api.pickOnboardingSample(sample.id);
+      setSpec(picked.spec || sample.title);
+      if (picked.preferredProvider) setProvider(picked.preferredProvider);
+    } catch {
+      // Backend tracking is best-effort; still let the user start from the title.
+      setSpec(sample.title);
+    } finally {
+      setSampleBusyId(null);
+    }
+  }
 
   // Load repos when the project changes; default to all selected.
   useEffect(() => {
@@ -377,6 +402,25 @@ export function IdeCompose() {
       <div style={{marginTop: 10}}>
         <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
       </div>
+
+      {samples.length > 0 && (
+        <>
+          <div className='ide-h2'>Start from a sample</div>
+          <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+            {samples.map((s) => (
+              <button
+                key={s.id}
+                className='ide-btn ghost'
+                disabled={sampleBusyId != null}
+                onClick={() => void applySample(s)}
+                title={`${s.category} · ${s.complexity}`}
+              >
+                {sampleBusyId === s.id ? '…' : s.title}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className='ide-h2'>Project</div>
       <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
