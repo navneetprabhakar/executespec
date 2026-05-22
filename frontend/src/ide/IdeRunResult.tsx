@@ -158,6 +158,40 @@ export default function IdeRunResult() {
     );
   }
 
+  // Run management — fork / archive / unarchive / soft-delete (dark endpoints).
+  async function manageRun(act: 'fork' | 'archive' | 'unarchive' | 'delete') {
+    if (!runId) return;
+    if (
+      act === 'delete' &&
+      !window.confirm('Delete this run? It is soft-deleted with a 30-day undo window.')
+    )
+      return;
+    setBusy(act);
+    setMsg('');
+    try {
+      if (act === 'fork') {
+        const f = await api.forkRun(runId);
+        navigate(`/plan/${f.runId}`);
+        return;
+      }
+      if (act === 'delete') {
+        await api.softDeleteRun(runId);
+        navigate('/runs');
+        return;
+      }
+      await (act === 'archive' ? api.archiveRun(runId) : api.unarchiveRun(runId));
+      setRun(await api.getRun(runId));
+      setMsg(act === 'archive' ? 'Run archived.' : 'Run unarchived.');
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const terminal = ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(
+    (run?.status || '').toUpperCase(),
+  );
   const score = report?.verifiedScore ?? null;
   const v = verdictFor(score, run?.status);
   const active = activeFile ? cache[activeFile] : null;
@@ -356,6 +390,30 @@ export default function IdeRunResult() {
                     ↻ Try {p}
                   </button>
                 ))}
+              <button
+                className='ide-btn ghost'
+                disabled={busy === 'fork'}
+                onClick={() => manageRun('fork')}
+              >
+                ⑂ Fork
+              </button>
+              <button
+                className='ide-btn ghost'
+                disabled={busy === 'archive' || busy === 'unarchive'}
+                onClick={() => manageRun(run?.archivedAt ? 'unarchive' : 'archive')}
+              >
+                {run?.archivedAt ? '⊡ Unarchive' : '⊟ Archive'}
+              </button>
+              {terminal && (
+                <button
+                  className='ide-btn ghost'
+                  style={{color: 'var(--ide-red)'}}
+                  disabled={busy === 'delete'}
+                  onClick={() => manageRun('delete')}
+                >
+                  ⊘ Delete
+                </button>
+              )}
             </div>
           </div>
         )}

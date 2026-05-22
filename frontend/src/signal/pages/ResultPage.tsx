@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {useParams} from 'react-router-dom';
+import {useNavigate, useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, KvList, TabsStrip, Button} from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
@@ -10,6 +10,7 @@ import {GitHubLogo} from '@/signal/components/BrandLogos';
 import {CodeView} from '@/signal/components/CodeView';
 import {FileTree, type FileEntry} from '@/signal/components/FileTree';
 import {Markdown} from '@/signal/components/Markdown';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
@@ -28,6 +29,61 @@ function shortStatusReason(r?: string | null): string {
   if (!r) return '—';
   return r.toUpperCase().replace(/_/g, ' ');
 }
+
+function isTerminalStatus(s?: string): boolean {
+  return ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(
+    (s || '').toUpperCase(),
+  );
+}
+
+// Run-management glyphs (18px, stroke-only) for the run-detail header.
+const RUN_ICON = {width: 18, height: 18} as const;
+const forkIcon = (
+  <svg
+    viewBox='0 0 24 24'
+    style={RUN_ICON}
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={2}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <circle cx='6' cy='6' r='2.2' />
+    <circle cx='6' cy='18' r='2.2' />
+    <circle cx='18' cy='9' r='2.2' />
+    <path d='M6 8.2v7.6' />
+    <path d='M18 11.2c0 3.2-3.6 3.8-6 3.8' />
+  </svg>
+);
+const archiveIcon = (
+  <svg
+    viewBox='0 0 24 24'
+    style={RUN_ICON}
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={2}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <rect x='3' y='4' width='18' height='4' rx='1' />
+    <path d='M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8' />
+    <line x1='10' y1='12' x2='14' y2='12' />
+  </svg>
+);
+const trashIcon = (
+  <svg
+    viewBox='0 0 24 24'
+    style={RUN_ICON}
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={2}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+  >
+    <polyline points='3 6 5 6 21 6' />
+    <path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' />
+  </svg>
+);
 
 export default function ResultPage() {
   const {runId, runShort} = useParams<{runId?: string; runShort?: string}>();
@@ -63,6 +119,37 @@ export default function ResultPage() {
   // re-typing. Used to ship as a single "Iterate" row that always rebuilt on
   // the same provider; that hid the most valuable comparison.
   const [rerunBusy, setRerunBusy] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Run management — fork / archive / unarchive / soft-delete. These run-
+  // lifecycle endpoints existed in the backend but no screen surfaced them.
+  async function manageRun(action: 'fork' | 'archive' | 'unarchive' | 'delete') {
+    if (!id) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      if (action === 'fork') {
+        const forked = await api.forkRun(id);
+        navigate(`/plan/${forked.runId}`);
+        return;
+      }
+      if (action === 'delete') {
+        await api.softDeleteRun(id);
+        navigate('/runs');
+        return;
+      }
+      await (action === 'archive' ? api.archiveRun(id) : api.unarchiveRun(id));
+      setRun(await api.getRun(id));
+      setMsg(action === 'archive' ? 'Run archived.' : 'Run unarchived.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -554,8 +641,32 @@ export default function ResultPage() {
             <IconButton ariaLabel='Share' onClick={share}>
               <Share size={18} />
             </IconButton>
+            <IconButton ariaLabel='Fork run' onClick={() => manageRun('fork')}>
+              {forkIcon}
+            </IconButton>
+            <IconButton
+              ariaLabel={run?.archivedAt ? 'Unarchive run' : 'Archive run'}
+              onClick={() => manageRun(run?.archivedAt ? 'unarchive' : 'archive')}
+            >
+              {archiveIcon}
+            </IconButton>
+            {isTerminalStatus(status) && (
+              <IconButton ariaLabel='Delete run' onClick={() => setConfirmDelete(true)}>
+                {trashIcon}
+              </IconButton>
+            )}
           </>
         }
+      />
+      <ConfirmModal
+        open={confirmDelete}
+        title='Delete this run?'
+        body='The run is soft-deleted with a 30-day undo window, then permanently removed. You can restore it from All Runs within 30 days.'
+        confirmLabel='Delete run'
+        danger
+        busy={busy}
+        onConfirm={() => manageRun('delete')}
+        onClose={() => setConfirmDelete(false)}
       />
       <Feed>
         {err && (
