@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 
 function fmtWhen(iso?: string | null): string {
@@ -49,7 +49,7 @@ export function IdeWelcome() {
 
       <div className='ide-h2'>Recent runs</div>
       {runs === null ? (
-        <div className='ide-empty'>Loading runs…</div>
+        <IdeLoader label='Loading runs…' />
       ) : runs.length === 0 ? (
         <div className='ide-empty'>No runs yet — start with a new spec.</div>
       ) : (
@@ -204,7 +204,7 @@ export function IdeLive() {
       <div className='ide-h1'>Live run</div>
       <div className='ide-sub ide-mono'>{runId}</div>
       {!run ? (
-        <div className='ide-empty'>Connecting…</div>
+        <IdeLoader label='Connecting to run…' />
       ) : (
         <div className='ide-card'>
           <div style={{display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12}}>

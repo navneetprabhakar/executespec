@@ -3,7 +3,7 @@ import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
-import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
@@ -27,7 +27,7 @@ export function IdeRuns() {
       <div className='ide-h1'>All runs</div>
       <div className='ide-sub'>Every spec you've run, newest first.</div>
       {runs === null ? (
-        <div className='ide-empty'>Loading…</div>
+        <IdeLoader label='Loading runs…' />
       ) : runs.length === 0 ? (
         <div className='ide-empty'>No runs yet — start with a new spec.</div>
       ) : (

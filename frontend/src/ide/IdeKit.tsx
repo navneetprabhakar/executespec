@@ -431,5 +431,15 @@ export function ResizeHandle({onDelta}: {onDelta: (dx: number) => void}) {
   );
 }
 
+// ───────── loading spinner ─────────
+export function IdeLoader({label = 'Loading…', pad}: {label?: string; pad?: number}) {
+  return (
+    <div className='ide-loader' style={pad != null ? {padding: pad} : undefined}>
+      <span className='ide-spinner' aria-hidden='true' />
+      {label}
+    </div>
+  );
+}
+
 // Re-export navigate convenience for surfaces that need it.
 export {useNavigate};
