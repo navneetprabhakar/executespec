@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-16 (1.0.0-M1).
 
-React 18 + Vite 5 + Tailwind CSS 4 + TypeScript 5.3. **The VS Code-style IDE workspace (`frontend/src/ide/`) is the only chrome** since the 2026-05-22 IDE-only switch: `App.tsx` hard-mounts `IdeWorkspace` (`const ide = true`) and the A/B `uiMode` toggle was removed (`useUiStore.initUiMode()` hard-returns `'ide'`; the status-bar + Account "Interface" toggles are gone). The production **Signal** chrome shell was retired as a user-facing option; its **pages** (`frontend/src/signal/`) are kept transitionally as route fallbacks for surfaces not yet rebuilt IDE-native (auth/login, billing, plans, org-settings, legal, discovery) — they're ported to IDE-native then `signal/pages/*` is deleted. The shared `signal/components/` primitives + `signal.css` are reused by the IDE and stay. The legacy V2 sidebar + V3 top-bar shells (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`); only `signal/`, `ide/`, `hooks/`, `lib/`, `stores/`, `types/`, `design-system/` remain under `src/`. Single Vite build into the Spring Boot JAR at `src/main/resources/static/`. **NOTE:** the "## Top-level layout" tree + "## Two coexisting chromes" sections lower in this file are STALE (they describe the deleted V2/V3 chromes) — pending rewrite; trust this paragraph + the chrome-A/B-switch + Recent-work sections.
+React 18 + Vite 5 + Tailwind CSS 4 + TypeScript 5.3. **The VS Code-style IDE workspace (`frontend/src/ide/`) is the only chrome** since the 2026-05-22 IDE-only switch: `App.tsx` hard-mounts `IdeWorkspace` (`const ide = true`) and the A/B `uiMode` toggle was removed (`useUiStore.initUiMode()` hard-returns `'ide'`; the status-bar + Account "Interface" toggles are gone). The production **Signal** chrome shell was retired as a user-facing option; its **pages** (`frontend/src/signal/`) are kept transitionally as route fallbacks for surfaces not yet rebuilt IDE-native (auth/login, billing, plans, org-settings, legal, discovery) — they're ported to IDE-native then `signal/pages/*` is deleted. The shared `signal/components/` primitives + `signal.css` are reused by the IDE and stay. The legacy V2 sidebar + V3 top-bar shells (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`); only `signal/`, `ide/`, `hooks/`, `lib/`, `stores/`, `types/`, `design-system/` remain under `src/`. Single Vite build into the Spring Boot JAR at `src/main/resources/static/`. (The "## Top-level layout" + "## Chrome + routing" sections below carry the full IDE-only structure + routing model.)
 
 **Chrome A/B switch + IDE overhaul (2026-05-22, `frontend/src/ide/`):** `App.tsx` renders a **mode-specific route subtree** based on `useUiStore.uiMode` (`'signal' | 'ide'`, persisted to `es:uiMode`, applied to `<html data-ui>`): Signal mode mounts `signal/components/Shell`; IDE mode mounts `ide/IdeWorkspace` — a real VS Code workspace (activity bar + Explorer with live runs/projects + editor area + status bar + ⌘K command palette) with **its own core surfaces**, NOT wrapped Signal pages: `IdeWelcome` (workspace home), `IdeRunResult` (file-tree + editor tabs + the `IdeKit` code viewer + run-info panel — the flagship), `IdeCompose`, `IdeLive`, `IdeProject` (project workspace — composer + repo scoping + recent project runs, `ide/IdeProject.tsx`). **All core surfaces are now IDE-native at full Signal-parity depth** (2026-05-22 rebuild): project workbench — 10 sub-tabs incl. Code's 6 sub-tabs (browse / tech-debt+autofix / **CodeReviewPanel** / health / standards / docs), Architecture's 5 tabs (current / versions-diff / invariants / ADRs / contracts), Repos link-panel, Runs Runs/PRs split-pane + **PrReviewPanel**, Chat/Settings(RAG+memory)/Members(invite+share); run loop — Result 9 tabs (incl. Timeline + Chat/iterate), Live SSE console + CostProgressBar + cancel, Compose project/repo/cap/estimate/mode/TDD/Figma, run-management (fork/archive/delete/deploy/pause/resume), PR-comment inbox, preview lifecycle; plus Deployments + GCP, Admin 6-tab console, Account (notif-prefs/GDPR/DSAR/erasure), Integrations. **Dedicated PR Review + Code Review agent panels** live in `signal/components/PrReviewPanel.tsx` + `CodeReviewPanel.tsx` (shared `variant='signal'|'ide'`). Library + Migrations are LIVE (real API, not stubs). Remaining Signal-fallback inside the IDE shell (deliberate): billing / plans / org-settings / api-keys / org-members / notifications / search + discovery pages (insights/library/migrations-detail/templates/audit). The **V3 multi-solution execution lane** (`/api/executions`) is intentionally NOT surfaced — it's feature-flagged OFF (`TierConfig.executionViewEnabled=false` default; `App.tsx` redirects `/projects/:id/executions/*` away), so V2 is the only active execution path. `ide/IdeKit.tsx` = code viewer + command palette + tokenizer + badges; `ide/ide.css` = VS Code Dark+/Light+ tokens themed via `[data-theme]` (follows OS). Rollout: public flag `ui.ide.default` flips the cohort default; an explicit choice (Account → Preferences "Interface", or the IDE status-bar "⇄ Signal UI") always wins. Distinct desktop (activity bar / Explorer / editor) vs mobile (top-bar + drawer + bottom tabs) layouts.
 
@@ -26,47 +26,46 @@ The shared 4-band score palette + `verifiedScore` thresholds live in `Primitives
 frontend/
 ├── package.json                     # deps + scripts (build / dev / format:check / lint)
 ├── vite.config.ts                   # Vite config + dev-server proxy /api → :8080
-├── tailwind.config.ts               # token-aware Tailwind (var(--c-*) palette)
-├── tsconfig.json                    # strict TS; path aliases for shared primitives
-├── .prettierrc.json + .prettierignore
-├── .eslintrc.cjs                    # @typescript-eslint/* + react + react-hooks
-├── .pa11yci.json                    # a11y gate (public surfaces)
-├── A11Y.md                          # a11y enablement guide
-├── public/
-│   ├── manifest.webmanifest
-│   ├── sw.js                        # PWA service worker (prod-only registration)
-│   └── trust-pack.pdf               # Trust Pack download asset
+├── tailwind.config.ts               # token-aware Tailwind
+├── tsconfig.json                    # strict TS; path alias @/ → src/
+├── .eslintrc.cjs · .prettierrc.json · .pa11yci.json · A11Y.md
+├── public/                          # manifest.webmanifest · sw.js (PWA) · trust-pack.pdf
 └── src/
-    ├── main.tsx                     # app entry + pre-paint theme + PostHog init
-    ├── App.tsx                      # routes
-    ├── tokens.css                   # Graphite+Signal palette tokens + 4-band score colours
-    ├── components/
-    │   ├── layout/                  # V2 sidebar shell (AppLayout, Sidebar, Header)
-    │   ├── runs/                    # RunCard, RunDetailTabs, InlineRunDetail, ValidationReportPanel, ScoreCard, ScoreRing, VerdictPill, SignalBreakdown, CostProgressBar, RunSpecBlock, FirstRunCelebration, PrReviewButton
-    │   ├── project/                 # ProjectDashboardPage, PulseTab, RepoCard, TechDebtPanel, WorkspaceHealthPanel, PostMergeBar, CodeQualityPanel, GeneratedDocsPanel, ProjectMemoryPanel, ProjectChatPanel, ArchitectureViewer
-    │   ├── billing/                 # PlanCard, BillingPage, InvoicesPage
-    │   ├── auth/                    # LoginPage, RegisterPage, SettingsPage
-    │   ├── execution/               # ExecutionStepper, FailureDecisionModal, CancellationPanel
-    │   ├── shared/                  # Button, Checkbox, Radio, ResponsiveModal, Tooltip, Glossary, Drawer, EstimateChip, MarkdownContent
-    │   └── design-system/           # contrast.{ts,test.ts} — WCAG ratio helpers + dormant vitest-shape regression test
-    ├── v3/                          # V3 top-bar shell (Shell, V3TopBar, V3HomeRedirect, V3* pages)
-    │   ├── Shell.tsx
-    │   ├── pages/                   # V3Landing, V3ProjectHome, V3EmptyProject, V3Insights, V3Library, V3Migrations, V3Settings, …
-    │   └── stores/useV3ProjectStore.ts
-    ├── stores/                      # Zustand: useAuthStore, useUiStore (theme), useRunStore, useProjectStore, useExecutionStore
-    ├── pages/                       # top-level routes for the V2 shell — RunsListPage, RunDetail, AdminPage, OrgProjectsPage, PlansPage, IntegrationsPage, ExecSummaryPage, SharedReportPage, TierLifecyclePage, etc
-    ├── lib/                         # api.ts (single backend client) + analytics.ts (posthog wrapper) + glossary.ts (5-term dictionary)
-    └── styles/v3.css                # V3-shell-specific styles + scroll-fade utility
+    ├── main.tsx                     # app entry + pre-paint theme/chrome + PostHog init
+    ├── App.tsx                      # routes — hard-mounts <IdeWorkspace> for every protected route
+    ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
+    ├── ide/                         # the live VS Code-style chrome (the ONLY chrome)
+    │   ├── IdeWorkspace.tsx          # activity bar + Explorer (live runs/projects) + editor area + status bar + ⌘K
+    │   ├── IdeSurfaces.tsx           # IdeWelcome / IdeCompose / IdeLive
+    │   ├── IdeRunResult.tsx          # flagship run detail — file tree + editor tabs + IdeKit code viewer
+    │   ├── IdeProject(s|Tabs|More).tsx  # project workbench (composer + 10 sub-tabs)
+    │   ├── IdePlan.tsx · IdeMore.tsx (Runs/Account/Deployments) · IdeSettings.tsx (Integrations/Admin)
+    │   ├── IdeKit.tsx                # code viewer + command palette + tokenizer + badges
+    │   ├── IdeIcons.tsx              # inline-SVG icon set (activity bar + per-language file icons)
+    │   └── ide.css                   # VS Code Dark+/Light+ tokens ([data-theme]) + the --signal-* token bridge
+    ├── signal/                      # RETIRED chrome shell; its PAGES survive as transitional route fallbacks
+    │   ├── components/              # shared primitives — many reused by ide/ (SpecChat, CostProgressBar, Markdown, Modal, Primitives, Loaders, PrReviewPanel, CodeReviewPanel, PrCommentInbox, GcpCredentialPanel, UsageMeter, UpgradeModal, VerdictPill, FileTree, CodeView…). Shell.tsx + Chrome.tsx are the now-dead Signal shell.
+    │   ├── pages/                   # route fallbacks not yet ported IDE-native (see "Chrome + routing")
+    │   ├── lib/                     # runUtils (repoDisplayName / repoIdFor / runTitleFor / relTime)
+    │   ├── hooks/ · icons/
+    │   └── signal.css               # .signal-* component styles (reused by ide/ via the ide.css token bridge)
+    ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + forced uiMode='ide'), useRunStore, useProjectStore, useExecutionStore, useMetricsStore, useSseStore
+    ├── hooks/                       # useSse, useTierPermissions, useAsyncAction, useIsMobile, useBreakpoint, useKeyboardShortcuts, …
+    ├── lib/                         # api.ts (single backend client) + analytics.ts + glossary.ts + verdict.ts + billing/execution/invoice-api split clients
+    ├── types/                       # project.ts, execution.ts
+    └── design-system/              # contrast.{ts,test.ts} (WCAG ratio helpers + dormant vitest test) + primitives.css
 ```
 
-## Two coexisting chromes
+## Chrome + routing (IDE-only since 2026-05-22)
 
-| Chrome                             | Layout                                      | Path prefix                                                                                                                                                                                                              | Purpose                                                            |
-| ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| **V2 sidebar shell** (`AppLayout`) | Left sidebar + breadcrumb header            | `/runs`, `/admin/*`, `/audit`, `/invoices`, `/accounting`, `/exec`, `/org/*`, `/projects/:id/dashboard`, `/projects/:id/executions/*`, `/welcome`, `/deployments`, `/legacy/billing`                                     | Long-form workbench surfaces (admin, billing, project dashboards). |
-| **V3 top-bar shell** (`Shell`)     | Top-bar with ProjectSwitcher + theme toggle | `/projects/:slug`, `/projects/:slug/runs/:runShort`, `/projects/empty`, `/insights`, `/billing`, `/pricing`, `/settings`, `/integrations`, `/team`, `/trust`, `/library`, `/migrations`, `/exec-demo`, `/home`, `/claim` | Short-form conversation + landing surfaces.                        |
+There is **one chrome**: the VS Code-style **IDE workspace** (`ide/IdeWorkspace`). `App.tsx` hard-mounts it for every protected route (`const ide = true`) and `useUiStore.initUiMode()` forces `uiMode='ide'`; the old Signal↔IDE A/B toggle + the `ui.ide.default` flag path were removed. The routing model:
 
-Both share `useAuthStore`, `useUiStore` (theme), `useRunStore`, `useProjectStore`. V3 adds `useV3ProjectStore`. State survives navigation between chromes — users don't lose context crossing the boundary.
+- **Public routes** (`/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password`, `/accept-invite`, `/auth/callback`, `/welcome`, `/pricing`, `/trust`, `/terms`, `/privacy`, `/dpa`, `/shared/:token`) render **standalone Signal pages** with no chrome — there is no IDE-native auth/marketing surface yet.
+- **Protected routes** mount inside `<IdeWorkspace>`. Most render an **IDE-native** surface: `/home`→IdeWelcome, `/compose`→IdeCompose, `/plan/:id`→IdePlan, `/live/:id`→IdeLive, `/result/:id`→IdeRunResult, `/runs`→IdeRuns, `/projects`→IdeProjects, `/projects/:id/*`→IdeProjectTabs/IdeProjectMore, `/account`→IdeAccount, `/integrations`→IdeIntegrations, `/admin`→IdeAdmin, `/deployments`→IdeDeployments.
+- A set of protected routes still **fall back to the Signal page** (rendered inside the IDE shell) pending an IDE-native rebuild — these are the deletion-blockers for `signal/pages/`: `/billing`, `/plans`, `/api-keys`, `/org-members`, `/org/settings` (holds the F3 model-matrix grid), `/notifications`, `/search`, `/more`, `/insights`, `/library`, `/migrations`, `/templates`, `/audit`, `/admin/*` sub-routes.
+- `LegacyRedirect` collapses old prefixes (`/v3/*`, `/v4/*`, `/signal/*`, `/p/*`, `/dashboard`, `/org/*`, `/exec`, `/team`, …) to canonical paths.
+
+All surfaces share `useAuthStore`, `useUiStore` (theme), `useRunStore`, `useProjectStore`. The legacy V2 sidebar (`AppLayout`) + V3 top-bar (`Shell`) chromes were deleted in `5f5e4aaa`.
 
 `SecurityConfig` whitelists `/api/shared/**` + `/api/invites/preview` for public read paths (V175 cross-org sharing + share-link surfaces).
 
