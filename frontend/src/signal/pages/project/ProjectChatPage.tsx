@@ -305,13 +305,8 @@ export default function ProjectChatPage() {
                 {m.role === 'user' ? 'YOU' : 'PROJECT'}
                 {m.ts && ` · ${new Date(m.ts).toLocaleTimeString()}`}
               </div>
-              {m.role === 'user' ? (
-                <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-                  {m.content}
-                </div>
-              ) : (
-                <Markdown>{m.content}</Markdown>
-              )}
+              {/* Both sides render Markdown so the chat fully supports formatting. */}
+              <Markdown>{m.content}</Markdown>
             </div>
           ))}
           {busy && (

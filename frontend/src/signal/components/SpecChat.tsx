@@ -218,15 +218,9 @@ export function SpecChat({
               >
                 {m.role === 'user' ? 'YOU' : 'AGENT'} · {new Date(m.ts).toLocaleTimeString()}
               </div>
-              {m.role === 'user' ? (
-                <div style={{fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-                  {m.content}
-                </div>
-              ) : (
-                // Agent replies render as Markdown — same workflow ("Use as spec"
-                // still copies the raw `content`), just nicer to read.
-                <Markdown>{m.content}</Markdown>
-              )}
+              {/* Both sides render Markdown so the chat fully supports formatting
+                  (the "Use as spec" flow still copies the raw `content`). */}
+              <Markdown>{m.content}</Markdown>
             </div>
           ))}
           {busy && (

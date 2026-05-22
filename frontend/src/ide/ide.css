@@ -802,3 +802,73 @@
     padding: 16px;
   }
 }
+
+/* Markdown inside the IDE chrome (chat bubbles, etc.). The shared Markdown
+   component emits .signal-md* classes styled with Signal tokens; remap them to
+   IDE tokens so chat formatting looks native in the Dark+/Light+ themes. */
+.ide-root .signal-md {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ide-root .signal-md > * {
+  margin: 0 0 8px;
+}
+.ide-root .signal-md > *:last-child {
+  margin-bottom: 0;
+}
+.ide-root .signal-md-h {
+  font-weight: 700;
+  margin: 12px 0 6px;
+  line-height: 1.3;
+  color: var(--ide-fg-bright);
+}
+.ide-root .signal-md-code {
+  background: var(--ide-bg-input);
+  border: 1px solid var(--ide-border);
+  color: var(--ide-fg-bright);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+.ide-root .signal-md-codeblock {
+  background: var(--ide-bg-widget);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.ide-root .signal-md-codeblock .signal-md-codelang {
+  color: var(--ide-fg-muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.ide-root .signal-md-link {
+  color: var(--ide-blue);
+  text-decoration: underline;
+}
+.ide-root .signal-md-quote {
+  border-left: 3px solid var(--ide-border-strong);
+  padding: 2px 12px;
+  color: var(--ide-fg-muted);
+  font-style: italic;
+}
+.ide-root .signal-md-list {
+  padding-left: 20px;
+}
+.ide-root .signal-md-list li {
+  margin-bottom: 4px;
+}
+.ide-root .signal-md-hr {
+  border: 0;
+  border-top: 1px solid var(--ide-border);
+  margin: 12px 0;
+}
