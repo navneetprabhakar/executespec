@@ -544,6 +544,30 @@ export default function ResultPage() {
     }
   }
 
+  // Permanent Cloud Run deploy (createDeployment) — was wired into no screen.
+  const [deployBusy, setDeployBusy] = useState(false);
+  async function deployPermanent() {
+    if (!id) return;
+    if (!canPreview) {
+      setErr('Deploys are gated to PRO+ tiers. Upgrade your plan to enable.');
+      return;
+    }
+    if (!window.confirm('Deploy this run to a permanent Cloud Run service?')) return;
+    setDeployBusy(true);
+    try {
+      const dep = await api.createDeployment({runId: id});
+      setMsg(
+        dep.serviceUrl
+          ? `Deployed at ${dep.serviceUrl}`
+          : 'Deployment provisioning — see Deployments.',
+      );
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Deploy failed.');
+    } finally {
+      setDeployBusy(false);
+    }
+  }
+
   async function retryTask(taskId: string) {
     if (!id) return;
     setRetryingTaskId(taskId);
@@ -1021,6 +1045,21 @@ export default function ResultPage() {
                   disabled={previewBusy || !canPreview}
                 >
                   {previewBusy ? 'Starting…' : !canPreview ? 'Upgrade' : 'Start'}
+                </Button>
+              }
+            />
+            <Row
+              dot='lavender'
+              title='Deploy to Cloud Run'
+              meta={<span>permanent service{!canPreview && ' · PRO+ feature'}</span>}
+              trailing={
+                <Button
+                  kind='secondary'
+                  sm
+                  onClick={deployPermanent}
+                  disabled={deployBusy || !canPreview}
+                >
+                  {deployBusy ? 'Deploying…' : !canPreview ? 'Upgrade' : 'Deploy'}
                 </Button>
               }
             />
