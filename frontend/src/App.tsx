@@ -8,7 +8,8 @@ import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 // reusing the Signal pages until they're rebuilt.
 import SignalShell from '@/signal/components/Shell';
 import IdeWorkspace from '@/ide/IdeWorkspace';
-import {IdeWelcome, IdeRunResult, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
 import {useUiStore} from '@/stores/useUiStore';

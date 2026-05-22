@@ -290,12 +290,42 @@ function iconMeta(name: string): {l: string; c: string} {
   const ext = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
   return EXT_ICON[ext] ?? {l: '·', c: '#888888'};
 }
+// Tinted document SVG (colour = language) — reads as a real file icon, no dep.
 export function FileIcon({name}: {name: string}) {
   const m = iconMeta(name);
   return (
-    <span className='ide-fileicon' style={{color: m.c}}>
-      {m.l}
-    </span>
+    <svg className='ide-ficon' viewBox='0 0 16 16' width='14' height='14' aria-hidden='true'>
+      <path
+        d='M4 1.6a1 1 0 0 1 1-1h4.3L12.4 3.7V14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V1.6z'
+        fill={m.c}
+        fillOpacity='0.22'
+        stroke={m.c}
+        strokeOpacity='0.65'
+        strokeWidth='0.7'
+      />
+      <path
+        d='M9.3 0.6v2.2a1 1 0 0 0 1 1h2.1'
+        fill='none'
+        stroke={m.c}
+        strokeOpacity='0.65'
+        strokeWidth='0.7'
+      />
+    </svg>
+  );
+}
+
+export function FolderIcon({open = false}: {open?: boolean}) {
+  return (
+    <svg className='ide-ficon' viewBox='0 0 16 16' width='14' height='14' aria-hidden='true'>
+      <path
+        d='M1.5 3.4a1 1 0 0 1 1-1h3.1l1.4 1.4h6.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V3.4z'
+        fill='#dcb67a'
+        fillOpacity={open ? '0.28' : '0.42'}
+        stroke='#c89b5a'
+        strokeOpacity='0.7'
+        strokeWidth='0.7'
+      />
+    </svg>
   );
 }
 
@@ -353,7 +383,7 @@ export function IdeFileTree({
             onClick={() => toggle(n.path)}
           >
             <span className='ide-tree-chev'>{collapsed.has(n.path) ? '▸' : '▾'}</span>
-            <span className='ide-tree-ico'>🗀</span>
+            <FolderIcon open={!collapsed.has(n.path)} />
             {n.name}
           </button>
           {!collapsed.has(n.path) && render(n.children, depth + 1)}
