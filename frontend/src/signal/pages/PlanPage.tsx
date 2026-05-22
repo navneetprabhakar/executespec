@@ -21,6 +21,8 @@ export default function PlanPage() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [feedback, setFeedback] = useState('');
+  const [editing, setEditing] = useState(false);
 
   // Poll the run while it's in CLASSIFYING / PLANNING / AWAITING_APPROVAL.
   useEffect(() => {
@@ -84,6 +86,23 @@ export default function PlanPage() {
       navigate('/compose');
     } catch {
       navigate('/compose');
+    }
+  }
+
+  // Revise the plan before approving — re-plans with feedback; the poll loop
+  // picks up the new AWAITING_APPROVAL version.
+  async function revise() {
+    if (!runId || !feedback.trim()) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await api.editRunPlan(runId, feedback.trim());
+      setFeedback('');
+      setEditing(false);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Revision failed.');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -295,6 +314,46 @@ export default function PlanPage() {
             <Button kind='ghost' block onClick={reject} disabled={busy}>
               Cancel
             </Button>
+            {awaiting &&
+              (editing ? (
+                <div style={{marginTop: 10}}>
+                  <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    rows={4}
+                    placeholder='Tell the planner what to change — add or drop tasks, adjust scope, change approach…'
+                    style={{
+                      width: '100%',
+                      borderRadius: 10,
+                      border: '1px solid var(--signal-hairline)',
+                      background: 'var(--signal-bg)',
+                      color: 'var(--signal-ink)',
+                      padding: 10,
+                      fontSize: 13.5,
+                      fontFamily: 'inherit',
+                      resize: 'vertical',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{display: 'flex', gap: 6, marginTop: 6}}>
+                    <Button
+                      kind='secondary'
+                      sm
+                      onClick={revise}
+                      disabled={busy || !feedback.trim()}
+                    >
+                      {busy ? 'Revising…' : 'Submit revision'}
+                    </Button>
+                    <Button kind='ghost' sm onClick={() => setEditing(false)}>
+                      Discard
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button kind='ghost' block onClick={() => setEditing(true)} style={{marginTop: 4}}>
+                  Revise plan
+                </Button>
+              ))}
           </div>
         </div>
 
