@@ -356,6 +356,21 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
+                disabled={busy === 'deploy'}
+                onClick={() => {
+                  if (window.confirm('Deploy this run to a permanent Cloud Run service?'))
+                    action(
+                      'deploy',
+                      () => api.createDeployment({runId}),
+                      (r) =>
+                        `Deployed: ${(r as {serviceUrl?: string})?.serviceUrl || 'provisioning'}`,
+                    );
+                }}
+              >
+                {busy === 'deploy' ? 'Deploying…' : '☁ Deploy'}
+              </button>
+              <button
+                className='ide-btn ghost'
                 disabled={busy === 'pdf'}
                 onClick={() =>
                   action(
