@@ -617,12 +617,54 @@
   flex-shrink: 0;
   letter-spacing: -0.5px;
 }
+.ide-ficon {
+  flex-shrink: 0;
+  vertical-align: -2px;
+}
 .ide-tree-chev {
   width: 12px;
   display: inline-block;
   font-size: 9px;
   color: var(--ide-fg-muted);
   flex-shrink: 0;
+}
+
+/* result-page tab strip */
+.ide-rtabs {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--ide-bg-sidebar);
+  border-bottom: 1px solid var(--ide-border);
+  overflow-x: auto;
+}
+.ide-rtab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ide-rtab:hover {
+  color: var(--ide-fg);
+}
+.ide-rtab.active {
+  color: var(--ide-fg-bright);
+  border-bottom-color: var(--ide-accent);
+}
+.ide-rtab-badge {
+  font-size: 10px;
+  background: var(--ide-bg-tab-inactive);
+  border-radius: 8px;
+  padding: 0 5px;
+  color: var(--ide-fg-muted);
 }
 .ide-tab-close {
   margin-left: 4px;
