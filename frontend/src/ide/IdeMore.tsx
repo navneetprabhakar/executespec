@@ -258,10 +258,17 @@ export function IdeAccount() {
   const setTheme = useUiStore((s) => s.setTheme);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [dsarBusy, setDsarBusy] = useState(false);
   const [erasing, setErasing] = useState(false);
   const [msg, setMsg] = useState('');
+  // Contact us / send feedback
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactCategory, setContactCategory] = useState('Feedback');
+  const [contactBody, setContactBody] = useState('');
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactNote, setContactNote] = useState<{kind: 'ok' | 'bad'; text: string} | null>(null);
 
   useEffect(() => {
     if (!permissions) {
@@ -290,6 +297,29 @@ export function IdeAccount() {
       /* swallow — toggle stays at its prior value */
     } finally {
       setNotifBusy(null);
+    }
+  }
+
+  // Contact us / feedback — POST /api/contact emails admin@executespec.ai.
+  async function onSubmitContact() {
+    const body = contactBody.trim();
+    if (!body) {
+      setContactNote({kind: 'bad', text: 'Please enter a message.'});
+      return;
+    }
+    setContactBusy(true);
+    setContactNote(null);
+    try {
+      await api.submitContactForm(`[${contactCategory}] from ${email}`, body);
+      setContactBody('');
+      setContactNote({kind: 'ok', text: 'Thanks — your message is on its way.'});
+    } catch (e: unknown) {
+      setContactNote({
+        kind: 'bad',
+        text: e instanceof Error ? e.message : 'Could not send. Please try again.',
+      });
+    } finally {
+      setContactBusy(false);
     }
   }
 
@@ -468,6 +498,85 @@ export function IdeAccount() {
         </div>
       </div>
 
+      <button
+        type='button'
+        className='ide-h2'
+        aria-expanded={contactOpen}
+        onClick={() => setContactOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span className='ide-tree-chev'>{contactOpen ? '▾' : '▸'}</span>
+        <span>Contact us / Send feedback</span>
+      </button>
+      {contactOpen && (
+        <div className='ide-card'>
+          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+            Questions, bugs, or ideas — this reaches the ExecuteSpec team directly.
+          </div>
+          <label
+            style={{display: 'block', fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+          >
+            Category
+          </label>
+          <select
+            className='ide-select'
+            value={contactCategory}
+            disabled={contactBusy}
+            onChange={(e) => setContactCategory(e.target.value)}
+            style={{marginBottom: 12}}
+          >
+            <option value='Feedback'>Feedback</option>
+            <option value='Bug report'>Bug report</option>
+            <option value='Feature request'>Feature request</option>
+            <option value='Billing'>Billing</option>
+            <option value='Other'>Other</option>
+          </select>
+          <label
+            style={{display: 'block', fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+          >
+            Message
+          </label>
+          <textarea
+            className='ide-textarea'
+            rows={5}
+            value={contactBody}
+            disabled={contactBusy}
+            placeholder='Tell us what’s on your mind…'
+            onChange={(e) => setContactBody(e.target.value)}
+            style={{marginBottom: 12}}
+          />
+          <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+            <button
+              className='ide-btn'
+              disabled={contactBusy || !contactBody.trim()}
+              onClick={onSubmitContact}
+            >
+              {contactBusy ? 'Sending…' : 'Send message'}
+            </button>
+            {contactNote && (
+              <span
+                style={{
+                  fontSize: 12.5,
+                  color: contactNote.kind === 'ok' ? 'var(--ide-green)' : 'var(--ide-red)',
+                }}
+              >
+                {contactNote.text}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className='ide-h2'>Manage</div>
       <div className='ide-card' style={{padding: 0}}>
         {[
@@ -513,8 +622,27 @@ export function IdeAccount() {
         ))}
       </div>
 
-      <div className='ide-h2'>Notifications</div>
-      {notifPrefs === null ? (
+      <button
+        type='button'
+        className='ide-h2'
+        aria-expanded={notifOpen}
+        onClick={() => setNotifOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span className='ide-tree-chev'>{notifOpen ? '▾' : '▸'}</span>
+        <span>Notifications{notifPrefs ? ` · ${notifPrefs.length}` : ''}</span>
+      </button>
+      {!notifOpen ? null : notifPrefs === null ? (
         <IdeLoader label='Loading notification preferences…' />
       ) : notifPrefs.length === 0 ? (
         <div className='ide-empty'>No notification events to configure yet.</div>
