@@ -37,7 +37,10 @@ export function verdictFor(score: number | null | undefined, status?: string | n
   const s = (status || '').toUpperCase();
   if (TERMINAL_FAILED.has(s)) return {label: 'Failed', kind: 'failed'};
   if (score == null) {
-    return {label: s === 'COMPLETED' || s === 'COMPLETE' ? 'Complete' : 'In progress', kind: 'progress'};
+    return {
+      label: s === 'COMPLETED' || s === 'COMPLETE' ? 'Complete' : 'In progress',
+      kind: 'progress',
+    };
   }
   if (score >= 85) return {label: 'Shippable', kind: 'shipped'};
   if (score >= 70) return {label: 'Needs review', kind: 'needs'};
@@ -49,13 +52,7 @@ export function verdictFor(score: number | null | undefined, status?: string | n
  * using the band palette from `StatusPill` so the colour matches the score
  * chips everywhere else.
  */
-export function VerdictPill({
-  score,
-  status,
-}: {
-  score?: number | null;
-  status?: string | null;
-}) {
+export function VerdictPill({score, status}: {score?: number | null; status?: string | null}) {
   const v = verdictFor(score, status);
   // `StatusPill` only knows live | shipped | needs | failed; the "progress"
   // verdict has no score yet, so it falls through to the muted default pill.
