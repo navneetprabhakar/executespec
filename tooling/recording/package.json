@@ -1,0 +1,14 @@
+{
+  "name": "executespec-recording-rig",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-contained Playwright rig for recording an annotated product-walkthrough video of the ExecuteSpec IDE UI (hero video).",
+  "type": "module",
+  "scripts": {
+    "record": "node record-hero.mjs",
+    "postinstall-note": "After install run: npx playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
