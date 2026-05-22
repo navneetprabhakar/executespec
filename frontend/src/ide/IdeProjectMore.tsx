@@ -6,6 +6,7 @@ import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {Markdown} from '@/signal/components/Markdown';
+import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 const tok = () => localStorage.getItem('access_token') ?? '';
@@ -362,10 +363,6 @@ export function IdeProjectCode() {
   // Other tabs
   const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
   const [docs, setDocs] = useState<api.GeneratedDocRow[] | null>(null);
-  const [reviews, setReviews] = useState<Record<
-    string,
-    {repoName: string; review: api.CodeReviewScanWithIssues | null}
-  > | null>(null);
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null | undefined>(undefined);
   const [standards, setStandards] = useState<api.ComplianceReport | null | undefined>(undefined);
 
@@ -425,25 +422,6 @@ export function IdeProjectCode() {
       .catch(() => setStandards(null));
   }, [sub, projectId, standards, user?.orgId]);
 
-  // Code review — latest scan per repo (typed endpoint).
-  useEffect(() => {
-    if (sub !== 'review' || repos.length === 0) return;
-    let cancelled = false;
-    Promise.all(
-      repos.map(async (r) => {
-        const rid = repoIdFor(r);
-        const name = repoDisplayName(r);
-        const review = await api.getLatestCodeReviewForRepo(projectId, name).catch(() => null);
-        return [rid, {repoName: name, review}] as const;
-      }),
-    ).then((entries) => {
-      if (!cancelled) setReviews(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [sub, projectId, repos]);
-
   async function open(path: string) {
     setActive(path);
     if (content[path]) return;
@@ -464,20 +442,6 @@ export function IdeProjectCode() {
       setMsg(res.runId ? `Autofix dispatched: R-${res.runId.slice(0, 6)}` : 'Autofix dispatched.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Autofix failed.');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function newScan(repoFullName: string) {
-    setBusy(`scan-${repoFullName}`);
-    setErr('');
-    setMsg('');
-    try {
-      await api.submitCodeReview({projectId, repoFullName});
-      setMsg('Scan queued. Results appear here when the scan completes.');
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Scan failed.');
     } finally {
       setBusy('');
     }
@@ -521,6 +485,15 @@ export function IdeProjectCode() {
       .sort((a, b) => b.count - a.count);
   }, [debt]);
 
+  // Code-review target — the repo currently chosen in the shared header
+  // <select> (falls back to the first linked repo). The full review surface
+  // (scan / severity-grouped issues / autofix / report) is per-repo.
+  const reviewRepoId = repoId || (repos[0] ? repoIdFor(repos[0]) : '');
+  const reviewRepo = useMemo(
+    () => repos.find((r) => repoIdFor(r) === reviewRepoId) ?? null,
+    [repos, reviewRepoId],
+  );
+
   const browseIsSplit = sub === 'browse';
 
   return (
@@ -540,7 +513,7 @@ export function IdeProjectCode() {
           <div className='ide-h1' style={{margin: 0}}>
             Code &amp; quality
           </div>
-          {sub === 'browse' && repos.length > 0 && (
+          {(sub === 'browse' || sub === 'review') && repos.length > 0 && (
             <select
               className='ide-select'
               value={repoId}
@@ -627,69 +600,21 @@ export function IdeProjectCode() {
         </div>
       )}
 
-      {/* ── Code review ── */}
+      {/* ── Code review (full whole-repo surface) ── */}
       {sub === 'review' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
           {repos.length === 0 ? (
             <div className='ide-empty'>No repos linked — link one to enable per-repo review.</div>
-          ) : reviews === null ? (
-            <IdeLoader label='Loading scan results…' />
+          ) : !reviewRepo ? (
+            <IdeLoader label='Loading…' />
           ) : (
-            Object.entries(reviews).map(([rid, val]) => {
-              const scan = val.review?.scan;
-              const issues = val.review?.issues ?? [];
-              const counts: Record<string, number> = {CRITICAL: 0, MAJOR: 0, MINOR: 0, INFO: 0};
-              for (const it of issues) counts[it.severity] = (counts[it.severity] ?? 0) + 1;
-              const clean = !counts.CRITICAL && !counts.MAJOR && !counts.MINOR && !counts.INFO;
-              return (
-                <div key={rid} className='ide-card' style={{marginBottom: 8}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
-                    <div style={{flex: 1, minWidth: 0}}>
-                      <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-                        {val.repoName}
-                      </div>
-                      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                        {scan?.finishedAt
-                          ? `Last scan ${new Date(scan.finishedAt).toLocaleString()}`
-                          : scan
-                            ? `Status ${scan.status}`
-                            : 'No scan yet'}
-                      </div>
-                    </div>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
-                      disabled={busy === `scan-${val.repoName}`}
-                      onClick={() => newScan(val.repoName)}
-                    >
-                      {busy === `scan-${val.repoName}` ? 'Queuing…' : 'New scan'}
-                    </button>
-                  </div>
-                  {val.review && (
-                    <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8}}>
-                      {counts.CRITICAL > 0 && (
-                        <IdeBadge kind='bad'>{counts.CRITICAL} CRITICAL</IdeBadge>
-                      )}
-                      {counts.MAJOR > 0 && <IdeBadge kind='warn'>{counts.MAJOR} MAJOR</IdeBadge>}
-                      {counts.MINOR > 0 && <IdeBadge kind='warn'>{counts.MINOR} MINOR</IdeBadge>}
-                      {counts.INFO > 0 && <IdeBadge kind='ok'>{counts.INFO} INFO</IdeBadge>}
-                      {clean && <IdeBadge kind='ok'>CLEAN</IdeBadge>}
-                    </div>
-                  )}
-                  {scan?.id && (
-                    <a
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
-                      href={api.codeReviewReportDownloadUrl(scan.id)}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                    >
-                      Download report (Markdown)
-                    </a>
-                  )}
-                </div>
-              );
-            })
+            <CodeReviewPanel
+              key={reviewRepoId}
+              projectId={projectId}
+              repoId={reviewRepoId}
+              repoFullName={repoDisplayName(reviewRepo)}
+              variant='ide'
+            />
           )}
         </div>
       )}
