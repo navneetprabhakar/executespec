@@ -56,7 +56,7 @@ Phase 3's webhook stays OFF until SWE-bench Lite resolved% justifies the unatten
 
 ### Tier ladder (live on `dev` + `main`)
 
-**FREE** (15 runs/month, 1-credit specs only — bumped from 5 in V200 on 2026-05-19 so evaluation users have room to form an opinion) → **PRO** (HIDDEN — grandfathered, new buyers can't pick) → **TEAM** ($39/seat/month BYOK, min 2 seats) → **ENTERPRISE** (custom, unlimited). The V143 `product_id` consumer/B2B surface split was prototyped then rolled back by V179 + V185 — all accounts on a single `executespec` surface; `TierProductSurfaceMapper` is dormant.
+**FREE** (15 runs/month, 1-credit specs only — bumped from 5 in V200 on 2026-05-19 so evaluation users have room to form an opinion) → **PRO** (HIDDEN — grandfathered, new buyers can't pick) → **TEAM** ($39/seat/month BYOK, from 1 seat — the 2-seat minimum was removed 2026-05-22; `BillingService` now accepts 1–20 seats) → **ENTERPRISE** (custom, unlimited). The V143 `product_id` consumer/B2B surface split was prototyped then rolled back by V179 + V185 — all accounts on a single `executespec` surface; `TierProductSurfaceMapper` is dormant.
 
 Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`. Charged at plan approval (not submission); refunded on FAILURE. Customer can voluntarily lower the ceiling via `RunRequest.userCostCap` (clamped against the platform cap). BYOK orgs (`keySourceMode=OWN_KEYS`) skip the platform cap entirely; HYBRID + SYSTEM stay capped.
 
