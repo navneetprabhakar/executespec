@@ -284,7 +284,11 @@ export default function IdeWorkspace() {
           <IdeBadge kind='ok'>{tier}</IdeBadge>
         </span>
         <span className='ide-status-spacer' />
-        <button className='ide-status btn' onClick={() => setPaletteOpen(true)} aria-label='Command palette'>
+        <button
+          className='ide-status btn'
+          onClick={() => setPaletteOpen(true)}
+          aria-label='Command palette'
+        >
           <CommandIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           Commands
         </button>

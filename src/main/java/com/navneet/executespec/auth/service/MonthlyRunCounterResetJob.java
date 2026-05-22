@@ -35,8 +35,8 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
  * billing-cycle anchor rather than being blindly zeroed.
  *
  * <p>2026-05-22 — FREE users are now reset too. FREE was a lifetime quota; it is now a monthly "15
- * runs/month" cap that resets on the calendar-month boundary, matching {@code TierEnforcementService
- * .maybeResetUserCounter}.
+ * runs/month" cap that resets on the calendar-month boundary, matching {@code
+ * TierEnforcementService .maybeResetUserCounter}.
  *
  * <p>{@link SchedulerLock} prevents double-firing when multiple app instances hit the cron moment
  * together (MIG / Cloud Run).

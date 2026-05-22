@@ -568,7 +568,8 @@ public class TierEnforcementService {
     if (limit < 0) return; // unlimited
 
     // 2026-05-22 — FREE is a MONTHLY quota (matches the "15 runs/month" copy + tier_config),
-    // resetting each calendar month like the paid tiers (FREE has no subscription → calendar-month).
+    // resetting each calendar month like the paid tiers (FREE has no subscription →
+    // calendar-month).
     maybeResetUserCounter(user);
 
     // FREE tier keeps a friendlier upgrade message than the generic quota error below.

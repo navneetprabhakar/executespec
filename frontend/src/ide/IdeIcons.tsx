@@ -390,7 +390,9 @@ const C = {
 } as const;
 
 export const TsIcon = (p: IconProps) => <LangFile {...p} color={C.ts} glyph='TS' glyphSize={5.4} />;
-export const TsxIcon = (p: IconProps) => <LangFile {...p} color={C.ts} glyph='TSX' glyphSize={4.2} />;
+export const TsxIcon = (p: IconProps) => (
+  <LangFile {...p} color={C.ts} glyph='TSX' glyphSize={4.2} />
+);
 export const JsIcon = (p: IconProps) => <LangFile {...p} color={C.js} glyph='JS' glyphSize={5.4} />;
 export const JsxIcon = (p: IconProps) => (
   <LangFile {...p} color={C.js} glyph='JSX' glyphSize={4.2} />
@@ -438,9 +440,7 @@ export const TxtIcon = (p: IconProps) => (
   <LangFile {...p} color={C.txt} glyph='txt' glyphSize={4.4} />
 );
 export const CIcon = (p: IconProps) => <LangFile {...p} color={C.c} glyph='C' glyphSize={5.8} />;
-export const CppIcon = (p: IconProps) => (
-  <LangFile {...p} color={C.cpp} glyph='C+' glyphSize={5} />
-);
+export const CppIcon = (p: IconProps) => <LangFile {...p} color={C.cpp} glyph='C+' glyphSize={5} />;
 export const CsIcon = (p: IconProps) => <LangFile {...p} color={C.cs} glyph='C#' glyphSize={5} />;
 export const SwiftIcon = (p: IconProps) => (
   <LangFile {...p} color={C.swift} glyph='sw' glyphSize={5} />
