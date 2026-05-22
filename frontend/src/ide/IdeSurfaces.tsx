@@ -1,7 +1,15 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {IdeBadge, IdeCodeViewer, statusKind, type DiffLine} from '@/ide/IdeKit';
+import {
+  IdeBadge,
+  IdeCodeViewer,
+  IdeFileTree,
+  FileIcon,
+  ResizeHandle,
+  statusKind,
+  type DiffLine,
+} from '@/ide/IdeKit';
 
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
@@ -96,6 +104,19 @@ export function IdeRunResult() {
     Record<string, {content: string; diff: DiffLine[] | null}>
   >({});
   const [err, setErr] = useState('');
+  const [filesWidth, setFilesWidth] = useState(240);
+
+  function closeFile(path: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    setOpenFiles((o) => {
+      const next = o.filter((f) => f !== path);
+      if (activeFile === path) {
+        const idx = o.indexOf(path);
+        setActiveFile(next[idx] ?? next[idx - 1] ?? next[0] ?? null);
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!runId) return;
@@ -145,27 +166,18 @@ export function IdeRunResult() {
 
   return (
     <div className='ide-split'>
-      {/* file explorer */}
-      <div className='ide-split-files'>
-        <div className='ide-side-head'>Files {files.length ? `(${files.length})` : ''}</div>
+      {/* file explorer (folder tree) */}
+      <div className='ide-split-files' style={{width: filesWidth}}>
+        <div className='ide-side-head'>Explorer {files.length ? `· ${files.length}` : ''}</div>
         {files.length === 0 ? (
           <div className='ide-empty' style={{padding: '16px 12px'}}>
             {err ? 'Run not found' : 'No files'}
           </div>
         ) : (
-          files.map((f) => (
-            <button
-              key={f}
-              className={`ide-tree-item${activeFile === f ? ' active' : ''}`}
-              onClick={() => openFile(f)}
-              title={f}
-            >
-              <span className='ide-tree-ico'>📄</span>
-              {f.split('/').pop()}
-            </button>
-          ))
+          <IdeFileTree files={files} activePath={activeFile} onOpen={openFile} />
         )}
       </div>
+      <ResizeHandle onDelta={(dx) => setFilesWidth((w) => Math.max(160, Math.min(520, w + dx)))} />
 
       {/* editor */}
       <div className='ide-split-main'>
@@ -176,9 +188,18 @@ export function IdeRunResult() {
                 key={f}
                 className={`ide-tab${activeFile === f ? ' active' : ''}`}
                 onClick={() => setActiveFile(f)}
+                title={f}
               >
-                <span className='ide-tab-ico'>📄</span>
+                <FileIcon name={f.split('/').pop() || f} />
                 {f.split('/').pop()}
+                <span
+                  className='ide-tab-close'
+                  role='button'
+                  aria-label='Close'
+                  onClick={(e) => closeFile(f, e)}
+                >
+                  ×
+                </span>
               </div>
             ))}
           </div>
