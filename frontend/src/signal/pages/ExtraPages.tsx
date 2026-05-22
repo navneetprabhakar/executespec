@@ -1773,7 +1773,7 @@ export function PublicPricingPage() {
               tier: 'TEAM',
               price: '$31',
               unit: '/seat/mo',
-              sub: 'Min 2 seats · yearly',
+              sub: 'From 1 seat · per seat · yearly',
               features: [
                 'Unlimited runs',
                 '500 credits / seat / month',
@@ -1856,7 +1856,22 @@ export function PublicPricingPage() {
                   <li key={f}>✓ {f}</li>
                 ))}
               </ul>
-              <Button kind={p.best ? 'primary' : 'secondary'} block style={{marginTop: 14}}>
+              <Button
+                kind={p.best ? 'primary' : 'secondary'}
+                block
+                style={{marginTop: 14}}
+                // Anonymous visitors land here (back-link is /login). Free + paid
+                // CTAs route to sign-up; Enterprise opens a sales conversation.
+                to={p.tier === 'ENTERPRISE' ? undefined : '/register'}
+                onClick={
+                  p.tier === 'ENTERPRISE'
+                    ? () => {
+                        window.location.href =
+                          'mailto:sales@executespec.ai?subject=Enterprise%20plan';
+                      }
+                    : undefined
+                }
+              >
                 {p.tier === 'ENTERPRISE'
                   ? 'Talk to sales'
                   : p.tier === 'FREE'

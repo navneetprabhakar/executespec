@@ -1,9 +1,11 @@
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
-import {Feed, Row, Chip, KvList, Card} from '@/signal/components/Primitives';
+import {Feed, Row, Chip, KvList, Card, Button} from '@/signal/components/Primitives';
 import {ComposerCard} from '@/signal/components/Compose';
 import {SpecChat} from '@/signal/components/SpecChat';
+import {UsageMeter} from '@/signal/components/UsageMeter';
+import {UpgradeModal} from '@/signal/components/UpgradeModal';
 import * as api from '@/lib/api';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
@@ -50,6 +52,7 @@ export default function ComposePage() {
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Bootstrap: load projects, hydrate from sandbox-picker handoff.
   useEffect(() => {
@@ -190,6 +193,11 @@ export default function ComposePage() {
           </div>
         )}
 
+        {/* Always-on monthly quota meter — green→amber→red as the cap nears,
+            with a /plans nudge once ≥80% through. FREE is a real monthly quota
+            now (15 runs/month), so the copy says "this month". */}
+        <UsageMeter style={{marginBottom: 12}} />
+
         {isAtCap && (
           <Card
             style={{
@@ -198,23 +206,25 @@ export default function ComposePage() {
               marginBottom: 12,
             }}
           >
-            <div style={{fontSize: 13, color: 'var(--signal-y-text)', lineHeight: 1.5}}>
-              You've used all <strong>{permissions?.monthlyRunLimit}</strong> runs in this billing
-              cycle.{' '}
-              <a href='/topup' style={{color: 'var(--signal-coral)', fontWeight: 600}}>
-                Top up credits →
-              </a>{' '}
-              or{' '}
-              <a href='/plans' style={{color: 'var(--signal-coral)', fontWeight: 600}}>
-                upgrade your plan →
-              </a>
-              .
+            <div
+              style={{
+                fontSize: 13,
+                color: 'var(--signal-y-text)',
+                lineHeight: 1.5,
+                marginBottom: 10,
+              }}
+            >
+              You've used all <strong>{permissions?.monthlyRunLimit}</strong> runs this month.
+              Upgrade to TEAM for unlimited runs — no monthly cap, from a single seat.
             </div>
+            <Button kind='primary' sm onClick={() => setUpgradeOpen(true)}>
+              Upgrade to TEAM →
+            </Button>
           </Card>
         )}
 
         <ComposerCard
-          est={runsUsed === '— / —' ? 'est cost' : runsUsed + ' runs this cycle'}
+          est={runsUsed === '— / —' ? 'est cost' : runsUsed + ' runs this month'}
           value={spec}
           onChange={setSpec}
           onSubmit={onSubmit}
@@ -377,6 +387,12 @@ export default function ComposePage() {
           showChev
         />
       </Feed>
+      <UpgradeModal
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        reason={`You've used all ${permissions?.monthlyRunLimit ?? ''} runs this month. TEAM removes the monthly cap and starts at a single seat.`}
+        targetTier='TEAM'
+      />
     </>
   );
 }

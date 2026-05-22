@@ -30,6 +30,51 @@ const SEV: Record<string, {l: string; k: 'ok' | 'warn' | 'bad'}> = {
 };
 const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 const num = (n?: number | null) => (n == null ? '—' : n.toLocaleString());
+
+// Split file text into lines for diffing (drops a single trailing newline so an
+// empty last "line" doesn't render as a phantom row).
+function toLines(s: string): string[] {
+  return (s || '').replace(/\n$/, '').split('\n');
+}
+
+/**
+ * LCS line diff: `base` (old) → `head` (new) into a flat DiffLine[] where
+ * unchanged lines are ' ', deletions '-', and additions '+'. Deletions in a
+ * hunk are emitted before the additions that replace them (standard diff
+ * grouping). Used for MODIFIED files where the backend gives us both sides.
+ */
+function lineDiff(base: string, head: string): DiffLine[] {
+  const a = toLines(base);
+  const b = toLines(head);
+  const n = a.length;
+  const m = b.length;
+  // LCS length table (n+1 × m+1).
+  const lcs: number[][] = Array.from({length: n + 1}, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({sign: ' ', text: a[i]});
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      out.push({sign: '-', text: a[i]});
+      i++;
+    } else {
+      out.push({sign: '+', text: b[j]});
+      j++;
+    }
+  }
+  while (i < n) out.push({sign: '-', text: a[i++]});
+  while (j < m) out.push({sign: '+', text: b[j++]});
+  return out;
+}
 function fmtDur(ms?: number | null) {
   if (!ms) return '—';
   const s = Math.round(ms / 1000);
@@ -175,13 +220,14 @@ export default function IdeRunResult() {
     if (cache[path]) return;
     try {
       const d = await api.getFileDiff(runId, path);
-      const diff: DiffLine[] | null =
-        d.status === 'ADDED'
-          ? (d.head || '')
-              .replace(/\n$/, '')
-              .split('\n')
-              .map((t) => ({sign: '+', text: t}))
-          : null;
+      // ADDED → every head line is an addition. MODIFIED → real LCS diff over
+      // base (old) + head (new). UNCHANGED/other → no diff toggle.
+      let diff: DiffLine[] | null = null;
+      if (d.status === 'ADDED') {
+        diff = toLines(d.head || '').map((t) => ({sign: '+' as const, text: t}));
+      } else if (d.status === 'MODIFIED' && (d.base || d.head)) {
+        diff = lineDiff(d.base || '', d.head || '');
+      }
       setCache((c) => ({...c, [path]: {content: d.head ?? '', diff}}));
     } catch {
       try {

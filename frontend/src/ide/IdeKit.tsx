@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
+import {fileIconFor, FolderClosedIcon, FolderOpenIcon} from '@/ide/IdeIcons';
 
 // ───────── status helpers ─────────
 export function statusKind(status?: string | null): 'ok' | 'warn' | 'bad' {
@@ -259,73 +260,18 @@ export function usePaletteHotkey(setOpen: (v: boolean) => void) {
 }
 
 // ───────── file-type icons (by extension) ─────────
-const EXT_ICON: Record<string, {l: string; c: string}> = {
-  ts: {l: 'ts', c: '#3178c6'},
-  tsx: {l: 'tsx', c: '#3178c6'},
-  js: {l: 'js', c: '#cbcb41'},
-  jsx: {l: 'jsx', c: '#cbcb41'},
-  mjs: {l: 'js', c: '#cbcb41'},
-  py: {l: 'py', c: '#4b8bbe'},
-  java: {l: 'jv', c: '#cc8b3a'},
-  kt: {l: 'kt', c: '#a97bff'},
-  go: {l: 'go', c: '#519aba'},
-  rs: {l: 'rs', c: '#dea584'},
-  rb: {l: 'rb', c: '#cc342d'},
-  php: {l: 'php', c: '#777bb3'},
-  json: {l: '{}', c: '#cbcb41'},
-  md: {l: 'md', c: '#519aba'},
-  css: {l: '#', c: '#519aba'},
-  scss: {l: '#', c: '#cc6699'},
-  html: {l: '<>', c: '#e37933'},
-  xml: {l: '<>', c: '#e37933'},
-  yml: {l: 'yml', c: '#cbcb41'},
-  yaml: {l: 'yml', c: '#cbcb41'},
-  sql: {l: 'sql', c: '#519aba'},
-  sh: {l: '$', c: '#89e051'},
-  toml: {l: 'cfg', c: '#9c9c9c'},
-  txt: {l: '·', c: '#999999'},
-};
-function iconMeta(name: string): {l: string; c: string} {
-  const parts = name.split('.');
-  const ext = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-  return EXT_ICON[ext] ?? {l: '·', c: '#888888'};
-}
-// Tinted document SVG (colour = language) — reads as a real file icon, no dep.
+// Both icons now delegate to the per-language SVG set in IdeIcons. The
+// signatures are unchanged so IdeFileTree / IdeCodeViewer callers stay put.
 export function FileIcon({name}: {name: string}) {
-  const m = iconMeta(name);
-  return (
-    <svg className='ide-ficon' viewBox='0 0 16 16' width='14' height='14' aria-hidden='true'>
-      <path
-        d='M4 1.6a1 1 0 0 1 1-1h4.3L12.4 3.7V14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V1.6z'
-        fill={m.c}
-        fillOpacity='0.22'
-        stroke={m.c}
-        strokeOpacity='0.65'
-        strokeWidth='0.7'
-      />
-      <path
-        d='M9.3 0.6v2.2a1 1 0 0 0 1 1h2.1'
-        fill='none'
-        stroke={m.c}
-        strokeOpacity='0.65'
-        strokeWidth='0.7'
-      />
-    </svg>
-  );
+  const Icon = fileIconFor(name);
+  return <Icon className='ide-ficon' size={14} />;
 }
 
 export function FolderIcon({open = false}: {open?: boolean}) {
-  return (
-    <svg className='ide-ficon' viewBox='0 0 16 16' width='14' height='14' aria-hidden='true'>
-      <path
-        d='M1.5 3.4a1 1 0 0 1 1-1h3.1l1.4 1.4h6.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V3.4z'
-        fill='#dcb67a'
-        fillOpacity={open ? '0.28' : '0.42'}
-        stroke='#c89b5a'
-        strokeOpacity='0.7'
-        strokeWidth='0.7'
-      />
-    </svg>
+  return open ? (
+    <FolderOpenIcon className='ide-ficon' size={14} />
+  ) : (
+    <FolderClosedIcon className='ide-ficon' size={14} />
   );
 }
 

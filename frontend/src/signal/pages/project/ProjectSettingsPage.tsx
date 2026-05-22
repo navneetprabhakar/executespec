@@ -137,6 +137,22 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Indexing happens async server-side (UPLOADED → EXTRACTING → EMBEDDING →
+  // READY/FAILED). Poll every 5s while any doc is still in flight so the
+  // status pill converges instead of sitting on EMBEDDING forever. Stops once
+  // every doc is terminal (READY/FAILED).
+  useEffect(() => {
+    if (!id || !docs) return;
+    const pending = docs.some((d) => {
+      const st = (d.status || '').toUpperCase();
+      return st === 'UPLOADED' || st === 'EXTRACTING' || st === 'EMBEDDING';
+    });
+    if (!pending) return;
+    const t = setInterval(() => void refreshDocs(), 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, docs]);
+
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;

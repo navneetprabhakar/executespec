@@ -12,6 +12,7 @@ import {FileTree, type FileEntry} from '@/signal/components/FileTree';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
+import {verdictFor} from '@/signal/components/VerdictPill';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
@@ -378,11 +379,12 @@ export default function ResultPage() {
     (run as unknown as {scmPrUrl?: string; githubPrUrl?: string})?.scmPrUrl ||
     (run as unknown as {githubPrUrl?: string})?.githubPrUrl;
   const statusReason = (run as unknown as {statusReason?: string})?.statusReason;
-  // Match the 4-band palette used by RunCard/ScoreRing/AllRunsPage/HomePage:
-  // ≥85 = green / Shippable, 70-84 = amber / Needs review, <70 = red / Failed.
-  // The previous 90 threshold here put green-band runs (85-89) into "Needs
-  // review" which directly contradicted the chip colour everywhere else.
-  const verdict = score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+  // Verdict label sourced from the shared `verdictFor` helper so the ≥85
+  // thresholds can't drift from RunCard / ScoreRing / HomePage. ScoreCard
+  // renders only the label string; the band colour lives on its own .verdict
+  // styling, so we just feed it the canonical label here. `score` already
+  // resolves verifiedScore ?? accuracyScore ?? 0, so behaviour is unchanged.
+  const verdict = verdictFor(score, status).label;
   const tasks = run?.tasks || [];
 
   const reportAny = (report || {}) as unknown as {
