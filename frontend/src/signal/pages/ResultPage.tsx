@@ -11,6 +11,7 @@ import {CodeView} from '@/signal/components/CodeView';
 import {FileTree, type FileEntry} from '@/signal/components/FileTree';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
+import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
@@ -1217,17 +1218,20 @@ export default function ResultPage() {
 
         {tab === 'pr' &&
           (prUrl ? (
-            <PrCard
-              label='PR · OPEN'
-              title={userRequest ? userRequest.slice(0, 80) : 'Open pull request'}
-              repo={prUrl.replace(/^https?:\/\/[^/]+\//, '').replace(/\/pull\//, '#')}
-              ciStatus={<span className='ci-ok'>● open</span>}
-              actions={
-                <button type='button' onClick={() => window.open(prUrl, '_blank', 'noopener')}>
-                  Open on GitHub
-                </button>
-              }
-            />
+            <>
+              <PrCard
+                label='PR · OPEN'
+                title={userRequest ? userRequest.slice(0, 80) : 'Open pull request'}
+                repo={prUrl.replace(/^https?:\/\/[^/]+\//, '').replace(/\/pull\//, '#')}
+                ciStatus={<span className='ci-ok'>● open</span>}
+                actions={
+                  <button type='button' onClick={() => window.open(prUrl, '_blank', 'noopener')}>
+                    Open on GitHub
+                  </button>
+                }
+              />
+              <PrCommentInbox runId={id} variant='signal' />
+            </>
           ) : (
             <Card>
               <p
