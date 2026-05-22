@@ -100,12 +100,16 @@ export default function IdeWorkspace() {
   return (
     <div className='ide-root'>
       <div className='ide-mobilebar'>
-        <button onClick={() => setDrawerOpen(true)} aria-label='Open menu'>
+        <button onClick={() => setDrawerOpen(true)} title='Open menu' aria-label='Open menu'>
           <MenuIcon size={20} />
         </button>
         <strong style={{fontSize: 13}}>ExecuteSpec</strong>
         <span style={{flex: 1}} />
-        <button onClick={() => setPaletteOpen(true)} aria-label='Command palette'>
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title='Command palette (⌘K)'
+          aria-label='Command palette'
+        >
           <CommandIcon size={20} />
         </button>
       </div>
@@ -273,33 +277,47 @@ export default function IdeWorkspace() {
           repo is in scope here, so hardcoding "main" would be a lie. The
           per-run surfaces surface the real branch where one is known. */}
       <div className='ide-statusbar'>
-        <span className='ide-status'>
+        <span className='ide-status' title='ExecuteSpec workspace'>
           <BranchIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           ExecuteSpec
         </span>
-        <span className='ide-status'>
+        <span className='ide-status' title={`Plan: ${tier}`}>
           <IdeBadge kind='ok'>{tier}</IdeBadge>
         </span>
         <span className='ide-status-spacer' />
         <button
           className='ide-status btn'
           onClick={() => setPaletteOpen(true)}
+          title='Command palette (⌘K)'
           aria-label='Command palette'
         >
           <CommandIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           Commands
         </button>
-        <button className='ide-status btn' onClick={toggleTheme}>
+        <button
+          className='ide-status btn'
+          onClick={toggleTheme}
+          title={`Theme: ${theme} — click to switch`}
+          aria-label={`Theme: ${theme}. Click to switch theme.`}
+        >
           <ThemeIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           {theme}
         </button>
-        <span className='ide-status'>IDE · Beta</span>
+        <span className='ide-status' title='IDE workspace (Beta)'>
+          IDE · Beta
+        </span>
       </div>
 
       {/* mobile bottom tabs */}
       <nav className='ide-tabbar'>
         {ACTIVITY.map((a) => (
-          <NavLink key={a.path} to={a.path} className={({isActive}) => (isActive ? 'active' : '')}>
+          <NavLink
+            key={a.path}
+            to={a.path}
+            title={a.label}
+            aria-label={a.label}
+            className={({isActive}) => (isActive ? 'active' : '')}
+          >
             <span className='ico'>
               <a.Icon size={20} />
             </span>
