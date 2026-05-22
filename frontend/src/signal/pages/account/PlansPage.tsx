@@ -27,6 +27,7 @@ const FEATURES: Record<string, string[]> = {
   TEAM: [
     '✓ Unlimited runs',
     '✓ 500 credits / seat',
+    '✓ 1–20 seats (start solo)',
     '✓ $25 hard cost cap',
     '✓ Multi-repo + BYOK',
     '✓ Project sharing + audit',
@@ -304,7 +305,7 @@ export default function PlansPage() {
                   {p.tier === 'FREE'
                     ? 'Try ExecuteSpec without a card'
                     : p.tier === 'TEAM'
-                      ? 'Add seats as your team grows. Annual billing.'
+                      ? 'Start with one seat — add up to 20 as you grow. Annual billing.'
                       : p.tier === 'ENTERPRISE'
                         ? 'SSO, SLA, dedicated support'
                         : 'Hidden plan — grandfathered users only'}

@@ -73,6 +73,52 @@
   --ide-shadow: rgba(0, 0, 0, 0.16);
 }
 
+/*
+ * Signal-token bridge. A few Signal components are reused verbatim inside the
+ * IDE chrome (SpecChat "Build my spec", CostProgressBar, UsageMeter,
+ * UpgradeModal + the Modal/Button primitives they pull in). They read
+ * --signal-* tokens, which are only defined under .signal-app — so without
+ * this bridge they render unstyled / stuck-dark in the IDE (the theme-desync
+ * bug). Map them onto the theme-aware --ide-* tokens so they follow the IDE's
+ * light/dark theme automatically (no per-theme duplication needed — the
+ * --ide-* tokens already flip under [data-theme='light']).
+ */
+.ide-root {
+  --signal-bg: var(--ide-bg-editor);
+  --signal-card-bg: var(--ide-bg-widget);
+  --signal-card-elev: var(--ide-bg-sidebar);
+  --signal-bg-translucent: var(--ide-bg-editor);
+
+  --signal-ink: var(--ide-fg-bright);
+  --signal-ink-soft: var(--ide-fg);
+  --signal-text-dim: var(--ide-fg-muted);
+  --signal-text-mute: var(--ide-fg-muted);
+
+  --signal-hairline: var(--ide-border);
+  --signal-hairline-strong: var(--ide-border-strong);
+
+  --signal-mint: var(--ide-green);
+  --signal-mint-soft: color-mix(in srgb, var(--ide-green) 22%, transparent);
+  --signal-mint-text: var(--ide-fg-bright);
+  --signal-mint-text-on-light: var(--ide-green);
+  --signal-coral: var(--ide-red);
+  --signal-coral-soft: color-mix(in srgb, var(--ide-red) 22%, transparent);
+  --signal-coral-text: var(--ide-red);
+  --signal-y: var(--ide-yellow);
+  --signal-y-soft: color-mix(in srgb, var(--ide-yellow) 20%, transparent);
+  --signal-y-text: var(--ide-yellow);
+  --signal-lavender: var(--ide-blue);
+  --signal-lavender-soft: color-mix(in srgb, var(--ide-blue) 20%, transparent);
+  --signal-ocean: var(--ide-blue);
+
+  --signal-r-sm: 8px;
+  --signal-r-md: 12px;
+  --signal-r-lg: 16px;
+  --signal-r-xl: 20px;
+  --signal-shadow: 0 6px 16px -6px var(--ide-shadow);
+  --signal-shadow-strong: var(--ide-shadow);
+}
+
 .ide-mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }

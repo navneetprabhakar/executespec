@@ -13,13 +13,32 @@ import {
   IdeBadge,
   ResizeHandle,
 } from '@/ide/IdeKit';
+import {
+  WorkspaceIcon,
+  NewSpecIcon,
+  RunsIcon,
+  ProjectsIcon,
+  AdminIcon,
+  AccountIcon,
+  SidebarIcon,
+  PlusIcon,
+  MenuIcon,
+  CommandIcon,
+  SunIcon,
+  MoonIcon,
+  MonitorIcon,
+  SwapIcon,
+  BranchIcon,
+  StatusDot,
+  type IconProps,
+} from '@/ide/IdeIcons';
 
-type Act = {path: string; icon: string; label: string};
+type Act = {path: string; Icon: (p: IconProps) => React.ReactElement; label: string};
 const ACTIVITY: Act[] = [
-  {path: '/home', icon: '⊞', label: 'Workspace'},
-  {path: '/compose', icon: '＋', label: 'New spec'},
-  {path: '/runs', icon: '◎', label: 'All runs'},
-  {path: '/projects', icon: '▤', label: 'Projects'},
+  {path: '/home', Icon: WorkspaceIcon, label: 'Workspace'},
+  {path: '/compose', Icon: NewSpecIcon, label: 'New spec'},
+  {path: '/runs', Icon: RunsIcon, label: 'All runs'},
+  {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
 ];
 
 function runLabel(r: api.RunSummary): string {
@@ -67,6 +86,7 @@ export default function IdeWorkspace() {
   const commands: PaletteCmd[] = [
     {id: 'home', label: 'Go: Workspace', hint: 'Home', run: () => navigate('/home')},
     {id: 'compose', label: 'New spec', hint: '＋', run: () => navigate('/compose')},
+    {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: All runs', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
     {id: 'theme', label: 'Toggle theme', run: toggleTheme},
@@ -78,18 +98,18 @@ export default function IdeWorkspace() {
     })),
   ];
 
-  const themeIcon = theme === 'light' ? '☀' : theme === 'system' ? '⊟' : '☾';
+  const ThemeIcon = theme === 'light' ? SunIcon : theme === 'system' ? MonitorIcon : MoonIcon;
 
   return (
     <div className='ide-root'>
       <div className='ide-mobilebar'>
         <button onClick={() => setDrawerOpen(true)} aria-label='Open menu'>
-          ☰
+          <MenuIcon size={20} />
         </button>
         <strong style={{fontSize: 13}}>ExecuteSpec</strong>
         <span style={{flex: 1}} />
         <button onClick={() => setPaletteOpen(true)} aria-label='Command palette'>
-          ⌘K
+          <CommandIcon size={20} />
         </button>
       </div>
 
@@ -104,7 +124,7 @@ export default function IdeWorkspace() {
               title={a.label}
               aria-label={a.label}
             >
-              {a.icon}
+              <a.Icon size={22} />
             </NavLink>
           ))}
           <span className='ide-act-spacer' />
@@ -112,15 +132,17 @@ export default function IdeWorkspace() {
             className='ide-act'
             onClick={() => setCollapsed((c) => !c)}
             title='Toggle sidebar'
+            aria-label='Toggle sidebar'
           >
-            ▥
+            <SidebarIcon size={22} />
           </button>
           <NavLink
             to='/account'
             className={`ide-act${path.startsWith('/account') ? ' active' : ''}`}
             title='Account'
+            aria-label='Account'
           >
-            ◍
+            <AccountIcon size={22} />
           </NavLink>
         </div>
 
@@ -135,20 +157,27 @@ export default function IdeWorkspace() {
             Explorer
             <button
               className='ide-status btn'
-              style={{color: 'var(--ide-fg-muted)', padding: 0}}
+              style={{color: 'var(--ide-fg-muted)', padding: 0, display: 'inline-flex'}}
               onClick={() => setPaletteOpen(true)}
               title='Command palette (⌘K)'
+              aria-label='Command palette'
             >
-              ⌘K
+              <CommandIcon size={15} />
             </button>
           </div>
           <div className='ide-side-body'>
             <div className='ide-tree-group-title'>Open</div>
             <NavLink className='ide-tree-item' to='/compose'>
-              <span className='ide-tree-ico'>＋</span>New spec
+              <span className='ide-tree-ico'>
+                <NewSpecIcon size={15} />
+              </span>
+              New spec
             </NavLink>
             <NavLink className='ide-tree-item' to='/runs'>
-              <span className='ide-tree-ico'>◎</span>All runs
+              <span className='ide-tree-ico'>
+                <RunsIcon size={15} />
+              </span>
+              All runs
             </NavLink>
 
             <div className='ide-tree-group-title'>Recent runs</div>
@@ -164,34 +193,60 @@ export default function IdeWorkspace() {
                   to={`/result/${r.runId}`}
                   title={runLabel(r)}
                 >
-                  <span className='ide-tree-ico'>{statusKind(r.status) === 'ok' ? '✓' : '•'}</span>
+                  <span className='ide-tree-ico'>
+                    <StatusDot kind={statusKind(r.status)} size={8} />
+                  </span>
                   {runLabel(r)}
                 </NavLink>
               ))
             )}
 
-            {projects.length > 0 && (
-              <>
-                <div className='ide-tree-group-title'>Projects</div>
-                {projects.map((p) => (
-                  <NavLink
-                    key={p.id}
-                    className={({isActive}) => `ide-tree-item${isActive ? ' active' : ''}`}
-                    to={`/projects/${p.id}`}
-                    title={p.name}
-                  >
-                    <span className='ide-tree-ico'>▤</span>
-                    {p.name}
-                  </NavLink>
-                ))}
-              </>
+            {/* PROJECTS group — header carries a discoverable create-project (+)
+                affordance that routes to /projects (the working create flow). */}
+            <div className='ide-tree-group-title'>
+              Projects
+              <span style={{flex: 1}} />
+              <button
+                className='ide-status btn'
+                style={{color: 'var(--ide-fg-muted)', padding: 0, display: 'inline-flex'}}
+                onClick={() => navigate('/projects')}
+                title='New project'
+                aria-label='New project'
+              >
+                <PlusIcon size={15} />
+              </button>
+            </div>
+            {projects.length === 0 ? (
+              <button className='ide-tree-item' onClick={() => navigate('/projects')}>
+                <span className='ide-tree-ico'>
+                  <PlusIcon size={14} />
+                </span>
+                New project
+              </button>
+            ) : (
+              projects.map((p) => (
+                <NavLink
+                  key={p.id}
+                  className={({isActive}) => `ide-tree-item${isActive ? ' active' : ''}`}
+                  to={`/projects/${p.id}`}
+                  title={p.name}
+                >
+                  <span className='ide-tree-ico'>
+                    <ProjectsIcon size={15} />
+                  </span>
+                  {p.name}
+                </NavLink>
+              ))
             )}
 
             {isSuperAdmin && (
               <>
                 <div className='ide-tree-group-title'>System</div>
                 <NavLink className='ide-tree-item' to='/admin'>
-                  <span className='ide-tree-ico'>✦</span>Admin
+                  <span className='ide-tree-ico'>
+                    <AdminIcon size={15} />
+                  </span>
+                  Admin
                 </NavLink>
               </>
             )}
@@ -217,25 +272,33 @@ export default function IdeWorkspace() {
         </div>
       </div>
 
-      {/* status bar */}
+      {/* status bar — branch is intentionally omitted at the chrome level: no
+          repo is in scope here, so hardcoding "main" would be a lie. The
+          per-run surfaces surface the real branch where one is known. */}
       <div className='ide-statusbar'>
-        <span className='ide-status'>⎇ main</span>
+        <span className='ide-status'>
+          <BranchIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
+          ExecuteSpec
+        </span>
         <span className='ide-status'>
           <IdeBadge kind='ok'>{tier}</IdeBadge>
         </span>
         <span className='ide-status-spacer' />
-        <button className='ide-status btn' onClick={() => setPaletteOpen(true)}>
-          ⌘K
+        <button className='ide-status btn' onClick={() => setPaletteOpen(true)} aria-label='Command palette'>
+          <CommandIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
+          Commands
         </button>
         <button className='ide-status btn' onClick={toggleTheme}>
-          {themeIcon} {theme}
+          <ThemeIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
+          {theme}
         </button>
         <button
           className='ide-status btn'
           onClick={toggleUiMode}
           title='Switch to classic Signal UI'
         >
-          ⇄ Signal UI
+          <SwapIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
+          Signal UI
         </button>
         <span className='ide-status'>IDE · Beta</span>
       </div>
@@ -244,7 +307,9 @@ export default function IdeWorkspace() {
       <nav className='ide-tabbar'>
         {ACTIVITY.map((a) => (
           <NavLink key={a.path} to={a.path} className={({isActive}) => (isActive ? 'active' : '')}>
-            <span className='ico'>{a.icon}</span>
+            <span className='ico'>
+              <a.Icon size={20} />
+            </span>
             {a.label}
           </NavLink>
         ))}

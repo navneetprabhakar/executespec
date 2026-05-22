@@ -30,26 +30,70 @@ const costOf = (r: unknown) =>
   (r as {actualCost?: number}).actualCost ??
   (r as {totalCost?: number}).totalCost;
 
-// Workbench tab strip — shown on every project sub-route.
-const T: Array<{label: string; seg: string}> = [
+// Workbench tab strip — shown on every project sub-route. `count` keys a tab
+// to the live-count map below; tabs without a key stay label-only.
+const T: Array<{label: string; seg: string; count?: 'repos' | 'runs' | 'code' | 'members'}> = [
   {label: 'Compose', seg: ''},
   {label: 'Pulse', seg: '/pulse'},
-  {label: 'Repos', seg: '/repos'},
-  {label: 'Runs', seg: '/runs'},
-  {label: 'Code', seg: '/code'},
+  {label: 'Repos', seg: '/repos', count: 'repos'},
+  {label: 'Runs', seg: '/runs', count: 'runs'},
+  {label: 'Code', seg: '/code', count: 'code'},
   {label: 'Chat', seg: '/chat'},
   {label: 'Architecture', seg: '/architecture'},
-  {label: 'Members', seg: '/members'},
+  {label: 'Members', seg: '/members', count: 'members'},
   {label: 'Activity', seg: '/activity'},
   {label: 'Settings', seg: '/settings'},
 ];
+
+type TabCounts = {repos?: number; runs?: number; code?: number; members?: number};
+
 export function ProjectTabs({projectId}: {projectId: string}) {
   const {pathname} = useLocation();
+  // Live counts from the project dashboard + companions, clamped >= 0 so a
+  // garbage signed-int can never reach the badge. Repos comes from the repo
+  // list (dashboard carries no repo count) and Code from the tech-debt total
+  // (dashboard carries no findings count) — matching what each tab surfaces.
+  const [counts, setCounts] = useState<TabCounts>({});
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    Promise.allSettled([
+      api.getProjectDashboard(projectId),
+      api.getProjectRepos(projectId),
+      api.getProjectMembers(projectId),
+      api.getTechDebt(projectId),
+    ]).then(([dash, repos, members, debt]) => {
+      if (cancelled) return;
+      const d = dash.status === 'fulfilled' ? dash.value : null;
+      const repoArr = repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value : [];
+      const memberArr =
+        members.status === 'fulfilled' && Array.isArray(members.value) ? members.value : [];
+      const totalRuns = d
+        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0)
+        : undefined;
+      const debtTotal =
+        debt.status === 'fulfilled'
+          ? Object.values(debt.value.issuesBySeverity || {}).reduce((a, b) => a + (b || 0), 0)
+          : undefined;
+      const safe = (n?: number) => (typeof n === 'number' && n >= 0 ? n : undefined);
+      setCounts({
+        repos: safe(repoArr.length),
+        runs: safe(totalRuns),
+        code: safe(debtTotal),
+        members: safe(memberArr.length),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   return (
     <div className='ide-rtabs' style={{marginBottom: 16}}>
       {T.map((t) => {
         const to = `/projects/${projectId}${t.seg}`;
         const active = t.seg === '' ? pathname === to : pathname.startsWith(to);
+        const n = t.count ? counts[t.count] : undefined;
         return (
           <Link
             key={t.label}
@@ -57,7 +101,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
             className={`ide-rtab${active ? ' active' : ''}`}
             style={{textDecoration: 'none'}}
           >
-            {t.label}
+            {n != null ? `${t.label} · ${n}` : t.label}
           </Link>
         );
       })}

@@ -59,7 +59,10 @@ export default function ProjectsPage() {
           Promise.all([
             api.getProjectDashboard(p.id).catch(() => null),
             api.getRuns({projectId: p.id, page: 0, size: 10}).catch(() => null),
-          ]).then(([d, r]) => {
+            // Tech-debt count isn't on the dashboard payload — fetch it
+            // separately and fold the severity-bucket total into `merged`.
+            api.getTechDebt(p.id).catch(() => null),
+          ]).then(([d, r, td]) => {
             if (cancelled) return;
             const merged: Record<string, unknown> = {...((d ?? {}) as Record<string, unknown>)};
             // Compute recency-biased avg: weights decay 1.0 → 0.4 over the
@@ -75,6 +78,12 @@ export default function ProjectsPage() {
                 scoreSum += (rr.verifiedScore ?? 0) * w;
               });
               merged.recencyAvgScore = scoreSum / weightSum;
+            }
+            if (td) {
+              merged.techDebt = Object.values(td.issuesBySeverity || {}).reduce(
+                (a, b) => a + (b || 0),
+                0,
+              );
             }
             setStats((prev) => ({...prev, [p.id]: merged}));
           });
@@ -227,8 +236,15 @@ export default function ProjectsPage() {
               // the project is performing now, not 6 months ago.
               const avg = num('recencyAvgScore') ?? num('avgScore');
               const spent = num('totalCostUsd');
-              const debtCount = 0;
-              const debtKind = debtCount >= 3 ? 'fail' : debtCount > 0 ? 'warn' : 'good';
+              const debtCount = num('techDebt');
+              const debtKind =
+                debtCount == null
+                  ? 'good'
+                  : debtCount >= 3
+                    ? 'fail'
+                    : debtCount > 0
+                      ? 'warn'
+                      : 'good';
               const status = p.archivedAt
                 ? undefined
                 : openPrs > 0
@@ -319,7 +335,7 @@ export default function ProjectsPage() {
                                 : undefined,
                         }}
                       >
-                        {debtCount > 0 ? debtCount : '—'}
+                        {debtCount != null ? debtCount : '—'}
                       </div>
                     </div>
                   </div>

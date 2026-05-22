@@ -7,6 +7,7 @@ import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
+import {verdictFor} from '@/signal/components/VerdictPill';
 import {runTitleFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
@@ -38,7 +39,9 @@ function InlineRunDetailPane({
     (run as unknown as {verifiedScore?: number}).verifiedScore ??
     (run as unknown as {accuracyScore?: number}).accuracyScore ??
     0;
-  const verdict = score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+  // Shared verdict helper — was inline ≥90 here, which over-counted "Needs
+  // review" vs the canonical ≥85 used by the run list / ResultPage / IDE.
+  const verdict = verdictFor(score, run.status).label;
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;
   const prUrl =
     (run as unknown as {scmPrUrl?: string; githubPrUrl?: string}).scmPrUrl ||

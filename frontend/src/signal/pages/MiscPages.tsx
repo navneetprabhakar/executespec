@@ -14,6 +14,7 @@ import {
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {ScoreCard, PrCard} from '@/signal/components/Compose';
+import {verdictFor} from '@/signal/components/VerdictPill';
 import {Bell, Search, Settings, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -1481,7 +1482,10 @@ export function SharedPage() {
     (data as unknown as {verifiedScore?: number; score?: number}).verifiedScore ??
     (data as unknown as {score?: number}).score ??
     0;
-  const verdict = score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+  // Shared verdict helper — was inline ≥90 here, which disagreed with the
+  // canonical ≥85 band used everywhere else. Shared report has no run status,
+  // so pass undefined and let the score drive the verdict.
+  const verdict = verdictFor(score, undefined).label;
   const userRequest = (data as unknown as {userRequest?: string}).userRequest || '—';
   const prUrl =
     (data as unknown as {prUrl?: string; githubPrUrl?: string}).prUrl ||

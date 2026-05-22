@@ -9,10 +9,17 @@ const numOf = (s: Dash, k: string): number | undefined =>
 
 // Real IDE Projects list — health cards (avg score / spend / runs / PRs / status),
 // replacing the Signal ProjectsPage. Mirrors its dashboard-derived stats.
+// Tech-debt total = sum of every severity bucket. The dashboard payload
+// carries no findings count, so it's a separate per-card fetch.
+const debtTotal = (r: api.TechDebtReport): number =>
+  Object.values(r.issuesBySeverity || {}).reduce((a, b) => a + (b || 0), 0);
+
 export default function IdeProjects() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
   const [stats, setStats] = useState<Record<string, Dash>>({});
+  // Tech-debt count keyed by project id, fetched lazily alongside the dashboard.
+  const [debt, setDebt] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState<'mine' | 'archived'>('mine');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -26,6 +33,10 @@ export default function IdeProjects() {
           api
             .getProjectDashboard(p.id)
             .then((d) => setStats((s) => ({...s, [p.id]: d as unknown as Dash})))
+            .catch(() => {});
+          api
+            .getTechDebt(p.id)
+            .then((r) => setDebt((m) => ({...m, [p.id]: debtTotal(r)})))
             .catch(() => {});
         });
       })
@@ -66,6 +77,7 @@ export default function IdeProjects() {
     ).size;
     const avg = numOf(s, 'recencyAvgScore') ?? numOf(s, 'avgScore');
     const spent = numOf(s, 'totalCostUsd');
+    const techDebt = debt[p.id];
     const status = p.archivedAt
       ? {l: 'Archived', k: 'warn' as const}
       : prs > 0
@@ -98,7 +110,7 @@ export default function IdeProjects() {
           {[
             ['Avg score', avg != null ? `${Math.round(avg)}%` : '—'],
             ['Spent', spent != null ? `$${spent.toFixed(2)}` : '—'],
-            ['Tech debt', '—'],
+            ['Tech debt', techDebt != null ? String(techDebt) : '—'],
           ].map(([k, v]) => (
             <div key={k}>
               <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{k}</div>
