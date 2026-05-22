@@ -1,9 +1,10 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {runTitleFor, relTime} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 
 function fmtWhen(iso?: string | null): string {
@@ -12,65 +13,235 @@ function fmtWhen(iso?: string | null): string {
   return isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
+const PAGE_SIZE = 30;
+const LIVE_STATUSES = new Set([
+  'CLASSIFYING',
+  'PLANNING',
+  'EXECUTING',
+  'AWAITING_APPROVAL',
+  'RUNNING',
+  'PROVIDER_SWITCHING',
+  'PAUSED',
+]);
+const isLiveStatus = (s?: string | null) => LIVE_STATUSES.has((s || '').toUpperCase());
+// verifiedScore is on RunDetail; RunSummary carries it on the wire but not in the
+// type. Read it (and the cost field) through a cast — same shape AllRunsPage uses.
+const scoreOf = (r: api.RunSummary) => (r as unknown as {verifiedScore?: number}).verifiedScore;
+const costOf = (r: api.RunSummary) =>
+  r.actualCostUsd ??
+  (r as unknown as {actualCost?: number}).actualCost ??
+  (r as unknown as {totalCost?: number}).totalCost;
+
+type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'failed';
+
+// Score → IDE band colour (≥85 shippable / 70-84 needs review / <70 failed).
+function scoreColor(score?: number | null): string {
+  if (score == null) return 'var(--ide-fg-muted)';
+  if (score >= 85) return 'var(--ide-green)';
+  if (score >= 70) return 'var(--ide-yellow)';
+  return 'var(--ide-red)';
+}
+
 // ───────────────────────── All runs (list) ─────────────────────────
 export function IdeRuns() {
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
+  const [filter, setFilter] = useState<RunFilter>('all');
+  const [page, setPage] = useState(0);
+  const [more, setMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [err, setErr] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     api
-      .getRuns({size: 40})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]));
+      .getRuns({page: 0, size: PAGE_SIZE})
+      .then((p) => {
+        if (cancelled) return;
+        setRuns(p.content ?? []);
+        setMore(p.hasNext);
+        setPage(0);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setRuns([]);
+        setErr(e instanceof Error ? e.message : 'Failed to load runs.');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    setErr('');
+    try {
+      const next = await api.getRuns({page: page + 1, size: PAGE_SIZE});
+      setRuns((prev) => [...(prev ?? []), ...(next.content ?? [])]);
+      setPage((p) => p + 1);
+      setMore(next.hasNext);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to load more.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // Bucket each loaded run once; drive both the strip counts and the filtered list.
+  const counts = useMemo(() => {
+    const list = runs ?? [];
+    let live = 0,
+      shipped = 0,
+      needs = 0,
+      failed = 0;
+    for (const r of list) {
+      const s = (r.status || '').toUpperCase();
+      const score = scoreOf(r);
+      if (isLiveStatus(s)) live++;
+      else if (s === 'COMPLETED' && (score == null || score >= 85)) shipped++;
+      else if (s === 'PARTIAL' || (s === 'COMPLETED' && score != null && score < 85)) needs++;
+      else if (s === 'FAILED' || s === 'CANCELLED') failed++;
+    }
+    return {all: list.length, live, shipped, needs, failed};
+  }, [runs]);
+
+  const filtered = useMemo(() => {
+    const list = runs ?? [];
+    if (filter === 'all') return list;
+    return list.filter((r) => {
+      const s = (r.status || '').toUpperCase();
+      const score = scoreOf(r);
+      if (filter === 'live') return isLiveStatus(s);
+      if (filter === 'shipped') return s === 'COMPLETED' && (score == null || score >= 85);
+      if (filter === 'needs')
+        return s === 'PARTIAL' || (s === 'COMPLETED' && score != null && score < 85);
+      if (filter === 'failed') return s === 'FAILED' || s === 'CANCELLED';
+      return true;
+    });
+  }, [runs, filter]);
+
+  const TABS: Array<{key: RunFilter; label: string; n: number}> = [
+    {key: 'all', label: 'All', n: counts.all},
+    {key: 'live', label: 'Live', n: counts.live},
+    {key: 'shipped', label: 'Shipped', n: counts.shipped},
+    {key: 'needs', label: 'Needs review', n: counts.needs},
+    {key: 'failed', label: 'Failed', n: counts.failed},
+  ];
 
   return (
     <div className='ide-pane'>
       <div className='ide-h1'>All runs</div>
-      <div className='ide-sub'>Every spec you've run, newest first.</div>
+      <div className='ide-sub'>
+        {runs === null
+          ? 'Every spec you’ve run, newest first.'
+          : `${counts.all} loaded · ${counts.live} live`}
+      </div>
+
+      <div className='ide-rtabs' style={{marginBottom: 12}}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`ide-rtab${filter === t.key ? ' active' : ''}`}
+            onClick={() => setFilter(t.key)}
+          >
+            {t.label} <span className='ide-rtab-badge'>{t.n}</span>
+          </button>
+        ))}
+      </div>
+
+      {err && (
+        <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
+          {err}
+        </div>
+      )}
+
       {runs === null ? (
         <IdeLoader label='Loading runs…' />
-      ) : runs.length === 0 ? (
+      ) : counts.all === 0 ? (
         <div className='ide-empty'>No runs yet — start with a new spec.</div>
-      ) : (
-        <div className='ide-card' style={{padding: 0}}>
-          {runs.map((r, i) => (
-            <Link
-              key={r.runId}
-              to={`/result/${r.runId}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '11px 16px',
-                textDecoration: 'none',
-                color: 'var(--ide-fg)',
-                borderBottom: i < runs.length - 1 ? '1px solid var(--ide-border)' : 'none',
-              }}
-            >
-              <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
-              <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontWeight: 500,
-                }}
-              >
-                {(r.runTitle || r.userRequest || r.runId).slice(0, 100)}
-              </span>
-              {r.aiProvider && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
-                  {r.aiProvider.toLowerCase()}
-                </span>
-              )}
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12, flexShrink: 0}}>
-                {fmtWhen(r.startedAt)}
-              </span>
-            </Link>
-          ))}
+      ) : filtered.length === 0 ? (
+        <div className='ide-empty'>
+          No runs match this filter.{' '}
+          <button
+            className='ide-btn ghost'
+            style={{padding: '2px 8px', marginLeft: 4}}
+            onClick={() => setFilter('all')}
+          >
+            Show all
+          </button>
         </div>
+      ) : (
+        <>
+          <div className='ide-card' style={{padding: 0}}>
+            {filtered.map((r, i) => {
+              const live = isLiveStatus(r.status);
+              const score = scoreOf(r);
+              const cost = costOf(r);
+              return (
+                <Link
+                  key={r.runId}
+                  to={live ? `/live/${r.runId}` : `/result/${r.runId}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '11px 16px',
+                    textDecoration: 'none',
+                    color: 'var(--ide-fg)',
+                    borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                  }}
+                >
+                  <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                  <span style={{flex: 1, minWidth: 0}}>
+                    <span
+                      style={{
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {runTitleFor(r)}
+                    </span>
+                    <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                      R-{r.runId.slice(0, 6)}
+                      {r.projectName ? ` · ${String(r.projectName).slice(0, 24)}` : ''} ·{' '}
+                      {relTime(r.startedAt)}
+                    </span>
+                  </span>
+                  {r.aiProvider && (
+                    <span style={{color: 'var(--ide-fg-muted)', fontSize: 12, flexShrink: 0}}>
+                      {r.aiProvider.toLowerCase()}
+                    </span>
+                  )}
+                  <span style={{flexShrink: 0, textAlign: 'right', minWidth: 56}}>
+                    <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
+                      {score != null ? `${Math.round(score)}%` : live ? 'live' : '—'}
+                    </span>
+                    {cost != null && (
+                      <span
+                        className='ide-mono'
+                        style={{display: 'block', fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                      >
+                        ${cost.toFixed(2)}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+          {more && (
+            <button
+              className='ide-btn ghost'
+              style={{marginTop: 12, width: '100%'}}
+              disabled={loadingMore}
+              onClick={loadMore}
+            >
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -87,6 +258,10 @@ export function IdeAccount() {
   const setTheme = useUiStore((s) => s.setTheme);
   const uiMode = useUiStore((s) => s.uiMode);
   const setUiMode = useUiStore((s) => s.setUiMode);
+  const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
+  const [notifBusy, setNotifBusy] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [msg, setMsg] = useState('');
 
   useEffect(() => {
     if (!permissions) {
@@ -97,12 +272,89 @@ export function IdeAccount() {
     }
   }, [permissions]);
 
+  // Notification preferences for the toggle panel below.
+  useEffect(() => {
+    api
+      .getNotificationPreferences()
+      .then(setNotifPrefs)
+      .catch(() => setNotifPrefs([]));
+  }, []);
+
+  async function togglePref(eventType: string, channel: 'IN_APP' | 'EMAIL', enabled: boolean) {
+    const key = `${eventType}:${channel}`;
+    setNotifBusy(key);
+    try {
+      await api.updateNotificationPreference(eventType, channel, enabled);
+      setNotifPrefs(await api.getNotificationPreferences());
+    } catch {
+      /* swallow — toggle stays at its prior value */
+    } finally {
+      setNotifBusy(null);
+    }
+  }
+
+  // GDPR data export — no api helper exists, so fetch the ZIP with the bearer
+  // token (same key the api client uses) and trigger a blob download.
+  async function onExport() {
+    setExporting(true);
+    setMsg('');
+    try {
+      const token = localStorage.getItem('access_token') ?? '';
+      const resp = await fetch('/api/auth/me/data-export', {
+        headers: token ? {Authorization: `Bearer ${token}`} : {},
+      });
+      if (!resp.ok) throw new Error(`Export failed (${resp.status}).`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `executespec-export-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg('Export downloaded.');
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Export failed.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const email = user?.email || '—';
   const name =
     [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || email.split('@')[0];
   const usage = permissions
     ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
     : '— / —';
+
+  // Plan-limits rows from the permissions object (mirrors AccountPage's KvList).
+  const limitRows: Array<{k: string; v: string}> = [
+    {
+      k: 'Monthly run cap',
+      v: permissions
+        ? permissions.monthlyRunLimit === -1
+          ? 'Unlimited'
+          : String(permissions.monthlyRunLimit)
+        : '—',
+    },
+    {k: 'Runs used', v: permissions ? String(permissions.currentRunCount) : '—'},
+    {
+      k: 'Max org seats',
+      v: permissions
+        ? permissions.maxOrgMembers === -1
+          ? 'Unlimited'
+          : String(permissions.maxOrgMembers)
+        : '—',
+    },
+    {k: 'Live log access', v: permissions?.canViewLiveLog ? 'Enabled' : 'PRO+'},
+    {k: 'BYOK keys', v: permissions?.canManageAiKeys ? 'Enabled' : 'PRO+'},
+    {k: 'Audit log', v: permissions?.canViewAudit ? 'Enabled' : 'TEAM+'},
+    {
+      k: 'Deploy engine',
+      v: permissions?.canDeploy
+        ? `Up to ${permissions.maxDeployments === -1 ? '∞' : permissions.maxDeployments}`
+        : 'PRO+',
+    },
+  ];
 
   function Seg({
     on,
@@ -200,6 +452,111 @@ export function IdeAccount() {
             <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{row.sub} ›</span>
           </Link>
         ))}
+      </div>
+
+      <div className='ide-h2'>Plan limits</div>
+      <div className='ide-card'>
+        {limitRows.map((row, i) => (
+          <div
+            key={row.k}
+            className='ide-kv'
+            style={i === limitRows.length - 1 ? {borderBottom: 'none'} : undefined}
+          >
+            <span>{row.k}</span>
+            <span style={{color: 'var(--ide-fg-bright)'}}>{row.v}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className='ide-h2'>Notifications</div>
+      {notifPrefs === null ? (
+        <IdeLoader label='Loading notification preferences…' />
+      ) : notifPrefs.length === 0 ? (
+        <div className='ide-empty'>No notification events to configure yet.</div>
+      ) : (
+        <div className='ide-card' style={{padding: 0}}>
+          {notifPrefs.map((row, i) => {
+            const key = `${row.eventType}:${row.channel}`;
+            return (
+              <div
+                key={key}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '11px 16px',
+                  borderBottom: i < notifPrefs.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                }}
+              >
+                <span style={{minWidth: 0, flex: 1}}>
+                  <span style={{display: 'block', fontSize: 13, color: 'var(--ide-fg-bright)'}}>
+                    {row.eventType.replace(/_/g, ' ').toLowerCase()}
+                  </span>
+                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    {row.channel.toLowerCase()} channel
+                  </span>
+                </span>
+                <button
+                  type='button'
+                  aria-pressed={row.enabled}
+                  disabled={notifBusy === key}
+                  onClick={() => togglePref(row.eventType, row.channel, !row.enabled)}
+                  style={{
+                    position: 'relative',
+                    width: 38,
+                    height: 20,
+                    flexShrink: 0,
+                    borderRadius: 999,
+                    border: '1px solid var(--ide-border)',
+                    background: row.enabled ? 'var(--ide-accent)' : 'var(--ide-bg-tab-inactive)',
+                    cursor: notifBusy === key ? 'default' : 'pointer',
+                    opacity: notifBusy === key ? 0.6 : 1,
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 1,
+                      left: row.enabled ? 18 : 1,
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      transition: 'left 0.15s',
+                    }}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className='ide-h2'>Security &amp; data</div>
+      <div className='ide-card'>
+        <div
+          style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12}}
+        >
+          <span>
+            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+              Export my data (GDPR)
+            </span>
+            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+              ZIP · runs, projects, billing
+            </span>
+          </span>
+          <button
+            className='ide-btn ghost'
+            style={{padding: '6px 14px', flexShrink: 0}}
+            disabled={exporting}
+            onClick={onExport}
+          >
+            {exporting ? 'Preparing…' : 'Export'}
+          </button>
+        </div>
+        {msg && <div style={{marginTop: 10, fontSize: 12.5, color: 'var(--ide-blue)'}}>{msg}</div>}
       </div>
 
       <button
