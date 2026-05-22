@@ -256,8 +256,6 @@ export function IdeAccount() {
   const permissions = useAuthStore((s) => s.permissions);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
-  const uiMode = useUiStore((s) => s.uiMode);
-  const setUiMode = useUiStore((s) => s.setUiMode);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -454,17 +452,6 @@ export function IdeAccount() {
 
       <div className='ide-h2'>Preferences</div>
       <div className='ide-card'>
-        <div className='ide-kv' style={{alignItems: 'center'}}>
-          <span>Interface</span>
-          <span style={{display: 'flex', gap: 4}}>
-            <Seg on={uiMode === 'signal'} onClick={() => setUiMode('signal')}>
-              Signal
-            </Seg>
-            <Seg on={uiMode === 'ide'} onClick={() => setUiMode('ide')}>
-              IDE
-            </Seg>
-          </span>
-        </div>
         <div className='ide-kv' style={{alignItems: 'center', borderBottom: 'none'}}>
           <span>Theme</span>
           <span style={{display: 'flex', gap: 4}}>
