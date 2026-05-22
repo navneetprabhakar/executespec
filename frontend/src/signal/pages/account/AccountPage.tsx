@@ -15,6 +15,8 @@ export default function AccountPage() {
   const permissions = useAuthStore((s) => s.permissions);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
+  const uiMode = useUiStore((s) => s.uiMode);
+  const setUiMode = useUiStore((s) => s.setUiMode);
   const [busy, setBusy] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
@@ -189,6 +191,49 @@ export default function AccountPage() {
               </Chip>
               <Chip kind={theme === 'dark' ? 'active' : 'default'} onClick={() => setTheme('dark')}>
                 Dark
+              </Chip>
+            </div>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '14px 16px',
+              borderBottom: '1px solid var(--signal-hairline)',
+            }}
+          >
+            <div>
+              <div style={{fontSize: 14.5, fontWeight: 500}}>
+                Interface{' '}
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--signal-signal-text, #5B8DEF)',
+                    border: '1px solid currentColor',
+                    borderRadius: 4,
+                    padding: '0 4px',
+                    marginLeft: 4,
+                    verticalAlign: 'middle',
+                  }}
+                >
+                  BETA
+                </span>
+              </div>
+              <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
+                {uiMode === 'ide' ? 'VS Code-style IDE' : 'Signal (classic)'}
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: 4}}>
+              <Chip
+                kind={uiMode === 'signal' ? 'active' : 'default'}
+                onClick={() => setUiMode('signal')}
+              >
+                Signal
+              </Chip>
+              <Chip kind={uiMode === 'ide' ? 'active' : 'default'} onClick={() => setUiMode('ide')}>
+                IDE
               </Chip>
             </div>
           </div>
