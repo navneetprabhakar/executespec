@@ -13,6 +13,14 @@ import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
 import {IdeProjectPulse, IdeProjectRuns, IdeProjectRepos} from '@/ide/IdeProjectTabs';
+import {
+  IdeProjectChat,
+  IdeProjectCode,
+  IdeProjectArchitecture,
+  IdeProjectMembers,
+  IdeProjectActivity,
+  IdeProjectSettings,
+} from '@/ide/IdeProjectMore';
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
 import {useUiStore} from '@/stores/useUiStore';
@@ -164,12 +172,30 @@ function protectedChildren(ide: boolean) {
         path='/projects/:projectId/runs/:runShort'
         element={ide ? <IdeRunResult /> : <ResultPage />}
       />
-      <Route path='/projects/:projectId/code' element={<ProjectCodePage />} />
-      <Route path='/projects/:projectId/chat' element={<ProjectChatPage />} />
-      <Route path='/projects/:projectId/activity' element={<ProjectActivityPage />} />
-      <Route path='/projects/:projectId/members' element={<ProjectMembersPage />} />
-      <Route path='/projects/:projectId/architecture' element={<ProjectArchitecturePage />} />
-      <Route path='/projects/:projectId/settings' element={<ProjectSettingsPage />} />
+      <Route
+        path='/projects/:projectId/code'
+        element={ide ? <IdeProjectCode /> : <ProjectCodePage />}
+      />
+      <Route
+        path='/projects/:projectId/chat'
+        element={ide ? <IdeProjectChat /> : <ProjectChatPage />}
+      />
+      <Route
+        path='/projects/:projectId/activity'
+        element={ide ? <IdeProjectActivity /> : <ProjectActivityPage />}
+      />
+      <Route
+        path='/projects/:projectId/members'
+        element={ide ? <IdeProjectMembers /> : <ProjectMembersPage />}
+      />
+      <Route
+        path='/projects/:projectId/architecture'
+        element={ide ? <IdeProjectArchitecture /> : <ProjectArchitecturePage />}
+      />
+      <Route
+        path='/projects/:projectId/settings'
+        element={ide ? <IdeProjectSettings /> : <ProjectSettingsPage />}
+      />
 
       {/* Account + billing */}
       <Route path='/account' element={ide ? <IdeAccount /> : <AccountPage />} />
