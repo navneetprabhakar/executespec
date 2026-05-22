@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
+import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import * as api from '@/lib/api';
 import {
   IdeBadge,
@@ -660,17 +661,20 @@ export default function IdeRunResult() {
               </div>
             )}
             {run?.githubPrUrl ? (
-              <div className='ide-card'>
-                <div
-                  className='ide-mono'
-                  style={{fontSize: 12, wordBreak: 'break-all', marginBottom: 10}}
-                >
-                  {run.githubPrUrl}
+              <>
+                <div className='ide-card'>
+                  <div
+                    className='ide-mono'
+                    style={{fontSize: 12, wordBreak: 'break-all', marginBottom: 10}}
+                  >
+                    {run.githubPrUrl}
+                  </div>
+                  <a className='ide-btn' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
+                    ↗ Open on GitHub
+                  </a>
                 </div>
-                <a className='ide-btn' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
-                  ↗ Open on GitHub
-                </a>
-              </div>
+                <PrCommentInbox runId={runId} variant='ide' />
+              </>
             ) : (
               <div className='ide-card'>
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
