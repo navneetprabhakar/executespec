@@ -220,10 +220,9 @@ export function IdeAdmin() {
   );
 }
 
-// ───────────────────────── Overview (funnel + tiers + flags) ─────────────────────────
+// ───────────────────────── Overview (funnel + tiers) ─────────────────────────
 function AdminOverview() {
   const [funnel, setFunnel] = useState<api.ActivationFunnelReport | null>(null);
-  const [flags, setFlags] = useState<api.FeatureFlagDto[]>([]);
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
 
   useEffect(() => {
@@ -232,10 +231,6 @@ function AdminOverview() {
       .then(setFunnel)
       // keep the grid visible on error rather than spinning forever
       .catch(() => setFunnel({windowDays: 30, windowStart: '', stages: {}}));
-    api
-      .adminListFeatureFlags()
-      .then(setFlags)
-      .catch(() => {});
     api
       .fetchTiersLifecycle()
       .then(setTiers)
@@ -280,19 +275,6 @@ function AdminOverview() {
             <IdeBadge kind={t.state === 'LISTED' ? 'ok' : t.state === 'HIDDEN' ? 'warn' : 'bad'}>
               {t.state}
             </IdeBadge>
-          </div>
-        ))}
-      </AdminList>
-
-      <div className='ide-h2'>Feature flags · {flags.length}</div>
-      <AdminList>
-        {flags.map((f, i) => (
-          <div key={f.id} style={{...rowStyle(i === flags.length - 1), fontSize: 12.5}}>
-            <span className='ide-mono' style={{flex: 1}}>
-              {f.flagKey}
-            </span>
-            <span style={{color: 'var(--ide-fg-muted)'}}>{f.scope}</span>
-            <IdeBadge kind={f.flagValue === 'true' ? 'ok' : 'warn'}>{f.flagValue}</IdeBadge>
           </div>
         ))}
       </AdminList>
@@ -627,6 +609,178 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
   );
 }
 
+// Pill toggle — mirrors the notification-pref switch in IdeMore (38×20).
+function IdeSwitch({
+  on,
+  disabled,
+  onClick,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        position: 'relative',
+        width: 38,
+        height: 20,
+        flexShrink: 0,
+        borderRadius: 999,
+        border: '1px solid var(--ide-border)',
+        background: on ? 'var(--ide-accent)' : 'var(--ide-bg-tab-inactive)',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        transition: 'background 0.15s',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 1,
+          left: on ? 18 : 1,
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: '#fff',
+          transition: 'left 0.15s',
+        }}
+      />
+    </button>
+  );
+}
+
+// Collapsible ide-h2 header — count + chevron, toggles the section body.
+function CollapsibleHeader({
+  label,
+  count,
+  open,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      className='ide-h2'
+      onClick={onToggle}
+      aria-expanded={open}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        width: '100%',
+        background: 'none',
+        border: 'none',
+        padding: 0,
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <span className='ide-tree-chev'>{open ? '▾' : '▸'}</span>
+      <span>
+        {label} · {count}
+      </span>
+    </button>
+  );
+}
+
+// ───────────────────────── Feature flags (Ops sub-panel) ─────────────────────────
+// Collapsed by default. SUPER_ADMIN may toggle BOOLEAN flags inline — optimistic
+// update with revert-on-error; non-boolean flags stay read-only value badges.
+function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
+  const role = useAuthStore((s) => s.user?.globalRole);
+  const isSuperAdmin = role === 'SUPER_ADMIN';
+  const [flags, setFlags] = useState<api.FeatureFlagDto[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .adminListFeatureFlags()
+      .then(setFlags)
+      .catch(() => setFlags([]));
+  }, []);
+
+  function toggle(f: api.FeatureFlagDto) {
+    if (!isSuperAdmin || busy) return;
+    const next = f.flagValue === 'true' ? 'false' : 'true';
+    // optimistic
+    setFlags((prev) =>
+      prev ? prev.map((x) => (x.id === f.id ? {...x, flagValue: next} : x)) : prev,
+    );
+    setBusy(f.flagKey);
+    api
+      .adminUpdateFeatureFlag(f.flagKey, next)
+      .then((updated) => {
+        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? updated : x)) : prev));
+        ok(`${f.flagKey} → ${next}`);
+      })
+      .catch((e) => {
+        // revert
+        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? f : x)) : prev));
+        bad(e);
+      })
+      .finally(() => setBusy(null));
+  }
+
+  if (flags === null) return <IdeLoader label='Loading feature flags…' />;
+  return (
+    <>
+      <CollapsibleHeader
+        label='Feature flags'
+        count={flags.length}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+      />
+      {open &&
+        (flags.length === 0 ? (
+          <div className='ide-empty'>No feature flags.</div>
+        ) : (
+          <AdminList>
+            {flags.map((f, i) => {
+              const isBool = f.valueType === 'BOOLEAN';
+              return (
+                <div key={f.id} style={{...rowStyle(i === flags.length - 1), fontSize: 12.5}}>
+                  <span style={{flex: 1, minWidth: 0}}>
+                    <span
+                      className='ide-mono'
+                      style={{display: 'block', color: 'var(--ide-fg-bright)'}}
+                    >
+                      {f.flagKey}
+                    </span>
+                    {f.description && (
+                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        {f.description}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>{f.scope}</span>
+                  {isBool && isSuperAdmin ? (
+                    <IdeSwitch
+                      on={f.flagValue === 'true'}
+                      disabled={busy === f.flagKey}
+                      onClick={() => toggle(f)}
+                    />
+                  ) : (
+                    <IdeBadge kind={f.flagValue === 'true' ? 'ok' : 'warn'}>{f.flagValue}</IdeBadge>
+                  )}
+                </div>
+              );
+            })}
+          </AdminList>
+        ))}
+    </>
+  );
+}
+
 // ───────────────────────── Ops ─────────────────────────
 function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -768,6 +922,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
           </button>
         </div>
       </AdminList>
+
+      <FeatureFlagsPanel ok={ok} bad={bad} />
     </>
   );
 }
