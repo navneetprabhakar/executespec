@@ -606,6 +606,52 @@
   color: var(--ide-fg-muted);
 }
 
+/* ───────── file icons · folder chevrons · tab close · resizer ───────── */
+.ide-fileicon {
+  display: inline-block;
+  width: 17px;
+  text-align: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.ide-tree-chev {
+  width: 12px;
+  display: inline-block;
+  font-size: 9px;
+  color: var(--ide-fg-muted);
+  flex-shrink: 0;
+}
+.ide-tab-close {
+  margin-left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ide-fg-muted);
+  flex-shrink: 0;
+}
+.ide-tab-close:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+.ide-resize {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+.ide-resize:hover {
+  background: var(--ide-accent);
+}
+
 /* ───────── mobile / tablet (distinct layout) ───────── */
 .ide-mobilebar,
 .ide-tabbar,

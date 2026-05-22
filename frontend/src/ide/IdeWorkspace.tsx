@@ -11,6 +11,7 @@ import {
   type PaletteCmd,
   statusKind,
   IdeBadge,
+  ResizeHandle,
 } from '@/ide/IdeKit';
 
 type Act = {path: string; icon: string; label: string};
@@ -35,6 +36,9 @@ export default function IdeWorkspace() {
   const tier = useAuthStore(selectNormalizedTier);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [sideWidth, setSideWidth] = useState(
+    () => Number(localStorage.getItem('es:ideSideW')) || 270,
+  );
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
@@ -125,6 +129,7 @@ export default function IdeWorkspace() {
         {/* explorer */}
         <aside
           className={`ide-side${collapsed ? ' collapsed' : ''}${drawerOpen ? ' drawer-open' : ''}`}
+          style={{width: sideWidth}}
         >
           <div className='ide-side-head'>
             Explorer
@@ -192,6 +197,17 @@ export default function IdeWorkspace() {
             )}
           </div>
         </aside>
+        {!collapsed && (
+          <ResizeHandle
+            onDelta={(dx) =>
+              setSideWidth((w) => {
+                const next = Math.max(180, Math.min(520, w + dx));
+                localStorage.setItem('es:ideSideW', String(next));
+                return next;
+              })
+            }
+          />
+        )}
 
         {/* editor area — the active surface renders here */}
         <div className='ide-editor'>

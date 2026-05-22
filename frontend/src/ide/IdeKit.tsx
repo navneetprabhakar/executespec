@@ -110,7 +110,7 @@ export function IdeCodeViewer({
 
   const rows =
     mode === 'diff' && hasDiff
-      ? diff!.map((d, idx) => ({
+      ? (diff ?? []).map((d, idx) => ({
           n: idx + 1,
           text: d.text,
           klass: d.sign === '+' ? 'add' : d.sign === '-' ? 'del' : '',
@@ -256,6 +256,149 @@ export function usePaletteHotkey(setOpen: (v: boolean) => void) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [setOpen]);
+}
+
+// ───────── file-type icons (by extension) ─────────
+const EXT_ICON: Record<string, {l: string; c: string}> = {
+  ts: {l: 'ts', c: '#3178c6'},
+  tsx: {l: 'tsx', c: '#3178c6'},
+  js: {l: 'js', c: '#cbcb41'},
+  jsx: {l: 'jsx', c: '#cbcb41'},
+  mjs: {l: 'js', c: '#cbcb41'},
+  py: {l: 'py', c: '#4b8bbe'},
+  java: {l: 'jv', c: '#cc8b3a'},
+  kt: {l: 'kt', c: '#a97bff'},
+  go: {l: 'go', c: '#519aba'},
+  rs: {l: 'rs', c: '#dea584'},
+  rb: {l: 'rb', c: '#cc342d'},
+  php: {l: 'php', c: '#777bb3'},
+  json: {l: '{}', c: '#cbcb41'},
+  md: {l: 'md', c: '#519aba'},
+  css: {l: '#', c: '#519aba'},
+  scss: {l: '#', c: '#cc6699'},
+  html: {l: '<>', c: '#e37933'},
+  xml: {l: '<>', c: '#e37933'},
+  yml: {l: 'yml', c: '#cbcb41'},
+  yaml: {l: 'yml', c: '#cbcb41'},
+  sql: {l: 'sql', c: '#519aba'},
+  sh: {l: '$', c: '#89e051'},
+  toml: {l: 'cfg', c: '#9c9c9c'},
+  txt: {l: '·', c: '#999999'},
+};
+function iconMeta(name: string): {l: string; c: string} {
+  const parts = name.split('.');
+  const ext = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+  return EXT_ICON[ext] ?? {l: '·', c: '#888888'};
+}
+export function FileIcon({name}: {name: string}) {
+  const m = iconMeta(name);
+  return (
+    <span className='ide-fileicon' style={{color: m.c}}>
+      {m.l}
+    </span>
+  );
+}
+
+// ───────── folder tree (built from flat paths) ─────────
+type TreeNode = {name: string; path: string; dir: boolean; children: TreeNode[]};
+function buildTree(paths: string[]): TreeNode {
+  const root: TreeNode = {name: '', path: '', dir: true, children: []};
+  for (const p of paths) {
+    const parts = p.split('/').filter(Boolean);
+    let cur = root;
+    parts.forEach((part, i) => {
+      const isFile = i === parts.length - 1;
+      let child = cur.children.find((c) => c.name === part && c.dir === !isFile);
+      if (!child) {
+        child = {name: part, path: parts.slice(0, i + 1).join('/'), dir: !isFile, children: []};
+        cur.children.push(child);
+      }
+      cur = child;
+    });
+  }
+  const sortRec = (n: TreeNode) => {
+    n.children.sort((a, b) => (a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name)));
+    n.children.forEach(sortRec);
+  };
+  sortRec(root);
+  return root;
+}
+
+export function IdeFileTree({
+  files,
+  activePath,
+  onOpen,
+}: {
+  files: string[];
+  activePath: string | null;
+  onOpen: (p: string) => void;
+}) {
+  const tree = useMemo(() => buildTree(files), [files]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggle = (p: string) =>
+    setCollapsed((s) => {
+      const x = new Set(s);
+      if (x.has(p)) x.delete(p);
+      else x.add(p);
+      return x;
+    });
+
+  const render = (nodes: TreeNode[], depth: number): React.ReactNode =>
+    nodes.map((n) =>
+      n.dir ? (
+        <div key={n.path}>
+          <button
+            className='ide-tree-item'
+            style={{paddingLeft: 8 + depth * 12}}
+            onClick={() => toggle(n.path)}
+          >
+            <span className='ide-tree-chev'>{collapsed.has(n.path) ? '▸' : '▾'}</span>
+            <span className='ide-tree-ico'>🗀</span>
+            {n.name}
+          </button>
+          {!collapsed.has(n.path) && render(n.children, depth + 1)}
+        </div>
+      ) : (
+        <button
+          key={n.path}
+          className={`ide-tree-item${activePath === n.path ? ' active' : ''}`}
+          style={{paddingLeft: 8 + depth * 12 + 14}}
+          onClick={() => onOpen(n.path)}
+          title={n.path}
+        >
+          <FileIcon name={n.name} />
+          {n.name}
+        </button>
+      ),
+    );
+
+  return <div>{render(tree.children, 0)}</div>;
+}
+
+// ───────── draggable resize handle (col-resize) ─────────
+export function ResizeHandle({onDelta}: {onDelta: (dx: number) => void}) {
+  const last = useRef(0);
+  const onDown = (e: React.MouseEvent) => {
+    last.current = e.clientX;
+    const move = (ev: MouseEvent) => {
+      onDelta(ev.clientX - last.current);
+      last.current = ev.clientX;
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  };
+  return (
+    <div className='ide-resize' onMouseDown={onDown} role='separator' aria-orientation='vertical' />
+  );
 }
 
 // Re-export navigate convenience for surfaces that need it.
