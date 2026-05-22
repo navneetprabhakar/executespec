@@ -118,8 +118,9 @@ export default function ProjectPulsePage() {
   const avgScore = dashAny.avgScore != null ? `${Math.round(dashAny.avgScore)}%` : '—';
   const avgRunTime = dashAny.avgDurationMs
     ? (() => {
-        const m = Math.floor(dashAny.avgDurationMs! / 60000);
-        const s = Math.floor((dashAny.avgDurationMs! % 60000) / 1000);
+        const ms = dashAny.avgDurationMs ?? 0;
+        const m = Math.floor(ms / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
         return `${m}m ${s}s`;
       })()
     : '—';

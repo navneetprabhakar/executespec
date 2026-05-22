@@ -814,6 +814,7 @@ export function OrgSettingsPage() {
               role='switch'
               aria-checked={!!org.externalSharingEnabled}
               disabled={!canEdit || extBusy}
+              // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `extBusy` already disables this toggle while in flight.
               onClick={async () => {
                 setExtBusy(true);
                 setErr('');

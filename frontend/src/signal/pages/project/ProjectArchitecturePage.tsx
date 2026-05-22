@@ -2,7 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, StatusPill, TabsStrip} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {Markdown} from '@/signal/components/Markdown';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
@@ -406,6 +406,7 @@ export default function ProjectArchitecturePage() {
                     kind='primary'
                     sm
                     disabled={diffBusy || diffFrom == null || diffTo == null}
+                    // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `diffBusy` already disables this button while in flight.
                     onClick={async () => {
                       if (diffFrom == null || diffTo == null) return;
                       setDiffBusy(true);
@@ -740,6 +741,7 @@ export default function ProjectArchitecturePage() {
                 kind='secondary'
                 block
                 style={{marginTop: 8}}
+                // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `contractBusy` already disables this button while in flight.
                 onClick={async () => {
                   setContractBusy('all');
                   try {

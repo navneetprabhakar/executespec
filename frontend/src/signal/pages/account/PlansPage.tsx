@@ -139,7 +139,10 @@ export default function PlansPage() {
         perSeat: false,
       });
     const order = ['FREE', 'TEAM', 'ENTERPRISE'];
-    return order.map((k) => byTier.get(k)!).filter(Boolean);
+    return order.flatMap((k) => {
+      const row = byTier.get(k);
+      return row ? [row] : [];
+    });
   }, [pricing]);
 
   async function subscribe(t: string) {

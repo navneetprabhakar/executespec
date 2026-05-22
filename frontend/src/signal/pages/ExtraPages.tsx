@@ -17,7 +17,6 @@ import {
 } from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ConfirmModal, PromptModal, Modal} from '@/signal/components/Modal';
-import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import AuthLayout from '@/signal/components/AuthLayout';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
@@ -2478,7 +2477,9 @@ export function DeploymentsPage() {
                       <Button
                         kind='secondary'
                         sm
-                        onClick={() => window.open(dAny.url!, '_blank', 'noopener')}
+                        onClick={() => {
+                          if (dAny.url) window.open(dAny.url, '_blank', 'noopener');
+                        }}
                       >
                         Open
                       </Button>

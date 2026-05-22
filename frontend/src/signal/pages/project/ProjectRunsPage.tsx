@@ -1,8 +1,8 @@
 import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar} from '@/signal/components/Chrome';
-import {Feed, Row, Card, TabsStrip, Button, Chip, StatusPill} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {Feed, Card, TabsStrip, Button, Chip, StatusPill} from '@/signal/components/Primitives';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
