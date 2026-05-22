@@ -110,7 +110,7 @@ function initTheme(): Theme {
 // UI chrome A/B mode — applied to <html data-ui> pre-paint so the right chrome
 // renders without a flash. Defaults to 'signal' (production); the user's explicit
 // choice in es:uiMode wins. A rollout flag can override the default at app boot
-// (see ChromeShell) for users who haven't chosen.
+// (see App.tsx) for users who haven't chosen.
 function initUiMode(): UiMode {
   const saved = localStorage.getItem('es:uiMode');
   const mode: UiMode = saved === 'ide' ? 'ide' : 'signal';
