@@ -27,7 +27,6 @@ import {
   SunIcon,
   MoonIcon,
   MonitorIcon,
-  SwapIcon,
   BranchIcon,
   StatusDot,
   type IconProps,
@@ -50,7 +49,6 @@ export default function IdeWorkspace() {
   const navigate = useNavigate();
   const theme = useUiStore((s) => s.theme);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
-  const toggleUiMode = useUiStore((s) => s.toggleUiMode);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const tier = useAuthStore(selectNormalizedTier);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -90,7 +88,6 @@ export default function IdeWorkspace() {
     {id: 'runs', label: 'Go: All runs', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
     {id: 'theme', label: 'Toggle theme', run: toggleTheme},
-    {id: 'signal', label: 'Switch to classic Signal UI', run: toggleUiMode},
     ...runs.map((r) => ({
       id: r.runId,
       label: `Open run: ${runLabel(r)}`,
@@ -295,14 +292,6 @@ export default function IdeWorkspace() {
         <button className='ide-status btn' onClick={toggleTheme}>
           <ThemeIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           {theme}
-        </button>
-        <button
-          className='ide-status btn'
-          onClick={toggleUiMode}
-          title='Switch to classic Signal UI'
-        >
-          <SwapIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
-          Signal UI
         </button>
         <span className='ide-status'>IDE · Beta</span>
       </div>

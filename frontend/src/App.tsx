@@ -1,12 +1,11 @@
-import {useEffect} from 'react';
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// Chrome A/B switch (2026-05-22 redesign). uiMode picks the production Signal
-// shell or the new VS Code-style IDE workspace; the IDE renders its OWN core
-// surfaces (not wrapped Signal pages), with non-core routes transitionally
-// reusing the Signal pages until they're rebuilt.
-import SignalShell from '@/signal/components/Shell';
+// 2026-05-22 — the VS Code-style IDE workspace is the ONLY chrome (the Signal
+// chrome was retired as a user-facing option, A/B toggle removed). The IDE
+// renders its OWN core surfaces; a handful of non-core routes (billing, plans,
+// org-settings, legal, auth, etc.) transitionally reuse the standalone Signal
+// pages until they're rebuilt IDE-native.
 import IdeWorkspace from '@/ide/IdeWorkspace';
 import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
@@ -24,8 +23,6 @@ import {
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
 import {IdeIntegrations, IdeAdmin} from '@/ide/IdeSettings';
-import {useUiStore} from '@/stores/useUiStore';
-import * as api from '@/lib/api';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -231,25 +228,10 @@ function protectedChildren(ide: boolean) {
 }
 
 export default function App() {
-  const uiMode = useUiStore((s) => s.uiMode);
-
-  // Rollout default: if the user hasn't explicitly chosen a chrome, let the
-  // public flag `ui.ide.default` decide (applied via setState, not persisted,
-  // so the flag stays in control until the user toggles).
-  useEffect(() => {
-    if (localStorage.getItem('es:uiMode')) return;
-    api
-      .getPublicFeatureFlags()
-      .then((flags) => {
-        if (flags['ui.ide.default']) {
-          useUiStore.setState({uiMode: 'ide'});
-          document.documentElement.dataset.ui = 'ide';
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const ide = uiMode === 'ide';
+  // 2026-05-22 — Signal chrome retired; the IDE workspace is the only chrome.
+  // `ide` stays a constant so the per-route helpers below keep their shape
+  // until the remaining Signal-page fallbacks are ported IDE-native.
+  const ide = true;
 
   return (
     <Routes>
@@ -275,9 +257,9 @@ export default function App() {
       <Route path='/reports/shared/:token' element={<SharedPage />} />
       <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
-      {/* ───── Protected app (Signal shell or IDE workspace) ───── */}
+      {/* ───── Protected app (IDE workspace — the only chrome) ───── */}
       <Route element={<ProtectedRoute />}>
-        <Route element={ide ? <IdeWorkspace /> : <SignalShell />}>{protectedChildren(ide)}</Route>
+        <Route element={<IdeWorkspace />}>{protectedChildren(ide)}</Route>
       </Route>
 
       {/* Legacy URL catchers — collapse to canonical equivalents */}

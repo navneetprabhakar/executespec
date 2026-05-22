@@ -107,17 +107,17 @@ function initTheme(): Theme {
   return theme;
 }
 
-// UI chrome A/B mode — applied to <html data-ui> pre-paint so the right chrome
-// renders without a flash. Defaults to 'signal' (production); the user's explicit
-// choice in es:uiMode wins. A rollout flag can override the default at app boot
-// (see App.tsx) for users who haven't chosen.
+// UI chrome — applied to <html data-ui> pre-paint so the chrome renders without
+// a flash. 2026-05-22: the Signal chrome was retired as a user-facing option;
+// the VS Code-style IDE workspace is now the ONLY chrome and the A/B toggle was
+// removed. We force 'ide' regardless of any previously-persisted es:uiMode.
+// (The `setUiMode`/`toggleUiMode` actions + the 'signal' branch survive only
+// until the Signal pages are fully ported IDE-native, then get removed.)
 function initUiMode(): UiMode {
-  const saved = localStorage.getItem('es:uiMode');
-  const mode: UiMode = saved === 'ide' ? 'ide' : 'signal';
   if (typeof document !== 'undefined') {
-    document.documentElement.dataset.ui = mode;
+    document.documentElement.dataset.ui = 'ide';
   }
-  return mode;
+  return 'ide';
 }
 
 // M-026 (Wave 1) — first-time users land with sidebar expanded so they can
