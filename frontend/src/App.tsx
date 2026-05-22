@@ -23,6 +23,7 @@ import {
 } from '@/ide/IdeProjectMore';
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
+import {IdeIntegrations, IdeAdmin} from '@/ide/IdeSettings';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
 
@@ -204,7 +205,7 @@ function protectedChildren(ide: boolean) {
       <Route path='/billing' element={<BillingPage />} />
       <Route path='/plans' element={<PlansPage />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
-      <Route path='/integrations' element={<IntegrationsPage />} />
+      <Route path='/integrations' element={ide ? <IdeIntegrations /> : <IntegrationsPage />} />
       <Route path='/api-keys' element={<ApiKeysPage />} />
       <Route path='/org-members' element={<OrgMembersPage />} />
       <Route path='/org/settings' element={<OrgSettingsPage />} />
@@ -223,7 +224,7 @@ function protectedChildren(ide: boolean) {
       <Route path='/notifications' element={<NotificationsPage />} />
       <Route path='/search' element={<SearchPage />} />
       <Route path='/more' element={<MorePage />} />
-      <Route path='/admin' element={<AdminPage />} />
+      <Route path='/admin' element={ide ? <IdeAdmin /> : <AdminPage />} />
       <Route path='/admin/*' element={<AdminPage />} />
     </>
   );
