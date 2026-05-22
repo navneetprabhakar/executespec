@@ -220,6 +220,16 @@ export function OrgSettingsPage() {
   // V198 — busy flag for the external-sharing toggle so consecutive clicks
   // don't race the PUT.
   const [extBusy, setExtBusy] = useState(false);
+  // Org-wide BYOK provider keys. Inputs are write-only — raw keys are never
+  // returned (only has*Key flags) — and a blank field leaves the stored key
+  // unchanged, so each provider saves independently without wiping the others.
+  const [keyInputs, setKeyInputs] = useState({
+    anthropic: '',
+    openai: '',
+    gemini: '',
+    openrouter: '',
+  });
+  const [keyBusy, setKeyBusy] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.allSettled([api.getMyOrg(), api.getSsoConfig()]).then(([o, s]) => {
@@ -294,7 +304,49 @@ export function OrgSettingsPage() {
     }
   }
 
+  async function saveOrgKey(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter') {
+    const value = keyInputs[provider].trim();
+    if (!value) {
+      setErr('Enter a key first.');
+      return;
+    }
+    setKeyBusy(provider);
+    setErr('');
+    setMsg('');
+    try {
+      const next = await api.updateOrgAiKeySettings(
+        provider === 'anthropic' ? value : '',
+        provider === 'openai' ? value : '',
+        provider === 'gemini' ? value : '',
+        provider === 'openrouter' ? value : '',
+      );
+      setOrg(next);
+      setKeyInputs((k) => ({...k, [provider]: ''}));
+      setMsg('Provider key saved.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setKeyBusy(null);
+    }
+  }
+
   if (!org) return <LoadingState label='Loading org…' />;
+
+  // OpenRouter is an Enterprise-only gateway — only offer it when the org qualifies
+  // (the backend rejects the key with 403 otherwise).
+  const isEnterprise = (org.tier || '').toUpperCase() === 'ENTERPRISE';
+  const orgKeyRows: {
+    provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+    label: string;
+    connected: boolean;
+  }[] = [
+    {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
+    {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
+    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
+    ...(isEnterprise
+      ? [{provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey}]
+      : []),
+  ];
 
   return (
     <>
@@ -447,6 +499,75 @@ export function OrgSettingsPage() {
               )}
             </div>
           )}
+        </Card>
+
+        <SectionHeader>AI provider keys</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Org-wide BYOK keys shared by every member. Runs against a provider you supply a key for
+            bypass the platform cost cap. Keys are encrypted at rest and never shown again — paste a
+            new value to replace one, or leave a field blank to keep the current key.
+          </div>
+        </Card>
+        <Card style={{padding: 0}}>
+          {orgKeyRows.map((row, i) => (
+            <div
+              key={row.provider}
+              style={{
+                padding: '14px 16px',
+                borderBottom:
+                  i < orgKeyRows.length - 1 ? '1px solid var(--signal-hairline)' : 'none',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{fontSize: 14.5, fontWeight: 600}}>{row.label}</div>
+                {row.connected ? (
+                  <StatusPill kind='shipped'>Connected</StatusPill>
+                ) : (
+                  <StatusPill>Not set</StatusPill>
+                )}
+              </div>
+              <div style={{display: 'flex', gap: 8}}>
+                <input
+                  type='password'
+                  autoComplete='off'
+                  placeholder={
+                    row.connected ? 'Paste a new key to replace' : `Paste your ${row.label} key`
+                  }
+                  value={keyInputs[row.provider]}
+                  onChange={(e) => setKeyInputs((k) => ({...k, [row.provider]: e.target.value}))}
+                  disabled={!canEdit}
+                  style={{
+                    ...inputStyle,
+                    flex: 1,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    marginBottom: 0,
+                  }}
+                />
+                <Button
+                  kind='primary'
+                  sm
+                  disabled={!canEdit || keyBusy === row.provider}
+                  onClick={() => saveOrgKey(row.provider)}
+                >
+                  {keyBusy === row.provider ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          ))}
         </Card>
 
         <SectionHeader>External sharing</SectionHeader>
