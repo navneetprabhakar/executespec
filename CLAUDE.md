@@ -9,7 +9,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 ## Architecture (5-minute orientation)
 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
-- **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 6. Two coexisting chromes share Zustand stores: V2 sidebar shell (under `frontend/src/components/layout/`) and V3 top-bar shell (under `frontend/src/v3/`).
+- **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. Two A/B-switchable chromes share Zustand stores: the production **Signal** shell (`frontend/src/signal/`) and the VS Code-style **IDE** workspace (`frontend/src/ide/`). `useUiStore.uiMode` (`'signal' | 'ide'`, persisted to `es:uiMode`) selects the chrome; `App.tsx` renders a mode-specific route subtree; rollout via the `ui.ide.default` public flag. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `hooks/`, `lib/`, `stores/`, `types/`, `design-system/` remain under `frontend/src/`.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
 - **Codebase shape:** 72 top-level packages under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). 98 REST controllers, 78 entities, 186 Flyway migrations, ~88 prompt files. Frontend ~75K LOC.
 
