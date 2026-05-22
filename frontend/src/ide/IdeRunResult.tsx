@@ -5,6 +5,7 @@ import {
   IdeBadge,
   IdeCodeViewer,
   IdeFileTree,
+  IdeLoader,
   FileIcon,
   ResizeHandle,
   type DiffLine,
@@ -62,13 +63,15 @@ export default function IdeRunResult() {
   const [tab, setTab] = useState<Tab>('Overview');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!runId) return;
     api
       .getRun(runId)
       .then(setRun)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
     api
       .getValidationReport(runId)
       .then(setReport)
@@ -159,6 +162,14 @@ export default function IdeRunResult() {
   const v = verdictFor(score, run?.status);
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
+
+  if (loading) {
+    return (
+      <div style={{position: 'absolute', inset: 0}}>
+        <IdeLoader label='Loading run…' />
+      </div>
+    );
+  }
 
   return (
     <div style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}>

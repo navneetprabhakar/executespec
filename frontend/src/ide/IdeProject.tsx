@@ -1,16 +1,11 @@
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 
 type Repo = Record<string, unknown>;
-function rid(r: Repo): string {
-  return String(r.id ?? '');
-}
-function rname(r: Repo): string {
-  return String(r.githubRepoFullName ?? r.name ?? r.id ?? 'repo');
-}
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -31,13 +26,15 @@ export default function IdeProject() {
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!projectId) return;
     api
       .getProject(projectId)
       .then(setProject)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
     api
       .getProjectRepos(projectId)
       .then((list) => setRepos((list as unknown as Repo[]) ?? []))
@@ -73,6 +70,14 @@ export default function IdeProject() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className='ide-pane'>
+        <IdeLoader label='Loading project…' />
+      </div>
+    );
+  }
+
   return (
     <div className='ide-pane'>
       <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4}}>
@@ -104,7 +109,7 @@ export default function IdeProject() {
           <div className='ide-h2'>Repos the agent may touch</div>
           <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
             {repos.map((r) => {
-              const id = rid(r);
+              const id = repoIdFor(r);
               const on = selected.includes(id);
               return (
                 <button
@@ -118,7 +123,7 @@ export default function IdeProject() {
                   onClick={() => setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))}
                 >
                   {on ? '✓ ' : ''}
-                  {rname(r)}
+                  {repoDisplayName(r)}
                 </button>
               );
             })}

@@ -564,6 +564,29 @@
   padding: 30px 0;
   text-align: center;
 }
+.ide-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 44px 0;
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+}
+.ide-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ide-border-strong);
+  border-top-color: var(--ide-accent);
+  border-radius: 50%;
+  animation: ide-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ide-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* run result split: file tree | code | info panel. Absolute-fills the editor
    body (which is position:relative) so the three columns scroll independently

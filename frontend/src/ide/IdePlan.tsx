@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 
 const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 const EXEC = ['EXECUTING', 'RUNNING', 'REVIEWING', 'BUILDING'];
@@ -71,7 +71,7 @@ export default function IdePlan() {
       <div className='ide-sub ide-mono'>{runId}</div>
 
       {!run ? (
-        <div className='ide-empty'>Loading plan…</div>
+        <IdeLoader label='Loading plan…' />
       ) : !awaiting ? (
         <div className='ide-card' style={{display: 'flex', alignItems: 'center', gap: 10}}>
           <IdeBadge kind={statusKind(run.status)}>{run.status}</IdeBadge>
