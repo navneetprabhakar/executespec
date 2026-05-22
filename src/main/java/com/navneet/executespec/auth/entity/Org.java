@@ -110,6 +110,16 @@ public class Org {
   @Column(name = "enabled_providers")
   private String enabledProviders;
 
+  /**
+   * Per-org model-matrix overrides (F3, ENTERPRISE). JSON object mapping {@code
+   * "<provider>:<tier>"} → model id, e.g. {@code {"anthropic:planning":"claude-opus-4-6"}}. Sparse
+   * — only overridden cells are present; every unset cell falls back to the {@code application.yml
+   * model-matrix} default. Null/blank = no overrides. Model ids are not secret, so this is stored
+   * in clear text.
+   */
+  @Column(name = "model_overrides_json", columnDefinition = "TEXT")
+  private String modelOverridesJson;
+
   // ── Domain enforcement & member limits ────────────────────────────────────
 
   /**

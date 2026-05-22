@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V203**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V205**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -92,6 +92,8 @@ Tech debt (`project/techdebt/`): rolls up `validation_report.issues_json` into c
 
 YAML is the **single source of truth** for every model identifier / context-window / max-output-tokens / pricing rate / display label / fallback chain / free-tier lock / agent→tier map / provider-default model. `ModelRegistry` reads `application.yml model-matrix.*`. `ModelContextWindowMap` was deleted; `ModelController.MODEL_LABELS` reads `display-label` from YAML; frontend `PricingTable` reads `chainTier` via new DTO fields on `PricingRow`.
 
+**Per-org matrix override (F3, ENTERPRISE — V205):** an Enterprise org admin can pin a different model for any `(provider, tier)` cell via `PUT /api/org/me/model-matrix`; unset cells fall back to the YAML defaults. Stored sparsely as JSON on `Org.model_overrides_json`, resolved once per run in `RunOrchestrator` and bound to the pipeline thread via `RunModelOverrides` (ThreadLocal); `ModelResolver.lookupModel` (the chokepoint every tier-routed agent funnels through — worker via `SequentialExecutor.tierConfigFor`, planner, reviewer, …) returns the override when present. `OrgModelOverrideService` validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper`'s allow-list) and is lenient on read.
+
 Agent tier mapping (`application.yml`):
 
 | Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
@@ -125,7 +127,7 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V203**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V205**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
 ### Patterns: MUST follow
 
@@ -304,6 +306,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). Unchanged by V198 — gates the cross-org `ProjectMember` path, not the public-link path.                                                                                                          |
 | GET    | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                                                                                                                                                                                                                      |
 | PUT    | `/api/org/me/settings/external-sharing`                                               | **V198** — toggle the per-org flag. Body `{enabled: bool}`. ORG_ADMIN-of-own-org or SUPER_ADMIN only. Emits `ORG_EXTERNAL_SHARING_CHANGED` audit row.                                                                                       |
+| GET    | `/api/org/me/model-matrix`                                                            | **F3** — effective model matrix (defaults + this org's overrides + picker options). Any org admin (read-only grid for non-ENTERPRISE).                                                                                                       |
+| PUT    | `/api/org/me/model-matrix`                                                            | **F3 (V205)** — replace the org's `(provider:tier)→model` overrides (sparse; `{}` clears). ENTERPRISE-only (403 otherwise); each cell validated against the registered matrix.                                                               |
 
 ### Auth + org
 
@@ -402,7 +406,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V203)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V205)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
@@ -447,6 +451,6 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 ### Known tech debt
 
 - **Bug #1c (router strict-provider bypass)** — `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when `-Dexecutespec.strict-provider=true` is set. Fix deferred — needs either a strict-mode guard inside ModelResolver or opt-out flag per org.
-- **Planner model sourced from run model, not tier** — `OutlinePlannerAgent` constructs the LLM request using `req.model()` which is the RUN-level `defaultModelFor(provider)` (→ haiku for anthropic), not `ModelResolver.resolve("OutlinePlannerAgent", provider).getModel()`. Swapping `anthropic: planning:` in YAML has no effect on the planner today. Fix: have the planner resolve its own tier model.
+- ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (corrected 2026-05-22, RL-2026-05-015). `OutlinePlannerAgent.planOnce` resolves its model via `modelResolver.resolve("OutlinePlannerAgent", provider).getModel()` ([line 290](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)); the only remaining `req.model()` is a metrics tag in `recordPlannerLatency`. So the planner DOES honour the YAML matrix (and the per-org overrides from F3). Worker + reviewer likewise resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`). The only real model-resolution debt is **Bug #1c** above.
 - **10 legacy guard sites** in `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` — 3 repo-scoped in `ProjectRepoController`, 2 SUPER_ADMIN in `SuperAdminController` + 1 in `ExecutespecMigrationController`, 1 V2-canary in `RunController#poll`, 3 unrelated. Migration order spelled out in the GA-readiness P4.1-followup.
 - **JAVADOC.md is stale** — last comprehensively refreshed at v2.4.0 (2026-04-14); subsequent ranges live in CLAUDE.md / ARCHITECTURE.md / per-package CLAUDE.md. Rewriting JAVADOC.md is on the queue but not blocking.

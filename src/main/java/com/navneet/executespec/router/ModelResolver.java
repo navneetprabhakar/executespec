@@ -261,6 +261,13 @@ public class ModelResolver {
     if (models == null) {
       throw new IllegalStateException("No model matrix config for provider: " + provider);
     }
+    // F3 — a run-scoped per-org override for this (provider, tier) cell wins over the YAML
+    // default. Bound by the pipeline at run start (RunModelOverrides); absent for non-pipeline
+    // callers and for unset cells, in which case we fall straight through to YAML.
+    String override = RunModelOverrides.lookup(provider, tier);
+    if (override != null) {
+      return override;
+    }
     return switch (tier) {
       case PLANNING -> models.getPlanning();
       case WORKHORSE -> models.getWorkhorse();
