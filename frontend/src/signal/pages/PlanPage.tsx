@@ -2,7 +2,6 @@ import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Button, Card, KvList} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {TaskLine} from '@/signal/components/Compose';
 import {Glossary} from '@/signal/components/Glossary';
 import * as api from '@/lib/api';
@@ -30,18 +29,19 @@ export default function PlanPage() {
       setLoading(false);
       return;
     }
+    const id = runId;
     let cancelled = false;
     let timer: number | undefined;
     async function tick() {
       try {
-        const r = await api.getRun(runId!);
+        const r = await api.getRun(id);
         if (cancelled) return;
         setRun(r);
         setLoading(false);
         const status = r?.status as string | undefined;
         // Auto-redirect once the plan gate is closed
         if (status === 'EXECUTING' || status === 'COMPLETED') {
-          navigate(status === 'COMPLETED' ? `/result/${runId}` : `/live/${runId}`, {replace: true});
+          navigate(status === 'COMPLETED' ? `/result/${id}` : `/live/${id}`, {replace: true});
           return;
         }
         if (status === 'FAILED' || status === 'CANCELLED') {

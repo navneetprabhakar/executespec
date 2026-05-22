@@ -23,7 +23,6 @@ export default function BillingPage() {
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [payments, setPayments] = useState<PaymentRowLite[]>([]);
-  const [err, setErr] = useState('');
 
   useEffect(() => {
     if (!user?.orgId) return;
@@ -100,22 +99,6 @@ export default function BillingPage() {
         backTo='/account'
       />
       <Feed>
-        {err && (
-          <div
-            style={{
-              background: 'var(--signal-coral-soft)',
-              color: 'var(--signal-coral-text)',
-              border: '1px solid var(--signal-coral)',
-              borderRadius: 10,
-              padding: '10px 14px',
-              marginBottom: 12,
-              fontSize: 13,
-            }}
-          >
-            {err}
-          </div>
-        )}
-
         <Card style={{padding: 18}}>
           <div
             style={{

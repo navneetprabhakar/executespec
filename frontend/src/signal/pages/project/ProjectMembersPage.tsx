@@ -1,8 +1,8 @@
 import {useEffect, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
-import {Feed, Button, Card, Chip, StatusPill, Row} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {Feed, Button, Card, Chip, Row} from '@/signal/components/Primitives';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {Plus, Share} from '@/signal/icons/icons';
@@ -294,16 +294,18 @@ export default function ProjectMembersPage() {
                     kind='ghost'
                     sm
                     style={{color: 'var(--signal-coral-text)', marginLeft: 4}}
-                    onClick={() =>
+                    onClick={() => {
+                      const uid = mAny.userId;
+                      if (!uid) return;
                       setConfirmRemove({
-                        userId: mAny.userId!,
+                        userId: String(uid),
                         label:
                           ((mAny.firstName || mAny.email?.split('@')[0]) ?? '') +
                             (mAny.lastName ? ` ${mAny.lastName}` : '') ||
                           mAny.email ||
                           'this member',
-                      })
-                    }
+                      });
+                    }}
                   >
                     ×
                   </Button>

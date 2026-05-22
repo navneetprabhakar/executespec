@@ -11,7 +11,7 @@ import {
   TabsStrip,
   KvList,
 } from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {ScoreCard, PrCard} from '@/signal/components/Compose';
 import {verdictFor} from '@/signal/components/VerdictPill';
@@ -914,6 +914,7 @@ function AdminUsersSection({ok, bad}: SectionProps) {
           {name: 'reason', label: 'Reason (optional)', placeholder: 'goodwill'},
         ]}
         submitLabel='Grant'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
         onSubmit={async (v) => {
           const qty = Number(v.quantity);
           if (grantFor && Number.isFinite(qty) && qty > 0) {
@@ -1038,6 +1039,7 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
           },
         ]}
         submitLabel='Save'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
         onSubmit={async (v) => {
           if (limitFor) {
             const raw = v.limit.trim();
@@ -1065,6 +1067,7 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
           {name: 'reason', label: 'Reason (optional)', placeholder: 'goodwill'},
         ]}
         submitLabel='Grant'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
         onSubmit={async (v) => {
           const qty = Number(v.quantity);
           if (grantFor && Number.isFinite(qty) && qty > 0) {
@@ -1398,6 +1401,7 @@ function AdminTopupsSection({ok, bad}: SectionProps) {
           {name: 'amountUsd', label: 'Amount (USD, optional)', placeholder: '6'},
         ]}
         submitLabel='Create'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
         onSubmit={async (v) => {
           const runCount = Number(v.runCount);
           const amountInr = Number(v.amountInr);

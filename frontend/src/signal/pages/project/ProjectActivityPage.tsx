@@ -1,8 +1,8 @@
 import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {TopBar, SectionHeader} from '@/signal/components/Chrome';
+import {TopBar} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, TabsStrip} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import * as api from '@/lib/api';
@@ -68,7 +68,7 @@ export default function ProjectActivityPage() {
     };
   }, [id]);
 
-  const entries: api.ActivityEntry[] = page?.entries || [];
+  const entries: api.ActivityEntry[] = useMemo(() => page?.entries || [], [page?.entries]);
   const filtered = useMemo(() => {
     if (filter === 'all') return entries;
     return entries.filter((e) => {

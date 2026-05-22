@@ -1,9 +1,9 @@
 /* Top-up, Integrations, API keys (BYOK), Org members — wired to backend. */
 
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useState} from 'react';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, Chip, StatusPill} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {Plus} from '@/signal/icons/icons';
 import {
   GitHubLogo,
@@ -434,6 +434,7 @@ export function IntegrationsPage() {
         ]}
         busy={connectBusy}
         onClose={() => setConnectOpen(null)}
+        // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `connectBusy` (passed as the modal's `busy` prop) wraps this submit.
         onSubmit={async (v) => {
           setConnectBusy(true);
           try {
@@ -464,6 +465,7 @@ export function IntegrationsPage() {
         ]}
         busy={connectBusy}
         onClose={() => setConnectOpen(null)}
+        // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `connectBusy` (passed as the modal's `busy` prop) wraps this submit.
         onSubmit={async (v) => {
           setConnectBusy(true);
           try {
@@ -490,6 +492,7 @@ export function IntegrationsPage() {
         ]}
         busy={connectBusy}
         onClose={() => setConnectOpen(null)}
+        // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `connectBusy` (passed as the modal's `busy` prop) wraps this submit.
         onSubmit={async (v) => {
           setConnectBusy(true);
           try {
@@ -532,13 +535,11 @@ export function IntegrationsPage() {
 // ──────────────────── API Keys (BYOK) ────────────────────
 export function ApiKeysPage() {
   const tier = useAuthStore(selectNormalizedTier);
-  const permissions = useAuthStore((s) => s.permissions);
   // Gate strictly by tier (FREE only is blocked). Some running JVMs return
   // `canManageAiKeys=false` on PRO/TEAM (RJ-01 quirk in CLAUDE.md) which would
   // show the wrong "Upgrade →" CTA to paying users. Tier is the contractual
-  // surface; permissions is an advisory hint.
+  // surface, so we ignore the advisory `permissions.canManageAiKeys` hint here.
   const canManage = tier !== 'FREE';
-  const permissionMismatch = permissions != null && !permissions.canManageAiKeys && canManage;
 
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');

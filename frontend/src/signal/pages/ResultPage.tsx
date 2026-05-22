@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, KvList, TabsStrip, Button} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
 import {Share} from '@/signal/icons/icons';
 import {Glossary} from '@/signal/components/Glossary';
@@ -1416,7 +1416,9 @@ export default function ResultPage() {
                           kind='primary'
                           sm
                           disabled={retryingTaskId === tAny.taskId}
-                          onClick={() => retryTask(tAny.taskId!)}
+                          onClick={() => {
+                            if (tAny.taskId) retryTask(tAny.taskId);
+                          }}
                         >
                           {retryingTaskId === tAny.taskId ? 'Retrying…' : 'Retry task'}
                         </Button>
@@ -1437,10 +1439,10 @@ export default function ResultPage() {
                   {k: 'Total cost', v: `$${totalCost.toFixed(2)}`},
                   {
                     k: 'Hard cap',
-                    v:
-                      (run as unknown as {hardCapUsd?: number})?.hardCapUsd != null
-                        ? `$${(run as unknown as {hardCapUsd?: number}).hardCapUsd!.toFixed(2)}`
-                        : '—',
+                    v: (() => {
+                      const cap = (run as unknown as {hardCapUsd?: number})?.hardCapUsd;
+                      return cap != null ? `$${cap.toFixed(2)}` : '—';
+                    })(),
                   },
                   {
                     k: 'Credits charged',
@@ -1575,8 +1577,8 @@ export default function ResultPage() {
             </Card>
             {(reportAny.issues || []).length > 0 && (
               <>
-                <SectionHeader>Issues · {reportAny.issues!.length}</SectionHeader>
-                {reportAny.issues!.slice(0, 20).map((iss, i) => {
+                <SectionHeader>Issues · {(reportAny.issues || []).length}</SectionHeader>
+                {(reportAny.issues || []).slice(0, 20).map((iss, i) => {
                   const iAny = iss as unknown as {
                     id?: string;
                     title?: string;
@@ -1845,6 +1847,7 @@ export default function ResultPage() {
                     kind='secondary'
                     block
                     style={{marginTop: 10}}
+                    // eslint-disable-next-line no-restricted-syntax -- fire-and-queue action; reports via setMsg/setErr toast, no in-button spinner needed.
                     onClick={async () => {
                       if (!id) return;
                       try {
@@ -1941,6 +1944,7 @@ export default function ResultPage() {
                                 kind='primary'
                                 sm
                                 style={{marginTop: 10}}
+                                // eslint-disable-next-line no-restricted-syntax -- fire-and-queue action; reports via setMsg/setErr toast, no in-button spinner needed.
                                 onClick={async () => {
                                   try {
                                     await api.applyTestFixes(id, gAny.signature);

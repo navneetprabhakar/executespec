@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, IconButton} from '@/signal/components/Chrome';
 import {Feed, Card, KvList, Button, StatusPill} from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {Plus} from '@/signal/icons/icons';

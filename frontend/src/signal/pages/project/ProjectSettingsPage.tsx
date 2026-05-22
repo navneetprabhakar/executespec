@@ -11,7 +11,7 @@ import {
   Chip,
   StatusPill,
 } from '@/signal/components/Primitives';
-import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
+import {LoadingState} from '@/signal/components/Loaders';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';

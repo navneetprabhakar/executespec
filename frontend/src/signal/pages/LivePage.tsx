@@ -57,16 +57,17 @@ export default function LivePage() {
   // than the pre-SSE 3s because the live updates aren't on this path.
   useEffect(() => {
     if (!runId) return;
+    const id = runId;
     let cancelled = false;
     let timer: number | undefined;
     async function tick() {
       try {
-        const r = await api.getRun(runId!);
+        const r = await api.getRun(id);
         if (cancelled) return;
         setRun(r);
         const status = r?.status as string | undefined;
         if (status === 'COMPLETED' || status === 'PARTIAL') {
-          navigate(`/result/${runId}`, {replace: true});
+          navigate(`/result/${id}`, {replace: true});
           return;
         }
         if (status === 'FAILED' || status === 'CANCELLED') {

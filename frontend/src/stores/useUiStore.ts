@@ -29,11 +29,13 @@ type ViewMode = 'pro' | 'project';
 type Theme = 'dark' | 'light' | 'system';
 
 /**
- * UI chrome A/B switch (2026-05-22 redesign). 'signal' = the current production
- * chrome; 'ide' = the new VS Code-style chrome. Per-user choice persisted to
- * localStorage; a public feature flag (`ui.ide.default`) can flip the default
- * for a rollout cohort when the user hasn't chosen explicitly. Applied to
- * `<html data-ui>` so CSS can key off it too.
+ * UI chrome mode. 'ide' = the VS Code-style workspace (the only live chrome);
+ * 'signal' = the retired classic chrome. As of the 2026-05-22 IDE-only switch
+ * the chrome is no longer user-switchable — `App.tsx` hard-codes `const ide =
+ * true`, so every route renders its IDE surface. The value is still applied to
+ * `<html data-ui>` (always 'ide') for CSS. `uiMode` + `setUiMode` are retained
+ * only because the undeleted Signal `AccountPage` fallback still references the
+ * old Interface toggle; nothing in the live IDE tree reads them.
  */
 type UiMode = 'signal' | 'ide';
 
@@ -57,7 +59,7 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
-  /** UI chrome A/B mode (signal | ide). Persists to localStorage. */
+  /** UI chrome mode (always 'ide' since the 2026-05-22 IDE-only switch). */
   uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
@@ -82,7 +84,6 @@ interface UiStore {
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setUiMode: (m: UiMode) => void;
-  toggleUiMode: () => void;
   setCurrentProjectName: (name: string | null) => void;
 }
 
@@ -111,8 +112,8 @@ function initTheme(): Theme {
 // a flash. 2026-05-22: the Signal chrome was retired as a user-facing option;
 // the VS Code-style IDE workspace is now the ONLY chrome and the A/B toggle was
 // removed. We force 'ide' regardless of any previously-persisted es:uiMode.
-// (The `setUiMode`/`toggleUiMode` actions + the 'signal' branch survive only
-// until the Signal pages are fully ported IDE-native, then get removed.)
+// (`setUiMode` survives only because the undeleted Signal `AccountPage` fallback
+// still references the old Interface toggle; the live IDE tree never calls it.)
 function initUiMode(): UiMode {
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.ui = 'ide';
@@ -203,12 +204,6 @@ export const useUiStore = create<UiStore>((set, get) => ({
     localStorage.setItem('es:uiMode', m);
     if (typeof document !== 'undefined') document.documentElement.dataset.ui = m;
     set({uiMode: m});
-  },
-  toggleUiMode: () => {
-    const next: UiMode = get().uiMode === 'ide' ? 'signal' : 'ide';
-    localStorage.setItem('es:uiMode', next);
-    if (typeof document !== 'undefined') document.documentElement.dataset.ui = next;
-    set({uiMode: next});
   },
 
   setCurrentProjectName: (name) => set({currentProjectName: name}),
