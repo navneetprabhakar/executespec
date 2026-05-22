@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V203**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
+Migration head: **V205**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
 
 ---
 

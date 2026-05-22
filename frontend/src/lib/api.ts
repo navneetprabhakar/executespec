@@ -1478,6 +1478,35 @@ export const updateOrgKeySourceSettings = (
   });
 
 /**
+ * F3 — per-org model-matrix overrides. `defaults` + `overrides` are keyed by
+ * `"<provider>:<tier>"` (e.g. `"anthropic:planning"`); the effective model for a
+ * cell is `overrides[key] ?? defaults[key]`. `modelsByProvider` lists the models
+ * selectable per provider. `editable` is true only for ENTERPRISE orgs.
+ */
+export interface ModelMatrixView {
+  tier: string;
+  editable: boolean;
+  providers: string[];
+  tiers: string[];
+  defaults: Record<string, string>;
+  overrides: Record<string, string>;
+  modelsByProvider: Record<string, string[]>;
+}
+
+/** Reads the org's effective model matrix (defaults + overrides). Any org admin. */
+export const getOrgModelMatrix = () => req<ModelMatrixView>('/org/me/model-matrix');
+
+/**
+ * Replaces the org's full set of model-matrix overrides (sparse — only the cells to
+ * override). Empty map clears all. ENTERPRISE-only (PUT 403s otherwise).
+ */
+export const updateOrgModelMatrix = (overrides: Record<string, string>) =>
+  req<ModelMatrixView>('/org/me/model-matrix', {
+    method: 'PUT',
+    body: JSON.stringify({overrides}),
+  });
+
+/**
  * V198 — toggle per-org external project sharing. When true, ORG_ADMIN or
  * SUPER_ADMIN may invite any email domain (gmail, outlook, etc.) as a
  * cross-org collaborator on a project. Default is false; existing tenants

@@ -64,7 +64,9 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -165,6 +167,7 @@ public class RunOrchestrator {
   private final GateStore gateStore;
   private final AccuracyAssessmentService accuracyAssessmentService;
   private final ModelResolver modelResolver;
+  private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final com.navneet.executespec.smoketest.CliSmokeRunner cliSmokeRunner;
   private final ProjectRepoService projectRepoService;
@@ -857,6 +860,23 @@ public class RunOrchestrator {
             "V2 run={} BYOK resolution failed; using platform keys: {}", runId, keyEx.getMessage());
       }
 
+      // F3 — bind this org's per-tier model overrides for the duration of the run so every
+      // tier-routed agent (worker via SequentialExecutor.tierConfigFor, planner, reviewer)
+      // resolves the org's chosen model instead of the YAML default. All resolve on this
+      // pipeline thread, so a ThreadLocal binding covers them; cleared in the finally below.
+      // Non-fatal: any failure falls through to the matrix defaults.
+      try {
+        PipelineRun ovProbe = runRepo.findById(runId).orElse(null);
+        String orgId = ovProbe != null ? ovProbe.getOrgId() : null;
+        RunModelOverrides.bind(orgModelOverrideService.overridesForRun(orgId));
+      } catch (Exception ovEx) {
+        RunModelOverrides.clear();
+        log.warn(
+            "V2 run={} model-override binding failed; using matrix defaults: {}",
+            runId,
+            ovEx.getMessage());
+      }
+
       // Use V1's workspace convention: <agent.workspace>/<runId>/
       // V1's WorkspaceFileService (Code tab, download ZIP) resolves paths via the
       // same formula, so files written here are visible through the existing UI
@@ -1485,6 +1505,9 @@ public class RunOrchestrator {
       terminate(runId, "FAILED", "unexpected: " + shortMsg(unexpected), startedAt);
     } finally {
       perky.stop(runId);
+      // F3 — drop the run-scoped model-override binding so it never leaks to the
+      // next run that reuses this pooled pipeline thread.
+      RunModelOverrides.clear();
       // V165 BYOK fix — drop the cached key context. Caffeine's TTL
       // would clean up eventually, but explicit eviction keeps memory
       // usage tight on long-lived JVMs and prevents a stale entry

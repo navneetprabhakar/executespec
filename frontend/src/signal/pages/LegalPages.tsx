@@ -230,23 +230,50 @@ export function OrgSettingsPage() {
     openrouter: '',
   });
   const [keyBusy, setKeyBusy] = useState<string | null>(null);
+  // F3 — per-org model-matrix overrides. `matrix` is the server view (defaults +
+  // current overrides + picker options); `matrixOverrides` is the editable copy.
+  const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
+  const [matrixOverrides, setMatrixOverrides] = useState<Record<string, string>>({});
+  const [matrixBusy, setMatrixBusy] = useState(false);
 
   useEffect(() => {
-    Promise.allSettled([api.getMyOrg(), api.getSsoConfig()]).then(([o, s]) => {
-      if (o.status === 'fulfilled') {
-        setOrg(o.value);
-        setName(o.value.name || '');
-        setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
-      }
-      if (s.status === 'fulfilled') {
-        setSso(s.value);
-        if (s.value.provider) setSsoProvider(s.value.provider);
-        if (s.value.metadataUrl) setSsoMetadataUrl(s.value.metadataUrl);
-        if (s.value.domain) setSsoDomain(s.value.domain);
-        setSsoEnforced(!!s.value.enforced);
-      }
-    });
+    Promise.allSettled([api.getMyOrg(), api.getSsoConfig(), api.getOrgModelMatrix()]).then(
+      ([o, s, m]) => {
+        if (o.status === 'fulfilled') {
+          setOrg(o.value);
+          setName(o.value.name || '');
+          setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
+        }
+        if (s.status === 'fulfilled') {
+          setSso(s.value);
+          if (s.value.provider) setSsoProvider(s.value.provider);
+          if (s.value.metadataUrl) setSsoMetadataUrl(s.value.metadataUrl);
+          if (s.value.domain) setSsoDomain(s.value.domain);
+          setSsoEnforced(!!s.value.enforced);
+        }
+        if (m.status === 'fulfilled') {
+          setMatrix(m.value);
+          setMatrixOverrides(m.value.overrides || {});
+        }
+      },
+    );
   }, []);
+
+  async function saveMatrix() {
+    setMatrixBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const next = await api.updateOrgModelMatrix(matrixOverrides);
+      setMatrix(next);
+      setMatrixOverrides(next.overrides || {});
+      setMsg('Model matrix saved.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setMatrixBusy(false);
+    }
+  }
 
   async function saveOrg() {
     setBusy(true);
@@ -569,6 +596,95 @@ export function OrgSettingsPage() {
             </div>
           ))}
         </Card>
+
+        <SectionHeader>Model matrix</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Pin which model each agent tier uses, per provider. Cells left on <em>Default</em>{' '}
+            follow the platform matrix; an override applies to every run your org submits on that
+            provider.{' '}
+            {matrix && !matrix.editable && (
+              <strong>Overrides are an Enterprise-tier feature.</strong>
+            )}
+          </div>
+        </Card>
+        {matrix &&
+          matrix.tiers.map((tier) => (
+            <Card key={tier} style={{marginBottom: 10}}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  textTransform: 'capitalize',
+                  marginBottom: 10,
+                }}
+              >
+                {tier}
+              </div>
+              {matrix.providers
+                .filter((p) => matrix.defaults[`${p}:${tier}`])
+                .map((p) => {
+                  const key = `${p}:${tier}`;
+                  const def = matrix.defaults[key];
+                  const val = matrixOverrides[key] ?? '';
+                  return (
+                    <div
+                      key={key}
+                      style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
+                    >
+                      <div
+                        style={{
+                          width: 92,
+                          flexShrink: 0,
+                          fontSize: 13,
+                          color: 'var(--signal-text-dim)',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {p}
+                      </div>
+                      <select
+                        value={val}
+                        disabled={!canEdit || !matrix.editable}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMatrixOverrides((prev) => {
+                            const nextO = {...prev};
+                            if (!v) delete nextO[key];
+                            else nextO[key] = v;
+                            return nextO;
+                          });
+                        }}
+                        style={{
+                          ...inputStyle,
+                          flex: 1,
+                          minWidth: 0,
+                          cursor: !canEdit || !matrix.editable ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <option value=''>Default · {def}</option>
+                        {(matrix.modelsByProvider[p] ?? []).map((mdl) => (
+                          <option key={mdl} value={mdl}>
+                            {mdl}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+            </Card>
+          ))}
+        {matrix && matrix.editable && canEdit && (
+          <Button kind='primary' block disabled={matrixBusy} onClick={saveMatrix}>
+            {matrixBusy ? 'Saving…' : 'Save model matrix'}
+          </Button>
+        )}
 
         <SectionHeader>External sharing</SectionHeader>
         <Card>
