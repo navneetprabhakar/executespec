@@ -10,6 +10,7 @@ import SignalShell from '@/signal/components/Shell';
 import IdeWorkspace from '@/ide/IdeWorkspace';
 import {IdeWelcome, IdeRunResult, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeProject from '@/ide/IdeProject';
+import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
 
@@ -129,7 +130,7 @@ function protectedChildren(ide: boolean) {
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
       <Route path='/home' element={ide ? <IdeWelcome /> : <HomePage />} />
-      <Route path='/runs' element={ide ? <IdeWelcome /> : <AllRunsPage />} />
+      <Route path='/runs' element={ide ? <IdeRuns /> : <AllRunsPage />} />
       <Route path='/compose' element={ide ? <IdeCompose /> : <ComposePage />} />
       <Route path='/plan' element={<PlanPage />} />
       <Route path='/plan/:runId' element={<PlanPage />} />
@@ -158,9 +159,9 @@ function protectedChildren(ide: boolean) {
       <Route path='/projects/:projectId/settings' element={<ProjectSettingsPage />} />
 
       {/* Account + billing */}
-      <Route path='/account' element={<AccountPage />} />
-      <Route path='/settings' element={<AccountPage />} />
-      <Route path='/settings/manage' element={<AccountPage />} />
+      <Route path='/account' element={ide ? <IdeAccount /> : <AccountPage />} />
+      <Route path='/settings' element={ide ? <IdeAccount /> : <AccountPage />} />
+      <Route path='/settings/manage' element={ide ? <IdeAccount /> : <AccountPage />} />
       <Route path='/billing' element={<BillingPage />} />
       <Route path='/plans' element={<PlansPage />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
