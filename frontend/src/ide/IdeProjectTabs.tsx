@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 
 type Dash = Record<string, unknown>;
@@ -449,6 +450,7 @@ export function IdeProjectRuns() {
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
   const [prBusy, setPrBusy] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -815,6 +817,15 @@ export function IdeProjectRuns() {
                           Open on GitHub
                         </button>
                       )}
+                      {repo && num > 0 && (
+                        <button
+                          className='ide-btn ghost'
+                          style={{padding: '4px 10px'}}
+                          onClick={() => setReviewOpen((k) => (k === key ? null : key))}
+                        >
+                          {reviewOpen === key ? 'Hide AI review' : 'Review with AI'}
+                        </button>
+                      )}
                       <button
                         className='ide-btn ghost'
                         style={{padding: '4px 10px'}}
@@ -824,6 +835,14 @@ export function IdeProjectRuns() {
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </button>
                     </div>
+                    {reviewOpen === key && repo && num > 0 && (
+                      <PrReviewPanel
+                        projectId={projectId}
+                        repoFullName={repo}
+                        prNumber={num}
+                        variant='ide'
+                      />
+                    )}
                   </div>
                 );
               })}

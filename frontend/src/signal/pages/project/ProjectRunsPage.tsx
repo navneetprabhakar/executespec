@@ -6,6 +6,7 @@ import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
+import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {runTitleFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
@@ -151,6 +152,7 @@ export default function ProjectRunsPage() {
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<unknown[] | null>(null);
   const [prBusy, setPrBusy] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   // Inline run detail (split-pane) — v3 parity. Clicking a run in the list
@@ -632,7 +634,7 @@ export default function ProjectRunsPage() {
                         </Chip>
                       )}
                     </div>
-                    <div style={{display: 'flex', gap: 6}}>
+                    <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
                       {url && (
                         <Button
                           kind='secondary'
@@ -640,6 +642,15 @@ export default function ProjectRunsPage() {
                           onClick={() => window.open(url, '_blank', 'noopener')}
                         >
                           Open on GitHub
+                        </Button>
+                      )}
+                      {repo && (p.prNumber ?? 0) > 0 && (
+                        <Button
+                          kind='secondary'
+                          sm
+                          onClick={() => setReviewOpen((k) => (k === key ? null : key))}
+                        >
+                          {reviewOpen === key ? 'Hide AI review' : 'Review with AI'}
                         </Button>
                       )}
                       <Button
@@ -651,6 +662,14 @@ export default function ProjectRunsPage() {
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </Button>
                     </div>
+                    {reviewOpen === key && repo && (p.prNumber ?? 0) > 0 && (
+                      <PrReviewPanel
+                        projectId={id}
+                        repoFullName={repo}
+                        prNumber={p.prNumber as number}
+                        variant='signal'
+                      />
+                    )}
                   </Card>
                 );
               })

@@ -6,6 +6,7 @@ import {LoadingState} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {FileTree} from '@/signal/components/FileTree';
 import {CodeView} from '@/signal/components/CodeView';
+import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -45,7 +46,10 @@ export default function ProjectCodePage() {
   // ProjectCodePage no longer fetches the project itself — useProjectMeta
   // (called in render below) handles that. Repos are fetched here directly.
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
-  const [reviews, setReviews] = useState<Record<string, unknown> | null>(null);
+  // Code-review target — the repo selected in the per-repo picker on the Code
+  // review sub-tab (defaults to the first linked repo). The full whole-repo
+  // review surface is rendered per-repo by <CodeReviewPanel>.
+  const [reviewRepoId, setReviewRepoId] = useState<string | null>(null);
   // P1 regression fixes: workspace health + org standards compliance.
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
   const [standards, setStandards] = useState<api.ComplianceReport | null>(null);
@@ -153,37 +157,13 @@ export default function ProjectCodePage() {
     setSelectedFilePath(null);
   }, [browseRepoId]);
 
+  // Default-select the first repo when the user opens Code review so the panel
+  // has a target on first load.
   useEffect(() => {
-    if (sub !== 'review' || !id || repos.length === 0) return;
-    // Per-repo latest code review scan. We fetch each in parallel and key by
-    // repoId so the panel can render side-by-side severity chips.
-    let cancelled = false;
-    Promise.all(
-      repos.map(async (r) => {
-        const repoId = repoIdFor(r);
-        const repoName = repoDisplayName(r);
-        try {
-          // Backend's /api/code-reviews?repo= expects the GitHub slug (e.g.
-          // owner/repo) when present; fall back to the same display we show
-          // the user. The repoDisplayName helper already prefers slug.
-          const review = await fetch(
-            `/api/code-reviews?projectId=${id}&latest=true&repo=${encodeURIComponent(repoName)}`,
-            {
-              headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
-            },
-          ).then((res) => (res.ok ? res.json() : null));
-          return [repoId, {repoName, review}];
-        } catch {
-          return [repoId, {repoName, review: null}];
-        }
-      }),
-    ).then((entries) => {
-      if (!cancelled) setReviews(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [sub, id, repos]);
+    if (sub === 'review' && !reviewRepoId && repos.length > 0) {
+      setReviewRepoId(repoIdFor(repos[0]));
+    }
+  }, [sub, repos, reviewRepoId]);
 
   async function autofixCategory(category: string) {
     setBusy(category);
@@ -194,28 +174,6 @@ export default function ProjectCodePage() {
       setMsg(runId ? `Autofix dispatched: R-${runId.slice(0, 6)}` : 'Autofix dispatched.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Autofix failed.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function rescanReview(repoId: string) {
-    setBusy(`scan-${repoId}`);
-    setErr('');
-    setMsg('');
-    try {
-      const r = await fetch('/api/code-reviews/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
-        },
-        body: JSON.stringify({projectId: id, repoId}),
-      });
-      if (!r.ok) throw new Error(`Scan failed (${r.status}).`);
-      setMsg('Scan queued. Results appear here when the scan completes.');
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Scan failed.');
     } finally {
       setBusy(null);
     }
@@ -440,91 +398,35 @@ export default function ProjectCodePage() {
                 to enable per-repo code review.
               </p>
             </Card>
-          ) : reviews == null ? (
-            <LoadingState label='Loading scan results…' />
           ) : (
             <>
-              <SectionHeader>Per-repo scan</SectionHeader>
-              {Object.entries(reviews).map(([repoId, val]) => {
-                const v = val as {
-                  repoName?: string;
-                  review?: {
-                    id?: string;
-                    critical?: number;
-                    major?: number;
-                    minor?: number;
-                    info?: number;
-                    scannedAt?: string;
-                    reportUrl?: string;
-                  };
-                };
-                const r = v.review;
+              {/* Repo picker — single-repo projects collapse the row. */}
+              {repos.length > 1 && (
+                <TabsStrip
+                  items={repos.map((r) => {
+                    const rid = repoIdFor(r);
+                    return {
+                      label: repoDisplayName(r),
+                      active: rid === reviewRepoId,
+                      onClick: () => setReviewRepoId(rid),
+                    };
+                  })}
+                />
+              )}
+              {(() => {
+                const rid = reviewRepoId || (repos[0] ? repoIdFor(repos[0]) : '');
+                const repo = repos.find((r) => repoIdFor(r) === rid) ?? repos[0];
+                if (!repo) return <LoadingState label='Loading…' />;
                 return (
-                  <Card key={repoId} style={{marginBottom: 10}}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'baseline',
-                        marginBottom: 10,
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{minWidth: 0, flex: 1}}>
-                        <div
-                          style={{
-                            fontSize: 14.5,
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {v.repoName}
-                        </div>
-                        <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
-                          {r?.scannedAt
-                            ? `Last scan ${new Date(r.scannedAt).toLocaleString()}`
-                            : 'No scan yet'}
-                        </div>
-                      </div>
-                      <Button
-                        kind='secondary'
-                        sm
-                        disabled={busy === `scan-${repoId}`}
-                        onClick={() => rescanReview(repoId)}
-                      >
-                        {busy === `scan-${repoId}` ? 'Queuing…' : 'New scan'}
-                      </Button>
-                    </div>
-                    {r && (
-                      <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                        {(r.critical ?? 0) > 0 && (
-                          <StatusPill kind='failed'>{r.critical} CRITICAL</StatusPill>
-                        )}
-                        {(r.major ?? 0) > 0 && (
-                          <StatusPill kind='needs'>{r.major} MAJOR</StatusPill>
-                        )}
-                        {(r.minor ?? 0) > 0 && <StatusPill>{r.minor} MINOR</StatusPill>}
-                        {(r.info ?? 0) > 0 && <StatusPill>{r.info} INFO</StatusPill>}
-                        {!r.critical && !r.major && !r.minor && !r.info && (
-                          <StatusPill kind='shipped'>CLEAN</StatusPill>
-                        )}
-                      </div>
-                    )}
-                    {r?.reportUrl && (
-                      <Button
-                        kind='ghost'
-                        sm
-                        block
-                        onClick={() => window.open(r.reportUrl, '_blank', 'noopener')}
-                      >
-                        Download report (Markdown)
-                      </Button>
-                    )}
-                  </Card>
+                  <CodeReviewPanel
+                    key={rid}
+                    projectId={id}
+                    repoId={rid}
+                    repoFullName={repoDisplayName(repo)}
+                    variant='signal'
+                  />
                 );
-              })}
+              })()}
             </>
           ))}
 
