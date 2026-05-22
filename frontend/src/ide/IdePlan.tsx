@@ -15,6 +15,8 @@ export default function IdePlan() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
@@ -57,6 +59,22 @@ export default function IdePlan() {
       navigate('/home');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Cancel failed.');
+      setBusy('');
+    }
+  }
+  // Revise the plan before approving — re-plans with the feedback; the poll
+  // loop above picks up the new AWAITING_APPROVAL version.
+  async function revise() {
+    if (!feedback.trim()) return;
+    setBusy('e');
+    setErr('');
+    try {
+      await api.editRunPlan(runId, feedback.trim());
+      setFeedback('');
+      setEditing(false);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Revision failed.');
+    } finally {
       setBusy('');
     }
   }
@@ -131,6 +149,35 @@ export default function IdePlan() {
               </div>
             ))}
           </div>
+
+          <div className='ide-h2'>Not quite right?</div>
+          {editing ? (
+            <div className='ide-card'>
+              <textarea
+                className='ide-textarea'
+                rows={4}
+                placeholder='Tell the planner what to change — add or drop tasks, adjust scope, change approach…'
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+              />
+              <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+                <button
+                  className='ide-btn'
+                  disabled={busy === 'e' || !feedback.trim()}
+                  onClick={revise}
+                >
+                  {busy === 'e' ? 'Revising…' : '↻ Submit revision'}
+                </button>
+                <button className='ide-btn ghost' onClick={() => setEditing(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button className='ide-btn ghost' onClick={() => setEditing(true)}>
+              ✎ Revise plan
+            </button>
+          )}
 
           {err && (
             <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '12px 0'}}>{err}</div>
