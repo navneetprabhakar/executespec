@@ -12,7 +12,7 @@ import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
-import {IdeProjectPulse, IdeProjectRuns} from '@/ide/IdeProjectTabs';
+import {IdeProjectPulse, IdeProjectRuns, IdeProjectRepos} from '@/ide/IdeProjectTabs';
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
 import {useUiStore} from '@/stores/useUiStore';
@@ -152,7 +152,10 @@ function protectedChildren(ide: boolean) {
         path='/projects/:projectId/pulse'
         element={ide ? <IdeProjectPulse /> : <ProjectPulsePage />}
       />
-      <Route path='/projects/:projectId/repos' element={<ProjectReposPage />} />
+      <Route
+        path='/projects/:projectId/repos'
+        element={ide ? <IdeProjectRepos /> : <ProjectReposPage />}
+      />
       <Route
         path='/projects/:projectId/runs'
         element={ide ? <IdeProjectRuns /> : <ProjectRunsPage />}

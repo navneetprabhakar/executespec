@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
-import {runTitleFor, repoDisplayName} from '@/signal/lib/runUtils';
+import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -197,6 +197,121 @@ export function IdeProjectRuns() {
               </span>
             </Link>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────── Repos ─────────────────────────
+export function IdeProjectRepos() {
+  const {projectId = ''} = useParams();
+  const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
+  const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+
+  function load() {
+    api
+      .getProjectRepos(projectId)
+      .then((l) => setRepos(l as unknown as Array<Record<string, unknown>>))
+      .catch(() => setRepos([]));
+    api
+      .getWorkspaceHealth(projectId)
+      .then((h) => {
+        const arr = (h as unknown as {repos?: unknown[]}).repos || (Array.isArray(h) ? h : []);
+        const map: Record<string, Record<string, unknown>> = {};
+        (arr as Array<Record<string, unknown>>).forEach((r) => {
+          map[repoDisplayName(r)] = r;
+        });
+        setHealth(map);
+      })
+      .catch(() => {});
+  }
+  useEffect(() => {
+    if (projectId) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  async function act(key: string, fn: () => Promise<unknown>) {
+    setBusy(key);
+    setMsg('');
+    try {
+      await fn();
+      setMsg('Done.');
+      load();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div className='ide-pane'>
+      <ProjectTabs projectId={projectId} />
+      <div className='ide-h1'>Repos</div>
+      {msg && (
+        <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+          {msg}
+        </div>
+      )}
+      {repos === null ? (
+        <IdeLoader label='Loading repos…' />
+      ) : repos.length === 0 ? (
+        <div className='ide-empty'>No repos linked to this project.</div>
+      ) : (
+        <div className='ide-grid'>
+          {repos.map((r) => {
+            const id = repoIdFor(r);
+            const name = repoDisplayName(r);
+            const h = health[name] || {};
+            const drift = numOf(h, 'commitsBehind') ?? numOf(h, 'behindBy') ?? 0;
+            const wh = (h as {webhookInstalled?: boolean}).webhookInstalled;
+            const open = numOf(h, 'openPrs') ?? 0;
+            return (
+              <div key={id} className='ide-card'>
+                <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 8}}>
+                  ▤ {name}
+                </div>
+                <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+                  <IdeBadge kind={drift > 0 ? 'warn' : 'ok'}>
+                    {drift > 0 ? `drift +${drift}` : 'in sync'}
+                  </IdeBadge>
+                  <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook ✓' : 'no webhook'}</IdeBadge>
+                  <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                </div>
+                <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '4px 10px'}}
+                    disabled={busy === `sync${id}`}
+                    onClick={() => act(`sync${id}`, () => api.syncRepo(id))}
+                  >
+                    Sync
+                  </button>
+                  {!wh && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `wh${id}`}
+                      onClick={() => act(`wh${id}`, () => api.installRepoWebhook(id))}
+                    >
+                      Install webhook
+                    </button>
+                  )}
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '4px 10px', color: 'var(--ide-red)'}}
+                    disabled={busy === `unlink${id}`}
+                    onClick={() => act(`unlink${id}`, () => api.unlinkProjectRepo(projectId, id))}
+                  >
+                    Unlink
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
