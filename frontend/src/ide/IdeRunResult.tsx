@@ -1,6 +1,7 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
+import {Markdown} from '@/signal/components/Markdown';
 import * as api from '@/lib/api';
 import {
   IdeBadge,
@@ -35,7 +36,17 @@ function fmtDur(ms?: number | null) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-const TABS = ['Overview', 'Code', 'Tasks', 'Validation', 'Cost', 'PR', 'Tests'] as const;
+const TABS = [
+  'Overview',
+  'Code',
+  'Tasks',
+  'Timeline',
+  'Validation',
+  'Cost',
+  'PR',
+  'Tests',
+  'Chat',
+] as const;
 type Tab = (typeof TABS)[number];
 
 function Kv({k, v}: {k: string; v: React.ReactNode}) {
@@ -65,6 +76,12 @@ export default function IdeRunResult() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
+  // Timeline + Chat — IDE parity with Signal ResultPage.
+  const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
+  const [chat, setChat] = useState<api.RunChatMessage[] | null>(null);
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -88,13 +105,31 @@ export default function IdeRunResult() {
   }, [runId]);
 
   useEffect(() => {
-    if (tab === 'Tests' && !tests && runId)
+    if (!runId) return;
+    if (tab === 'Tests' && !tests)
       api
         .getTestReport(runId)
         .then(setTests)
         .catch(() => setTests(null));
+    if (tab === 'Timeline' && !timeline)
+      api
+        .getTimeline(runId)
+        .then(setTimeline)
+        .catch(() => setTimeline({tasks: []}));
+    if (tab === 'Chat' && !chat)
+      api
+        .getRunChat(runId)
+        .then(setChat)
+        .catch(() => setChat([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  // Keep the chat thread pinned to the newest message.
+  useEffect(() => {
+    if (tab !== 'Chat') return;
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [tab, chat, chatBusy]);
 
   async function openFile(path: string) {
     setActiveFile(path);
@@ -190,9 +225,62 @@ export default function IdeRunResult() {
     }
   }
 
+  // Run-scoped chat: append the user message optimistically, then the reply.
+  async function sendChat() {
+    if (!runId || !chatInput.trim() || chatBusy) return;
+    const text = chatInput.trim();
+    setChatInput('');
+    setChatBusy(true);
+    setChat((prev) => [...(prev || []), {role: 'user', content: text}]);
+    try {
+      const resp = await api.sendRunChatMessage(runId, text);
+      setChat((prev) => [...(prev || []), {role: 'assistant', content: resp.reply || ''}]);
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Chat failed.');
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  // Iterate as new run — forks the run's codebase + spec into a fresh run via the
+  // backend /iterate endpoint, then routes to the new run's gate (PRODUCTION) or
+  // live view (PROTOTYPE).
+  async function iterateAsNewRun() {
+    if (!runId || chatBusy) return;
+    const instruction = chatInput.trim();
+    if (!instruction) {
+      setMsg('Type the change you want before starting a new iteration.');
+      return;
+    }
+    setChatBusy(true);
+    setMsg('');
+    try {
+      const {runId: newId} = await api.iterateRun(runId, instruction);
+      if (newId) {
+        setChatInput('');
+        const prod = (run?.executionMode || '').toUpperCase() === 'PRODUCTION';
+        navigate(prod ? `/plan/${newId}` : `/live/${newId}`);
+      }
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Iterate failed.');
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  const statusUpper = (run?.status || '').toUpperCase();
   const terminal = ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(
-    (run?.status || '').toUpperCase(),
+    statusUpper,
   );
+  // Power-ops gating: pause is only meaningful while running; resume only when paused.
+  const canPause = [
+    'RUNNING',
+    'EXECUTING',
+    'IN_PROGRESS',
+    'PLANNING',
+    'AWAITING_APPROVAL',
+  ].includes(statusUpper);
+  const canResume = statusUpper === 'PAUSED';
   const score = report?.verifiedScore ?? null;
   const v = verdictFor(score, run?.status);
   const active = activeFile ? cache[activeFile] : null;
@@ -322,6 +410,36 @@ export default function IdeRunResult() {
 
             <div className='ide-h2'>What now</div>
             <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+              {canPause && (
+                <button
+                  className='ide-btn ghost'
+                  disabled={busy === 'pause'}
+                  onClick={() =>
+                    action(
+                      'pause',
+                      () => api.pauseRun(runId),
+                      () => 'Run paused.',
+                    )
+                  }
+                >
+                  {busy === 'pause' ? 'Pausing…' : '⏸ Pause'}
+                </button>
+              )}
+              {canResume && (
+                <button
+                  className='ide-btn'
+                  disabled={busy === 'resume'}
+                  onClick={() =>
+                    action(
+                      'resume',
+                      () => api.resumeRun(runId),
+                      () => 'Run resumed.',
+                    )
+                  }
+                >
+                  {busy === 'resume' ? 'Resuming…' : '▶ Resume'}
+                </button>
+              )}
               {run?.githubPrUrl ? (
                 <a className='ide-btn' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
                   ↗ Open PR
@@ -549,6 +667,97 @@ export default function IdeRunResult() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Timeline ── */}
+        {tab === 'Timeline' && (
+          <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
+            <div className='ide-h1'>Timeline</div>
+            {timeline == null ? (
+              <IdeLoader label='Loading timeline…' />
+            ) : (timeline.tasks || []).length === 0 ? (
+              <div className='ide-empty'>No timeline data yet. Tasks populate as the run runs.</div>
+            ) : (
+              <div className='ide-card'>
+                {(() => {
+                  const allTasks = timeline.tasks || [];
+                  const starts = allTasks.map((t) => new Date(t.startedAt).getTime());
+                  const ends = allTasks.map((t) =>
+                    t.completedAt ? new Date(t.completedAt).getTime() : Date.now(),
+                  );
+                  const minT = Math.min(...starts);
+                  const maxT = Math.max(...ends);
+                  const span = Math.max(1, maxT - minT);
+                  return allTasks.map((t, i) => {
+                    const start = new Date(t.startedAt).getTime();
+                    const end = t.completedAt ? new Date(t.completedAt).getTime() : Date.now();
+                    const leftPct = ((start - minT) / span) * 100;
+                    const widthPct = Math.max(2, ((end - start) / span) * 100);
+                    const st = (t.status || '').toUpperCase();
+                    const done = st === 'COMPLETED' || st === 'COMPLETE' || st === 'DONE';
+                    const failed = st === 'FAILED';
+                    return (
+                      <div key={t.taskId || i} style={{marginBottom: 14}}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            marginBottom: 5,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 13,
+                              color: 'var(--ide-fg-bright)',
+                              flex: 1,
+                              minWidth: 0,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {t.title || `Task ${i + 1}`}
+                          </span>
+                          <span
+                            className='ide-mono'
+                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                          >
+                            {fmtDur(end - start)}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            position: 'relative',
+                            height: 8,
+                            background: 'var(--ide-bg)',
+                            borderRadius: 4,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: `${leftPct}%`,
+                              width: `${widthPct}%`,
+                              top: 0,
+                              bottom: 0,
+                              borderRadius: 4,
+                              background: failed
+                                ? 'var(--ide-red)'
+                                : done
+                                  ? 'var(--ide-green)'
+                                  : 'var(--ide-yellow)',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>
@@ -789,6 +998,110 @@ export default function IdeRunResult() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* ── Chat ── */}
+        {tab === 'Chat' && (
+          <div
+            className='ide-pane'
+            style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}
+          >
+            <div className='ide-h1'>Chat</div>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+              Run-scoped chat — ask the agent about its decisions or describe a change and start a
+              fresh iteration from this run&apos;s codebase.
+            </div>
+            {msg && (
+              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+                {msg}
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
+              {chat == null ? (
+                <IdeLoader label='Loading chat…' />
+              ) : chat.length === 0 && !chatBusy ? (
+                <div className='ide-empty'>
+                  No messages yet. Ask the agent anything about this run.
+                </div>
+              ) : (
+                chat.map((m, i) => {
+                  const isUser = m.role === 'user';
+                  return (
+                    <div
+                      key={i}
+                      className='ide-card'
+                      style={{
+                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        background: isUser ? 'var(--ide-blue)' : undefined,
+                        color: isUser ? '#fff' : undefined,
+                        padding: '10px 14px',
+                      }}
+                    >
+                      <div
+                        className='ide-mono'
+                        style={{fontSize: 10, opacity: 0.7, marginBottom: 4}}
+                      >
+                        {isUser ? 'YOU' : 'RUN COPILOT'}
+                      </div>
+                      {/* Both roles render through Markdown (all-chat-markdown rule). */}
+                      <Markdown>{m.content || ''}</Markdown>
+                    </div>
+                  );
+                })
+              )}
+              {chatBusy && (
+                <div style={{alignSelf: 'flex-start', fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                  Thinking…
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+              <textarea
+                className='ide-input'
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void sendChat();
+                  }
+                }}
+                placeholder='Ask anything about this run…'
+                rows={2}
+                disabled={chatBusy}
+                style={{flex: 1, resize: 'vertical', minHeight: 56, maxHeight: 200}}
+              />
+              <div style={{display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0}}>
+                <button
+                  className='ide-btn'
+                  onClick={sendChat}
+                  disabled={chatBusy || !chatInput.trim()}
+                >
+                  Send
+                </button>
+                <button
+                  className='ide-btn ghost'
+                  onClick={iterateAsNewRun}
+                  disabled={chatBusy || !chatInput.trim()}
+                  title='Start a new run from this run’s code with your change applied'
+                >
+                  ⑂ Iterate as new run
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
