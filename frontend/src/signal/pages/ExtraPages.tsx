@@ -18,6 +18,7 @@ import {
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
+import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import AuthLayout from '@/signal/components/AuthLayout';
 import {Search, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
@@ -1553,6 +1554,10 @@ export function DeploymentsPage() {
             completed run.
           </div>
         </Card>
+
+        <div style={{marginTop: 12}}>
+          <GcpCredentialPanel variant='signal' />
+        </div>
 
         {err && (
           <div
