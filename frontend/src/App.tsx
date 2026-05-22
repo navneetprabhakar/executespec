@@ -9,6 +9,7 @@ import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 import SignalShell from '@/signal/components/Shell';
 import IdeWorkspace from '@/ide/IdeWorkspace';
 import {IdeWelcome, IdeRunResult, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import IdeProject from '@/ide/IdeProject';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
 
@@ -141,7 +142,7 @@ function protectedChildren(ide: boolean) {
       {/* Projects */}
       <Route path='/projects' element={<ProjectsPage />} />
       <Route path='/projects/empty' element={<EmptyProjectPage />} />
-      <Route path='/projects/:projectId' element={<ProjectComposePage />} />
+      <Route path='/projects/:projectId' element={ide ? <IdeProject /> : <ProjectComposePage />} />
       <Route path='/projects/:projectId/pulse' element={<ProjectPulsePage />} />
       <Route path='/projects/:projectId/repos' element={<ProjectReposPage />} />
       <Route path='/projects/:projectId/runs' element={<ProjectRunsPage />} />
