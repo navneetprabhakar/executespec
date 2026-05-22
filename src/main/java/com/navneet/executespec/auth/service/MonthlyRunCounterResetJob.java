@@ -30,12 +30,13 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
  * new month, especially in the first few hours of the 1st (IST) when nobody had hit submit yet.
  *
  * <p>This job runs at {@code 0 0 0 1 * *} (midnight on the 1st) in {@code Asia/Kolkata}. Hitting
- * ENTERPRISE+PRO users via {@code personalRunCount} and every org via {@code monthlyRunCount},
+ * all per-user quotas via {@code personalRunCount} and every org via {@code monthlyRunCount},
  * calling the same {@link TierEnforcementService} predicates so subscribed users still honour their
  * billing-cycle anchor rather than being blindly zeroed.
  *
- * <p>FREE users are intentionally skipped — per {@code TierEnforcementService
- * .maybeResetUserCounter}, FREE is a lifetime quota, not monthly.
+ * <p>2026-05-22 — FREE users are now reset too. FREE was a lifetime quota; it is now a monthly "15
+ * runs/month" cap that resets on the calendar-month boundary, matching {@code TierEnforcementService
+ * .maybeResetUserCounter}.
  *
  * <p>{@link SchedulerLock} prevents double-firing when multiple app instances hit the cron moment
  * together (MIG / Cloud Run).
@@ -53,8 +54,8 @@ public class MonthlyRunCounterResetJob {
   /**
    * Fires at 00:00 IST on the 1st of every month. Iterates users + orgs and delegates to {@link
    * TierEnforcementService}'s existing reset predicates so subscribed users still anchor to their
-   * billing period and FREE users stay skipped. Idempotent — subsequent firings in the same month
-   * are no-ops.
+   * billing period; FREE users reset on the calendar-month boundary. Idempotent — subsequent
+   * firings in the same month are no-ops.
    */
   @Scheduled(cron = "0 0 0 1 * *", zone = "Asia/Kolkata")
   @SchedulerLock(name = "monthlyRunCounterReset", lockAtLeastFor = "PT5M", lockAtMostFor = "PT30M")
@@ -82,9 +83,7 @@ public class MonthlyRunCounterResetJob {
     List<AppUser> userBatch = new ArrayList<>();
     for (AppUser user : userRepo.findAll()) {
       userScanned++;
-      // FREE users use a lifetime limit — no reset path for them.
-      String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
-      if ("FREE".equals(tier)) continue;
+      // 2026-05-22 — FREE now resets monthly too (was lifetime), matching the "15 runs/month" copy.
       if (tierEnforcement.shouldResetUserCounterForJob(user, activeByUser)) {
         user.setPersonalRunCount(0);
         user.setRunCountResetAt(resetStamp);
