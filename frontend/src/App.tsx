@@ -11,6 +11,7 @@ import IdeWorkspace from '@/ide/IdeWorkspace';
 import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
+import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
@@ -133,8 +134,8 @@ function protectedChildren(ide: boolean) {
       <Route path='/home' element={ide ? <IdeWelcome /> : <HomePage />} />
       <Route path='/runs' element={ide ? <IdeRuns /> : <AllRunsPage />} />
       <Route path='/compose' element={ide ? <IdeCompose /> : <ComposePage />} />
-      <Route path='/plan' element={<PlanPage />} />
-      <Route path='/plan/:runId' element={<PlanPage />} />
+      <Route path='/plan' element={ide ? <IdePlan /> : <PlanPage />} />
+      <Route path='/plan/:runId' element={ide ? <IdePlan /> : <PlanPage />} />
       <Route path='/live' element={<LivePage />} />
       <Route path='/live/:runId' element={ide ? <IdeLive /> : <LivePage />} />
       <Route path='/result' element={<ResultPage />} />

@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {SpecChat} from '@/signal/components/SpecChat';
 
 type Repo = Record<string, unknown>;
 function rid(r: Repo): string {
@@ -94,6 +95,9 @@ export default function IdeProject() {
         value={spec}
         onChange={(e) => setSpec(e.target.value)}
       />
+      <div style={{marginTop: 10}}>
+        <SpecChat projectId={projectId} draftSpec={spec} onApply={setSpec} />
+      </div>
 
       {repos.length > 0 && (
         <>

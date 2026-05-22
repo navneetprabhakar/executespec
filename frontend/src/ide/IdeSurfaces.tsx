@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {SpecChat} from '@/signal/components/SpecChat';
 
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
@@ -126,6 +127,9 @@ export function IdeCompose() {
         value={spec}
         onChange={(e) => setSpec(e.target.value)}
       />
+      <div style={{marginTop: 10}}>
+        <SpecChat draftSpec={spec} onApply={setSpec} />
+      </div>
       <div style={{display: 'flex', gap: 12, margin: '14px 0', flexWrap: 'wrap'}}>
         <div style={{flex: 1, minWidth: 180}}>
           <div className='ide-h2' style={{marginTop: 0}}>
