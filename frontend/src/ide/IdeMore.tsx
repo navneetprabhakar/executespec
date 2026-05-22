@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
@@ -257,6 +258,7 @@ export function IdeDeployments() {
         Permanent Cloud Run services promoted from completed runs. Deploy a run from its result
         page.
       </div>
+      <GcpCredentialPanel variant='ide' />
       {msg && (
         <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
           {msg}
