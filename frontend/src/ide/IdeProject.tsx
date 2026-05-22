@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {ProjectTabs} from '@/ide/IdeProjectTabs';
 
 type Repo = Record<string, unknown>;
 function fmtWhen(iso?: string | null): string {
@@ -91,6 +92,8 @@ export default function IdeProject() {
       <div className='ide-sub'>
         {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
       </div>
+
+      <ProjectTabs projectId={projectId || ''} />
 
       <div className='ide-h2'>New spec in this project</div>
       <textarea
