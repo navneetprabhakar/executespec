@@ -224,17 +224,10 @@ public class RunOrchestrator {
       programBenchContainerStore;
 
   /**
-   * R-162 — referral hook. Wired here so that when a referee's first run reaches a successful
-   * terminal status, the inviting Free user gets +5 lifetime credits granted automatically.
-   * Idempotent on the service side (uses pending-invite presence as the once-only marker until V153
-   * promotes it to a granted_at column).
-   */
-  private final com.navneet.executespec.referral.ReferralService referralService;
-
-  /**
    * R-162 — terminal-status referral hook. Logic extracted into a helper so the wire-point is
    * unit-testable without exercising the orchestrator end-to-end (see {@link
-   * com.navneet.executespec.referral.ReferralCompletionHook}).
+   * com.navneet.executespec.referral.ReferralCompletionHook}). The earlier direct {@code
+   * ReferralService} injection was superseded by this helper and removed.
    */
   private final com.navneet.executespec.referral.ReferralCompletionHook referralCompletionHook;
 
