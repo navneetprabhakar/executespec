@@ -22,7 +22,7 @@ import {
   IdeProjectSettings,
 } from '@/ide/IdeProjectMore';
 import IdePlan from '@/ide/IdePlan';
-import {IdeRuns, IdeAccount} from '@/ide/IdeMore';
+import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
 import {IdeIntegrations, IdeAdmin} from '@/ide/IdeSettings';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
@@ -218,7 +218,7 @@ function protectedChildren(ide: boolean) {
       <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
       <Route path='/templates' element={<SpecTemplatesPage />} />
       <Route path='/audit' element={<AuditLogPage />} />
-      <Route path='/deployments' element={<DeploymentsPage />} />
+      <Route path='/deployments' element={ide ? <IdeDeployments /> : <DeploymentsPage />} />
 
       {/* System */}
       <Route path='/notifications' element={<NotificationsPage />} />

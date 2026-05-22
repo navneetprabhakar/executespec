@@ -177,6 +177,7 @@ export function IdeAccount() {
           {to: '/plans', label: 'Compare plans', sub: ''},
           {to: '/api-keys', label: 'API keys (BYOK)', sub: ''},
           {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
+          {to: '/deployments', label: 'Deployments', sub: 'Cloud Run'},
           ...(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
@@ -210,6 +211,139 @@ export function IdeAccount() {
       >
         Sign out
       </button>
+    </div>
+  );
+}
+
+// ───────────────────────── Deployments (list + lifecycle) ─────────────────────────
+// Permanent Cloud Run deployments promoted from runs. Mirrors the Signal
+// DeploymentsPage (list + rollback + delete); the deploy itself is initiated
+// from a run's result page ("Deploy to Cloud Run").
+export function IdeDeployments() {
+  const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+
+  function load() {
+    api
+      .getDeployments()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function act(key: string, fn: () => Promise<unknown>, confirm?: string) {
+    if (confirm && !window.confirm(confirm)) return;
+    setBusy(key);
+    setMsg('');
+    try {
+      await fn();
+      setMsg('Done.');
+      load();
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Action failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div className='ide-pane'>
+      <div className='ide-h1'>Deployments</div>
+      <div className='ide-sub'>
+        Permanent Cloud Run services promoted from completed runs. Deploy a run from its result
+        page.
+      </div>
+      {msg && (
+        <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+          {msg}
+        </div>
+      )}
+      {items === null ? (
+        <IdeLoader label='Loading deployments…' />
+      ) : items.length === 0 ? (
+        <div className='ide-empty'>No permanent deployments yet.</div>
+      ) : (
+        <div className='ide-card' style={{padding: 0}}>
+          {items.map((d, i) => (
+            <div
+              key={d.id}
+              style={{
+                padding: '12px 16px',
+                borderBottom: i < items.length - 1 ? '1px solid var(--ide-border)' : 'none',
+              }}
+            >
+              <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6}}>
+                <IdeBadge kind={statusKind(d.status)}>{d.status}</IdeBadge>
+                <span className='ide-mono' style={{fontSize: 12.5, fontWeight: 600}}>
+                  {d.versionTag || d.id.slice(0, 8)}
+                </span>
+                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{d.strategy}</span>
+                <Link
+                  to={`/result/${d.runId}`}
+                  style={{fontSize: 11, color: 'var(--ide-blue)', marginLeft: 'auto'}}
+                >
+                  run ↗
+                </Link>
+              </div>
+              {d.serviceUrl && (
+                <a
+                  href={d.serviceUrl}
+                  target='_blank'
+                  rel='noreferrer'
+                  className='ide-mono'
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--ide-blue)',
+                    wordBreak: 'break-all',
+                    display: 'block',
+                    marginBottom: 8,
+                  }}
+                >
+                  {d.serviceUrl}
+                </a>
+              )}
+              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
+                Created {fmtWhen(d.createdAt)}
+                {d.ttlExpiresAt ? ` · TTL ${fmtWhen(d.ttlExpiresAt)}` : ''}
+              </div>
+              <div style={{display: 'flex', gap: 6}}>
+                <button
+                  className='ide-btn ghost'
+                  style={{padding: '4px 10px'}}
+                  disabled={busy === `rb${d.id}`}
+                  onClick={() =>
+                    act(
+                      `rb${d.id}`,
+                      () => api.rollbackDeployment(d.id),
+                      'Roll this deployment back to the previous revision?',
+                    )
+                  }
+                >
+                  Rollback
+                </button>
+                <button
+                  className='ide-btn ghost'
+                  style={{padding: '4px 10px', color: 'var(--ide-red)'}}
+                  disabled={busy === `rm${d.id}`}
+                  onClick={() =>
+                    act(
+                      `rm${d.id}`,
+                      () => api.deleteDeployment(d.id),
+                      'Delete this deployment record? The Cloud Run service is torn down.',
+                    )
+                  }
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
