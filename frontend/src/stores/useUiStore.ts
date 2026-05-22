@@ -28,6 +28,15 @@ type ViewMode = 'pro' | 'project';
  */
 type Theme = 'dark' | 'light' | 'system';
 
+/**
+ * UI chrome A/B switch (2026-05-22 redesign). 'signal' = the current production
+ * chrome; 'ide' = the new VS Code-style chrome. Per-user choice persisted to
+ * localStorage; a public feature flag (`ui.ide.default`) can flip the default
+ * for a rollout cohort when the user hasn't chosen explicitly. Applied to
+ * `<html data-ui>` so CSS can key off it too.
+ */
+type UiMode = 'signal' | 'ide';
+
 interface UiStore {
   sidebarExpanded: boolean;
   mobileSidebarOpen: boolean;
@@ -48,6 +57,8 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
+  /** UI chrome A/B mode (signal | ide). Persists to localStorage. */
+  uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
    * viewing on a /projects/:id/dashboard route. ProjectDashboardPage sets
@@ -70,6 +81,8 @@ interface UiStore {
   setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
+  setUiMode: (m: UiMode) => void;
+  toggleUiMode: () => void;
   setCurrentProjectName: (name: string | null) => void;
 }
 
@@ -92,6 +105,19 @@ function initTheme(): Theme {
     document.documentElement.dataset.theme = theme === 'system' ? resolveSystemTheme() : theme;
   }
   return theme;
+}
+
+// UI chrome A/B mode — applied to <html data-ui> pre-paint so the right chrome
+// renders without a flash. Defaults to 'signal' (production); the user's explicit
+// choice in es:uiMode wins. A rollout flag can override the default at app boot
+// (see ChromeShell) for users who haven't chosen.
+function initUiMode(): UiMode {
+  const saved = localStorage.getItem('es:uiMode');
+  const mode: UiMode = saved === 'ide' ? 'ide' : 'signal';
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.ui = mode;
+  }
+  return mode;
 }
 
 // M-026 (Wave 1) — first-time users land with sidebar expanded so they can
@@ -119,6 +145,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
   theme: initTheme(),
+  uiMode: initUiMode(),
   currentProjectName: null,
   viewMode: ((): ViewMode => {
     const saved = localStorage.getItem('es:viewMode');
@@ -172,6 +199,18 @@ export const useUiStore = create<UiStore>((set, get) => ({
     }
     set({theme: next});
   },
+  setUiMode: (m) => {
+    localStorage.setItem('es:uiMode', m);
+    if (typeof document !== 'undefined') document.documentElement.dataset.ui = m;
+    set({uiMode: m});
+  },
+  toggleUiMode: () => {
+    const next: UiMode = get().uiMode === 'ide' ? 'signal' : 'ide';
+    localStorage.setItem('es:uiMode', next);
+    if (typeof document !== 'undefined') document.documentElement.dataset.ui = next;
+    set({uiMode: next});
+  },
+
   setCurrentProjectName: (name) => set({currentProjectName: name}),
 
   addToast: (t) => {

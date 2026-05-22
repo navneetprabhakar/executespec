@@ -1,8 +1,9 @@
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// Signal — the only design now. v2/v3/v4 chromes retired 2026-05-15.
-import SignalShell from '@/signal/components/Shell';
+// Chrome A/B switch (2026-05-22 redesign): renders the production Signal shell
+// or the new VS Code-style IDE shell based on useUiStore.uiMode + a rollout flag.
+import ChromeShell from '@/ide/ChromeShell';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -138,7 +139,7 @@ export default function App() {
 
       {/* ───── Protected app ───── */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<SignalShell />}>
+        <Route element={<ChromeShell />}>
           {/* Default + run loop */}
           <Route path='/' element={<Navigate to='/home' replace />} />
           <Route path='/home' element={<HomePage />} />
