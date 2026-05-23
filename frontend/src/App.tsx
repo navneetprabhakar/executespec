@@ -32,6 +32,7 @@ import {
   IdeMigrationDetail,
   IdeSpecTemplates,
 } from '@/ide/IdeDiscovery';
+import {IdeApiKeys, IdeOrgMembers, IdeOrgSettings} from '@/ide/IdeOrg';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -62,12 +63,7 @@ import ProjectComposePage from '@/signal/pages/project/ProjectComposePage';
 import AccountPage from '@/signal/pages/account/AccountPage';
 import BillingPage from '@/signal/pages/account/BillingPage';
 import PlansPage from '@/signal/pages/account/PlansPage';
-import {
-  TopupPage,
-  IntegrationsPage,
-  ApiKeysPage,
-  OrgMembersPage,
-} from '@/signal/pages/account/MiscAccountPages';
+import {TopupPage, IntegrationsPage} from '@/signal/pages/account/MiscAccountPages';
 
 // Cross-cutting + admin
 import {AdminPage, SharedPage} from '@/signal/pages/MiscPages';
@@ -81,7 +77,7 @@ import {
   AcceptInvitePage,
   DeploymentsPage,
 } from '@/signal/pages/ExtraPages';
-import {TermsPage, PrivacyPage, DpaPage, OrgSettingsPage} from '@/signal/pages/LegalPages';
+import {TermsPage, PrivacyPage, DpaPage} from '@/signal/pages/LegalPages';
 
 // avoid an unused-import error for TopupPage (route uses a redirect)
 void TopupPage;
@@ -198,9 +194,9 @@ function protectedChildren(ide: boolean) {
       <Route path='/plans' element={<PlansPage />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
       <Route path='/integrations' element={ide ? <IdeIntegrations /> : <IntegrationsPage />} />
-      <Route path='/api-keys' element={<ApiKeysPage />} />
-      <Route path='/org-members' element={<OrgMembersPage />} />
-      <Route path='/org/settings' element={<OrgSettingsPage />} />
+      <Route path='/api-keys' element={<IdeApiKeys />} />
+      <Route path='/org-members' element={<IdeOrgMembers />} />
+      <Route path='/org/settings' element={<IdeOrgSettings />} />
 
       {/* Discover */}
       <Route path='/insights' element={<IdeInsights />} />
