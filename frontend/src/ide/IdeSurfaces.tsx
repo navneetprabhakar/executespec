@@ -254,6 +254,18 @@ export function IdeCompose() {
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
 
+  // Compose handoff — a discovery surface (library / templates / chat compile)
+  // may stash a pre-filled spec under `signal:pending-spec` before navigating
+  // here. Consume it once on mount so the textarea pre-fills, mirroring the
+  // Signal ComposePage behaviour.
+  useEffect(() => {
+    const pending = sessionStorage.getItem('signal:pending-spec');
+    if (pending) {
+      setSpec(pending);
+      sessionStorage.removeItem('signal:pending-spec');
+    }
+  }, []);
+
   useEffect(() => {
     if (!permissions) {
       api
