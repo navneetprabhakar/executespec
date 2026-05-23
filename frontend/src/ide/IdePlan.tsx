@@ -129,6 +129,20 @@ export default function IdePlan() {
               <span>Hard cap</span>
               <span>{usd(run.hardCapUsd)}</span>
             </div>
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 10,
+                borderTop: '1px solid var(--ide-border)',
+                fontSize: 12,
+                color: 'var(--ide-fg-muted)',
+                lineHeight: 1.5,
+              }}
+            >
+              1 credit ≈ $5 of model spend. Charged only when you approve — and{' '}
+              <strong style={{color: 'var(--ide-fg)'}}>fully refunded if the run fails</strong>.
+              Spend never exceeds the hard cap.
+            </div>
           </div>
 
           <div className='ide-h2'>Tasks · {tasks.length}</div>
