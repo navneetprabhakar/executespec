@@ -23,6 +23,15 @@ import {
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
 import {IdeIntegrations, IdeAdmin} from '@/ide/IdeSettings';
+import IdeNotifications, {IdeSearch, IdeAudit, IdeEmptyProject, IdeMoreMenu} from '@/ide/IdeSystem';
+import {
+  IdeInsights,
+  IdeLibrary,
+  IdeLibraryDetail,
+  IdeMigrations,
+  IdeMigrationDetail,
+  IdeSpecTemplates,
+} from '@/ide/IdeDiscovery';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -61,30 +70,16 @@ import {
 } from '@/signal/pages/account/MiscAccountPages';
 
 // Cross-cutting + admin
-import {
-  NotificationsPage,
-  SearchPage,
-  MorePage,
-  AdminPage,
-  SharedPage,
-} from '@/signal/pages/MiscPages';
+import {AdminPage, SharedPage} from '@/signal/pages/MiscPages';
 
 // Extras (Library, Migrations, etc.)
 import {
-  InsightsPage,
-  LibraryPage,
-  LibraryDetailPage,
-  MigrationsPage,
-  MigrationDetailPage,
   TrustPage,
-  EmptyProjectPage,
   PublicPricingPage,
   ForgotPasswordPage,
   ResetPasswordPage,
   AcceptInvitePage,
-  AuditLogPage,
   DeploymentsPage,
-  SpecTemplatesPage,
 } from '@/signal/pages/ExtraPages';
 import {TermsPage, PrivacyPage, DpaPage, OrgSettingsPage} from '@/signal/pages/LegalPages';
 
@@ -152,7 +147,7 @@ function protectedChildren(ide: boolean) {
 
       {/* Projects */}
       <Route path='/projects' element={ide ? <IdeProjects /> : <ProjectsPage />} />
-      <Route path='/projects/empty' element={<EmptyProjectPage />} />
+      <Route path='/projects/empty' element={<IdeEmptyProject />} />
       <Route path='/projects/:projectId' element={ide ? <IdeProject /> : <ProjectComposePage />} />
       <Route
         path='/projects/:projectId/pulse'
@@ -208,19 +203,19 @@ function protectedChildren(ide: boolean) {
       <Route path='/org/settings' element={<OrgSettingsPage />} />
 
       {/* Discover */}
-      <Route path='/insights' element={<InsightsPage />} />
-      <Route path='/library' element={<LibraryPage />} />
-      <Route path='/library/:slug' element={<LibraryDetailPage />} />
-      <Route path='/migrations' element={<MigrationsPage />} />
-      <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
-      <Route path='/templates' element={<SpecTemplatesPage />} />
-      <Route path='/audit' element={<AuditLogPage />} />
+      <Route path='/insights' element={<IdeInsights />} />
+      <Route path='/library' element={<IdeLibrary />} />
+      <Route path='/library/:slug' element={<IdeLibraryDetail />} />
+      <Route path='/migrations' element={<IdeMigrations />} />
+      <Route path='/migrations/:slug' element={<IdeMigrationDetail />} />
+      <Route path='/templates' element={<IdeSpecTemplates />} />
+      <Route path='/audit' element={<IdeAudit />} />
       <Route path='/deployments' element={ide ? <IdeDeployments /> : <DeploymentsPage />} />
 
       {/* System */}
-      <Route path='/notifications' element={<NotificationsPage />} />
-      <Route path='/search' element={<SearchPage />} />
-      <Route path='/more' element={<MorePage />} />
+      <Route path='/notifications' element={<IdeNotifications />} />
+      <Route path='/search' element={<IdeSearch />} />
+      <Route path='/more' element={<IdeMoreMenu />} />
       <Route path='/admin' element={ide ? <IdeAdmin /> : <AdminPage />} />
       <Route path='/admin/*' element={<AdminPage />} />
     </>
