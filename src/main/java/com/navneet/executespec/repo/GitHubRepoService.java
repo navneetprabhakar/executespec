@@ -1,9 +1,11 @@
 package com.navneet.executespec.repo;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -516,9 +518,12 @@ public class GitHubRepoService {
                           + "/"
                           + ownerRepo[1]
                           + "/contents/"
-                          + relativePath
+                          // URL-encode the path (preserving '/') so Next.js dynamic-route
+                          // segments like [contactId] don't throw "Illegal character in path".
+                          + URLEncoder.encode(relativePath, StandardCharsets.UTF_8)
+                              .replace("%2F", "/")
                           + "?ref="
-                          + effectiveBranch))
+                          + URLEncoder.encode(effectiveBranch, StandardCharsets.UTF_8)))
               .header("Authorization", "Bearer " + effectivePat)
               .header("Accept", "application/vnd.github+json")
               .GET()
