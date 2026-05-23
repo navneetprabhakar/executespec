@@ -573,66 +573,30 @@ Total: ~88 prompt files. Prompt-resource verification at boot (`PromptResourceVe
 
 ---
 
-## 8. Frontend Signal pages
+## 8. Frontend — chrome + pages
 
-Under `frontend/src/signal/pages/`. Routed from `frontend/src/App.tsx`. Signal is the only chrome.
+The **VS Code-style IDE workspace** (`frontend/src/ide/`) is the only chrome since the 2026-05-22 IDE-only switch; `App.tsx` mounts `IdeWorkspace` for every protected route. **The live protected surfaces are all IDE-native** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md) for the full `ide/` map: `IdeWorkspace` · `IdeSurfaces` (Welcome / Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, 10 sub-tabs) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + ⌘K palette + tokenizer).
 
-### Top-level pages
+The **2026-05-23 cleanup deleted 22 orphaned `signal/pages` files** (run-loop + `project/` + `account/`, incl. Billing/Plans) plus the dead `Shell.tsx`. The only `signal/pages/` that survive are the **standalone public pages + admin**, routed directly with no IDE chrome (by design):
 
-| File | Routes | Purpose |
-| --- | --- | --- |
-| `HomePage.tsx` | `/home` | Dashboard — greeting, live-run hero, quick-actions, recent runs, projects |
-| `ComposePage.tsx` | `/compose` | Spec composer (sandbox/project runs) with cost cap + estimate |
-| `LivePage.tsx` | `/live`, `/live/:runId` | Live-run watch — SSE event stream + 8s poll |
-| `PlanPage.tsx` | `/plan`, `/plan/:runId` | Plan-gate — approve/cancel |
-| `ResultPage.tsx` | `/result`, `/result/:runId`, `/runs/:runShort`, `/projects/:projectId/runs/:runShort` | 9-tab run result (Overview / Tasks / Timeline / Code / Cost / PR / Validation / Tests / Chat) |
-| `AllRunsPage.tsx` | `/runs` | All-runs list with filter tabs (All / Live / Shipped / Needs / Failed / Archived) |
-| `ProjectsPage.tsx` | `/projects` | Projects directory (Mine / Shared / Archived) |
-| `AuthCallbackPage.tsx` | `/auth/callback` | OAuth2 callback handler |
-
-### Multi-export bundles
-
-| File | Exports |
+| File | Exports / routes |
 | --- | --- |
 | `AuthPages.tsx` | `LoginPage` (`/login`), `SignupPage` (`/register`, `/signup`), `VerifyPage` (`/verify`, `/verify-email`), `WelcomePage` (`/welcome`) |
-| `MiscPages.tsx` | `NotificationsPage` (`/notifications`), `SearchPage` (`/search`), `MorePage` (`/more`), `AdminPage` (`/admin`, `/admin/*`), `SharedPage` (`/shared/:token`, `/reports/shared/:token`, `/projects/snapshot/:token`) |
-| `ExtraPages.tsx` | `InsightsPage` (`/insights`), `LibraryPage` (`/library`), `LibraryDetailPage` (`/library/:slug`), `MigrationsPage` (`/migrations`), `MigrationDetailPage` (`/migrations/:slug`), `TrustPage` (`/trust`), `EmptyProjectPage` (`/projects/empty`), `PublicPricingPage` (`/pricing`), `ForgotPasswordPage` (`/forgot-password`), `ResetPasswordPage` (`/reset-password`), `AcceptInvitePage` (`/accept-invite`), `AuditLogPage` (`/audit`), `DeploymentsPage` (`/deployments`), `SpecTemplatesPage` (`/templates`) |
-| `LegalPages.tsx` | `TermsPage` (`/terms`), `PrivacyPage` (`/privacy`), `DpaPage` (`/dpa`), `OrgSettingsPage` (`/org/settings`) |
+| `AuthCallbackPage.tsx` | OAuth2 callback (`/auth/callback`) |
+| `ExtraPages.tsx` | `ForgotPasswordPage` (`/forgot-password`), `ResetPasswordPage` (`/reset-password`), `AcceptInvitePage` (`/accept-invite`), `PublicPricingPage` (`/pricing`), `TrustPage` (`/trust`) |
+| `LegalPages.tsx` | `TermsPage` (`/terms`), `PrivacyPage` (`/privacy`), `DpaPage` (`/dpa`) |
+| `MiscPages.tsx` | `AdminPage` (`/admin/*` deep links), `SharedPage` (`/shared/:token`, `/reports/shared/:token`, `/projects/snapshot/:token`) |
 
-### Per-project pages (under `pages/project/`)
-
-| File | Route | Purpose |
-| --- | --- | --- |
-| `ProjectComposePage.tsx` | `/projects/:projectId` (default) | Per-project spec composer |
-| `ProjectPulsePage.tsx` | `/projects/:projectId/pulse` | Project dashboard (Pulse tab) |
-| `ProjectReposPage.tsx` | `/projects/:projectId/repos` | Linked repos with health + link/unlink |
-| `ProjectRunsPage.tsx` | `/projects/:projectId/runs` | 2-sub-tab — Runs + PRs |
-| `ProjectCodePage.tsx` | `/projects/:projectId/code` | 6-sub-tab — Browse / Tech debt / Code review / Health / Standards / Docs |
-| `ProjectChatPage.tsx` | `/projects/:projectId/chat` | Project-scoped chat (TEAM+/ENTERPRISE) |
-| `ProjectActivityPage.tsx` | `/projects/:projectId/activity` | Activity feed with type filter |
-| `ProjectMembersPage.tsx` | `/projects/:projectId/members` | Members + share-links (V198-gated invite) |
-| `ProjectArchitecturePage.tsx` | `/projects/:projectId/architecture` | 5-sub-tab — Current / Versions / Invariants / ADRs / Contracts |
-| `ProjectSettingsPage.tsx` | `/projects/:projectId/settings` | 3-sub-tab — Settings / Documents / Memory + danger zone |
-| `ProjectTabs.tsx` | (shared tab strip) | Per-project tab navigation |
-
-### Account section (under `pages/account/`)
-
-| File | Routes | Purpose |
-| --- | --- | --- |
-| `AccountPage.tsx` | `/account`, `/settings`, `/settings/manage` | Account hub — quick-links, prefs, notification matrix |
-| `BillingPage.tsx` | `/billing` | Billing overview — tier, usage gauge, invoices |
-| `PlansPage.tsx` | `/plans` | Plan comparison (monthly/yearly toggle) |
-| `MiscAccountPages.tsx` | `/topup`, `/integrations`, `/api-keys`, `/org-members` | TopupPage / IntegrationsPage / ApiKeysPage / OrgMembersPage |
+> The multi-export bundles (`ExtraPages`, `MiscPages`, `LegalPages`) still carry a few now-dead exports (e.g. `InsightsPage`, `NotificationsPage`, `OrgSettingsPage`, `DeploymentsPage`) whose routes moved to `ide/`. They're unimported + tree-shaken from the bundle; slated for removal in a follow-up.
 
 ---
 
 ## 9. Frontend Signal components
 
-Under `frontend/src/signal/components/`. CSS lives at `frontend/src/signal/signal.css` (imported by `Shell.tsx`).
+Under `frontend/src/signal/components/` — shared primitives still reused by the IDE chrome + the surviving public pages. CSS lives at `frontend/src/signal/signal.css` (re-mapped onto the `--ide-*` tokens by `ide/ide.css`). The Signal shell (`Shell.tsx`) was deleted in the 2026-05-23 cleanup; `Chrome.tsx` (TopBar / SectionHeader / …) survives because the public pages use it.
 
 | Component | Purpose |
 | --- | --- |
-| `Shell.tsx` | App shell — desktop sidebar + mobile drawer + bottom tab bar + theme toggle |
 | `AuthLayout.tsx` | 2-column auth shell (form left, brand panel right ≥920px) |
 | `Compose.tsx` | Compose primitives — `LiveHero`, `LiveHeroAction`, `ScoreCard`, `StreamCard`, `PrCard`, `ComposerCard`, `TaskLine` |
 | `Primitives.tsx` | Base controls — `Feed`, `Card`, `Row`, `Chip`, `StatusPill`, `Button`, `KvList`, `TabsStrip` |
