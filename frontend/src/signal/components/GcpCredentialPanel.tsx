@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {Button} from '@/signal/components/Primitives';
+import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
 
 /**
@@ -21,6 +22,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const [validation, setValidation] = useState<api.ValidationResult | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   function load() {
     api
@@ -63,8 +65,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
       setBusy('');
     }
   }
-  async function disconnect() {
-    if (!window.confirm('Disconnect the GCP deploy credential?')) return;
+  async function doDisconnect() {
     setBusy('del');
     setMsg('');
     try {
@@ -165,7 +166,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
                 className='ide-btn ghost'
                 style={{padding: '4px 10px', color: 'var(--ide-red)'}}
                 disabled={busy === 'del'}
-                onClick={disconnect}
+                onClick={() => setConfirmDisconnect(true)}
               >
                 Disconnect
               </button>
@@ -175,7 +176,12 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
               <Button kind='secondary' sm onClick={validate} disabled={busy === 'val'}>
                 {busy === 'val' ? 'Validating…' : 'Validate'}
               </Button>
-              <Button kind='ghost' sm onClick={disconnect} disabled={busy === 'del'}>
+              <Button
+                kind='ghost'
+                sm
+                onClick={() => setConfirmDisconnect(true)}
+                disabled={busy === 'del'}
+              >
                 Disconnect
               </Button>
             </div>
@@ -247,6 +253,17 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
           )}
         </>
       )}
+
+      <ConfirmModal
+        open={confirmDisconnect}
+        title='Disconnect GCP credential'
+        body='Disconnect the GCP deploy credential?'
+        confirmLabel='Disconnect'
+        danger
+        busy={busy === 'del'}
+        onConfirm={doDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+      />
     </div>
   );
 }

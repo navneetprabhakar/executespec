@@ -7,6 +7,7 @@ import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {Markdown} from '@/signal/components/Markdown';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
+import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 const tok = () => localStorage.getItem('access_token') ?? '';
@@ -88,6 +89,7 @@ export function IdeProjectChat() {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
   // Backend gates project chat behind TEAM+ (TierConfig.isExecutionViewEnabled).
   // FREE / PRO hit a 403 on chat/info → show an upgrade card instead of a broken shell.
   const [gated, setGated] = useState(false);
@@ -201,7 +203,6 @@ export function IdeProjectChat() {
     }
   }
   async function clearAll() {
-    if (!window.confirm('Clear chat history? All messages are deleted permanently.')) return;
     setErr('');
     try {
       await api.clearProjectChat(projectId);
@@ -236,7 +237,7 @@ export function IdeProjectChat() {
         </button>
         <button
           className='ide-btn ghost'
-          onClick={clearAll}
+          onClick={() => setConfirmClear(true)}
           disabled={gated}
           style={{color: 'var(--ide-red)'}}
         >
@@ -338,6 +339,16 @@ export function IdeProjectChat() {
           {busy ? '…' : 'Send'}
         </button>
       </div>
+
+      <ConfirmModal
+        open={confirmClear}
+        title='Clear chat history'
+        body='Clear chat history? All messages are deleted permanently.'
+        confirmLabel='Clear'
+        danger
+        onConfirm={clearAll}
+        onClose={() => setConfirmClear(false)}
+      />
     </div>
   );
 }
@@ -843,6 +854,8 @@ export function IdeProjectArchitecture() {
     api.ContractCoverageResponse | null
   > | null>(null);
   const [contractBusy, setContractBusy] = useState('');
+  // Contract whose drift the user is dismissing (drives the PromptModal).
+  const [dismissFor, setDismissFor] = useState<string | null>(null);
 
   // Version diff picker
   const [diffFrom, setDiffFrom] = useState<number | null>(null);
@@ -962,9 +975,7 @@ export function IdeProjectArchitecture() {
     }
   }
 
-  async function dismissDrift(contractId: string) {
-    const rationale = window.prompt('Why dismiss this drift? (≥10 chars)')?.trim();
-    if (!rationale || rationale.length < 10) return;
+  async function dismissDrift(contractId: string, rationale: string) {
     setContractBusy(`dismiss-${contractId}`);
     setErr('');
     setMsg('');
@@ -1395,7 +1406,7 @@ export function IdeProjectArchitecture() {
                         className='ide-btn ghost'
                         style={{padding: '3px 9px', fontSize: 12}}
                         disabled={contractBusy === `dismiss-${driftIds[0]}`}
-                        onClick={() => dismissDrift(driftIds[0])}
+                        onClick={() => setDismissFor(driftIds[0])}
                       >
                         Dismiss drift
                       </button>
@@ -1414,6 +1425,29 @@ export function IdeProjectArchitecture() {
             </button>
           </>
         ))}
+
+      <PromptModal
+        open={!!dismissFor}
+        title='Dismiss drift'
+        fields={[
+          {
+            name: 'rationale',
+            label: 'Why dismiss this drift? (≥10 chars)',
+            multiline: true,
+            required: true,
+          },
+        ]}
+        submitLabel='Dismiss'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); ≥10-char guard preserved below.
+        onSubmit={async (v) => {
+          const contractId = dismissFor;
+          setDismissFor(null);
+          const rationale = v.rationale.trim();
+          if (!contractId || !rationale || rationale.length < 10) return;
+          await dismissDrift(contractId, rationale);
+        }}
+        onClose={() => setDismissFor(null)}
+      />
     </div>
   );
 }
@@ -1436,6 +1470,8 @@ export function IdeProjectMembers() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [revokeFor, setRevokeFor] = useState<string | null>(null);
+  const [removeFor, setRemoveFor] = useState<string | null>(null);
 
   function load() {
     api
@@ -1495,7 +1531,6 @@ export function IdeProjectMembers() {
   }
 
   async function revokeLink(linkId: string) {
-    if (!window.confirm('Revoke this share link?')) return;
     try {
       await api.revokeShareLink(projectId, linkId);
       setShareLinks((p) => (p ?? []).filter((l) => l.id !== linkId));
@@ -1506,7 +1541,6 @@ export function IdeProjectMembers() {
   }
 
   async function remove(userId: string) {
-    if (!window.confirm('Remove this member from the project?')) return;
     try {
       await api.removeProjectMember(projectId, userId);
       load();
@@ -1570,7 +1604,7 @@ export function IdeProjectMembers() {
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                    onClick={() => remove(m.userId)}
+                    onClick={() => setRemoveFor(m.userId)}
                   >
                     Remove
                   </button>
@@ -1700,7 +1734,7 @@ export function IdeProjectMembers() {
                 <button
                   className='ide-btn ghost'
                   style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                  onClick={() => revokeLink(s.id)}
+                  onClick={() => setRevokeFor(s.id)}
                 >
                   Revoke
                 </button>
@@ -1717,6 +1751,31 @@ export function IdeProjectMembers() {
       >
         {busy === 'share' ? 'Creating…' : 'Create project snapshot link'}
       </button>
+
+      <ConfirmModal
+        open={!!revokeFor}
+        title='Revoke share link'
+        body='Revoke this share link?'
+        confirmLabel='Revoke'
+        danger
+        onConfirm={async () => {
+          const id = revokeFor;
+          if (id) await revokeLink(id);
+        }}
+        onClose={() => setRevokeFor(null)}
+      />
+      <ConfirmModal
+        open={!!removeFor}
+        title='Remove member'
+        body='Remove this member from the project?'
+        confirmLabel='Remove'
+        danger
+        onConfirm={async () => {
+          const id = removeFor;
+          if (id) await remove(id);
+        }}
+        onClose={() => setRemoveFor(null)}
+      />
     </div>
   );
 }
@@ -1789,6 +1848,9 @@ export function IdeProjectSettings() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [deleteDocFor, setDeleteDocFor] = useState<{docId: string; label: string} | null>(null);
+  // Danger-zone project action awaiting confirmation.
+  const [projectAction, setProjectAction] = useState<'archive' | 'delete' | null>(null);
 
   // Settings form
   const [name, setName] = useState('');
@@ -1880,8 +1942,7 @@ export function IdeProjectSettings() {
     }
   }
 
-  async function deleteDoc(docId: string, label: string) {
-    if (!window.confirm(`Delete "${label}" from the RAG index?`)) return;
+  async function deleteDoc(docId: string) {
     try {
       await api.deleteProjectDocument(projectId, docId);
       refreshDocs();
@@ -2021,28 +2082,13 @@ export function IdeProjectSettings() {
 
               <div className='ide-h2'>Danger zone</div>
               <div className='ide-card' style={{display: 'flex', gap: 8}}>
-                <button
-                  className='ide-btn ghost'
-                  onClick={() =>
-                    window.confirm('Archive this project?') &&
-                    api
-                      .archiveProject(projectId)
-                      .then(() => navigate('/projects'))
-                      .catch((e) => setErr(e instanceof Error ? e.message : 'Archive failed.'))
-                  }
-                >
+                <button className='ide-btn ghost' onClick={() => setProjectAction('archive')}>
                   Archive
                 </button>
                 <button
                   className='ide-btn ghost'
                   style={{color: 'var(--ide-red)'}}
-                  onClick={() =>
-                    window.confirm('Delete this project? This cannot be undone.') &&
-                    api
-                      .deleteProject(projectId)
-                      .then(() => navigate('/projects'))
-                      .catch((e) => setErr(e instanceof Error ? e.message : 'Delete failed.'))
-                  }
+                  onClick={() => setProjectAction('delete')}
                 >
                   Delete
                 </button>
@@ -2120,7 +2166,7 @@ export function IdeProjectSettings() {
                         <button
                           className='ide-btn ghost'
                           style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                          onClick={() => deleteDoc(d.id, label)}
+                          onClick={() => setDeleteDocFor({docId: d.id, label})}
                         >
                           ×
                         </button>
@@ -2180,6 +2226,48 @@ export function IdeProjectSettings() {
           )}
         </>
       )}
+
+      <ConfirmModal
+        open={!!deleteDocFor}
+        title='Delete document'
+        body={deleteDocFor ? `Delete "${deleteDocFor.label}" from the RAG index?` : ''}
+        confirmLabel='Delete'
+        danger
+        onConfirm={async () => {
+          const d = deleteDocFor;
+          if (d) await deleteDoc(d.docId);
+        }}
+        onClose={() => setDeleteDocFor(null)}
+      />
+      <ConfirmModal
+        open={projectAction === 'archive'}
+        title='Archive project'
+        body='Archive this project?'
+        confirmLabel='Archive'
+        onConfirm={() => {
+          setProjectAction(null);
+          api
+            .archiveProject(projectId)
+            .then(() => navigate('/projects'))
+            .catch((e) => setErr(e instanceof Error ? e.message : 'Archive failed.'));
+        }}
+        onClose={() => setProjectAction(null)}
+      />
+      <ConfirmModal
+        open={projectAction === 'delete'}
+        title='Delete project'
+        body='Delete this project? This cannot be undone.'
+        confirmLabel='Delete'
+        danger
+        onConfirm={() => {
+          setProjectAction(null);
+          api
+            .deleteProject(projectId)
+            .then(() => navigate('/projects'))
+            .catch((e) => setErr(e instanceof Error ? e.message : 'Delete failed.'));
+        }}
+        onClose={() => setProjectAction(null)}
+      />
     </div>
   );
 }

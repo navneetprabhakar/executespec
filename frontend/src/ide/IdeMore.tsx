@@ -6,6 +6,7 @@ import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor, relTime} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
+import {ConfirmModal} from '@/signal/components/Modal';
 
 function fmtWhen(iso?: string | null): string {
   if (!iso) return '—';
@@ -262,6 +263,7 @@ export function IdeAccount() {
   const [exporting, setExporting] = useState(false);
   const [dsarBusy, setDsarBusy] = useState(false);
   const [erasing, setErasing] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
   const [msg, setMsg] = useState('');
   // Contact us / send feedback
   const [contactOpen, setContactOpen] = useState(false);
@@ -378,14 +380,8 @@ export function IdeAccount() {
 
   // Right-to-erasure — DELETE /api/auth/me/data soft-deletes the caller's
   // completed/failed runs + schedules workspace teardown (GDPR Art. 17). Strong
-  // window.confirm warning; no api helper, so direct fetch with the bearer.
+  // confirmation modal; no api helper, so direct fetch with the bearer.
   async function onErase() {
-    if (
-      !window.confirm(
-        'Delete your data? This soft-deletes every completed and failed run on your account and schedules the workspaces for permanent deletion. Active runs must be cancelled first. This cannot be undone.',
-      )
-    )
-      return;
     setErasing(true);
     setMsg('');
     try {
@@ -778,7 +774,7 @@ export function IdeAccount() {
             className='ide-btn ghost'
             style={{padding: '6px 14px', flexShrink: 0, color: 'var(--ide-red)'}}
             disabled={erasing}
-            onClick={onErase}
+            onClick={() => setEraseOpen(true)}
           >
             {erasing ? 'Deleting…' : 'Delete'}
           </button>
@@ -796,6 +792,17 @@ export function IdeAccount() {
       >
         Sign out
       </button>
+
+      <ConfirmModal
+        open={eraseOpen}
+        title='Delete my data'
+        body='Delete your data? This soft-deletes every completed and failed run on your account and schedules the workspaces for permanent deletion. Active runs must be cancelled first. This cannot be undone.'
+        confirmLabel='Delete'
+        danger
+        busy={erasing}
+        onConfirm={onErase}
+        onClose={() => setEraseOpen(false)}
+      />
     </div>
   );
 }
@@ -808,6 +815,14 @@ export function IdeDeployments() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  // A destructive deployment action awaiting confirmation (rollback / delete).
+  const [pendingAct, setPendingAct] = useState<{
+    key: string;
+    fn: () => Promise<unknown>;
+    title: string;
+    body: string;
+    confirmLabel: string;
+  } | null>(null);
 
   function load() {
     api
@@ -820,8 +835,7 @@ export function IdeDeployments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function act(key: string, fn: () => Promise<unknown>, confirm?: string) {
-    if (confirm && !window.confirm(confirm)) return;
+  async function act(key: string, fn: () => Promise<unknown>) {
     setBusy(key);
     setMsg('');
     try {
@@ -902,11 +916,13 @@ export function IdeDeployments() {
                   style={{padding: '4px 10px'}}
                   disabled={busy === `rb${d.id}`}
                   onClick={() =>
-                    act(
-                      `rb${d.id}`,
-                      () => api.rollbackDeployment(d.id),
-                      'Roll this deployment back to the previous revision?',
-                    )
+                    setPendingAct({
+                      key: `rb${d.id}`,
+                      fn: () => api.rollbackDeployment(d.id),
+                      title: 'Roll back deployment',
+                      body: 'Roll this deployment back to the previous revision?',
+                      confirmLabel: 'Roll back',
+                    })
                   }
                 >
                   Rollback
@@ -916,11 +932,13 @@ export function IdeDeployments() {
                   style={{padding: '4px 10px', color: 'var(--ide-red)'}}
                   disabled={busy === `rm${d.id}`}
                   onClick={() =>
-                    act(
-                      `rm${d.id}`,
-                      () => api.deleteDeployment(d.id),
-                      'Delete this deployment record? The Cloud Run service is torn down.',
-                    )
+                    setPendingAct({
+                      key: `rm${d.id}`,
+                      fn: () => api.deleteDeployment(d.id),
+                      title: 'Delete deployment',
+                      body: 'Delete this deployment record? The Cloud Run service is torn down.',
+                      confirmLabel: 'Delete',
+                    })
                   }
                 >
                   Delete
@@ -930,6 +948,21 @@ export function IdeDeployments() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!pendingAct}
+        title={pendingAct?.title ?? ''}
+        body={pendingAct?.body ?? ''}
+        confirmLabel={pendingAct?.confirmLabel ?? 'Confirm'}
+        danger
+        busy={!!pendingAct && busy === pendingAct.key}
+        onConfirm={async () => {
+          const p = pendingAct;
+          if (!p) return;
+          await act(p.key, p.fn);
+        }}
+        onClose={() => setPendingAct(null)}
+      />
     </div>
   );
 }

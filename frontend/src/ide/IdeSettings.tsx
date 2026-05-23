@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 
 // ───────────────────────── Integrations ─────────────────────────
 export function IdeIntegrations() {
@@ -285,6 +286,8 @@ function AdminOverview() {
 // ───────────────────────── Users ─────────────────────────
 function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
+  const [suspendFor, setSuspendFor] = useState<api.AuthUser | null>(null);
+  const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
   const load = () =>
     api
@@ -317,9 +320,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       })
       .catch(bad);
   }
-  function setStatus(u: api.AuthUser, status: string) {
-    if (status === 'SUSPENDED' && !window.confirm(`Suspend ${u.email}?`)) return;
-    api
+  function applyStatus(u: api.AuthUser, status: string) {
+    return api
       .adminUpdateUserStatus(u.id, status)
       .then((r) => {
         patch(r);
@@ -327,15 +329,9 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       })
       .catch(bad);
   }
-  function grant(u: api.AuthUser) {
-    const raw = window.prompt(`Grant how many runs to ${u.email}?`, '10');
-    if (!raw) return;
-    const qty = Number(raw);
-    if (!Number.isFinite(qty) || qty <= 0) return;
-    api
-      .adminGrantUserRuns(u.id, qty, null, 'admin grant')
-      .then(() => ok(`Granted ${qty} runs to ${u.email}`))
-      .catch(bad);
+  function setStatus(u: api.AuthUser, status: string) {
+    if (status === 'SUSPENDED') setSuspendFor(u);
+    else void applyStatus(u, status);
   }
 
   if (!users) return <IdeLoader label='Loading users…' />;
@@ -363,13 +359,45 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
             <button
               className='ide-btn ghost'
               style={{padding: '3px 9px', fontSize: 12}}
-              onClick={() => grant(u)}
+              onClick={() => setGrantFor(u)}
             >
               + Runs
             </button>
           </div>
         ))}
       </AdminList>
+
+      <ConfirmModal
+        open={!!suspendFor}
+        title='Suspend user'
+        body={suspendFor ? `Suspend ${suspendFor.email}?` : ''}
+        confirmLabel='Suspend'
+        danger
+        onConfirm={async () => {
+          if (suspendFor) await applyStatus(suspendFor, 'SUSPENDED');
+        }}
+        onClose={() => setSuspendFor(null)}
+      />
+      <PromptModal
+        open={!!grantFor}
+        title='Grant runs'
+        body={grantFor ? `Grant how many runs to ${grantFor.email}?` : ''}
+        fields={[{name: 'quantity', label: 'Quantity', defaultValue: '10', required: true}]}
+        submitLabel='Grant'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
+        onSubmit={async (v) => {
+          const u = grantFor;
+          setGrantFor(null);
+          if (!u) return;
+          const qty = Number(v.quantity);
+          if (!Number.isFinite(qty) || qty <= 0) return;
+          await api
+            .adminGrantUserRuns(u.id, qty, null, 'admin grant')
+            .then(() => ok(`Granted ${qty} runs to ${u.email}`))
+            .catch(bad);
+        }}
+        onClose={() => setGrantFor(null)}
+      />
     </>
   );
 }
@@ -377,6 +405,9 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
 // ───────────────────────── Orgs ─────────────────────────
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
+  const [suspendFor, setSuspendFor] = useState<api.OrgDto | null>(null);
+  const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
+  const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
 
   const load = () =>
     api
@@ -399,9 +430,8 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       })
       .catch(bad);
   }
-  function setStatus(o: api.OrgDto, status: string) {
-    if (status === 'SUSPENDED' && !window.confirm(`Suspend org ${o.name}?`)) return;
-    api
+  function applyStatus(o: api.OrgDto, status: string) {
+    return api
       .adminUpdateOrgStatus(o.id, status)
       .then((r) => {
         patch(r);
@@ -409,31 +439,9 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       })
       .catch(bad);
   }
-  function setLimit(o: api.OrgDto) {
-    const raw = window.prompt(
-      `Monthly run-limit override for ${o.name} (blank = clear, use tier default):`,
-      o.monthlyRunLimitOverride != null ? String(o.monthlyRunLimitOverride) : '',
-    );
-    if (raw === null) return;
-    const limit = raw.trim() === '' ? null : Number(raw);
-    if (limit !== null && (!Number.isFinite(limit) || limit < 0)) return;
-    api
-      .adminUpdateOrgRunLimit(o.id, limit)
-      .then((r) => {
-        patch(r);
-        ok(`${o.name} limit → ${limit ?? 'default'}`);
-      })
-      .catch(bad);
-  }
-  function grant(o: api.OrgDto) {
-    const raw = window.prompt(`Grant how many runs to ${o.name}?`, '10');
-    if (!raw) return;
-    const qty = Number(raw);
-    if (!Number.isFinite(qty) || qty <= 0) return;
-    api
-      .adminGrantOrgRuns(o.id, qty, null, 'admin grant')
-      .then(() => ok(`Granted ${qty} runs to ${o.name}`))
-      .catch(bad);
+  function setStatus(o: api.OrgDto, status: string) {
+    if (status === 'SUSPENDED') setSuspendFor(o);
+    else void applyStatus(o, status);
   }
 
   if (!orgs) return <IdeLoader label='Loading orgs…' />;
@@ -461,20 +469,89 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
             <button
               className='ide-btn ghost'
               style={{padding: '3px 9px', fontSize: 12}}
-              onClick={() => setLimit(o)}
+              onClick={() => setLimitFor(o)}
             >
               Limit
             </button>
             <button
               className='ide-btn ghost'
               style={{padding: '3px 9px', fontSize: 12}}
-              onClick={() => grant(o)}
+              onClick={() => setGrantFor(o)}
             >
               + Runs
             </button>
           </div>
         ))}
       </AdminList>
+
+      <ConfirmModal
+        open={!!suspendFor}
+        title='Suspend org'
+        body={suspendFor ? `Suspend org ${suspendFor.name}?` : ''}
+        confirmLabel='Suspend'
+        danger
+        onConfirm={async () => {
+          if (suspendFor) await applyStatus(suspendFor, 'SUSPENDED');
+        }}
+        onClose={() => setSuspendFor(null)}
+      />
+      <PromptModal
+        open={!!limitFor}
+        title='Run-limit override'
+        body={
+          limitFor
+            ? `Monthly run-limit override for ${limitFor.name} (blank = clear, use tier default):`
+            : ''
+        }
+        fields={[
+          {
+            name: 'limit',
+            label: 'Monthly limit',
+            placeholder: 'blank = tier default',
+            defaultValue:
+              limitFor?.monthlyRunLimitOverride != null
+                ? String(limitFor.monthlyRunLimitOverride)
+                : '',
+          },
+        ]}
+        submitLabel='Save'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
+        onSubmit={async (v) => {
+          const o = limitFor;
+          setLimitFor(null);
+          if (!o) return;
+          const limit = v.limit.trim() === '' ? null : Number(v.limit);
+          if (limit !== null && (!Number.isFinite(limit) || limit < 0)) return;
+          await api
+            .adminUpdateOrgRunLimit(o.id, limit)
+            .then((r) => {
+              patch(r);
+              ok(`${o.name} limit → ${limit ?? 'default'}`);
+            })
+            .catch(bad);
+        }}
+        onClose={() => setLimitFor(null)}
+      />
+      <PromptModal
+        open={!!grantFor}
+        title='Grant runs'
+        body={grantFor ? `Grant how many runs to ${grantFor.name}?` : ''}
+        fields={[{name: 'quantity', label: 'Quantity', defaultValue: '10', required: true}]}
+        submitLabel='Grant'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
+        onSubmit={async (v) => {
+          const o = grantFor;
+          setGrantFor(null);
+          if (!o) return;
+          const qty = Number(v.quantity);
+          if (!Number.isFinite(qty) || qty <= 0) return;
+          await api
+            .adminGrantOrgRuns(o.id, qty, null, 'admin grant')
+            .then(() => ok(`Granted ${qty} runs to ${o.name}`))
+            .catch(bad);
+        }}
+        onClose={() => setGrantFor(null)}
+      />
     </>
   );
 }
@@ -784,16 +861,11 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
 // ───────────────────────── Ops ─────────────────────────
 function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmKind, setConfirmKind] = useState<'halt' | 'reconcile' | null>(null);
 
-  function halt() {
-    if (
-      !window.confirm(
-        'Halt ALL active runs platform-wide? This cancels in-flight pipelines for every org.',
-      )
-    )
-      return;
+  function doHalt() {
     setBusy('halt');
-    api
+    return api
       .haltAllActiveRuns('admin emergency halt')
       .then((r) => ok(`Halted ${r.haltedCount} run(s).`))
       .catch(bad)
@@ -815,8 +887,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
       .catch(bad)
       .finally(() => setBusy(null));
   }
-  async function reconcile() {
-    if (!window.confirm('Reconcile orphan runs — mark stale non-terminal runs FAILED?')) return;
+  async function doReconcile() {
     setBusy('reconcile');
     try {
       const r = await fetch('/api/admin/executions/reconcile', {
@@ -882,7 +953,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
           desc='Emergency stop — cancels every in-flight pipeline platform-wide.'
           danger
           busyKey='halt'
-          action={halt}
+          action={() => setConfirmKind('halt')}
           label='Halt all'
         />
         <OpRow
@@ -896,7 +967,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
           title='Reconcile orphan runs'
           desc='Mark stale non-terminal ExecutionRuns as FAILED.'
           busyKey='reconcile'
-          action={reconcile}
+          action={() => setConfirmKind('reconcile')}
           label='Reconcile'
         />
         <div style={{...ROW_BASE, borderBottom: 'none'}}>
@@ -924,6 +995,26 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
       </AdminList>
 
       <FeatureFlagsPanel ok={ok} bad={bad} />
+
+      <ConfirmModal
+        open={confirmKind === 'halt'}
+        title='Halt all active runs'
+        body='Halt ALL active runs platform-wide? This cancels in-flight pipelines for every org.'
+        confirmLabel='Halt all'
+        danger
+        busy={busy === 'halt'}
+        onConfirm={doHalt}
+        onClose={() => setConfirmKind(null)}
+      />
+      <ConfirmModal
+        open={confirmKind === 'reconcile'}
+        title='Reconcile orphan runs'
+        body='Reconcile orphan runs — mark stale non-terminal runs FAILED?'
+        confirmLabel='Reconcile'
+        busy={busy === 'reconcile'}
+        onConfirm={doReconcile}
+        onClose={() => setConfirmKind(null)}
+      />
     </>
   );
 }
@@ -931,6 +1022,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
 // ───────────────────────── Top-up packages ─────────────────────────
 function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
 
   const load = () =>
     api
@@ -941,37 +1034,11 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
     load();
   }, []);
 
-  function create() {
-    const name = window.prompt('Package name?');
-    if (!name) return;
-    const runsRaw = window.prompt('Run count?', '50');
-    const inrRaw = window.prompt('Amount (INR)?', '500');
-    const runCount = Number(runsRaw);
-    const amountInr = Number(inrRaw);
-    if (!Number.isFinite(runCount) || runCount <= 0 || !Number.isFinite(amountInr)) return;
-    api
-      .adminCreateTopupPackage({name, runCount, amountInr})
-      .then(() => {
-        ok(`Created ${name}`);
-        load();
-      })
-      .catch(bad);
-  }
   function toggleActive(p: api.TopupPackageAdmin) {
     api
       .adminUpdateTopupPackage(p.id, {active: !p.active})
       .then(() => {
         ok(`${p.name} ${!p.active ? 'activated' : 'deactivated'}`);
-        load();
-      })
-      .catch(bad);
-  }
-  function remove(p: api.TopupPackageAdmin) {
-    if (!window.confirm(`Delete top-up package "${p.name}"?`)) return;
-    api
-      .adminDeleteTopupPackage(p.id)
-      .then(() => {
-        ok(`Deleted ${p.name}`);
         load();
       })
       .catch(bad);
@@ -985,7 +1052,11 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
         style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}
       >
         <span>Top-up packages · {pkgs.length}</span>
-        <button className='ide-btn' style={{padding: '4px 12px', fontSize: 12}} onClick={create}>
+        <button
+          className='ide-btn'
+          style={{padding: '4px 12px', fontSize: 12}}
+          onClick={() => setCreating(true)}
+        >
           + New
         </button>
       </div>
@@ -1017,7 +1088,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
                   color: 'var(--ide-red)',
                   borderColor: 'var(--ide-red)',
                 }}
-                onClick={() => remove(p)}
+                onClick={() => setDeleteFor(p)}
               >
                 Delete
               </button>
@@ -1025,6 +1096,53 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
           ))}
         </AdminList>
       )}
+
+      <PromptModal
+        open={creating}
+        title='New top-up package'
+        fields={[
+          {name: 'name', label: 'Package name', placeholder: 'Starter pack', required: true},
+          {name: 'runCount', label: 'Run count', defaultValue: '50', required: true},
+          {name: 'amountInr', label: 'Amount (INR)', defaultValue: '500', required: true},
+        ]}
+        submitLabel='Create'
+        // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
+        onSubmit={async (v) => {
+          setCreating(false);
+          const name = v.name;
+          if (!name) return;
+          const runCount = Number(v.runCount);
+          const amountInr = Number(v.amountInr);
+          if (!Number.isFinite(runCount) || runCount <= 0 || !Number.isFinite(amountInr)) return;
+          await api
+            .adminCreateTopupPackage({name, runCount, amountInr})
+            .then(() => {
+              ok(`Created ${name}`);
+              load();
+            })
+            .catch(bad);
+        }}
+        onClose={() => setCreating(false)}
+      />
+      <ConfirmModal
+        open={!!deleteFor}
+        title='Delete package'
+        body={deleteFor ? `Delete top-up package "${deleteFor.name}"?` : ''}
+        confirmLabel='Delete'
+        danger
+        onConfirm={async () => {
+          const p = deleteFor;
+          if (!p) return;
+          await api
+            .adminDeleteTopupPackage(p.id)
+            .then(() => {
+              ok(`Deleted ${p.name}`);
+              load();
+            })
+            .catch(bad);
+        }}
+        onClose={() => setDeleteFor(null)}
+      />
     </>
   );
 }
