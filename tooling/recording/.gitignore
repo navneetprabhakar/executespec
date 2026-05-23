@@ -1,0 +1,3 @@
+# Playwright raw video scratch dir — the rig writes per-phase .webm clips here and
+# normalises/stitches them into website/media/hero.webm. Never commit the scratch.
+.video-out/

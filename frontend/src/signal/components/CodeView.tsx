@@ -25,7 +25,7 @@ export function CodeView({
 }) {
   const lang = guessLang(path);
   const isDiff = typeof diff === 'string' && diff.length > 0;
-  const body = isDiff ? diff! : content || '';
+  const body = isDiff && diff ? diff : content || '';
   const lines = useMemo(() => body.split('\n'), [body]);
 
   return (

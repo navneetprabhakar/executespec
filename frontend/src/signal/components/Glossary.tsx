@@ -11,7 +11,7 @@ export const GLOSSARY: Record<string, string> = {
   'wiring pass':
     'A reviewer step that fixes call-site mismatches after the worker has finished editing — e.g. an old import that no longer resolves, or a function whose signature changed mid-run.',
   'verified score':
-    'A 0–100 score combining build, tests, coverage, reviewer, security, and architecture signals — multiplicatively, so any single failure caps the score.',
+    'A 0–100 score from real signals — code delivered, final build, test pass rate, reviewer verdict, and unresolved criticals — combined as a weighted average over the signals that actually ran (unmeasured signals drop out instead of defaulting to a pass). ≥85 ships, 70–84 needs review, <70 is blocked.',
   'status reason':
     'A machine-readable label for why a run landed in its current status — e.g. TESTS_FAILED:2_OF_8 or REVIEWER_UNRESOLVED. Used by the UI to explain badges.',
   classifier:

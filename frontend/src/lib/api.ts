@@ -1355,6 +1355,8 @@ export interface OrgDto {
   hasAnthropicKey?: boolean;
   hasOpenAiKey?: boolean;
   hasGeminiKey?: boolean;
+  /** Enterprise OpenRouter gateway key flag. */
+  hasOpenRouterKey?: boolean;
   // Key source mode & provider restrictions
   keySourceMode?: string;
   enabledProviders?: string[] | null;
@@ -1449,15 +1451,20 @@ export const adjustOrgSeats = (newSeats: number) =>
     body: JSON.stringify({newSeats}),
   });
 
-/** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
+/**
+ * Saves org-wide AI provider API keys (ORG_ADMIN only). A blank value leaves that
+ * provider's key unchanged, so the settings panel can save one provider at a time
+ * without wiping the others. OpenRouter is rejected (403) on non-ENTERPRISE orgs.
+ */
 export const updateOrgAiKeySettings = (
   anthropicApiKey: string,
   openAiApiKey: string,
   geminiApiKey: string,
+  openRouterApiKey = '',
 ) =>
   req<OrgDto>('/org/me/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey}),
+    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey, openRouterApiKey}),
   });
 
 /** Updates org key source mode and provider restrictions (ORG_ADMIN only). */
@@ -1468,6 +1475,35 @@ export const updateOrgKeySourceSettings = (
   req<OrgDto>('/org/me/settings/key-source', {
     method: 'PUT',
     body: JSON.stringify({keySourceMode, enabledProviders}),
+  });
+
+/**
+ * F3 — per-org model-matrix overrides. `defaults` + `overrides` are keyed by
+ * `"<provider>:<tier>"` (e.g. `"anthropic:planning"`); the effective model for a
+ * cell is `overrides[key] ?? defaults[key]`. `modelsByProvider` lists the models
+ * selectable per provider. `editable` is true only for ENTERPRISE orgs.
+ */
+export interface ModelMatrixView {
+  tier: string;
+  editable: boolean;
+  providers: string[];
+  tiers: string[];
+  defaults: Record<string, string>;
+  overrides: Record<string, string>;
+  modelsByProvider: Record<string, string[]>;
+}
+
+/** Reads the org's effective model matrix (defaults + overrides). Any org admin. */
+export const getOrgModelMatrix = () => req<ModelMatrixView>('/org/me/model-matrix');
+
+/**
+ * Replaces the org's full set of model-matrix overrides (sparse — only the cells to
+ * override). Empty map clears all. ENTERPRISE-only (PUT 403s otherwise).
+ */
+export const updateOrgModelMatrix = (overrides: Record<string, string>) =>
+  req<ModelMatrixView>('/org/me/model-matrix', {
+    method: 'PUT',
+    body: JSON.stringify({overrides}),
   });
 
 /**

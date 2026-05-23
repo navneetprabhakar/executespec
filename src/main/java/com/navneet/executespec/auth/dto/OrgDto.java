@@ -26,6 +26,8 @@ public record OrgDto(
     boolean hasAnthropicKey,
     boolean hasOpenAiKey,
     boolean hasGeminiKey,
+    /** Enterprise OpenRouter gateway key flag (raw key never exposed). */
+    boolean hasOpenRouterKey,
     // Key source mode & provider restrictions
     String keySourceMode,
     List<String> enabledProviders,
@@ -63,6 +65,7 @@ public record OrgDto(
         present(org.getAnthropicApiKey()),
         present(org.getOpenAiApiKey()),
         present(org.getGeminiApiKey()),
+        present(org.getOpenRouterApiKey()),
         org.getKeySourceMode(),
         parseProviders(org.getEnabledProviders()),
         // JIRA: all 3 fields must be present

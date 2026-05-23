@@ -1,0 +1,920 @@
+/*
+ * IDE chrome (2026-05-22 UX overhaul). A real VS Code-style workspace — its own
+ * surfaces + components, NOT a reskin of Signal. Tokens scoped to .ide-root and
+ * themed via <html data-theme> (follows OS). Loaded only in IDE mode.
+ */
+
+.ide-root {
+  /* VS Code "Dark+" defaults */
+  --ide-bg-editor: #1e1e1e;
+  --ide-bg-sidebar: #252526;
+  --ide-bg-activitybar: #333333;
+  --ide-bg-panel: #1e1e1e;
+  --ide-bg-input: #3c3c3c;
+  --ide-bg-tab-active: #1e1e1e;
+  --ide-bg-tab-inactive: #2d2d2d;
+  --ide-bg-statusbar: #007acc;
+  --ide-bg-widget: #252526;
+  --ide-fg: #cccccc;
+  --ide-fg-muted: #858585;
+  --ide-fg-bright: #ffffff;
+  --ide-fg-statusbar: #ffffff;
+  --ide-border: #2b2b2b;
+  --ide-border-strong: #3c3c3c;
+  --ide-accent: #007acc;
+  --ide-accent-fg: #ffffff;
+  --ide-hover: #2a2d2e;
+  --ide-list-active: #094771;
+  --ide-list-inactive: #37373d;
+  --ide-green: #4ec9b0;
+  --ide-yellow: #d7ba7d;
+  --ide-red: #f48771;
+  --ide-blue: #569cd6;
+  --ide-add: #487e02;
+  --ide-del: #6c1313;
+  --ide-shadow: rgba(0, 0, 0, 0.36);
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--ide-bg-editor);
+  color: var(--ide-fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+[data-theme='light'] .ide-root {
+  --ide-bg-editor: #ffffff;
+  --ide-bg-sidebar: #f3f3f3;
+  --ide-bg-activitybar: #f3f3f3;
+  --ide-bg-panel: #ffffff;
+  --ide-bg-input: #ffffff;
+  --ide-bg-tab-active: #ffffff;
+  --ide-bg-tab-inactive: #ececec;
+  --ide-bg-statusbar: #007acc;
+  --ide-bg-widget: #ffffff;
+  --ide-fg: #333333;
+  --ide-fg-muted: #616161;
+  --ide-fg-bright: #000000;
+  --ide-border: #e0e0e0;
+  --ide-border-strong: #c8c8c8;
+  --ide-hover: #e8e8e8;
+  --ide-list-active: #cfe3fa;
+  --ide-list-inactive: #e4e6f1;
+  --ide-green: #098658;
+  --ide-yellow: #b58900;
+  --ide-red: #cd3131;
+  --ide-blue: #0451a5;
+  --ide-add: #cce8cc;
+  --ide-del: #f7c5c5;
+  --ide-shadow: rgba(0, 0, 0, 0.16);
+}
+
+/*
+ * Signal-token bridge. A few Signal components are reused verbatim inside the
+ * IDE chrome (SpecChat "Build my spec", CostProgressBar, UsageMeter,
+ * UpgradeModal + the Modal/Button primitives they pull in). They read
+ * --signal-* tokens, which are only defined under .signal-app — so without
+ * this bridge they render unstyled / stuck-dark in the IDE (the theme-desync
+ * bug). Map them onto the theme-aware --ide-* tokens so they follow the IDE's
+ * light/dark theme automatically (no per-theme duplication needed — the
+ * --ide-* tokens already flip under [data-theme='light']).
+ */
+.ide-root {
+  --signal-bg: var(--ide-bg-editor);
+  --signal-card-bg: var(--ide-bg-widget);
+  --signal-card-elev: var(--ide-bg-sidebar);
+  --signal-bg-translucent: var(--ide-bg-editor);
+
+  --signal-ink: var(--ide-fg-bright);
+  --signal-ink-soft: var(--ide-fg);
+  --signal-text-dim: var(--ide-fg-muted);
+  --signal-text-mute: var(--ide-fg-muted);
+
+  --signal-hairline: var(--ide-border);
+  --signal-hairline-strong: var(--ide-border-strong);
+
+  --signal-mint: var(--ide-green);
+  --signal-mint-soft: color-mix(in srgb, var(--ide-green) 22%, transparent);
+  --signal-mint-text: var(--ide-fg-bright);
+  --signal-mint-text-on-light: var(--ide-green);
+  --signal-coral: var(--ide-red);
+  --signal-coral-soft: color-mix(in srgb, var(--ide-red) 22%, transparent);
+  --signal-coral-text: var(--ide-red);
+  --signal-y: var(--ide-yellow);
+  --signal-y-soft: color-mix(in srgb, var(--ide-yellow) 20%, transparent);
+  --signal-y-text: var(--ide-yellow);
+  --signal-lavender: var(--ide-blue);
+  --signal-lavender-soft: color-mix(in srgb, var(--ide-blue) 20%, transparent);
+  --signal-ocean: var(--ide-blue);
+
+  --signal-r-sm: 8px;
+  --signal-r-md: 12px;
+  --signal-r-lg: 16px;
+  --signal-r-xl: 20px;
+  --signal-shadow: 0 6px 16px -6px var(--ide-shadow);
+  --signal-shadow-strong: var(--ide-shadow);
+}
+
+.ide-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ───────── body: activity bar | side bar | editor ───────── */
+.ide-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Activity bar */
+.ide-activitybar {
+  width: 48px;
+  flex-shrink: 0;
+  background: var(--ide-bg-activitybar);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  border-right: 1px solid var(--ide-border);
+}
+.ide-act {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ide-fg-muted);
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  font-size: 19px;
+  text-decoration: none;
+}
+.ide-act:hover {
+  color: var(--ide-fg-bright);
+}
+.ide-act.active {
+  color: var(--ide-fg-bright);
+  border-left-color: var(--ide-accent);
+}
+[data-theme='light'] .ide-act.active {
+  color: var(--ide-accent);
+}
+.ide-act-spacer {
+  flex: 1;
+}
+
+/* Side bar (explorer) */
+.ide-side {
+  width: 270px;
+  flex-shrink: 0;
+  background: var(--ide-bg-sidebar);
+  border-right: 1px solid var(--ide-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ide-side.collapsed {
+  display: none;
+}
+.ide-side-head {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ide-fg-muted);
+  padding: 10px 16px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ide-side-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+.ide-tree-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ide-fg-muted);
+  padding: 10px 12px 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ide-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 12px 3px 22px;
+  color: var(--ide-fg);
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ide-tree-item:hover {
+  background: var(--ide-hover);
+}
+.ide-tree-item.active {
+  background: var(--ide-list-active);
+  color: var(--ide-fg-bright);
+}
+[data-theme='light'] .ide-tree-item.active {
+  color: var(--ide-fg);
+}
+.ide-tree-ico {
+  width: 15px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+.ide-tree-sub {
+  font-size: 11px;
+  color: var(--ide-fg-muted);
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+/* Editor column */
+.ide-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ide-bg-editor);
+}
+.ide-tabs {
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--ide-bg-sidebar);
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--ide-border);
+  overflow-x: auto;
+}
+.ide-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--ide-fg-muted);
+  background: var(--ide-bg-tab-inactive);
+  border-right: 1px solid var(--ide-border);
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 240px;
+}
+.ide-tab.active {
+  color: var(--ide-fg);
+  background: var(--ide-bg-tab-active);
+  border-top: 1px solid var(--ide-accent);
+}
+.ide-tab .ide-tab-ico {
+  opacity: 0.85;
+}
+.ide-editor-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+}
+
+/* breadcrumb */
+.ide-breadcrumb {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  font-size: 12px;
+  color: var(--ide-fg-muted);
+  border-bottom: 1px solid var(--ide-border);
+  flex-shrink: 0;
+}
+
+/* Status bar */
+.ide-statusbar {
+  height: 22px;
+  flex-shrink: 0;
+  background: var(--ide-bg-statusbar);
+  color: var(--ide-fg-statusbar);
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.ide-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: default;
+  font-size: 12px;
+  text-decoration: none;
+}
+.ide-status.btn {
+  cursor: pointer;
+}
+.ide-status.btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.ide-status-spacer {
+  flex: 1;
+}
+
+/* ───────── command palette ───────── */
+.ide-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.ide-palette {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 60vh;
+  background: var(--ide-bg-widget);
+  border: 1px solid var(--ide-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px var(--ide-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ide-palette input {
+  border: none;
+  outline: none;
+  background: var(--ide-bg-input);
+  color: var(--ide-fg);
+  font-size: 14px;
+  padding: 10px 12px;
+  margin: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--ide-border-strong);
+}
+.ide-palette-list {
+  overflow-y: auto;
+  padding: 4px 0 8px;
+}
+.ide-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ide-fg);
+}
+.ide-palette-item.active,
+.ide-palette-item:hover {
+  background: var(--ide-list-active);
+  color: var(--ide-fg-bright);
+}
+[data-theme='light'] .ide-palette-item.active,
+[data-theme='light'] .ide-palette-item:hover {
+  color: var(--ide-fg);
+}
+.ide-palette-kbd {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ide-fg-muted);
+}
+
+/* ───────── code viewer ───────── */
+.ide-code {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ide-bg-editor);
+}
+.ide-code-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--ide-border);
+  font-size: 12px;
+  color: var(--ide-fg-muted);
+  flex-shrink: 0;
+}
+.ide-code-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.ide-code-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ide-code-gutter {
+  text-align: right;
+  padding: 0 12px 0 16px;
+  color: var(--ide-fg-muted);
+  user-select: none;
+  white-space: nowrap;
+  width: 1%;
+  vertical-align: top;
+  border-right: 1px solid var(--ide-border);
+}
+.ide-code-line {
+  padding: 0 16px;
+  white-space: pre;
+  vertical-align: top;
+  color: var(--ide-fg);
+}
+.ide-code-row.add .ide-code-line,
+.ide-code-row.add .ide-code-gutter {
+  background: var(--ide-add);
+}
+.ide-code-row.del .ide-code-line,
+.ide-code-row.del .ide-code-gutter {
+  background: var(--ide-del);
+}
+.tok-kw {
+  color: var(--ide-blue);
+}
+.tok-str {
+  color: var(--ide-yellow);
+}
+.tok-com {
+  color: var(--ide-green);
+  font-style: italic;
+}
+.tok-num {
+  color: #b5cea8;
+}
+
+/* ───────── generic IDE surface chrome (welcome/compose/result) ───────── */
+.ide-pane {
+  padding: 22px 28px;
+  max-width: 1100px;
+}
+.ide-h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  margin: 0 0 4px;
+}
+.ide-sub {
+  font-size: 13px;
+  color: var(--ide-fg-muted);
+  margin: 0 0 20px;
+}
+.ide-h2 {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ide-fg-muted);
+  margin: 22px 0 10px;
+}
+.ide-card {
+  background: var(--ide-bg-sidebar);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.ide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.ide-run-card {
+  background: var(--ide-bg-sidebar);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 13px 15px;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--ide-fg);
+  display: block;
+}
+.ide-run-card:hover {
+  border-color: var(--ide-accent);
+}
+.ide-run-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ide-run-meta {
+  font-size: 12px;
+  color: var(--ide-fg-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ide-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--ide-border-strong);
+}
+.ide-badge.ok {
+  color: var(--ide-green);
+  border-color: var(--ide-green);
+}
+.ide-badge.warn {
+  color: var(--ide-yellow);
+  border-color: var(--ide-yellow);
+}
+.ide-badge.bad {
+  color: var(--ide-red);
+  border-color: var(--ide-red);
+}
+.ide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--ide-accent);
+  color: var(--ide-accent-fg);
+  border: none;
+  border-radius: 3px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.ide-btn:hover {
+  filter: brightness(1.08);
+}
+.ide-btn.ghost {
+  background: transparent;
+  color: var(--ide-fg);
+  border: 1px solid var(--ide-border-strong);
+}
+.ide-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ide-input,
+.ide-textarea,
+.ide-select {
+  width: 100%;
+  background: var(--ide-bg-input);
+  color: var(--ide-fg);
+  border: 1px solid var(--ide-border-strong);
+  border-radius: 4px;
+  padding: 9px 11px;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.ide-textarea {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  line-height: 1.55;
+  resize: vertical;
+}
+.ide-input:focus,
+.ide-textarea:focus,
+.ide-select:focus {
+  border-color: var(--ide-accent);
+}
+.ide-empty {
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  padding: 30px 0;
+  text-align: center;
+}
+.ide-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 44px 0;
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+}
+.ide-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ide-border-strong);
+  border-top-color: var(--ide-accent);
+  border-radius: 50%;
+  animation: ide-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ide-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* run result split: file tree | code | info panel. Absolute-fills the editor
+   body (which is position:relative) so the three columns scroll independently
+   regardless of content height. */
+.ide-split {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-height: 0;
+}
+.ide-split-files {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--ide-border);
+  overflow-y: auto;
+  background: var(--ide-bg-sidebar);
+}
+.ide-split-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ide-split-info {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--ide-border);
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--ide-bg-sidebar);
+}
+.ide-kv {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--ide-border);
+}
+.ide-kv span:first-child {
+  color: var(--ide-fg-muted);
+}
+
+/* ───────── file icons · folder chevrons · tab close · resizer ───────── */
+.ide-fileicon {
+  display: inline-block;
+  width: 17px;
+  text-align: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.ide-ficon {
+  flex-shrink: 0;
+  vertical-align: -2px;
+}
+.ide-tree-chev {
+  width: 12px;
+  display: inline-block;
+  font-size: 9px;
+  color: var(--ide-fg-muted);
+  flex-shrink: 0;
+}
+
+/* result-page tab strip */
+.ide-rtabs {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--ide-bg-sidebar);
+  border-bottom: 1px solid var(--ide-border);
+  overflow-x: auto;
+}
+.ide-rtab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ide-rtab:hover {
+  color: var(--ide-fg);
+}
+.ide-rtab.active {
+  color: var(--ide-fg-bright);
+  border-bottom-color: var(--ide-accent);
+}
+.ide-rtab-badge {
+  font-size: 10px;
+  background: var(--ide-bg-tab-inactive);
+  border-radius: 8px;
+  padding: 0 5px;
+  color: var(--ide-fg-muted);
+}
+.ide-tab-close {
+  margin-left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ide-fg-muted);
+  flex-shrink: 0;
+}
+.ide-tab-close:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+.ide-resize {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+.ide-resize:hover {
+  background: var(--ide-accent);
+}
+
+/* ───────── mobile / tablet (distinct layout) ───────── */
+.ide-mobilebar,
+.ide-tabbar,
+.ide-backdrop {
+  display: none;
+}
+@media (max-width: 860px) {
+  .ide-activitybar {
+    display: none;
+  }
+  .ide-side {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: 80vw;
+    max-width: 320px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .ide-side.drawer-open {
+    transform: translateX(0);
+    display: flex;
+  }
+  .ide-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.5);
+  }
+  .ide-mobilebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 46px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    background: var(--ide-bg-activitybar);
+    border-bottom: 1px solid var(--ide-border);
+    color: var(--ide-fg);
+  }
+  .ide-mobilebar button {
+    background: none;
+    border: none;
+    color: var(--ide-fg);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .ide-tabs {
+    display: none;
+  }
+  .ide-split-files,
+  .ide-split-info {
+    display: none;
+  }
+  .ide-tabbar {
+    display: flex;
+    height: 54px;
+    flex-shrink: 0;
+    background: var(--ide-bg-sidebar);
+    border-top: 1px solid var(--ide-border);
+  }
+  .ide-tabbar a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--ide-fg-muted);
+    text-decoration: none;
+    font-size: 10px;
+  }
+  .ide-tabbar a.active {
+    color: var(--ide-accent);
+  }
+  .ide-tabbar .ico {
+    font-size: 18px;
+  }
+  .ide-pane {
+    padding: 16px;
+  }
+}
+
+/* Markdown inside the IDE chrome (chat bubbles, etc.). The shared Markdown
+   component emits .signal-md* classes styled with Signal tokens; remap them to
+   IDE tokens so chat formatting looks native in the Dark+/Light+ themes. */
+.ide-root .signal-md {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ide-root .signal-md > * {
+  margin: 0 0 8px;
+}
+.ide-root .signal-md > *:last-child {
+  margin-bottom: 0;
+}
+.ide-root .signal-md-h {
+  font-weight: 700;
+  margin: 12px 0 6px;
+  line-height: 1.3;
+  color: var(--ide-fg-bright);
+}
+.ide-root .signal-md-code {
+  background: var(--ide-bg-input);
+  border: 1px solid var(--ide-border);
+  color: var(--ide-fg-bright);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+.ide-root .signal-md-codeblock {
+  background: var(--ide-bg-widget);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.ide-root .signal-md-codeblock .signal-md-codelang {
+  color: var(--ide-fg-muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.ide-root .signal-md-link {
+  color: var(--ide-blue);
+  text-decoration: underline;
+}
+.ide-root .signal-md-quote {
+  border-left: 3px solid var(--ide-border-strong);
+  padding: 2px 12px;
+  color: var(--ide-fg-muted);
+  font-style: italic;
+}
+.ide-root .signal-md-list {
+  padding-left: 20px;
+}
+.ide-root .signal-md-list li {
+  margin-bottom: 4px;
+}
+.ide-root .signal-md-hr {
+  border: 0;
+  border-top: 1px solid var(--ide-border);
+  margin: 12px 0;
+}

@@ -176,9 +176,10 @@ public class BillingService {
     // v2.6.1 — seat validation per tier
     int effectiveSeats;
     if ("TEAM".equals(plan.getTier())) {
-      if (seats < 2 || seats > 20) {
+      // 2026-05-22 — TEAM no longer requires a 2-seat minimum; single-seat TEAM is allowed.
+      if (seats < 1 || seats > 20) {
         throw new BillingException(
-            "TEAM tier requires 2-20 seats (got " + seats + "). Contact sales for larger orgs.");
+            "TEAM tier requires 1-20 seats (got " + seats + "). Contact sales for larger orgs.");
       }
       effectiveSeats = seats;
     } else {
@@ -322,7 +323,7 @@ public class BillingService {
       String userName = user.getFirstName() + " " + user.getLastName();
       result =
           razorpayGateway.createSubscription(
-              userId, userName, user.getEmail(), user.getOrgId(), plan);
+              userId, userName, user.getEmail(), user.getOrgId(), plan, effectiveSeats);
 
       persistSubscription(
           userId,

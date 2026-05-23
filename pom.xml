@@ -460,10 +460,12 @@
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>
-        <!-- 2026-05-16: Dependabot #134 bumped 2.43 → 3.4. Major version change; config
-             schema unchanged for the slots we use (googleJavaFormat, removeUnusedImports,
-             importOrder, formatAnnotations). -->
-        <version>3.4.0</version>
+        <!-- 2026-05-16: Dependabot #134 bumped 2.43 → 3.4 (major; config schema unchanged
+             for the slots we use: googleJavaFormat, removeUnusedImports, importOrder,
+             formatAnnotations). 2026-05-22: Dependabot #149 bumped 3.4 → 3.5.1 (minor;
+             google-java-format stays pinned at 1.22.0 below, so the bump changes plugin
+             behaviour only — no codebase reformat). -->
+        <version>3.5.1</version>
         <configuration>
           <java>
             <includes>

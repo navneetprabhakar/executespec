@@ -499,21 +499,46 @@ public class OrgService {
 
   @Transactional
   public OrgDto updateAiKeySettings(
-      String orgId, String anthropicKey, String openAiKey, String geminiKey, String actorId) {
+      String orgId,
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String openRouterKey,
+      String actorId) {
     Org org =
         orgRepo
             .findById(orgId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
-    org.setAnthropicApiKey(blankToNull(anthropicKey));
-    org.setOpenAiApiKey(blankToNull(openAiKey));
-    org.setGeminiApiKey(blankToNull(geminiKey));
+    // Blank = "leave unchanged", not "clear" — the settings UI saves one provider
+    // at a time and sends only the edited field, so an unconditional set would wipe
+    // the other keys. Each key is overwritten only when a non-blank value arrives.
+    if (anthropicKey != null && !anthropicKey.isBlank()) {
+      org.setAnthropicApiKey(anthropicKey.trim());
+    }
+    if (openAiKey != null && !openAiKey.isBlank()) {
+      org.setOpenAiApiKey(openAiKey.trim());
+    }
+    if (geminiKey != null && !geminiKey.isBlank()) {
+      org.setGeminiApiKey(geminiKey.trim());
+    }
+    // OpenRouter (gateway) is Enterprise-only — reject the key on lower tiers so the provider can
+    // never be offered (AvailableProviderResolver treats key-present as the Enterprise signal).
+    String openRouter = blankToNull(openRouterKey);
+    if (openRouter != null) {
+      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN, "OpenRouter is an Enterprise-tier feature");
+      }
+      org.setOpenRouterApiKey(openRouter);
+    }
     org.setUpdatedAt(Instant.now());
     log.info(
-        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}",
+        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}, openrouter={}",
         orgId,
         org.getAnthropicApiKey() != null,
         org.getOpenAiApiKey() != null,
-        org.getGeminiApiKey() != null);
+        org.getGeminiApiKey() != null,
+        org.getOpenRouterApiKey() != null);
     OrgDto result = OrgDto.from(orgRepo.save(org));
 
     auditOrgEvent(

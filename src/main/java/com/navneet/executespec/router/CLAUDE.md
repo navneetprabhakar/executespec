@@ -16,6 +16,9 @@ User-selected provider routing with YAML as the single source of truth and a Red
 | `ProviderHealthTracker.java` | Redis-backed circuit breaker. **10** consecutive failures → OPEN; **180s** TTL auto-recovery. Fail-open on Redis errors. (Constants `UNHEALTHY_THRESHOLD=10` + `RECOVERY_WINDOW=Duration.ofSeconds(180)` in the source.) |
 | `AvailableProviderResolver.java` | Resolves available providers per run based on org policy + API key availability. |
 | `ProviderRecommendationService.java` | Heuristic project-type → provider routing. Gated by `provider.smart-routing.enabled` flag (default OFF). |
+| `OrgModelOverrideService.java` | **F3** — per-org `(provider:tier)→model` overrides stored as JSON on `Org.model_overrides_json` (V205). Validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper` allow-list), ENTERPRISE-gated, lenient on read; short-TTL Caffeine cache. Backs `GET/PUT /api/org/me/model-matrix`. |
+| `RunModelOverrides.java` | **F3** — `ThreadLocal` holder for the run's override map. `RunOrchestrator` binds it at run start (cleared in `finally`); `ModelResolver.lookupModel` consults it so worker/planner/reviewer honour the override with no per-call-site plumbing. **Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22):** static `withRunPin(orgOverrides, provider, model)` builds the bound map by overlaying the run's chosen model onto the provider's three tier cells of a mutable copy of the org map (pin out-ranks org + YAML). `RunOrchestrator` calls it at the bind site ENTERPRISE-gated (owner-tier lookup) from the raw `RunRequest.modelName`, validated provider-scoped via `ModelRegistry`. This overlay is the authoritative routing mechanism for every role — the worker no longer ignores the pin by re-resolving the tier default. UI: the ENTERPRISE-only "Model · Beta" selector on the IDE Compose surface (`frontend/src/ide/IdeSurfaces.tsx`). |
+| `OrgModelOverrideService.java` migration | **V205** `org_model_overrides` — adds `org.model_overrides_json TEXT`. |
 
 ## Agent tier mapping (from `application.yml`)
 
@@ -45,7 +48,7 @@ Per `application.yml failover-order:`, when a provider fails the router walks th
 ## Known tech debt
 
 - **Bug #1c** — `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when the caller has explicitly locked the provider. Fix deferred — needs either a strict-mode guard or opt-out flag per org.
-- **Planner / reviewer model sourced from run model, not tier** — `OutlinePlannerAgent` uses `req.model()` (the RUN-level `defaultModelFor(provider)`) instead of `ModelRegistry.resolve("OutlinePlannerAgent", provider).getModel()`. Swapping `anthropic: planning:` in YAML has no effect today. Fix: have the planner resolve its own tier model.
+- ~~**Planner / reviewer model sourced from run model, not tier**~~ — FIXED / stale note (corrected 2026-05-22). `OutlinePlannerAgent.planOnce` resolves via `modelResolver.resolve(...).getModel()` (line 290); `ReviewerAgent` and the worker (through `SequentialExecutor.tierConfigFor`) likewise resolve via `ModelResolver`. The only `req.model()` left in the planner is a metrics tag. So YAML `planning:` swaps DO take effect — and the F3 per-org overrides ride the same `lookupModel` path.
 
 ## YAML consolidation (2026-05-06)
 
