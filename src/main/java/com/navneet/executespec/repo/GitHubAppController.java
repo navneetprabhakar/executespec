@@ -42,6 +42,12 @@ import lombok.extern.slf4j.Slf4j;
  * checks. These all need the GitHub App credentials wired into env config + a real install. The
  * skeleton lets the data model + admin UX + status reporting exist independently so Phase 2 can
  * wire the real flow without rebuilding the surface.
+ *
+ * <p><b>When Phase 2 wires the installation-token exchange:</b> installation access tokens are
+ * short-lived (~1h) and now use a longer stateless format ({@code ghs_…}, ~520 chars). Keep them
+ * in-memory / fetch on demand — do NOT persist them. If a future design must store one, use a
+ * {@code TEXT} column, never a {@code VARCHAR(n)} length cap (see V208, which widened {@code
+ * github_pat} to TEXT for exactly this reason).
  */
 @RestController
 @RequestMapping("/api/auth/github-app")
