@@ -1118,9 +1118,9 @@ export function IdeProjectArchitecture() {
               {docMd ? (
                 <div
                   className='signal-md'
-                  style={{fontSize: 13.5, lineHeight: 1.6, maxHeight: 480, overflow: 'auto'}}
+                  style={{fontSize: 13.5, lineHeight: 1.6, maxHeight: '70vh', overflow: 'auto'}}
                 >
-                  <Markdown>{docMd.slice(0, 8000)}</Markdown>
+                  <Markdown>{docMd}</Markdown>
                 </div>
               ) : (
                 <div className='ide-empty' style={{padding: '12px 0'}}>
