@@ -73,7 +73,8 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │       ├── main.tsx              React entry, OTel init, service-worker registration (prod only)
 │       ├── tokens.css            Graphite + Signal design tokens (:root dark default, [data-theme='light'] overrides)
 │       ├── index.css             Global stylesheet (Tailwind v4, mobile/iOS Safari fixes, component utilities)
-│       ├── signal/               Signal chrome (only active shell since 2026-05-15)
+│       ├── ide/                  VS Code-style IDE workspace — the ONLY chrome (IdeWorkspace + every protected surface)
+│       ├── signal/               Public pages (auth/marketing/legal/shared) + AdminPage + shared components reused by the IDE
 │       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
 │       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
 ├── observability/                Local Prometheus + Grafana + Tempo (docker compose up -d)
@@ -81,7 +82,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 └── docs/                         All project docs (see "Where to go next")
 ```
 
-Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. Only Signal is active; `App.tsx` keeps a `LegacyRedirect` component to absorb bookmarks of the old paths.
+Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. The VS Code-style **IDE workspace** (`ide/`) is the only chrome since the 2026-05-22 IDE-only switch; the retired Signal chrome's pages were ported IDE-native then deleted in the 2026-05-23 cleanup, leaving `signal/` with the public pages (auth/marketing/legal/shared), `AdminPage`, and the shared components the IDE reuses. `App.tsx` keeps a `LegacyRedirect` to absorb bookmarks of the old paths.
 
 ## Run it locally
 
