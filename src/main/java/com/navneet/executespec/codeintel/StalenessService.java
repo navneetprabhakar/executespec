@@ -110,7 +110,22 @@ public class StalenessService {
       String current =
           gitHub.getBranchHeadSha(
               "https://github.com/" + repo.getGithubRepoFullName(), probeBranch, overridePat);
-      boolean stale = current != null && (generated == null || !generated.equals(current));
+      // Stale only if the SOURCE changed. Ignore .executespec/-only diffs — ExecuteSpec publishes
+      // its own codemaps under .executespec/, which moves HEAD but doesn't change source; without
+      // this the dashboard shows a permanent STALE after each published-codemap merge
+      // (RL-2026-05-025).
+      boolean stale;
+      if (current == null) {
+        stale = false;
+      } else if (generated == null) {
+        stale = true; // never generated
+      } else if (generated.equals(current)) {
+        stale = false;
+      } else {
+        stale =
+            !gitHub.diffConfinedTo(
+                repo.getGithubRepoFullName(), generated, current, ".executespec/", overridePat);
+      }
       if (stale) staleCount++;
       repoReports.add(new RepoStaleness(repo.getGithubRepoFullName(), generated, current, stale));
     }
