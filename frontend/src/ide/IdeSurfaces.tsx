@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {CostProgressBar} from '@/signal/components/CostProgressBar';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
@@ -639,6 +640,7 @@ export function IdeLive() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [err, setErr] = useState('');
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // Real-time event stream — same hook the Signal LivePage uses. Populates
   // useSseStore with tool / LLM / log entries as the agent runs.
@@ -694,13 +696,6 @@ export function IdeLive() {
 
   async function performCancel() {
     if (!runId) return;
-    if (
-      !window.confirm(
-        'Cancel this run? The agent is interrupted immediately; completed tasks are kept, in-flight changes are discarded.',
-      )
-    ) {
-      return;
-    }
     setCancelBusy(true);
     try {
       await api.cancelRun(runId);
@@ -751,11 +746,27 @@ export function IdeLive() {
           </div>
         </div>
         {!terminal && (
-          <button className='ide-btn ghost' onClick={performCancel} disabled={cancelBusy}>
+          <button
+            className='ide-btn ghost'
+            onClick={() => setConfirmCancel(true)}
+            disabled={cancelBusy}
+          >
             {cancelBusy ? 'Cancelling…' : '✕ Cancel run'}
           </button>
         )}
       </div>
+
+      <ConfirmModal
+        open={confirmCancel}
+        title='Cancel run'
+        body='Cancel this run? The agent is interrupted immediately; completed tasks are kept, in-flight changes are discarded.'
+        confirmLabel='Cancel run'
+        cancelLabel='Keep running'
+        danger
+        busy={cancelBusy}
+        onConfirm={performCancel}
+        onClose={() => setConfirmCancel(false)}
+      />
 
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '8px 0'}}>{err}</div>}
 

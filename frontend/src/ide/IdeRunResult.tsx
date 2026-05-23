@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {Markdown} from '@/signal/components/Markdown';
+import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
 import {
   IdeBadge,
@@ -122,6 +123,16 @@ export default function IdeRunResult() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
+  // Single confirm-modal slot — multiple destructive actions on this page
+  // (delete run / deploy / stop preview / mark-test-invalid) drive it via a
+  // discriminated payload that carries the action to run on confirm.
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
   // Timeline + Chat — IDE parity with Signal ResultPage.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [chat, setChat] = useState<api.RunChatMessage[] | null>(null);
@@ -279,13 +290,9 @@ export default function IdeRunResult() {
   }
 
   // Run management — fork / archive / unarchive / soft-delete (dark endpoints).
+  // 'delete' is confirmed by the caller via the ConfirmModal before reaching here.
   async function manageRun(act: 'fork' | 'archive' | 'unarchive' | 'delete') {
     if (!runId) return;
-    if (
-      act === 'delete' &&
-      !window.confirm('Delete this run? It is soft-deleted with a 30-day undo window.')
-    )
-      return;
     setBusy(act);
     setMsg('');
     try {
@@ -564,15 +571,20 @@ export default function IdeRunResult() {
               <button
                 className='ide-btn ghost'
                 disabled={busy === 'deploy'}
-                onClick={() => {
-                  if (window.confirm('Deploy this run to a permanent Cloud Run service?'))
-                    action(
-                      'deploy',
-                      () => api.createDeployment({runId}),
-                      (r) =>
-                        `Deployed: ${(r as {serviceUrl?: string})?.serviceUrl || 'provisioning'}`,
-                    );
-                }}
+                onClick={() =>
+                  setConfirm({
+                    title: 'Deploy to Cloud Run',
+                    body: 'Deploy this run to a permanent Cloud Run service?',
+                    confirmLabel: 'Deploy',
+                    onConfirm: () =>
+                      action(
+                        'deploy',
+                        () => api.createDeployment({runId}),
+                        (r) =>
+                          `Deployed: ${(r as {serviceUrl?: string})?.serviceUrl || 'provisioning'}`,
+                      ),
+                  })
+                }
               >
                 {busy === 'deploy' ? 'Deploying…' : '☁ Deploy'}
               </button>
@@ -632,7 +644,15 @@ export default function IdeRunResult() {
                   className='ide-btn ghost'
                   style={{color: 'var(--ide-red)'}}
                   disabled={busy === 'delete'}
-                  onClick={() => manageRun('delete')}
+                  onClick={() =>
+                    setConfirm({
+                      title: 'Delete run',
+                      body: 'Delete this run? It is soft-deleted with a 30-day undo window.',
+                      confirmLabel: 'Delete',
+                      danger: true,
+                      onConfirm: () => manageRun('delete'),
+                    })
+                  }
                 >
                   ⊘ Delete
                 </button>
@@ -684,19 +704,25 @@ export default function IdeRunResult() {
                         className='ide-btn ghost'
                         style={{padding: '4px 10px', color: 'var(--ide-red)'}}
                         disabled={busy === 'preview-stop'}
-                        onClick={() => {
-                          if (!window.confirm('Stop this preview?')) return;
-                          action(
-                            'preview-stop',
-                            async () => {
-                              await api.stopPreview(runId);
-                              setPreviewStarted(false);
-                              setPreview((p) => (p ? {...p, status: 'STOPPED', url: null} : p));
-                              return null;
-                            },
-                            () => 'Preview stopped.',
-                          );
-                        }}
+                        onClick={() =>
+                          setConfirm({
+                            title: 'Stop preview',
+                            body: 'Stop this preview?',
+                            confirmLabel: 'Stop',
+                            danger: true,
+                            onConfirm: () =>
+                              action(
+                                'preview-stop',
+                                async () => {
+                                  await api.stopPreview(runId);
+                                  setPreviewStarted(false);
+                                  setPreview((p) => (p ? {...p, status: 'STOPPED', url: null} : p));
+                                  return null;
+                                },
+                                () => 'Preview stopped.',
+                              ),
+                          })
+                        }
                       >
                         {busy === 'preview-stop' ? 'Stopping…' : '■ Stop'}
                       </button>
@@ -1383,14 +1409,19 @@ export default function IdeRunResult() {
                                   className='ide-btn ghost'
                                   style={{padding: '3px 8px'}}
                                   disabled={busy === `invalid-${r.testResultId}`}
-                                  onClick={() => {
-                                    if (!window.confirm('Mark this test as invalid?')) return;
-                                    action(
-                                      `invalid-${r.testResultId}`,
-                                      () => api.markTestInvalid(r.testResultId),
-                                      () => 'Marked invalid.',
-                                    );
-                                  }}
+                                  onClick={() =>
+                                    setConfirm({
+                                      title: 'Mark test invalid',
+                                      body: 'Mark this test as invalid?',
+                                      confirmLabel: 'Mark invalid',
+                                      onConfirm: () =>
+                                        action(
+                                          `invalid-${r.testResultId}`,
+                                          () => api.markTestInvalid(r.testResultId),
+                                          () => 'Marked invalid.',
+                                        ),
+                                    })
+                                  }
                                 >
                                   Mark invalid
                                 </button>
@@ -1525,6 +1556,16 @@ export default function IdeRunResult() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={!!confirm}
+        title={confirm?.title ?? ''}
+        body={confirm?.body ?? ''}
+        confirmLabel={confirm?.confirmLabel ?? 'Confirm'}
+        danger={confirm?.danger}
+        onConfirm={() => confirm?.onConfirm()}
+        onClose={() => setConfirm(null)}
+      />
     </div>
   );
 }

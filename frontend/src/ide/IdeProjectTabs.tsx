@@ -3,6 +3,7 @@ import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 
 type Dash = Record<string, unknown>;
@@ -908,6 +909,7 @@ export function IdeProjectRepos() {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [unlinkFor, setUnlinkFor] = useState<{repoId: string; name: string} | null>(null);
 
   function load() {
     api
@@ -979,14 +981,7 @@ export function IdeProjectRepos() {
   }
 
   function confirmUnlink(repoId: string, name: string) {
-    if (
-      !window.confirm(
-        `Unlink "${name}"? It will no longer be cloned or referenced by future runs. ` +
-          'Existing runs and PRs are unaffected.',
-      )
-    )
-      return;
-    act(`unlink${repoId}`, () => api.unlinkProjectRepo(projectId, repoId), 'Repo unlinked.');
+    setUnlinkFor({repoId, name});
   }
 
   return (
@@ -1172,6 +1167,29 @@ export function IdeProjectRepos() {
           })}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!unlinkFor}
+        title='Unlink repo'
+        body={
+          unlinkFor
+            ? `Unlink "${unlinkFor.name}"? It will no longer be cloned or referenced by future runs. Existing runs and PRs are unaffected.`
+            : ''
+        }
+        confirmLabel='Unlink'
+        danger
+        busy={!!unlinkFor && busy === `unlink${unlinkFor.repoId}`}
+        onConfirm={async () => {
+          const u = unlinkFor;
+          if (!u) return;
+          await act(
+            `unlink${u.repoId}`,
+            () => api.unlinkProjectRepo(projectId, u.repoId),
+            'Repo unlinked.',
+          );
+        }}
+        onClose={() => setUnlinkFor(null)}
+      />
     </div>
   );
 }
