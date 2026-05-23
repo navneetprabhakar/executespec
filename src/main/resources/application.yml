@@ -392,7 +392,6 @@ agent:
       max-output-token-multiplier: 1.5  # Batch tasks get 1.5x output tokens
       google-inline-task-limit: 10  # Google: inline <10 tasks, JSONL >=10
   github:
-    pat: ""
     default-owner: ""
   shell:
     sandbox-enabled: true

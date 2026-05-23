@@ -20,7 +20,6 @@ import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -69,9 +68,6 @@ public class BootstrapService {
   private final ActivityEventEmitter activityEmitter;
   private final PullRequestRecordService prRecordService;
   private final HttpClient http;
-
-  @Value("${agent.github.pat:#{null}}")
-  private String systemPat;
 
   @Autowired
   public BootstrapService(
@@ -334,9 +330,7 @@ public class BootstrapService {
   }
 
   private String effectivePat(String actorPat) {
-    if (actorPat != null && !actorPat.isBlank()) return actorPat;
-    if (systemPat != null && !systemPat.isBlank()) return systemPat;
-    return null;
+    return (actorPat != null && !actorPat.isBlank()) ? actorPat : null;
   }
 
   public static String slugify(String projectName) {
