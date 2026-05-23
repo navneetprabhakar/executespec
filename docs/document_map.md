@@ -100,8 +100,6 @@ The frontend has its own conventions because the two coexisting chromes (V2 side
 | Doc | Path | What | When to read |
 | --- | --- | --- | --- |
 | Javadoc | [`docs/JAVADOC.md`](JAVADOC.md) | The generated-style API reference — every public class with package, role, key methods. **Known stale** since v2.4.0 (2026-04-14); subsequent deltas live in `ARCHITECTURE.md`, `CODEMAP.md`, and per-package `CLAUDE.md`. Rewriting `JAVADOC.md` is queued but not blocking. | When you need a class-level signature reference. Cross-check against `ARCHITECTURE.md` and `CODEMAP.md` for anything younger than v2.4.0. |
-| Backend feature inventory | [`docs/audit/backend-feature-inventory.md`](audit/backend-feature-inventory.md) | Exhaustive endpoint catalogue — every REST controller's full URL, user-facing capability, and access level, organized by domain (100 controllers, 448 endpoints). Built to detect backend capabilities the UI never surfaces. | When you need a full map of what the backend exposes, or to find UI gaps against the API. |
-| Earlier-chrome → current gap | [`docs/audit/earlier-chrome-gap.md`](audit/earlier-chrome-gap.md) | Diffs the recovered earlier-chrome source (V2 `components/`+`pages/`, V3, V4 at commit `d0e643ec`) against the live Signal + IDE tree. Lists the 111 `api.ts` functions the earlier chrome called that neither current chrome reaches, mapped to user-facing features (PR/Code review autofix, live-preview embed, deploy wizard, multi-solution execution lane, Library/Migrations, accounting/GST, admin console, run power-ops). Complements `feature-gap-comparison.md` (which couldn't diff the gutted legacy source). | When deciding what to restore from the older UI, or scoping the Signal/IDE feature backlog. |
 
 ---
 
