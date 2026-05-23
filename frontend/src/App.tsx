@@ -1,72 +1,58 @@
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// Signal — the only design now. v2/v3/v4 chromes retired 2026-05-15.
-import SignalShell from '@/signal/components/Shell';
+// The VS Code-style IDE workspace is the ONLY chrome. Every protected route is
+// IDE-native (2026-05-23 Signal-removal waves finished the port). The only
+// surviving Signal pages are the standalone PUBLIC pages (auth / marketing /
+// legal / shared) — which have no IDE chrome by design — plus AdminPage for the
+// /admin/* deep links.
+import IdeWorkspace from '@/ide/IdeWorkspace';
+import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import IdeRunResult from '@/ide/IdeRunResult';
+import IdeProject from '@/ide/IdeProject';
+import IdeProjects from '@/ide/IdeProjects';
+import {IdeProjectPulse, IdeProjectRuns, IdeProjectRepos} from '@/ide/IdeProjectTabs';
+import {
+  IdeProjectChat,
+  IdeProjectCode,
+  IdeProjectArchitecture,
+  IdeProjectMembers,
+  IdeProjectActivity,
+  IdeProjectSettings,
+} from '@/ide/IdeProjectMore';
+import IdePlan from '@/ide/IdePlan';
+import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
+import {IdeIntegrations, IdeAdmin} from '@/ide/IdeSettings';
+import IdeNotifications, {IdeSearch, IdeAudit, IdeEmptyProject, IdeMoreMenu} from '@/ide/IdeSystem';
+import {
+  IdeInsights,
+  IdeLibrary,
+  IdeLibraryDetail,
+  IdeMigrations,
+  IdeMigrationDetail,
+  IdeSpecTemplates,
+} from '@/ide/IdeDiscovery';
+import {IdeApiKeys, IdeOrgMembers, IdeOrgSettings} from '@/ide/IdeOrg';
+import {IdeBilling, IdePlans} from '@/ide/IdeBilling';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
 import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
 
-// Run loop — each in its own file with default export
-import HomePage from '@/signal/pages/HomePage';
-import AllRunsPage from '@/signal/pages/AllRunsPage';
-import ComposePage from '@/signal/pages/ComposePage';
-import PlanPage from '@/signal/pages/PlanPage';
-import LivePage from '@/signal/pages/LivePage';
-import ResultPage from '@/signal/pages/ResultPage';
+// Admin sub-routes + public share pages are the only Signal pages that survive
+// inside the router (no IDE-native surface by design); AdminPage also backs the
+// /admin/* deep links.
+import {AdminPage, SharedPage} from '@/signal/pages/MiscPages';
 
-// Projects
-import ProjectsPage from '@/signal/pages/ProjectsPage';
-import ProjectPulsePage from '@/signal/pages/project/ProjectPulsePage';
-import ProjectReposPage from '@/signal/pages/project/ProjectReposPage';
-import ProjectRunsPage from '@/signal/pages/project/ProjectRunsPage';
-import ProjectCodePage from '@/signal/pages/project/ProjectCodePage';
-import ProjectChatPage from '@/signal/pages/project/ProjectChatPage';
-import ProjectActivityPage from '@/signal/pages/project/ProjectActivityPage';
-import ProjectMembersPage from '@/signal/pages/project/ProjectMembersPage';
-import ProjectArchitecturePage from '@/signal/pages/project/ProjectArchitecturePage';
-import ProjectSettingsPage from '@/signal/pages/project/ProjectSettingsPage';
-import ProjectComposePage from '@/signal/pages/project/ProjectComposePage';
-
-// Account + billing
-import AccountPage from '@/signal/pages/account/AccountPage';
-import BillingPage from '@/signal/pages/account/BillingPage';
-import PlansPage from '@/signal/pages/account/PlansPage';
+// Standalone public pages (auth / marketing / legal) — no IDE chrome.
 import {
-  TopupPage,
-  IntegrationsPage,
-  ApiKeysPage,
-  OrgMembersPage,
-} from '@/signal/pages/account/MiscAccountPages';
-
-// Cross-cutting + admin
-import {
-  NotificationsPage,
-  SearchPage,
-  MorePage,
-  AdminPage,
-  SharedPage,
-} from '@/signal/pages/MiscPages';
-
-// Extras (Library, Migrations, etc.)
-import {
-  InsightsPage,
-  LibraryPage,
-  LibraryDetailPage,
-  MigrationsPage,
-  MigrationDetailPage,
   TrustPage,
-  EmptyProjectPage,
   PublicPricingPage,
   ForgotPasswordPage,
   ResetPasswordPage,
   AcceptInvitePage,
-  AuditLogPage,
-  DeploymentsPage,
-  SpecTemplatesPage,
 } from '@/signal/pages/ExtraPages';
-import {TermsPage, PrivacyPage, DpaPage, OrgSettingsPage} from '@/signal/pages/LegalPages';
+import {TermsPage, PrivacyPage, DpaPage} from '@/signal/pages/LegalPages';
 
 /**
  * Legacy URL redirects so old bookmarks + marketing links keep working.
@@ -82,10 +68,6 @@ function LegacyRedirect() {
   path = path.replace(/^\/p\/empty\b/, '/projects/empty');
   path = path.replace(/^\/p\/([^/]+)\/r\//, '/projects/$1/runs/');
   path = path.replace(/^\/p\//, '/projects/');
-  // Executions (v3 launch system) is currently being rebuilt — collapse any
-  // legacy /projects/:id/executions/* link to the project Compose tab so
-  // bookmarks don't 404. The redirect-only behaviour is intentional and
-  // documented in the gap report (P0 #3).
   path = path.replace(/^\/projects\/([^/]+)\/executions(\/.*)?$/, '/projects/$1');
   // v2 routes folded into Signal equivalents
   if (path === '/dashboard') path = '/insights';
@@ -94,7 +76,6 @@ function LegacyRedirect() {
   if (path === '/accounting' || path === '/invoices') path = '/billing';
   if (path === '/team') path = '/org-members';
   if (path === '/org/projects') path = '/projects';
-  // /org/settings now has a real page (SSO + standards + profile) — no redirect needed.
   if (path === '/governance/audit') path = '/audit';
   if (path === '/runs/new') path = '/compose';
   if (path === '/runs/new/sandbox') path = '/welcome';
@@ -109,6 +90,75 @@ function LegacyRedirect() {
   if (path === '/claim') path = '/welcome';
   if (path === '/landing' || path === '') path = '/home';
   return <Navigate to={path + location.search + location.hash} replace />;
+}
+
+/**
+ * Protected route children — all IDE-native (the Signal-page fallbacks were
+ * removed in the 2026-05-23 cleanup). The only Signal page reached from here is
+ * AdminPage for the /admin/* deep links; bare /live + /result (no run id)
+ * redirect to /runs since there's nothing to render without an id.
+ */
+function protectedChildren() {
+  return (
+    <>
+      {/* Default + run loop */}
+      <Route path='/' element={<Navigate to='/home' replace />} />
+      <Route path='/home' element={<IdeWelcome />} />
+      <Route path='/runs' element={<IdeRuns />} />
+      <Route path='/compose' element={<IdeCompose />} />
+      <Route path='/plan' element={<IdePlan />} />
+      <Route path='/plan/:runId' element={<IdePlan />} />
+      <Route path='/live' element={<Navigate to='/runs' replace />} />
+      <Route path='/live/:runId' element={<IdeLive />} />
+      <Route path='/result' element={<Navigate to='/runs' replace />} />
+      <Route path='/result/:runId' element={<IdeRunResult />} />
+      <Route path='/runs/:runShort' element={<IdeRunResult />} />
+
+      {/* Projects */}
+      <Route path='/projects' element={<IdeProjects />} />
+      <Route path='/projects/empty' element={<IdeEmptyProject />} />
+      <Route path='/projects/:projectId' element={<IdeProject />} />
+      <Route path='/projects/:projectId/pulse' element={<IdeProjectPulse />} />
+      <Route path='/projects/:projectId/repos' element={<IdeProjectRepos />} />
+      <Route path='/projects/:projectId/runs' element={<IdeProjectRuns />} />
+      <Route path='/projects/:projectId/runs/:runShort' element={<IdeRunResult />} />
+      <Route path='/projects/:projectId/code' element={<IdeProjectCode />} />
+      <Route path='/projects/:projectId/chat' element={<IdeProjectChat />} />
+      <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
+      <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />
+      <Route path='/projects/:projectId/architecture' element={<IdeProjectArchitecture />} />
+      <Route path='/projects/:projectId/settings' element={<IdeProjectSettings />} />
+
+      {/* Account + billing */}
+      <Route path='/account' element={<IdeAccount />} />
+      <Route path='/settings' element={<IdeAccount />} />
+      <Route path='/settings/manage' element={<IdeAccount />} />
+      <Route path='/billing' element={<IdeBilling />} />
+      <Route path='/plans' element={<IdePlans />} />
+      <Route path='/topup' element={<Navigate to='/billing' replace />} />
+      <Route path='/integrations' element={<IdeIntegrations />} />
+      <Route path='/api-keys' element={<IdeApiKeys />} />
+      <Route path='/org-members' element={<IdeOrgMembers />} />
+      <Route path='/org/settings' element={<IdeOrgSettings />} />
+
+      {/* Discover */}
+      <Route path='/insights' element={<IdeInsights />} />
+      <Route path='/library' element={<IdeLibrary />} />
+      <Route path='/library/:slug' element={<IdeLibraryDetail />} />
+      <Route path='/migrations' element={<IdeMigrations />} />
+      <Route path='/migrations/:slug' element={<IdeMigrationDetail />} />
+      <Route path='/templates' element={<IdeSpecTemplates />} />
+      <Route path='/audit' element={<IdeAudit />} />
+      <Route path='/deployments' element={<IdeDeployments />} />
+
+      {/* System */}
+      <Route path='/notifications' element={<IdeNotifications />} />
+      <Route path='/search' element={<IdeSearch />} />
+      <Route path='/more' element={<IdeMoreMenu />} />
+      <Route path='/admin' element={<IdeAdmin />} />
+      <Route path='/admin/*' element={<AdminPage />} />
+    </>
+  );
 }
 
 export default function App() {
@@ -136,72 +186,9 @@ export default function App() {
       <Route path='/reports/shared/:token' element={<SharedPage />} />
       <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
-      {/* ───── Protected app ───── */}
+      {/* ───── Protected app (IDE workspace — the only chrome) ───── */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<SignalShell />}>
-          {/* Default + run loop */}
-          <Route path='/' element={<Navigate to='/home' replace />} />
-          <Route path='/home' element={<HomePage />} />
-          <Route path='/runs' element={<AllRunsPage />} />
-          <Route path='/compose' element={<ComposePage />} />
-          <Route path='/plan' element={<PlanPage />} />
-          <Route path='/plan/:runId' element={<PlanPage />} />
-          <Route path='/live' element={<LivePage />} />
-          <Route path='/live/:runId' element={<LivePage />} />
-          <Route path='/result' element={<ResultPage />} />
-          <Route path='/result/:runId' element={<ResultPage />} />
-          <Route path='/runs/:runShort' element={<ResultPage />} />
-
-          {/* Projects */}
-          <Route path='/projects' element={<ProjectsPage />} />
-          <Route path='/projects/empty' element={<EmptyProjectPage />} />
-          {/* Compose is the default landing for projects — matches v3/dev. Pulse
-              lives at the explicit /pulse path. Old bookmarks of /projects/:id
-              come straight here. */}
-          <Route path='/projects/:projectId' element={<ProjectComposePage />} />
-          <Route path='/projects/:projectId/pulse' element={<ProjectPulsePage />} />
-          <Route path='/projects/:projectId/repos' element={<ProjectReposPage />} />
-          <Route path='/projects/:projectId/runs' element={<ProjectRunsPage />} />
-          <Route path='/projects/:projectId/runs/:runShort' element={<ResultPage />} />
-          <Route path='/projects/:projectId/code' element={<ProjectCodePage />} />
-          <Route path='/projects/:projectId/chat' element={<ProjectChatPage />} />
-          <Route path='/projects/:projectId/activity' element={<ProjectActivityPage />} />
-          <Route path='/projects/:projectId/members' element={<ProjectMembersPage />} />
-          <Route path='/projects/:projectId/architecture' element={<ProjectArchitecturePage />} />
-          <Route path='/projects/:projectId/settings' element={<ProjectSettingsPage />} />
-
-          {/* Account + billing */}
-          <Route path='/account' element={<AccountPage />} />
-          <Route path='/settings' element={<AccountPage />} />
-          <Route path='/settings/manage' element={<AccountPage />} />
-          <Route path='/billing' element={<BillingPage />} />
-          <Route path='/plans' element={<PlansPage />} />
-          {/* /topup intentionally removed 2026-05-19 — backend endpoints (topup/packs,
-              topup/purchase, credits) are not implemented; the page rendered 3 empty
-              "Pack —" cards. Restore once BillingService.purchaseTopUp() ships. */}
-          <Route path='/topup' element={<Navigate to='/billing' replace />} />
-          <Route path='/integrations' element={<IntegrationsPage />} />
-          <Route path='/api-keys' element={<ApiKeysPage />} />
-          <Route path='/org-members' element={<OrgMembersPage />} />
-          <Route path='/org/settings' element={<OrgSettingsPage />} />
-
-          {/* Discover */}
-          <Route path='/insights' element={<InsightsPage />} />
-          <Route path='/library' element={<LibraryPage />} />
-          <Route path='/library/:slug' element={<LibraryDetailPage />} />
-          <Route path='/migrations' element={<MigrationsPage />} />
-          <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
-          <Route path='/templates' element={<SpecTemplatesPage />} />
-          <Route path='/audit' element={<AuditLogPage />} />
-          <Route path='/deployments' element={<DeploymentsPage />} />
-
-          {/* System */}
-          <Route path='/notifications' element={<NotificationsPage />} />
-          <Route path='/search' element={<SearchPage />} />
-          <Route path='/more' element={<MorePage />} />
-          <Route path='/admin' element={<AdminPage />} />
-          <Route path='/admin/*' element={<AdminPage />} />
-        </Route>
+        <Route element={<IdeWorkspace />}>{protectedChildren()}</Route>
       </Route>
 
       {/* Legacy URL catchers — collapse to canonical equivalents */}

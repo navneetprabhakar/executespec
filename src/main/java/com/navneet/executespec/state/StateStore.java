@@ -2112,12 +2112,6 @@ public class StateStore {
     runRepo.save(run);
   }
 
-  private void updateRunStatus(String runId, String status) {
-    PipelineRun run = runRepo.findById(runId).orElseThrow();
-    run.setStatus(status);
-    runRepo.save(run);
-  }
-
   /**
    * Updates the instance heartbeat for a run. Called every 30s by RunOrchestrator. Uses a
    * lightweight JPA update to avoid loading the full entity.

@@ -82,10 +82,8 @@ public class CostEstimator {
   private static final int MEDIUM_IN_TOKENS = 18_000;
   private static final int HIGH_IN_TOKENS = 35_000;
 
-  // Output token estimates per iteration by complexity.
-  private static final int LOW_OUT_TOKENS = 1_500;
+  // Output token estimate per iteration (flat across complexity tiers).
   private static final int MEDIUM_OUT_TOKENS = 3_000;
-  private static final int HIGH_OUT_TOKENS = 6_000;
 
   public CostBreakdown estimate(TaskPlan plan) {
     return estimate(plan, LlmProvider.ANTHROPIC);
@@ -382,14 +380,6 @@ public class CostEstimator {
       case "LOW" -> LOW_IN_TOKENS;
       case "HIGH" -> HIGH_IN_TOKENS;
       default -> MEDIUM_IN_TOKENS;
-    };
-  }
-
-  private int complexityOutputTokens(String complexity) {
-    return switch (complexity) {
-      case "LOW" -> LOW_OUT_TOKENS;
-      case "HIGH" -> HIGH_OUT_TOKENS;
-      default -> MEDIUM_OUT_TOKENS;
     };
   }
 }

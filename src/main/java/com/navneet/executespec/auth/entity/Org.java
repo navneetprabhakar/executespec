@@ -90,6 +90,13 @@ public class Org {
   @Column(name = "gemini_api_key")
   private String geminiApiKey;
 
+  /**
+   * OpenRouter API key (Enterprise gateway). Org-level only; set by org admins, ENTERPRISE tier.
+   */
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "open_router_api_key")
+  private String openRouterApiKey;
+
   // ── Key source mode & provider restrictions ──────────────────────────────
   // Controls how API keys are resolved for runs created by this org's members.
   // SYSTEM = always use platform keys; OWN_KEYS = only user/org keys (no fallback);
@@ -102,6 +109,16 @@ public class Org {
   /** Comma-separated lowercase provider names, e.g. "anthropic,openai". Null = all allowed. */
   @Column(name = "enabled_providers")
   private String enabledProviders;
+
+  /**
+   * Per-org model-matrix overrides (F3, ENTERPRISE). JSON object mapping {@code
+   * "<provider>:<tier>"} → model id, e.g. {@code {"anthropic:planning":"claude-opus-4-6"}}. Sparse
+   * — only overridden cells are present; every unset cell falls back to the {@code application.yml
+   * model-matrix} default. Null/blank = no overrides. Model ids are not secret, so this is stored
+   * in clear text.
+   */
+  @Column(name = "model_overrides_json", columnDefinition = "TEXT")
+  private String modelOverridesJson;
 
   // ── Domain enforcement & member limits ────────────────────────────────────
 

@@ -567,20 +567,24 @@ public class TierEnforcementService {
     int limit = getMonthlyLimit(tier);
     if (limit < 0) return; // unlimited
 
-    // FREE tier: lifetime limit — never reset
+    // 2026-05-22 — FREE is a MONTHLY quota (matches the "15 runs/month" copy + tier_config),
+    // resetting each calendar month like the paid tiers (FREE has no subscription →
+    // calendar-month).
+    maybeResetUserCounter(user);
+
+    // FREE tier keeps a friendlier upgrade message than the generic quota error below.
     if ("FREE".equals(tier)) {
       if (user.getPersonalRunCount() >= limit) {
         throw new ResponseStatusException(
             HttpStatus.PAYMENT_REQUIRED,
             "You've used all "
                 + limit
-                + " free runs. Upgrade to Pro for 20 credits/month or Team for unlimited runs"
-                + " against your own provider keys.");
+                + " free runs this month. Upgrade to Pro for 20 credits/month or Team for"
+                + " unlimited runs against your own provider keys.");
       }
       return;
     }
 
-    maybeResetUserCounter(user);
     if (user.getPersonalRunCount() >= limit) {
       // Check bonus runs before rejecting
       long bonus = runTopupService.getAvailableBonus(user.getId());
@@ -629,10 +633,8 @@ public class TierEnforcementService {
   }
 
   private void maybeResetUserCounter(AppUser user) {
-    // FREE tier uses lifetime limit — never reset
-    String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
-    if ("FREE".equals(tier)) return;
-
+    // 2026-05-22 — FREE resets monthly too (was lifetime); shouldResetUsage falls back to a
+    // calendar-month boundary for users without a subscription.
     if (shouldResetUsage(user.getId(), user.getRunCountResetAt())) {
       user.setPersonalRunCount(0);
       user.setRunCountResetAt(Instant.now());

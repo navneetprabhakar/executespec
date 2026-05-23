@@ -52,7 +52,7 @@ public record RunRequest(
      * Optional AI provider override for this run. v2.5.13 — enum renamed GOOGLE → GEMINI; legacy
      * GOOGLE still accepted.
      */
-    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider") String aiProvider,
+    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI|OPENROUTER", message = "Invalid AI provider") String aiProvider,
     /** Optional project ID to associate this run with (org members only). */
     @Size(max = 36, message = "Project ID must not exceed 36 characters") String projectId,
     /**
