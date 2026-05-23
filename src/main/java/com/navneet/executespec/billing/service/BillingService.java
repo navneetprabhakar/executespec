@@ -323,7 +323,7 @@ public class BillingService {
       String userName = user.getFirstName() + " " + user.getLastName();
       result =
           razorpayGateway.createSubscription(
-              userId, userName, user.getEmail(), user.getOrgId(), plan);
+              userId, userName, user.getEmail(), user.getOrgId(), plan, effectiveSeats);
 
       persistSubscription(
           userId,

@@ -14,7 +14,7 @@ import com.navneet.executespec.billing.entity.BillingPlan;
 public interface BillingGateway {
 
   SubscriptionInitResult createSubscription(
-      String userId, String userName, String userEmail, String orgId, BillingPlan plan);
+      String userId, String userName, String userEmail, String orgId, BillingPlan plan, int seats);
 
   boolean verifyPayment(VerifyPaymentRequest request);
 
