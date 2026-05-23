@@ -113,7 +113,6 @@ public class AgentProperties {
 
   @Data
   public static class GitHub {
-    private String pat = "";
     private String defaultOwner = "";
   }
 

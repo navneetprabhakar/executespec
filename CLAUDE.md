@@ -203,7 +203,7 @@ ANTHROPIC_API_KEY=
 GOOGLE_API_KEY=                  # Gemini API key
 
 # Optional — Integrations
-GITHUB_PAT=
+# (GITHUB_PAT removed 2026-05-23 — there is no system GitHub PAT; every GitHub op uses the caller's own PAT)
 SLACK_CLIENT_ID= / SLACK_CLIENT_SECRET= / SLACK_SIGNING_SECRET=
 DASHBOARD_URL=
 
