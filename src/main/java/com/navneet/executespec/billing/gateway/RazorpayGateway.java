@@ -30,19 +30,21 @@ public class RazorpayGateway implements BillingGateway {
 
   @Override
   public SubscriptionInitResult createSubscription(
-      String userId, String userName, String userEmail, String orgId, BillingPlan plan) {
+      String userId, String userName, String userEmail, String orgId, BillingPlan plan, int seats) {
     // 1. Get or create Razorpay customer
     String customerId = getOrCreateCustomer(userId, userName, userEmail);
 
     // 2. Compute max total_count
     int totalCount = "ANNUAL".equals(plan.getPeriod()) ? 50 : 600;
 
-    // 3. Create Razorpay subscription
+    // 3. Create Razorpay subscription. quantity = seats so per-seat (TEAM) plans
+    //    charge seats × the per-seat price; flat plans (Pro/Solo) pass seats=1.
     JsonNode sub =
         client.createSubscription(
             plan.getRazorpayPlanId(),
             customerId,
             totalCount,
+            seats,
             Map.of(
                 "user_id", userId,
                 "plan_tier", plan.getTier(),
