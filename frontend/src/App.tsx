@@ -33,6 +33,7 @@ import {
   IdeSpecTemplates,
 } from '@/ide/IdeDiscovery';
 import {IdeApiKeys, IdeOrgMembers, IdeOrgSettings} from '@/ide/IdeOrg';
+import {IdeBilling, IdePlans} from '@/ide/IdeBilling';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -61,8 +62,6 @@ import ProjectComposePage from '@/signal/pages/project/ProjectComposePage';
 
 // Account + billing
 import AccountPage from '@/signal/pages/account/AccountPage';
-import BillingPage from '@/signal/pages/account/BillingPage';
-import PlansPage from '@/signal/pages/account/PlansPage';
 import {TopupPage, IntegrationsPage} from '@/signal/pages/account/MiscAccountPages';
 
 // Cross-cutting + admin
@@ -190,8 +189,8 @@ function protectedChildren(ide: boolean) {
       <Route path='/account' element={ide ? <IdeAccount /> : <AccountPage />} />
       <Route path='/settings' element={ide ? <IdeAccount /> : <AccountPage />} />
       <Route path='/settings/manage' element={ide ? <IdeAccount /> : <AccountPage />} />
-      <Route path='/billing' element={<BillingPage />} />
-      <Route path='/plans' element={<PlansPage />} />
+      <Route path='/billing' element={<IdeBilling />} />
+      <Route path='/plans' element={<IdePlans />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
       <Route path='/integrations' element={ide ? <IdeIntegrations /> : <IntegrationsPage />} />
       <Route path='/api-keys' element={<IdeApiKeys />} />
