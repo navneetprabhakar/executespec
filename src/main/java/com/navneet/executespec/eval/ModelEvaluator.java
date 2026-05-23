@@ -795,9 +795,4 @@ public class ModelEvaluator {
         "Patterns: %d/%d matched. Latency: %dms (ceiling %dms). " + "Accuracy=%.1f, Speed=%.1f",
         matched, total, latencyMs, ceiling, accuracy, speed);
   }
-
-  private String truncate(String s, int maxLen) {
-    if (s == null) return null;
-    return s.length() <= maxLen ? s : s.substring(0, maxLen) + "... [truncated]";
-  }
 }

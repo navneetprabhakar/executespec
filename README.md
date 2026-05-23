@@ -9,7 +9,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Project           | `1.0.0-M1`          | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V202`              | `src/main/resources/db/migration/V202_*.sql`                           |
+| Flyway head       | `V203`              | `src/main/resources/db/migration/V203_*.sql`                           |
 | Frontend          | `1.0.0-M1`          | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -22,7 +22,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V202                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V203                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -59,7 +59,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │   └── ... (~72 packages total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix (tier → provider → model, pricing, failover)
-│   ├── db/migration/             Flyway V*.sql (head V202, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V203, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -73,7 +73,8 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │       ├── main.tsx              React entry, OTel init, service-worker registration (prod only)
 │       ├── tokens.css            Graphite + Signal design tokens (:root dark default, [data-theme='light'] overrides)
 │       ├── index.css             Global stylesheet (Tailwind v4, mobile/iOS Safari fixes, component utilities)
-│       ├── signal/               Signal chrome (only active shell since 2026-05-15)
+│       ├── ide/                  VS Code-style IDE workspace — the ONLY chrome (IdeWorkspace + every protected surface)
+│       ├── signal/               Public pages (auth/marketing/legal/shared) + AdminPage + shared components reused by the IDE
 │       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
 │       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
 ├── observability/                Local Prometheus + Grafana + Tempo (docker compose up -d)
@@ -81,7 +82,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 └── docs/                         All project docs (see "Where to go next")
 ```
 
-Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. Only Signal is active; `App.tsx` keeps a `LegacyRedirect` component to absorb bookmarks of the old paths.
+Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. The VS Code-style **IDE workspace** (`ide/`) is the only chrome since the 2026-05-22 IDE-only switch; the retired Signal chrome's pages were ported IDE-native then deleted in the 2026-05-23 cleanup, leaving `signal/` with the public pages (auth/marketing/legal/shared), `AdminPage`, and the shared components the IDE reuses. `App.tsx` keeps a `LegacyRedirect` to absorb bookmarks of the old paths.
 
 ## Run it locally
 

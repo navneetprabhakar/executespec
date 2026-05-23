@@ -163,11 +163,13 @@ class FailoverOrderEnumAlignmentTest {
     // tests should keep passing — but if someone REMOVES one, the
     // failover-order test above will catch it via the yaml check.
     assertEquals(
-        3,
+        4,
         LlmProvider.values().length,
-        "Unexpected LlmProvider enum size — if you added a new provider, "
-            + "update application.yml's failover-order + model-matrix.providers + "
-            + "agent.run-pool.providers to include it. If you removed one, "
-            + "update the same three yaml sections to drop references.");
+        "Unexpected LlmProvider enum size — if you added a new provider, update application.yml's"
+            + " failover-order + model-matrix.providers + agent.run-pool.providers to include it."
+            + " If you removed one, update the same three yaml sections to drop references."
+            + " (OPENROUTER added 2026-05-21 — model-matrix.providers.openrouter is set; it is an"
+            + " enterprise gateway, intentionally NOT in failover-order or"
+            + " agent.run-pool.providers.)");
   }
 }

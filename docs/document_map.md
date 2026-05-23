@@ -52,6 +52,7 @@ The user-shaped view of the system. Useful for PMs, support, and anyone writing 
 | Project user journeys | [`docs/project-user-journeys.md`](project-user-journeys.md) | Project-scoped journeys: create project, link repos, run architecture refresh, project chat, tech-debt fix, code review, share-link invite. | When designing or QA-ing a project-workspace feature. |
 | User journeys | [`docs/user-journeys.md`](user-journeys.md) | Non-project journeys: anonymous landing, register, first run, upgrade, billing change, account close. | When designing or QA-ing the unauthenticated and solo-user surfaces. |
 | Benchmark strategy | [`docs/plans/benchmark-strategy.md`](plans/benchmark-strategy.md) | Proposed plan for publishable PATCH (SWE-bench Lite/Verified) and BUILD (Commit0/BaxBench/DevBench) benchmarks — ranked by publishability, with the cost model and a staged rollout. | When deciding which benchmark to run, what it costs, or how to publish the result. |
+| Change-impact guardrail | [`docs/plans/change-impact-guardrail.md`](plans/change-impact-guardrail.md) | Proposed plan to surface, at the plan-approval gate, what shared code a run will touch and who depends on it — grounded in the contract dependency graph. v1 is warn-only with an acknowledged override. | When designing the plan-gate impact warning, the steward policy, or the contract blast-radius surfaces. |
 
 ## 4. Auth + Enterprise
 
@@ -118,13 +119,14 @@ Use this as a cheat-sheet when you know what you're trying to do but not which d
 | Add a readymade or migration recipe | `docs/readymades-catalog-format.md` or `docs/migration-recipes-catalog-format.md` | — |
 | Ship to prod or rollback | `docs/DEPLOYMENT.md` | `docs/operations/slos.md`, `docs/status-page.md` |
 | Look up a class signature | `docs/JAVADOC.md` (caveat: stale post-v2.4.0) | `docs/CODEMAP.md`, then per-package `CLAUDE.md` |
+| Understand why a change was made / what's in flight | `docs/reason-log/2026-05.md` (newest-first decision log) | per-package `CLAUDE.md` |
 
 ---
 
 ## Documents intentionally omitted from this map
 
 - **Audit reports** under `docs/audits/` (line-by-line reviews, migration-and-library verification dumps) and **dated UX assessments** under `docs/design/` (mobile-UX audits, redesign drafts) are point-in-time artefacts. They are kept in git history for traceability but are not re-indexed here once the action items are merged.
-- **`docs/plans/pending.md`** is the operational truth for in-flight tracks (hierarchical planner, SWE-bench adapter, ProgramBench wire-in, V2 batch execution). It's volatile by design and lives outside this map so the map can stay stable across PRs.
+- **`docs/reason-log/2026-05.md`** is the operational truth for in-flight tracks + dated engineering decisions (the retired `docs/plans/pending.md` was folded into it). Volatile by design (newest-first, immutable `RL-YYYY-MM-NNN` ids), it lives outside this map so the map can stay stable across PRs.
 - **`docs/reports/*`** (model-mapping audits, matrix-tracking dumps) is tooling output, not curated docs.
 
 If you need any of those, look in git history — they were last touched on the audit-review branches.

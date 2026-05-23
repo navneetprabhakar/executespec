@@ -44,7 +44,7 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
   'verified score': {
     display: 'verified score',
     definition:
-      'A 0–100 number computed from real signals — final build pass, test pass rate, reviewer verdict — not from an LLM self-rating. ≥85 ships, 50–84 needs review, <50 is blocked.',
+      'A 0–100 number computed from real signals — code delivered, final build pass, test pass rate, reviewer verdict — combined as a weighted average, not an LLM self-rating. ≥85 ships, 70–84 needs review, <70 is blocked.',
   },
   'wiring pass': {
     display: 'wiring pass',

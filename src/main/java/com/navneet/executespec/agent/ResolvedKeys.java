@@ -20,6 +20,8 @@ public record ResolvedKeys(
     String openAiKey,
     /** Google Gemini API key to use, or null to fall back to the system bean. */
     String geminiKey,
+    /** OpenRouter API key (Enterprise gateway), or null. Org-level only. */
+    String openRouterKey,
     /** Key source mode from the org: SYSTEM | OWN_KEYS | HYBRID. */
     String keySourceMode,
     /** Enabled providers (lowercase). Null = all providers allowed. */
@@ -37,6 +39,16 @@ public record ResolvedKeys(
   /** Backward-compatible constructor: defaults to HYBRID mode, all providers. */
   public ResolvedKeys(String anthropicKey, String openAiKey, String geminiKey) {
     this(anthropicKey, openAiKey, geminiKey, "HYBRID", null);
+  }
+
+  /** Backward-compatible 5-arg constructor (pre-OpenRouter): no OpenRouter key. */
+  public ResolvedKeys(
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String keySourceMode,
+      Set<String> enabledProviders) {
+    this(anthropicKey, openAiKey, geminiKey, null, keySourceMode, enabledProviders);
   }
 
   /** Returns true if the given provider (lowercase) is allowed by org policy. */

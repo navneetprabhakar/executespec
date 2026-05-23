@@ -231,12 +231,4 @@ public class TokenBudgetMonitor {
   public int contextLimitFor(String model) {
     return modelRegistry.contextLimitFor(model);
   }
-
-  private int softLimitFor(String complexity, AgentProperties.TokenBudget budget) {
-    return switch (complexity == null ? "MEDIUM" : complexity.toUpperCase()) {
-      case "LOW" -> budget.getLow();
-      case "HIGH" -> budget.getHigh();
-      default -> budget.getMedium();
-    };
-  }
 }

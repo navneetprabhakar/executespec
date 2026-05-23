@@ -6,7 +6,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +26,11 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.OpenRouterModelMapper;
+import com.navneet.executespec.router.OrgModelOverrideService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,6 +50,8 @@ public class OrgController {
   private final ActivityAuditService auditService;
   private final OrgRepository orgRepo;
   private final OrgMemberRepository orgMemberRepo;
+  private final OrgModelOverrideService orgModelOverrideService;
+  private final ModelRegistry modelRegistry;
 
   @PostMapping
   public ResponseEntity<OrgDto> createOrg(
@@ -239,7 +248,7 @@ public class OrgController {
   // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
 
   record OrgAiKeySettingsRequest(
-      String anthropicApiKey, String openAiApiKey, String geminiApiKey) {}
+      String anthropicApiKey, String openAiApiKey, String geminiApiKey, String openRouterApiKey) {}
 
   /**
    * Saves org-wide AI provider API keys. Used by all org members who have not set a personal key.
@@ -259,7 +268,93 @@ public class OrgController {
             req.anthropicApiKey(),
             req.openAiApiKey(),
             req.geminiApiKey(),
+            req.openRouterApiKey(),
             userDetails.getUser().getId()));
+  }
+
+  // ── Org-level model-matrix overrides (F3, ENTERPRISE) ───────────────────
+
+  record ModelOverridesRequest(Map<String, String> overrides) {}
+
+  /**
+   * The matrix defaults + this org's per-(provider, tier) overrides + the picker options. Readable
+   * by any org admin (so the grid renders for everyone); only ENTERPRISE orgs may save — the PUT
+   * 403s otherwise. {@code editable} lets the UI render the grid read-only with an upgrade note for
+   * non-Enterprise tiers.
+   */
+  record ModelMatrixView(
+      String tier,
+      boolean editable,
+      List<String> providers,
+      List<String> tiers,
+      Map<String, String> defaults,
+      Map<String, String> overrides,
+      Map<String, List<String>> modelsByProvider) {}
+
+  @GetMapping("/me/model-matrix")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<ModelMatrixView> getModelMatrix(
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    return ResponseEntity.ok(buildMatrixView(orgId));
+  }
+
+  @PutMapping("/me/model-matrix")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<ModelMatrixView> updateModelMatrix(
+      @AuthenticationPrincipal AppUserDetails userDetails, @RequestBody ModelOverridesRequest req) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    orgModelOverrideService.updateOverrides(orgId, req.overrides(), userDetails.getUser().getId());
+    return ResponseEntity.ok(buildMatrixView(orgId));
+  }
+
+  private ModelMatrixView buildMatrixView(String orgId) {
+    Org org = orgRepo.findById(orgId).orElse(null);
+    String tier = org != null ? org.getTier() : null;
+    boolean editable = "ENTERPRISE".equalsIgnoreCase(tier);
+
+    List<String> providers = new ArrayList<>();
+    for (LlmProvider p : LlmProvider.values()) providers.add(p.name().toLowerCase());
+    List<String> tiers = new ArrayList<>();
+    for (AgentTier t : AgentTier.values()) tiers.add(t.name().toLowerCase());
+
+    Map<String, String> defaults = new LinkedHashMap<>();
+    for (String p : providers) {
+      putIfPresent(defaults, p + ":planning", modelRegistry.planningModelFor(p));
+      putIfPresent(defaults, p + ":workhorse", modelRegistry.workhouseModelFor(p));
+      putIfPresent(defaults, p + ":lightweight", modelRegistry.lightweightModelFor(p));
+    }
+
+    Map<String, List<String>> modelsByProvider = new LinkedHashMap<>();
+    for (String p : providers) modelsByProvider.put(p, selectableModelsFor(p));
+
+    return new ModelMatrixView(
+        tier,
+        editable,
+        providers,
+        tiers,
+        defaults,
+        orgModelOverrideService.currentOverrides(orgId),
+        modelsByProvider);
+  }
+
+  private static void putIfPresent(Map<String, String> m, String k, String v) {
+    if (v != null && !v.isBlank()) m.put(k, v);
+  }
+
+  /**
+   * Models a given provider can run — its registered matrix models (OpenRouter = the allow-list).
+   */
+  private List<String> selectableModelsFor(String provider) {
+    if ("openrouter".equalsIgnoreCase(provider)) {
+      return OpenRouterModelMapper.allowList().keySet().stream().sorted().toList();
+    }
+    return modelRegistry.allModels().keySet().stream()
+        .filter(id -> provider.equalsIgnoreCase(modelRegistry.providerFor(id)))
+        .sorted()
+        .toList();
   }
 
   // ── Org-level JIRA settings (ORG_ADMIN only) ────────────────────────────

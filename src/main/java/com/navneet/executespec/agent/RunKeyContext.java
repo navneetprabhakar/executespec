@@ -23,9 +23,11 @@ public record RunKeyContext(
     String anthropicKey,
     String openAiKey,
     String geminiKey,
+    String openRouterKey,
     Source anthropicSource,
     Source openAiSource,
     Source geminiSource,
+    Source openRouterSource,
     String userId,
     String orgId) {
 
@@ -48,6 +50,7 @@ public record RunKeyContext(
       case "anthropic" -> anthropicKey;
       case "openai" -> openAiKey;
       case "gemini" -> geminiKey;
+      case "openrouter" -> openRouterKey;
       default -> null;
     };
   }
@@ -59,6 +62,7 @@ public record RunKeyContext(
       case "anthropic" -> anthropicSource != null ? anthropicSource : Source.PLATFORM;
       case "openai" -> openAiSource != null ? openAiSource : Source.PLATFORM;
       case "gemini" -> geminiSource != null ? geminiSource : Source.PLATFORM;
+      case "openrouter" -> openRouterSource != null ? openRouterSource : Source.PLATFORM;
       default -> Source.PLATFORM;
     };
   }
@@ -74,6 +78,7 @@ public record RunKeyContext(
     if (anthropicSource != null && anthropicSource != Source.PLATFORM) return anthropicSource;
     if (openAiSource != null && openAiSource != Source.PLATFORM) return openAiSource;
     if (geminiSource != null && geminiSource != Source.PLATFORM) return geminiSource;
+    if (openRouterSource != null && openRouterSource != Source.PLATFORM) return openRouterSource;
     return Source.PLATFORM;
   }
 }

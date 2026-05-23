@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V203**. Frontend chrome: **Signal** (production), under `frontend/src/signal/`.
+Migration head: **V207**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -465,9 +465,9 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 ---
 
-## 6. Flyway migrations — last 34 (V170..V203)
+## 6. Flyway migrations — last 38 (V170..V207)
 
-Head: **V203**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V207**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -505,6 +505,10 @@ Head: **V203**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V201 | Seed `scoring.additive-v2` PLATFORM flag (default true) — additive verifiedScore rebuild |
 | V202 | Seed `reviewer.third-pass.enabled` GLOBAL flag (default true) — fix-the-red-build reviewer pass |
 | V203 | Seed `scoring.real-test-exec` GLOBAL flag (default true) — run worker tests in BUILD mode → real passed/total into TESTS slot (RL-2026-05-001) |
+| V204 | Add `org.openrouter_api_key` — org-level OpenRouter BYOK key (Enterprise gateway, F1) |
+| V205 | Add `org.model_overrides_json` — per-org model-matrix overrides (F3, Enterprise) |
+| V206 | INR pricing kept ~10% below USD as USD strengthened — TEAM monthly INR `per_seat_inr` ₹3,199 → ₹3,399/seat; Pro/Solo INR unchanged |
+| V207 | Deactivate stale duplicate active Pro-monthly plans (₹1,699 INR + $20 USD) left from the pre-V176 Solo launch |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -573,66 +577,30 @@ Total: ~88 prompt files. Prompt-resource verification at boot (`PromptResourceVe
 
 ---
 
-## 8. Frontend Signal pages
+## 8. Frontend — chrome + pages
 
-Under `frontend/src/signal/pages/`. Routed from `frontend/src/App.tsx`. Signal is the only chrome.
+The **VS Code-style IDE workspace** (`frontend/src/ide/`) is the only chrome since the 2026-05-22 IDE-only switch; `App.tsx` mounts `IdeWorkspace` for every protected route. **The live protected surfaces are all IDE-native** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md) for the full `ide/` map: `IdeWorkspace` · `IdeSurfaces` (Welcome / Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, 10 sub-tabs) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + ⌘K palette + tokenizer).
 
-### Top-level pages
+The **2026-05-23 cleanup deleted 22 orphaned `signal/pages` files** (run-loop + `project/` + `account/`, incl. Billing/Plans) plus the dead `Shell.tsx`. The only `signal/pages/` that survive are the **standalone public pages + admin**, routed directly with no IDE chrome (by design):
 
-| File | Routes | Purpose |
-| --- | --- | --- |
-| `HomePage.tsx` | `/home` | Dashboard — greeting, live-run hero, quick-actions, recent runs, projects |
-| `ComposePage.tsx` | `/compose` | Spec composer (sandbox/project runs) with cost cap + estimate |
-| `LivePage.tsx` | `/live`, `/live/:runId` | Live-run watch — SSE event stream + 8s poll |
-| `PlanPage.tsx` | `/plan`, `/plan/:runId` | Plan-gate — approve/cancel |
-| `ResultPage.tsx` | `/result`, `/result/:runId`, `/runs/:runShort`, `/projects/:projectId/runs/:runShort` | 9-tab run result (Overview / Tasks / Timeline / Code / Cost / PR / Validation / Tests / Chat) |
-| `AllRunsPage.tsx` | `/runs` | All-runs list with filter tabs (All / Live / Shipped / Needs / Failed / Archived) |
-| `ProjectsPage.tsx` | `/projects` | Projects directory (Mine / Shared / Archived) |
-| `AuthCallbackPage.tsx` | `/auth/callback` | OAuth2 callback handler |
-
-### Multi-export bundles
-
-| File | Exports |
+| File | Exports / routes |
 | --- | --- |
 | `AuthPages.tsx` | `LoginPage` (`/login`), `SignupPage` (`/register`, `/signup`), `VerifyPage` (`/verify`, `/verify-email`), `WelcomePage` (`/welcome`) |
-| `MiscPages.tsx` | `NotificationsPage` (`/notifications`), `SearchPage` (`/search`), `MorePage` (`/more`), `AdminPage` (`/admin`, `/admin/*`), `SharedPage` (`/shared/:token`, `/reports/shared/:token`, `/projects/snapshot/:token`) |
-| `ExtraPages.tsx` | `InsightsPage` (`/insights`), `LibraryPage` (`/library`), `LibraryDetailPage` (`/library/:slug`), `MigrationsPage` (`/migrations`), `MigrationDetailPage` (`/migrations/:slug`), `TrustPage` (`/trust`), `EmptyProjectPage` (`/projects/empty`), `PublicPricingPage` (`/pricing`), `ForgotPasswordPage` (`/forgot-password`), `ResetPasswordPage` (`/reset-password`), `AcceptInvitePage` (`/accept-invite`), `AuditLogPage` (`/audit`), `DeploymentsPage` (`/deployments`), `SpecTemplatesPage` (`/templates`) |
-| `LegalPages.tsx` | `TermsPage` (`/terms`), `PrivacyPage` (`/privacy`), `DpaPage` (`/dpa`), `OrgSettingsPage` (`/org/settings`) |
+| `AuthCallbackPage.tsx` | OAuth2 callback (`/auth/callback`) |
+| `ExtraPages.tsx` | `ForgotPasswordPage` (`/forgot-password`), `ResetPasswordPage` (`/reset-password`), `AcceptInvitePage` (`/accept-invite`), `PublicPricingPage` (`/pricing`), `TrustPage` (`/trust`) |
+| `LegalPages.tsx` | `TermsPage` (`/terms`), `PrivacyPage` (`/privacy`), `DpaPage` (`/dpa`) |
+| `MiscPages.tsx` | `AdminPage` (`/admin/*` deep links), `SharedPage` (`/shared/:token`, `/reports/shared/:token`, `/projects/snapshot/:token`) |
 
-### Per-project pages (under `pages/project/`)
-
-| File | Route | Purpose |
-| --- | --- | --- |
-| `ProjectComposePage.tsx` | `/projects/:projectId` (default) | Per-project spec composer |
-| `ProjectPulsePage.tsx` | `/projects/:projectId/pulse` | Project dashboard (Pulse tab) |
-| `ProjectReposPage.tsx` | `/projects/:projectId/repos` | Linked repos with health + link/unlink |
-| `ProjectRunsPage.tsx` | `/projects/:projectId/runs` | 2-sub-tab — Runs + PRs |
-| `ProjectCodePage.tsx` | `/projects/:projectId/code` | 6-sub-tab — Browse / Tech debt / Code review / Health / Standards / Docs |
-| `ProjectChatPage.tsx` | `/projects/:projectId/chat` | Project-scoped chat (TEAM+/ENTERPRISE) |
-| `ProjectActivityPage.tsx` | `/projects/:projectId/activity` | Activity feed with type filter |
-| `ProjectMembersPage.tsx` | `/projects/:projectId/members` | Members + share-links (V198-gated invite) |
-| `ProjectArchitecturePage.tsx` | `/projects/:projectId/architecture` | 5-sub-tab — Current / Versions / Invariants / ADRs / Contracts |
-| `ProjectSettingsPage.tsx` | `/projects/:projectId/settings` | 3-sub-tab — Settings / Documents / Memory + danger zone |
-| `ProjectTabs.tsx` | (shared tab strip) | Per-project tab navigation |
-
-### Account section (under `pages/account/`)
-
-| File | Routes | Purpose |
-| --- | --- | --- |
-| `AccountPage.tsx` | `/account`, `/settings`, `/settings/manage` | Account hub — quick-links, prefs, notification matrix |
-| `BillingPage.tsx` | `/billing` | Billing overview — tier, usage gauge, invoices |
-| `PlansPage.tsx` | `/plans` | Plan comparison (monthly/yearly toggle) |
-| `MiscAccountPages.tsx` | `/topup`, `/integrations`, `/api-keys`, `/org-members` | TopupPage / IntegrationsPage / ApiKeysPage / OrgMembersPage |
+> The multi-export bundles (`ExtraPages`, `MiscPages`, `LegalPages`) still carry a few now-dead exports (e.g. `InsightsPage`, `NotificationsPage`, `OrgSettingsPage`, `DeploymentsPage`) whose routes moved to `ide/`. They're unimported + tree-shaken from the bundle; slated for removal in a follow-up.
 
 ---
 
 ## 9. Frontend Signal components
 
-Under `frontend/src/signal/components/`. CSS lives at `frontend/src/signal/signal.css` (imported by `Shell.tsx`).
+Under `frontend/src/signal/components/` — shared primitives still reused by the IDE chrome + the surviving public pages. CSS lives at `frontend/src/signal/signal.css` (re-mapped onto the `--ide-*` tokens by `ide/ide.css`). The Signal shell (`Shell.tsx`) was deleted in the 2026-05-23 cleanup; `Chrome.tsx` (TopBar / SectionHeader / …) survives because the public pages use it.
 
 | Component | Purpose |
 | --- | --- |
-| `Shell.tsx` | App shell — desktop sidebar + mobile drawer + bottom tab bar + theme toggle |
 | `AuthLayout.tsx` | 2-column auth shell (form left, brand panel right ≥920px) |
 | `Compose.tsx` | Compose primitives — `LiveHero`, `LiveHeroAction`, `ScoreCard`, `StreamCard`, `PrCard`, `ComposerCard`, `TaskLine` |
 | `Primitives.tsx` | Base controls — `Feed`, `Card`, `Row`, `Chip`, `StatusPill`, `Button`, `KvList`, `TabsStrip` |

@@ -167,6 +167,7 @@ export function ConfirmModal({
           kind={danger ? 'coral' : 'primary'}
           sm
           disabled={busy}
+          // eslint-disable-next-line no-restricted-syntax -- pending state handled by caller-supplied `busy` prop (disables the button + shows '…').
           onClick={async () => {
             await onConfirm();
             if (!busy) onClose();

@@ -3,7 +3,7 @@
    Spec templates. Bundled here because each is small. */
 
 import {useEffect, useState} from 'react';
-import {Link, useNavigate, useSearchParams} from 'react-router-dom';
+import {Link, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {
   Feed,
@@ -16,9 +16,10 @@ import {
   KvList,
 } from '@/signal/components/Primitives';
 import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
-import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
-import {LiveHero, LiveHeroAction} from '@/signal/components/Compose';
+import {ConfirmModal, PromptModal, Modal} from '@/signal/components/Modal';
+import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import AuthLayout from '@/signal/components/AuthLayout';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {Search, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -296,69 +297,255 @@ export function InsightsPage() {
 }
 
 // ──────────────────── Library (readymade solutions) ────────────────────
-const LIBRARY_SOLUTIONS = [
-  {
-    slug: 'stripe-checkout',
-    name: 'Stripe checkout',
-    desc: 'Subscriptions + one-time + webhook signature verify',
-    tags: ['payments', 'webhook'],
-    time: '~6m',
-    credits: 4,
-    color: 'mint',
-  },
-  {
-    slug: 'oauth-login',
-    name: 'OAuth login',
-    desc: 'Google + GitHub + email/password fallback',
-    tags: ['auth', 'security'],
-    time: '~4m',
-    credits: 2,
-    color: 'signal',
-  },
-  {
-    slug: 'rag-pgvector',
-    name: 'RAG with pgvector',
-    desc: 'Tika extraction → embeddings → retrieval',
-    tags: ['llm', 'postgres'],
-    time: '~9m',
-    credits: 6,
-    color: 'coral',
-  },
-  {
-    slug: 'github-actions',
-    name: 'GitHub Actions CI',
-    desc: 'Build · test · lint · containerize · push',
-    tags: ['ci', 'docker'],
-    time: '~3m',
-    credits: 2,
-    color: 'lavender',
-  },
-  {
-    slug: 'docker-compose',
-    name: 'Docker compose dev',
-    desc: 'Postgres + Redis + app · hot reload',
-    tags: ['infra'],
-    time: '~2m',
-    credits: 1,
-    color: 'mint',
-  },
-  {
-    slug: 'razorpay-checkout',
-    name: 'Razorpay checkout',
-    desc: 'India payments · UPI · cards · auth webhooks',
-    tags: ['payments'],
-    time: '~5m',
-    credits: 3,
-    color: 'signal',
-  },
-] as const;
+
+const LIB_TILE_COLORS = ['mint', 'signal', 'coral', 'lavender'] as const;
+function libTileBg(i: number): string {
+  const c = LIB_TILE_COLORS[i % LIB_TILE_COLORS.length];
+  return c === 'mint'
+    ? 'var(--signal-mint-soft)'
+    : c === 'signal'
+      ? 'var(--signal-y-soft)'
+      : c === 'coral'
+        ? 'var(--signal-coral-soft)'
+        : 'var(--signal-lavender-soft)';
+}
+
+/** Split a comma/space-delimited tag string into trimmed chips (max 4). */
+function splitTags(tags: string | null | undefined): string[] {
+  if (!tags) return [];
+  return tags
+    .split(/[,|]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function creditsLabel(low: string | null, high: string | null): string | null {
+  const l = low != null && low !== '' ? Number(low) : null;
+  const h = high != null && high !== '' ? Number(high) : null;
+  if (l == null && h == null) return null;
+  if (l != null && h != null && l !== h) return `${l}–${h} credits`;
+  const n = l ?? h;
+  return `${n} credit${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Shared project + repo picker used by both the Library "Run this solution" and
+ * the Migrations dry-run / apply flows. Loads active projects on first open,
+ * auto-selects the first, and reloads that project's linked repos when the
+ * project changes. Uses the canonical {@link repoIdFor} / {@link repoDisplayName}
+ * helpers so the repo id is the repo UUID (not the link UUID) and the label is
+ * the repo name (not its SHA).
+ */
+function useProjectRepoPicker(open: boolean) {
+  const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  const [repos, setRepos] = useState<Record<string, unknown>[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .getProjects()
+      .then((p) => {
+        if (cancelled) return;
+        const active = p.filter((x) => !x.archivedAt && !x.deletedAt);
+        setProjects(active);
+        setProjectId((cur) => cur ?? active[0]?.id ?? null);
+      })
+      .catch(() => {
+        /* swallow — empty-state hint covers the no-projects case */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setRepos([]);
+      return;
+    }
+    let cancelled = false;
+    setRepos([]);
+    setSelectedRepoIds([]);
+    api
+      .getProjectRepos(projectId)
+      .then((r) => {
+        if (cancelled) return;
+        const list = r as unknown as Record<string, unknown>[];
+        setRepos(list);
+        // Pre-select all linked repos — most migrations/solutions want the whole project.
+        setSelectedRepoIds(list.map((x) => repoIdFor(x)).filter(Boolean));
+      })
+      .catch(() => {
+        if (!cancelled) setRepos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  function toggleRepo(repoId: string) {
+    setSelectedRepoIds((prev) =>
+      prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId],
+    );
+  }
+
+  return {projects, repos, projectId, setProjectId, selectedRepoIds, toggleRepo};
+}
+
+function ProjectRepoPickerBody({
+  projects,
+  repos,
+  projectId,
+  setProjectId,
+  selectedRepoIds,
+  toggleRepo,
+  emptyHint,
+}: {
+  projects: api.ProjectDto[];
+  repos: Record<string, unknown>[];
+  projectId: string | null;
+  setProjectId: (id: string) => void;
+  selectedRepoIds: string[];
+  toggleRepo: (repoId: string) => void;
+  emptyHint: string;
+}) {
+  if (projects.length === 0) {
+    return (
+      <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
+        {emptyHint}{' '}
+        <Link to='/projects' style={{color: 'var(--signal-coral)'}}>
+          Create a project →
+        </Link>
+      </p>
+    );
+  }
+  return (
+    <>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--signal-text-mute)',
+          marginBottom: 6,
+        }}
+      >
+        Project
+      </div>
+      <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14}}>
+        {projects.map((p) => (
+          <Chip
+            key={p.id}
+            kind={p.id === projectId ? 'active' : 'default'}
+            onClick={() => setProjectId(p.id)}
+          >
+            {p.name}
+          </Chip>
+        ))}
+      </div>
+
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--signal-text-mute)',
+          marginBottom: 6,
+        }}
+      >
+        Repos
+      </div>
+      {repos.length === 0 ? (
+        <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0}}>
+          No repos linked to this project.
+        </p>
+      ) : (
+        <>
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+            {repos.map((r) => {
+              const rId = repoIdFor(r);
+              const selected = selectedRepoIds.includes(rId);
+              return (
+                <Chip
+                  key={rId}
+                  kind={selected ? 'active' : 'default'}
+                  onClick={() => toggleRepo(rId)}
+                >
+                  {selected ? '✓ ' : ''}
+                  {repoDisplayName(r)}
+                </Chip>
+              );
+            })}
+          </div>
+          <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 8}}>
+            {selectedRepoIds.length} {selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
 export function LibraryPage() {
+  const [items, setItems] = useState<api.ReadymadeListItem[] | null>(null);
+  const [facets, setFacets] = useState<api.LibraryFacets | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const [err, setErr] = useState('');
+
+  // Facets load once (category tabs).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLibraryFacets()
+      .then((f) => {
+        if (!cancelled) setFacets(f);
+      })
+      .catch(() => {
+        /* tabs are best-effort; the list below is the source of truth */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // List re-fetches whenever the category filter changes.
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    setErr('');
+    api
+      .listLibrary(category ? {category} : {})
+      .then((r) => {
+        if (!cancelled) setItems(r);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setErr(e instanceof Error ? e.message : 'Failed to load the library.');
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [category]);
+
+  const categories = Object.entries(facets?.categories ?? {}).sort((a, b) => b[1] - a[1]);
+  const totalCount = categories.reduce((sum, [, n]) => sum + n, 0);
+
   return (
     <>
       <TopBar
         title='Library'
-        sub='28 readymade solutions'
+        sub={
+          items
+            ? `${items.length} readymade solution${items.length === 1 ? '' : 's'}`
+            : 'Readymade solutions'
+        }
         back
         backTo='/home'
         actions={
@@ -387,199 +574,516 @@ export function LibraryPage() {
           </div>
         </Card>
 
-        <TabsStrip
-          items={[
-            {label: 'All · 28', active: true},
-            {label: 'Auth'},
-            {label: 'Payments'},
-            {label: 'LLM'},
-            {label: 'CI / Infra'},
-            {label: 'UI / Frontend'},
-          ]}
-        />
+        {categories.length > 0 && (
+          <TabsStrip
+            items={[
+              {
+                label: `All${totalCount ? ` · ${totalCount}` : ''}`,
+                active: category === null,
+                onClick: () => setCategory(null),
+              },
+              ...categories.map(([cat, n]) => ({
+                label: `${cat} · ${n}`,
+                active: category === cat,
+                onClick: () => setCategory(cat),
+              })),
+            ]}
+          />
+        )}
 
-        <div className='signal-grid auto'>
-          {LIBRARY_SOLUTIONS.map((s) => (
-            <Card key={s.slug} to={`/library/${s.slug}`}>
-              <div style={{display: 'flex', gap: 14, marginBottom: 12}}>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 10,
-                    background:
-                      s.color === 'mint'
-                        ? 'var(--signal-mint-soft)'
-                        : s.color === 'signal'
-                          ? 'var(--signal-y-soft)'
-                          : s.color === 'coral'
-                            ? 'var(--signal-coral-soft)'
-                            : 'var(--signal-lavender-soft)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  ⚡
-                </div>
-                <div style={{flex: 1, minWidth: 0}}>
-                  <div style={{fontSize: 15, fontWeight: 600, marginBottom: 4}}>{s.name}</div>
-                  <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.4}}>
-                    {s.desc}
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+
+        {items === null ? (
+          <div className='signal-grid auto'>
+            <SkeletonRow lines={3} />
+            <SkeletonRow lines={3} />
+            <SkeletonRow lines={3} />
+            <SkeletonRow lines={3} />
+          </div>
+        ) : items.length === 0 ? (
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No solutions{category ? ` in “${category}”` : ' available'} yet.
+            </p>
+          </Card>
+        ) : (
+          <div className='signal-grid auto'>
+            {items.map((item, i) => {
+              const s = item.solution;
+              const tags = splitTags(s.tags);
+              const credits = creditsLabel(s.estCreditsLow, s.estCreditsHigh);
+              return (
+                <Card key={s.slug} to={`/library/${s.slug}`}>
+                  <div style={{display: 'flex', gap: 14, marginBottom: 12}}>
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 10,
+                        background: libTileBg(i),
+                        display: 'grid',
+                        placeItems: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      ⚡
+                    </div>
+                    <div style={{flex: 1, minWidth: 0}}>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 600,
+                          marginBottom: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        {s.name}
+                        {item.locked && (
+                          <StatusPill kind='needs'>{item.unlockTier || s.tier}</StatusPill>
+                        )}
+                      </div>
+                      <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.4}}>
+                        {s.tagline || s.description || '—'}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                {s.tags.map((t) => (
-                  <Chip key={t}>{t}</Chip>
-                ))}
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 11,
-                  color: 'var(--signal-text-mute)',
-                }}
-              >
-                <span>{s.time}</span>
-                <span>·</span>
-                <span>{s.credits} credits</span>
-              </div>
-            </Card>
-          ))}
-        </div>
+                  {tags.length > 0 && (
+                    <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+                      {tags.map((t) => (
+                        <Chip key={t}>{t}</Chip>
+                      ))}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'center',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11,
+                      color: 'var(--signal-text-mute)',
+                    }}
+                  >
+                    <span>{s.category}</span>
+                    {credits && (
+                      <>
+                        <span>·</span>
+                        <span>{credits}</span>
+                      </>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </Feed>
     </>
   );
 }
 
 export function LibraryDetailPage() {
+  const {slug} = useParams<{slug: string}>();
+  const navigate = useNavigate();
+  const [detail, setDetail] = useState<api.ReadymadeDetail | null>(null);
+  const [err, setErr] = useState('');
+  const [spec, setSpec] = useState('');
+  const [variantId, setVariantId] = useState<string | null>(null);
+  const [fav, setFav] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setDetail(null);
+    setErr('');
+    api
+      .getLibraryDetail(slug)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+        const v = d.variants[0];
+        if (v) {
+          setVariantId(v.id);
+          setSpec(v.specTemplate || '');
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load this solution.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  async function toggleFav() {
+    if (!slug || favBusy) return;
+    setFavBusy(true);
+    const next = !fav;
+    setFav(next); // optimistic
+    try {
+      if (next) await api.favouriteLibrarySolution(slug);
+      else await api.unfavouriteLibrarySolution(slug);
+    } catch (e: unknown) {
+      setFav(!next); // revert
+      setErr(e instanceof Error ? e.message : 'Could not update favourite.');
+    } finally {
+      setFavBusy(false);
+    }
+  }
+
+  // "Edit in composer" — hand the resolved spec to the composer (no project needed).
+  function editInComposer() {
+    if (spec) sessionStorage.setItem('signal:pending-spec', spec);
+    navigate('/compose');
+  }
+
+  const s = detail?.solution;
+  const credits = s ? creditsLabel(s.estCreditsLow, s.estCreditsHigh) : null;
+  const variant = detail?.variants.find((v) => v.id === variantId) || detail?.variants[0] || null;
+
   return (
     <>
       <TopBar
-        title='Stripe checkout'
-        sub='Library solution · ~6m · 4 credits'
+        title={s?.name || 'Library solution'}
+        sub={
+          s
+            ? [s.category, credits].filter(Boolean).join(' · ') || 'Library solution'
+            : 'Library solution'
+        }
         back
         backTo='/library'
+        actions={
+          detail ? (
+            <IconButton ariaLabel={fav ? 'Unfavourite' : 'Favourite'} onClick={toggleFav}>
+              <span
+                style={{
+                  fontSize: 18,
+                  lineHeight: 1,
+                  color: fav ? 'var(--signal-y-text)' : undefined,
+                }}
+              >
+                {fav ? '★' : '☆'}
+              </span>
+            </IconButton>
+          ) : undefined
+        }
       />
       <Feed>
-        <Card>
+        {err && (
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--signal-text-mute)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 8,
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
             }}
           >
-            What you'll get
+            {err}
           </div>
-          <ul
-            style={{
-              listStyle: 'none',
-              padding: 0,
-              margin: 0,
-              display: 'grid',
-              gap: 8,
-              fontSize: 14,
-            }}
-          >
-            <li>✓ Subscription + one-time checkout endpoints</li>
-            <li>✓ Webhook handler with signature verification</li>
-            <li>✓ Customer + invoice persistence</li>
-            <li>✓ Failed-payment retry + dunning email</li>
-            <li>✓ Test mode toggle + sandbox keys</li>
-            <li>✓ Smoke test + integration test suite</li>
-          </ul>
-        </Card>
+        )}
 
-        <SectionHeader>Tweak the spec before running</SectionHeader>
-        <div className='signal-composer-card'>
-          <div className='composer-h'>
-            <h3>Pre-filled spec</h3>
-            <span className='est'>est 4 credits</span>
-          </div>
-          <textarea
-            defaultValue={`Add Stripe checkout to the API. Both subscription and one-time charge endpoints. Webhook handler at /webhooks/stripe with HMAC SHA-256 signature verification. Persist customer + invoice. Failed-payment retry with 3-attempt dunning. Add test-mode env var + sandbox keys. Tests must still pass.`}
-          />
-          <Link to='/plan' className='composer-submit'>
-            Run this solution →
-          </Link>
-        </div>
+        {detail === null && !err ? (
+          <LoadingState label='Loading solution…' />
+        ) : !detail ? null : (
+          <>
+            <Card>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--signal-text-mute)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}
+              >
+                What you'll get
+              </div>
+              <div style={{fontSize: 14, color: 'var(--signal-text-dim)', lineHeight: 1.55}}>
+                {s?.description || s?.tagline || 'A readymade, spec-driven solution.'}
+              </div>
+              {splitTags(s?.tags).length > 0 && (
+                <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12}}>
+                  {splitTags(s?.tags).map((t) => (
+                    <Chip key={t}>{t}</Chip>
+                  ))}
+                </div>
+              )}
+            </Card>
 
-        <SectionHeader>Used by · 1,247 orgs</SectionHeader>
-        <Card>
-          <KvList
-            pairs={[
-              {k: 'Avg run time', v: '6m 12s'},
-              {k: 'Avg verified score', v: '93%'},
-              {k: 'PRs merged from this', v: '982 (78%)'},
-              {k: 'Open source', v: 'github.com/executespec/library'},
-            ]}
-          />
-        </Card>
+            {detail.locked && (
+              <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
+                <div style={{fontSize: 13.5, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
+                  This solution requires the {detail.unlockTier || s?.tier} plan.{' '}
+                  <Link to='/plans' style={{color: 'var(--signal-coral-text)', fontWeight: 600}}>
+                    Upgrade →
+                  </Link>
+                </div>
+              </Card>
+            )}
+
+            {detail.variants.length > 1 && (
+              <>
+                <SectionHeader>Pick a stack</SectionHeader>
+                <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+                  {detail.variants.map((v) => (
+                    <Chip
+                      key={v.id}
+                      kind={v.id === variantId ? 'active' : 'default'}
+                      onClick={() => {
+                        setVariantId(v.id);
+                        setSpec(v.specTemplate || '');
+                      }}
+                    >
+                      {[v.language, v.framework].filter(Boolean).join(' · ') || 'variant'}
+                    </Chip>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <SectionHeader>Tweak the spec before running</SectionHeader>
+            <div className='signal-composer-card'>
+              <div className='composer-h'>
+                <h3>Pre-filled spec</h3>
+                {credits && <span className='est'>est {credits}</span>}
+              </div>
+              <textarea
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
+                placeholder='The solution spec…'
+              />
+              <div style={{display: 'flex', gap: 8, marginTop: 4}}>
+                <Button kind='primary' onClick={() => setPickerOpen(true)} disabled={detail.locked}>
+                  Use this →
+                </Button>
+                <Button kind='secondary' onClick={editInComposer}>
+                  Edit in composer
+                </Button>
+              </div>
+            </div>
+
+            {detail.slots.length > 0 && (
+              <>
+                <SectionHeader>What it asks for</SectionHeader>
+                <Card>
+                  <KvList
+                    pairs={detail.slots.map((slot) => ({
+                      k: slot.displayName + (slot.required ? ' *' : ''),
+                      v: slot.description || slot.type,
+                    }))}
+                  />
+                </Card>
+              </>
+            )}
+
+            <SectionHeader>Details</SectionHeader>
+            <Card>
+              <KvList
+                pairs={[
+                  {k: 'Category', v: s?.category || '—'},
+                  {k: 'Kind', v: s?.kind || '—'},
+                  {k: 'Source', v: s?.source === 'FIRST_PARTY' ? 'First-party' : 'Community'},
+                  {k: 'Plan', v: s?.tier || '—'},
+                  ...(s?.samplePrUrl
+                    ? [
+                        {
+                          k: 'Sample PR',
+                          v: (
+                            <a
+                              href={s.samplePrUrl}
+                              target='_blank'
+                              rel='noreferrer'
+                              style={{color: 'var(--signal-coral)'}}
+                            >
+                              View →
+                            </a>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </Card>
+          </>
+        )}
       </Feed>
+
+      {detail && (
+        <LibraryInstantiateModal
+          open={pickerOpen}
+          slug={slug || ''}
+          variant={variant}
+          onClose={() => setPickerOpen(false)}
+          onLaunched={(runId) => {
+            setPickerOpen(false);
+            navigate(`/plan/${runId}`);
+          }}
+        />
+      )}
     </>
   );
 }
 
+/**
+ * Project + repo picker for instantiating a library solution into a real run.
+ * When the user picks exactly one repo we run resolveLibraryVariant() to detect
+ * the best-fit variant for that repo's stack and surface the result.
+ */
+function LibraryInstantiateModal({
+  open,
+  slug,
+  variant,
+  onClose,
+  onLaunched,
+}: {
+  open: boolean;
+  slug: string;
+  variant: api.ReadymadeVariant | null;
+  onClose: () => void;
+  onLaunched: (runId: string) => void;
+}) {
+  const {projects, repos, projectId, setProjectId, selectedRepoIds, toggleRepo} =
+    useProjectRepoPicker(open);
+  const [resolved, setResolved] = useState<api.VariantResolutionResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Auto-resolve the best variant when exactly one repo is selected.
+  useEffect(() => {
+    setResolved(null);
+    if (!open || !slug || !projectId || selectedRepoIds.length !== 1) return;
+    let cancelled = false;
+    api
+      .resolveLibraryVariant(slug, projectId, selectedRepoIds[0])
+      .then((r) => {
+        if (!cancelled) setResolved(r);
+      })
+      .catch(() => {
+        /* resolution is advisory — instantiate still works with the chosen variant */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, slug, projectId, selectedRepoIds]);
+
+  async function launch() {
+    if (!projectId || selectedRepoIds.length === 0) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const chosenVariantId = resolved?.bestMatch?.id || variant?.id;
+      const resp = await api.instantiateLibrarySolution(slug, {
+        projectId,
+        repoIds: selectedRepoIds,
+        ...(chosenVariantId ? {variantId: chosenVariantId} : {}),
+      });
+      onLaunched(resp.executionRunId);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not start the run.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title='Run this solution' onClose={onClose} size='md'>
+      <ProjectRepoPickerBody
+        projects={projects}
+        repos={repos}
+        projectId={projectId}
+        setProjectId={setProjectId}
+        selectedRepoIds={selectedRepoIds}
+        toggleRepo={toggleRepo}
+        emptyHint='Library solutions run against a project. Create one to continue.'
+      />
+
+      {resolved && (
+        <div style={{marginTop: 12, fontSize: 12.5, color: 'var(--signal-text-dim)'}}>
+          {resolved.bestMatch
+            ? `Detected ${[resolved.detectedLanguage, resolved.detectedFramework].filter(Boolean).join(' / ') || 'a matching stack'} — using the best-fit variant.`
+            : resolved.reason === 'STACK_NOT_DETECTED'
+              ? "Couldn't detect the repo's stack — running the default variant."
+              : resolved.reason === 'NO_VARIANT_FOR_STACK'
+                ? 'No variant matches this stack — running the default variant.'
+                : 'Running the default variant.'}
+        </div>
+      )}
+
+      {err && (
+        <div style={{marginTop: 12, fontSize: 13, color: 'var(--signal-coral-text)'}}>{err}</div>
+      )}
+
+      <div style={{display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16}}>
+        <Button kind='ghost' sm onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button
+          kind='primary'
+          sm
+          disabled={busy || !projectId || selectedRepoIds.length === 0}
+          onClick={() => void launch()}
+        >
+          {busy ? '…' : 'Run →'}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 // ──────────────────── Migrations ────────────────────
-const MIGRATIONS = [
-  {
-    slug: 'js-to-ts',
-    name: 'JavaScript → TypeScript',
-    desc: 'Add types incrementally with strict mode pin',
-    impact: 'high',
-    time: '~15m / file',
-  },
-  {
-    slug: 'express-fastify',
-    name: 'Express → Fastify',
-    desc: 'Per-route migration · Zod schemas · perf wins',
-    impact: 'medium',
-    time: '~8m / route',
-  },
-  {
-    slug: 'mongoose-prisma',
-    name: 'Mongoose → Prisma',
-    desc: 'Schema · queries · migrations · Postgres adapter',
-    impact: 'high',
-    time: '~12m / model',
-  },
-  {
-    slug: 'react-class-hooks',
-    name: 'React classes → hooks',
-    desc: 'Components, lifecycle → useEffect, context → providers',
-    impact: 'medium',
-    time: '~4m / cmp',
-  },
-  {
-    slug: 'webpack-vite',
-    name: 'Webpack → Vite',
-    desc: 'Config, plugins, alias, env, build · dev-server',
-    impact: 'high',
-    time: '~30m',
-  },
-  {
-    slug: 'pages-app-router',
-    name: 'Pages → App Router',
-    desc: 'Next.js routing · server components · loading',
-    impact: 'high',
-    time: '~10m / route',
-  },
-];
 
 export function MigrationsPage() {
+  const [items, setItems] = useState<api.MigrationListItem[] | null>(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listMigrations()
+      .then((r) => {
+        if (!cancelled) setItems(r);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setErr(e instanceof Error ? e.message : 'Failed to load migrations.');
+        setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <>
       <TopBar
         title='Migrations'
-        sub='11 modernization recipes'
+        sub={
+          items
+            ? `${items.length} modernization recipe${items.length === 1 ? '' : 's'}`
+            : 'Modernization recipes'
+        }
         back
         backTo='/home'
         actions={
@@ -608,125 +1112,456 @@ export function MigrationsPage() {
           </div>
         </Card>
 
-        <div className='signal-grid cols-2'>
-          {MIGRATIONS.map((m) => (
-            <Card key={m.slug} to={`/migrations/${m.slug}`}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'baseline',
-                  marginBottom: 6,
-                }}
-              >
-                <div style={{fontSize: 15, fontWeight: 600}}>{m.name}</div>
-                <StatusPill kind={m.impact === 'high' ? 'shipped' : 'needs'}>{m.impact}</StatusPill>
-              </div>
-              <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 8}}>
-                {m.desc}
-              </div>
-              <div
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 11,
-                  color: 'var(--signal-text-mute)',
-                }}
-              >
-                {m.time}
-              </div>
-            </Card>
-          ))}
-        </div>
+        {err && (
+          <div
+            style={{
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            {err}
+          </div>
+        )}
+
+        {items === null ? (
+          <div className='signal-grid cols-2'>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </div>
+        ) : items.length === 0 ? (
+          <Card>
+            <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>
+              No migration recipes available yet.
+            </p>
+          </Card>
+        ) : (
+          <div className='signal-grid cols-2'>
+            {items.map((item) => {
+              const m = item.recipe;
+              const credits = creditsLabel(m.estCreditsLow, m.estCreditsHigh);
+              const fileMeta =
+                m.estFilesLow != null || m.estFilesHigh != null
+                  ? `~${m.estFilesLow ?? m.estFilesHigh}${m.estFilesHigh != null && m.estFilesHigh !== m.estFilesLow ? `–${m.estFilesHigh}` : ''} files`
+                  : null;
+              return (
+                <Card key={m.slug} to={`/migrations/${m.slug}`}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      gap: 8,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div style={{fontSize: 15, fontWeight: 600}}>{m.name}</div>
+                    {item.locked ? (
+                      <StatusPill kind='needs'>{item.unlockTier || m.tier}</StatusPill>
+                    ) : (
+                      <StatusPill kind='shipped'>{m.category}</StatusPill>
+                    )}
+                  </div>
+                  <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 8}}>
+                    {m.tagline || m.description || `${m.sourceStack} → ${m.targetStack}`}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      flexWrap: 'wrap',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 11,
+                      color: 'var(--signal-text-mute)',
+                    }}
+                  >
+                    <span>
+                      {m.sourceStack} → {m.targetStack}
+                    </span>
+                    {fileMeta && (
+                      <>
+                        <span>·</span>
+                        <span>{fileMeta}</span>
+                      </>
+                    )}
+                    {credits && (
+                      <>
+                        <span>·</span>
+                        <span>{credits}</span>
+                      </>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </Feed>
     </>
   );
 }
 
 export function MigrationDetailPage() {
+  const {slug} = useParams<{slug: string}>();
+  const navigate = useNavigate();
+  const [detail, setDetail] = useState<api.MigrationDetail | null>(null);
+  const [err, setErr] = useState('');
+  const [dryRunOpen, setDryRunOpen] = useState(false);
+  const [applyOpen, setApplyOpen] = useState(false);
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setDetail(null);
+    setErr('');
+    api
+      .getMigrationDetail(slug)
+      .then((d) => {
+        if (!cancelled) setDetail(d);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load this migration.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  const r = detail?.recipe;
+  const credits = r ? creditsLabel(r.estCreditsLow, r.estCreditsHigh) : null;
+
   return (
     <>
       <TopBar
-        title='JavaScript → TypeScript'
-        sub='Migration · incremental · per-file'
+        title={r?.name || 'Migration'}
+        sub={r ? `${r.sourceStack} → ${r.targetStack}` : 'Migration · incremental'}
         back
         backTo='/migrations'
       />
       <Feed>
-        <Card>
+        {err && (
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--signal-text-mute)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 8,
+              background: 'var(--signal-coral-soft)',
+              color: 'var(--signal-coral-text)',
+              border: '1px solid var(--signal-coral)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              marginBottom: 12,
+              fontSize: 13,
             }}
           >
-            How it runs
+            {err}
           </div>
-          <ol style={{padding: '0 0 0 18px', margin: 0, display: 'grid', gap: 8, fontSize: 14}}>
-            <li>
-              Scan all{' '}
-              <code className='mono' style={{fontSize: 12}}>
-                .js
-              </code>{' '}
-              /{' '}
-              <code className='mono' style={{fontSize: 12}}>
-                .jsx
-              </code>{' '}
-              files
-            </li>
-            <li>Cluster by dependency graph; start at leaves</li>
-            <li>For each file: rename, infer types, add explicit annotations on public APIs</li>
-            <li>
-              Run{' '}
-              <code className='mono' style={{fontSize: 12}}>
-                tsc --noEmit
-              </code>{' '}
-              after every cluster
-            </li>
-            <li>Open one PR per cluster (~30 files), CI-green</li>
-          </ol>
-        </Card>
+        )}
 
-        <SectionHeader>Configure</SectionHeader>
-        <div className='signal-composer-card'>
+        {detail === null && !err ? (
+          <LoadingState label='Loading migration…' />
+        ) : !detail ? null : (
+          <>
+            <Card>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--signal-text-mute)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}
+              >
+                What it does
+              </div>
+              <div style={{fontSize: 14, color: 'var(--signal-text-dim)', lineHeight: 1.55}}>
+                {r?.description ||
+                  r?.tagline ||
+                  `Migrate from ${r?.sourceStack} to ${r?.targetStack}.`}
+              </div>
+            </Card>
+
+            {detail.locked && (
+              <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
+                <div style={{fontSize: 13.5, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
+                  This migration requires the {detail.unlockTier || r?.tier} plan.{' '}
+                  <Link to='/plans' style={{color: 'var(--signal-coral-text)', fontWeight: 600}}>
+                    Upgrade →
+                  </Link>
+                </div>
+              </Card>
+            )}
+
+            <SectionHeader>Configure</SectionHeader>
+            <div className='signal-composer-card' style={{padding: 16}}>
+              <KvList
+                pairs={[
+                  {k: 'From', v: r?.sourceStack || '—'},
+                  {k: 'To', v: r?.targetStack || '—'},
+                  {
+                    k: 'Affected files',
+                    v: <span className='mono'>{r?.affectedFilesGlob || '—'}</span>,
+                  },
+                  {
+                    k: 'Est files',
+                    v:
+                      r?.estFilesLow != null || r?.estFilesHigh != null
+                        ? `${r?.estFilesLow ?? r?.estFilesHigh}${r?.estFilesHigh != null && r?.estFilesHigh !== r?.estFilesLow ? `–${r?.estFilesHigh}` : ''}`
+                        : '—',
+                  },
+                  {k: 'Est cost', v: credits || '—'},
+                ]}
+              />
+              <div style={{display: 'flex', gap: 8, marginTop: 16}}>
+                <Button kind='secondary' onClick={() => setDryRunOpen(true)}>
+                  Dry run
+                </Button>
+                <Button kind='primary' onClick={() => setApplyOpen(true)} disabled={detail.locked}>
+                  Apply migration →
+                </Button>
+              </div>
+            </div>
+
+            {detail.slots.length > 0 && (
+              <>
+                <SectionHeader>Options</SectionHeader>
+                <Card>
+                  <KvList
+                    pairs={detail.slots.map((slot) => ({
+                      k: slot.displayName + (slot.required ? ' *' : ''),
+                      v: slot.defaultValue || slot.description || slot.type,
+                    }))}
+                  />
+                </Card>
+              </>
+            )}
+
+            <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--signal-coral-text)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginBottom: 6,
+                }}
+              >
+                Heads up
+              </div>
+              <div style={{fontSize: 13.5, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
+                We pause at every plan gate. You're never further than one approval away from the
+                next batch. Run a dry-run first to check applicability and cost.
+              </div>
+            </Card>
+          </>
+        )}
+      </Feed>
+
+      <MigrationDryRunModal
+        open={dryRunOpen}
+        slug={slug || ''}
+        onClose={() => setDryRunOpen(false)}
+      />
+      <MigrationApplyModal
+        open={applyOpen}
+        slug={slug || ''}
+        onClose={() => setApplyOpen(false)}
+        onLaunched={(runId) => {
+          setApplyOpen(false);
+          navigate(`/plan/${runId}`);
+        }}
+      />
+    </>
+  );
+}
+
+/** Dry-run picker — runs migrationDryRun() and shows per-repo applicability. */
+function MigrationDryRunModal({
+  open,
+  slug,
+  onClose,
+}: {
+  open: boolean;
+  slug: string;
+  onClose: () => void;
+}) {
+  const {projects, repos, projectId, setProjectId, selectedRepoIds, toggleRepo} =
+    useProjectRepoPicker(open);
+  const [result, setResult] = useState<api.MigrationDryRunResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Reset the result whenever the selection changes so stale output never lingers.
+  useEffect(() => {
+    setResult(null);
+  }, [projectId, selectedRepoIds]);
+
+  async function run() {
+    if (!projectId || selectedRepoIds.length === 0) return;
+    setBusy(true);
+    setErr('');
+    try {
+      setResult(await api.migrationDryRun(slug, {projectId, repoIds: selectedRepoIds}));
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Dry run failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title='Dry run' onClose={onClose} size='lg'>
+      <ProjectRepoPickerBody
+        projects={projects}
+        repos={repos}
+        projectId={projectId}
+        setProjectId={setProjectId}
+        selectedRepoIds={selectedRepoIds}
+        toggleRepo={toggleRepo}
+        emptyHint='Migrations run against a project.'
+      />
+
+      {err && (
+        <div style={{marginTop: 12, fontSize: 13, color: 'var(--signal-coral-text)'}}>{err}</div>
+      )}
+
+      {busy && (
+        <div style={{marginTop: 14}}>
+          <LoadingState label='Checking applicability…' />
+        </div>
+      )}
+
+      {result && !busy && (
+        <div style={{marginTop: 16}}>
           <KvList
             pairs={[
-              {k: 'Target repo', v: 'frontend'},
-              {k: 'Strictness', v: '--strict + noImplicitAny'},
-              {k: 'PR size cap', v: '30 files / PR'},
-              {k: 'Test command', v: 'npm test'},
-              {k: 'Est total cost', v: '$8.40'},
-              {k: 'Est total time', v: '~3 hours'},
+              {
+                k: 'Est files',
+                v:
+                  result.estFilesLowTotal != null || result.estFilesHighTotal != null
+                    ? `${result.estFilesLowTotal ?? result.estFilesHighTotal}–${result.estFilesHighTotal ?? result.estFilesLowTotal}`
+                    : '—',
+              },
+              {
+                k: 'Est cost',
+                v:
+                  result.estCostLowTotal != null || result.estCostHighTotal != null
+                    ? `$${result.estCostLowTotal ?? result.estCostHighTotal} – $${result.estCostHighTotal ?? result.estCostLowTotal}`
+                    : '—',
+              },
             ]}
           />
-          <Link to='/plan' className='composer-submit' style={{marginTop: 16}}>
-            Kick off migration →
-          </Link>
+          <div style={{marginTop: 12, display: 'grid', gap: 6}}>
+            {result.perRepo.map((pr) => {
+              const ok = pr.status === 'APPLICABLE';
+              return (
+                <Row
+                  key={pr.repoId}
+                  dot={ok ? 'mint' : 'coral'}
+                  title={pr.fullName || pr.repoId.slice(0, 8)}
+                  meta={<span>{pr.reason || pr.status.replace(/_/g, ' ').toLowerCase()}</span>}
+                  trailing={
+                    <StatusPill kind={ok ? 'shipped' : 'failed'}>
+                      {ok ? 'applicable' : pr.status.replace(/_/g, ' ').toLowerCase()}
+                    </StatusPill>
+                  }
+                />
+              );
+            })}
+          </div>
         </div>
+      )}
 
-        <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--signal-coral-text)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Heads up
-          </div>
-          <div style={{fontSize: 13.5, color: 'var(--signal-coral-text)', lineHeight: 1.5}}>
-            We pause at every plan gate. You're never further than one approval away from the next
-            batch.
-          </div>
-        </Card>
-      </Feed>
-    </>
+      <div style={{display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16}}>
+        <Button kind='ghost' sm onClick={onClose} disabled={busy}>
+          Close
+        </Button>
+        <Button
+          kind='primary'
+          sm
+          disabled={busy || !projectId || selectedRepoIds.length === 0}
+          onClick={() => void run()}
+        >
+          {busy ? '…' : 'Run dry run'}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Apply picker — runs migrationApply() and navigates to the plan gate. */
+function MigrationApplyModal({
+  open,
+  slug,
+  onClose,
+  onLaunched,
+}: {
+  open: boolean;
+  slug: string;
+  onClose: () => void;
+  onLaunched: (runId: string) => void;
+}) {
+  const {projects, repos, projectId, setProjectId, selectedRepoIds, toggleRepo} =
+    useProjectRepoPicker(open);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function apply() {
+    if (!projectId || selectedRepoIds.length === 0) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const resp = await api.migrationApply(slug, {projectId, repoIds: selectedRepoIds});
+      onLaunched(resp.executionRunId);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not start the migration.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title='Apply migration' onClose={onClose} size='md'>
+      <ProjectRepoPickerBody
+        projects={projects}
+        repos={repos}
+        projectId={projectId}
+        setProjectId={setProjectId}
+        selectedRepoIds={selectedRepoIds}
+        toggleRepo={toggleRepo}
+        emptyHint='Migrations run against a project.'
+      />
+
+      <div
+        style={{marginTop: 12, fontSize: 12.5, color: 'var(--signal-text-dim)', lineHeight: 1.5}}
+      >
+        We'll plan the migration and pause at the plan gate for your approval before any code is
+        written.
+      </div>
+
+      {err && (
+        <div style={{marginTop: 12, fontSize: 13, color: 'var(--signal-coral-text)'}}>{err}</div>
+      )}
+
+      <div style={{display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16}}>
+        <Button kind='ghost' sm onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button
+          kind='primary'
+          sm
+          disabled={busy || !projectId || selectedRepoIds.length === 0}
+          onClick={() => void apply()}
+        >
+          {busy ? '…' : 'Apply →'}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -937,7 +1772,7 @@ export function PublicPricingPage() {
               tier: 'TEAM',
               price: '$31',
               unit: '/seat/mo',
-              sub: 'Min 2 seats · yearly',
+              sub: 'From 1 seat · per seat · yearly',
               features: [
                 'Unlimited runs',
                 '500 credits / seat / month',
@@ -1020,7 +1855,22 @@ export function PublicPricingPage() {
                   <li key={f}>✓ {f}</li>
                 ))}
               </ul>
-              <Button kind={p.best ? 'primary' : 'secondary'} block style={{marginTop: 14}}>
+              <Button
+                kind={p.best ? 'primary' : 'secondary'}
+                block
+                style={{marginTop: 14}}
+                // Anonymous visitors land here (back-link is /login). Free + paid
+                // CTAs route to sign-up; Enterprise opens a sales conversation.
+                to={p.tier === 'ENTERPRISE' ? undefined : '/register'}
+                onClick={
+                  p.tier === 'ENTERPRISE'
+                    ? () => {
+                        window.location.href =
+                          'mailto:sales@executespec.ai?subject=Enterprise%20plan';
+                      }
+                    : undefined
+                }
+              >
                 {p.tier === 'ENTERPRISE'
                   ? 'Talk to sales'
                   : p.tier === 'FREE'
@@ -1554,6 +2404,10 @@ export function DeploymentsPage() {
           </div>
         </Card>
 
+        <div style={{marginTop: 12}}>
+          <GcpCredentialPanel variant='signal' />
+        </div>
+
         {err && (
           <div
             style={{
@@ -1623,7 +2477,9 @@ export function DeploymentsPage() {
                       <Button
                         kind='secondary'
                         sm
-                        onClick={() => window.open(dAny.url!, '_blank', 'noopener')}
+                        onClick={() => {
+                          if (dAny.url) window.open(dAny.url, '_blank', 'noopener');
+                        }}
                       >
                         Open
                       </Button>
@@ -1729,14 +2585,17 @@ export function SpecTemplatesPage() {
   async function performCreate(values: Record<string, string>) {
     if (!projectId) return;
     const name = (values.name || '').trim();
-    const body = (values.body || '').trim();
-    if (!name || !body) return;
+    const requirementTemplate = (values.requirementTemplate || '').trim();
+    const description = (values.description || '').trim();
+    if (!name || !requirementTemplate) return;
     setCreateBusy(true);
     setErr('');
     try {
-      await api.createProjectSpecTemplate(projectId, {name, body} as unknown as Parameters<
-        typeof api.createProjectSpecTemplate
-      >[1]);
+      await api.createProjectSpecTemplate(projectId, {
+        name,
+        requirementTemplate,
+        ...(description ? {description} : {}),
+      });
       setTemplates(await api.listSpecTemplates(projectId));
       setCreateOpen(false);
     } catch (e: unknown) {
@@ -1831,25 +2690,20 @@ export function SpecTemplatesPage() {
           </Card>
         ) : (
           templates.map((t) => {
-            const tAny = t as unknown as {
-              id?: string;
-              name?: string;
-              body?: string;
-              createdAt?: string;
-            };
+            const preview = (t.description || t.requirementTemplate || '').slice(0, 60);
             return (
               <Row
-                key={tAny.id}
+                key={t.id}
                 dot='lavender'
-                title={tAny.name || 'untitled'}
-                meta={<span>{(tAny.body || '').slice(0, 60)}…</span>}
+                title={t.name || 'untitled'}
+                meta={<span>{preview}…</span>}
                 trailing={
                   <div style={{display: 'flex', gap: 4}}>
                     <Button
                       kind='secondary'
                       sm
                       onClick={() => {
-                        sessionStorage.setItem('signal:pending-spec', tAny.body || '');
+                        sessionStorage.setItem('signal:pending-spec', t.requirementTemplate || '');
                         window.location.href = '/compose';
                       }}
                     >
@@ -1859,10 +2713,7 @@ export function SpecTemplatesPage() {
                       kind='ghost'
                       sm
                       style={{color: 'var(--signal-coral-text)'}}
-                      onClick={() =>
-                        tAny.id &&
-                        setConfirmDelete({id: tAny.id, name: tAny.name || 'this template'})
-                      }
+                      onClick={() => setConfirmDelete({id: t.id, name: t.name || 'this template'})}
                     >
                       ×
                     </Button>
@@ -1897,7 +2748,12 @@ export function SpecTemplatesPage() {
             required: true,
           },
           {
-            name: 'body',
+            name: 'description',
+            label: 'Description (optional)',
+            placeholder: 'Short note about when to use this',
+          },
+          {
+            name: 'requirementTemplate',
             label: 'Spec body',
             placeholder: 'Describe the spec…',
             multiline: true,

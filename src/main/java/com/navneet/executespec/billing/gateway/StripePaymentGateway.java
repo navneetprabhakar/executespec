@@ -334,29 +334,6 @@ public class StripePaymentGateway implements PaymentGateway {
    *       to any recognised tier.
    * </ol>
    */
-  /**
-   * Phase 2 wiring helper — looks up the tier for a plan id so the Stripe metadata can stamp the
-   * correct surface. Returns null when the plan can't be resolved (caller will fall through to the
-   * executespec default in TierProductSurfaceMapper).
-   */
-  private String resolveTierForPlan(String planId) {
-    if (planId == null || planRepo == null) return null;
-    try {
-      java.util.UUID uuid = java.util.UUID.fromString(planId);
-      com.navneet.executespec.billing.entity.BillingPlan plan =
-          planRepo.findById(uuid).orElse(null);
-      return plan != null ? plan.getTier() : null;
-    } catch (IllegalArgumentException ignore) {
-      // legacy string planId — pattern match. V165 — "max" rolls up to TEAM.
-      String lower = planId.toLowerCase();
-      if (lower.contains("enterprise")) return "ENTERPRISE";
-      if (lower.contains("team")) return "TEAM";
-      if (lower.contains("max")) return "TEAM";
-      if (lower.contains("pro")) return "PRO";
-      return null;
-    }
-  }
-
   private String resolvePriceId(String planId) {
     if (planId == null) return proPriceId;
 
