@@ -5,16 +5,30 @@ import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 
 // ───────────────────────── Integrations ─────────────────────────
+// Per-user credential providers that store a token via /auth/settings/{provider}.
+// (GitHub also has the org-level App-install flow, surfaced as a second action.)
+type ConnectKind = 'github' | 'jira' | 'confluence' | 'bitbucket';
+const INT_BTN: React.CSSProperties = {padding: '4px 10px', flexShrink: 0};
+
 export function IdeIntegrations() {
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const [sources, setSources] = useState<string[] | null>(null);
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
+  const [connect, setConnect] = useState<ConnectKind | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
 
-  useEffect(() => {
+  const loadSources = () =>
     api
       .getIntegrationStatus()
       .then((s) => setSources(s.enabledSources ?? []))
       .catch(() => setSources([]));
+
+  useEffect(() => {
+    loadSources();
     api
       .getSlackStatus()
       .then(setSlack)
@@ -25,36 +39,261 @@ export function IdeIntegrations() {
       .catch(() => {});
   }, []);
 
-  function open(getUrl: () => Promise<{installUrl?: string}>) {
+  function openInstall(getUrl: () => Promise<{installUrl?: string}>) {
     getUrl()
       .then((r) => r.installUrl && window.open(r.installUrl, '_blank'))
       .catch(() => {});
   }
 
+  // Connected = the source is enabled server-side OR the per-user credential
+  // flag is set (the flag flips immediately after a save, before the sources
+  // list re-reads). `has()` is the canonical signal the retired Signal page used.
   const has = (k: string) => (sources ?? []).map((s) => s.toLowerCase()).includes(k);
-  const rows = [
+  const ghConnected = !!gh?.installed || !!user?.hasGithubPat;
+  const jiraConnected = has('jira') || !!user?.hasJiraToken;
+  const confluenceConnected = has('confluence') || !!user?.hasConfluenceToken;
+  const bitbucketConnected = has('bitbucket') || !!user?.hasBitbucketAppPassword;
+
+  // PromptModal spec per provider — mirrors the connect modals from the retired
+  // Signal IntegrationsPage. `run` posts to the typed /auth/settings/{provider}
+  // helper and returns the refreshed AuthUser.
+  function modalSpec(p: ConnectKind): {
+    title: string;
+    body: string;
+    fields: Array<{
+      name: string;
+      label: string;
+      placeholder?: string;
+      defaultValue?: string;
+      required?: boolean;
+    }>;
+    run: (v: Record<string, string>) => Promise<api.AuthUser>;
+  } {
+    switch (p) {
+      case 'github':
+        return {
+          title: 'Connect GitHub (token)',
+          body: 'Paste a GitHub personal access token (classic or fine-grained, scopes: repo + workflow). Used to clone and push your repositories. Stored encrypted at rest.',
+          fields: [
+            {
+              name: 'githubPat',
+              label: 'Personal access token',
+              placeholder: 'ghp_… or github_pat_…',
+              required: true,
+            },
+            {
+              name: 'githubOwner',
+              label: 'Owner (username or org)',
+              placeholder: 'your-username',
+              defaultValue: user?.githubOwner ?? '',
+              required: true,
+            },
+          ],
+          run: (v) => api.updateGithubSettings(v.githubPat, v.githubOwner),
+        };
+      case 'jira':
+        return {
+          title: 'Connect Jira',
+          body: 'Paste your Jira Cloud credentials. The API token is stored encrypted at rest.',
+          fields: [
+            {
+              name: 'baseUrl',
+              label: 'Base URL',
+              placeholder: 'https://yourco.atlassian.net',
+              defaultValue: user?.jiraBaseUrl ?? '',
+              required: true,
+            },
+            {
+              name: 'email',
+              label: 'Email',
+              placeholder: 'you@yourco.com',
+              defaultValue: user?.jiraEmail ?? '',
+              required: true,
+            },
+            {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
+          ],
+          run: (v) => api.updateJiraSettings(v.baseUrl, v.email, v.apiToken),
+        };
+      case 'confluence':
+        return {
+          title: 'Connect Confluence',
+          body: 'Paste your Confluence Cloud credentials. The API token is stored encrypted at rest.',
+          fields: [
+            {
+              name: 'baseUrl',
+              label: 'Base URL',
+              placeholder: 'https://yourco.atlassian.net/wiki',
+              defaultValue: user?.confluenceBaseUrl ?? '',
+              required: true,
+            },
+            {
+              name: 'email',
+              label: 'Email',
+              placeholder: 'you@yourco.com',
+              defaultValue: user?.confluenceEmail ?? '',
+              required: true,
+            },
+            {name: 'apiToken', label: 'API token', placeholder: 'ATATT…', required: true},
+          ],
+          run: (v) => api.updateConfluenceSettings(v.baseUrl, v.email, v.apiToken),
+        };
+      case 'bitbucket':
+        return {
+          title: 'Connect Bitbucket',
+          body: 'Provide a Bitbucket workspace + repo + app password (scopes: repository, pullrequest).',
+          fields: [
+            {
+              name: 'workspace',
+              label: 'Workspace',
+              placeholder: 'your-workspace',
+              defaultValue: user?.bitbucketWorkspace ?? '',
+              required: true,
+            },
+            {
+              name: 'repoSlug',
+              label: 'Default repo slug',
+              placeholder: 'main-repo',
+              defaultValue: user?.bitbucketRepoSlug ?? '',
+              required: true,
+            },
+            {
+              name: 'username',
+              label: 'Username',
+              placeholder: 'you',
+              defaultValue: user?.bitbucketUsername ?? '',
+              required: true,
+            },
+            {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
+          ],
+          run: (v) =>
+            api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, v.repoSlug),
+        };
+      default:
+        throw new Error(`Unknown integration provider: ${String(p)}`);
+    }
+  }
+
+  const spec = connect ? modalSpec(connect) : null;
+
+  async function submitConnect(values: Record<string, string>) {
+    if (!connect || !spec) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const updated = await spec.run(values);
+      setUser(api.normalizeAuthUser(updated));
+      await loadSources();
+      setMsg(`${spec.title.replace('Connect ', '').replace(' (token)', '')} connected.`);
+      setConnect(null);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Connect failed.');
+      setConnect(null); // close so the banner is visible; re-open to retry
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const rows: Array<{
+    name: string;
+    desc: string;
+    connected: boolean;
+    sub?: string;
+    actions?: React.ReactNode;
+  }> = [
     {
       name: 'GitHub',
-      connected: !!gh?.installed,
-      action: () => open(api.getGitHubAppInstallUrl as () => Promise<{installUrl?: string}>),
-      label: 'Install app',
+      desc: 'Clone repos + open PRs · GitHub App or a personal access token',
+      connected: ghConnected,
+      sub: gh?.installed ? 'app installed' : user?.hasGithubPat ? 'token set' : undefined,
+      actions: (
+        <>
+          {!gh?.installed && (
+            <button
+              className='ide-btn ghost'
+              style={INT_BTN}
+              onClick={() =>
+                openInstall(api.getGitHubAppInstallUrl as () => Promise<{installUrl?: string}>)
+              }
+            >
+              Install app
+            </button>
+          )}
+          <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('github')}>
+            {user?.hasGithubPat ? 'Update token' : 'Set token'}
+          </button>
+        </>
+      ),
     },
     {
       name: 'Slack',
+      desc: 'Run-completion alerts in your channel',
       connected: !!slack?.connected,
-      sub: slack?.connected ? slack.teamName || '' : '',
-      action: () => open(api.getSlackInstallUrl),
-      label: 'Connect',
+      sub: slack?.connected ? slack.teamName || undefined : undefined,
+      actions: !slack?.connected ? (
+        <button
+          className='ide-btn ghost'
+          style={INT_BTN}
+          onClick={() => openInstall(api.getSlackInstallUrl)}
+        >
+          Connect
+        </button>
+      ) : undefined,
     },
-    {name: 'Jira', connected: has('jira')},
-    {name: 'Confluence', connected: has('confluence')},
-    {name: 'Bitbucket', connected: has('bitbucket')},
+    {
+      name: 'Jira',
+      desc: 'Trigger runs from issues',
+      connected: jiraConnected,
+      sub: user?.jiraBaseUrl || undefined,
+      actions: (
+        <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('jira')}>
+          {jiraConnected ? 'Manage' : 'Connect'}
+        </button>
+      ),
+    },
+    {
+      name: 'Confluence',
+      desc: 'Trigger runs from pages',
+      connected: confluenceConnected,
+      sub: user?.confluenceBaseUrl || undefined,
+      actions: (
+        <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('confluence')}>
+          {confluenceConnected ? 'Manage' : 'Connect'}
+        </button>
+      ),
+    },
+    {
+      name: 'Bitbucket',
+      desc: 'Clone repos + open PRs',
+      connected: bitbucketConnected,
+      sub: user?.bitbucketWorkspace || undefined,
+      actions: (
+        <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('bitbucket')}>
+          {bitbucketConnected ? 'Manage' : 'Connect'}
+        </button>
+      ),
+    },
   ];
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
       <div className='ide-h1'>Integrations</div>
       <div className='ide-sub'>Connect GitHub, Slack, and your issue trackers.</div>
+
+      {(err || msg) && (
+        <div
+          className='ide-card'
+          style={{
+            marginBottom: 12,
+            fontSize: 13,
+            color: err ? 'var(--ide-red)' : 'var(--ide-green)',
+            borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
+          }}
+        >
+          {err || msg}
+        </div>
+      )}
+
       {sources === null ? (
         <IdeLoader label='Loading integrations…' />
       ) : (
@@ -70,23 +309,39 @@ export function IdeIntegrations() {
                 borderBottom: i < rows.length - 1 ? '1px solid var(--ide-border)' : 'none',
               }}
             >
-              <span style={{flex: 1, fontWeight: 500}}>
-                {r.name}
-                {r.sub && (
-                  <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}> · {r.sub}</span>
-                )}
-              </span>
+              <div style={{flex: 1, minWidth: 0}}>
+                <div style={{fontWeight: 500}}>
+                  {r.name}
+                  {r.sub && (
+                    <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}> · {r.sub}</span>
+                  )}
+                </div>
+                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                  {r.desc}
+                </div>
+              </div>
               <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
                 {r.connected ? 'Connected' : 'Not connected'}
               </IdeBadge>
-              {r.action && !r.connected && (
-                <button className='ide-btn ghost' style={{padding: '4px 10px'}} onClick={r.action}>
-                  {r.label}
-                </button>
-              )}
+              {r.actions}
             </div>
           ))}
         </div>
+      )}
+
+      {spec && (
+        <PromptModal
+          key={connect ?? 'closed'}
+          open={!!connect}
+          title={spec.title}
+          body={spec.body}
+          fields={spec.fields}
+          submitLabel='Save'
+          busy={busy}
+          onClose={() => setConnect(null)}
+          // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `busy` (passed as the modal's `busy` prop) wraps this submit.
+          onSubmit={submitConnect}
+        />
       )}
     </div>
   );
