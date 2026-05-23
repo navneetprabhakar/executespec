@@ -1006,10 +1006,15 @@
             font-size: 14px; font-weight: 600;
             text-align: center;
             background: var(--card-elev); color: var(--ink);
-            border: 1px solid var(--hairline);
-            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+            border: 1px solid var(--hairline-strong);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
         }
-        .price-card .btn:hover { background: var(--hairline); }
+        .price-card .btn:hover {
+            background: var(--hairline);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(14, 15, 18, 0.12);
+            border-color: var(--ink);
+        }
         .price-card.best .btn {
             background: var(--ink); color: var(--bg); border-color: var(--ink);
             font-weight: 700;
@@ -1234,7 +1239,7 @@
         </nav>
         <div class='cta-row'>
             <a class='btn-sm' href='https://dev.executespec.ai/login'>Sign in</a>
-            <a class='btn-sm primary' href='https://dev.executespec.ai/signal/signup'>Start free</a>
+            <a class='btn-sm primary' href='https://dev.executespec.ai/signup'>Start free</a>
         </div>
     </div>
 </header>
@@ -1246,11 +1251,11 @@
             Write a one-line spec. We plan it, code it across one repo or twenty, run the tests, review it, and open a pull request with a deterministic <strong>Ready / Needs review / Failed</strong> verdict attached. <strong>You merge it.</strong>
         </p>
         <div class='cta-row'>
-            <a class='btn primary' href='https://dev.executespec.ai/signal/signup'>
+            <a class='btn primary' href='https://dev.executespec.ai/signup'>
                 Start free
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
-            <a class='btn secondary' href='https://dev.executespec.ai/signal/welcome'>Try the sandbox</a>
+            <a class='btn secondary' href='https://dev.executespec.ai/welcome'>Try the sandbox</a>
             <span class='pip'>No card required · 15 runs / mo</span>
         </div>
 
@@ -1406,11 +1411,11 @@
         </div>
 
         <div style='margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap;'>
-            <a class='btn primary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; background:var(--ink); color:var(--bg); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/signal/library'>
+            <a class='btn primary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; background:var(--ink); color:var(--bg); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/library'>
                 Browse 28 solutions
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
-            <a class='btn secondary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; color:var(--ink); border:1px solid var(--hairline-strong); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/signal/migrations'>
+            <a class='btn secondary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; color:var(--ink); border:1px solid var(--hairline-strong); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/migrations'>
                 11 modernization recipes
             </a>
         </div>
@@ -1444,7 +1449,7 @@
                     <li>Single repo</li>
                     <li>Email support</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signal/signup'>Start free</a>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Start free</a>
             </div>
             <div class='price-card'>
                 <div class='tier'>SOLO</div>
@@ -1458,7 +1463,7 @@
                     <li>Managed keys · 3 providers</li>
                     <li>Library + migrations</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signal/signup'>Start 14d trial</a>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Start 14d trial</a>
             </div>
             <div class='price-card best'>
                 <div class='best-pip'>RECOMMENDED</div>
@@ -1473,7 +1478,7 @@
                     <li>Cross-repo + sharing</li>
                     <li>All 4 autofix surfaces</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signal/signup'>Start 14d trial</a>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Start 14d trial</a>
             </div>
             <div class='price-card'>
                 <div class='tier'>ENTERPRISE</div>
@@ -1595,7 +1600,7 @@
         <div class='cta-block'>
             <h2>Stop reviewing diffs. <em>Start merging PRs.</em></h2>
             <p>15 free runs a month. No card. Five minutes to your first verified PR.</p>
-            <a class='btn-cta' href='https://dev.executespec.ai/signal/signup'>
+            <a class='btn-cta' href='https://dev.executespec.ai/signup'>
                 Start free
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
@@ -1624,7 +1629,7 @@
         <div>
             <h5>Company</h5>
             <ul>
-                <li><a href='https://dev.executespec.ai/signal/trust'>Trust &amp; security</a></li>
+                <li><a href='https://dev.executespec.ai/trust'>Trust &amp; security</a></li>
                 <li><a href='/terms'>Terms</a></li>
                 <li><a href='/privacy'>Privacy</a></li>
                 <li><a href='/dpa'>DPA</a></li>
@@ -1634,10 +1639,10 @@
         <div>
             <h5>Get started</h5>
             <ul>
-                <li><a href='https://dev.executespec.ai/signal/signup'>Start free</a></li>
+                <li><a href='https://dev.executespec.ai/signup'>Start free</a></li>
                 <li><a href='https://dev.executespec.ai/login'>Sign in</a></li>
-                <li><a href='https://dev.executespec.ai/signal/welcome'>Try the sandbox</a></li>
-                <li><a href='https://dev.executespec.ai/signal/library'>Browse library</a></li>
+                <li><a href='https://dev.executespec.ai/welcome'>Try the sandbox</a></li>
+                <li><a href='https://dev.executespec.ai/library'>Browse library</a></li>
             </ul>
         </div>
     </div>
