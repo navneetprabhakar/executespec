@@ -89,10 +89,14 @@ public class OpenAiNativeToolClient {
     if (apiKey == null || apiKey.isBlank()) {
       throw new IllegalStateException("OpenAI api-key not configured (set OPENAI_API_KEY)");
     }
+    // Per-call base-URL override lets OpenAI-wire-compatible gateways (e.g. OpenRouter) reuse this
+    // exact client; absent an override we use the configured OpenAI default.
+    String effectiveBaseUrl =
+        (request.baseUrl() != null && !request.baseUrl().isBlank()) ? request.baseUrl() : baseUrl;
     ObjectNode body = buildRequestBody(request);
     log.info(
-        "OpenAI wrapper POST {} model={} tools={}",
-        baseUrl + CHAT_COMPLETIONS_PATH,
+        "OpenAI-wire POST {} model={} tools={}",
+        effectiveBaseUrl + CHAT_COMPLETIONS_PATH,
         request.model(),
         request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
 
@@ -101,7 +105,8 @@ public class OpenAiNativeToolClient {
     HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
     factory.setReadTimeout(READ_TIMEOUT);
-    RestClient client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
+    RestClient client =
+        RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
     JsonNode response;
     try {
       response =
@@ -306,5 +311,6 @@ public class OpenAiNativeToolClient {
       String toolChoice,
       Double temperature,
       Integer maxCompletionTokens,
-      String apiKey) {}
+      String apiKey,
+      String baseUrl) {}
 }

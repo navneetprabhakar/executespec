@@ -52,12 +52,16 @@ public class RazorpayRestClient {
 
   /** POST /v1/subscriptions */
   public JsonNode createSubscription(
-      String razorpayPlanId, String customerId, int totalCount, Map<String, String> notes) {
+      String razorpayPlanId,
+      String customerId,
+      int totalCount,
+      int quantity,
+      Map<String, String> notes) {
     Map<String, Object> body = new HashMap<>();
     body.put("plan_id", razorpayPlanId);
     body.put("customer_id", customerId);
     body.put("total_count", totalCount);
-    body.put("quantity", 1);
+    body.put("quantity", Math.max(1, quantity));
     if (notes != null && !notes.isEmpty()) body.put("notes", notes);
 
     log.info(

@@ -2,16 +2,16 @@
 
 > Operator's reference for every page a signed-in user can reach, plus the public surfaces (auth, legal, shared links).
 >
-> This manual maps **route path - page component - what the page does - which API endpoints it calls - who can see it**. It is generated from the production frontend chrome (Signal) - the only active shell since the 2026-05-15 V3/V4 retirement.
+> This manual maps **route path - what the page does - which API endpoints it calls - who can see it**. The **VS Code-style IDE workspace** (`frontend/src/ide/`) is the only chrome since the 2026-05-22 IDE-only switch; every protected route renders an IDE-native surface. The route paths, behaviours, and API calls below remain current — but the chrome/nav description and some page-component names still reference the retired Signal shell, pending a full IDE-native rewrite of this manual.
 
 ## How the app is laid out
 
-ExecuteSpec ships a single SPA mounted at `frontend/src/main.tsx`. Routing lives in [`frontend/src/App.tsx`](../frontend/src/App.tsx). All authenticated pages render inside [`frontend/src/signal/components/Shell.tsx`](../frontend/src/signal/components/Shell.tsx), which provides:
+ExecuteSpec ships a single SPA mounted at `frontend/src/main.tsx`. Routing lives in [`frontend/src/App.tsx`](../frontend/src/App.tsx). All authenticated pages render inside [`frontend/src/ide/IdeWorkspace.tsx`](../frontend/src/ide/IdeWorkspace.tsx) — a VS Code-style workspace:
 
-- **Desktop (>=1024px)** - a persistent 280px left sidebar, theme toggle in the footer, no bottom bar.
-- **Mobile (<1024px)** - a hamburger-drawer sidebar, a sticky top "mobile-bar" (logo + theme + hamburger), and a fixed bottom tab bar with five entries (`/home`, `/runs`, `/compose`, `/projects`, `/account`). The middle `/compose` tab is a FAB ("New").
+- **Desktop** - a left **activity bar** (icon rail) + an **Explorer** panel (live runs + projects tree) + the editor/surface area + a bottom **status bar**, with a **⌘K command palette** to jump to a run, project, or action.
+- **Mobile** - a top bar + slide-in drawer + bottom tab bar.
 
-The sidebar is built by `buildSidebar({tier, isSuperAdmin, canDeploy})` and is divided into **four groups**: Daily, Workspace, Account, System. Some items are gated by tier or role; some carry a `BETA` badge.
+> **Heads up — the route tables below are stale on chrome framing.** They were written for the retired Signal shell (sidebar groups, page-component names like `HomePage`/`ResultPage`). The route paths, behaviours, tier-gating, and API calls remain accurate and useful as a route inventory; the navigation/sidebar framing and component names do not reflect the current IDE chrome. A full IDE-native rewrite of this manual is pending.
 
 ### Sidebar group at a glance
 

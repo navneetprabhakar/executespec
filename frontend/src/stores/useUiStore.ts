@@ -28,6 +28,17 @@ type ViewMode = 'pro' | 'project';
  */
 type Theme = 'dark' | 'light' | 'system';
 
+/**
+ * UI chrome mode. 'ide' = the VS Code-style workspace (the only live chrome);
+ * 'signal' = the retired classic chrome. As of the 2026-05-22 IDE-only switch
+ * the chrome is no longer user-switchable — `App.tsx` hard-codes `const ide =
+ * true`, so every route renders its IDE surface. The value is still applied to
+ * `<html data-ui>` (always 'ide') for CSS. `uiMode` + `setUiMode` are retained
+ * only because the undeleted Signal `AccountPage` fallback still references the
+ * old Interface toggle; nothing in the live IDE tree reads them.
+ */
+type UiMode = 'signal' | 'ide';
+
 interface UiStore {
   sidebarExpanded: boolean;
   mobileSidebarOpen: boolean;
@@ -48,6 +59,8 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
+  /** UI chrome mode (always 'ide' since the 2026-05-22 IDE-only switch). */
+  uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
    * viewing on a /projects/:id/dashboard route. ProjectDashboardPage sets
@@ -70,6 +83,7 @@ interface UiStore {
   setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
+  setUiMode: (m: UiMode) => void;
   setCurrentProjectName: (name: string | null) => void;
 }
 
@@ -92,6 +106,19 @@ function initTheme(): Theme {
     document.documentElement.dataset.theme = theme === 'system' ? resolveSystemTheme() : theme;
   }
   return theme;
+}
+
+// UI chrome — applied to <html data-ui> pre-paint so the chrome renders without
+// a flash. 2026-05-22: the Signal chrome was retired as a user-facing option;
+// the VS Code-style IDE workspace is now the ONLY chrome and the A/B toggle was
+// removed. We force 'ide' regardless of any previously-persisted es:uiMode.
+// (`setUiMode` survives only because the undeleted Signal `AccountPage` fallback
+// still references the old Interface toggle; the live IDE tree never calls it.)
+function initUiMode(): UiMode {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.ui = 'ide';
+  }
+  return 'ide';
 }
 
 // M-026 (Wave 1) — first-time users land with sidebar expanded so they can
@@ -119,6 +146,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
   theme: initTheme(),
+  uiMode: initUiMode(),
   currentProjectName: null,
   viewMode: ((): ViewMode => {
     const saved = localStorage.getItem('es:viewMode');
@@ -172,6 +200,12 @@ export const useUiStore = create<UiStore>((set, get) => ({
     }
     set({theme: next});
   },
+  setUiMode: (m) => {
+    localStorage.setItem('es:uiMode', m);
+    if (typeof document !== 'undefined') document.documentElement.dataset.ui = m;
+    set({uiMode: m});
+  },
+
   setCurrentProjectName: (name) => set({currentProjectName: name}),
 
   addToast: (t) => {

@@ -220,13 +220,44 @@ export function OrgSettingsPage() {
   // V198 — busy flag for the external-sharing toggle so consecutive clicks
   // don't race the PUT.
   const [extBusy, setExtBusy] = useState(false);
+  // Org-wide BYOK provider keys. Inputs are write-only — raw keys are never
+  // returned (only has*Key flags) — and a blank field leaves the stored key
+  // unchanged, so each provider saves independently without wiping the others.
+  const [keyInputs, setKeyInputs] = useState({
+    anthropic: '',
+    openai: '',
+    gemini: '',
+    openrouter: '',
+  });
+  const [keyBusy, setKeyBusy] = useState<string | null>(null);
+  // F3 — per-org model-matrix overrides. `matrix` is the server view (defaults +
+  // current overrides + picker options); `matrixOverrides` is the editable copy.
+  const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
+  const [matrixOverrides, setMatrixOverrides] = useState<Record<string, string>>({});
+  const [matrixBusy, setMatrixBusy] = useState(false);
+  // Seat adjustment (TEAM tier) — current value seeded from the org seat count.
+  const [seats, setSeats] = useState(1);
+  const [seatBusy, setSeatBusy] = useState(false);
+  // Org members — drives the per-member suspend control.
+  const [members, setMembers] = useState<api.OrgMemberDto[] | null>(null);
+  const [suspendBusy, setSuspendBusy] = useState<string | null>(null);
+  // Org audit log — loaded lazily on first expand to keep first paint cheap.
+  const [audit, setAudit] = useState<api.AuditLogEntry[] | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditBusy, setAuditBusy] = useState(false);
 
   useEffect(() => {
-    Promise.allSettled([api.getMyOrg(), api.getSsoConfig()]).then(([o, s]) => {
+    Promise.allSettled([
+      api.getMyOrg(),
+      api.getSsoConfig(),
+      api.getOrgModelMatrix(),
+      api.getOrgMembers(),
+    ]).then(([o, s, m, mem]) => {
       if (o.status === 'fulfilled') {
         setOrg(o.value);
         setName(o.value.name || '');
         setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
+        setSeats(o.value.seatCount ?? 1);
       }
       if (s.status === 'fulfilled') {
         setSso(s.value);
@@ -235,8 +266,30 @@ export function OrgSettingsPage() {
         if (s.value.domain) setSsoDomain(s.value.domain);
         setSsoEnforced(!!s.value.enforced);
       }
+      if (m.status === 'fulfilled') {
+        setMatrix(m.value);
+        setMatrixOverrides(m.value.overrides || {});
+      }
+      if (mem.status === 'fulfilled') setMembers(mem.value);
+      else setMembers([]);
     });
   }, []);
+
+  async function saveMatrix() {
+    setMatrixBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const next = await api.updateOrgModelMatrix(matrixOverrides);
+      setMatrix(next);
+      setMatrixOverrides(next.overrides || {});
+      setMsg('Model matrix saved.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setMatrixBusy(false);
+    }
+  }
 
   async function saveOrg() {
     setBusy(true);
@@ -294,7 +347,96 @@ export function OrgSettingsPage() {
     }
   }
 
+  async function saveSeats() {
+    setSeatBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const res = await api.adjustOrgSeats(seats);
+      setMsg(res.message || `Seats updated to ${res.newSeats}.`);
+      setSeats(res.newSeats);
+      // Reflect the new count in the local org snapshot + topbar subtitle.
+      setOrg((prev) => (prev ? {...prev, seatCount: res.newSeats} : prev));
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Seat update failed.');
+    } finally {
+      setSeatBusy(false);
+    }
+  }
+
+  async function toggleSuspend(userId: string, suspended: boolean) {
+    setSuspendBusy(userId);
+    setErr('');
+    setMsg('');
+    try {
+      await api.orgSuspendMember(userId, suspended);
+      setMembers(await api.getOrgMembers());
+      setMsg(suspended ? 'Member suspended.' : 'Member reinstated.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Suspend failed.');
+    } finally {
+      setSuspendBusy(null);
+    }
+  }
+
+  async function loadAudit() {
+    setAuditOpen(true);
+    if (audit !== null) return;
+    setAuditBusy(true);
+    try {
+      const page = await api.getAuditLogs({orgScoped: true, size: 50});
+      setAudit(page.content);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Audit load failed.');
+      setAudit([]);
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
+  async function saveOrgKey(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter') {
+    const value = keyInputs[provider].trim();
+    if (!value) {
+      setErr('Enter a key first.');
+      return;
+    }
+    setKeyBusy(provider);
+    setErr('');
+    setMsg('');
+    try {
+      const next = await api.updateOrgAiKeySettings(
+        provider === 'anthropic' ? value : '',
+        provider === 'openai' ? value : '',
+        provider === 'gemini' ? value : '',
+        provider === 'openrouter' ? value : '',
+      );
+      setOrg(next);
+      setKeyInputs((k) => ({...k, [provider]: ''}));
+      setMsg('Provider key saved.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setKeyBusy(null);
+    }
+  }
+
   if (!org) return <LoadingState label='Loading org…' />;
+
+  // OpenRouter is an Enterprise-only gateway — only offer it when the org qualifies
+  // (the backend rejects the key with 403 otherwise).
+  const isEnterprise = (org.tier || '').toUpperCase() === 'ENTERPRISE';
+  const orgKeyRows: {
+    provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+    label: string;
+    connected: boolean;
+  }[] = [
+    {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
+    {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
+    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
+    ...(isEnterprise
+      ? [{provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey}]
+      : []),
+  ];
 
   return (
     <>
@@ -360,6 +502,44 @@ export function OrgSettingsPage() {
               {busy ? 'Saving…' : 'Save org profile'}
             </Button>
           )}
+        </Card>
+
+        <SectionHeader>Seats</SectionHeader>
+        <Card>
+          <div
+            style={{
+              fontSize: 13,
+              color: 'var(--signal-text-dim)',
+              lineHeight: 1.5,
+              marginBottom: 12,
+            }}
+          >
+            TEAM-tier orgs share a seat pool (min 2). Changing the count syncs the prorated quantity
+            to your billing gateway. You can&apos;t reduce below the current active member count.
+          </div>
+          <Field label='Seats'>
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <input
+                type='number'
+                min={1}
+                max={20}
+                value={seats}
+                onChange={(e) => setSeats(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                disabled={!canEdit}
+                style={{...inputStyle, width: 120, marginBottom: 0}}
+              />
+              {canEdit && (
+                <Button
+                  kind='primary'
+                  sm
+                  disabled={seatBusy || seats === (org.seatCount ?? 1)}
+                  onClick={saveSeats}
+                >
+                  {seatBusy ? 'Updating…' : 'Update seats'}
+                </Button>
+              )}
+            </div>
+          </Field>
         </Card>
 
         <SectionHeader>Single sign-on (SSO)</SectionHeader>
@@ -449,6 +629,164 @@ export function OrgSettingsPage() {
           )}
         </Card>
 
+        <SectionHeader>AI provider keys</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Org-wide BYOK keys shared by every member. Runs against a provider you supply a key for
+            bypass the platform cost cap. Keys are encrypted at rest and never shown again — paste a
+            new value to replace one, or leave a field blank to keep the current key.
+          </div>
+        </Card>
+        <Card style={{padding: 0}}>
+          {orgKeyRows.map((row, i) => (
+            <div
+              key={row.provider}
+              style={{
+                padding: '14px 16px',
+                borderBottom:
+                  i < orgKeyRows.length - 1 ? '1px solid var(--signal-hairline)' : 'none',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{fontSize: 14.5, fontWeight: 600}}>{row.label}</div>
+                {row.connected ? (
+                  <StatusPill kind='shipped'>Connected</StatusPill>
+                ) : (
+                  <StatusPill>Not set</StatusPill>
+                )}
+              </div>
+              <div style={{display: 'flex', gap: 8}}>
+                <input
+                  type='password'
+                  autoComplete='off'
+                  placeholder={
+                    row.connected ? 'Paste a new key to replace' : `Paste your ${row.label} key`
+                  }
+                  value={keyInputs[row.provider]}
+                  onChange={(e) => setKeyInputs((k) => ({...k, [row.provider]: e.target.value}))}
+                  disabled={!canEdit}
+                  style={{
+                    ...inputStyle,
+                    flex: 1,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    marginBottom: 0,
+                  }}
+                />
+                <Button
+                  kind='primary'
+                  sm
+                  disabled={!canEdit || keyBusy === row.provider}
+                  onClick={() => saveOrgKey(row.provider)}
+                >
+                  {keyBusy === row.provider ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </Card>
+
+        <SectionHeader>Model matrix</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Pin which model each agent tier uses, per provider. Cells left on <em>Default</em>{' '}
+            follow the platform matrix; an override applies to every run your org submits on that
+            provider.{' '}
+            {matrix && !matrix.editable && (
+              <strong>Overrides are an Enterprise-tier feature.</strong>
+            )}
+          </div>
+        </Card>
+        {matrix &&
+          matrix.tiers.map((tier) => (
+            <Card key={tier} style={{marginBottom: 10}}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  textTransform: 'capitalize',
+                  marginBottom: 10,
+                }}
+              >
+                {tier}
+              </div>
+              {matrix.providers
+                .filter((p) => matrix.defaults[`${p}:${tier}`])
+                .map((p) => {
+                  const key = `${p}:${tier}`;
+                  const def = matrix.defaults[key];
+                  const val = matrixOverrides[key] ?? '';
+                  return (
+                    <div
+                      key={key}
+                      style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
+                    >
+                      <div
+                        style={{
+                          width: 92,
+                          flexShrink: 0,
+                          fontSize: 13,
+                          color: 'var(--signal-text-dim)',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {p}
+                      </div>
+                      <select
+                        value={val}
+                        disabled={!canEdit || !matrix.editable}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMatrixOverrides((prev) => {
+                            const nextO = {...prev};
+                            if (!v) delete nextO[key];
+                            else nextO[key] = v;
+                            return nextO;
+                          });
+                        }}
+                        style={{
+                          ...inputStyle,
+                          flex: 1,
+                          minWidth: 0,
+                          cursor: !canEdit || !matrix.editable ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <option value=''>Default · {def}</option>
+                        {(matrix.modelsByProvider[p] ?? []).map((mdl) => (
+                          <option key={mdl} value={mdl}>
+                            {mdl}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+            </Card>
+          ))}
+        {matrix && matrix.editable && canEdit && (
+          <Button kind='primary' block disabled={matrixBusy} onClick={saveMatrix}>
+            {matrixBusy ? 'Saving…' : 'Save model matrix'}
+          </Button>
+        )}
+
         <SectionHeader>External sharing</SectionHeader>
         <Card>
           <div
@@ -476,6 +814,7 @@ export function OrgSettingsPage() {
               role='switch'
               aria-checked={!!org.externalSharingEnabled}
               disabled={!canEdit || extBusy}
+              // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `extBusy` already disables this toggle while in flight.
               onClick={async () => {
                 setExtBusy(true);
                 setErr('');
@@ -521,6 +860,137 @@ export function OrgSettingsPage() {
               />
             </button>
           </div>
+        </Card>
+
+        <SectionHeader>Members</SectionHeader>
+        <Card
+          style={{
+            background: 'var(--signal-lavender-soft)',
+            borderColor: 'transparent',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+            Suspend a member to block their access without removing them from the org. Reinstate to
+            restore it. Manage roles + invites from{' '}
+            <Link to='/org-members' style={{color: 'var(--signal-coral)'}}>
+              Org members
+            </Link>
+            .
+          </div>
+        </Card>
+        {members === null ? (
+          <LoadingState label='Loading members…' />
+        ) : members.length === 0 ? (
+          <Card>
+            <span style={{fontSize: 13, color: 'var(--signal-text-dim)'}}>No members found.</span>
+          </Card>
+        ) : (
+          <Card style={{padding: 0}}>
+            {members.map((m, i) => {
+              const mName = [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || m.email;
+              const isSelf = m.userId === user?.id;
+              return (
+                <div
+                  key={m.userId}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 16px',
+                    borderBottom: i < members.length - 1 ? '1px solid var(--signal-hairline)' : 0,
+                  }}
+                >
+                  <div style={{minWidth: 0, flex: 1}}>
+                    <div style={{fontSize: 14, fontWeight: 600, color: 'var(--signal-ink)'}}>
+                      {mName}
+                      {isSelf && (
+                        <span style={{fontSize: 11, color: 'var(--signal-text-mute)'}}> · you</span>
+                      )}
+                    </div>
+                    <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
+                      {m.email} · {m.orgRole}
+                    </div>
+                  </div>
+                  {canEdit && !isSelf && (
+                    <div style={{display: 'flex', gap: 6, flexShrink: 0}}>
+                      <Button
+                        kind='ghost'
+                        sm
+                        disabled={suspendBusy === m.userId}
+                        style={{color: 'var(--signal-coral-text)'}}
+                        onClick={() => toggleSuspend(m.userId, true)}
+                      >
+                        {suspendBusy === m.userId ? '…' : 'Suspend'}
+                      </Button>
+                      <Button
+                        kind='ghost'
+                        sm
+                        disabled={suspendBusy === m.userId}
+                        onClick={() => toggleSuspend(m.userId, false)}
+                      >
+                        Reinstate
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+        )}
+
+        <SectionHeader>Audit log</SectionHeader>
+        <Card style={{padding: 0}}>
+          {!auditOpen ? (
+            <div style={{padding: 16}}>
+              <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 12}}>
+                Org-scoped audit trail — role changes, SSO + sharing toggles, member actions.
+              </div>
+              <Button kind='secondary' sm onClick={loadAudit}>
+                Load audit log
+              </Button>
+            </div>
+          ) : auditBusy || audit === null ? (
+            <div style={{padding: 16}}>
+              <LoadingState label='Loading audit log…' />
+            </div>
+          ) : audit.length === 0 ? (
+            <div style={{padding: 16, fontSize: 13, color: 'var(--signal-text-dim)'}}>
+              No audit entries yet.
+            </div>
+          ) : (
+            audit.map((a, i) => (
+              <div
+                key={a.id}
+                style={{
+                  padding: '11px 16px',
+                  borderBottom: i < audit.length - 1 ? '1px solid var(--signal-hairline)' : 0,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    alignItems: 'baseline',
+                  }}
+                >
+                  <span style={{fontSize: 13, fontWeight: 600, color: 'var(--signal-ink)'}}>
+                    {a.eventType}
+                  </span>
+                  <span style={{fontSize: 11, color: 'var(--signal-text-mute)', flexShrink: 0}}>
+                    {a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}
+                  </span>
+                </div>
+                <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 2}}>
+                  {a.entityType}
+                  {a.entityId ? ` · ${a.entityId.slice(0, 12)}` : ''}
+                  {a.actorEmail ? ` · by ${a.actorEmail}` : ''}
+                </div>
+              </div>
+            ))
+          )}
         </Card>
 
         <SectionHeader>Compliance</SectionHeader>
