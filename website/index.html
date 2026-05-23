@@ -112,8 +112,9 @@
         "Figma URL to design-compliance score",
         "React Native + Expo codegen for Android and iOS",
         "TDD mode (test-first task decomposition)",
-        "Bring Your Own Keys (BYOK) for Anthropic, OpenAI, and Gemini",
+        "Bring Your Own Keys (BYOK) for Anthropic, OpenAI, and Gemini, plus OpenRouter as an Enterprise gateway",
         "Agentic code review with auto-fix (wiring + general passes)",
+        "Per-org model matrix override and per-run provider + model pin (Enterprise)",
         "JIRA and Confluence integration (Enterprise)",
         "Execution View: multi-repo, multi-solution launches (Enterprise)",
         "SSO/SAML, RBAC, audit trail (Enterprise)"
@@ -157,7 +158,7 @@
         "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited runs with zero per-run markup from us, and pay providers directly. The Solo tier ($29/mo) uses managed keys for solo developers — we pay the LLM costs and you get 30 managed runs per month. The Free tier (15 runs per month, no credit card) uses our system credits."
+          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited runs with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Solo tier ($29/mo) uses managed keys for solo developers — we pay the LLM costs and you get 30 managed runs per month. The Free tier (15 runs per month, no credit card) uses our system credits."
         }
       }, {
         "@type": "Question",
@@ -368,7 +369,7 @@
         {
           "@type": "Offer",
           "name": "Enterprise",
-          "description": "Everything in Team plus dedicated infrastructure region, custom MSA, SOC 2 Type II evidence, signed DPA, SAML/OIDC enforced, audit-log retention 5 years, Execution View (multi-repo multi-solution launches), cross-repo handover, JIRA + Confluence + ServiceNow + PagerDuty, dedicated Slack + custom SLA.",
+          "description": "Everything in Team plus dedicated infrastructure region, custom MSA, SOC 2 Type II evidence, signed DPA, SAML/OIDC enforced, audit-log retention 5 years, Execution View (multi-repo multi-solution launches), cross-repo handover, per-org model matrix override with per-run provider + model pin, OpenRouter gateway, JIRA + Confluence + ServiceNow + PagerDuty, dedicated Slack + custom SLA.",
           "price": "0",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -441,7 +442,7 @@
         {
           "@type": "DefinedTerm",
           "name": "BYOK",
-          "description": "Bring Your Own Keys. ExecuteSpec's Team tier ($39/seat/month, from 1 seat) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Google API keys. ExecuteSpec adds zero per-run markup to provider costs; customers pay the LLM provider directly and ExecuteSpec only for the seat or platform fee.",
+          "description": "Bring Your Own Keys. ExecuteSpec's Team tier ($39/seat/month, from 1 seat) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Google API keys; Enterprise can additionally route through OpenRouter as a gateway. ExecuteSpec adds zero per-run markup to provider costs; customers pay the LLM provider directly and ExecuteSpec only for the seat or platform fee.",
           "inDefinedTermSet": "https://executespec.ai/#glossary"
         },
         {
@@ -592,9 +593,20 @@
             background: transparent;
             color: var(--ink);
             white-space: nowrap;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, opacity 0.15s ease;
         }
-        .nav .cta-row .btn-sm.primary { background: var(--ink); color: var(--bg); }
-        .nav .cta-row .btn-sm:hover { opacity: 0.85; }
+        .nav .cta-row .btn-sm.primary {
+            background: var(--ink); color: var(--bg);
+            font-weight: 700;
+            padding: 8px 18px;
+            box-shadow: 0 4px 14px rgba(14, 15, 18, 0.2);
+        }
+        .nav .cta-row .btn-sm.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 7px 20px rgba(14, 15, 18, 0.28), 0 0 0 3px rgba(244, 211, 94, 0.32);
+            opacity: 1;
+        }
+        .nav .cta-row .btn-sm:not(.primary):hover { opacity: 0.7; }
         @media (max-width: 480px) {
             .nav .nav-inner { padding: 12px 14px; gap: 6px; }
             .nav .logo { font-size: 15px; }
@@ -654,13 +666,50 @@
             border-radius: 999px;
             font-size: 15px; font-weight: 600;
             display: inline-flex; align-items: center; gap: 8px;
-            transition: transform 0.15s;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
         .hero .btn:active { transform: scale(0.98); }
-        .hero .btn.primary { background: var(--ink); color: var(--bg); }
-        .hero .btn.primary:hover { background: var(--ink-soft); }
+        .hero .btn.primary {
+            position: relative;
+            overflow: hidden;
+            background: var(--ink); color: var(--bg);
+            padding: 15px 28px;
+            font-weight: 700;
+            box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22), 0 0 0 0 rgba(244, 211, 94, 0.55);
+            animation: cta-pulse 2.8s ease-in-out infinite;
+        }
+        /* Animated sheen sweeping across the hero's primary CTA. */
+        .hero .btn.primary::after {
+            content: "";
+            position: absolute; top: 0; left: -130%;
+            width: 70%; height: 100%;
+            background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+            transform: skewX(-18deg);
+            animation: cta-sheen 4.2s ease-in-out infinite;
+        }
+        .hero .btn.primary:hover {
+            background: var(--ink-soft);
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 14px 32px rgba(14, 15, 18, 0.3), 0 0 0 4px rgba(244, 211, 94, 0.35);
+            animation-play-state: paused;
+        }
         .hero .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--hairline-strong); }
         .hero .btn.secondary:hover { background: var(--card-elev); }
+        /* Gentle attention treatment for primary CTAs — disabled for reduced-motion users. */
+        @keyframes cta-pulse {
+            0%   { box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22), 0 0 0 0 rgba(244, 211, 94, 0.55); }
+            70%  { box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22), 0 0 0 9px rgba(244, 211, 94, 0.0); }
+            100% { box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22), 0 0 0 0 rgba(244, 211, 94, 0.0); }
+        }
+        @keyframes cta-sheen {
+            0%   { left: -130%; }
+            55%  { left: 130%; }
+            100% { left: 130%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .hero .btn.primary { animation: none; }
+            .hero .btn.primary::after { animation: none; display: none; }
+        }
         .hero .pip {
             font-family: 'JetBrains Mono', monospace;
             font-size: 12px; color: var(--text-mute);
@@ -958,9 +1007,19 @@
             text-align: center;
             background: var(--card-elev); color: var(--ink);
             border: 1px solid var(--hairline);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
         }
+        .price-card .btn:hover { background: var(--hairline); }
         .price-card.best .btn {
             background: var(--ink); color: var(--bg); border-color: var(--ink);
+            font-weight: 700;
+            padding: 13px;
+            box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22);
+        }
+        .price-card.best .btn:hover {
+            background: var(--ink-soft);
+            transform: translateY(-2px);
+            box-shadow: 0 14px 30px rgba(14, 15, 18, 0.3), 0 0 0 4px rgba(244, 211, 94, 0.32);
         }
         /* Currency toggle */
         .cur-wrap { text-align: center; margin-bottom: 22px; }
@@ -1096,11 +1155,18 @@
         .cta-block .btn-cta {
             display: inline-flex; align-items: center; gap: 8px;
             background: var(--signal-y); color: var(--mint-text);
-            padding: 14px 28px;
+            padding: 16px 34px;
             border-radius: 999px;
-            font-size: 15px; font-weight: 600;
+            font-size: 15px; font-weight: 700;
+            box-shadow: 0 10px 30px rgba(244, 211, 94, 0.4);
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
-        .cta-block .btn-cta:hover { background: #f1c945; }
+        .cta-block .btn-cta:hover {
+            background: #f1c945;
+            transform: translateY(-2px) scale(1.03);
+            box-shadow: 0 16px 40px rgba(244, 211, 94, 0.55);
+        }
+        .cta-block .btn-cta:active { transform: scale(0.98); }
 
         /* ─────────── Footer ─────────── */
         footer {
@@ -1244,8 +1310,8 @@
 
 <section class='phone-mock-section' id='workspace'>
     <div class='wrap'>
-        <div class='section-eyebrow mint'>Mobile-first workspace</div>
-        <h2 style='margin-bottom: 56px;'>Check in from anywhere.</h2>
+        <div class='section-eyebrow mint'>Your workspace</div>
+        <h2 style='margin-bottom: 56px;'>A real IDE, in the browser.</h2>
 
         <div class='phone-mock-grid'>
             <div class='phone-mock'>
@@ -1267,16 +1333,16 @@
             </div>
 
             <div class='phone-side'>
-                <h3>Mobile is the source of truth.</h3>
-                <p>Runs take 5–20 minutes. Sit at your desktop watching one if you want — but the product is built so you can walk away.</p>
+                <h3>A workspace, not a dashboard.</h3>
+                <p>A VS Code-style IDE: activity bar, Explorer, editor, and a real code &amp; diff viewer — so you read the change the way you'd read a teammate's PR. Runs take 5–20 minutes; watch one live or walk away.</p>
                 <ul class='feature-list'>
                     <li>
                         <span class='ic'>✓</span>
-                        <div><b>Push notifications</b><span>Plan ready, run shipped, cost cap warnings — to your lock screen.</span></div>
+                        <div><b>Explorer + code &amp; diff viewer</b><span>Browse the file tree, open any file, read every diff inline — no leaving the page.</span></div>
                     </li>
                     <li>
                         <span class='ic'>✓</span>
-                        <div><b>Approve from the bottom-sheet</b><span>One tap to approve a plan from the phone. Big mint button; no nested menus.</span></div>
+                        <div><b>⌘K command palette</b><span>Jump to a run, a project, or an action without touching the mouse.</span></div>
                     </li>
                     <li>
                         <span class='ic'>✓</span>
@@ -1284,7 +1350,7 @@
                     </li>
                     <li>
                         <span class='ic'>✓</span>
-                        <div><b>Theme follows your system</b><span>Light by day, dark by 11pm. Persists per device.</span></div>
+                        <div><b>Light &amp; dark, follows your system</b><span>Plus push notifications — plan ready, run shipped, cost-cap warnings — when you step away.</span></div>
                     </li>
                 </ul>
             </div>
@@ -1414,12 +1480,12 @@
                 <div class='price'>Custom</div>
                 <div class='sub'>SSO · SLA · CSM</div>
                 <ul>
-                    <li>Unlimited credits</li>
-                    <li>No cost cap</li>
+                    <li>Unlimited credits · no cost cap</li>
+                    <li>BYOK + OpenRouter gateway</li>
+                    <li>Model matrix override + per-run pin</li>
                     <li>Standards · Contracts · ADRs</li>
                     <li>SSO + SCIM</li>
-                    <li>99.9% SLA</li>
-                    <li>Dedicated CSM</li>
+                    <li>99.9% SLA · dedicated CSM</li>
                 </ul>
                 <a class='btn' href='mailto:sales@executespec.ai'>Talk to sales</a>
             </div>
@@ -1491,7 +1557,7 @@
             <details class='faq-item'>
                 <summary>What does "Bring Your Own Keys (BYOK)" mean?</summary>
                 <div class='answer'>
-                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys. Runs against your keys bypass our cost cap entirely (we still track cache-hit rates for optimization). Your keys are KMS-wrapped at rest and rotated on a single click.
+                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Runs against your keys bypass our cost cap entirely (we still track cache-hit rates for optimization). Your keys are KMS-wrapped at rest and rotated on a single click.
                 </div>
             </details>
             <details class='faq-item'>
@@ -1503,7 +1569,7 @@
             <details class='faq-item'>
                 <summary>What's the verified score?</summary>
                 <div class='answer'>
-                    A deterministic 0–100 score attached to every PR. <span class='mono' style='font-size: 13px;'>verifiedScore = baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty</span>. Six dimensions: code quality, test coverage, architecture, security, performance, design compliance. The verdict pill (Ready / Needs review / Failed / Blocked) is derived from the score.
+                    A deterministic 0–100 score attached to every PR, computed from real signals — not the model grading itself. It's an additive weighted score across five slots: <span class='mono' style='font-size: 13px;'>code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5)</span>, averaged over whichever slots actually fired. Tests come from running your own test suite in the workspace; build and reviewer from the real passes. The verdict pill (Ready / Needs review / Failed / Blocked) is derived from the score.
                 </div>
             </details>
             <details class='faq-item'>
