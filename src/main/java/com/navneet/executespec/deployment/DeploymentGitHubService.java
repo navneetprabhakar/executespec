@@ -37,10 +37,10 @@ public class DeploymentGitHubService {
   }
 
   /** Mode NEW: Create new GitHub repo + push workspace. */
-  public RunRepo createAndPush(String runId, String repoName, Path workspacePath)
+  public RunRepo createAndPush(String runId, String repoName, Path workspacePath, String pat)
       throws IOException {
-    String repoUrl = createRepo(repoName);
-    commitAndPush(workspacePath, repoUrl);
+    String repoUrl = createRepo(repoName, pat);
+    commitAndPush(workspacePath, repoUrl, pat);
 
     RunRepo entity =
         RunRepo.create(
@@ -54,9 +54,9 @@ public class DeploymentGitHubService {
   }
 
   /** Mode EXISTING: Push to existing GitHub repo. */
-  public RunRepo pushToExisting(String runId, String repoUrl, Path workspacePath)
+  public RunRepo pushToExisting(String runId, String repoUrl, Path workspacePath, String pat)
       throws IOException {
-    commitAndPush(workspacePath, repoUrl);
+    commitAndPush(workspacePath, repoUrl, pat);
 
     String[] parts = parseOwnerAndName(repoUrl);
     RunRepo entity = RunRepo.create(runId, repoUrl, parts[0], parts[1], RunRepo.RepoMode.EXISTING);
@@ -70,8 +70,11 @@ public class DeploymentGitHubService {
     return runRepoRepo.save(entity);
   }
 
-  private String createRepo(String name) throws IOException {
-    String pat = agentProps.getGithub().getPat();
+  private String createRepo(String name, String pat) throws IOException {
+    if (pat == null || pat.isBlank()) {
+      throw new IOException(
+          "GitHub PAT required to create a repo — connect your PAT in Integrations.");
+    }
     String body =
         objectMapper.writeValueAsString(
             java.util.Map.of("name", name, "private", false, "auto_init", false));
@@ -112,8 +115,10 @@ public class DeploymentGitHubService {
     }
   }
 
-  private void commitAndPush(Path workspacePath, String repoUrl) throws IOException {
-    String pat = agentProps.getGithub().getPat();
+  private void commitAndPush(Path workspacePath, String repoUrl, String pat) throws IOException {
+    if (pat == null || pat.isBlank()) {
+      throw new IOException("GitHub PAT required to push — connect your PAT in Integrations.");
+    }
     try {
       Git git;
       if (workspacePath.resolve(".git").toFile().exists()) {

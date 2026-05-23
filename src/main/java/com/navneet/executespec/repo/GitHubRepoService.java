@@ -30,9 +30,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class GitHubRepoService {
 
-  @Value("${agent.github.pat:#{null}}")
-  private String pat;
-
   @Value("${agent.github.default-owner:owner}")
   private String defaultOwner;
 
@@ -83,7 +80,7 @@ public class GitHubRepoService {
       String visibility,
       String overridePat,
       String overrideOwner) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     String effectiveOwner = resolve(overrideOwner, defaultOwner);
 
     if (effectivePat == null || effectivePat.isBlank()) {
@@ -150,7 +147,7 @@ public class GitHubRepoService {
    * @return true on 200 or 422 (already closed); false otherwise
    */
   public boolean closePullRequest(String repoFullName, int prNumber, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return false;
     if (repoFullName == null || !repoFullName.contains("/")) return false;
 
@@ -208,7 +205,7 @@ public class GitHubRepoService {
    * @return true on success (or already-deleted); false on real failure (network / 403 / 401)
    */
   public boolean deleteBranch(String repoFullName, String branch, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return false;
     if (repoFullName == null || !repoFullName.contains("/")) return false;
     if (branch == null || branch.isBlank()) return false;
@@ -283,7 +280,7 @@ public class GitHubRepoService {
    */
   public List<ChangedFile> compareCommits(
       String repoFullName, String baseSha, String headSha, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (repoFullName == null || baseSha == null || headSha == null) return List.of();
     if (baseSha.equals(headSha)) return List.of();
     try {
@@ -343,7 +340,7 @@ public class GitHubRepoService {
       log.debug("[GitHubRepoService] Webhook auto-provision disabled — callback/secret not set");
       return false;
     }
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return false;
     if (repoFullName == null || !repoFullName.contains("/")) return false;
 
@@ -394,7 +391,7 @@ public class GitHubRepoService {
    * @param overridePat per-user PAT (null falls back to system PAT)
    */
   public void updateRepoDescription(String repoUrl, String description, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return;
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
@@ -445,7 +442,7 @@ public class GitHubRepoService {
 
   /** Variant that respects a non-default branch (avoids the hardcoded {@code main}). */
   public List<String> listRepoFiles(String repoUrl, String branch, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return List.of();
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
@@ -501,7 +498,7 @@ public class GitHubRepoService {
 
   public String readRepoFile(
       String repoUrl, String relativePath, String branch, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return "// No GitHub PAT configured";
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
@@ -550,7 +547,7 @@ public class GitHubRepoService {
    * {@code git init} if no PAT is available.
    */
   public void cloneRepo(String repoUrl, String workspacePath, String overridePat) throws Exception {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) {
       log.info(
           "[GitHubRepoService] No PAT configured — initializing empty git repo at {}",
@@ -596,7 +593,7 @@ public class GitHubRepoService {
    * @return default branch name, or "main" on failure
    */
   public String getDefaultBranch(String repoUrl, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return "main";
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
@@ -643,7 +640,7 @@ public class GitHubRepoService {
    * #getDefaultBranch}; this is a parallel reader on the same resource.
    */
   public long getRepoSizeKb(String repoUrl, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return -1L;
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
@@ -679,7 +676,7 @@ public class GitHubRepoService {
    * without throwing.
    */
   public String getBranchHeadSha(String repoUrl, String branch, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return null;
     String[] ownerRepo = extractOwnerRepo(repoUrl);
     if (ownerRepo == null) return null;
@@ -731,7 +728,7 @@ public class GitHubRepoService {
    */
   public String createPullRequest(
       String repoUrl, String head, String base, String title, String prBody, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) {
       log.warn("[GitHubRepoService] No PAT — cannot create PR");
       return null;
@@ -815,7 +812,7 @@ public class GitHubRepoService {
    */
   public void updatePullRequestBody(
       String repoUrl, int prNumber, String newBody, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return;
     String[] ownerRepo = extractOwnerRepo(repoUrl);
     if (ownerRepo == null) return;
@@ -865,7 +862,7 @@ public class GitHubRepoService {
   public void requestReviewers(
       String repoUrl, int prNumber, java.util.List<String> reviewers, String overridePat) {
     if (reviewers == null || reviewers.isEmpty()) return;
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return;
     String[] ownerRepo = extractOwnerRepo(repoUrl);
     if (ownerRepo == null) return;
@@ -921,7 +918,7 @@ public class GitHubRepoService {
    * @return formatted comments, or empty string on failure (non-fatal)
    */
   public String fetchPrReviewComments(String repoFullName, int prNumber, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return "";
     if (repoFullName == null || repoFullName.isBlank()) return "";
 
@@ -1168,7 +1165,7 @@ public class GitHubRepoService {
    */
   public PullRequestSnapshot getPullRequestSnapshot(
       String repoFullName, int prNumber, String overridePat, int diffMaxChars) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return null;
     if (repoFullName == null || repoFullName.isBlank()) return null;
     try {
@@ -1266,7 +1263,7 @@ public class GitHubRepoService {
   public record CheckRunRollup(String status, int failingCount) {}
 
   public CheckRunRollup getCheckRunRollup(String repoFullName, String sha, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return new CheckRunRollup("UNKNOWN", 0);
     if (repoFullName == null || repoFullName.isBlank() || sha == null || sha.isBlank()) {
       return new CheckRunRollup("UNKNOWN", 0);
@@ -1347,7 +1344,7 @@ public class GitHubRepoService {
    * see many orgs but the user only wants to register repos from one of them.
    */
   public List<RemoteRepo> listOwnerRepos(String ownerFilter, String overridePat) {
-    String effectivePat = resolve(overridePat, pat);
+    String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) return List.of();
 
     com.fasterxml.jackson.databind.ObjectMapper mapper =

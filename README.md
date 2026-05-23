@@ -183,7 +183,6 @@ Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below 
 | `ANTHROPIC_API_KEY`    | Anthropic provider (Claude)          |
 | `OPENAI_API_KEY`       | OpenAI provider (GPT)                |
 | `GOOGLE_API_KEY`       | Google GenAI provider (Gemini)       |
-| `GITHUB_PAT`           | GitHub PAT for repo + PR operations  |
 | `GITHUB_OWNER`         | Default GitHub owner / org           |
 | `RAZORPAY_KEY_ID`      | Razorpay test or live key            |
 | `RAZORPAY_KEY_SECRET`  | Razorpay key secret                  |
