@@ -92,14 +92,6 @@ public class DeploymentService {
     } catch (Exception e) {
       log.warn("✗ gcloud not available — deploys will fail");
     }
-
-    // GitHub PAT
-    String pat = agentProps.getGithub().getPat();
-    if (pat != null && !pat.isBlank() && !pat.equals("${GITHUB_PAT}")) {
-      log.info("✓ GitHub PAT configured");
-    } else {
-      log.warn("✗ GITHUB_PAT not set — GitHub repo creation will fail (NONE mode still works)");
-    }
   }
 
   public boolean isEnabled() {
@@ -375,9 +367,10 @@ public class DeploymentService {
             (repoName != null && !repoName.isBlank())
                 ? repoName
                 : "demo-" + run.getRunId().substring(0, 8);
-        yield gitHubService.createAndPush(run.getRunId(), name, workspacePath);
+        yield gitHubService.createAndPush(run.getRunId(), name, workspacePath, run.getGithubPat());
       }
-      case EXISTING -> gitHubService.pushToExisting(run.getRunId(), repoUrl, workspacePath);
+      case EXISTING ->
+          gitHubService.pushToExisting(run.getRunId(), repoUrl, workspacePath, run.getGithubPat());
       case NONE -> gitHubService.skipGitHub(run.getRunId());
     };
   }

@@ -22,7 +22,6 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.repo.GitHubRepoService;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
@@ -82,9 +81,6 @@ public class ExecutespecFolderWriter {
   private final HttpClient http;
   private final ObjectMapper json;
   private final GitHubRepoService gh;
-
-  @Value("${agent.github.pat:#{null}}")
-  private String systemPat;
 
   @Autowired
   public ExecutespecFolderWriter(ObjectMapper json, GitHubRepoService gh) {
@@ -473,9 +469,7 @@ public class ExecutespecFolderWriter {
   }
 
   private String pat(String actorPat) {
-    if (actorPat != null && !actorPat.isBlank()) return actorPat;
-    if (systemPat != null && !systemPat.isBlank()) return systemPat;
-    return null;
+    return (actorPat != null && !actorPat.isBlank()) ? actorPat : null;
   }
 
   static String synthesiseBranchName(String prTitle) {
