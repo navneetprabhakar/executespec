@@ -93,6 +93,9 @@ export function IdeProjectChat() {
   // Backend gates project chat behind TEAM+ (TierConfig.isExecutionViewEnabled).
   // FREE / PRO hit a 403 on chat/info → show an upgrade card instead of a broken shell.
   const [gated, setGated] = useState(false);
+  // Memory digest is reference context, not needed every message — collapsed by
+  // default so it doesn't dominate the chat pane; click the header to expand.
+  const [memOpen, setMemOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -250,22 +253,63 @@ export function IdeProjectChat() {
       </div>
 
       {memDigest && (
-        <div className='ide-card' style={{marginBottom: 8, borderColor: 'var(--ide-yellow)'}}>
-          <div
+        <div
+          className='ide-card'
+          style={{
+            marginBottom: 8,
+            borderColor: 'var(--ide-yellow)',
+            padding: memOpen ? undefined : '8px 12px',
+          }}
+        >
+          <button
+            type='button'
+            onClick={() => setMemOpen((v) => !v)}
+            aria-expanded={memOpen}
+            title={memOpen ? 'Hide memory digest' : 'Show memory digest'}
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              textAlign: 'left',
               fontSize: 11,
               fontWeight: 700,
               color: 'var(--ide-yellow)',
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
-              marginBottom: 6,
             }}
           >
+            <span
+              style={{
+                display: 'inline-block',
+                transition: 'transform 0.15s',
+                transform: memOpen ? 'rotate(90deg)' : 'none',
+              }}
+            >
+              ▸
+            </span>
             Memory digest · {memRuns} runs
-          </div>
-          <div style={{fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-            {memDigest.slice(0, 1200)}
-          </div>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontWeight: 400,
+                letterSpacing: 0,
+                textTransform: 'none',
+                color: 'var(--ide-fg-muted)',
+              }}
+            >
+              {memOpen ? 'hide' : 'show'}
+            </span>
+          </button>
+          {memOpen && (
+            <div style={{fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 8}}>
+              {memDigest.slice(0, 1200)}
+            </div>
+          )}
         </div>
       )}
 
