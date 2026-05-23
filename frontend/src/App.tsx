@@ -1,11 +1,11 @@
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// 2026-05-22 — the VS Code-style IDE workspace is the ONLY chrome (the Signal
-// chrome was retired as a user-facing option, A/B toggle removed). The IDE
-// renders its OWN core surfaces; a handful of non-core routes (billing, plans,
-// org-settings, legal, auth, etc.) transitionally reuse the standalone Signal
-// pages until they're rebuilt IDE-native.
+// The VS Code-style IDE workspace is the ONLY chrome. Every protected route is
+// IDE-native (2026-05-23 Signal-removal waves finished the port). The only
+// surviving Signal pages are the standalone PUBLIC pages (auth / marketing /
+// legal / shared) — which have no IDE chrome by design — plus AdminPage for the
+// /admin/* deep links.
 import IdeWorkspace from '@/ide/IdeWorkspace';
 import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
@@ -39,47 +39,20 @@ import {IdeBilling, IdePlans} from '@/ide/IdeBilling';
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
 import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
 
-// Run loop — each in its own file with default export
-import HomePage from '@/signal/pages/HomePage';
-import AllRunsPage from '@/signal/pages/AllRunsPage';
-import ComposePage from '@/signal/pages/ComposePage';
-import PlanPage from '@/signal/pages/PlanPage';
-import LivePage from '@/signal/pages/LivePage';
-import ResultPage from '@/signal/pages/ResultPage';
-
-// Projects
-import ProjectsPage from '@/signal/pages/ProjectsPage';
-import ProjectPulsePage from '@/signal/pages/project/ProjectPulsePage';
-import ProjectReposPage from '@/signal/pages/project/ProjectReposPage';
-import ProjectRunsPage from '@/signal/pages/project/ProjectRunsPage';
-import ProjectCodePage from '@/signal/pages/project/ProjectCodePage';
-import ProjectChatPage from '@/signal/pages/project/ProjectChatPage';
-import ProjectActivityPage from '@/signal/pages/project/ProjectActivityPage';
-import ProjectMembersPage from '@/signal/pages/project/ProjectMembersPage';
-import ProjectArchitecturePage from '@/signal/pages/project/ProjectArchitecturePage';
-import ProjectSettingsPage from '@/signal/pages/project/ProjectSettingsPage';
-import ProjectComposePage from '@/signal/pages/project/ProjectComposePage';
-
-// Account + billing
-import AccountPage from '@/signal/pages/account/AccountPage';
-import {TopupPage, IntegrationsPage} from '@/signal/pages/account/MiscAccountPages';
-
-// Cross-cutting + admin
+// Admin sub-routes + public share pages are the only Signal pages that survive
+// inside the router (no IDE-native surface by design); AdminPage also backs the
+// /admin/* deep links.
 import {AdminPage, SharedPage} from '@/signal/pages/MiscPages';
 
-// Extras (Library, Migrations, etc.)
+// Standalone public pages (auth / marketing / legal) — no IDE chrome.
 import {
   TrustPage,
   PublicPricingPage,
   ForgotPasswordPage,
   ResetPasswordPage,
   AcceptInvitePage,
-  DeploymentsPage,
 } from '@/signal/pages/ExtraPages';
 import {TermsPage, PrivacyPage, DpaPage} from '@/signal/pages/LegalPages';
-
-// avoid an unused-import error for TopupPage (route uses a redirect)
-void TopupPage;
 
 /**
  * Legacy URL redirects so old bookmarks + marketing links keep working.
@@ -120,79 +93,50 @@ function LegacyRedirect() {
 }
 
 /**
- * Protected route children. Core surfaces (home / compose / live / result) use
- * the real IDE pages when `ide` is true; everything else uses the Signal pages
- * (transitional — they render inside whichever shell is active until rebuilt).
+ * Protected route children — all IDE-native (the Signal-page fallbacks were
+ * removed in the 2026-05-23 cleanup). The only Signal page reached from here is
+ * AdminPage for the /admin/* deep links; bare /live + /result (no run id)
+ * redirect to /runs since there's nothing to render without an id.
  */
-function protectedChildren(ide: boolean) {
+function protectedChildren() {
   return (
     <>
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
-      <Route path='/home' element={ide ? <IdeWelcome /> : <HomePage />} />
-      <Route path='/runs' element={ide ? <IdeRuns /> : <AllRunsPage />} />
-      <Route path='/compose' element={ide ? <IdeCompose /> : <ComposePage />} />
-      <Route path='/plan' element={ide ? <IdePlan /> : <PlanPage />} />
-      <Route path='/plan/:runId' element={ide ? <IdePlan /> : <PlanPage />} />
-      <Route path='/live' element={<LivePage />} />
-      <Route path='/live/:runId' element={ide ? <IdeLive /> : <LivePage />} />
-      <Route path='/result' element={<ResultPage />} />
-      <Route path='/result/:runId' element={ide ? <IdeRunResult /> : <ResultPage />} />
-      <Route path='/runs/:runShort' element={ide ? <IdeRunResult /> : <ResultPage />} />
+      <Route path='/home' element={<IdeWelcome />} />
+      <Route path='/runs' element={<IdeRuns />} />
+      <Route path='/compose' element={<IdeCompose />} />
+      <Route path='/plan' element={<IdePlan />} />
+      <Route path='/plan/:runId' element={<IdePlan />} />
+      <Route path='/live' element={<Navigate to='/runs' replace />} />
+      <Route path='/live/:runId' element={<IdeLive />} />
+      <Route path='/result' element={<Navigate to='/runs' replace />} />
+      <Route path='/result/:runId' element={<IdeRunResult />} />
+      <Route path='/runs/:runShort' element={<IdeRunResult />} />
 
       {/* Projects */}
-      <Route path='/projects' element={ide ? <IdeProjects /> : <ProjectsPage />} />
+      <Route path='/projects' element={<IdeProjects />} />
       <Route path='/projects/empty' element={<IdeEmptyProject />} />
-      <Route path='/projects/:projectId' element={ide ? <IdeProject /> : <ProjectComposePage />} />
-      <Route
-        path='/projects/:projectId/pulse'
-        element={ide ? <IdeProjectPulse /> : <ProjectPulsePage />}
-      />
-      <Route
-        path='/projects/:projectId/repos'
-        element={ide ? <IdeProjectRepos /> : <ProjectReposPage />}
-      />
-      <Route
-        path='/projects/:projectId/runs'
-        element={ide ? <IdeProjectRuns /> : <ProjectRunsPage />}
-      />
-      <Route
-        path='/projects/:projectId/runs/:runShort'
-        element={ide ? <IdeRunResult /> : <ResultPage />}
-      />
-      <Route
-        path='/projects/:projectId/code'
-        element={ide ? <IdeProjectCode /> : <ProjectCodePage />}
-      />
-      <Route
-        path='/projects/:projectId/chat'
-        element={ide ? <IdeProjectChat /> : <ProjectChatPage />}
-      />
-      <Route
-        path='/projects/:projectId/activity'
-        element={ide ? <IdeProjectActivity /> : <ProjectActivityPage />}
-      />
-      <Route
-        path='/projects/:projectId/members'
-        element={ide ? <IdeProjectMembers /> : <ProjectMembersPage />}
-      />
-      <Route
-        path='/projects/:projectId/architecture'
-        element={ide ? <IdeProjectArchitecture /> : <ProjectArchitecturePage />}
-      />
-      <Route
-        path='/projects/:projectId/settings'
-        element={ide ? <IdeProjectSettings /> : <ProjectSettingsPage />}
-      />
+      <Route path='/projects/:projectId' element={<IdeProject />} />
+      <Route path='/projects/:projectId/pulse' element={<IdeProjectPulse />} />
+      <Route path='/projects/:projectId/repos' element={<IdeProjectRepos />} />
+      <Route path='/projects/:projectId/runs' element={<IdeProjectRuns />} />
+      <Route path='/projects/:projectId/runs/:runShort' element={<IdeRunResult />} />
+      <Route path='/projects/:projectId/code' element={<IdeProjectCode />} />
+      <Route path='/projects/:projectId/chat' element={<IdeProjectChat />} />
+      <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
+      <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />
+      <Route path='/projects/:projectId/architecture' element={<IdeProjectArchitecture />} />
+      <Route path='/projects/:projectId/settings' element={<IdeProjectSettings />} />
 
       {/* Account + billing */}
-      <Route path='/account' element={ide ? <IdeAccount /> : <AccountPage />} />
-      <Route path='/settings' element={ide ? <IdeAccount /> : <AccountPage />} />
-      <Route path='/settings/manage' element={ide ? <IdeAccount /> : <AccountPage />} />
+      <Route path='/account' element={<IdeAccount />} />
+      <Route path='/settings' element={<IdeAccount />} />
+      <Route path='/settings/manage' element={<IdeAccount />} />
       <Route path='/billing' element={<IdeBilling />} />
       <Route path='/plans' element={<IdePlans />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
-      <Route path='/integrations' element={ide ? <IdeIntegrations /> : <IntegrationsPage />} />
+      <Route path='/integrations' element={<IdeIntegrations />} />
       <Route path='/api-keys' element={<IdeApiKeys />} />
       <Route path='/org-members' element={<IdeOrgMembers />} />
       <Route path='/org/settings' element={<IdeOrgSettings />} />
@@ -205,24 +149,19 @@ function protectedChildren(ide: boolean) {
       <Route path='/migrations/:slug' element={<IdeMigrationDetail />} />
       <Route path='/templates' element={<IdeSpecTemplates />} />
       <Route path='/audit' element={<IdeAudit />} />
-      <Route path='/deployments' element={ide ? <IdeDeployments /> : <DeploymentsPage />} />
+      <Route path='/deployments' element={<IdeDeployments />} />
 
       {/* System */}
       <Route path='/notifications' element={<IdeNotifications />} />
       <Route path='/search' element={<IdeSearch />} />
       <Route path='/more' element={<IdeMoreMenu />} />
-      <Route path='/admin' element={ide ? <IdeAdmin /> : <AdminPage />} />
+      <Route path='/admin' element={<IdeAdmin />} />
       <Route path='/admin/*' element={<AdminPage />} />
     </>
   );
 }
 
 export default function App() {
-  // 2026-05-22 — Signal chrome retired; the IDE workspace is the only chrome.
-  // `ide` stays a constant so the per-route helpers below keep their shape
-  // until the remaining Signal-page fallbacks are ported IDE-native.
-  const ide = true;
-
   return (
     <Routes>
       {/* ───── Public auth ───── */}
@@ -249,7 +188,7 @@ export default function App() {
 
       {/* ───── Protected app (IDE workspace — the only chrome) ───── */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<IdeWorkspace />}>{protectedChildren(ide)}</Route>
+        <Route element={<IdeWorkspace />}>{protectedChildren()}</Route>
       </Route>
 
       {/* Legacy URL catchers — collapse to canonical equivalents */}
