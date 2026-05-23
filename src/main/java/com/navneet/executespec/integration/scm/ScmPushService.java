@@ -259,7 +259,10 @@ public class ScmPushService {
     if (user != null && user.getGithubPat() != null && !user.getGithubPat().isBlank()) {
       return user.getGithubPat();
     }
-    return props.getGithub() != null ? props.getGithub().getPat() : null;
+    // No system-PAT fallback — every GitHub push uses the user's own PAT (run- or user-stamped).
+    // null = no credential: the caller skips the push + opens no PR (logged), never a platform
+    // token.
+    return null;
   }
 
   /**

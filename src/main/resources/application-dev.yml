@@ -90,7 +90,6 @@ server:
 # ── Agent & GitHub ────────────────────────────────────────────────────────────
 agent:
   github:
-    pat: ${GITHUB_PAT:}
     default-owner: ${GITHUB_OWNER:}
   deployment:
     gcp-project: ${GCP_PROJECT:executespecv1}
