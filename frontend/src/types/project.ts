@@ -118,7 +118,9 @@ export interface ProjectDashboardDTO {
 export interface ArchitectureDoc {
   id: string;
   version: number;
-  content: string;
+  // null in the /versions LIST payload (content is omitted there to keep the list flat as docs
+  // grow); always present on the latest/current doc endpoint.
+  content: string | null;
   userAnnotations: string | null;
   generatedAt: string;
 }

@@ -879,6 +879,117 @@ export function IdeProjectCode() {
 // ───────────────────────── Architecture (Current · Versions · Invariants · ADRs · Contracts) ─────────────────────────
 type ArchSub = 'current' | 'versions' | 'invariants' | 'adrs' | 'contracts';
 
+// Split a markdown doc into a preamble (text before the first `##`) + top-level (`##`) sections.
+// Heading text is lifted out so the section header can be a clickable disclosure; the body keeps
+// everything else (incl. `###` subsections, code, tables) for Markdown.
+function parseArchDoc(md: string): {preamble: string; sections: {heading: string; body: string}[]} {
+  const sections: {heading: string; body: string[]}[] = [];
+  const preamble: string[] = [];
+  for (const line of md.split('\n')) {
+    const m = /^##\s+(.*)$/.exec(line);
+    if (m) sections.push({heading: m[1].trim(), body: []});
+    else if (sections.length > 0) sections[sections.length - 1].body.push(line);
+    else preamble.push(line);
+  }
+  return {
+    preamble: preamble.join('\n'),
+    sections: sections.map((s) => ({heading: s.heading, body: s.body.join('\n')})),
+  };
+}
+
+// Architecture-doc viewer — lazy + section-collapsible so the browser is never handed one giant
+// markdown blob. Small docs (<40k chars, ≤10 sections) render fully expanded (no behaviour change);
+// larger docs collapse all but the first section and mount each section's Markdown only on expand.
+// Keyed by version at the call site, so it re-inits cleanly when a new doc loads.
+function ArchDocView({md}: {md: string}) {
+  const {preamble, sections} = useMemo(() => parseArchDoc(md), [md]);
+  const large = md.length > 40_000 || sections.length > 10;
+  const [open, setOpen] = useState<Set<number>>(
+    () => new Set(large ? [0] : sections.map((_, i) => i)),
+  );
+  const toggle = (i: number) =>
+    setOpen((s) => {
+      const n = new Set(s);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
+      return n;
+    });
+  const allOpen = sections.length > 0 && open.size === sections.length;
+
+  // No top-level headings — fall back to a single Markdown render.
+  if (sections.length === 0) {
+    return (
+      <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6}}>
+        <Markdown>{md}</Markdown>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {preamble.trim() && (
+        <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6, marginBottom: 8}}>
+          <Markdown>{preamble}</Markdown>
+        </div>
+      )}
+      {sections.length > 1 && (
+        <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 6}}>
+          <button
+            type='button'
+            className='ide-btn ghost'
+            style={{padding: '3px 10px', fontSize: 12}}
+            onClick={() => setOpen(allOpen ? new Set() : new Set(sections.map((_, i) => i)))}
+          >
+            {allOpen ? 'Collapse all' : 'Expand all'}
+          </button>
+        </div>
+      )}
+      {sections.map((s, i) => {
+        const isOpen = open.has(i);
+        return (
+          <div
+            key={i}
+            className='ide-card'
+            style={{padding: 0, marginBottom: 8, overflow: 'hidden'}}
+          >
+            <button
+              type='button'
+              onClick={() => toggle(i)}
+              aria-expanded={isOpen}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '10px 14px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                color: 'var(--ide-fg-bright)',
+                fontWeight: 600,
+                fontSize: 13.5,
+              }}
+            >
+              <span className='ide-tree-chev' style={{color: 'var(--ide-fg-muted)'}}>
+                {isOpen ? '▾' : '▸'}
+              </span>
+              <span>{s.heading}</span>
+            </button>
+            {isOpen && (
+              <div
+                className='signal-md'
+                style={{padding: '0 14px 12px', fontSize: 13.5, lineHeight: 1.6}}
+              >
+                <Markdown>{s.body}</Markdown>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function IdeProjectArchitecture() {
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<ArchSub>('current');
@@ -1116,11 +1227,8 @@ export function IdeProjectArchitecture() {
                 </IdeBadge>
               </div>
               {docMd ? (
-                <div
-                  className='signal-md'
-                  style={{fontSize: 13.5, lineHeight: 1.6, maxHeight: '70vh', overflow: 'auto'}}
-                >
-                  <Markdown>{docMd}</Markdown>
+                <div style={{maxHeight: '70vh', overflow: 'auto'}}>
+                  <ArchDocView key={`v${arch?.version ?? 0}`} md={docMd} />
                 </div>
               ) : (
                 <div className='ide-empty' style={{padding: '12px 0'}}>
