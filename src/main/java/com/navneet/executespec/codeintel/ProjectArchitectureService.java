@@ -261,10 +261,12 @@ public class ProjectArchitectureService {
     // flow always returns the new version even if the legacy-row delete trips on something.
     versionRetention.pruneProjectArch(projectId);
     log.info(
-        "[{}] 3-step arch generation complete: {} repos, combined v{} ({} in / {} out tokens)",
+        "[{}] 3-step arch generation complete: {} repos, combined v{} ({} chars, {} in / {} out"
+            + " tokens)",
         projectId,
         codeMaps.size(),
         nextVersion,
+        combined.markdown().length(),
         combined.inputTokens(),
         combined.outputTokens());
 
@@ -315,10 +317,11 @@ public class ProjectArchitectureService {
     codeMapRepo.save(cm);
     versionRetention.pruneCodeMap(projectId, repo.getId());
     log.info(
-        "[{}] codemap for {} regenerated as v{} @ sha={}",
+        "[{}] codemap for {} regenerated as v{} ({} chars) @ sha={}",
         projectId,
         repo.getGithubRepoFullName(),
         nextVersion,
+        result.markdown().length(),
         shortSha(cm.getGeneratedFromSha()));
     return cm;
   }
