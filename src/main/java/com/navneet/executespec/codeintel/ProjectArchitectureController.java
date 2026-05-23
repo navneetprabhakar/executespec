@@ -37,6 +37,15 @@ public class ProjectArchitectureController {
       return new ArchDocDto(
           d.getId(), d.getVersion(), d.getContent(), d.getUserAnnotations(), d.getGeneratedAt());
     }
+
+    /**
+     * Lean variant for the versions LIST — omits the (potentially large) content + annotations
+     * body. The Versions tab only renders version number + timestamp; full content is fetched on
+     * demand via the latest/diff endpoints. Keeps the list payload flat as docs grow.
+     */
+    static ArchDocDto fromMeta(ProjectArchitectureDoc d) {
+      return new ArchDocDto(d.getId(), d.getVersion(), null, null, d.getGeneratedAt());
+    }
   }
 
   public record CodeMapDto(String content, Integer version, Instant generatedAt) {
@@ -111,7 +120,7 @@ public class ProjectArchitectureController {
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    List<ArchDocDto> out = service.versions(projectId).stream().map(ArchDocDto::from).toList();
+    List<ArchDocDto> out = service.versions(projectId).stream().map(ArchDocDto::fromMeta).toList();
     return ResponseEntity.ok(out);
   }
 

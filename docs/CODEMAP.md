@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V207**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -509,6 +509,7 @@ Head: **V207**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V205 | Add `org.model_overrides_json` — per-org model-matrix overrides (F3, Enterprise) |
 | V206 | INR pricing kept ~10% below USD as USD strengthened — TEAM monthly INR `per_seat_inr` ₹3,199 → ₹3,399/seat; Pro/Solo INR unchanged |
 | V207 | Deactivate stale duplicate active Pro-monthly plans (₹1,699 INR + $20 USD) left from the pre-V176 Solo launch |
+| V208 | Widen `github_pat` VARCHAR(255) → TEXT (`app_user` + `pipeline_run`) — drop the brittle length cap ahead of longer GitHub tokens (`ghs_…` ~520 chars); metadata-only ALTER (RL-2026-05-024) |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
