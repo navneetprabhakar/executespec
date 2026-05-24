@@ -331,6 +331,25 @@ public class GitHubRepoService {
     }
   }
 
+  /**
+   * True if EVERY file changed between {@code baseSha} and {@code headSha} sits under {@code
+   * prefix} (e.g. {@code ".executespec/"}). Used to break a regenerate loop: ExecuteSpec publishes
+   * codemaps to the customer repo under {@code .executespec/}, which moves HEAD — without this the
+   * next sync sees HEAD ≠ the codemap's {@code generatedFromSha} and regenerates (→ publish → HEAD
+   * moves → …). Fail-safe: returns false on equal SHAs (caller handles equality), an empty/failed
+   * compare, or any file outside {@code prefix} — i.e. when in doubt, treat it as a real change.
+   */
+  public boolean diffConfinedTo(
+      String repoFullName, String baseSha, String headSha, String prefix, String overridePat) {
+    if (baseSha == null || headSha == null || baseSha.equals(headSha)) return false;
+    List<ChangedFile> files = compareCommits(repoFullName, baseSha, headSha, overridePat);
+    if (files.isEmpty()) return false;
+    for (ChangedFile f : files) {
+      if (f.filename() == null || !f.filename().startsWith(prefix)) return false;
+    }
+    return true;
+  }
+
   /** GitHub compare API file entry — status is one of added/modified/removed/renamed. */
   public record ChangedFile(String filename, String status, int additions, int deletions) {}
 
