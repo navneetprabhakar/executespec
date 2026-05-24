@@ -1,0 +1,442 @@
+package com.navneet.executespec.benchmark;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.harness.event.PipelineEvent;
+import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.state.RunMode;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.swebench.SwebenchContainerStore;
+import com.navneet.executespec.swebench.SwebenchInstanceLoader;
+import com.navneet.executespec.swebench.SwebenchProperties;
+
+import org.springframework.context.event.EventListener;
+import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Clean-slate SWE-bench harness — runs each instance through the REAL production pipeline entry
+ * point ({@link RunOrchestrator#submitRun}), blind. Supersedes {@link
+ * com.navneet.executespec.swebench.SwebenchTaskService} (a bespoke oracle-mode adapter that
+ * bypassed the production entry point AND injected the gold {@code test_patch} into the prompt —
+ * invalid for any public leaderboard).
+ *
+ * <p><b>Principle: real system, sandbox-only.</b> The code-gen path is untouched production: the
+ * real {@code submitRun} entry, real tier routing, real worker + tools. We run in {@code
+ * runMode=PATCH} — the production autofix engine (the same thin-worker loop that powers the four
+ * customer autofix surfaces), <i>not</i> a benchmark fork. The earlier BUILD-mode smoke proved
+ * BUILD's product machinery (PostEditFormatter, scaffolding, auto-commit) pollutes the diff with
+ * non-fix churn (a 469-line reformat + scaffolding files), making it unscoreable; PATCH emits the
+ * minimal source diff a leaderboard submission needs. Only the <i>sandbox</i> is
+ * benchmark-specific: the cleanroom container, the blind issue→spec input, the diff capture, and
+ * (external) scoring.
+ *
+ * <p><b>Blind.</b> The agent receives ONLY the issue {@code problem_statement} +
+ * offline/environment context. It never sees {@code FAIL_TO_PASS}/{@code PASS_TO_PASS} ids or the
+ * gold {@code test_patch} — those are applied only at scoring time, outside the agent. This is what
+ * makes the number leaderboard-comparable.
+ *
+ * <p>Reuses the proven sandbox plumbing from the old adapter (we keep {@link SwebenchProperties},
+ * {@link SwebenchInstanceLoader}, {@link SwebenchContainerStore} — the last is consulted directly
+ * by {@code ShellTool}/{@code BuildProjectTool}/{@code RunTestsTool} to dispatch into {@code
+ * /testbed}).
+ *
+ * <p>Per-instance lifecycle:
+ *
+ * <ol>
+ *   <li>Stash the setup recipe in {@link #PENDING}.
+ *   <li>{@link RunOrchestrator#submitRun} with {@code runMode=PATCH}, {@code repoMode=NONE}, the
+ *       blind spec.
+ *   <li>{@link #onRunStarted} fires synchronously → docker pull → cp {@code /testbed} into the host
+ *       workspace → run with bind-mount + {@code --network none} → register the container.
+ *   <li>The real PATCH pipeline (thin worker loop) runs against the bind-mounted {@code /testbed}.
+ *   <li>{@link #captureOnTerminalAsync} polls to terminal, captures the {@code git diff} as an
+ *       SWE-bench {@code preds.json}.
+ * </ol>
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BenchmarkRunService {
+
+  private static final ObjectMapper JSON = new ObjectMapper();
+
+  private final SwebenchProperties props;
+  private final SwebenchContainerStore containerStore;
+  private final SwebenchInstanceLoader loader;
+  private final RunOrchestrator orchestrator;
+  private final PipelineRunRepository runRepo;
+  private final AgentProperties agentProps;
+
+  /**
+   * ThreadLocal stash for the in-flight setup recipe (set before submitRun, read by the listener).
+   */
+  private static final ThreadLocal<SetupRecipe> PENDING = new ThreadLocal<>();
+
+  record SetupRecipe(String image, String containerName, String instanceId) {}
+
+  /**
+   * Synchronous {@link PipelineEvent.RunStarted} listener. For benchmark runs (recipe present in
+   * {@link #PENDING}): docker pull → cp {@code /testbed/.} into the host workspace → run a live
+   * container bind-mounting the workspace at {@code /testbed} with {@code --network none} →
+   * register the container so the worker's shell/build tools dispatch via {@code docker exec}.
+   *
+   * <p>Unlike the old adapter this does <b>not</b> inject any failing-test output or gold test
+   * patch — the run is blind.
+   */
+  @EventListener
+  public void onRunStarted(PipelineEvent.RunStarted event) {
+    SetupRecipe recipe = PENDING.get();
+    if (recipe == null) return; // not a benchmark run
+    String runId = event.runId();
+    Path workspaceHost = Paths.get(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    try {
+      Files.createDirectories(workspaceHost);
+
+      if (run("docker pull " + recipe.image(), 1200).exit() != 0) {
+        throw new RuntimeException("docker pull failed for " + recipe.image());
+      }
+
+      String tempName = "bench-prep-" + UUID.randomUUID().toString().substring(0, 8);
+      if (run("docker create --name " + tempName + " " + recipe.image() + " sleep 1", 60).exit()
+          != 0) {
+        throw new RuntimeException("docker create failed for " + recipe.image());
+      }
+      try {
+        if (run("docker cp " + tempName + ":/testbed/. " + workspaceHost, 600).exit() != 0) {
+          throw new RuntimeException("docker cp /testbed failed");
+        }
+      } finally {
+        run("docker rm -f " + tempName, 30);
+      }
+
+      String runCmd =
+          String.format(
+              "docker run -d --rm --network none --name %s -v %s:/testbed -w /testbed %s sleep"
+                  + " %dh",
+              recipe.containerName(),
+              workspaceHost,
+              recipe.image(),
+              props.getTaskWallTimeoutMinutes() / 60 + 1);
+      ShellResult startResult = run(runCmd, 60);
+      if (startResult.exit() != 0) {
+        throw new RuntimeException("docker run failed: " + startResult.output());
+      }
+      String[] outLines = startResult.output().trim().split("\\r?\\n");
+      String containerId = "";
+      for (int i = outLines.length - 1; i >= 0; i--) {
+        if (!outLines[i].trim().isEmpty()) {
+          containerId = outLines[i].trim();
+          break;
+        }
+      }
+      if (containerId.isEmpty()) {
+        throw new RuntimeException(
+            "docker run produced no container id; output=" + startResult.output());
+      }
+      log.info(
+          "benchmark: container {} ({}) ready for run {}, workspace={}",
+          recipe.containerName(),
+          containerId,
+          runId,
+          workspaceHost);
+      containerStore.put(runId, containerId);
+    } catch (Exception e) {
+      log.error(
+          "benchmark: cleanroom setup FAILED for runId={} instance={} — marking run FAILED to avoid"
+              + " poisoning benchmark stats",
+          runId,
+          recipe.instanceId(),
+          e);
+      run("docker rm -f " + recipe.containerName(), 30);
+      try {
+        runRepo
+            .findById(runId)
+            .ifPresent(
+                pr -> {
+                  pr.setStatus("FAILED");
+                  pr.setStatusReason(
+                      "BENCH_SETUP_FAILED: "
+                          + (e.getMessage() == null
+                              ? e.getClass().getSimpleName()
+                              : e.getMessage()));
+                  runRepo.save(pr);
+                });
+      } catch (Exception persistEx) {
+        log.warn(
+            "benchmark: failed to mark run {} FAILED after setup error: {}",
+            runId,
+            persistEx.getMessage());
+      }
+    }
+  }
+
+  /** Result returned to the controller — runId is the UI link. */
+  public record TaskSubmitResult(
+      String runId, String instanceId, String containerName, Path workspace, Path outputDir) {}
+
+  /**
+   * Submit one SWE-bench instance for execution through the real BUILD pipeline, blind. Returns the
+   * runId so the caller can poll status / view in UI.
+   */
+  public TaskSubmitResult submit(String instanceId, String aiProvider, String modelName) {
+    if (!props.isEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "swebench is disabled (set swebench.enabled=true to use)");
+    }
+    if (instanceId == null || instanceId.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instanceId required");
+    }
+
+    SwebenchInstanceLoader.SwebenchInstance instance = loader.findById(instanceId);
+    String image = loader.imageNameFor(instanceId);
+    String provider =
+        aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
+
+    Path outputDir =
+        Paths.get(props.getOutputBase(), instanceId + "-" + Instant.now().toEpochMilli());
+    try {
+      Files.createDirectories(outputDir);
+    } catch (IOException ioe) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "failed to create output dir: " + ioe.getMessage());
+    }
+
+    String containerName = "bench-run-" + UUID.randomUUID().toString().substring(0, 8);
+    String userRequest = synthesizeBlindSpec(instance);
+
+    PipelineRun run;
+    PENDING.set(new SetupRecipe(image, containerName, instanceId));
+    try {
+      // runMode=PATCH → the production autofix engine: a thin worker loop that emits a MINIMAL
+      // patch
+      // (no PostEditFormatter / scaffolding / preview / auto-commit), which is what a clean,
+      // scoreable
+      // SWE-bench submission needs. The smoke proved BUILD mode's product machinery pollutes the
+      // patch
+      // (469-line reformat of rebuilder.py, scaffolding files, fixture rename) → switched to PATCH.
+      // repoMode=NONE + repoUrl=null → no clone; the workspace is populated by onRunStarted's cp.
+      // Blind: the agent gets only the issue text (no FAIL_TO_PASS / gold test_patch) — those are
+      // applied externally at scoring time.
+      run =
+          orchestrator.submitRun(
+              userRequest,
+              /* source */ "swebench-build",
+              /* repoUrl */ null,
+              /* repoMode */ "NONE",
+              /* githubPat */ null,
+              /* githubOwner */ null,
+              /* skipApproval */ true,
+              /* autoMerge */ false,
+              /* modelName */ modelName,
+              /* aiProvider */ provider,
+              /* createdByUserId */ props.getBenchUserId(),
+              /* orgId */ props.getBenchOrgId(),
+              /* projectId */ props.getBenchProjectId(),
+              /* executionMode */ "PROTOTYPE",
+              /* selectedRepoIds */ java.util.List.of(),
+              /* figmaUrl */ null,
+              /* tddMode */ false,
+              /* branchOverride */ null,
+              /* prReviewComments */ null,
+              /* runMode */ RunMode.PATCH);
+    } catch (Exception e) {
+      run("docker rm -f " + containerName, 30);
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "submitRun failed: " + e.getMessage(), e);
+    } finally {
+      PENDING.remove();
+    }
+
+    Path workspaceHost =
+        Paths.get(agentProps.getWorkspace(), run.getRunId()).toAbsolutePath().normalize();
+    captureOnTerminalAsync(run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+
+    return new TaskSubmitResult(
+        run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+  }
+
+  @Async
+  protected void captureOnTerminalAsync(
+      String runId, String instanceId, String containerName, Path workspaceHost, Path outputDir) {
+    Instant deadline = Instant.now().plus(Duration.ofMinutes(props.getTaskWallTimeoutMinutes()));
+    try {
+      while (Instant.now().isBefore(deadline)) {
+        Optional<PipelineRun> maybe = runRepo.findById(runId);
+        if (maybe.isEmpty()) {
+          log.warn("benchmark: runId {} disappeared from DB", runId);
+          return;
+        }
+        if (isTerminal(maybe.get().getStatus())) {
+          log.info("benchmark: run {} terminal status={}", runId, maybe.get().getStatus());
+          captureSubmission(runId, instanceId, containerName, outputDir, maybe.get().getStatus());
+          return;
+        }
+        Thread.sleep(5_000);
+      }
+      log.warn(
+          "benchmark: run {} exceeded wall timeout {}min",
+          runId,
+          props.getTaskWallTimeoutMinutes());
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+    } finally {
+      run("docker rm -f " + containerName, 30);
+      containerStore.remove(runId);
+    }
+  }
+
+  /**
+   * On terminal status: capture the agent's {@code git diff} inside the container as an SWE-bench
+   * {@code preds.json} (so the official harness can score it) + the raw patch for inspection.
+   */
+  private void captureSubmission(
+      String runId,
+      String instanceId,
+      String containerName,
+      Path outputDir,
+      String terminalStatus) {
+    try {
+      Files.createDirectories(outputDir);
+      String baseCommit = "";
+      try {
+        baseCommit = loader.findById(instanceId).baseCommit();
+      } catch (Exception ignore) {
+        // fall back to HEAD below
+      }
+      String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
+      // Diff against the REAL base commit (not HEAD) so any pipeline commit can't hide the fix, and
+      // exclude run-infra noise (scaffolding / caches) so the patch is the source change only.
+      String excludes =
+          " -- . \":(exclude).agent-context\" \":(exclude)Dockerfile\" \":(exclude).dockerignore\""
+              + " \":(exclude)README.md\" \":(exclude)__pycache__\" \":(exclude).pytest_cache\""
+              + " \":(exclude)*.egg-info\"";
+      String preCmd =
+          "docker exec "
+              + containerName
+              + " sh -c '"
+              + "cd /testbed && "
+              + "git ls-files --others --exclude-standard | xargs -r git add -N >/dev/null 2>&1; "
+              + "git diff "
+              + diffTarget
+              + excludes
+              + "'";
+      ShellResult diff = run(preCmd, 120);
+      String patch = diff.exit() == 0 ? diff.output() : "";
+      Files.writeString(outputDir.resolve("submission.patch"), patch);
+
+      ObjectNode preds = JSON.createObjectNode();
+      ObjectNode entry = preds.putObject(instanceId);
+      Optional<PipelineRun> runRow = runRepo.findById(runId);
+      String model = runRow.map(PipelineRun::getPlannerModel).orElse("unknown");
+      entry.put("model_name_or_path", "executespec-build/" + model);
+      entry.put("instance_id", instanceId);
+      entry.put("model_patch", patch);
+      Path predsPath = outputDir.resolve("preds.json");
+      Files.writeString(predsPath, preds.toPrettyString());
+
+      log.info(
+          "benchmark: captured runId={} instance={} status={} → patch={}B preds={}",
+          runId,
+          instanceId,
+          terminalStatus,
+          patch.length(),
+          predsPath);
+    } catch (IOException ioe) {
+      log.error("benchmark: capture failed for runId={}", runId, ioe);
+    }
+  }
+
+  // ── helpers ──
+
+  private static boolean isTerminal(String status) {
+    return "COMPLETE".equals(status)
+        || "FAILED".equals(status)
+        || "PARTIAL".equals(status)
+        || "CANCELLED".equals(status)
+        || "ABORTED".equals(status);
+  }
+
+  /**
+   * Blind spec — the issue {@code problem_statement} + offline/environment context only. NO
+   * FAIL_TO_PASS/PASS_TO_PASS ids, NO gold test patch. The "existing repo, fix don't scaffold"
+   * framing keeps the BUILD planner/worker from greenfield-scaffolding (the workspace already holds
+   * the repo at the base commit, populated by {@link #onRunStarted}).
+   */
+  private String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("Resolve the following GitHub issue in an existing Python repository.\n\n");
+    sb.append("# Environment\n");
+    sb.append(
+        "- You are working in an EXISTING repository already checked out at /testbed (your"
+            + " workspace). Investigate the existing code and fix the issue described below. Do NOT"
+            + " scaffold a new project.\n");
+    sb.append(
+        "- The environment is offline (no network) and all dependencies are pre-installed. Do not"
+            + " pip install / curl / git fetch.\n");
+    sb.append(
+        "- Edit only non-test source files. Do NOT modify or add test files. Your final submission"
+            + " is the git diff of /testbed against its base commit.\n\n");
+    sb.append("# Repository\n");
+    sb.append("- Repo: ").append(i.repo()).append("\n");
+    sb.append("- Working directory: /testbed\n\n");
+    sb.append("# Issue\n\n");
+    sb.append(i.problemStatement()).append("\n\n");
+    sb.append("# How to work\n");
+    sb.append(
+        "1. Investigate with listFiles / searchFiles / readFile to locate the relevant source.\n");
+    sb.append(
+        "2. Pin down the EXACT expected behavior BEFORE editing: re-read the issue for the precise"
+            + " result it expects — a specific return value, or a raised error/exception? Then"
+            + " check how the surrounding code and similar functions handle analogous or invalid"
+            + " inputs (e.g. do they raise ValueError, or return a default?) and MATCH the"
+            + " codebase's existing conventions. Do not settle for a plausible-but-different"
+            + " behavior.\n");
+    sb.append("3. Make a minimal, targeted fix that produces exactly that behavior.\n");
+    sb.append(
+        "4. No gold/spec tests are provided — work from the issue. After fixing, run the"
+            + " repository's EXISTING tests for the module you changed to confirm nothing"
+            + " regressed, then call completeTask.\n");
+    return sb.toString();
+  }
+
+  private record ShellResult(int exit, String output) {}
+
+  private ShellResult run(String command, int timeoutSec) {
+    try {
+      ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
+      pb.redirectErrorStream(true);
+      Process p = pb.start();
+      boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
+      if (!done) {
+        p.destroyForcibly();
+        return new ShellResult(-1, "timeout after " + timeoutSec + "s: " + command);
+      }
+      String out = new String(p.getInputStream().readAllBytes());
+      return new ShellResult(p.exitValue(), out);
+    } catch (IOException ioe) {
+      return new ShellResult(-2, "io error: " + ioe.getMessage());
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      return new ShellResult(-3, "interrupted");
+    }
+  }
+}
