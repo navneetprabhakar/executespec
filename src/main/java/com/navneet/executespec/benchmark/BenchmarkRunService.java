@@ -110,7 +110,11 @@ public class BenchmarkRunService {
     try {
       Files.createDirectories(workspaceHost);
 
-      if (run("docker pull " + recipe.image(), 1200).exit() != 0) {
+      // Skip the registry pull when the image is already present (e.g. pre-pulled by the runner).
+      // A present-image `docker pull` still round-trips the registry and can time out under host
+      // load — that timeout was the trigger for the stuck-run failure. Only pull when absent.
+      boolean imagePresent = run("docker image inspect " + recipe.image(), 30).exit() == 0;
+      if (!imagePresent && run("docker pull " + recipe.image(), 1800).exit() != 0) {
         throw new RuntimeException("docker pull failed for " + recipe.image());
       }
 
@@ -172,11 +176,15 @@ public class BenchmarkRunService {
             .ifPresent(
                 pr -> {
                   pr.setStatus("FAILED");
-                  pr.setStatusReason(
+                  String reason =
                       "BENCH_SETUP_FAILED: "
                           + (e.getMessage() == null
                               ? e.getClass().getSimpleName()
-                              : e.getMessage()));
+                              : e.getMessage());
+                  // status_reason is VARCHAR(80): an over-long value makes THIS save throw, so the
+                  // run never gets marked FAILED and falls through to a containerless worker run on
+                  // the host. Truncate so the FAILED-mark always persists.
+                  pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
                   runRepo.save(pr);
                 });
       } catch (Exception persistEx) {

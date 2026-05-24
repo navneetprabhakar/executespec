@@ -57,6 +57,23 @@ loops to the iter cap. `PatchAgent.run` therefore reads the run's `sourceType` a
 `requireTestVerification = !(src startsWith "swebench" | "benchmark")` — gate OFF for benchmark, ON
 for `finding:*`. (RL-2026-05-028.)
 
+## Operational gotchas + hardening (2026-05-24)
+
+- **Run workspace must NOT live under a macOS TCC-protected dir (`~/Documents`).** The default
+  `agent.workspace: ./workspace` resolves under the repo (often in `~/Documents`). If macOS revokes
+  the JVM's disk access mid-run (TCC), the worker loses access to its own workspace and **freezes**
+  on the next file op (observed: workers stalled at iter ~4, no in-container process). Run the
+  benchmark with `agent.workspace` pointed outside `~/Documents` (e.g. `~/swebench-bench/espec-ws`).
+- **`onRunStarted` skips `docker pull` when the image is already present** — a present-image pull
+  still round-trips the registry and timed out under host load; pre-pull images and this is a no-op.
+- **`status_reason` is `VARCHAR(80)`** — the setup-failure path truncates `BENCH_SETUP_FAILED: …`
+  to 80 chars, else the FAILED-mark save throws and the run falls through to a containerless host
+  run. (Both fixes: RL-2026-05-028 follow-up.)
+- **`submit()` blocks until the run is terminal**, so a runner that scores off the HTTP response
+  must set a generous client timeout (Live runs ~2–4 min each; a *frozen* run blocks the full
+  timeout). The `scripts`-side runner pre-pulls per instance + waits on the run, then scores the
+  `submission.patch`.
+
 ## Status
 
 Validated locally on SWE-bench **Lite** (iteration surface) + **Live** (publish surface) across all
