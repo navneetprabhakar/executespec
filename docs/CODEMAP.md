@@ -23,7 +23,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `arch/invariants` | 1 | 1 | - | - | Org architectural invariants + violation tracking |
 | `auth` | 7 | 12 | - | - | JWT/OAuth2 auth, RBAC, org/user/project lifecycle, GDPR export |
 | `batch` | - | 6 | - | - | Provider batch-mode job orchestration (Anthropic/OpenAI/Gemini) |
-| `benchmark` | 1 | 1 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); branch `feature/swebench-harness` |
+| `benchmark` | 1 | 2 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean synchronous `/generate`); branch `feature/swebench-harness` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
 | `chat` | - | 3 | - | - | Post-run conversation: ChatService + ApplyService + ApplyResultStore |
 | `codeintel` | 2 | 7 | - | - | Codemap + per-repo arch + cross-repo arch + RAG-backed docs |
@@ -201,7 +201,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Controller | Base path | Purpose |
 | --- | --- | --- |
-| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`) |
+| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); supersedes oracle `swebench/` |
 | `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission (oracle-mode; superseded by `benchmark/`) |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
 | `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |

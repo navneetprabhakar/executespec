@@ -37,7 +37,8 @@ D2=BUILD on paper-review; the smoke flipped it to PATCH — see §13 there + RL-
 | File | Purpose |
 |------|---------|
 | `BenchmarkRunService.java` | The harness. `submit()` → `orchestrator.submitRun(source="swebench-build", repoMode="NONE", repoUrl=null, runMode=PATCH, executionMode=PROTOTYPE, skipApproval=true)`. A synchronous `@EventListener onRunStarted` does `docker pull` → `docker cp /testbed/.` into the host workspace → `docker run -d --rm --network none -v <workspace>:/testbed` → registers the container id in `SwebenchContainerStore` (so `ShellTool`/`BuildProjectTool`/`RunTestsTool` dispatch via `docker exec`). On setup failure it marks the run FAILED (status_reason `BENCH_SETUP_FAILED`) so a bad container can't poison benchmark stats. `captureOnTerminalAsync` polls to terminal then writes `submission.patch` + SWE-bench `preds.json` (the `git diff <baseCommit>` with run-infra excludes: `.agent-context`, `Dockerfile`, `.dockerignore`, `README.md`, `__pycache__`, `.pytest_cache`, `*.egg-info`). `synthesizeBlindSpec` builds the issue-only spec with an "existing repo at /testbed, fix don't scaffold, don't modify tests, pin down EXACT expected behavior + match codebase conventions" framing. |
-| `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` (submit one instance), `GET /preview/{id}` (resolved image/repo/baseCommit), `GET /instances` (loaded id count). |
+| `BenchmarkGenerationService.java` | **Lean, synchronous code-gen API** (RL-2026-05-028 follow-up). `generate()` reuses the code-gen components **directly** — sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls `patchAgent.run(...)` **synchronously**, captures the diff → `submission.patch` + `preds.json`, returns `{runId, outcome, patchBytes, costUsd, …}`. **No `submitRun`** → no async pipeline, no event listeners (email/preview/report), no credits, no harvesting. Workspace under the (non-Documents) output base by design. This is the going-forward benchmark path: one instance = one call → score. |
+| `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` (async, via `submitRun` — `BenchmarkRunService`), **`POST /generate` (synchronous lean code-gen — `BenchmarkGenerationService`; preferred)**, `GET /preview/{id}` (resolved image/repo/baseCommit), `GET /instances` (loaded id count). |
 
 ## Reused from `swebench/` (sandbox layer — sound, not the problem)
 
@@ -77,6 +78,14 @@ for `finding:*`. (RL-2026-05-028.)
 ## Status
 
 Validated locally on SWE-bench **Lite** (iteration surface) + **Live** (publish surface) across all
-three providers, blind. Not yet merged; not wired to dev/prod (the `swebench.enabled` flag is OFF by
-default and only set in the local-only profile). Follow-up: remove the superseded oracle path
+three providers, blind. **First blind Live run (2026-05-24, Anthropic Sonnet): 5/11 = 45% resolved**
+before stopping — full result + miss-analysis in
+[`docs/benchmarks/swebench-live-2026-05-24.md`](../../../../../../../docs/benchmarks/swebench-live-2026-05-24.md).
+Dominant miss mode: **under-scoping multi-file changes** (the actionable scaffold lever). Run stopped
+at 11/50 because the local arm64/Rosetta environment kept stalling (a credible full run belongs on
+native x86_64 infra). `BenchmarkGenerationService` (`POST /generate`) is **compile-verified but not
+yet runtime-tested** — the Live run used the older `submitRun` path (`POST /run`).
+
+Not yet merged; not wired to dev/prod (the `swebench.enabled` flag is OFF by default and only set in
+the local-only profile). Follow-up: runtime-test `/generate`, then remove the superseded oracle path
 (`swebench/SwebenchTaskService` + the old `SwebenchController`) once this is the validated default.
