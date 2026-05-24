@@ -34,6 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 public class BenchmarkController {
 
   private final BenchmarkRunService runService;
+  private final BenchmarkGenerationService generationService;
   private final SwebenchInstanceLoader loader;
   private final SwebenchProperties props;
 
@@ -50,6 +51,24 @@ public class BenchmarkController {
         req.modelName());
     return ResponseEntity.accepted()
         .body(runService.submit(req.instanceId(), req.aiProvider(), req.modelName()));
+  }
+
+  /**
+   * Lean, SYNCHRONOUS code-generation. Reuses the production code-gen components ({@link
+   * com.navneet.executespec.agent.PatchAgent} → worker → tools) directly — no {@code submitRun}
+   * lifecycle, no async, no listeners. Blocks until the worker terminates (~2–4 min for a Live
+   * instance) and returns the captured patch + cost. See {@link BenchmarkGenerationService}.
+   */
+  @PostMapping("/generate")
+  public ResponseEntity<BenchmarkGenerationService.GenerateResult> generate(
+      @RequestBody SubmitRequest req) {
+    log.info(
+        "benchmark generate instance={} provider={} model={}",
+        req.instanceId(),
+        req.aiProvider(),
+        req.modelName());
+    return ResponseEntity.ok(
+        generationService.generate(req.instanceId(), req.aiProvider(), req.modelName()));
   }
 
   /** Read-only preview — what image / repo / base commit this instance resolves to. */
