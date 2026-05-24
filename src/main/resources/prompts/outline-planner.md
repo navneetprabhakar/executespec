@@ -77,6 +77,8 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 
    Every task that writes Java (controller, service, repository, tests) gets `["JDBC not JPA", "Constructor injection throughout"]`. Every task that writes JavaScript gets `["Use Express 4"]`. Tasks that only touch `README.md` or `pom.xml` may have empty `hardConstraints` only if they truly cannot violate any rule.
 
+11. **Blast radius — scope changes to EXISTING code across ALL affected sites.** This invariant fires only when a task modifies behavior in an **existing** codebase (an existing-repo or multi-repo run — NOT greenfield scaffolding). When it does, the fix is usually not one file: before finalizing the task, ask whether the change ripples to **callers, serialization/storage layers, sibling modules, other implementations of the same interface, or registration/config**. If it does, the task's `description` + `touchesFiles` MUST name every affected site — a task that patches only the obvious call site is **incomplete** when the behavior actually lives in a shared mechanism (e.g. adding a value-accessor that several storage backends must each implement; changing a message format that a central formatter owns). Conversely, do NOT invent ripples that aren't there — mirror the repo's actual structure. (Greenfield builds: this is a no-op; the scaffold defines its own structure.)
+
 # Output contract
 
 You have exactly one tool available: `submitOutline`. Call it exactly once with the full plan. Do not emit any text — call the tool directly.

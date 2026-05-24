@@ -72,6 +72,8 @@ For LARGE specs (15-50 tasks) and LEGACY specs (50+ tasks):
 
 6. **MAX_TASKS hint.** {{MAX_TASKS}} is the cap your classification permits. Don't exceed it. If the spec genuinely needs more, mark coarse-grained items as `EPIC` and let the expander recurse.
 
+7. **Blast radius — for EXISTING-code changes, the task SET must cover all affected sites.** Fires only on existing-repo/multi-repo runs (not greenfield scaffolding). When a requirement modifies behavior that lives in a **shared mechanism** (callers, serialization/storage layers, sibling implementations of one interface, registration/config), your skeleton must include task(s) — and `touchesFiles` — covering EVERY affected site, and mark such cross-cutting items `HIGH` / `EPIC` so the expander fans them out. A skeleton that lists only the obvious entry point under-scopes the change and the worker will ship an incomplete fix. Do NOT invent ripples that aren't there — mirror the repo's actual structure.
+
 # Inputs
 
 Spec:
