@@ -39,6 +39,7 @@ Everything you need to ship, run, and stay-up-to-the-SLO. Read in order on a fir
 | Local test playbook | [`docs/operations/local-test-playbook.md`](operations/local-test-playbook.md) | The local smoke-test recipe: Flyway migrate against a clean Postgres, Spring Boot startup, frontend `npm run dev`, end-to-end run submission, expected timing budgets. | Before pushing to `dev` — the rule is local-first, CI is not authoritative. |
 | Service-level objectives | [`docs/operations/slos.md`](operations/slos.md) | The 5 published SLOs: terminal-in-15-min, verified-score correctness, cost-estimate accuracy, webhook latency, hot-path 5xx. With measurement methodology and on-call escalation. | When auditing reliability or pricing a customer SLA. |
 | Status page | [`docs/status-page.md`](status-page.md) | How the public status page is wired, what each surfaced metric means, where the cron + uptime probes live, how an incident is declared and resolved. | When the status page is wrong or when adding a new probe. |
+| Tech-debt register | [`docs/tech-debt.md`](tech-debt.md) | Severity-ranked backend + frontend debt audit (god classes, the unauthenticated `/api/v2/test/**` surface, the un-split frontend bundle, the missing frontend test harness, dead Signal-era code). Living doc — strike items as paid down. | When planning a hardening / cleanup pass, or before a big refactor. Last audited 2026-05-24. |
 
 ## 3. Product / UX
 

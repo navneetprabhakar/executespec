@@ -2483,6 +2483,14 @@ export const updateRepoRelationships = (
 export const generateArchitecture = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, {method: 'POST'});
 
+// Per-repo architecture regen (Task #82) — explicit, heavy (codemap + per-repo arch LLM calls).
+// Split out of syncRepo, which is now a fast metadata-only refresh.
+export const regenerateRepoArchitecture = (projectId: string, repoId: string) =>
+  req<{id: string; version: number; content: string; generatedAt: string}>(
+    `/projects/${projectId}/repos/${repoId}/regenerate-architecture`,
+    {method: 'POST'},
+  );
+
 // Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
 export const analyseProject = (projectId: string, branch?: string) =>
   req<ArchitectureDoc>(

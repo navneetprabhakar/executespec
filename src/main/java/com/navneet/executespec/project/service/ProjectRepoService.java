@@ -52,11 +52,6 @@ public class ProjectRepoService {
   /** M-039 (Wave 3) — repo allowlist enforcement. */
   private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
 
-  /** Lazy to break potential circular wiring on startup. */
-  private final org.springframework.beans.factory.ObjectProvider<
-          com.navneet.executespec.codeintel.ProjectArchitectureService>
-      archServiceProvider;
-
   /**
    * E1.5 — fires bootstrap PR async after a successful link. Lazy to keep service start-up cheap
    * when the bootstrap pipeline isn't on the critical path (e.g. tests, admin tooling, migrations).
@@ -191,18 +186,24 @@ public class ProjectRepoService {
   }
 
   /**
-   * v2.5.12 — Sync is now more than a metadata refresh. For every project this repo is linked to,
-   * we also regenerate the per-repo codemap + per- repo architecture doc (Steps 1 + 2 of the 3-step
-   * arch pipeline). Step 3 (combined architecture doc) is deliberately skipped to keep sync cheap —
-   * it re-runs on the next project-level Analyse.
+   * Fast metadata-only sync — refreshes {@code detected_stack} + {@code last_synced_sha} (+ the
+   * monorepo subdir marker) for this repo. <b>Deliberately NOT {@code @Transactional}, and NOT a
+   * codemap/arch regen.</b>
    *
-   * <p>Metadata updates (detected_stack + last_synced_sha) happen first; then the per-project regen
-   * loop runs best-effort (a failure on one project logs a warning but does not abort the sync).
+   * <p>History (RL-2026-05-026 / Task #82): v2.5.12 folded a per-project codemap + per-repo-arch
+   * regen into this method, inside a method-level transaction. That held a pooled DB connection
+   * across the multi-minute, LLM-driven {@link
+   * com.navneet.executespec.codeintel.ProjectArchitectureService#regenerateForRepo} call for every
+   * linked project — exhausting the HikariCP pool under concurrency and making "Sync" hang for
+   * minutes. Sync is a cheap metadata refresh again; the heavy regen moved to an explicit,
+   * non-transactional endpoint ({@code POST
+   * /api/projects/{projectId}/repos/{repoId}/regenerate-architecture}). The single {@code
+   * repoRepo.save} below runs in its own short Spring-Data transaction, so the GitHub network calls
+   * above never sit inside a held transaction.
    *
-   * @param overridePat caller's PAT (used for both SHA lookup and codemap fetch against private
+   * @param overridePat caller's PAT (used for the SHA + stack + subdir probes against private
    *     repos)
    */
-  @Transactional
   public ProjectRepoDto syncRepo(
       UUID repoId,
       String callerUserId,
@@ -211,7 +212,7 @@ public class ProjectRepoService {
       String overridePat) {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
 
-    // 1. Metadata refresh (unchanged semantics).
+    // Metadata refresh only. These are GitHub network calls — run OUTSIDE any transaction.
     String detected = stackDetector.detect(repo.getGithubRepoFullName(), null);
     if (detected != null) repo.setDetectedStack(detected);
     String headSha =
@@ -232,40 +233,16 @@ public class ProjectRepoService {
             overridePat);
     if (subdir != null) repo.setSubdir(subdir);
     repo.setUpdatedAt(Instant.now());
+    // repoRepo.save is itself transactional (Spring Data wraps each call) — a short write tx, not
+    // one held across the network probes above. Architecture regen is now an explicit action.
     ProjectRepo saved = repoRepo.save(repo);
-
-    // 2. Per-project regen (Steps 1 + 2). Multi-project repos fan out here.
-    List<ProjectRepoLink> links = linkRepo.findByRepoId(repoId);
-    if (!links.isEmpty()) {
-      com.navneet.executespec.codeintel.ProjectArchitectureService archService =
-          archServiceProvider.getIfAvailable();
-      if (archService == null) {
-        log.warn(
-            "Sync: ProjectArchitectureService unavailable — skipping per-project regen for"
-                + " repoId={}",
-            repoId);
-      } else {
-        for (ProjectRepoLink link : links) {
-          try {
-            archService.regenerateForRepo(link.getProjectId(), repoId, overridePat);
-          } catch (Exception e) {
-            log.warn(
-                "Sync: per-project regen failed project={} repo={}: {}",
-                link.getProjectId(),
-                repo.getGithubRepoFullName(),
-                e.getMessage());
-          }
-        }
-      }
-    }
     return ProjectRepoDto.from(saved);
   }
 
   /**
    * Legacy overload — metadata-only sync, kept for any caller that isn't ready to pass a PAT.
-   * Prefer the 5-arg form above for full behaviour.
+   * Prefer the 5-arg form above (it passes the caller PAT for private-repo probes).
    */
-  @Transactional
   public ProjectRepoDto syncRepo(
       UUID repoId, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
     return syncRepo(repoId, callerUserId, callerOrgId, isOrgAdmin, null);
