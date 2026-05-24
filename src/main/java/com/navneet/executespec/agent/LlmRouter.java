@@ -115,6 +115,16 @@ public class LlmRouter {
   private String openRouterBaseUrl;
 
   /**
+   * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
+   * matrix lost 3 runs to single 502/503 blips (incl. Gemini discarding 51 iterations of work on
+   * one 502). Retrying the SAME provider keeps per-provider benchmark numbers honest (no silent
+   * failover) and makes customer runs survive transient upstream errors.
+   */
+  private static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+
+  private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
+
+  /**
    * Dispatch a single LLM call.
    *
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
@@ -140,7 +150,6 @@ public class LlmRouter {
     // even when the run has BYOK configured for *another* provider.
     if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
 
-    long start = System.currentTimeMillis();
     log.info(
         "LlmRouter -> {} {} keySource={} (tools={}, messages={})",
         request.provider(),
@@ -148,32 +157,92 @@ public class LlmRouter {
         source,
         tools.size(),
         request.messages().size());
-    try {
-      ChatResponse resp = dispatch(request, tools, resolvedKey);
-      long elapsed = System.currentTimeMillis() - start;
-      metrics.recordLlmLatency(
-          request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
-      metrics.recordKeySource(request.provider(), source.name());
-      String runId = request.context().runId();
-      String taskId = request.context().taskId();
-      costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-      RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
-      broadcaster.emit(runId, RunEvent.tokenUsage(runId, snap.inputTokens(), snap.outputTokens()));
-      log.info("LlmRouter <- {} {} ok in {}ms", request.provider(), request.model(), elapsed);
-      return resp;
-    } catch (RuntimeException e) {
-      long elapsed = System.currentTimeMillis() - start;
-      metrics.recordLlmLatency(
-          request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
-      metrics.recordKeySource(request.provider(), source.name());
-      log.warn(
-          "LlmRouter <- {} {} FAILED in {}ms: {}",
-          request.provider(),
-          request.model(),
-          elapsed,
-          e.getMessage());
-      throw e;
+    RuntimeException lastError = null;
+    for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+      long start = System.currentTimeMillis();
+      try {
+        ChatResponse resp = dispatch(request, tools, resolvedKey);
+        long elapsed = System.currentTimeMillis() - start;
+        metrics.recordLlmLatency(
+            request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
+        metrics.recordKeySource(request.provider(), source.name());
+        String runId = request.context().runId();
+        String taskId = request.context().taskId();
+        costTracker.record(runId, taskId, request.provider(), request.model(), resp);
+        RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
+        broadcaster.emit(
+            runId, RunEvent.tokenUsage(runId, snap.inputTokens(), snap.outputTokens()));
+        log.info(
+            "LlmRouter <- {} {} ok in {}ms (attempt {})",
+            request.provider(),
+            request.model(),
+            elapsed,
+            attempt);
+        return resp;
+      } catch (RuntimeException e) {
+        long elapsed = System.currentTimeMillis() - start;
+        metrics.recordLlmLatency(
+            request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
+        metrics.recordKeySource(request.provider(), source.name());
+        log.warn(
+            "LlmRouter <- {} {} FAILED in {}ms (attempt {}/{}): {}",
+            request.provider(),
+            request.model(),
+            elapsed,
+            attempt,
+            TRANSIENT_RETRY_MAX_ATTEMPTS,
+            e.getMessage());
+        lastError = e;
+        if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
+          long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
+          log.warn(
+              "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
+          try {
+            Thread.sleep(backoffMs);
+          } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw e;
+          }
+          continue;
+        }
+        throw e;
+      }
     }
+    throw lastError; // unreachable: loop body always returns or throws
+  }
+
+  /**
+   * Transient = retryable on the same provider: any 5xx, connection reset / I/O timeout, or
+   * rate-limit (429). Permanent client errors (400/401/403/404) are NOT retried. Walks the cause
+   * chain + falls back to message sniffing since the three provider clients throw different types.
+   */
+  private static boolean isTransientError(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof org.springframework.web.client.HttpServerErrorException) return true;
+      if (t instanceof org.springframework.web.client.ResourceAccessException) return true;
+      if (t instanceof java.net.SocketTimeoutException) return true;
+      String m = t.getMessage();
+      if (m != null) {
+        String lm = m.toLowerCase();
+        if (lm.contains("503")
+            || lm.contains("502")
+            || lm.contains("504")
+            || lm.contains("service unavailable")
+            || lm.contains("bad gateway")
+            || lm.contains("gateway timeout")
+            || lm.contains("overloaded")
+            || lm.contains("upstream connect")
+            || lm.contains("connection reset")
+            || lm.contains("connection termination")
+            || lm.contains("timed out")
+            || lm.contains("temporarily unavailable")
+            || lm.contains("429")
+            || lm.contains("rate limit")) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private ChatResponse dispatch(LlmRequest request, List<ToolCallback> tools, String apiKey) {
