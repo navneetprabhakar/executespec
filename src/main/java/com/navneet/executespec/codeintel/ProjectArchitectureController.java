@@ -206,6 +206,29 @@ public class ProjectArchitectureController {
         .orElseGet(() -> ResponseEntity.noContent().build());
   }
 
+  /**
+   * Task #82 — explicit per-repo architecture regen (Steps 1 + 2: codemap + per-repo arch doc),
+   * split out of the {@code POST /api/repos/{repoId}/sync} path so Sync stays a cheap metadata
+   * refresh and never holds a DB connection across the LLM calls. Mirrors {@link #generate}: a paid
+   * LLM call + workspace mutation, so it's write-gated and runs synchronously (the caller
+   * explicitly asked to regenerate); {@link ProjectArchitectureService#regenerateForRepo} is
+   * deliberately not {@code @Transactional}. Invalidates the staleness cache so the dashboard badge
+   * refreshes.
+   */
+  @PostMapping("/api/projects/{projectId}/repos/{repoId}/regenerate-architecture")
+  public ResponseEntity<RepoArchDto> regenerateRepoArchitecture(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID repoId) {
+    // Paid LLM call + workspace mutation — same write-gate as generate()/analyse().
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    RepoArchitectureDoc doc = service.regenerateForRepo(projectId, repoId, pat);
+    stalenessService.invalidate(projectId);
+    return ResponseEntity.status(HttpStatus.CREATED).body(RepoArchDto.from(doc));
+  }
+
   // ─── 2026-05-16 — file-browse endpoints for Project → Code → Browse ────────
   //
   // The Browse tab now shows actual file content, not codemap-derived

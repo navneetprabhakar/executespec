@@ -1,6 +1,8 @@
 # JAVADOC
 
-> Compact reference of the public Java surface for ExecuteSpec backend. Version `1.0.0-M1`. Migration head `V202`. All paths are relative to `src/main/java/com/navneet/executespec/` unless otherwise noted. Grep-friendly: one entity / method / class per line where possible.
+> Compact reference of the public Java surface for ExecuteSpec backend. Version `1.0.0-M1`. Migration head `V208`. All paths are relative to `src/main/java/com/navneet/executespec/` unless otherwise noted. Grep-friendly: one entity / method / class per line where possible.
+>
+> ⚠️ **Partially stale** — head reference refreshed 2026-05-24, but the last comprehensive body rewrite was v2.4.0 (2026-04-14). For anything not found here, the authoritative surface is `CLAUDE.md` + per-package `CLAUDE.md` + `docs/CODEMAP.md`. Full rewrite is queued (`docs/tech-debt.md`).
 
 ## 1. Controllers (REST surface)
 

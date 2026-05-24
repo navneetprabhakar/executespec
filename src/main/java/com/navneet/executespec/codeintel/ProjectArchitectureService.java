@@ -291,16 +291,36 @@ public class ProjectArchitectureService {
         gitHub.getBranchHeadSha(
             "https://github.com/" + repo.getGithubRepoFullName(), branch, patOverride);
 
-    if (latest.isPresent()
-        && currentSha != null
-        && currentSha.equals(latest.get().getGeneratedFromSha())) {
-      log.info(
-          "[{}] codemap for {} up-to-date @ sha={} — reusing v{}",
-          projectId,
-          repo.getGithubRepoFullName(),
-          shortSha(currentSha),
-          latest.get().getVersion());
-      return latest.get();
+    if (latest.isPresent() && currentSha != null) {
+      String generatedSha = latest.get().getGeneratedFromSha();
+      if (currentSha.equals(generatedSha)) {
+        log.info(
+            "[{}] codemap for {} up-to-date @ sha={} — reusing v{}",
+            projectId,
+            repo.getGithubRepoFullName(),
+            shortSha(currentSha),
+            latest.get().getVersion());
+        return latest.get();
+      }
+      // RL-2026-05-025 — break the regenerate loop. ExecuteSpec publishes codemaps to the customer
+      // repo under .executespec/, which moves HEAD; without this, the next sync sees HEAD ≠
+      // generatedFromSha and regenerates (→ publish → HEAD moves → regen → …). If the ONLY change
+      // since this codemap was generated is under .executespec/, the source is unchanged — reuse +
+      // advance the stored SHA so subsequent syncs short-circuit on the equality check above.
+      if (gitHub.diffConfinedTo(
+          repo.getGithubRepoFullName(), generatedSha, currentSha, ".executespec/", patOverride)) {
+        log.info(
+            "[{}] codemap for {} unchanged except .executespec/ ({} → {}) — reusing v{}, advancing"
+                + " SHA",
+            projectId,
+            repo.getGithubRepoFullName(),
+            shortSha(generatedSha),
+            shortSha(currentSha),
+            latest.get().getVersion());
+        ProjectCodeMap cm = latest.get();
+        cm.setGeneratedFromSha(currentSha);
+        return codeMapRepo.save(cm);
+      }
     }
 
     CodeMapGenerator.Result result =
