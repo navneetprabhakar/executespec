@@ -47,7 +47,7 @@ Per `application.yml failover-order:`, when a provider fails the router walks th
 
 ## Known tech debt
 
-- **Bug #1c** — `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when the caller has explicitly locked the provider. Fix deferred — needs either a strict-mode guard or opt-out flag per org.
+- ~~**Bug #1c**~~ — **mostly mitigated** (corrected 2026-05-24). `ModelResolver` now gates adaptive routing behind two layers (`lookupModel`, lines 78-92): the `-Dexecutespec.strict-provider` JVM flag AND the `routing.adaptive-routing.enabled` feature flag (default OFF). With neither saying "let adaptive run" it always uses the user's provider — so a strict-locked caller is no longer silently switched. Residual debt: the switch is still silent (no log/event) when an operator flips the flag ON, and there's no per-org opt-out.
 - ~~**Planner / reviewer model sourced from run model, not tier**~~ — FIXED / stale note (corrected 2026-05-22). `OutlinePlannerAgent.planOnce` resolves via `modelResolver.resolve(...).getModel()` (line 290); `ReviewerAgent` and the worker (through `SequentialExecutor.tierConfigFor`) likewise resolve via `ModelResolver`. The only `req.model()` left in the planner is a metrics tag. So YAML `planning:` swaps DO take effect — and the F3 per-org overrides ride the same `lookupModel` path.
 
 ## YAML consolidation (2026-05-06)

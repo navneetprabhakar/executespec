@@ -9,6 +9,19 @@ import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
   typeof s[k] === 'number' ? (s[k] as number) : undefined;
+// Primary language from the repo's detectedStack JSON ({language, framework, version}); null-safe.
+const stackLanguage = (r: Dash): string | undefined => {
+  const ds = r.detectedStack;
+  if (typeof ds !== 'string' || !ds) return undefined;
+  try {
+    return (JSON.parse(ds) as {language?: string}).language || undefined;
+  } catch {
+    return undefined;
+  }
+};
+// Repo size: KB → human (e.g. 1.2 MB / 840 KB).
+const fmtKb = (kb: number): string =>
+  kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
 function relTime(input?: string | null): string {
   if (!input) return '—';
   const t = new Date(input).getTime();
@@ -1072,8 +1085,9 @@ export function IdeProjectRepos() {
               numOf(h, 'commitsBehind') ?? numOf(h, 'behindBy') ?? numOf(r, 'commitsBehind') ?? 0;
             const wh = (h as {webhookInstalled?: boolean}).webhookInstalled;
             const open = numOf(h, 'openPrCount') ?? numOf(h, 'openPrs') ?? 0;
-            const language = (r as {language?: string}).language;
-            const loc = numOf(r, 'loc');
+            const language = stackLanguage(r);
+            const sizeKb = numOf(r, 'sizeKb');
+            const fullName = (r as {githubRepoFullName?: string}).githubRepoFullName || name;
             const head =
               (r as {headSha?: string}).headSha ||
               (h as {currentOriginSha?: string}).currentOriginSha;
@@ -1095,15 +1109,27 @@ export function IdeProjectRepos() {
                     {drift > 0 ? `drift +${drift}` : 'in sync'}
                   </IdeBadge>
                   <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook ✓' : 'no webhook'}</IdeBadge>
-                  <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                  {fullName.includes('/') ? (
+                    <a
+                      href={`https://github.com/${fullName}/pulls`}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      style={{textDecoration: 'none'}}
+                      title='View pull requests on GitHub'
+                    >
+                      <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
+                    </a>
+                  ) : (
+                    <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                  )}
                 </div>
                 <div className='ide-kv'>
                   <span>Language</span>
                   <span>{language || '—'}</span>
                 </div>
                 <div className='ide-kv'>
-                  <span>LOC</span>
-                  <span>{loc != null ? `${(loc / 1000).toFixed(1)}K` : '—'}</span>
+                  <span>Size</span>
+                  <span>{sizeKb != null ? fmtKb(sizeKb) : '—'}</span>
                 </div>
                 <div className='ide-kv'>
                   <span>HEAD</span>
@@ -1137,9 +1163,25 @@ export function IdeProjectRepos() {
                     className='ide-btn ghost'
                     style={{padding: '4px 10px'}}
                     disabled={busy === `sync${id}`}
-                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Sync started.')}
+                    title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
+                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
                   >
                     {busy === `sync${id}` ? '…' : 'Sync'}
+                  </button>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '4px 10px'}}
+                    disabled={busy === `regen${id}`}
+                    title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
+                    onClick={() =>
+                      act(
+                        `regen${id}`,
+                        () => api.regenerateRepoArchitecture(projectId, id),
+                        'Architecture regenerated.',
+                      )
+                    }
+                  >
+                    {busy === `regen${id}` ? '…' : 'Regenerate'}
                   </button>
                   {!wh && (
                     <button

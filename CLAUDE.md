@@ -280,6 +280,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=`          | Latest arch / all versions / source-file changes between versions. |
 | POST   | `/api/projects/{id}/architecture/generate`                                   | Regenerate codemaps + arch doc.                                    |
 | GET    | `/api/projects/{id}/repos/{repoId}/architecture`                             | Per-repo HLD/LLD.                                                  |
+| POST   | `/api/projects/{id}/repos/{repoId}/regenerate-architecture`                  | Per-repo codemap + arch regen (Task #82 — split out of the now metadata-only `POST /api/repos/{repoId}/sync`; synchronous, write-gated, non-transactional). |
 | POST   | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs.                                                    |
 | GET    | `/api/projects/{id}/tech-debt?since=<days>`                                  | Issues-by-category / severity / file hotspots.                     |
 | POST   | `/api/projects/{id}/analyse?branch=<name>`                                   | Per-branch arch refresh using caller's PAT.                        |
@@ -441,7 +442,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 ### In progress / not-yet-merged
 
-- **dev → main release (PR #157, honesty pass V199→V203)** — merged to `dev` via PRs #155 + #156 (2026-05-21); promotion to `main` pending. Includes the planner over-decomposition relaxation (RL-2026-05-011) whose validating eval is in flight.
+- **PR #170 (open against `dev`, 2026-05-24)** — codemap/arch regenerate-loop fix (`.executespec/`-only diffs no longer force regen) + Sync connection-leak fix (`syncRepo` is metadata-only + non-`@Transactional`; heavy regen moved to the new explicit `POST /api/projects/{id}/repos/{repoId}/regenerate-architecture`) + repo-card Language/Size/PR-link. RL-2026-05-025 + RL-2026-05-026.
+- **dev → main: in sync (2026-05-24)** — the V199→V203 honesty-pass release (PRs #155/#156) and every subsequent fix were promoted to `main` (latest via PR #169); `origin/dev` is 0 commits ahead of `origin/main`. No promotion pending. (Includes the planner over-decomposition relaxation, RL-2026-05-011.)
 - **`feature/programbench-benchmark`** — V2/V3 unification pass (88+18 file moves, 25 class renames) + ProgramBench adapter + step-2 wire-in into V2 worker stack. Validated locally across 3 providers (OpenAI / Anthropic / Gemini) on a Python single-shot spec; pipeline healthy. PR open against dev.
 - **`feature/swebench-adapter`** (PR #88, NOT merged) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Empirical: medium matrix 67% / hard matrix 60% across 3 providers.
 - **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/reason-log/2026-05.md` and per-package `CLAUDE.md` files.
@@ -450,7 +452,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 ### Known tech debt
 
-- **Bug #1c (router strict-provider bypass)** — `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when `-Dexecutespec.strict-provider=true` is set. Fix deferred — needs either a strict-mode guard inside ModelResolver or opt-out flag per org.
-- ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (corrected 2026-05-22, RL-2026-05-015). `OutlinePlannerAgent.planOnce` resolves its model via `modelResolver.resolve("OutlinePlannerAgent", provider).getModel()` ([line 290](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)); the only remaining `req.model()` is a metrics tag in `recordPlannerLatency`. So the planner DOES honour the YAML matrix (and the per-org overrides from F3). Worker + reviewer likewise resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`). The only real model-resolution debt is **Bug #1c** above.
-- **10 legacy guard sites** in `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` — 3 repo-scoped in `ProjectRepoController`, 2 SUPER_ADMIN in `SuperAdminController` + 1 in `ExecutespecMigrationController`, 1 V2-canary in `RunController#poll`, 3 unrelated. Migration order spelled out in the GA-readiness P4.1-followup.
-- **JAVADOC.md is stale** — last comprehensively refreshed at v2.4.0 (2026-04-14); subsequent ranges live in CLAUDE.md / ARCHITECTURE.md / per-package CLAUDE.md. Rewriting JAVADOC.md is on the queue but not blocking.
+> **Full register: [`docs/tech-debt.md`](docs/tech-debt.md)** (audited 2026-05-24 — backend + frontend, severity-ranked). The highlights below are the items most likely to bite next.
+
+- ✅ ~~`/api/v2/test/**` unauthenticated in prod~~ — **fixed 2026-05-24** (RL-2026-05-027, PR #170). The nine `test/*Controller`s (Planner/Router/Executor/Worker/Reviewer/NativeTools/ToolRegistry/ContextStore/Metrics) are now `SUPER_ADMIN`-gated in `SecurityConfig` (was `permitAll()` — an unauthenticated LLM-pipeline surface).
+- **God classes** — `RunOrchestrator.java` (4,828 LOC / 72 methods) backend; `frontend/src/lib/api.ts` (3,679 LOC / 307 fns) + `signal/pages/ExtraPages.tsx` (2,782 LOC, 14 pages) frontend. High-coupling, hard to test/split.
+- **Frontend: no code-splitting (single ~802 KB bundle) + zero running unit tests** — `vite.config.ts` has no `manualChunks`/`React.lazy`; `package.json` has no test runner and CI runs only prettier + warn-only eslint. The two biggest frontend debts.
+- ~~**Bug #1c (router strict-provider bypass)**~~ — **mostly mitigated** (corrected 2026-05-24). `ModelResolver` now gates adaptive routing behind `!strict && featureFlagService.isEnabled("routing.adaptive-routing.enabled")` ([line 84-88](src/main/java/com/navneet/executespec/router/ModelResolver.java)), flag default OFF — so `-Dexecutespec.strict-provider=true` DOES block the switch now. Residual: still silent when the flag is ON; no per-org opt-out.
+- ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (RL-2026-05-015). Planner/worker/reviewer all resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`); YAML-matrix + F3 per-org overrides take effect.
+- ~~**10 legacy access-guard sites**~~ — **resolved** (corrected 2026-05-24). `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is now an empty, closed set (35/35 cleared); any new violator fails the build.
+- **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
