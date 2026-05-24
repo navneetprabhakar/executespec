@@ -231,10 +231,14 @@ public class SecurityConfig {
                     // Admin endpoints — SUPER_ADMIN only
                     .requestMatchers("/api/admin/**")
                     .hasRole("SUPER_ADMIN")
-                    // V2 Phase 0 native-tools test endpoint (no auth — temporary, removed once
-                    // LlmRouter lands)
+                    // V2 native-tools diagnostic/test endpoints (test/*TestController) —
+                    // operator-only. These drive the real planner/worker/router/reviewer/executor
+                    // LLM pipeline, so they must NOT be an unauthenticated cost-burn + disclosure
+                    // surface. Was permitAll() "temporarily until LlmRouter lands"; LlmRouter
+                    // shipped, so they're now locked to SUPER_ADMIN (RL-2026-05-027). No frontend
+                    // / eval-script / test caller relies on anonymous access (verified).
                     .requestMatchers("/api/v2/test/**")
-                    .permitAll()
+                    .hasRole("SUPER_ADMIN")
                     // v2.5.12 — V2 Phase 9 canary retired; V2 is the only harness and is
                     // accessed via the regular /api/runs surface. The canary permit-all
                     // is removed; any remaining /api/v2/runs/** traffic must authenticate
