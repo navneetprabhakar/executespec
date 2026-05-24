@@ -280,6 +280,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=`          | Latest arch / all versions / source-file changes between versions. |
 | POST   | `/api/projects/{id}/architecture/generate`                                   | Regenerate codemaps + arch doc.                                    |
 | GET    | `/api/projects/{id}/repos/{repoId}/architecture`                             | Per-repo HLD/LLD.                                                  |
+| POST   | `/api/projects/{id}/repos/{repoId}/regenerate-architecture`                  | Per-repo codemap + arch regen (Task #82 — split out of the now metadata-only `POST /api/repos/{repoId}/sync`; synchronous, write-gated, non-transactional). |
 | POST   | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs.                                                    |
 | GET    | `/api/projects/{id}/tech-debt?since=<days>`                                  | Issues-by-category / severity / file hotspots.                     |
 | POST   | `/api/projects/{id}/analyse?branch=<name>`                                   | Per-branch arch refresh using caller's PAT.                        |

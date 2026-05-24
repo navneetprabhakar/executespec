@@ -1163,9 +1163,25 @@ export function IdeProjectRepos() {
                     className='ide-btn ghost'
                     style={{padding: '4px 10px'}}
                     disabled={busy === `sync${id}`}
-                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Sync started.')}
+                    title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
+                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
                   >
                     {busy === `sync${id}` ? '…' : 'Sync'}
+                  </button>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '4px 10px'}}
+                    disabled={busy === `regen${id}`}
+                    title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
+                    onClick={() =>
+                      act(
+                        `regen${id}`,
+                        () => api.regenerateRepoArchitecture(projectId, id),
+                        'Architecture regenerated.',
+                      )
+                    }
+                  >
+                    {busy === `regen${id}` ? '…' : 'Regenerate'}
                   </button>
                   {!wh && (
                     <button
