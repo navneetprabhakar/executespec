@@ -23,6 +23,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `arch/invariants` | 1 | 1 | - | - | Org architectural invariants + violation tracking |
 | `auth` | 7 | 12 | - | - | JWT/OAuth2 auth, RBAC, org/user/project lifecycle, GDPR export |
 | `batch` | - | 6 | - | - | Provider batch-mode job orchestration (Anthropic/OpenAI/Gemini) |
+| `benchmark` | 1 | 2 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean synchronous `/generate`); branch `feature/swebench-harness` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
 | `chat` | - | 3 | - | - | Post-run conversation: ChatService + ApplyService + ApplyResultStore |
 | `codeintel` | 2 | 7 | - | - | Codemap + per-repo arch + cross-repo arch + RAG-backed docs |
@@ -200,7 +201,8 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Controller | Base path | Purpose |
 | --- | --- | --- |
-| `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission |
+| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); supersedes oracle `swebench/` |
+| `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission (oracle-mode; superseded by `benchmark/`) |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
 | `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |
 | `eval/v2/TierEvalController` | `/api/admin/eval/v2` | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params) |
@@ -628,8 +630,12 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | --- | --- | --- |
 | `assessment.llm.enabled` | true | AccuracyAssessmentService LLM-judged scoring |
 | `billing.lifecycle.sunsetting.enabled` | (cfg) | Enables tier SUNSETTING gateway cascade (cancel-at-period-end) |
+| `build.test-exec-gate.enabled` | **false** (V209) | In-loop worker test-exec gate in BUILD per-task smoke (RL-2026-05-034); off ⇒ compile-only smoke |
 | `ci.autofix.enabled` | **false** | Autofix Phase 3 — auto-respond to GitHub `check_run.failure` webhook |
+| `codeintel.inject.enabled` | **false** (V210) | Inject codemap symbol-map into planner + PATCH prompt on project runs (RL-2026-05-035) |
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
+| `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
+| `enterprise.inject.enabled` | **false** (V211) | Inject `{{CONTRACTS}}` + `{{PROJECT_ADRS}}` into the planner prompt (RL-2026-05-035) |
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
 | `harness.v2.batch_enabled` | (cfg) | V2 batch-mode execution |
 | `lint.autofix.enabled` | true (V180) | Phase L1 deterministic auto-formatter pass between executor and reviewer |
@@ -690,6 +696,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V203) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V213) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |

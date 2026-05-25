@@ -347,7 +347,7 @@ public class ProjectDashboardController {
       throw new org.springframework.web.server.ResponseStatusException(
           org.springframework.http.HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     if (req == null || req.category() == null || req.category().isBlank()) {
       throw new org.springframework.web.server.ResponseStatusException(
           org.springframework.http.HttpStatus.BAD_REQUEST, "category is required");
@@ -365,7 +365,7 @@ public class ProjectDashboardController {
       @PathVariable String projectId,
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     postMergeCascadeService.dismissPostMergeBars(projectId);
     return ResponseEntity.noContent().build();
   }

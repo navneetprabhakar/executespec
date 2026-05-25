@@ -275,6 +275,8 @@ public class OutlinePlannerAgent {
             .replace("{{PROJECT_MEMORY}}", renderProjectMemoryBlock(req.projectMemory()))
             .replace("{{PROJECT_BRIEF}}", req.projectBrief() == null ? "" : req.projectBrief())
             .replace("{{REFERENCE_DOCS}}", req.referenceDocs() == null ? "" : req.referenceDocs())
+            .replace("{{CONTRACTS}}", req.contracts() == null ? "" : req.contracts())
+            .replace("{{PROJECT_ADRS}}", req.projectAdrs() == null ? "" : req.projectAdrs())
             .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
             .replace("{{MOBILE_PREFERENCE_BLOCK}}", "")
             .replace("{{PR_REVIEW_COMMENTS}}", "");

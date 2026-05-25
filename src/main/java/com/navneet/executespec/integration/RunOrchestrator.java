@@ -186,6 +186,43 @@ public class RunOrchestrator {
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
   /**
+   * Enterprise-knowledge planner injection (flag {@code enterprise.inject.enabled}, default OFF).
+   * Mirrors the codemap-injection pattern (RL-2026-05-035): best-effort, bounded, no-op on
+   * greenfield (no project) so the customer pipeline is unaffected when the flag is off.
+   */
+  private final com.navneet.executespec.contracts.injection.ContractInjectionService
+      contractInjectionService;
+
+  private final com.navneet.executespec.adr.AdrInjectionService adrInjectionService;
+
+  /**
+   * RL-2026-05-037 — enterprise enforcement made real (was "decorative"). {@code StandardsRunner}
+   * runs deterministic coding standards against the final workspace and persists violations so the
+   * {@code /standards/report} endpoint is no longer always-empty; {@code PlanBreakingChangeReport}
+   * classifies touched contracts (previous content from {@link
+   * com.navneet.executespec.contracts.ContractVersion}, new content from workspace disk) and
+   * surfaces breaking changes as report-only run issues. Both project-gated + flag-gated ({@code
+   * standards.enforcement.enabled} / {@code contracts.breaking-change.enabled}, default OFF) +
+   * non-fatal; greenfield / no-project runs are a no-op.
+   */
+  private final com.navneet.executespec.standards.EffectiveStandardsResolver
+      effectiveStandardsResolver;
+
+  private final com.navneet.executespec.standards.StandardsRunner standardsRunner;
+
+  private final com.navneet.executespec.standards.StandardsViolationRepository
+      standardsViolationRepository;
+
+  private final com.navneet.executespec.contracts.gate.PlanBreakingChangeReport
+      planBreakingChangeReport;
+
+  private final com.navneet.executespec.contracts.ContractRegistryRepository
+      contractRegistryRepository;
+
+  private final com.navneet.executespec.contracts.ContractVersionRepository
+      contractVersionRepository;
+
+  /**
    * RL-2026-05-001 — runs the worker's own tests in the workspace for the verifiedScore TESTS slot.
    */
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
@@ -1141,6 +1178,56 @@ public class RunOrchestrator {
         } else {
           summary = "empty scratch workspace (V2 harness)";
         }
+        // RL-2026-05-035 — feed the generated code-intel (codemap symbol maps) into the planner.
+        // Flag-gated + bounded + best-effort; no-op on greenfield (no project/codemap).
+        if (projectId != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
+          try {
+            String codeIntel =
+                buildCodeIntelContext(
+                    projectId, projectRepoService.resolveForRun(projectId, selectedRepoIds));
+            if (!codeIntel.isBlank()) {
+              summary = summary + "\n\n" + codeIntel;
+              log.info(
+                  "V2 run={} injected code-intel into planner ({} chars)",
+                  runId,
+                  codeIntel.length());
+            }
+          } catch (Exception e) {
+            log.warn("V2 run={} code-intel planner injection skipped: {}", runId, e.getMessage());
+          }
+        }
+        // Enterprise-knowledge injection — feed cross-repo contracts + accepted ADRs into the
+        // planner so it plans changes that respect them. Flag-gated (`enterprise.inject.enabled`,
+        // default OFF), bounded (~8000 chars each), best-effort per block. No project → both empty
+        // → no-op (greenfield fail-safe). Mirrors the codemap-injection pattern above.
+        String contractsBlock = "";
+        String adrsBlock = "";
+        if (projectId != null && featureFlagService.isEnabled("enterprise.inject.enabled")) {
+          try {
+            String c = contractInjectionService.compose(projectId).block();
+            contractsBlock = truncate(c == null ? "" : c, ENTERPRISE_INJECT_CAP);
+            if (!contractsBlock.isBlank()) {
+              log.info(
+                  "V2 run={} injected contracts into planner ({} chars)",
+                  runId,
+                  contractsBlock.length());
+            }
+          } catch (Exception e) {
+            log.warn("V2 run={} contracts planner injection skipped: {}", runId, e.getMessage());
+            contractsBlock = "";
+          }
+          try {
+            String a = adrInjectionService.compose(projectId).block();
+            adrsBlock = truncate(a == null ? "" : a, ENTERPRISE_INJECT_CAP);
+            if (!adrsBlock.isBlank()) {
+              log.info(
+                  "V2 run={} injected ADRs into planner ({} chars)", runId, adrsBlock.length());
+            }
+          } catch (Exception e) {
+            log.warn("V2 run={} ADR planner injection skipped: {}", runId, e.getMessage());
+            adrsBlock = "";
+          }
+        }
         PlannerRequest plannerReq =
             PlannerRequest.builder()
                 .spec(userRequest)
@@ -1152,6 +1239,8 @@ public class RunOrchestrator {
                 .projectMemory(projectMemory)
                 .projectBrief(projectBrief)
                 .referenceDocs(referenceDocs)
+                .contracts(contractsBlock)
+                .projectAdrs(adrsBlock)
                 .tddMode(tddMode)
                 .prReviewComments(prReviewComments)
                 .build();
@@ -1414,6 +1503,36 @@ public class RunOrchestrator {
         persistReviewFailure(runId, e);
       }
 
+      // ── 3b. Enterprise enforcement (project runs only) — make the formerly
+      // "decorative" engines real (RL-2026-05-037). StandardsRunner persists
+      // standards violations so /standards/report is populated; the breaking-
+      // change classifier surfaces touched-contract breaks as report-only run
+      // issues. Both project-gated + flag-gated (default OFF) + non-fatal.
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> contractBreakingIssues =
+          java.util.List.of();
+      if (projectId != null) {
+        if (featureFlagService.isEnabled("standards.enforcement.enabled")) {
+          try {
+            runStandardsEnforcement(runId, projectId, rootCtx.workspaceRoot());
+          } catch (Exception e) {
+            log.warn(
+                "RunOrchestrator run={} standards enforcement skipped: {}", runId, e.getMessage());
+          }
+        }
+        if (featureFlagService.isEnabled("contracts.breaking-change.enabled")) {
+          try {
+            contractBreakingIssues =
+                detectBreakingChangeIssues(
+                    runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds);
+          } catch (Exception e) {
+            log.warn(
+                "RunOrchestrator run={} breaking-change detection skipped: {}",
+                runId,
+                e.getMessage());
+          }
+        }
+      }
+
       // ── 4. Ensure README.md exists in the workspace ─────────────────
       // If the planner emitted a "create README" task the file is already there
       // and we leave it alone. If not (typical for trivial specs), write a
@@ -1470,7 +1589,7 @@ public class RunOrchestrator {
       }
 
       // ── 5. Generate validation report + kick off test generation ────
-      generateValidationReport(runId, execResult, reviewResult, plan);
+      generateValidationReport(runId, execResult, reviewResult, plan, contractBreakingIssues);
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
       // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
       // projects that does not apply; skip until the dedicated CLI stdin/stdout
@@ -1705,6 +1824,23 @@ public class RunOrchestrator {
               r.setStatus("WORKING");
               runRepo.save(r);
             });
+
+    // RL-2026-05-035 (PATCH-learning win) — inject the project's codemap so the PATCH agent
+    // localizes from the generated map instead of grepping the tree from scratch. Project autofix
+    // surfaces have a projectId + fresh codemap; blind bench runs have neither → no-op (fail-safe).
+    if (run.getProjectId() != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
+      try {
+        String codeIntel =
+            buildCodeIntelContext(
+                run.getProjectId(), projectRepoService.resolveForRun(run.getProjectId(), null));
+        if (!codeIntel.isBlank()) {
+          userRequestLive = codeIntel + "\n\n---\n\nTASK:\n" + userRequestLive;
+          log.info("PATCH run={} injected code-intel ({} chars)", runId, codeIntel.length());
+        }
+      } catch (Exception e) {
+        log.warn("PATCH run={} code-intel injection skipped: {}", runId, e.getMessage());
+      }
+    }
 
     com.navneet.executespec.agent.WorkerResult result;
     try {
@@ -3372,6 +3508,20 @@ public class RunOrchestrator {
    */
   private void generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
+    generateValidationReport(runId, execResult, reviewResult, plan, java.util.List.of());
+  }
+
+  /**
+   * RL-2026-05-037 — overload accepting extra synthetic issues (breaking-change findings from the
+   * contract gate) to append to the report's issue list so they surface in the run Issues panel.
+   * The 4-arg form delegates here with an empty list.
+   */
+  private void generateValidationReport(
+      String runId,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      Plan plan,
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues) {
     try {
       var run = runRepo.findById(runId).orElse(null);
       if (run == null) return;
@@ -3484,7 +3634,13 @@ public class RunOrchestrator {
       // of what actually happened. Synthesise issues from the signals we DO have
       // (build pass/fail, reviewer verdict, accuracy report) so the dimensions
       // actually move when things go wrong.
-      review.setIssues(synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> synthIssues =
+          new java.util.ArrayList<>(
+              synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
+      if (extraIssues != null && !extraIssues.isEmpty()) {
+        synthIssues.addAll(extraIssues);
+      }
+      review.setIssues(synthIssues);
 
       // RL-2026-05-001 — run the worker-written tests in the workspace and feed the REAL
       // passed/total into the verifiedScore TESTS slot, instead of an LLM coverage guess. The
@@ -3982,9 +4138,285 @@ public class RunOrchestrator {
     return out;
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // RL-2026-05-037 — enterprise enforcement wiring (StandardsRunner + breaking-change classifier).
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Cap the workspace file walk for standards enforcement (bounded cost on large repos). */
+  private static final int STANDARDS_WALK_FILE_CAP = 6_000;
+
+  /** Cap persisted standards-violation rows per run (avoid a runaway lint dump). */
+  private static final int STANDARDS_MAX_VIOLATIONS_PERSIST = 200;
+
+  /** Dirs never worth walking for standards (vendored / build output / VCS). */
+  private static final java.util.Set<String> STANDARDS_SKIP_DIRS =
+      java.util.Set.of(
+          ".git",
+          "node_modules",
+          "target",
+          "dist",
+          "build",
+          ".venv",
+          "venv",
+          "__pycache__",
+          "vendor",
+          ".gradle",
+          ".idea",
+          ".mvn",
+          "out",
+          "bin",
+          "obj",
+          ".next",
+          "coverage");
+
+  /**
+   * Run deterministic coding standards (lint / file-pattern / AST) against the final workspace and
+   * persist any violations to {@code standards_violation} so the {@code /standards/report} endpoint
+   * reflects reality. Project-gated by the caller; non-fatal here. Zero overhead when the org has
+   * no standards defined (resolver returns empty → early return).
+   */
+  private void runStandardsEnforcement(String runId, String projectId, Path workspaceRoot) {
+    UUID runUuid;
+    try {
+      runUuid = UUID.fromString(runId);
+    } catch (Exception e) {
+      runUuid = null; // run_id is nullable on standards_violation
+    }
+    String orgId =
+        projectRepository
+            .findById(projectId)
+            .map(com.navneet.executespec.auth.entity.Project::getOrgId)
+            .orElse(null);
+    if (orgId == null) return;
+    var effective = effectiveStandardsResolver.resolve(orgId, projectId, null);
+    if (effective == null || effective.isEmpty()) return; // common case → no-op
+    java.util.List<String> repoFilePaths = new java.util.ArrayList<>();
+    java.util.List<Path> sourceFiles = new java.util.ArrayList<>();
+    collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
+    var report = standardsRunner.run(effective, workspaceRoot, repoFilePaths, sourceFiles);
+    java.util.List<com.navneet.executespec.standards.StandardsViolation> rows =
+        toStandardsViolationRows(runUuid, projectId, report, STANDARDS_MAX_VIOLATIONS_PERSIST);
+    int persisted = 0;
+    for (var row : rows) {
+      try {
+        standardsViolationRepository.save(row);
+        persisted++;
+      } catch (Exception e) {
+        log.debug("RunOrchestrator run={} standards persist skipped: {}", runId, e.getMessage());
+      }
+    }
+    log.info(
+        "RunOrchestrator run={} standards: {} standard(s) resolved, {} violation(s) persisted",
+        runId,
+        effective.size(),
+        persisted);
+  }
+
+  /** Pure mapping: StandardsRunner violations → persistable {@code standards_violation} rows. */
+  static java.util.List<com.navneet.executespec.standards.StandardsViolation>
+      toStandardsViolationRows(
+          UUID runId,
+          String projectId,
+          com.navneet.executespec.standards.StandardsRunner.RunReport report,
+          int cap) {
+    java.util.List<com.navneet.executespec.standards.StandardsViolation> out =
+        new java.util.ArrayList<>();
+    if (report == null || report.violations() == null) return out;
+    for (var v : report.violations()) {
+      if (out.size() >= cap) break;
+      out.add(
+          com.navneet.executespec.standards.StandardsViolation.builder()
+              .runId(runId)
+              .projectId(projectId)
+              .standardId(v.standardId())
+              .enforcementType(v.enforcementType())
+              .severity(v.severity() == null ? "ADVISORY" : v.severity().name())
+              .violationSummary(truncate(v.message() + " @ " + v.location(), 1000))
+              .build());
+    }
+    return out;
+  }
+
+  /**
+   * Classify breaking changes to contracts the run touched. Previous content comes from the latest
+   * {@link com.navneet.executespec.contracts.ContractVersion#getInlineContent()}; new content is
+   * read from the workspace disk at the contract's detected path (per-repo subdir for multi-repo
+   * runs). Returns report-only (MINOR) run issues so a breaking change is visible in the Issues
+   * panel without triggering auto-fix or penalising the score. Non-fatal; empty on any miss.
+   */
+  private java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue>
+      detectBreakingChangeIssues(
+          String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
+    if (selectedRepoIds == null || selectedRepoIds.isEmpty()) return java.util.List.of();
+    var repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+    if (repos == null || repos.isEmpty()) return java.util.List.of();
+    boolean multiRepo = repos.size() > 1;
+    java.util.List<com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.IntendedChange>
+        intended = new java.util.ArrayList<>();
+    for (var repo : repos) {
+      Path repoRoot =
+          multiRepo
+              ? workspaceRoot
+                  .resolve("repos")
+                  .resolve(lastPathSegment(repo.getGithubRepoFullName()))
+              : workspaceRoot;
+      for (var contract : contractRegistryRepository.findByRepoId(repo.getId())) {
+        if (contract.getDetectedPath() == null || contract.getDetectedPath().isBlank()) continue;
+        String prev =
+            contractVersionRepository
+                .findFirstByContractIdOrderByRegistryVersionDesc(contract.getId())
+                .map(com.navneet.executespec.contracts.ContractVersion::getInlineContent)
+                .orElse(null);
+        if (prev == null) continue; // first-version or GCS-pointer contract: skip (best-effort)
+        Path f = repoRoot.resolve(contract.getDetectedPath());
+        if (!java.nio.file.Files.isRegularFile(f)) continue;
+        String now;
+        try {
+          now = java.nio.file.Files.readString(f);
+        } catch (Exception e) {
+          continue;
+        }
+        if (now.equals(prev)) continue; // unchanged → not a candidate
+        intended.add(
+            new com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.IntendedChange(
+                contract.getId(), prev, now));
+      }
+    }
+    if (intended.isEmpty()) return java.util.List.of();
+    var report = planBreakingChangeReport.compose(projectId, intended);
+    var issues = toBreakingChangeIssues(report);
+    if (!issues.isEmpty()) {
+      log.info(
+          "RunOrchestrator run={} breaking-change: {} contract(s) flagged (typedAck={})",
+          runId,
+          issues.size(),
+          report.requiresTypedAck());
+    }
+    return issues;
+  }
+
+  /** Pure mapping: breaking-change report rows → report-only (MINOR) run issues. */
+  static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> toBreakingChangeIssues(
+      com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.Report report) {
+    java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> out =
+        new java.util.ArrayList<>();
+    if (report == null || report.breakingChanges() == null) return out;
+    int n = 0;
+    for (var row : report.breakingChanges()) {
+      n++;
+      String consumers =
+          row.affectedConsumers() == null || row.affectedConsumers().isEmpty()
+              ? "no declared consumers"
+              : "consumers: " + String.join(", ", row.affectedConsumers());
+      out.add(
+          com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+              .id("SYNTH-CONTRACT-" + n)
+              .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
+              .category(com.navneet.executespec.reviewer.model.IssueCategory.CROSS_TASK_MISMATCH)
+              .description(
+                  "Breaking change to contract '"
+                      + row.contractName()
+                      + "' ("
+                      + row.type()
+                      + "): "
+                      + truncate(row.summary(), 160)
+                      + " — "
+                      + consumers
+                      + (row.requiresFriction() ? " [REQUIRES ACK]" : ""))
+              .autoFixed(false)
+              .fixSucceeded(false)
+              .build());
+    }
+    return out;
+  }
+
+  /** Bounded, pruned workspace walk for standards enforcement. */
+  private void collectWorkspaceFiles(
+      Path root, java.util.List<String> relPaths, java.util.List<Path> sourceFiles) {
+    if (root == null || !java.nio.file.Files.isDirectory(root)) return;
+    try {
+      java.nio.file.Files.walkFileTree(
+          root,
+          new java.nio.file.SimpleFileVisitor<Path>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(
+                Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
+              if (!dir.equals(root) && STANDARDS_SKIP_DIRS.contains(dir.getFileName().toString())) {
+                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+              }
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+              if (relPaths.size() >= STANDARDS_WALK_FILE_CAP) {
+                return java.nio.file.FileVisitResult.TERMINATE;
+              }
+              relPaths.add(root.relativize(file).toString());
+              sourceFiles.add(file);
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFileFailed(Path file, java.io.IOException e) {
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+          });
+    } catch (Exception e) {
+      log.debug("collectWorkspaceFiles walk failed: {}", e.getMessage());
+    }
+  }
+
   private static String truncate(String s, int max) {
     if (s == null) return "";
     return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+  }
+
+  // RL-2026-05-035 — "consumption is the liability" fix. The codemap/architecture pipeline produces
+  // a per-repo symbol map but it was never fed to the agents that write code (planner / worker /
+  // PATCH). This builds a HARD-BOUNDED code-intel block (per-repo codemap symbol maps) to inject so
+  // localization uses the generated map instead of re-discovering structure from scratch. Best-
+  // effort + language-neutral; flag-gated by callers (`codeintel.inject.enabled`).
+  private static final int CODEINTEL_TOTAL_CAP = 12_000;
+  private static final int CODEINTEL_PER_REPO_CAP = 6_000;
+
+  /**
+   * Per-block cap for enterprise-knowledge planner injection (contracts + ADRs, flag {@code
+   * enterprise.inject.enabled}). Each block is independently truncated so a large registry can't
+   * blow the planner cold-start budget.
+   */
+  private static final int ENTERPRISE_INJECT_CAP = 8_000;
+
+  private String buildCodeIntelContext(
+      String projectId, java.util.List<com.navneet.executespec.project.entity.ProjectRepo> repos) {
+    if (projectId == null || repos == null || repos.isEmpty()) return "";
+    StringBuilder sb = new StringBuilder();
+    int budget = CODEINTEL_TOTAL_CAP;
+    try {
+      for (com.navneet.executespec.project.entity.ProjectRepo r : repos) {
+        if (budget <= 0) break;
+        var cm = projectArchitectureService.latestCodeMap(projectId, r.getId());
+        if (cm.isEmpty() || cm.get().getContent() == null || cm.get().getContent().isBlank()) {
+          continue;
+        }
+        String body = truncate(cm.get().getContent(), Math.min(budget, CODEINTEL_PER_REPO_CAP));
+        sb.append("### Codemap — ")
+            .append(lastPathSegment(r.getGithubRepoFullName()))
+            .append("\n")
+            .append(body)
+            .append("\n\n");
+        budget -= body.length();
+      }
+    } catch (Exception e) {
+      log.warn("buildCodeIntelContext failed (continuing without code-intel): {}", e.getMessage());
+      return "";
+    }
+    String out = sb.toString().trim();
+    if (out.isBlank()) return "";
+    return "EXISTING CODEBASE MAP — use this to LOCATE the right files/symbols before editing;"
+        + " do NOT re-discover the structure from scratch:\n\n"
+        + out;
   }
 
   /**
@@ -4623,6 +5055,8 @@ public class RunOrchestrator {
             .projectMemory(parentReq.projectMemory())
             .projectBrief(parentReq.projectBrief())
             .referenceDocs(parentReq.referenceDocs())
+            .contracts(parentReq.contracts())
+            .projectAdrs(parentReq.projectAdrs())
             .tddMode(parentReq.tddMode())
             .build();
 
