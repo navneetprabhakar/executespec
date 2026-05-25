@@ -101,18 +101,10 @@ public class ShellTool implements Tool {
             ? Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC)
             : DEFAULT_TIMEOUT_SEC;
 
-    String workspacePath = ctx.workspaceRoot().toString();
-    ShellSandboxPolicy.ValidationResult validation = sandboxPolicy.validate(command, workspacePath);
-    if (!validation.permitted()) {
-      return ToolResult.err(
-          ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
-    }
-
-    // Bench-mode branch — when this runId has a cleanroom container registered,
-    // dispatch via `docker exec` so build/run commands hit the container's toolchain
-    // (gcc, cargo, go, etc.) which the host typically doesn't have. The two bench
-    // adapters (programbench, swebench) use different in-container working directories;
-    // resolve which one applies.
+    // Resolve the cleanroom container FIRST (was done after the sandbox check — see below for why
+    // the order matters). When this runId has one (SWE-bench / ProgramBench), the command
+    // dispatches via `docker exec` into a `--network none`, ephemeral, workspace-only container —
+    // the container itself IS the security boundary.
     String containerId = null;
     String workdir = null;
     if (swebenchContainers != null) {
@@ -127,6 +119,23 @@ public class ShellTool implements Tool {
       if (pbCid != null) {
         containerId = pbCid;
         workdir = "/workspace";
+      }
+    }
+
+    // The host-oriented ShellSandboxPolicy (blocks `cd <abs>`, heredocs, env-prefixes, chained
+    // verbs not in its allowlist) is correct for HOST execution (product runs), but is both
+    // unnecessary and actively harmful for IN-CONTAINER dispatch: it blocks the worker's own
+    // verification (writing + running a repro, running pytest, `cd /testbed && …`), forcing it to
+    // edit blind. Inside a `--network none`, ephemeral, workspace-only-mount container a command
+    // can neither exfiltrate nor damage the host, so we skip the host policy there and let the
+    // container be the sandbox. Host execution keeps the full policy.
+    if (containerId == null) {
+      String workspacePath = ctx.workspaceRoot().toString();
+      ShellSandboxPolicy.ValidationResult validation =
+          sandboxPolicy.validate(command, workspacePath);
+      if (!validation.permitted()) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
       }
     }
 
