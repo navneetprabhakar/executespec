@@ -171,6 +171,23 @@ class AccessGuardCoverageTest {
    */
   private static final Set<String> KNOWN_LEGACY_DRIFT = new LinkedHashSet<>(Set.of());
 
+  /**
+   * RL-2026-05-040 — write-annotated handlers
+   * ({@code @PostMapping/@PutMapping/@DeleteMapping/ @PatchMapping}) on a protected path that
+   * legitimately need only READ access: a mutating HTTP verb used for a read-only computation that
+   * mutates no tenant-owned state (e.g. a POST that returns a heuristic estimate or a drift
+   * report). Each entry asserts "a cross-org read-only member may invoke this without harm."
+   * Default response to a new failure is "swap assertCanRead → assertCanWrite," NOT adding here —
+   * keep this list to genuine read-only POSTs only.
+   */
+  private static final Set<String> READ_ONLY_WRITE_HANDLERS =
+      new LinkedHashSet<>(
+          Set.of(
+              "com.navneet.executespec.contracts.drift.ContractDriftController#checkContract",
+              "com.navneet.executespec.contracts.drift.ContractDriftController#checkProject",
+              "com.navneet.executespec.contracts.drift.ContractDriftController#checkRepo",
+              "com.navneet.executespec.export.ProjectExportController#export"));
+
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
     JavaClasses classes =
@@ -179,6 +196,7 @@ class AccessGuardCoverageTest {
             .importPackages("com.navneet.executespec");
 
     Set<String> violations = new TreeSet<>();
+    Set<String> writeGuardViolations = new TreeSet<>();
 
     for (var cls : classes) {
       // Only scan @RestController / @Controller classes (anything that responds to web).
@@ -205,6 +223,13 @@ class AccessGuardCoverageTest {
         if (!callsGuard) {
           violations.add(key + "  (path=" + fullPath + ")");
         }
+
+        // RL-2026-05-040 — write-shaped handler must not gate a mutation behind a READ guard.
+        if (isWriteHandler(m)
+            && gatesWriteBehindReadGuard(m)
+            && !READ_ONLY_WRITE_HANDLERS.contains(key)) {
+          writeGuardViolations.add(key + "  (path=" + fullPath + ")");
+        }
       }
     }
 
@@ -228,6 +253,21 @@ class AccessGuardCoverageTest {
             + String.join("\n  - ", violations);
 
     assertThat(violations).withFailMessage(msg).isEmpty();
+
+    String writeMsg =
+        "Write handler gated behind a READ-only guard — cross-org read-only members can mutate.\n\n"
+            + "These mutating endpoints (POST/PUT/DELETE/PATCH) on a project path call\n"
+            + "ProjectAccessGuard.assertCanRead but never assertCanWrite. assertCanRead admits a\n"
+            + "cross-org PROJECT_VIEWER, so a read-only member can drive the mutation"
+            + " (RL-2026-05-040).\n\n"
+            + "Fix: swap assertCanRead -> assertCanWrite. Only if the endpoint genuinely needs"
+            + " read\n"
+            + "(a POST that triggers a read-only computation + mutates no tenant state) add it to\n"
+            + "READ_ONLY_WRITE_HANDLERS with a one-line justification.\n\n"
+            + "Violations:\n"
+            + "  - "
+            + String.join("\n  - ", writeGuardViolations);
+    assertThat(writeGuardViolations).withFailMessage(writeMsg).isEmpty();
 
     // Drift detector — also flag entries in KNOWN_LEGACY_DRIFT that are no longer real
     // violations (controller migrated, method removed, etc.). Keeps the legacy set honest.
@@ -299,6 +339,36 @@ class AccessGuardCoverageTest {
         || m.isAnnotatedWith(DeleteMapping.class)
         || m.isAnnotatedWith(PatchMapping.class)
         || m.isAnnotatedWith(RequestMapping.class);
+  }
+
+  /** A mutating HTTP verb (POST/PUT/DELETE/PATCH) — not a pure read GET. */
+  private static boolean isWriteHandler(JavaMethod m) {
+    return m.isAnnotatedWith(PostMapping.class)
+        || m.isAnnotatedWith(PutMapping.class)
+        || m.isAnnotatedWith(DeleteMapping.class)
+        || m.isAnnotatedWith(PatchMapping.class);
+  }
+
+  /**
+   * True iff the handler's ONLY {@code ProjectAccessGuard} call is {@code assertCanRead} (it never
+   * calls {@code assertCanWrite}). {@code assertCanRead} admits a cross-org {@code PROJECT_VIEWER},
+   * so a write gated only by it lets a read-only member mutate. Handlers guarded by {@code
+   * RunAccessGuard} or a delegated name-pattern guard have no read/write split and return false
+   * (out of scope for this rule).
+   */
+  private static boolean gatesWriteBehindReadGuard(JavaMethod m) {
+    boolean callsProjectRead = false;
+    boolean callsProjectWrite = false;
+    for (var call : m.getMethodCallsFromSelf()) {
+      if (!"com.navneet.executespec.project.security.ProjectAccessGuard"
+          .equals(call.getTargetOwner().getName())) {
+        continue;
+      }
+      String n = call.getTarget().getName();
+      if ("assertCanRead".equals(n)) callsProjectRead = true;
+      if ("assertCanWrite".equals(n)) callsProjectWrite = true;
+    }
+    return callsProjectRead && !callsProjectWrite;
   }
 
   private static String extractClassBasePath(com.tngtech.archunit.core.domain.JavaClass cls) {

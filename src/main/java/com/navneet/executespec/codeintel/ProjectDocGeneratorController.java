@@ -57,7 +57,7 @@ public class ProjectDocGeneratorController {
       @PathVariable String projectId,
       @PathVariable String docType,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     DocType type = parseType(docType);
     String userId = userDetails == null ? null : userDetails.getUser().getId();
     try {

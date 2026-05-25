@@ -64,7 +64,7 @@ Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(
 
 JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`).
 
-`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard. Ten legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators fail the build.
+`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard — AND that write handlers (POST/PUT/DELETE/PATCH) use `assertCanWrite`, not `assertCanRead` (RL-2026-05-040; genuine read-only POSTs allowlisted in `READ_ONLY_WRITE_HANDLERS`). `KNOWN_LEGACY_DRIFT` is empty (35/35 cleared); new violators fail the build.
 
 ### Security
 
@@ -436,7 +436,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - In-app notifications (run completion + quota warning + gate-opened events).
 - Pause / resume on V2 runs (interrupt + resume-from-disk; flag `v2.pause.enabled`).
 - GDPR data-export endpoint.
-- `AccessGuardCoverageTest` ArchUnit pin + known-legacy ledger (10 sites remaining).
+- `AccessGuardCoverageTest` ArchUnit pin — tenant-guard coverage + write-handler-uses-write-guard (RL-2026-05-040); `KNOWN_LEGACY_DRIFT` empty (35/35 cleared).
 - Local Grafana dashboards + GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
 - Model evaluation framework (`eval/`) + tier-eval-v2 (`eval/v2/`) — production-shaped per-tier (LIGHTWEIGHT / PLANNING / WORKHORSE) × provider eval that drives the live agent prompts + tool schemas through `LlmRouter` and scores tool-call validity, cache hit rate, latency, cost. Admin endpoint `POST /api/admin/eval/v2/run`; CLI wrapper `scripts/tier-eval-v2.sh`.
 
