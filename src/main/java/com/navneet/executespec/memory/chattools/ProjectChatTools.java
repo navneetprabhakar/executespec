@@ -26,6 +26,9 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
+import com.navneet.executespec.project.rag.RetrievalService;
+import com.navneet.executespec.project.rag.entity.ProjectDocument;
+import com.navneet.executespec.project.rag.repository.ProjectDocumentRepository;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -75,6 +78,8 @@ public class ProjectChatTools {
   private final ProjectMemoryProvider memoryProvider;
   private final CodeReviewService codeReviewService;
   private final AppUserRepository appUserRepository;
+  private final ProjectDocumentRepository projectDocumentRepository;
+  private final RetrievalService retrievalService;
   private final ObjectMapper json;
 
   /** Caller-scoped state every tool needs. {@code callerPat} may be null for public-repo orgs. */
@@ -94,7 +99,10 @@ public class ProjectChatTools {
         getProjectMemory(ctx),
         getLatestArchitecture(ctx),
         runCodeReview(ctx),
-        getLatestCodeReview(ctx));
+        getLatestCodeReview(ctx),
+        listProjectDocuments(ctx),
+        readGeneratedDoc(ctx),
+        searchProjectDocs(ctx));
   }
 
   // ── Tool 1: regenerate architecture ───────────────────────────────────────
@@ -678,6 +686,174 @@ public class ProjectChatTools {
           out.put(
               "reportMarkdown", scan.getReportMarkdown() == null ? "" : scan.getReportMarkdown());
           if (scan.getFinishedAt() != null) out.put("finishedAt", scan.getFinishedAt().toString());
+          return out;
+        });
+  }
+
+  // ── Tool 10: list project documents (uploaded + generated) ───────────────
+
+  private ToolCallback listProjectDocuments(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("list_project_documents")
+            .description(
+                "List every document available for this project: user-UPLOADED reference docs"
+                    + " (PRDs, specs, design notes — with filename + indexing status) AND"
+                    + " SYSTEM-GENERATED docs (EXPLANATION onboarding narrative, SETUP guide). Call"
+                    + " this first to see what exists, then read_generated_doc /"
+                    + " search_project_docs to read content. The architecture doc + project memory"
+                    + " are already in your context. Read-only.")
+            .inputSchema("{ \"type\": \"object\", \"properties\": {} }")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          ObjectNode out = json.createObjectNode();
+          out.put("ok", true);
+          ArrayNode uploaded = out.putArray("uploaded");
+          for (ProjectDocument d :
+              projectDocumentRepository.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+                  ctx.projectId())) {
+            ObjectNode row = uploaded.addObject();
+            row.put("filename", d.getFilename() == null ? d.getPathRelative() : d.getFilename());
+            row.put("status", d.getStatus() == null ? "" : d.getStatus().name());
+            if (d.getMimeType() != null) row.put("mimeType", d.getMimeType());
+          }
+          ArrayNode generated = out.putArray("generated");
+          for (DocType t : DocType.values()) {
+            docGeneratorService
+                .latest(ctx.projectId(), t)
+                .ifPresent(
+                    g -> {
+                      ObjectNode row = generated.addObject();
+                      row.put("docType", g.getDocType().name());
+                      row.put("version", g.getVersion());
+                      if (g.getGeneratedAt() != null) {
+                        row.put("generatedAt", g.getGeneratedAt().toString());
+                      }
+                    });
+          }
+          out.put("uploadedCount", uploaded.size());
+          out.put("generatedCount", generated.size());
+          out.put(
+              "hint",
+              "READY uploaded docs are searchable via search_project_docs; generated docs are "
+                  + "readable verbatim via read_generated_doc.");
+          return out;
+        });
+  }
+
+  // ── Tool 11: read a generated doc (EXPLANATION / SETUP) verbatim ──────────
+
+  private ToolCallback readGeneratedDoc(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("read_generated_doc")
+            .description(
+                "Read the FULL content of a system-generated project doc WITHOUT regenerating it."
+                    + " EXPLANATION = plain-English onboarding narrative (\"what is this"
+                    + " project\"); SETUP = runnable local-setup guide. Use to answer onboarding /"
+                    + " setup questions. Read-only — use generate_project_doc only to create or"
+                    + " refresh.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "docType": {
+      "type": "string",
+      "enum": ["EXPLANATION", "SETUP"],
+      "description": "EXPLANATION for the narrative doc; SETUP for setup instructions."
+    }
+  },
+  "required": ["docType"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String docTypeStr =
+              args.has("docType") && !args.get("docType").isNull()
+                  ? args.get("docType").asText(null)
+                  : null;
+          if (docTypeStr == null) {
+            return errorEnvelope("docType is required (EXPLANATION or SETUP)");
+          }
+          DocType docType;
+          try {
+            docType = DocType.valueOf(docTypeStr.toUpperCase());
+          } catch (IllegalArgumentException ex) {
+            return errorEnvelope(
+                "Unknown docType '" + docTypeStr + "'. Accepted: EXPLANATION, SETUP.");
+          }
+          Optional<ProjectGeneratedDoc> doc = docGeneratorService.latest(ctx.projectId(), docType);
+          ObjectNode out = json.createObjectNode();
+          if (doc.isEmpty()) {
+            out.put("ok", true);
+            out.put(
+                "summary",
+                "No "
+                    + docType.name()
+                    + " doc exists yet. Call generate_project_doc to create it.");
+            return out;
+          }
+          out.put("ok", true);
+          out.put("docType", doc.get().getDocType().name());
+          out.put("version", doc.get().getVersion());
+          out.put("content", doc.get().getContent());
+          return out;
+        });
+  }
+
+  // ── Tool 12: semantic search over uploaded reference docs ────────────────
+
+  private ToolCallback searchProjectDocs(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("search_project_docs")
+            .description(
+                "Semantic search across the project's UPLOADED reference documents (PRDs, specs, "
+                    + "design notes). Returns the most relevant passages for your query — pick a "
+                    + "focused query to ground your answer in what the user uploaded. (The chat "
+                    + "already auto-injects passages relevant to the user's latest message; call "
+                    + "this when you need to search for something specific.) Read-only.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "What to search the uploaded documents for."
+    }
+  },
+  "required": ["query"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String query =
+              args.has("query") && !args.get("query").isNull()
+                  ? args.get("query").asText(null)
+                  : null;
+          if (query == null || query.isBlank()) {
+            return errorEnvelope("query is required");
+          }
+          String refs = retrievalService.retrieve(ctx.projectId(), query);
+          ObjectNode out = json.createObjectNode();
+          out.put("ok", true);
+          out.put("query", query);
+          if (refs == null || refs.isBlank()) {
+            out.put("results", "");
+            out.put(
+                "summary",
+                "No relevant passages found in the uploaded documents (or none are indexed yet).");
+          } else {
+            out.put("results", refs);
+          }
           return out;
         });
   }
