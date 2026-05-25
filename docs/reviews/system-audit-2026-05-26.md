@@ -28,7 +28,7 @@ fatal — this is one disciplined cycle away from defensible.
 | Code-quality signals | **B** | 13 TODO/FIXME in 156K LOC (clean); 29 flags, centralized (not sprawl). Real debt: 2 god-files, dual codemap systems, dead scanners. |
 | Product coherence & value prop | **C** | The spec→PR loop runs and the verified-score is honestly built, but the *measured* 59% is PATCH/existing-repo — not the greenfield BUILD path that is the actual product. |
 | Enterprise readiness | **D** | SSO is an explicit skeleton ("save intent so marketing can show 'SSO ✓'"); no SCIM; no intra-org least-privilege; enterprise governance engines shipped **OFF**. |
-| Security posture | **C+** | Real defense layers + the worst IDOR is genuinely fixed — but a **live cross-org write hole** remains and one advertised layer (`SupplyChainScanner`) is dead code. |
+| Security posture | **C+** | Real defense layers; the share-link IDOR + the cross-org write hole are now fixed (this PR) — but **no intra-org least privilege** (any in-org member writes any project) remains, and one advertised layer (`SupplyChainScanner`) is dead code. |
 | Trust & correctness | **B−** | The additive verified-score is the strongest asset (honest, real test exec, "not measured" disclosure) — but it vouches for AI-graded-by-AI and awards 30/100 for emitting files. |
 
 ## What is genuinely strong (do not lose this in the cleanup)
@@ -38,44 +38,47 @@ fatal — this is one disciplined cycle away from defensible.
 3. **Engineering culture signal.** The team caught and *transparently disclosed* its own 3× benchmark scorer error (false 17% → real 59%, 4 distinct bugs). 13 TODOs in 156K LOC and the disciplined default-OFF flag-rollout pattern (zero production blast radius) corroborate real discipline.
 4. **The core insight is right.** Existing-repo PATCH is where agentic scaffolds add the most lift, and the system measurably delivers it (≈59% on SWE-bench Lite, blind).
 
-## Top risks (ranked, cross-cutting, with evidence)
+## Top 20 risks (ranked)
 
-### 🔴 1. Strategic: the measured differentiator is not the product
-The 59%/52% SWE-bench result + the "5–17× lift" are **PATCH mode** (existing-repo bug-fix — only the 4 autofix surfaces + bench adapters use it). The customer-facing "submit a spec → PR" product is **BUILD mode** (greenfield; `RunMode` defaults to BUILD for product entry points). BUILD has **no comparable external benchmark** — its quality rests on the self-graded `scripts/v2-eval.sh` (LLM-judged accuracy). *The headline number a buyer hears does not measure the thing they'd buy.* Either benchmark the BUILD path externally, or reposition around existing-repo PATCH (where the moat is also strongest) — but that's exactly where Cursor/Cline/Devin already compete at 60–66% Verified.
+> Severity: 🔴 critical · 🟠 high · 🟡 medium. Each is the synthesis of two independent passes verified
+> against source. **Two items the first pass flagged were fixed in this same PR** — listed at the end,
+> not counted in the 20.
 
-### 🔴 2. Reliability: mid-run work is not durable
-Workspaces are local disk at `<agent.workspace>/<runId>/`; the GCS upload + archive job fire **only on terminal events** (`deployment/WorkspaceGcsUploadListener.java:50`, `WorkspaceArchiveJob.java:55`). Crash-resume requires the workspace on the same node — on ephemeral disk (the documented Cloud Run target) a restart maps to "workspace gone → FAILED," **after credits were charged at plan approval**. This is the only risk that *loses paid customer work*. Fix: pin execution to the persistent VM (and document Cloud Run = previews only) or checkpoint to GCS on task boundaries.
+### 🔴 Critical
 
-### 🔴 3. Scale: concurrency limits are dead code
-Dispatch is a single per-JVM `newFixedThreadPool(clamp(4,16,cores))` with an unbounded queue (`RunOrchestrator.java:291`). The YAML per-tier/provider `concurrent-run-limit` + `ProviderRunPoolProperties` have **zero consumers**; there is **no `Semaphore` in the dispatch path**. At load, everything contends on 16 threads + 30 DB connections, and provider 429s are ungated. Either enforce the config (per-provider/tier semaphore + bounded queue + fast-fail) or delete it (stop implying a control that doesn't exist).
+1. **Strategic — the measured differentiator isn't the product.** The 59%/52% + "5–17× lift" are **PATCH** (existing-repo); the product sold is **BUILD** (greenfield; `RunMode` defaults to BUILD for product entry points), which has **no external benchmark** — quality rests on the self-graded `scripts/v2-eval.sh`. The headline doesn't measure what a buyer buys. Either benchmark BUILD externally or reposition around PATCH (where Cursor/Cline/Devin already sit at 60–66%).
+2. **Reliability — mid-run work isn't durable.** Workspaces live on local disk; GCS upload + archive fire **only on terminal events** (`WorkspaceGcsUploadListener.java:50`). A restart on ephemeral disk (the documented Cloud Run target) → "workspace gone → FAILED," **after credits were charged at plan approval**. The only risk that *loses paid customer work*.
+3. **Scale — concurrency limits are dead code.** Single per-JVM 16-thread pool + unbounded queue (`RunOrchestrator.java:291`); the YAML per-tier/provider `concurrent-run-limit` + `ProviderRunPoolProperties` have **zero consumers**; no `Semaphore` anywhere; provider 429s ungated. Enforce it or delete the config.
+4. **Security — no intra-org least privilege.** `ProjectAccessGuard` admits **any in-org member to any project** (its own javadoc concedes it). A plain `DEVELOPER` not assigned to a project can drive it, open PRs, and spend LLM budget. (The cross-org-viewer write hole was fixed this cycle; this is the remaining open class.)
 
-### 🔴 4. Security: live cross-org write hole
-The recent hardening fixed the share-link IDOR + contracts guards (verified, unconditional) — but **not** this class: `project/controller/ProjectRepoController.java` and `project/rag/ProjectDocumentController.java` use `assertCanRead` on **write** paths (link/unlink repos, edit relationships, upload/delete RAG docs). A cross-org `PROJECT_VIEWER` invited read-only can still mutate those. Compounded by **no intra-org least privilege** (`ProjectAccessGuard` admits *any* in-org member to *any* project) and an `AccessGuardCoverageTest` that checks a guard is *called* but not that it's the *write* guard — so this ships green. **Recommend fixing immediately** (swap `assertCanRead`→`assertCanWrite` on the write handlers; tighten the test to distinguish read/write).
+### 🟠 High
 
-> **✅ FIXED 2026-05-26 (RL-2026-05-040, same PR):** all 21 write handlers swapped to `assertCanWrite`; `AccessGuardCoverageTest` now pins write-handler→write-guard (4 genuine read-only POSTs allowlisted with justification). The **intra-org least-privilege** gap (any in-org member can write any project) remains open — a larger, separate item.
+5. **`RunOrchestrator` god-object** — 5,262 LOC / 73 methods / **63 dependencies**; effectively un-unit-testable (2 narrow tests); every pipeline change risks it. Carve out cost/credit, validation-report, crash-resume, context-injection services.
+6. **Enterprise governance ships OFF.** Standards / contract / ADR / codemap injection are all **default-OFF** flags (V209–V213); `InvariantChecker` has zero callers. In the shipped default, defining governance **changes nothing the AI does** — one flag-flip from real, not flipped.
+7. **Verified-score vouches for AI-graded-by-AI.** The TESTS slot reads the worker's *own* tests (self-consistency, not correctness); CODE_DELIVERED awards **30/100 for `filesGenerated>0`** alone. "Shippable ≥85" doesn't map to customer intent.
+8. **SSO/SCIM is a skeleton.** `auth/sso/SsoConfigController.java` saves "intent" so marketing can show "SSO ✓"; SAML is 409-rejected; only Google OIDC works; **no SCIM anywhere**. The ENTERPRISE tier's #1 procurement checkbox is undeliverable today.
+9. **Cost estimator under-estimates → truncates paid runs.** A documented **12× miss** (`RunCostTracker.java:288`); low estimate → low hard-cap → the run stops mid-work and the customer is charged a credit for a half-finished PR (refund only on FAILURE, not a low-quality PASS).
+10. **Two LLM routers, divergent semantics.** `FallbackLlmRouter` ("legacy") has **33 callers / ~14 live agents** with different retry/failover than the "canonical" `LlmRouter` — a structural fork; a transient outage behaves differently depending on the caller.
+11. **Incomplete + mutable audit trail.** The activity feed omits run / PR / membership / setting events (RunOrchestrator emits none); retention defaults to dry-run. Insufficient for SOC2 / compliance positioning the ENTERPRISE tier implies.
+12. **RAG fragility.** OpenAI-only embeddings (a BYOK-no-OpenAI org throws on upload), binary corruption on the upload round-trip (PDF/DOCX mangled before Tika), and an ivfflat index built on an empty table (degraded recall).
+13. **No default spend ceiling.** `GovernanceGuard` org spend caps are **null-by-default** (opt-in) → most orgs have no ceiling; combined with the uncredited tech-debt/CI autofix surfaces, a low-tier seat can burn the org's LLM budget.
 
-### 🟠 5. Architecture: the `RunOrchestrator` god-object
-5,262 LOC, 73 methods, **63 dependencies**, owning classification → planning → gate → execution → review → cost → SCM → reporting → resume → injection. Effectively un-unit-testable (2 narrow tests exist); every pipeline change risks it. Carve out `CostCreditService`, `ValidationReportOrchestration`, `CrashResumeService`, `ContextInjectionService`; target <3,000 LOC / <30 deps.
+### 🟡 Medium
 
-### 🟠 6. Product honesty: enterprise governance + code-intel ship OFF
-`StandardsRunner`, contract/ADR injection, the breaking-change classifier, and codemap-injection are now *wired* — but all behind **default-OFF** flags (V209–V213), and the flip is gated on a v2-eval no-regression run the exec report lists as not-yet-fully-done. `InvariantChecker` still has zero callers. So in the shipped default, defining standards/contracts/ADRs **still changes nothing the AI does**. One flag-flip from real; not flipped.
+14. **Dual codemap systems.** `ProjectCodeMap` (8 consumers) vs `RunCodeMap` (3) — two separately-generated, never-reconciled repo views → double LLM cost on big repos + drift.
+15. **Dead `SupplyChainScanner`** — an advertised "8-layer defense" component (`security/dependency/`) with **zero callers**. Security theater.
+16. **Saga branch-delete is a no-op** — `SideEffectExecutor` can't `deleteBranch`, so failed/cancelled runs leak orphan branches on customer repos.
+17. **Frontend has no safety net** — zero running unit tests; CI is prettier + warn-only eslint; no code-splitting (single **~802 KB** bundle). ~35K LOC ships blind, slow first paint on the public path.
+18. **God frontend files** — `lib/api.ts` (**3,679 LOC** / 307 fns) + `signal/pages/ExtraPages.tsx` (2,782 LOC). High-coupling, dangerous to refactor without the (missing) test net.
+19. **Stale Spring-AI-1.1.4 reroute on a hot path** — `RunOrchestrator` reroutes OPENAI→ANTHROPIC for a bug fixed in the **1.1.6** the project now runs; self-healing (restores the provider) but mutates the run entity and is surprising.
+20. **Over-engineered surface area** — 115 entities / 213 migrations / 104 controllers for one product on one VM, much on unmerged branches; the migration log self-documents churn (tier limits set→revert; product-split added then dropped). Cognitive + maintenance load.
 
-### 🟠 7. Trust: the verified-score vouches for AI-graded-by-AI
-The TESTS slot reads the *worker's own* tests (green proves self-consistency, not correctness); CODE_DELIVERED awards **30/100 for `filesGenerated>0`** alone. So a run can earn "Shippable ≥85" with no link to the customer's acceptance criteria. The honesty framing is real, but the badge implies more than it knows.
-
-### 🟠 8. Enterprise: SSO/SCIM is a costume
-`auth/sso/SsoConfigController.java` literally saves "intent" so marketing can show "SSO ✓"; SAML is hard-rejected with 409; only Google OIDC works; **no SCIM anywhere**. The ENTERPRISE tier's #1 procurement checkbox cannot be delivered today.
-
-### 🟡 9. Maintainability/cost: two LLM routers + dual codemaps + dead code
-`FallbackLlmRouter` is framed as "legacy" but has **33 callers** (~14 live agents) with *different* retry/failover semantics than the "canonical" `LlmRouter` — a structural fork, not a vestige. `ProjectCodeMap` vs `RunCodeMap` are two separately-generated, never-reconciled repo views (double LLM cost on big repos). `SupplyChainScanner` (advertised defense layer) and the saga branch-delete are unwired; the Spring-AI-1.1.4 reroute workaround is stale (now on 1.1.6, though self-healing).
-
-### 🟡 10. Surface area vs. footprint
-115 entities / 213 migrations / 104 controllers / 72 packages for one product on one VM — much of it on unmerged branches (V3 launches, migration recipes, readymade solutions, dual SWE-bench harnesses). The migration log self-documents churn (tier limits set→loosen→revert; product-split added then dropped). Not fatal, but it's carrying cost.
+**✅ Fixed in this PR (were risks in the first pass, now closed):** the **cross-org write hole** (21 write handlers swapped to `assertCanWrite`, RL-2026-05-040) and the **`AccessGuardCoverageTest` read-guard-on-write blind spot** (now pins write-handler → write-guard).
 
 ## Prioritized roadmap (what to fix, in order)
 
 **Now (days, ship-blockers):**
-1. **Cross-org write hole** (#4) — `assertCanRead`→`assertCanWrite` on the write handlers + tighten `AccessGuardCoverageTest`. *Security; ~hours.*
+1. **Intra-org least privilege** (#4) — make `ProjectAccessGuard` check per-project membership/role, not just same-org. *Security; the larger remaining auth item now that the cross-org write hole is fixed (RL-2026-05-040, this PR).*
 2. **Mid-run durability** (#2) — pin execution to the persistent VM + document, or checkpoint to GCS on task boundaries. *Only thing that loses paid work.*
 3. **Concurrency** (#3) — enforce the config with a semaphore + bounded queue, or delete the dead config.
 
@@ -87,7 +90,7 @@ The TESTS slot reads the *worker's own* tests (green proves self-consistency, no
 **Strategic (the positioning call):**
 7. Either externally benchmark the BUILD path or reposition the headline around existing-repo PATCH (#1) — and decide the verified-score's relationship to *customer intent*, not just self-consistency (#7).
 
-**Cleanup (opportunistic):** consolidate the two routers + dual codemaps; delete `SupplyChainScanner`/stale reroute/no-op saga branch-delete (#9); deliver real SAML+SCIM before leaning on the ENTERPRISE tier (#8).
+**Cleanup (opportunistic):** consolidate the two LLM routers (#10) + dual codemaps (#14); delete `SupplyChainScanner` (#15) / stale Spring-AI reroute (#19) / no-op saga branch-delete (#16); deliver real SAML+SCIM before leaning on the ENTERPRISE tier (#8).
 
 ## Verdict
 
@@ -95,7 +98,7 @@ ExecuteSpec is a legitimately ambitious, largely-built platform whose strongest 
 honest verified-score with actual test execution, well-engineered crash recovery and gating, a candid
 engineering culture, and a defensible insight that existing-repo PATCH is where the lift lives. But
 today the gap between the pitch (enterprise spec→PR platform with a 59% headline) and the shipped
-default (greenfield BUILD that's unbenchmarked, enterprise governance disabled, SSO a skeleton, a live
-cross-org write hole, paid work lost on a restart) is wide enough to block a serious org from buying
+default (greenfield BUILD that's unbenchmarked, enterprise governance disabled, SSO a skeleton, no
+intra-org least privilege, paid work lost on a restart) is wide enough to block a serious org from buying
 and relying on it. The bones are strong; the path to credibility is concrete and mostly known to the
 team. **C+ — one focused hardening-and-positioning cycle from defensible.**
