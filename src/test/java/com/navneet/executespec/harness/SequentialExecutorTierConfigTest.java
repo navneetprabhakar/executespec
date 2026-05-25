@@ -59,6 +59,8 @@ class SequentialExecutorTierConfigTest {
         mock(AgentTaskRepository.class),
         modelResolver,
         mock(RetrievalService.class),
+        mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(ContextStore.class),
         mock(RunCostTracker.class));
   }

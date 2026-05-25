@@ -74,6 +74,7 @@ public class ProjectSharePublicController {
         runRepo
             .findById(link.getScopeId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+    assertSameProject(run.getProjectId(), link);
     linkService.recordView(link);
     return ResponseEntity.ok(
         new SharedRun(
@@ -97,6 +98,16 @@ public class ProjectSharePublicController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Validation report not found"));
+    // The report carries no projectId of its own — its owning run is the authority. Resolve the
+    // run and verify it belongs to the link's project before returning the report payload.
+    PipelineRun reportRun =
+        runRepo
+            .findById(report.getRunId())
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Validation report not found"));
+    assertSameProject(reportRun.getProjectId(), link);
     linkService.recordView(link);
     return ResponseEntity.ok(
         new SharedValidationReport(
@@ -120,6 +131,7 @@ public class ProjectSharePublicController {
             .findById(scanId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Code review not found"));
+    assertSameProject(scan.getProjectId(), link);
     linkService.recordView(link);
     java.util.List<CodeReviewIssue> issues =
         issueRepo.findByScanIdOrderBySeverityAscFilePathAscLineStartAsc(scanId);
@@ -144,6 +156,7 @@ public class ProjectSharePublicController {
             .findById(reviewId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found"));
+    assertSameProject(review.getProjectId(), link);
     linkService.recordView(link);
     java.util.List<PrReviewComment> comments =
         prCommentRepo.findByPrReviewIdOrderByFilePathAscLineNumberAsc(reviewId);
@@ -187,6 +200,23 @@ public class ProjectSharePublicController {
           HttpStatus.NOT_FOUND, "Share link does not target this surface");
     }
     return link;
+  }
+
+  /**
+   * Load-bearing cross-org IDOR guard for the public read path: the entity resolved by the link's
+   * {@code scopeId} MUST belong to the link's own project. This holds even if a malformed link was
+   * minted before the create-side guard existed. Returns {@code 404 NOT_FOUND} (not 403) on a
+   * mismatch so this unauthenticated endpoint never leaks whether the foreign entity exists.
+   *
+   * <p>Null-safe: a null {@code entityProjectId} or a null link project id never passes.
+   */
+  private static void assertSameProject(String entityProjectId, ProjectShareLink link) {
+    String linkProjectId = link.getProjectId();
+    if (entityProjectId == null
+        || linkProjectId == null
+        || !entityProjectId.equals(linkProjectId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found");
+    }
   }
 
   // ── Public-safe DTOs (never include internal tokens / credentials) ───────

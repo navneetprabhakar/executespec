@@ -55,10 +55,12 @@ public class ContractCoverageController {
   private final ContractDetectionService detectionService;
   private final GitHubRepoService gitHub;
   private final AppUserRepository userRepo;
+  private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public ResponseEntity<CoverageResponse> coverage(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
+    projectAccessGuard.assertCanRead(projectId, principal(auth));
     ProjectRepo repo = ensureLinkedAndAccessible(projectId, repoId, auth);
 
     List<ContractRegistry> existing = contractRegistryRepo.findByRepoId(repoId);
@@ -81,6 +83,7 @@ public class ContractCoverageController {
   @PostMapping("/rescan")
   public ResponseEntity<CoverageResponse> rescan(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ProjectRepo repo = ensureLinkedAndAccessible(projectId, repoId, auth);
     UUID actorUserId = parseUuid(auth == null ? null : auth.getName());
     String actorPat =
@@ -116,6 +119,15 @@ public class ContractCoverageController {
   }
 
   // ── Internals ───────────────────────────────────────────────────────────
+
+  private com.navneet.executespec.auth.security.AppUserDetails principal(
+      org.springframework.security.core.Authentication auth) {
+    if (auth != null
+        && auth.getPrincipal() instanceof com.navneet.executespec.auth.security.AppUserDetails u)
+      return u;
+    throw new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.UNAUTHORIZED, "auth required");
+  }
 
   private ProjectRepo ensureLinkedAndAccessible(
       String projectId, UUID repoId, Authentication auth) {

@@ -185,8 +185,15 @@ export function IdeProjectPulse() {
         (p) => ((p as {status?: string}).status || '').toUpperCase() === 'MERGED',
       ).length)
     : undefined;
+  // BUG-FIX (RL-2026-05-038): the dashboard returns `recentPrs`, not `openPrs` — so the
+  // "Open pull requests" section was permanently empty. Derive open PRs from recentPrs.
   const openPrs = dash
-    ? (((dash.openPrs as unknown[]) || []) as Array<Record<string, unknown>>)
+    ? (((dash.recentPrs as unknown[]) || []) as Array<Record<string, unknown>>).filter(
+        (p) =>
+          String(
+            (p as {status?: string}).status || (p as {state?: string}).state || '',
+          ).toUpperCase() === 'OPEN',
+      )
     : [];
 
   return (

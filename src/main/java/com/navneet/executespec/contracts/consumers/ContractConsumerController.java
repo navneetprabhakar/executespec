@@ -51,13 +51,14 @@ public class ContractConsumerController {
   private final ExecutespecFolderWriter folderWriter;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
+  private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
   @GetMapping
   public ResponseEntity<List<ConsumerDto>> list(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanRead(projectId, principal(auth));
     List<ConsumerDto> out =
         consumerRepo.findByContractIdAndDeclaredInProjectId(contractId, projectId).stream()
             .map(ConsumerDto::from)
@@ -71,7 +72,7 @@ public class ContractConsumerController {
       @PathVariable UUID contractId,
       @RequestBody DeclareRequest body,
       Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     if (body == null || body.consumerRepoId() == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "consumerRepoId required");
     }
@@ -187,7 +188,7 @@ public class ContractConsumerController {
       @PathVariable UUID contractId,
       @PathVariable UUID consumerRepoId,
       Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ContractConsumer existing =
         consumerRepo
             .findByContractIdAndConsumerRepoIdAndDeclaredInProjectId(
@@ -226,10 +227,13 @@ public class ContractConsumerController {
     return sb.toString();
   }
 
-  private void requireAuth(Authentication auth) {
-    if (auth == null || auth.getName() == null) {
-      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
-    }
+  private com.navneet.executespec.auth.security.AppUserDetails principal(
+      org.springframework.security.core.Authentication auth) {
+    if (auth != null
+        && auth.getPrincipal() instanceof com.navneet.executespec.auth.security.AppUserDetails u)
+      return u;
+    throw new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.UNAUTHORIZED, "auth required");
   }
 
   private static UUID parseUuidOrNull(String s) {
