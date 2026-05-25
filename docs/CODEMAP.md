@@ -630,8 +630,12 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | --- | --- | --- |
 | `assessment.llm.enabled` | true | AccuracyAssessmentService LLM-judged scoring |
 | `billing.lifecycle.sunsetting.enabled` | (cfg) | Enables tier SUNSETTING gateway cascade (cancel-at-period-end) |
+| `build.test-exec-gate.enabled` | **false** (V209) | In-loop worker test-exec gate in BUILD per-task smoke (RL-2026-05-034); off ⇒ compile-only smoke |
 | `ci.autofix.enabled` | **false** | Autofix Phase 3 — auto-respond to GitHub `check_run.failure` webhook |
+| `codeintel.inject.enabled` | **false** (V210) | Inject codemap symbol-map into planner + PATCH prompt on project runs (RL-2026-05-035) |
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
+| `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
+| `enterprise.inject.enabled` | **false** (V211) | Inject `{{CONTRACTS}}` + `{{PROJECT_ADRS}}` into the planner prompt (RL-2026-05-035) |
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
 | `harness.v2.batch_enabled` | (cfg) | V2 batch-mode execution |
 | `lint.autofix.enabled` | true (V180) | Phase L1 deterministic auto-formatter pass between executor and reviewer |
@@ -692,6 +696,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V203) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V213) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |

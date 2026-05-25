@@ -408,6 +408,22 @@ public class ProjectService {
       project.setGithubOwner(req.githubOwner().isBlank() ? null : req.githubOwner().trim());
     }
 
+    // RL-2026-05-038 — the settings form also sends name/description/targetBranch/
+    // branchNamingPattern; these were silently dropped (the DTO only had aiProvider +
+    // githubOwner). null = field not provided (the form sends `|| undefined`) → leave unchanged.
+    if (req.name() != null && !req.name().isBlank()) {
+      project.setName(req.name().trim());
+    }
+    if (req.description() != null) {
+      project.setDescription(req.description().isBlank() ? null : req.description().trim());
+    }
+    if (req.targetBranch() != null && !req.targetBranch().isBlank()) {
+      project.setTargetBranch(req.targetBranch().trim());
+    }
+    if (req.branchNamingPattern() != null && !req.branchNamingPattern().isBlank()) {
+      project.setBranchNamingPattern(req.branchNamingPattern().trim());
+    }
+
     project.setUpdatedAt(Instant.now());
     ProjectDto result = ProjectDto.from(projectRepo.save(project));
 

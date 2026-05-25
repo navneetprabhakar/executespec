@@ -84,6 +84,24 @@ class AccessGuardCoverageTest {
               + "[A-Z][a-zA-Z]*$");
 
   /**
+   * Controller-LOCAL helper names that happen to match {@link #GUARD_METHOD_NAME_PATTERN} but are
+   * NOT real tenant guards — they only assert the request is authenticated and/or that a repo is
+   * linked to a project, never that the <em>caller</em> belongs to the project's org. Counting them
+   * as guards lets a cross-org IDOR pass the build (the contracts-controllers leak,
+   * security-review-2026-05-25): a stranger in an unrelated org sails past {@code requireAuth} +
+   * {@code ensureLinked} and reads/mutates another org's contracts.
+   *
+   * <p>So a call to one of these names does NOT satisfy the guard requirement. The only ways to
+   * satisfy it are (a) a call to a method ON one of {@link #GUARD_FQNS} (the canonical {@code
+   * RunAccessGuard} / {@code ProjectAccessGuard}, e.g. {@code assertCanRead} / {@code
+   * assertCanWrite}), or (b) a non-excluded name-pattern match (e.g. a delegated {@code
+   * requireProjectAccess} service guard). Keep this list to genuinely local, non-tenant helpers
+   * only — do NOT add a real guard's method name here.
+   */
+  private static final Set<String> EXCLUDED_LOCAL_HELPERS =
+      Set.of("requireAuth", "ensureLinked", "ensureLinkedAndAccessible", "checkContract");
+
+  /**
    * Path-segment markers — if the controller's path or method's path contains any of these, the
    * method is in scope for the guard requirement.
    */
@@ -182,14 +200,7 @@ class AccessGuardCoverageTest {
         if (ALLOWLIST.contains(key)) continue;
         if (KNOWN_LEGACY_DRIFT.contains(key)) continue;
 
-        boolean callsGuard =
-            m.getMethodCallsFromSelf().stream()
-                .anyMatch(
-                    call ->
-                        GUARD_FQNS.contains(call.getTargetOwner().getName())
-                            || GUARD_METHOD_NAME_PATTERN
-                                .matcher(call.getTarget().getName())
-                                .matches());
+        boolean callsGuard = callsTenantGuard(m);
 
         if (!callsGuard) {
           violations.add(key + "  (path=" + fullPath + ")");
@@ -248,14 +259,7 @@ class AccessGuardCoverageTest {
         if (!isHandlerMethod(m)) continue;
         String fullPath = classBasePath + extractMethodPath(m);
         if (!touchesProtectedSegment(fullPath)) continue;
-        boolean callsGuard =
-            m.getMethodCallsFromSelf().stream()
-                .anyMatch(
-                    call ->
-                        GUARD_FQNS.contains(call.getTargetOwner().getName())
-                            || GUARD_METHOD_NAME_PATTERN
-                                .matcher(call.getTarget().getName())
-                                .matches());
+        boolean callsGuard = callsTenantGuard(m);
         if (!callsGuard) v.add(cls.getName() + "#" + m.getName());
       }
     }
@@ -263,6 +267,30 @@ class AccessGuardCoverageTest {
   }
 
   // ── helpers ────────────────────────────────────────────────────────────
+
+  /**
+   * A handler "calls a tenant guard" iff it invokes a method ON one of {@link #GUARD_FQNS} (the
+   * canonical {@code RunAccessGuard} / {@code ProjectAccessGuard} — covering {@code assertCanRead} /
+   * {@code assertCanWrite} / {@code requireRunAccess}), OR it invokes a name-pattern guard that is
+   * NOT a controller-local non-tenant helper ({@link #EXCLUDED_LOCAL_HELPERS}).
+   *
+   * <p>The exclusion is the bite of security-review-2026-05-25: {@code requireAuth} / {@code
+   * ensureLinked} only prove "authenticated" / "repo linked", never "caller's org owns this
+   * project", so they must NOT satisfy the requirement — otherwise a cross-org IDOR passes the
+   * build.
+   */
+  private static boolean callsTenantGuard(JavaMethod m) {
+    return m.getMethodCallsFromSelf().stream()
+        .anyMatch(
+            call -> {
+              String calledName = call.getTarget().getName();
+              if (GUARD_FQNS.contains(call.getTargetOwner().getName())) {
+                return true;
+              }
+              return !EXCLUDED_LOCAL_HELPERS.contains(calledName)
+                  && GUARD_METHOD_NAME_PATTERN.matcher(calledName).matches();
+            });
+  }
 
   private static boolean isHandlerMethod(JavaMethod m) {
     return m.isAnnotatedWith(GetMapping.class)

@@ -60,6 +60,8 @@ class SequentialExecutorResumeKeyTest {
         taskRepo,
         null, // modelResolver
         null, // retrievalService
+        null, // inLoopTestRunner
+        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(ContextStore.class),
         null /* costTracker */);
   }

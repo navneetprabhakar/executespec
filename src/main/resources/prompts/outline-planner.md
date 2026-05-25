@@ -127,6 +127,14 @@ The plan schema:
 
 {{REFERENCE_DOCS}}
 
+## Cross-repo contracts (do not break these)
+
+{{CONTRACTS}}
+
+## Architecture decisions (ADRs) — respect these
+
+{{PROJECT_ADRS}}
+
 {{TDD_MODE_BLOCK}}
 
 {{MOBILE_PREFERENCE_BLOCK}}

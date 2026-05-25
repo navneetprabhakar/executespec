@@ -49,6 +49,8 @@ class MultiRepoWorkerPromptTest {
         mock(com.navneet.executespec.state.repository.AgentTaskRepository.class),
         mock(com.navneet.executespec.router.ModelResolver.class),
         mock(com.navneet.executespec.project.rag.RetrievalService.class),
+        mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(com.navneet.executespec.context.ContextStore.class),
         mock(com.navneet.executespec.cost.RunCostTracker.class));
   }
