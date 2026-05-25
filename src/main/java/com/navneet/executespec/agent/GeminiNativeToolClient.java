@@ -80,10 +80,10 @@ public class GeminiNativeToolClient {
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(60);
 
   /**
-   * Max retries on HTTP 429 (rate limit) before bailing. Gemini 3.5 has a per-minute request cap;
-   * a 429 means we must wait for the window to reset, so back-off is EXPONENTIAL and patient:
-   * {@code RATE_LIMIT_BACKOFF_MS × 2^(attempt-1)} = 15s → 30s → 60s (per the rate-limit policy —
-   * "wait up to 60s and retry"). Total patience ~105s across 3 attempts before propagating.
+   * Max retries on HTTP 429 (rate limit) before bailing. Gemini 3.5 has a per-minute request cap; a
+   * 429 means we must wait for the window to reset, so back-off is EXPONENTIAL and patient: {@code
+   * RATE_LIMIT_BACKOFF_MS × 2^(attempt-1)} = 15s → 30s → 60s (per the rate-limit policy — "wait up
+   * to 60s and retry"). Total patience ~105s across 3 attempts before propagating.
    */
   private static final int RATE_LIMIT_RETRIES = 3;
 

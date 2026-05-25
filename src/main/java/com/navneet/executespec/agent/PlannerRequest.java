@@ -39,8 +39,8 @@ public record PlannerRequest(
     /**
      * Enterprise-knowledge injection (flag {@code enterprise.inject.enabled}, default OFF) — the
      * rendered {@code {{PROJECT_ADRS}}} block from {@link
-     * com.navneet.executespec.adr.AdrInjectionService}. Nullable / blank when no project or the flag
-     * is off; mirrors {@link #referenceDocs}.
+     * com.navneet.executespec.adr.AdrInjectionService}. Nullable / blank when no project or the
+     * flag is off; mirrors {@link #referenceDocs}.
      */
     String projectAdrs,
     /**

@@ -270,9 +270,9 @@ class AccessGuardCoverageTest {
 
   /**
    * A handler "calls a tenant guard" iff it invokes a method ON one of {@link #GUARD_FQNS} (the
-   * canonical {@code RunAccessGuard} / {@code ProjectAccessGuard} — covering {@code assertCanRead} /
-   * {@code assertCanWrite} / {@code requireRunAccess}), OR it invokes a name-pattern guard that is
-   * NOT a controller-local non-tenant helper ({@link #EXCLUDED_LOCAL_HELPERS}).
+   * canonical {@code RunAccessGuard} / {@code ProjectAccessGuard} — covering {@code assertCanRead}
+   * / {@code assertCanWrite} / {@code requireRunAccess}), OR it invokes a name-pattern guard that
+   * is NOT a controller-local non-tenant helper ({@link #EXCLUDED_LOCAL_HELPERS}).
    *
    * <p>The exclusion is the bite of security-review-2026-05-25: {@code requireAuth} / {@code
    * ensureLinked} only prove "authenticated" / "repo linked", never "caller's org owns this

@@ -1567,7 +1567,8 @@ end and only call completeTask if it exits 0.
       boolean passed = exit == 0;
       // Transfer #1 / verify-before-done (RL-2026-05-034): after a clean COMPILE, RUN the worker's
       // tests in-loop. BUILD's tests-are-mandatory directive WRITES tests; this verifies they PASS.
-      // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle / cargo).
+      // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle /
+      // cargo).
       // Flag-gated + fail-safe: no runner / empty summary → skip (today's compile-only behavior). A
       // real test failure flips this gate to FAILED, transparently reusing the existing build-fail
       // retry path (which re-invokes the worker with this failure text injected).
