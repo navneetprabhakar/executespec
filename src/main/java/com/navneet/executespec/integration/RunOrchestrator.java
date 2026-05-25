@@ -1187,7 +1187,10 @@ public class RunOrchestrator {
                     projectId, projectRepoService.resolveForRun(projectId, selectedRepoIds));
             if (!codeIntel.isBlank()) {
               summary = summary + "\n\n" + codeIntel;
-              log.info("V2 run={} injected code-intel into planner ({} chars)", runId, codeIntel.length());
+              log.info(
+                  "V2 run={} injected code-intel into planner ({} chars)",
+                  runId,
+                  codeIntel.length());
             }
           } catch (Exception e) {
             log.warn("V2 run={} code-intel planner injection skipped: {}", runId, e.getMessage());
@@ -4148,14 +4151,29 @@ public class RunOrchestrator {
   /** Dirs never worth walking for standards (vendored / build output / VCS). */
   private static final java.util.Set<String> STANDARDS_SKIP_DIRS =
       java.util.Set.of(
-          ".git", "node_modules", "target", "dist", "build", ".venv", "venv", "__pycache__",
-          "vendor", ".gradle", ".idea", ".mvn", "out", "bin", "obj", ".next", "coverage");
+          ".git",
+          "node_modules",
+          "target",
+          "dist",
+          "build",
+          ".venv",
+          "venv",
+          "__pycache__",
+          "vendor",
+          ".gradle",
+          ".idea",
+          ".mvn",
+          "out",
+          "bin",
+          "obj",
+          ".next",
+          "coverage");
 
   /**
    * Run deterministic coding standards (lint / file-pattern / AST) against the final workspace and
    * persist any violations to {@code standards_violation} so the {@code /standards/report} endpoint
-   * reflects reality. Project-gated by the caller; non-fatal here. Zero overhead when the org has no
-   * standards defined (resolver returns empty → early return).
+   * reflects reality. Project-gated by the caller; non-fatal here. Zero overhead when the org has
+   * no standards defined (resolver returns empty → early return).
    */
   private void runStandardsEnforcement(String runId, String projectId, Path workspaceRoot) {
     UUID runUuid;
@@ -4238,7 +4256,9 @@ public class RunOrchestrator {
     for (var repo : repos) {
       Path repoRoot =
           multiRepo
-              ? workspaceRoot.resolve("repos").resolve(lastPathSegment(repo.getGithubRepoFullName()))
+              ? workspaceRoot
+                  .resolve("repos")
+                  .resolve(lastPathSegment(repo.getGithubRepoFullName()))
               : workspaceRoot;
       for (var contract : contractRegistryRepository.findByRepoId(repo.getId())) {
         if (contract.getDetectedPath() == null || contract.getDetectedPath().isBlank()) continue;
@@ -4321,8 +4341,7 @@ public class RunOrchestrator {
             @Override
             public java.nio.file.FileVisitResult preVisitDirectory(
                 Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
-              if (!dir.equals(root)
-                  && STANDARDS_SKIP_DIRS.contains(dir.getFileName().toString())) {
+              if (!dir.equals(root) && STANDARDS_SKIP_DIRS.contains(dir.getFileName().toString())) {
                 return java.nio.file.FileVisitResult.SKIP_SUBTREE;
               }
               return java.nio.file.FileVisitResult.CONTINUE;

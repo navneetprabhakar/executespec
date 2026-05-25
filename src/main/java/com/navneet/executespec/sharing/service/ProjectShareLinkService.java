@@ -181,9 +181,9 @@ public class ProjectShareLinkService {
   /**
    * Cross-org IDOR guard for link creation: resolve the scope entity referenced by {@code scopeId}
    * and assert its {@code projectId} matches the project the caller is authorized for. Surfaces
-   * without a scope ({@code PROJECT_OVERVIEW}, {@code ARCHITECTURE_DOC}) are already
-   * project-scoped and need no check. Throws {@code 403 FORBIDDEN} when the scope belongs to a
-   * different project (or {@code 404 NOT_FOUND} when the scope id doesn't resolve at all).
+   * without a scope ({@code PROJECT_OVERVIEW}, {@code ARCHITECTURE_DOC}) are already project-scoped
+   * and need no check. Throws {@code 403 FORBIDDEN} when the scope belongs to a different project
+   * (or {@code 404 NOT_FOUND} when the scope id doesn't resolve at all).
    *
    * <p>Null-safe: a null {@code projectId} on either side never passes the match.
    */
@@ -209,8 +209,7 @@ public class ProjectShareLinkService {
                 .findById(parseUuid(scopeId))
                 .orElseThrow(
                     () ->
-                        new ResponseStatusException(
-                            HttpStatus.NOT_FOUND, "Code review not found"));
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Code review not found"));
         requireSameProject(scan.getProjectId(), projectId);
       }
       case PR_REVIEW -> {
@@ -218,9 +217,7 @@ public class ProjectShareLinkService {
             prReviewRepo
                 .findById(parseUuid(scopeId))
                 .orElseThrow(
-                    () ->
-                        new ResponseStatusException(
-                            HttpStatus.NOT_FOUND, "PR review not found"));
+                    () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found"));
         requireSameProject(review.getProjectId(), projectId);
       }
     }
@@ -231,8 +228,7 @@ public class ProjectShareLinkService {
     if (entityProjectId == null
         || linkProjectId == null
         || !entityProjectId.equals(linkProjectId)) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "scope does not belong to project");
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "scope does not belong to project");
     }
   }
 
