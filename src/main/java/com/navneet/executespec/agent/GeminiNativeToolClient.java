@@ -80,12 +80,14 @@ public class GeminiNativeToolClient {
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(60);
 
   /**
-   * Max retries on HTTP 429 (rate limit) before bailing — observed in the 2026-04-26 eval run. Each
-   * retry sleeps RATE_LIMIT_BACKOFF_MS × attempt.
+   * Max retries on HTTP 429 (rate limit) before bailing. Gemini 3.5 has a per-minute request cap; a
+   * 429 means we must wait for the window to reset, so back-off is EXPONENTIAL and patient: {@code
+   * RATE_LIMIT_BACKOFF_MS × 2^(attempt-1)} = 15s → 30s → 60s (per the rate-limit policy — "wait up
+   * to 60s and retry"). Total patience ~105s across 3 attempts before propagating.
    */
   private static final int RATE_LIMIT_RETRIES = 3;
 
-  private static final long RATE_LIMIT_BACKOFF_MS = 2000L;
+  private static final long RATE_LIMIT_BACKOFF_MS = 15_000L;
 
   private final ObjectMapper objectMapper;
 
@@ -163,8 +165,8 @@ public class GeminiNativeToolClient {
    *
    * <ul>
    *   <li><b>429 Too Many Requests</b> — rate limit. Retry up to {@link #RATE_LIMIT_RETRIES} with
-   *       linear back-off ({@link #RATE_LIMIT_BACKOFF_MS} × attempt). If the response includes a
-   *       {@code Retry-After} header, honour it (capped at 30s to avoid pathological waits).
+   *       EXPONENTIAL back-off (15s → 30s → 60s). If the response includes a {@code Retry-After}
+   *       header, honour it (capped at 60s to avoid pathological waits).
    *   <li><b>Other 4xx</b> — propagate immediately (validation / safety / auth — no point
    *       retrying).
    *   <li><b>5xx / network</b> — propagate to the upstream Spring RetryTemplate (caller decides
@@ -214,12 +216,14 @@ public class GeminiNativeToolClient {
     if (retryAfter != null && !retryAfter.isBlank()) {
       try {
         long s = Long.parseLong(retryAfter.trim());
-        return Math.min(30_000L, Math.max(500L, s * 1000L));
+        // Honour server's Retry-After, capped at 60s (our max patient wait).
+        return Math.min(60_000L, Math.max(500L, s * 1000L));
       } catch (NumberFormatException ignored) {
-        /* fall through to linear back-off */
+        /* fall through to exponential back-off */
       }
     }
-    return RATE_LIMIT_BACKOFF_MS * attempt;
+    // Exponential: 15s, 30s, 60s for attempts 1, 2, 3.
+    return RATE_LIMIT_BACKOFF_MS << (attempt - 1);
   }
 
   private static String truncate(String s, int max) {

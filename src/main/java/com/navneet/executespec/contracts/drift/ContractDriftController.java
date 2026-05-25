@@ -53,13 +53,14 @@ public class ContractDriftController {
   private final GitHubRepoService gitHub;
   private final AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
+  private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
   @PostMapping("/contracts/{contractId}/check-drift")
   public ResponseEntity<DriftDetectionService.DriftCheckResult> checkContract(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanRead(projectId, principal(auth));
     return ResponseEntity.ok(
         driftService.checkContract(contractId, parseUuidOrNull(projectId), patFor(auth)));
   }
@@ -67,7 +68,7 @@ public class ContractDriftController {
   @PostMapping("/repos/{repoId}/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkRepo(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanRead(projectId, principal(auth));
     ensureLinked(projectId, repoId);
     return ResponseEntity.ok(
         driftService.checkAllForRepo(repoId, parseUuidOrNull(projectId), patFor(auth)));
@@ -76,7 +77,7 @@ public class ContractDriftController {
   @PostMapping("/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkProject(
       @PathVariable String projectId, Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanRead(projectId, principal(auth));
     List<UUID> repoIds =
         linkRepo.findByProjectId(projectId).stream().map(l -> l.getRepoId()).toList();
     return ResponseEntity.ok(
@@ -86,7 +87,7 @@ public class ContractDriftController {
   @PostMapping("/contracts/{contractId}/refresh-from-source")
   public ResponseEntity<RefreshResponse> refreshFromSource(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ContractRegistry contract =
         registryRepo
             .findById(contractId)
@@ -177,7 +178,7 @@ public class ContractDriftController {
       @PathVariable UUID contractId,
       @RequestBody DismissRequest body,
       Authentication auth) {
-    requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     if (body == null || body.rationale() == null || body.rationale().trim().length() < 10) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rationale required (≥10 chars)");
     }
@@ -208,10 +209,13 @@ public class ContractDriftController {
 
   // ── Internals ───────────────────────────────────────────────────────────
 
-  private void requireAuth(Authentication auth) {
-    if (auth == null || auth.getName() == null) {
-      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
-    }
+  private com.navneet.executespec.auth.security.AppUserDetails principal(
+      org.springframework.security.core.Authentication auth) {
+    if (auth != null
+        && auth.getPrincipal() instanceof com.navneet.executespec.auth.security.AppUserDetails u)
+      return u;
+    throw new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.UNAUTHORIZED, "auth required");
   }
 
   private void ensureLinked(String projectId, UUID repoId) {

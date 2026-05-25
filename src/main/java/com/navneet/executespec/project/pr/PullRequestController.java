@@ -97,7 +97,7 @@ public class PullRequestController {
     // GA-readiness P4.1-followup — assertCanRead before issuing the GitHub
     // refresh. Closes the legacy gap where any authenticated caller could
     // poll any project's PR list (returning the same data + URLs).
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     // 2026-05-02 — thread the caller's PAT so private-repo snapshots succeed. Without
     // this, getPullRequestSnapshot returned null on private repos and the refresh
     // silently no-op'd; user clicked Refresh + saw merged PRs still showing OPEN.

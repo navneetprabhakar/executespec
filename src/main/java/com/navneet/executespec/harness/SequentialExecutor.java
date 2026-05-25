@@ -148,6 +148,10 @@ end and only call completeTask if it exits 0.
   private final AgentTaskRepository taskRepo;
   private final ModelResolver modelResolver;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
+  // Transfer #1 (PATCH→BUILD, RL-2026-05-034): in-loop test-execution gate. After a clean compile,
+  // RUN the worker's tests so "tests are mandatory" means "tests pass," not just "tests compile."
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner;
+  private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
   /**
    * 2026-05-04 — used by the resume path to load saved worker conversation snapshots. The
@@ -1561,6 +1565,41 @@ end and only call completeTask if it exits 0.
       String content = ok.content();
       int exit = extractExitCode(content);
       boolean passed = exit == 0;
+      // Transfer #1 / verify-before-done (RL-2026-05-034): after a clean COMPILE, RUN the worker's
+      // tests in-loop. BUILD's tests-are-mandatory directive WRITES tests; this verifies they PASS.
+      // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle /
+      // cargo).
+      // Flag-gated + fail-safe: no runner / empty summary → skip (today's compile-only behavior). A
+      // real test failure flips this gate to FAILED, transparently reusing the existing build-fail
+      // retry path (which re-invokes the worker with this failure text injected).
+      if (passed && featureFlagService.isEnabled("build.test-exec-gate.enabled")) {
+        try {
+          java.util.Optional<com.navneet.executespec.testgen.model.TestExecutionSummary> ts =
+              inLoopTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());
+          if (ts.isPresent() && (ts.get().getFailed() > 0 || ts.get().getErrors() > 0)) {
+            int bad = ts.get().getFailed() + ts.get().getErrors();
+            passed = false;
+            exit = 1;
+            content =
+                content
+                    + "\n\nBUILD COMPILED, but "
+                    + bad
+                    + " of "
+                    + ts.get().getTotalTests()
+                    + " tests FAILED ("
+                    + ts.get().getPassed()
+                    + " passed). The task is NOT complete until the existing + newly-written tests"
+                    + " pass. Re-run the test suite, find the failing cases, and fix them.";
+            log.info(
+                "Executor test-exec gate run={}: {}/{} tests failed → smoke FAILED (retry)",
+                ctx.runId(),
+                bad,
+                ts.get().getTotalTests());
+          }
+        } catch (Exception e) {
+          log.warn("Executor test-exec gate errored (fail-safe: ignored): {}", e.getMessage());
+        }
+      }
       metrics.recordSmokeTest(passed ? "pass" : "fail");
       return new SmokeTestResult(passed, exit, content, elapsed);
     }

@@ -152,8 +152,9 @@ public class ProjectRepoController {
       @PathVariable UUID repoId) {
     // GA-readiness P4.1-followup — verify caller can write to the project
     // before linking a repo to it (the service's downstream check stays as
-    // defense in depth).
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // defense in depth). RL-2026-05-040: was assertCanRead (let a cross-org
+    // read-only member link repos); linking mutates project state → write.
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     ProjectRepoLinkDto dto =
         service.linkToProject(
             projectId, repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
@@ -166,7 +167,8 @@ public class ProjectRepoController {
       @PathVariable String projectId,
       @PathVariable UUID repoId) {
     // GA-readiness P4.1-followup — destructive op; tenant guard up front.
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // RL-2026-05-040: write guard (was assertCanRead).
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     service.unlinkFromProject(
         projectId, repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     return ResponseEntity.noContent().build();
@@ -179,7 +181,8 @@ public class ProjectRepoController {
       @PathVariable UUID repoId,
       @RequestBody UpdateRelationshipsRequest req) {
     // GA-readiness P4.1-followup — relationship metadata mutates project state.
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // RL-2026-05-040: write guard (was assertCanRead).
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     return ResponseEntity.ok(
         service.updateRelationships(
             projectId,

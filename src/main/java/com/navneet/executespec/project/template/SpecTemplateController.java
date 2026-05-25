@@ -35,7 +35,7 @@ public class SpecTemplateController {
       @RequestBody SpecTemplateService.CreateRequest req,
       @AuthenticationPrincipal AppUserDetails user) {
     // GA-readiness P4.1-followup — write access to project state.
-    projectAccessGuard.assertCanRead(projectId, user);
+    projectAccessGuard.assertCanWrite(projectId, user);
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(service.createForProject(projectId, user.getUser(), req));
   }
@@ -56,7 +56,7 @@ public class SpecTemplateController {
       @AuthenticationPrincipal AppUserDetails user) {
     // GA-readiness P4.1-followup — projectId in the path is the trust boundary;
     // the service's owner_type/owner_id resolution stays as defense in depth.
-    projectAccessGuard.assertCanRead(projectId, user);
+    projectAccessGuard.assertCanWrite(projectId, user);
     service.delete(templateId, user.getUser());
     return ResponseEntity.noContent().build();
   }
