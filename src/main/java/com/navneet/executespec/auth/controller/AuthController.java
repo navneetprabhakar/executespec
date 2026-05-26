@@ -19,6 +19,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AuthService;
+import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.UserDataExportService;
 
@@ -45,6 +46,7 @@ public class AuthController {
   private final com.navneet.executespec.repo.BitbucketRepoService bitbucketRepoService;
   private final com.navneet.executespec.compliance.DataRetentionService dataRetentionService;
   private final UserDataExportService userDataExportService;
+  private final PersonalAccessTokenService personalAccessTokenService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
   private final PasswordEncoder passwordEncoder;
@@ -188,6 +190,48 @@ public class AuthController {
             "Content-Disposition", "attachment; filename=\"" + bundle.suggestedFilename() + "\"")
         .header("Content-Type", "application/zip")
         .body(bundle.zipBytes());
+  }
+
+  // ── Personal Access Tokens (programmatic auth for CLI / VS Code / CI) ──────
+
+  /**
+   * Create a Personal Access Token for the authenticated user. The plaintext credential is returned
+   * exactly once in {@code token} and is never persisted or retrievable again — only its SHA-256
+   * hash is stored. Clients present it as {@code Authorization: Bearer es_pat_…}, and it resolves to
+   * the same identity (global + org roles, tenant) a JWT would.
+   */
+  @PostMapping("/me/tokens")
+  public ResponseEntity<CreatePatResponse> createToken(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @Valid @RequestBody CreatePatRequest req) {
+    PersonalAccessTokenService.CreatedToken created =
+        personalAccessTokenService.create(userDetails.getUser().getId(), req);
+    recordSettingsAudit(
+        userDetails.getUser(),
+        "USER_PAT_CREATED",
+        "{\"tokenId\":\"" + created.token().getId() + "\"}");
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(new CreatePatResponse(created.plaintext(), PatDto.from(created.token())));
+  }
+
+  /** List the authenticated user's Personal Access Tokens (secret-free; includes revoked rows). */
+  @GetMapping("/me/tokens")
+  public ResponseEntity<java.util.List<PatDto>> listTokens(
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    return ResponseEntity.ok(
+        personalAccessTokenService.list(userDetails.getUser().getId()).stream()
+            .map(PatDto::from)
+            .toList());
+  }
+
+  /** Revoke one of the authenticated user's Personal Access Tokens. Idempotent. */
+  @DeleteMapping("/me/tokens/{tokenId}")
+  public ResponseEntity<Void> revokeToken(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String tokenId) {
+    personalAccessTokenService.revoke(userDetails.getUser().getId(), tokenId);
+    recordSettingsAudit(
+        userDetails.getUser(), "USER_PAT_REVOKED", "{\"tokenId\":\"" + tokenId + "\"}");
+    return ResponseEntity.noContent().build();
   }
 
   // ── GitHub settings ───────────────────────────────────────────────────────
