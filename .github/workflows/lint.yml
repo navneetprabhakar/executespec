@@ -73,12 +73,18 @@ jobs:
       - name: ESLint
         run: cd frontend && npm run lint
 
+      # RL-2026-05-041 (audit #17) — vitest unit suite. Was dormant (no runner in CI);
+      # now wired so the WCAG-contrast regression guard (+ future component tests) actually run.
+      - name: Vitest
+        run: cd frontend && npm test
+
       - name: Failure hint
         if: failure()
         run: |
           echo "::error::Run the following locally to fix:"
           echo "::error::  npm --prefix frontend run format"
           echo "::error::  npm --prefix frontend run lint:fix"
+          echo "::error::  npm --prefix frontend test"
           echo "::error::See docs/design/code-style.md for the documented deviations."
 
   # 2026-05-14 — npm audit gate, warn-only initially.

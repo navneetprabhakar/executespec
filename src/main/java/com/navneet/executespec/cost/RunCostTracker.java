@@ -358,6 +358,12 @@ public class RunCostTracker {
       reviewerWiring += (repoCount - 1) * cost(REVIEWER_PER_EXTRA_REPO_TOKENS, planningRates);
     }
 
+    // RL-2026-05-041 (audit #9) — reviewer fix-build THIRD pass, probabilistically (only fires when
+    // the final build is red). Expected cost = probability × pass cost. Closes a phase the estimate
+    // previously ignored entirely.
+    double reviewerFixBuild =
+        FIX_BUILD_PASS_PROBABILITY * cost(REVIEWER_FIX_BUILD_PASS_TOKENS, planningRates);
+
     // Accuracy assessment — runs once per terminal state on every run.
     double accuracy = cost(ACCURACY_ASSESSMENT_TOKENS, planningRates);
 
@@ -371,7 +377,12 @@ public class RunCostTracker {
             ? Math.max(1, repoCount) * cost(CODEMAP_PER_REPO_TOKENS, planningRates)
             : 0.0;
 
-    return reviewerGeneral + reviewerWiring + accuracy + validationReport + codemap;
+    return reviewerGeneral
+        + reviewerWiring
+        + reviewerFixBuild
+        + accuracy
+        + validationReport
+        + codemap;
   }
 
   /**
@@ -452,13 +463,32 @@ public class RunCostTracker {
    * 3-repo project; single-pass alone is ~half that). Per-repo multiplier handles multi-repo
    * project workspaces where wiring scans across multiple repos.
    */
-  private static final int[] REVIEWER_GENERAL_PASS_TOKENS = {18_000, 2_500};
+  // RL-2026-05-041 (audit #9): bumped 18k→40k input. The general pass reads the terminal workspace
+  // AND runs PostEditFormatter over the changed files; 18k under-modeled real multi-file reviews.
+  // Calibrated against eval run a45c3694 (anthropic/high, single-repo SMALL): estimate band was
+  // [$0.58,$1.64] but actual was $2.32 (42% over the high) — the reviewer terms were the dominant
+  // under-count. Re-validated against the 3×3 v2-eval (LOW/MED/HIGH × 3 providers).
+  private static final int[] REVIEWER_GENERAL_PASS_TOKENS = {40_000, 3_000};
 
   /**
    * ReviewerAgent wiring pass: same tier, narrower scope but reads ALL routers / barrels / import
    * graphs. Skipped when {@code skipWiringPass=true} (single-repo × single-task runs).
+   * RL-2026-05-041 (audit #9): bumped 15k→30k input — the wiring pass reads the full import/router
+   * graph.
    */
-  private static final int[] REVIEWER_WIRING_PASS_TOKENS = {15_000, 2_000};
+  private static final int[] REVIEWER_WIRING_PASS_TOKENS = {30_000, 2_500};
+
+  /**
+   * RL-2026-05-041 (audit #9) — reviewer fix-build THIRD pass (RL-2026-05-019, flag {@code
+   * reviewer.third-pass.enabled} default ON): when the final build is still red after the earlier
+   * passes, ONE more targeted pass runs (up to 25 iters / 360s) with the verbatim build error. It
+   * was entirely missing from the estimate. Modeled probabilistically in {@link
+   * #computePostPlanningCost} via {@link #FIX_BUILD_PASS_PROBABILITY}.
+   */
+  private static final int[] REVIEWER_FIX_BUILD_PASS_TOKENS = {35_000, 3_000};
+
+  /** Fraction of runs whose final build is red and trigger the reviewer fix-build third pass. */
+  private static final double FIX_BUILD_PASS_PROBABILITY = 0.35;
 
   /**
    * Extra reviewer cost PER additional linked repo beyond the first. Captures multi-repo wiring

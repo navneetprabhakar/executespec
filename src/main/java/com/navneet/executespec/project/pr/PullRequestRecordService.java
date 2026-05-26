@@ -2,9 +2,12 @@ package com.navneet.executespec.project.pr;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.navneet.executespec.activity.ActivityEventEmitter;
+import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.notification.InAppNotificationService;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -31,6 +34,9 @@ public class PullRequestRecordService {
 
   /** Wave 2.1 — activation funnel PR_MERGED step. */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
+
+  /** RL-2026-05-041 (audit #11) — project activity-feed emission for PR lifecycle. */
+  private final ActivityEventEmitter activityEmitter;
 
   /**
    * V82 contract — record a PR opened by a per-run code push. Defaults kind to {@link
@@ -94,7 +100,10 @@ public class PullRequestRecordService {
             .baseBranch(baseBranch)
             .status(PullRequestRecord.Status.OPEN)
             .build();
-    return repo.save(record);
+    PullRequestRecord saved = repo.save(record);
+    emitPrActivity(
+        saved, ActivityEventType.PR_OPENED, "PR #" + number + " opened in " + repoFullName);
+    return saved;
   }
 
   /**
@@ -115,6 +124,7 @@ public class PullRequestRecordService {
     }
     PullRequestRecord r = found.get();
     boolean wasNotMerged = r.getStatus() != PullRequestRecord.Status.MERGED;
+    boolean wasOpen = r.getStatus() == PullRequestRecord.Status.OPEN;
     if (merged) {
       r.setStatus(PullRequestRecord.Status.MERGED);
       r.setMergedAt(timestamp != null ? timestamp : Instant.now());
@@ -125,6 +135,16 @@ public class PullRequestRecordService {
     r.setUpdatedAt(Instant.now());
     repo.save(r);
     log.info("PR {}#{} updated via webhook -> {}", repoFullName, prNumber, r.getStatus());
+
+    // RL-2026-05-041 (audit #11) — emit the PR lifecycle to the project activity feed. Only on a
+    // real state transition (merge once; close once from OPEN) so a repeated webhook doesn't spam.
+    if (merged && wasNotMerged) {
+      emitPrActivity(
+          r, ActivityEventType.PR_MERGED, "PR #" + prNumber + " merged in " + repoFullName);
+    } else if (!merged && wasOpen) {
+      emitPrActivity(
+          r, ActivityEventType.PR_CLOSED, "PR #" + prNumber + " closed in " + repoFullName);
+    }
 
     // V169-companion (2026-05-02) — when a BOOTSTRAP PR merges, flip the
     // corresponding repo's folder_status from BOOTSTRAP_PR_OPEN to
@@ -233,6 +253,39 @@ public class PullRequestRecordService {
     }
     String body = "Your pull request was merged. View the run for the full code + report.";
     notificationService.create(run.getCreatedByUserId(), type, dedupTitle, body, link);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #11) — emit a PR lifecycle event to the project activity feed. Resolves
+   * the project from the record directly (project/system PRs) or via the linked run (run PRs, where
+   * projectId is null on the record but the PipelineRun carries it). No-op for standalone runs with
+   * no project. Best-effort: the emitter is @Async + swallows its own failures.
+   */
+  private void emitPrActivity(PullRequestRecord r, ActivityEventType type, String summary) {
+    if (r == null) return;
+    String projectId = r.getProjectId();
+    if ((projectId == null || projectId.isBlank()) && r.getRunId() != null) {
+      PipelineRun run = pipelineRunRepo.findById(r.getRunId()).orElse(null);
+      if (run != null) projectId = run.getProjectId();
+    }
+    if (projectId == null || projectId.isBlank()) return; // standalone run — feed is project-scoped
+    UUID projectUuid;
+    try {
+      projectUuid = UUID.fromString(projectId);
+    } catch (IllegalArgumentException e) {
+      return;
+    }
+    activityEmitter.emit(
+        projectUuid,
+        type,
+        null, // SYSTEM — PR lifecycle is driven by the pipeline / GitHub webhook, not a UI actor
+        "PR",
+        r.getPrUrl(),
+        summary,
+        Map.of(
+            "repo", r.getRepoFullName() == null ? "" : r.getRepoFullName(),
+            "prNumber", r.getPrNumber() == null ? 0 : r.getPrNumber(),
+            "prUrl", r.getPrUrl() == null ? "" : r.getPrUrl()));
   }
 
   public List<PullRequestRecord> listForRun(String runId) {

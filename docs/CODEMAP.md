@@ -14,7 +14,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Package | Ctrl | Svc | Agent | Tool | Purpose |
 | --- | --- | --- | --- | --- | --- |
-| `activity` | 1 | - | - | - | M-019 hash-chained activity feed + retention/partition jobs |
+| `activity` | 1 | - | - | - | M-019 hash-chained activity feed + retention/partition jobs + `RunActivityFeedListener` (run lifecycle → feed, RL-2026-05-042) |
 | `adr` | 1 | 1 | - | - | Architecture Decision Records — frontmatter parser + planner-injection |
 | `agent` | - | 17 | 12 | - | V2 LLM pipeline: classifier/planner/worker/coherence/expander + LlmRouter |
 | `analytics` | 1 | 1 | - | - | PostHog client + activation funnel event tracking |
@@ -36,7 +36,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `cost` | - | 4 | - | - | RunCostTracker + RunCostHistory + token attribution |
 | `credit` | - | 1 | - | - | LifetimeCreditService — R-161 5+5 referral lifetime credits |
 | `crypto` | - | 3 | - | - | EncryptedValueConverter + KeyMigrationRunner + crypto props |
-| `deployment` | 2 | 13 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS |
+| `deployment` | 2 | 14 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS + `GcsTaskCheckpointService` (mid-run task-boundary checkpoints, RL-2026-05-042) |
 | `eval` | 2 | 16 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) + `eval/v2/` tier-eval-v2 (production-shaped per-tier × provider eval driving live agent prompts) |
 | `execution` | 3 | 11 | - | - | V3 ExecutionRun "Launches" (multi-solution, multi-repo orchestration) |
 | `export` | 1 | 1 | - | - | Project-level ZIP export of `.executespec/` artefacts |
@@ -70,7 +70,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `saga` | - | 2 | - | - | SideEffectOutbox — retry persistence for failed async effects |
 | `scoring` | - | 3 | - | - | RunRubricVerifier + TestCoverageRescorer + ReviewScoringService |
 | `security` | - | 4 | - | - | InputSanitizer + CodeAbuseScanner + KeyEncryptor + ContextSanitizer |
-| `security/dependency` | - | 3 | - | - | DependencySecurityPolicy + SupplyChainScanner |
+| `security/dependency` | - | 1 | - | - | DependencySecurityPolicy (consumed by ShellSandboxPolicy) — SupplyChainScanner + NoopSupplyChainScanner deleted 2026-05-26, RL-2026-05-041 (zero callers) |
 | `security/guardrail` | - | 1 | - | - | GuardrailLevel enum + resolver (LOW/MEDIUM/HIGH) |
 | `sharing` | 3 | 2 | - | - | V175 cross-org project invites + public share links |
 | `smoketest` | - | 5 | - | - | CliSmokeRunner + BuildCommandResolver + TestCommandResolver + TestOutputParser + WorkspaceTestRunner (RL-2026-05-001 real test exec) |
@@ -635,6 +635,8 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `codeintel.inject.enabled` | **false** (V210) | Inject codemap symbol-map into planner + PATCH prompt on project runs (RL-2026-05-035) |
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
 | `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
+| `scoring.gaming-guards` | **true** (V214) | Anti-gaming guards on the additive verifiedScore — CODE_DELIVERED↔endpoint-intent + TESTS↔coverage-quality blend; tighten-only (RL-2026-05-042) |
+| `durability.task-checkpoint.enabled` | **true** (yaml) | GCS workspace checkpoint at each task boundary for mid-run durability; no-op when GCS unconfigured (RL-2026-05-042) |
 | `enterprise.inject.enabled` | **false** (V211) | Inject `{{CONTRACTS}}` + `{{PROJECT_ADRS}}` into the planner prompt (RL-2026-05-035) |
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
 | `harness.v2.batch_enabled` | (cfg) | V2 batch-mode execution |
@@ -696,6 +698,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V213) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V214) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
