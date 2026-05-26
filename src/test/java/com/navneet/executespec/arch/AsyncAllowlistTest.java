@@ -138,6 +138,11 @@ class AsyncAllowlistTest {
               "PostMergeOrchestrator#onMergeCompleted",
               "StartupRunResumer#onApplicationReady",
 
+              // benchmark — blind SWE-bench harness; same shape as programbench/swebench:
+              // polls the PipelineRun by id at terminal, shells out to capture the git diff.
+              // No lazy JPA navigation. (RL-2026-05-040 follow-up: caught at deploy, not PR CI.)
+              "BenchmarkRunService#captureOnTerminalAsync",
+
               // programbench — async background that polls run row + tars submission.
               // Reads the PipelineRun via id (no lazy navigation), shells out to docker.
               "ProgramBenchTaskService#captureOnTerminalAsync",

@@ -41,6 +41,7 @@ class ContractConsumerControllerTest {
   @Mock com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   @Mock ActivityEventEmitter emitter;
   @Mock ObjectProvider<ActivityEventEmitter> emitterProvider;
+  @Mock com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   @InjectMocks ContractConsumerController controller;
 
@@ -216,6 +217,16 @@ class ContractConsumerControllerTest {
   }
 
   private UsernamePasswordAuthenticationToken fakeAuth() {
-    return new UsernamePasswordAuthenticationToken(UUID.randomUUID().toString(), "n/a");
+    // RL-2026-05-040 follow-up: the controller now resolves principal(auth) as AppUserDetails (the
+    // RL-036 ProjectAccessGuard wiring); a bare String principal → 401 before validation. Mocked
+    // projectAccessGuard no-ops the assertCanRead/Write so tests reach the 400/404 path.
+    com.navneet.executespec.auth.entity.AppUser u =
+        new com.navneet.executespec.auth.entity.AppUser();
+    u.setId(UUID.randomUUID().toString());
+    u.setOrgId(UUID.randomUUID().toString());
+    u.setEmail("ci-test@executespec.local"); // getName() = getUsername() = email; non-null for auth
+    // helpers
+    return new UsernamePasswordAuthenticationToken(
+        new com.navneet.executespec.auth.security.AppUserDetails(u, null), "n/a");
   }
 }
