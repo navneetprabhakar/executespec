@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.ai.tool.ToolCallback;
@@ -42,7 +41,8 @@ public class ToolRegistry {
   /**
    * Local-hands/remote-brain (RL-2026-05-043). When a run is bound to a remote tool session, tool
    * calls are dispatched to the connected client instead of executed on the server. Inert for every
-   * other run, so the default pipeline is unaffected. Nullable in unit tests that don't exercise it.
+   * other run, so the default pipeline is unaffected. Nullable in unit tests that don't exercise
+   * it.
    */
   private final RemoteToolDispatcher remoteToolDispatcher;
 
@@ -80,7 +80,10 @@ public class ToolRegistry {
    */
   public List<ToolCallback> bind(ExecutionContext ctx) {
     return allTools.stream()
-        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
+        .map(
+            t ->
+                (ToolCallback)
+                    new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
   }
 
@@ -93,7 +96,10 @@ public class ToolRegistry {
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
-        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
+        .map(
+            t ->
+                (ToolCallback)
+                    new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
   }
 

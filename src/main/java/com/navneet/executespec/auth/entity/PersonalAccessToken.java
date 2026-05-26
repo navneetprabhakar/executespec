@@ -16,9 +16,9 @@ import lombok.NoArgsConstructor;
  * Long-lived, revocable credential for programmatic API access (CLI / VS Code extension / CI).
  *
  * <p>Presented as {@code Authorization: Bearer es_pat_…} and resolved by {@code
- * JwtAuthenticationFilter} to the same {@link AppUserDetails} as a JWT for the owning user. Only the
- * SHA-256 hash of the plaintext is stored ({@link #tokenHash}); the credential is shown to the user
- * once at creation and never persisted. See V215 migration.
+ * JwtAuthenticationFilter} to the same {@link AppUserDetails} as a JWT for the owning user. Only
+ * the SHA-256 hash of the plaintext is stored ({@link #tokenHash}); the credential is shown to the
+ * user once at creation and never persisted. See V215 migration.
  */
 @Entity
 @Table(name = "personal_access_token")
