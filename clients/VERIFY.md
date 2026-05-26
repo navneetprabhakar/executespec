@@ -36,17 +36,26 @@ mvn -q verify                                         # full build incl. spotles
 
 ---
 
-## 2. Client core — `clients/core`
+## 2. Clients — `clients/` (npm workspaces: `core` + `cli`)
 
 ```bash
-cd clients/core
-npm install
-npm run typecheck     # tsc --noEmit
-npm run build         # emits dist/
+cd clients
+npm install            # installs both workspaces (the registry was 403-blocked in-session)
+npm run build          # builds @executespec/core THEN @executespec/cli (order matters)
+npm run typecheck      # or typecheck only (also builds core first, for its .d.ts)
 ```
 
-- Registry was blocked in-session ⇒ `node_modules` is absent and TS was **never typechecked**. Expect to fix minor type nits. Zero runtime deps; Node ≥ 18 (you have 22).
-- Watch item: the web globals (`fetch`/`Response`/`ReadableStream`/`TextDecoder`/`AbortSignal`/`URLSearchParams`) are provided by `@types/node` (Node 18+). If tsc can't find `ReadableStream`, confirm `@types/node` resolved and `tsconfig` `types`/`lib` are applied.
+- `core` has zero runtime deps; `cli` depends on `core` (built first — the root scripts enforce the order). Node ≥ 18 (you have 22).
+- TS was **never typechecked** in-session ⇒ expect to fix minor nits. The `cli` shebang (`#!/usr/bin/env node`) is preserved by tsc into `dist/index.js`.
+- Watch item: the web globals (`fetch`/`Response`/`ReadableStream`/`TextDecoder`/`AbortSignal`/`URLSearchParams`) come from `@types/node` (Node 18+). If tsc can't find `ReadableStream`, confirm `@types/node` resolved and the `tsconfig` `types`/`lib` are applied.
+- Try the CLI (after build + a PAT):
+  ```bash
+  export EXECUTESPEC_HOST=http://localhost:8080
+  node clients/cli/dist/index.js auth login --token es_pat_...
+  node clients/cli/dist/index.js run submit "add a /health endpoint" --repo https://github.com/me/app --watch
+  node clients/cli/dist/index.js run list
+  ```
+  (Or `npm i -g clients/cli` / `npm link` to get the `executespec` + `es` binaries.) The `run local` command is wired but **experimental** — it needs the §3 activation wiring on the server before tool calls actually arrive.
 
 ---
 

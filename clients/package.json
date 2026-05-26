@@ -1,0 +1,12 @@
+{
+  "name": "@executespec/clients",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ExecuteSpec local clients monorepo — shared core + CLI (+ VS Code extension to come).",
+  "workspaces": ["core", "cli"],
+  "scripts": {
+    "build": "npm run build -w @executespec/core && npm run build -w @executespec/cli",
+    "typecheck": "npm run build -w @executespec/core && npm run typecheck -w @executespec/cli",
+    "clean": "npm run clean -w @executespec/core && npm run clean -w @executespec/cli"
+  }
+}
