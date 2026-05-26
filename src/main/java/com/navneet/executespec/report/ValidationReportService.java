@@ -68,6 +68,16 @@ public class ValidationReportService {
   private static final String FLAG_ADDITIVE_SCORE = "scoring.additive-v2";
 
   /**
+   * RL-2026-05-041 (audit #7 — verified-score vouches for AI). Anti-gaming guards on the additive
+   * score (founder-approved A+B+E): (A) CODE_DELIVERED is linked to deterministic endpoint-coverage
+   * intent (files-written alone no longer ⇒ 100 when the spec's endpoints aren't delivered); (B+E)
+   * the TESTS slot blends the real pass-rate with the coverage-quality judgment so trivial
+   * always-passing tests can't score the slot at 100. Guards only ever TIGHTEN a gameable score —
+   * never inflate — so they're safe-direction. Default ON (seeded by V214); reversible via flag.
+   */
+  private static final String FLAG_GAMING_GUARDS = "scoring.gaming-guards";
+
+  /**
    * Main entry point — called after ReviewerAgent completes, before MergeGate. Non-blocking on
    * failure: catches all exceptions and returns Optional.empty().
    */
@@ -933,6 +943,8 @@ public class ValidationReportService {
           endpointCoveragePercent,
           testCoverageLevel);
     }
+    boolean gamingGuards =
+        featureFlagService != null && featureFlagService.isEnabled(FLAG_GAMING_GUARDS);
     return computeVerifiedScoreAdditive(
         finalBuildPassed,
         testsPassed,
@@ -940,7 +952,9 @@ public class ValidationReportService {
         reviewerVerdictName,
         unfixedCriticalCount,
         testCoverageLevel,
-        filesGenerated);
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards);
   }
 
   /**
@@ -987,6 +1001,33 @@ public class ValidationReportService {
       int unfixedCriticalCount,
       String testCoverageLevel,
       int filesGenerated) {
+    // Legacy / direct-test entry — no gaming guards, no endpoint intent.
+    return computeVerifiedScoreAdditive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        null,
+        false);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #7) — additive score with the founder-approved anti-gaming guards (A+B+E)
+   * applied when {@code gamingGuards} is on. Guards only ever tighten a gameable score.
+   */
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards) {
 
     // CODE_DELIVERED hard floor. -1 = unknown (legacy 7-arg call) → treat as
     // "delivered" so the call site doesn't accidentally tank scores it can't see.
@@ -1001,7 +1042,15 @@ public class ValidationReportService {
 
     // CODE_DELIVERED — 30 pts, always counted when known (we just guarded the 0 case).
     if (codeKnown) {
-      weightedSum += 30.0 * (codeDelivered ? 100.0 : 0.0);
+      double codeScore = codeDelivered ? 100.0 : 0.0;
+      // (A) Intent linkage. When the spec implied HTTP endpoints and we have a DETERMINISTIC
+      // coverage %, blend it: half the slot for "code exists", half for "the endpoints the spec
+      // asked for are actually exposed". Stops files-written-alone from claiming full delivery.
+      if (gamingGuards && codeDelivered && endpointCoveragePercent != null) {
+        double ep = Math.max(0.0, Math.min(100.0, endpointCoveragePercent));
+        codeScore = 0.5 * 100.0 + 0.5 * ep;
+      }
+      weightedSum += 30.0 * codeScore;
       weightTotal += 30.0;
     }
 
@@ -1014,7 +1063,23 @@ public class ValidationReportService {
     // TESTS — 20 pts. Real run data > LLM grade. Skip entirely if neither present.
     if (testsTotal > 0) {
       double ratio = Math.max(0.0, Math.min(1.0, (double) testsPassed / Math.max(1, testsTotal)));
-      weightedSum += 20.0 * 100.0 * ratio;
+      double testScore = 100.0 * ratio;
+      // (B+E) Anti-gaming. A high pass-rate alone is gameable with trivial, always-passing tests,
+      // so
+      // blend it with the coverage-QUALITY judgment: NONE coverage caps the slot hard (classic
+      // "wrote 1 assert-true test" gaming), PARTIAL caps mid; GOOD/COMPREHENSIVE trust the
+      // pass-rate.
+      // Decouples "tests pass" from "tests are meaningful". Only ever lowers the slot.
+      if (gamingGuards && testCoverageLevel != null) {
+        double cap =
+            switch (testCoverageLevel) {
+              case "NONE" -> 30.0;
+              case "PARTIAL" -> 70.0;
+              default -> 100.0; // GOOD / COMPREHENSIVE / UNKNOWN → the pass-rate stands
+            };
+        testScore = Math.min(testScore, cap);
+      }
+      weightedSum += 20.0 * testScore;
       weightTotal += 20.0;
     } else if (testCoverageLevel != null) {
       // UNKNOWN damps to 50, it does NOT drop the slot. Rationale: RL-2026-05-003.

@@ -91,7 +91,9 @@ class SequentialExecutorSoftCompletionTest {
         org.mockito.Mockito.mock(
             com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
-        costTracker);
+        costTracker,
+        org.mockito.Mockito.mock(
+            com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */

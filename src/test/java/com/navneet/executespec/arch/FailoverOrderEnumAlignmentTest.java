@@ -76,39 +76,10 @@ class FailoverOrderEnumAlignmentTest {
     }
   }
 
-  @Test
-  void allProviderRunPoolKeysMatchLlmProviderEnum() throws Exception {
-    Map<String, Object> root = loadApplicationYaml();
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> agent = (Map<String, Object>) root.get("agent");
-    if (agent == null) return;
-    @SuppressWarnings("unchecked")
-    Map<String, Object> runPool = (Map<String, Object>) agent.get("run-pool");
-    if (runPool == null) return;
-    @SuppressWarnings("unchecked")
-    Map<String, Object> providers = (Map<String, Object>) runPool.get("providers");
-    if (providers == null) return;
-
-    // ProviderRunPoolProperties.forProvider(LlmProvider) does
-    // providers.get(provider.name()) — so these keys MUST match the
-    // enum's .name() output (uppercase). Otherwise silent fallback
-    // to defaultConfig() — not a crash, but dead config.
-    for (String key : providers.keySet()) {
-      try {
-        LlmProvider.valueOf(key);
-      } catch (IllegalArgumentException e) {
-        fail(
-            "agent.run-pool.providers key '"
-                + key
-                + "' does not match any "
-                + "LlmProvider enum constant ("
-                + validProviderNames()
-                + "). ProviderRunPoolProperties would silently fall back to "
-                + "defaults — fix by renaming the yaml key.");
-      }
-    }
-  }
+  // (Removed RL-2026-05-041) allProviderRunPoolKeysMatchLlmProviderEnum — it guarded the
+  // now-deleted
+  // ProviderRunPoolProperties / agent.provider-pools config (audit risk #3). The failover-order
+  // alignment test above is the live invariant; provider-pool key alignment no longer exists.
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -166,10 +137,11 @@ class FailoverOrderEnumAlignmentTest {
         4,
         LlmProvider.values().length,
         "Unexpected LlmProvider enum size — if you added a new provider, update application.yml's"
-            + " failover-order + model-matrix.providers + agent.run-pool.providers to include it."
-            + " If you removed one, update the same three yaml sections to drop references."
+            + " failover-order + model-matrix.providers to include it."
+            + " If you removed one, update the same two yaml sections to drop references."
             + " (OPENROUTER added 2026-05-21 — model-matrix.providers.openrouter is set; it is an"
-            + " enterprise gateway, intentionally NOT in failover-order or"
-            + " agent.run-pool.providers.)");
+            + " enterprise gateway, intentionally NOT in failover-order.)"
+            + " (agent.provider-pools was removed 2026-05-26, RL-2026-05-041 — no longer a section"
+            + " to update.)");
   }
 }
