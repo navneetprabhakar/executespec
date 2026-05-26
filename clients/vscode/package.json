@@ -1,0 +1,77 @@
+{
+  "name": "executespec-vscode",
+  "displayName": "ExecuteSpec",
+  "description": "Submit specs, watch runs, and approve the plan gate from VS Code. Thin client — the agent loop, prompts, and scoring stay server-side.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "executespec",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "executespec.signIn", "title": "ExecuteSpec: Sign In" },
+      { "command": "executespec.signOut", "title": "ExecuteSpec: Sign Out" },
+      {
+        "command": "executespec.submitSpec",
+        "title": "ExecuteSpec: Submit Spec…",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "executespec.refreshRuns",
+        "title": "ExecuteSpec: Refresh Runs",
+        "icon": "$(refresh)"
+      },
+      { "command": "executespec.watchRun", "title": "ExecuteSpec: Watch Run" }
+    ],
+    "views": {
+      "explorer": [{ "id": "executespecRuns", "name": "ExecuteSpec Runs" }]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "executespec.submitSpec",
+          "when": "view == executespecRuns",
+          "group": "navigation@1"
+        },
+        {
+          "command": "executespec.refreshRuns",
+          "when": "view == executespecRuns",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ExecuteSpec",
+      "properties": {
+        "executespec.host": {
+          "type": "string",
+          "default": "https://executespec.ai",
+          "description": "ExecuteSpec backend host (override for dev/self-hosted, e.g. http://localhost:8080)."
+        },
+        "executespec.defaultProvider": {
+          "type": "string",
+          "enum": ["ANTHROPIC", "OPENAI", "GEMINI"],
+          "default": "ANTHROPIC",
+          "description": "Default AI provider for new runs."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@executespec/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.3.0"
+  }
+}
