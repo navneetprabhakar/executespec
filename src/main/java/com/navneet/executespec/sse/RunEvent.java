@@ -36,6 +36,17 @@ public record RunEvent(
   }
 
   /**
+   * Local-hands/remote-brain (RL-2026-05-043): the server-side agent asks the connected client to
+   * run a tool against its local working tree. Payload is a JSON {@code ToolCallFrame} ({@code
+   * {callId, runId, taskId, name, args}}); the client executes it and POSTs the result envelope to
+   * {@code /api/runs/{id}/tool-results}. Only emitted for runs bound to a remote tool session; the
+   * default server-executed pipeline never produces this event.
+   */
+  public static RunEvent toolCall(String runId, String taskId, String frameJson) {
+    return new RunEvent("TOOL_CALL", runId, taskId, frameJson, Instant.now());
+  }
+
+  /**
    * 2026-05-07 — emitted by {@link com.navneet.executespec.lint.LintPass} after the deterministic
    * auto-fixers run between executor and reviewer. Payload is a one-line summary (e.g. {@code
    * "prettier+spotless-maven · 14 file(s) changed in 3.2s"}). LogPane on the v3 RunSidePanel
