@@ -12,7 +12,7 @@
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # macOS; use your JDK21 home elsewhere
-mvn -q -Dtest=PersonalAccessTokenServiceTest test     # the new unit test
+mvn -q -Dtest='PersonalAccessTokenServiceTest,RemoteToolDispatcherTest,ToolRegistryWorkerBindTest' test
 mvn -q verify                                         # full build incl. spotless format gate
 ```
 
@@ -50,16 +50,23 @@ npm run build         # emits dist/
 
 ---
 
-## 3. Not-yet-built — these paths WILL fail until the backend tool-proxy lands
+## 3. Backend tool-proxy — built but DORMANT (zero impact until activated)
 
-The **REST + SSE** half of the core works against the **existing** API today (auth, submit run, list, view, stream events, approve plan gate, report). But the **local-execution loop** (`LocalExecutionSession` + `ToolRuntime`) needs server surface that does **not exist yet**:
+The **REST + SSE** half of the core works against the **existing** API today (auth, submit run, list, view, stream events, approve plan gate, report). The server half of local-hands now exists and is wired, but it is **inert by default** — the dispatch branch fires only once `RemoteToolDispatcher.register(runId)` is called, and nothing calls it yet, so the default server-executed pipeline is byte-for-byte unchanged. **Landed:**
 
-- `localExecution` run mode (additive flag on `RunRequest`).
-- A `TOOL_CALL` SSE event whose `payload` is a JSON `ToolCallFrame`.
-- `POST /api/runs/{id}/tool-results` to receive a `ToolResultFrame`.
-- Server-side: `RemoteToolDispatcher` + the **gated** branch in `ToolRegistry.ContextBoundToolCallback.call()` (no-op unless a `LOCAL` session is bound) + LOCAL-mode disabling the server clone + `ScmPushService` auto-push.
+- `sse/RunEvent.toolCall(...)` — the `TOOL_CALL` event factory.
+- `tool/remote/RemoteToolDispatcher` — `register`/`unregister`/`isRemote`/`dispatch` (blocks for the client result, 120s) / `complete`.
+- `tool/remote/RemoteToolController` — `POST /api/runs/{id}/tool-results` (write-guarded via `RunAccessGuard.requireRunWriteAccess`).
+- `tool/ToolRegistry` — gated branch in `ContextBoundToolCallback.call()` (null- and `isRemote`-guarded; no-op for every server-run).
 
-Until those land, `LocalExecutionSession.run()` connects but receives no `TOOL_CALL` events and `postToolResult` 404s. This is the next build slice (additive, flag-gated, zero impact on the default pipeline).
+**Remaining activation wiring** (the last connective step — do this in a compile-capable env, additive + flag-gated):
+
+1. Mark a run as local. **NOTE:** `RunRequest` is a Java record constructed *positionally* (e.g. `RunController` fork), so don't just append a field blind — either add it at the end **and** fix every positional `new RunRequest(...)` caller, or (cleaner) carry the flag on `PipelineRun` / the run-mode rather than the request DTO.
+2. In `RunOrchestrator`: for a local run, call `remoteToolDispatcher.register(runId)` at run start and `unregister(runId)` at every terminal path (success / failure / cancel).
+3. In local mode, **skip the server-side repo clone** (the workspace *is* the client's local tree, reached only via tool calls) and **skip `ScmPushService` auto-push** (no PR/publish by default).
+4. The client subscribes to the run's SSE stream (it does, via `LocalExecutionSession`) to receive `TOOL_CALL` frames and POST results back.
+
+Until 1–3 land, a local run can't be initiated, the dispatcher is never registered, and the branch never fires — hence zero impact on existing behavior. `LocalExecutionSession.run()` will connect but see no `TOOL_CALL` events.
 
 ---
 

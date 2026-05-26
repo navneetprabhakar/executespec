@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
+
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -36,6 +38,13 @@ public class ToolRegistry {
 
   private final List<Tool> allTools;
   private final ObjectMapper objectMapper;
+
+  /**
+   * Local-hands/remote-brain (RL-2026-05-043). When a run is bound to a remote tool session, tool
+   * calls are dispatched to the connected client instead of executed on the server. Inert for every
+   * other run, so the default pipeline is unaffected. Nullable in unit tests that don't exercise it.
+   */
+  private final RemoteToolDispatcher remoteToolDispatcher;
 
   /**
    * Tools the worker agent must NOT call directly. Workspace persistence (git commit + push)
@@ -71,7 +80,7 @@ public class ToolRegistry {
    */
   public List<ToolCallback> bind(ExecutionContext ctx) {
     return allTools.stream()
-        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper))
+        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
   }
 
@@ -84,7 +93,7 @@ public class ToolRegistry {
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
-        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper))
+        .map(t -> (ToolCallback) new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
   }
 
@@ -110,7 +119,11 @@ public class ToolRegistry {
    * underlying {@link Tool} with the captured {@link ExecutionContext}, and serializes the {@link
    * ToolResult} as a JSON envelope.
    */
-  record ContextBoundToolCallback(Tool tool, ExecutionContext ctx, ObjectMapper objectMapper)
+  record ContextBoundToolCallback(
+      Tool tool,
+      ExecutionContext ctx,
+      ObjectMapper objectMapper,
+      RemoteToolDispatcher remoteToolDispatcher)
       implements ToolCallback {
 
     @Override
@@ -124,6 +137,12 @@ public class ToolRegistry {
 
     @Override
     public String call(String toolInput) {
+      // Local-hands/remote-brain: if this run executes tools on a connected client, dispatch there
+      // and return the client's result envelope. No-op for the default server-executed pipeline
+      // (remoteToolDispatcher null in tests, or isRemote false for every server-run).
+      if (remoteToolDispatcher != null && remoteToolDispatcher.isRemote(ctx.runId())) {
+        return remoteToolDispatcher.dispatch(ctx.runId(), ctx.taskId(), tool.name(), toolInput);
+      }
       JsonNode args;
       try {
         args =
