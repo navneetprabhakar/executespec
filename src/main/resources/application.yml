@@ -282,6 +282,44 @@ model-matrix:
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
+    # RL-2026-05-045 — new ENTERPRISE-selectable models (per-run pin + F3 org matrix). Pricing is a
+    # PLACEHOLDER (mirrors the predecessor) until the founder confirms the real provider model
+    # strings + per-token rates. Non-enterprise users are unaffected (they stay on the tier defaults
+    # in model-matrix.providers above). These appear in the picker because ModelRegistry.allModels()
+    # enumerates this registry; ModelResolver + OrgModelOverrideService validate/resolve from it too.
+    claude-opus-4-7:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      context-limit: 200000
+      max-output-tokens: 32000
+      display-label: "Claude Opus 4.7"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing placeholder = Opus 4.6; confirm rates."
+    "[gpt-5.5]":
+      provider: openai
+      chain-tier: CAPABLE
+      context-limit: 200000
+      max-output-tokens: 16384
+      display-label: "GPT-5.5"
+      pricing:
+        input-per-1m: 2.50
+        cached-input-per-1m: 1.25
+        output-per-1m: 15.00
+      notes: "GPT-5.5 — ENTERPRISE-only pin (Beta). Pricing placeholder = GPT-5.4; confirm rates."
+    "[gpt-5.5-mini]":
+      provider: openai
+      chain-tier: UTILITY
+      context-limit: 200000
+      max-output-tokens: 16384
+      display-label: "GPT-5.5 Mini"
+      pricing:
+        input-per-1m: 0.75
+        cached-input-per-1m: 0.375
+        output-per-1m: 4.50
+      notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Pricing placeholder = GPT-5.4 Mini; confirm rates."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
