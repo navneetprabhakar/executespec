@@ -40,11 +40,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>Principle: real system, sandbox-only.</b> The code-gen path is untouched production: the
  * real {@code submitRun} entry, real tier routing, real worker + tools. We run in {@code
- * runMode=PATCH} — the production autofix engine (the same thin-worker loop that powers the four
- * customer autofix surfaces), <i>not</i> a benchmark fork. The earlier BUILD-mode smoke proved
- * BUILD's product machinery (PostEditFormatter, scaffolding, auto-commit) pollutes the diff with
- * non-fix churn (a 469-line reformat + scaffolding files), making it unscoreable; PATCH emits the
- * minimal source diff a leaderboard submission needs. Only the <i>sandbox</i> is
+ * runMode=BUILD} with {@code source="swebench-codegen"} (RL-2026-05-050): the FULL pipeline —
+ * classifier picks the strategy, planner plans, worker generates — but the orchestrator's
+ * code-gen-only gate stops it right after the worker, BEFORE the reviewer. That gives the real
+ * classifier/planner decisioning AND a clean diff: the reviewer's {@code PostEditFormatter} (a
+ * 469-line whole-file reformat on the earlier smoke) + scaffolding + auto-commit all run in/after
+ * the reviewer, so skipping it removes exactly that non-fix churn. Only the <i>sandbox</i> is
  * benchmark-specific: the cleanroom container, the blind issue→spec input, the diff capture, and
  * (external) scoring.
  *
@@ -62,11 +63,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  *   <li>Stash the setup recipe in {@link #PENDING}.
- *   <li>{@link RunOrchestrator#submitRun} with {@code runMode=PATCH}, {@code repoMode=NONE}, the
- *       blind spec.
+ *   <li>{@link RunOrchestrator#submitRun} with {@code runMode=BUILD}, {@code
+ *       source="swebench-codegen"}, {@code repoMode=NONE}, the blind spec.
  *   <li>{@link #onRunStarted} fires synchronously → docker pull → cp {@code /testbed} into the host
  *       workspace → run with bind-mount + {@code --network none} → register the container.
- *   <li>The real PATCH pipeline (thin worker loop) runs against the bind-mounted {@code /testbed}.
+ *   <li>The real classifier→planner→worker pipeline runs against the bind-mounted {@code /testbed},
+ *       stopping at the worker (code-gen-only gate) before the reviewer.
  *   <li>{@link #captureOnTerminalAsync} polls to terminal, captures the {@code git diff} as an
  *       SWE-bench {@code preds.json}.
  * </ol>
