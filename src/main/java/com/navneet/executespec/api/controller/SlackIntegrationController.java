@@ -217,7 +217,7 @@ public class SlackIntegrationController {
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String orgId = userDetails.getUser().getOrgId();
     if (!integrationRepo.findByOrgId(orgId).isPresent()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slack not connected");
@@ -266,7 +266,7 @@ public class SlackIntegrationController {
       @PathVariable String channelId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     channelRepo.deleteByProjectIdAndChannelId(projectId, channelId);
     return ResponseEntity.noContent().build();
   }
@@ -279,7 +279,7 @@ public class SlackIntegrationController {
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String verbosity = body.get("verbosity");
     try {
       SlackVerbosity.valueOf(verbosity);

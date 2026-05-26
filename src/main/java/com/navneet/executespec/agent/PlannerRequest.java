@@ -30,6 +30,20 @@ public record PlannerRequest(
     String projectBrief,
     String referenceDocs,
     /**
+     * Enterprise-knowledge injection (flag {@code enterprise.inject.enabled}, default OFF) — the
+     * rendered {@code {{CONTRACTS}}} block from {@link
+     * com.navneet.executespec.contracts.injection.ContractInjectionService}. Nullable / blank when
+     * no project or the flag is off; mirrors {@link #referenceDocs}.
+     */
+    String contracts,
+    /**
+     * Enterprise-knowledge injection (flag {@code enterprise.inject.enabled}, default OFF) — the
+     * rendered {@code {{PROJECT_ADRS}}} block from {@link
+     * com.navneet.executespec.adr.AdrInjectionService}. Nullable / blank when no project or the
+     * flag is off; mirrors {@link #referenceDocs}.
+     */
+    String projectAdrs,
+    /**
      * v2.5.2 (Phase 4.3) — when true, planner emits test tasks first with implementation tasks
      * declaring dependsOn the test ids.
      */

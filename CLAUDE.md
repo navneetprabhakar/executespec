@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V208**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V213**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -11,7 +11,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. The VS Code-style **IDE** workspace (`frontend/src/ide/`) is the **only** chrome since the 2026-05-22 IDE-only switch — `App.tsx` mounts `IdeWorkspace` for every protected route (the A/B toggle was removed; `useUiStore.initUiMode()` hard-returns `'ide'`). The production **Signal** chrome was retired and its pages were ported IDE-native then **deleted in the 2026-05-23 cleanup** (App.tsx's dead `ide ? Ide : Signal` ternaries collapsed + the `const ide` flag dropped; `Shell.tsx` + 22 orphaned pages removed). `frontend/src/signal/` now holds only the standalone **public** pages (auth/marketing/legal/shared + `AdminPage` for `/admin/*`) plus shared `components/` + `signal.css` reused by the IDE. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `hooks/`, `lib/`, `stores/`, `types/`, `design-system/` remain under `frontend/src/`.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
-- **Codebase shape:** 72 top-level packages under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). 98 REST controllers, 78 entities, 208 Flyway migrations, ~88 prompt files. Frontend ~75K LOC.
+- **Codebase shape:** 72 top-level packages under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). 98 REST controllers, 78 entities, 211 Flyway migrations, ~88 prompt files. Frontend ~75K LOC.
 
 ### V2 pipeline (the only execution path)
 
@@ -64,7 +64,7 @@ Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(
 
 JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`).
 
-`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard. Ten legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators fail the build.
+`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard — AND that write handlers (POST/PUT/DELETE/PATCH) use `assertCanWrite`, not `assertCanRead` (RL-2026-05-040; genuine read-only POSTs allowlisted in `READ_ONLY_WRITE_HANDLERS`). `KNOWN_LEGACY_DRIFT` is empty (35/35 cleared); new violators fail the build.
 
 ### Security
 
@@ -82,7 +82,7 @@ Always-on RAG: Tika `DocumentExtractor` + 500/50-token `ChunkingService` + Sprin
 
 Project memory (`memory/`): every completed project-scoped run appends a digest to `project_run_ledger` via `RunLedgerAgent`; `MemoryCompactionService` rewrites a versioned `project_memory_snapshot` every 10 runs. `ProjectMemoryProvider.buildPlannerContext(projectId)` feeds `{{PROJECT_MEMORY}}` into the planner prompt.
 
-Project chat (`memory/ProjectChatService`): compaction (summarise older N messages, keep last 6 verbatim) + reset + per-bubble copy + branch override on launch. Async-dispatched apply-suggestion through dedicated `applyExecutor` (4 threads) so the 25-iter worker loop doesn't burn a Tomcat handler thread.
+Project chat (`memory/ProjectChatService`): compaction (summarise older N messages, keep last 6 verbatim) + reset + per-bubble copy + branch override on launch. Async-dispatched apply-suggestion through dedicated `applyExecutor` (4 threads) so the 25-iter worker loop doesn't burn a Tomcat handler thread. Tool-enabled via `memory/chattools/ProjectChatTools` (12 tools): architecture regen / doc generation / list repos-runs-PRs / project memory / code review + **doc access — `list_project_documents` / `read_generated_doc` (EXPLANATION·SETUP) / `search_project_docs` (RAG over uploaded docs)** (RL-2026-05-039); the architecture doc + memory are auto-injected into the chat context.
 
 Multi-repo PR creation: `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`. PRs persisted to `pull_request_record` (V169 added `project_id` + `kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status` columns). Webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `PullRequestSnapshot` carries `headSha` so PR refresh polls CI check-runs alongside merge state.
 
@@ -106,7 +106,7 @@ Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable
 
 Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. **2026-05-21 (RL-2026-05-010):** Gemini PLANNING also moved Pro → `gemini-3.5-flash` (the eval-best Gemini — ties Sonnet at verifiedScore 94 on the HIGH band, cheaper than Pro). All Gemini tiers now run Flash-class models; `gemini-3-pro-preview` is no longer tier-routed (it survives only as the `GeminiNativeToolClient` default-model constant).
 
-Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain.
+Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain. Since RL-2026-05-029 it also does a **bounded same-provider retry** (up to 4 attempts, exponential backoff 2s/4s/8s) on transient errors (5xx / connection reset / I/O timeout / 429 via `isTransientError`) before giving up — same provider, no mid-run model switch, so per-provider numbers stay honest and a customer run survives a transient upstream blip (permanent 4xx still fail fast).
 
 ### Observability
 
@@ -127,7 +127,7 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V208**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V213** — V209/210/211 seed the `build.test-exec-gate` / `codeintel.inject` / `enterprise.inject` flags (RL-2026-05-034/035); V212/213 seed `standards.enforcement` / `contracts.breaking-change` (RL-2026-05-037); all default OFF; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
 ### Patterns: MUST follow
 
@@ -407,7 +407,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V208)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V213)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
@@ -436,7 +436,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - In-app notifications (run completion + quota warning + gate-opened events).
 - Pause / resume on V2 runs (interrupt + resume-from-disk; flag `v2.pause.enabled`).
 - GDPR data-export endpoint.
-- `AccessGuardCoverageTest` ArchUnit pin + known-legacy ledger (10 sites remaining).
+- `AccessGuardCoverageTest` ArchUnit pin — tenant-guard coverage + write-handler-uses-write-guard (RL-2026-05-040); `KNOWN_LEGACY_DRIFT` empty (35/35 cleared).
 - Local Grafana dashboards + GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
 - Model evaluation framework (`eval/`) + tier-eval-v2 (`eval/v2/`) — production-shaped per-tier (LIGHTWEIGHT / PLANNING / WORKHORSE) × provider eval that drives the live agent prompts + tool schemas through `LlmRouter` and scores tool-call validity, cache hit rate, latency, cost. Admin endpoint `POST /api/admin/eval/v2/run`; CLI wrapper `scripts/tier-eval-v2.sh`.
 
@@ -445,7 +445,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - **PR #170 (open against `dev`, 2026-05-24)** — codemap/arch regenerate-loop fix (`.executespec/`-only diffs no longer force regen) + Sync connection-leak fix (`syncRepo` is metadata-only + non-`@Transactional`; heavy regen moved to the new explicit `POST /api/projects/{id}/repos/{repoId}/regenerate-architecture`) + repo-card Language/Size/PR-link. RL-2026-05-025 + RL-2026-05-026.
 - **dev → main: in sync (2026-05-24)** — the V199→V203 honesty-pass release (PRs #155/#156) and every subsequent fix were promoted to `main` (latest via PR #169); `origin/dev` is 0 commits ahead of `origin/main`. No promotion pending. (Includes the planner over-decomposition relaxation, RL-2026-05-011.)
 - **`feature/programbench-benchmark`** — V2/V3 unification pass (88+18 file moves, 25 class renames) + ProgramBench adapter + step-2 wire-in into V2 worker stack. Validated locally across 3 providers (OpenAI / Anthropic / Gemini) on a Python single-shot spec; pipeline healthy. PR open against dev.
-- **`feature/swebench-adapter`** (PR #88, NOT merged) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Empirical: medium matrix 67% / hard matrix 60% across 3 providers.
+- **`feature/swebench-harness`** (this branch, 2026-05-24) — clean-slate **blind** SWE-bench harness (new `benchmark/` package) that runs the REAL production pipeline in **PATCH** run-mode, blind (issue-only spec; hidden tests + gold `test_patch` applied externally at scoring). **Supersedes the PR #88 oracle adapter below** (which injected the gold test into the prompt → non-publishable; its 67%/60% numbers are **discarded**). Also lands two production-relevant fixes: `LlmRouter` bounded same-provider transient retry (RL-2026-05-029) + PATCH test-verification gate scoped by run source (RL-2026-05-028). Empirical (blind, small-N): Lite Hard-5 — Anthropic 4/4, Gemini 4/4, OpenAI 2/4; uplift study ~7% single-shot baseline → 67% with the system. Validated locally on Lite + Live × 3 providers; not merged. RL-2026-05-028 + RL-2026-05-029.
+- **`feature/swebench-adapter`** (PR #88, NOT merged — **superseded** by `feature/swebench-harness` above) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Its 67%/60% matrix numbers were measured **oracle-mode** (gold test injected into the prompt) and are **discarded** — the harness branch re-measures blind. The 4 autofix surfaces it introduced are live and unaffected.
 - **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/reason-log/2026-05.md` and per-package `CLAUDE.md` files.
 - Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md).
 - V2 batch execution — scoped in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md); not started.

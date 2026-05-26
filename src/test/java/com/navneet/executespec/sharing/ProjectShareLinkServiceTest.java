@@ -34,13 +34,19 @@ class ProjectShareLinkServiceTest {
 
   private ProjectShareLinkRepository linkRepo;
   private TierConfigRepository tierRepo;
+  private com.navneet.executespec.state.repository.PipelineRunRepository runRepo;
+  private com.navneet.executespec.codereview.repository.CodeReviewScanRepository scanRepo;
+  private com.navneet.executespec.prreview.repository.PrReviewRepository prReviewRepo;
   private ProjectShareLinkService service;
 
   @BeforeEach
   void setUp() {
     linkRepo = mock(ProjectShareLinkRepository.class);
     tierRepo = mock(TierConfigRepository.class);
-    service = new ProjectShareLinkService(linkRepo, tierRepo);
+    runRepo = mock(com.navneet.executespec.state.repository.PipelineRunRepository.class);
+    scanRepo = mock(com.navneet.executespec.codereview.repository.CodeReviewScanRepository.class);
+    prReviewRepo = mock(com.navneet.executespec.prreview.repository.PrReviewRepository.class);
+    service = new ProjectShareLinkService(linkRepo, tierRepo, runRepo, scanRepo, prReviewRepo);
     lenient().when(linkRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
     lenient().when(linkRepo.countActiveByProject(anyString(), any())).thenReturn(0L);
   }
@@ -90,6 +96,14 @@ class ProjectShareLinkServiceTest {
   void surface_requiring_scope_id_passes_with_scope() {
     AppUser pro = userOnTier("u-pro", "PRO");
     lenient().when(tierRepo.findById("PRO")).thenReturn(Optional.of(tier("PRO", 25)));
+    // IDOR fix (RL-2026-05-036): createLink now verifies the scope belongs to the project.
+    // Run "run-abc" must resolve to project "p1" for this same-project link to be allowed.
+    when(runRepo.findById("run-abc"))
+        .thenReturn(
+            Optional.of(
+                com.navneet.executespec.state.entity.PipelineRun.builder()
+                    .projectId("p1")
+                    .build()));
     ProjectShareLink link =
         service.createLink(
             "p1", ProjectShareLink.Surface.RUN_DETAIL, "run-abc", "run share", null, pro);

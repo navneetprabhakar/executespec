@@ -72,7 +72,7 @@ public class ProjectController {
       @RequestBody UpdateProjectSettingsRequest req) {
     // GA-readiness P4.1-followup — @PreAuthorize role check confirms ORG_ADMIN
     // somewhere; the guard confirms it's THIS project's org.
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     return ResponseEntity.ok(projectService.updateSettings(id, req, userDetails.getUser().getId()));
   }
 
@@ -81,7 +81,7 @@ public class ProjectController {
   public ResponseEntity<ProjectDto> archiveProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
     // GA-readiness P4.1-followup — tenant guard before destructive op.
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     return ResponseEntity.ok(projectService.archiveProject(id, userDetails.getUser().getId()));
   }
 
@@ -94,7 +94,7 @@ public class ProjectController {
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<ProjectDto> unarchiveProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     return ResponseEntity.ok(projectService.unarchiveProject(id, userDetails.getUser().getId()));
   }
 
@@ -108,7 +108,7 @@ public class ProjectController {
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<Void> deleteProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     projectService.softDeleteProject(id, userDetails.getUser().getId());
     return ResponseEntity.noContent().build();
   }
@@ -130,7 +130,7 @@ public class ProjectController {
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<ProjectDto> restoreProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     return ResponseEntity.ok(projectService.restoreProject(id, userDetails.getUser().getId()));
   }
 
@@ -153,7 +153,7 @@ public class ProjectController {
     // GA-readiness P4.1-followup — closes the access-control mutation gap.
     // Adding members is the most sensitive write surface on a project; the
     // guard ensures the caller is an admin of THIS project's org.
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     projectService.addMember(
         id, body.get("userId"), body.get("role"), userDetails.getUser().getId());
     return ResponseEntity.status(HttpStatus.CREATED).build();
@@ -166,7 +166,7 @@ public class ProjectController {
       @PathVariable String id,
       @PathVariable String userId) {
     // GA-readiness P4.1-followup — same as addMember.
-    projectAccessGuard.assertCanRead(id, userDetails);
+    projectAccessGuard.assertCanWrite(id, userDetails);
     projectService.removeMember(id, userId, userDetails.getUser().getId());
     return ResponseEntity.noContent().build();
   }

@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 
 import jakarta.annotation.PostConstruct;
 
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -96,6 +98,9 @@ public class PatchAgent {
    */
   private final WorkerAgent workerAgent;
 
+  /** Reads the run's {@code source} to scope the test-verification gate (see {@link #run}). */
+  private final PipelineRunRepository runRepo;
+
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
   public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
 
@@ -108,6 +113,14 @@ public class PatchAgent {
         provider,
         model,
         maxIterations);
+
+    // Scope the test-verification gate by run source. Blind benchmark runs (SWE-bench harness)
+    // deliberately hold out the target test, so the "runTests must pass before completeTask" gate
+    // can never be satisfied and the worker loops to the iter cap. Disable it for those
+    // ("swebench*"/"benchmark*"); keep it ON for the customer autofix surfaces ("finding:*").
+    String src = runRepo.findById(ctx.runId()).map(PipelineRun::getSourceType).orElse("");
+    boolean requireTV =
+        !(src != null && (src.startsWith("swebench") || src.startsWith("benchmark")));
 
     WorkerTaskRequest req =
         WorkerTaskRequest.builder()
@@ -126,7 +139,7 @@ public class PatchAgent {
             // ignored or over-applied; the gate enforces test execution programmatically.
             // 2026-05-08 strengthened: gate now requires tests to PASS (failed:[] +
             // errored:[] + exit_code:0) not just be run — see WorkerAgent line ~470.
-            .requireTestVerification(true)
+            .requireTestVerification(requireTV)
             .build();
 
     WorkerResult result = workerAgent.run(req);

@@ -2961,7 +2961,9 @@ export const uploadProjectDocument = async (
 ): Promise<ProjectDocumentRow> => {
   const form = new FormData();
   form.append('file', file);
-  const token = localStorage.getItem('token');
+  // BUG-FIX (RL-2026-05-038): the auth token is stored under 'access_token' (useAuthStore /
+  // AuthCallbackPage); reading 'token' always returned null → every RAG upload 401'd.
+  const token = localStorage.getItem('access_token');
   const res = await fetch(`/api/projects/${projectId}/documents`, {
     method: 'POST',
     headers: token ? {Authorization: `Bearer ${token}`} : {},
