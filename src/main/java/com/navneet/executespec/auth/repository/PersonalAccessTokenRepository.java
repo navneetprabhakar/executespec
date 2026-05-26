@@ -7,10 +7,11 @@ import com.navneet.executespec.auth.entity.PersonalAccessToken;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface PersonalAccessTokenRepository
-    extends JpaRepository<PersonalAccessToken, String> {
+public interface PersonalAccessTokenRepository extends JpaRepository<PersonalAccessToken, String> {
 
-  /** Hot-path lookup for authentication. Excludes revoked tokens; expiry is checked in the service. */
+  /**
+   * Hot-path lookup for authentication. Excludes revoked tokens; expiry is checked in the service.
+   */
   Optional<PersonalAccessToken> findByTokenHashAndRevokedAtIsNull(String tokenHash);
 
   /** Management list — a user's tokens, newest first. Includes revoked rows for the audit trail. */

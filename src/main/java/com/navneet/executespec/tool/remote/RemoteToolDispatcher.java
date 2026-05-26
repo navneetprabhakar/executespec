@@ -47,7 +47,9 @@ public class RemoteToolDispatcher {
     final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
   }
 
-  /** Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client. */
+  /**
+   * Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client.
+   */
   public void register(String runId) {
     sessions.put(runId, new Session());
     log.info("[RemoteTool] registered local-execution session for run {}", runId);
@@ -81,7 +83,9 @@ public class RemoteToolDispatcher {
     CompletableFuture<String> future = new CompletableFuture<>();
     s.pending.put(callId, future);
     try {
-      broadcaster.emit(runId, RunEvent.toolCall(runId, taskId, frame(callId, runId, taskId, toolName, argsJson)));
+      broadcaster.emit(
+          runId,
+          RunEvent.toolCall(runId, taskId, frame(callId, runId, taskId, toolName, argsJson)));
       return future.get(TOOL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
       return errorEnvelope(

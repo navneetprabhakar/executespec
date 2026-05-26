@@ -7,6 +7,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import com.navneet.executespec.auth.service.PersonalAccessTokenService;
+
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -14,8 +16,6 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
-
-import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +49,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   }
 
   /**
-   * Personal Access Token path (CLI / VS Code / CI). Resolves the token to its owning user and binds
-   * the SAME {@link AppUserDetails} a JWT would — identical global + org roles, identical tenant — so
-   * every downstream access guard behaves the same regardless of credential type.
+   * Personal Access Token path (CLI / VS Code / CI). Resolves the token to its owning user and
+   * binds the SAME {@link AppUserDetails} a JWT would — identical global + org roles, identical
+   * tenant — so every downstream access guard behaves the same regardless of credential type.
    */
   private void authenticateWithPat(String token, HttpServletRequest request) {
     String userId = personalAccessTokenService.resolveUserId(token);
@@ -78,8 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private void setAuthentication(UserDetails userDetails, HttpServletRequest request) {
     UsernamePasswordAuthenticationToken authentication =
-        new UsernamePasswordAuthenticationToken(
-            userDetails, null, userDetails.getAuthorities());
+        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
     SecurityContextHolder.getContext().setAuthentication(authentication);
   }

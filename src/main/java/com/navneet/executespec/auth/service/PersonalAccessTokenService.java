@@ -21,8 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Issues and resolves Personal Access Tokens — the programmatic-auth credential for the CLI / VS
- * Code extension / CI. A PAT acts as the owning user: {@code JwtAuthenticationFilter} resolves it to
- * the same {@link com.navneet.executespec.auth.security.AppUserDetails} a JWT would produce.
+ * Code extension / CI. A PAT acts as the owning user: {@code JwtAuthenticationFilter} resolves it
+ * to the same {@link com.navneet.executespec.auth.security.AppUserDetails} a JWT would produce.
  *
  * <p>Only the SHA-256 hash of the plaintext is stored, and it is the lookup key. The plaintext is
  * high-entropy random, so a fast digest is the right primitive (a salted password hash like bcrypt
@@ -33,7 +33,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PersonalAccessTokenService {
 
-  /** Every PAT plaintext starts with this marker so the auth filter can route it without a DB hit. */
+  /**
+   * Every PAT plaintext starts with this marker so the auth filter can route it without a DB hit.
+   */
   public static final String TOKEN_PREFIX = "es_pat_";
 
   private static final int RANDOM_BYTES = 32;
@@ -75,8 +77,7 @@ public class PersonalAccessTokenService {
             .expiresAt(expiresAt)
             .build();
     repo.save(token);
-    log.info(
-        "[PAT] Created token {} for user {} (expiresAt={})", token.getId(), userId, expiresAt);
+    log.info("[PAT] Created token {} for user {} (expiresAt={})", token.getId(), userId, expiresAt);
     return new CreatedToken(plaintext, token);
   }
 
@@ -97,9 +98,9 @@ public class PersonalAccessTokenService {
   }
 
   /**
-   * Resolve a presented PAT plaintext to its owning userId, or null if the token is unknown, revoked
-   * (excluded by the query), or expired. Stamps {@code lastUsedAt}, throttled to ≤ once / 5 min to
-   * keep the per-request auth path off the write path.
+   * Resolve a presented PAT plaintext to its owning userId, or null if the token is unknown,
+   * revoked (excluded by the query), or expired. Stamps {@code lastUsedAt}, throttled to ≤ once / 5
+   * min to keep the per-request auth path off the write path.
    */
   public String resolveUserId(String plaintext) {
     if (plaintext == null || !plaintext.startsWith(TOKEN_PREFIX)) {

@@ -197,8 +197,8 @@ public class AuthController {
   /**
    * Create a Personal Access Token for the authenticated user. The plaintext credential is returned
    * exactly once in {@code token} and is never persisted or retrievable again — only its SHA-256
-   * hash is stored. Clients present it as {@code Authorization: Bearer es_pat_…}, and it resolves to
-   * the same identity (global + org roles, tenant) a JWT would.
+   * hash is stored. Clients present it as {@code Authorization: Bearer es_pat_…}, and it resolves
+   * to the same identity (global + org roles, tenant) a JWT would.
    */
   @PostMapping("/me/tokens")
   public ResponseEntity<CreatePatResponse> createToken(
