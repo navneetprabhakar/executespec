@@ -282,6 +282,83 @@ model-matrix:
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
+    # RL-2026-05-045 — new ENTERPRISE-selectable models (per-run pin + F3 org matrix). Pricing
+    # VERIFIED 2026-05-26 against OpenRouter pass-through (≈ direct provider rates); see per-model
+    # notes. Exception: gpt-5.5-mini is not yet on the public catalogue, so it uses GPT-5.4 Mini's
+    # verified rates as a proxy. Non-enterprise users are unaffected (they stay on the tier defaults
+    # in model-matrix.providers above). These appear in the picker because ModelRegistry.allModels()
+    # enumerates this registry; ModelResolver + OrgModelOverrideService validate/resolve from it too.
+    claude-opus-4-7:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      context-limit: 200000
+      max-output-tokens: 32000
+      display-label: "Claude Opus 4.7"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26: $5 in / $0.50 cached / $25 out per 1M."
+    "[gpt-5.5]":
+      provider: openai
+      chain-tier: CAPABLE
+      context-limit: 200000
+      max-output-tokens: 16384
+      display-label: "GPT-5.5"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 30.00
+      notes: "GPT-5.5 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26 (OpenRouter pass-through ≈ direct): $5 in / $0.50 cached / $30 out per 1M."
+    "[gpt-5.5-mini]":
+      provider: openai
+      chain-tier: UTILITY
+      context-limit: 200000
+      max-output-tokens: 16384
+      display-label: "GPT-5.5 Mini"
+      pricing:
+        input-per-1m: 0.75
+        cached-input-per-1m: 0.075
+        output-per-1m: 4.50
+      notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Not yet on the public catalogue (2026-05-26); uses GPT-5.4 Mini's verified rates as proxy: $0.75 in / $0.075 cached / $4.50 out per 1M. Update when listed."
+    # RL-2026-05-048 — DeepSeek + Kimi via OpenRouter (ENTERPRISE BYOK, F3 grid + per-run pin).
+    # provider: openrouter → routed through callOpenRouter (OpenAI-wire-compatible) with the slug
+    # from OpenRouterModelMapper. Slugs verified against the live OpenRouter catalogue 2026-05-26.
+    # Pricing is APPROXIMATE (OpenRouter public rates) — BYOK orgs pay OpenRouter directly, so these
+    # only drive the cost ESTIMATE display, not platform billing.
+    deepseek-v4-pro:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "DeepSeek V4 Pro (OpenRouter)"
+      pricing:
+        input-per-1m: 0.435
+        cached-input-per-1m: 0.0036
+        output-per-1m: 0.87
+      notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.435 in / $0.0036 cached / $0.87 out per 1M."
+    deepseek-v4-flash:
+      provider: openrouter
+      chain-tier: UTILITY
+      context-limit: 1048576
+      max-output-tokens: 16384
+      display-label: "DeepSeek V4 Flash (OpenRouter)"
+      pricing:
+        input-per-1m: 0.10
+        cached-input-per-1m: 0.02
+        output-per-1m: 0.20
+      notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.10 in / $0.02 cached / $0.20 out per 1M."
+    "[kimi-k2.6]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Kimi K2.6 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.73
+        cached-input-per-1m: 0.25
+        output-per-1m: 3.49
+      notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.73 in / $0.25 cached / $3.49 out per 1M."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
@@ -345,6 +422,15 @@ model-matrix:
       - gemini
       - anthropic
 
+# RL-2026-05-041 (audit #2) — mid-run durability. When enabled (default), the workspace is
+# checkpointed to GCS at each task boundary (GcsTaskCheckpointService) so a node loss mid-run is
+# recoverable (StartupRunResumer / resumeAfterCrash restore from the latest checkpoint via
+# WorkspaceRestoreService) instead of failing WORKSPACE_GONE. No-op when GCS is unconfigured
+# (local dev), so it costs nothing there. Set false to disable the per-task GCS writes.
+durability:
+  task-checkpoint:
+    enabled: true
+
 agent:
   workspace: ./workspace
   roles:
@@ -366,19 +452,12 @@ agent:
     max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
     safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
     task-max-retries: 3           # Auto-retry failed tasks/subtasks up to 3 times before marking FAILED
-  provider-pools:
-    default-concurrency: 3        # Per-provider concurrent run limit (default for any unspecified provider)
-    default-queue-capacity: 10    # Max runs waiting per provider before HTTP 429
-    providers:
-      ANTHROPIC:
-        concurrency: 3
-        queue-capacity: 15        # Slightly larger — Anthropic is primary/premium provider
-      GEMINI:                     # v2.6.0 — renamed from GOOGLE to match LlmProvider enum.
-        concurrency: 3            # ProviderRunPoolProperties.forProvider(LlmProvider) does
-        queue-capacity: 10        # providers.get(provider.name()) — GOOGLE key never matched,
-      OPENAI:                     # silently fell back to defaults. Now functional.
-        concurrency: 3
-        queue-capacity: 10
+  # provider-pools: REMOVED (RL-2026-05-041, audit risk #3). ProviderRunPoolProperties had ZERO
+  # consumers — per-provider concurrency/queues were never enforced (no Semaphore in the dispatch
+  # path). Deleted the dead binder + this config rather than imply a control that doesn't exist.
+  # Real per-provider/tier concurrency limiting is scoped as a separate change (see
+  # docs/reviews/audit-remediation-2026-05-26.md). Per-tier concurrent-run-limit (TierConfig) is
+  # unrelated + retained.
   cost:
     credit-multiplier-usd: 5.0    # $5 of LLM compute per run credit
     estimation-buffer: 1.10        # 10% buffer on cost estimate for retry overhead
@@ -548,8 +627,10 @@ agent:
       require-audit: ${AGENT_SECURITY_DEPS_AUDIT:true}
       allow-prerelease: ${AGENT_SECURITY_DEPS_PRERELEASE:false}
       allowed-registries: ${AGENT_SECURITY_DEPS_REGISTRIES:https://registry.npmjs.org,https://registry.bun.sh,https://registry.pnpm.io,https://registry.yarnpkg.com}
-      # Vendor-neutral supply-chain scanner (Socket.dev / Snyk / Phylum / Sonatype). Default
-      # binding is NoopSupplyChainScanner — wire a real one as a Spring bean to enable.
+      # Supply-chain scanner config. NOTE (RL-2026-05-041): the SupplyChainScanner interface +
+      # NoopSupplyChainScanner impl were removed as unwired dead code (advertised "defense layer"
+      # with zero callers — it never ran). These keys remain only as a config hook for a future
+      # real integration; the LIVE deps protection is the registry-allowlist + audit policy above.
       scanner:
         vendor: ${AGENT_SECURITY_DEPS_SCANNER_VENDOR:none}
 

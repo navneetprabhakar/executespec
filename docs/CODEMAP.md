@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -14,7 +14,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Package | Ctrl | Svc | Agent | Tool | Purpose |
 | --- | --- | --- | --- | --- | --- |
-| `activity` | 1 | - | - | - | M-019 hash-chained activity feed + retention/partition jobs |
+| `activity` | 1 | - | - | - | M-019 hash-chained activity feed + retention/partition jobs + `RunActivityFeedListener` (run lifecycle → feed, RL-2026-05-042) |
 | `adr` | 1 | 1 | - | - | Architecture Decision Records — frontmatter parser + planner-injection |
 | `agent` | - | 17 | 12 | - | V2 LLM pipeline: classifier/planner/worker/coherence/expander + LlmRouter |
 | `analytics` | 1 | 1 | - | - | PostHog client + activation funnel event tracking |
@@ -25,7 +25,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `batch` | - | 6 | - | - | Provider batch-mode job orchestration (Anthropic/OpenAI/Gemini) |
 | `benchmark` | 1 | 2 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean synchronous `/generate`); branch `feature/swebench-harness` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
-| `chat` | - | 3 | - | - | Post-run conversation: ChatService + ApplyService + ApplyResultStore |
+| `chat` | - | 4 | - | - | Post-run conversation: ChatService (+ read-only RunChatTools) + ApplyService + ApplyResultStore |
 | `codeintel` | 2 | 7 | - | - | Codemap + per-repo arch + cross-repo arch + RAG-backed docs |
 | `codereview` | 1 | 3 | 1 | - | Whole-repo code review (Semgrep + LLM triage) |
 | `compliance` | - | 3 | - | - | Workspace + SCM cleanup jobs + data retention service |
@@ -36,7 +36,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `cost` | - | 4 | - | - | RunCostTracker + RunCostHistory + token attribution |
 | `credit` | - | 1 | - | - | LifetimeCreditService — R-161 5+5 referral lifetime credits |
 | `crypto` | - | 3 | - | - | EncryptedValueConverter + KeyMigrationRunner + crypto props |
-| `deployment` | 2 | 13 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS |
+| `deployment` | 2 | 14 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS + `GcsTaskCheckpointService` (mid-run task-boundary checkpoints, RL-2026-05-042) |
 | `eval` | 2 | 16 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) + `eval/v2/` tier-eval-v2 (production-shaped per-tier × provider eval driving live agent prompts) |
 | `execution` | 3 | 11 | - | - | V3 ExecutionRun "Launches" (multi-solution, multi-repo orchestration) |
 | `export` | 1 | 1 | - | - | Project-level ZIP export of `.executespec/` artefacts |
@@ -70,7 +70,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `saga` | - | 2 | - | - | SideEffectOutbox — retry persistence for failed async effects |
 | `scoring` | - | 3 | - | - | RunRubricVerifier + TestCoverageRescorer + ReviewScoringService |
 | `security` | - | 4 | - | - | InputSanitizer + CodeAbuseScanner + KeyEncryptor + ContextSanitizer |
-| `security/dependency` | - | 3 | - | - | DependencySecurityPolicy + SupplyChainScanner |
+| `security/dependency` | - | 1 | - | - | DependencySecurityPolicy (consumed by ShellSandboxPolicy) — SupplyChainScanner + NoopSupplyChainScanner deleted 2026-05-26, RL-2026-05-041 (zero callers) |
 | `security/guardrail` | - | 1 | - | - | GuardrailLevel enum + resolver (LOW/MEDIUM/HIGH) |
 | `sharing` | 3 | 2 | - | - | V175 cross-org project invites + public share links |
 | `smoketest` | - | 5 | - | - | CliSmokeRunner + BuildCommandResolver + TestCommandResolver + TestOutputParser + WorkspaceTestRunner (RL-2026-05-001 real test exec) |
@@ -314,6 +314,7 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 | `Org` | `org` | ~40 (tier, status, monthly_run_count, encrypted per-org keys, V198 external_sharing_enabled, V162 is_personal, SSO, GitHub App install) |
 | `OrgMember` | `org_member` | 5 (org/user/role/joined_at) |
 | `OrgInvitation` | `org_invitation` | 11 (token, status, escalation_note, project_ids, expires) |
+| `PersonalAccessToken` | `personal_access_token` | 9 (V215 — SHA-256 token_hash, prefix, scopes, expires_at, revoked_at, last_used_at) — programmatic auth for CLI/VS Code/CI (RL-2026-05-043) |
 | `Project` | `project` | ~18 (org, name, status, ai_provider, branch_naming, default_reviewers, V140 spend_cap, V191 archived_at/deleted_at) |
 | `ProjectMember` | `project_member` | 6 (V175 is_external) |
 | `TierConfig` | `tier_config` | ~20 (per-tier quotas + V172 pr_review/code_review + V175 share_link_active_cap + V140 max_projects/repos) |
@@ -467,9 +468,9 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 ---
 
-## 6. Flyway migrations — last 39 (V170..V208)
+## 6. Flyway migrations — V170..V208 + V215
 
-Head: **V208**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V215**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -513,6 +514,7 @@ Head: **V208**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V207 | Deactivate stale duplicate active Pro-monthly plans (₹1,699 INR + $20 USD) left from the pre-V176 Solo launch |
 | V208 | Widen `github_pat` VARCHAR(255) → TEXT on `app_user` + `pipeline_run` (longer GitHub tokens; RL-2026-05-024) |
 | V208 | Widen `github_pat` VARCHAR(255) → TEXT (`app_user` + `pipeline_run`) — drop the brittle length cap ahead of longer GitHub tokens (`ghs_…` ~520 chars); metadata-only ALTER (RL-2026-05-024) |
+| V215 | Create `personal_access_token` — programmatic auth for the CLI / VS Code / CI clients (SHA-256 hash, never plaintext; RL-2026-05-043). _(V209–V214 are logged in root `CLAUDE.md` + reason-log; this index wasn't backfilled for them.)_ |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -635,6 +637,8 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `codeintel.inject.enabled` | **false** (V210) | Inject codemap symbol-map into planner + PATCH prompt on project runs (RL-2026-05-035) |
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
 | `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
+| `scoring.gaming-guards` | **true** (V214) | Anti-gaming guards on the additive verifiedScore — CODE_DELIVERED↔endpoint-intent + TESTS↔coverage-quality blend; tighten-only (RL-2026-05-042) |
+| `durability.task-checkpoint.enabled` | **true** (yaml) | GCS workspace checkpoint at each task boundary for mid-run durability; no-op when GCS unconfigured (RL-2026-05-042) |
 | `enterprise.inject.enabled` | **false** (V211) | Inject `{{CONTRACTS}}` + `{{PROJECT_ADRS}}` into the planner prompt (RL-2026-05-035) |
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
 | `harness.v2.batch_enabled` | (cfg) | V2 batch-mode execution |
@@ -696,6 +700,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V213) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V214) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |

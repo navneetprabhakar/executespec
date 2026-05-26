@@ -203,7 +203,23 @@ class AsyncAllowlistTest {
               // Reads ExecutionRun rows + saves status; no lazy collection
               // navigation. Outer try/catch swallows recovery failures so
               // they never block startup.
-              "AdminReconciliationService#onApplicationReady"));
+              "AdminReconciliationService#onApplicationReady",
+
+              // RL-2026-05-041 (audit #11) — RunActivityFeedListener bridges run-lifecycle
+              // PipelineEvents to the project activity feed. Each handler does a single runRepo
+              // lookup (no lazy JPA navigation) then calls the already-allowlisted
+              // ActivityEventEmitter#emit. Same decoupled @Async + @EventListener profile as
+              // RunCompletionEmailListener.
+              "RunActivityFeedListener#onRunStarted",
+              "RunActivityFeedListener#onGateOpened",
+              "RunActivityFeedListener#onRunCompleted",
+              "RunActivityFeedListener#onRunFailed",
+
+              // RL-2026-05-041 (audit #2) — GcsTaskCheckpointService checkpoints the workspace to
+              // GCS at each task boundary for mid-run durability. Reads the run row +
+              // exports/uploads
+              // the workspace zip; no lazy JPA collection navigation. No-op when GCS unconfigured.
+              "GcsTaskCheckpointService#checkpointAfterTask"));
 
   @Test
   void asyncMethodAllowlistInSync() {

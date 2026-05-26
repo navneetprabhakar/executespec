@@ -1,5 +1,12 @@
 # ExecuteSpec — Unbiased System Audit (2026-05-26)
 
+> **⚠️ Superseded in part (2026-05-26).** This is the **C+ baseline** audit. A remediation cycle on
+> `fix/audit-remediation` (RL-2026-05-041) has since fixed several items below; the post-remediation
+> re-audit re-grades the system **C+ → B−**. See the updated report
+> [`docs/reports/system-audit-updated.{html,pdf}`](../reports/system-audit-updated.html) and the
+> remediation disposition [`audit-remediation-2026-05-26.md`](audit-remediation-2026-05-26.md).
+> This baseline is retained for the full top-20 risk detail the updated report summarizes.
+
 > **Method.** Two independent due-diligence passes (a skeptical principal-engineer tech pass and a
 > product+security+business pass), each instructed to verify claims against source rather than echo
 > the project's own docs, then reconciled here against this session's first-hand evidence. The brief

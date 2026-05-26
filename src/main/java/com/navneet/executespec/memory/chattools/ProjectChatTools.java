@@ -31,6 +31,7 @@ import com.navneet.executespec.project.rag.entity.ProjectDocument;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentRepository;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.project.techdebt.TechDebtService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -80,6 +81,7 @@ public class ProjectChatTools {
   private final AppUserRepository appUserRepository;
   private final ProjectDocumentRepository projectDocumentRepository;
   private final RetrievalService retrievalService;
+  private final TechDebtService techDebtService;
   private final ObjectMapper json;
 
   /** Caller-scoped state every tool needs. {@code callerPat} may be null for public-repo orgs. */
@@ -102,7 +104,8 @@ public class ProjectChatTools {
         getLatestCodeReview(ctx),
         listProjectDocuments(ctx),
         readGeneratedDoc(ctx),
-        searchProjectDocs(ctx));
+        searchProjectDocs(ctx),
+        getTechDebtSummary(ctx));
   }
 
   // ── Tool 1: regenerate architecture ───────────────────────────────────────
@@ -853,6 +856,63 @@ public class ProjectChatTools {
                 "No relevant passages found in the uploaded documents (or none are indexed yet).");
           } else {
             out.put("results", refs);
+          }
+          return out;
+        });
+  }
+
+  // ── Tool 13: tech-debt summary (read-only suggestion grounding) ───────────
+
+  private ToolCallback getTechDebtSummary(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("get_tech_debt_summary")
+            .description(
+                "Read this project's aggregated tech-debt rollup across recent runs: issue counts "
+                    + "by category + by severity, the top file hotspots, the per-dimension score "
+                    + "trend, and how many runs were analysed. This is the canonical 'what should "
+                    + "I improve next' data source (same as the dashboard Overview tab). Use it to "
+                    + "ground a prioritised list of SUGGESTIONS — it does NOT fix anything; point "
+                    + "the user at the dashboard's per-category Fix buttons to act. Read-only.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "sinceDays": {
+      "type": "integer",
+      "description": "Only include runs from the last N days. Omit / 0 = all history.",
+      "minimum": 1,
+      "maximum": 365
+    }
+  }
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          Integer sinceDays =
+              args.has("sinceDays") && !args.get("sinceDays").isNull()
+                  ? args.get("sinceDays").asInt()
+                  : null;
+          TechDebtService.Report report = techDebtService.build(ctx.projectId(), sinceDays);
+          ObjectNode out = json.createObjectNode();
+          out.put("ok", true);
+          out.put("totalRunsAnalyzed", report.totalRunsAnalyzed());
+          out.put("averageAccuracyScore", report.averageAccuracyScore());
+          out.set("issuesByCategory", json.valueToTree(report.issuesByCategory()));
+          out.set("issuesBySeverity", json.valueToTree(report.issuesBySeverity()));
+          ArrayNode hotspots = out.putArray("topFiles");
+          for (TechDebtService.FileHotspot h : report.topFiles()) {
+            ObjectNode row = hotspots.addObject();
+            row.put("filePath", h.filePath());
+            row.put("issueCount", h.issueCount());
+          }
+          if (report.totalRunsAnalyzed() == 0) {
+            out.put(
+                "summary",
+                "No completed runs with validation reports yet — no tech debt to summarise.");
           }
           return out;
         });

@@ -72,7 +72,8 @@ class ToolRegistryWorkerBindTest {
                 fakeTool("gitDiff"),
                 fakeTool("gitCommit"),
                 fakeTool("completeTask")),
-            new ObjectMapper());
+            new ObjectMapper(),
+            null); // remoteToolDispatcher — not exercised here; the dispatch branch is null-guarded
 
     List<ToolCallback> workerTools = registry.bindForWorker(ctx());
     List<String> workerNames = workerTools.stream().map(t -> t.getToolDefinition().name()).toList();
@@ -96,7 +97,8 @@ class ToolRegistryWorkerBindTest {
     ToolRegistry registry =
         new ToolRegistry(
             List.of(fakeTool("writeFile"), fakeTool("gitCommit"), fakeTool("completeTask")),
-            new ObjectMapper());
+            new ObjectMapper(),
+            null);
 
     List<ToolCallback> all = registry.bind(ctx());
     List<String> names = all.stream().map(t -> t.getToolDefinition().name()).toList();

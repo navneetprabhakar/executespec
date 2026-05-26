@@ -534,6 +534,10 @@ public class ProjectChatService {
         .append(
             "- \"explain the project's architecture / data flow / module boundaries\" → call"
                 + " get_latest_architecture\n")
+        .append(
+            "- \"what should I fix / improve next / where's the tech debt / worst files\" → call"
+                + " get_tech_debt_summary, then give a prioritised SUGGESTION list (read-only —"
+                + " point the user at the dashboard Fix buttons to act)\n")
         .append("After a write tool returns, briefly narrate what changed (1-2 sentences) so the ")
         .append("user knows where to look in the dashboard. After a read tool, summarise the ")
         .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")

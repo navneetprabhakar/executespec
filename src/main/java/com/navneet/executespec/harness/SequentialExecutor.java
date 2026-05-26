@@ -166,6 +166,10 @@ end and only call completeTask if it exits 0.
    */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
+  // RL-2026-05-041 (audit #2) — mid-run durability: GCS checkpoint at each task boundary.
+  private final com.navneet.executespec.deployment.GcsTaskCheckpointService
+      gcsTaskCheckpointService;
+
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
    * (k=3, 1500) so per-task cost stays bounded across many tasks.
@@ -275,6 +279,10 @@ end and only call completeTask if it exits 0.
       metrics.recordTaskStatus(outcome.status().name());
       metrics.recordTaskLatency(
           outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
+
+      // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
+      // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
+      gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
     }
 
     ExecutionResult result = summarize(outcomes, System.currentTimeMillis() - runStart);

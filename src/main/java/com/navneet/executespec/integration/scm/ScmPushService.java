@@ -55,6 +55,8 @@ public class ScmPushService {
   private final PullRequestRecordRepository pullRequestRecordRepository;
   private final ProjectRepoRepository projectRepoRepository;
   private final ObjectMapper objectMapper;
+  // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
+  private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
 
   /**
    * Entry point for manual SCM push from {@code RunController}. Resolves the user creds off the
@@ -236,6 +238,11 @@ public class ScmPushService {
             gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
           }
         }
+      } else {
+        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation failed: it's now an
+        // orphan. Enqueue the saga compensation to delete it (PAT resolved from the run owner at
+        // execution time — not stored in the payload).
+        enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
       }
       gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
     } else {
@@ -298,6 +305,34 @@ public class ScmPushService {
     if (slash < 0) return stripped;
     int second = stripped.indexOf('/', slash + 1);
     return second < 0 ? stripped : stripped.substring(0, second);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #16) — enqueue a saga compensation to delete a branch that was pushed but
+   * never got a PR (creation failed). Best-effort: a failed enqueue must never break the push path.
+   * Payload carries repoFullName + branch only; the executor resolves the owner PAT at run time.
+   */
+  private void enqueueOrphanBranchCleanup(String runId, String repoFullName, String branch) {
+    if (repoFullName == null || repoFullName.isBlank() || branch == null || branch.isBlank())
+      return;
+    try {
+      sideEffectOutbox.enqueueCompensation(
+          runId,
+          "COMPENSATE_GITHUB_BRANCH",
+          java.util.Map.of("repoFullName", repoFullName, "branch", branch));
+      log.info(
+          "[{}] Enqueued orphan-branch cleanup for {} branch {} (PR creation failed)",
+          runId,
+          repoFullName,
+          branch);
+    } catch (Exception e) {
+      log.warn(
+          "[{}] Failed to enqueue orphan-branch cleanup for {} branch {}: {}",
+          runId,
+          repoFullName,
+          branch,
+          e.getMessage());
+    }
   }
 
   /**
@@ -365,7 +400,11 @@ public class ScmPushService {
       String prUrl =
           gitHubRepoService.createPullRequest(
               remote, branchName, targetBranch, prTitle, prBodyBase, pat);
-      if (prUrl == null) continue;
+      if (prUrl == null) {
+        // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
+        enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        continue;
+      }
 
       Integer prNumber = PullRequestRecordService.extractPrNumber(prUrl);
       PullRequestRecord record =
