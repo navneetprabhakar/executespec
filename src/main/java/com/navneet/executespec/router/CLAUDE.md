@@ -34,7 +34,7 @@ Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). User-selectab
 
 Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` (ArchUnit) pins every failover-order entry to a valid `LlmProvider` enum constant.
 
-`FallbackLlmRouter` honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
+`FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
 
 ## Circuit breaker
 

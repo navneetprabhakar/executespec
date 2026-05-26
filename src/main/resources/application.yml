@@ -345,6 +345,15 @@ model-matrix:
       - gemini
       - anthropic
 
+# RL-2026-05-041 (audit #2) — mid-run durability. When enabled (default), the workspace is
+# checkpointed to GCS at each task boundary (GcsTaskCheckpointService) so a node loss mid-run is
+# recoverable (StartupRunResumer / resumeAfterCrash restore from the latest checkpoint via
+# WorkspaceRestoreService) instead of failing WORKSPACE_GONE. No-op when GCS is unconfigured
+# (local dev), so it costs nothing there. Set false to disable the per-task GCS writes.
+durability:
+  task-checkpoint:
+    enabled: true
+
 agent:
   workspace: ./workspace
   roles:

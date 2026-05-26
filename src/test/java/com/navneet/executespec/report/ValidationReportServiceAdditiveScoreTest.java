@@ -39,6 +39,46 @@ class ValidationReportServiceAdditiveScoreTest {
     return new ValidationReportService(null, null, null, null, null, null, flags);
   }
 
+  /** Additive + the RL-2026-05-041 anti-gaming guards (A+B+E) both ON. */
+  private ValidationReportService svcGuardsOn() {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(eq("scoring.additive-v2"))).thenReturn(true);
+    when(flags.isEnabled(eq("scoring.gaming-guards"))).thenReturn(true);
+    return new ValidationReportService(null, null, null, null, null, null, flags);
+  }
+
+  // ── RL-2026-05-041 anti-gaming guards (audit #7) ─────────────────────────
+
+  @Test
+  void guards_tighten_a_gamed_run_trivial_tests_plus_partial_endpoints() {
+    // All-passing tests but the LLM judged coverage NONE (classic "assert-true" gaming), and only
+    // half the spec's endpoints are actually exposed. Clean build + CLEAN review.
+    int unguarded = svcAdditiveOn().computeVerifiedScore(true, 5, 5, "CLEAN", 0, 50, "NONE", 4);
+    int guarded = svcGuardsOn().computeVerifiedScore(true, 5, 5, "CLEAN", 0, 50, "NONE", 4);
+    assertEquals(100, unguarded, "without guards a gamed run still reads 100");
+    assertTrue(
+        guarded < unguarded,
+        "guards must tighten the gamed score (TESTS capped at NONE + CODE blended with endpoints)."
+            + " Got guarded="
+            + guarded);
+    assertEquals(
+        79,
+        guarded,
+        "expected 79 = CODE 75 + BUILD 100 + TESTS 30 + REVIEWER 100 + CRIT 100"
+            + " weighted over 100. Got: "
+            + guarded);
+  }
+
+  @Test
+  void guards_do_not_touch_a_clean_run() {
+    // Endpoints fully covered + COMPREHENSIVE test coverage + all pass — a legitimately strong run.
+    // Guards are tighten-only, so this must stay 100.
+    int guarded =
+        svcGuardsOn().computeVerifiedScore(true, 10, 10, "CLEAN", 0, 100, "COMPREHENSIVE", 8);
+    assertEquals(
+        100, guarded, "a clean run with full endpoint coverage must be unaffected by guards");
+  }
+
   // ── CODE_DELIVERED hard floor ──────────────────────────────────────────
 
   @Test

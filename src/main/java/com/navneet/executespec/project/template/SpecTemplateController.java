@@ -45,6 +45,10 @@ public class SpecTemplateController {
       @PathVariable String orgId,
       @RequestBody SpecTemplateService.CreateRequest req,
       @AuthenticationPrincipal AppUserDetails user) {
+    // Org-scoped (not project-scoped), so this URL is outside the AccessGuardCoverageTest
+    // pattern. The tenant boundary is enforced in SpecTemplateService.createForOrg, which
+    // rejects (403) when orgId != caller.getOrgId() — write access to org templates is
+    // org-membership-bound, defense-in-depth at the service layer.
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(service.createForOrg(orgId, user.getUser(), req));
   }

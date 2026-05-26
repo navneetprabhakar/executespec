@@ -13,7 +13,7 @@
  * future token tweak shifts a hex, update BOTH the CSS and the
  * fixed value here so the test stays a true regression guard.
  */
-// @ts-expect-error — test runner not yet installed; types resolve once vitest is added
+// RL-2026-05-041 (audit #17) — vitest is now wired (vitest.config.ts + `npm test`); no longer dormant.
 import {describe, expect, it} from 'vitest';
 import {contrastRatio, WCAG} from './contrast';
 
@@ -31,7 +31,7 @@ const TOKENS = {
   popOrange: '#EC4899', // --c-pop-orange (brand accent — pink despite the name)
   popAmber: '#FBBF24', // --c-pop-amber
   graphite5: '#333B46', // legacy border-divider-subtle
-  graphite7: '#5E6771', // F-15 — new --border-default
+  graphite7: '#6A737E', // F-15 (corrected RL-2026-05-041) — --border-default, AA on graphite-2 + -3
   graphite8: '#7B8593', // F-15 — new --border-hover
   textPrimary: '#ECEEF2', // --c-ink-100
   textSecondary: '#C9D1DB', // --c-ink-200

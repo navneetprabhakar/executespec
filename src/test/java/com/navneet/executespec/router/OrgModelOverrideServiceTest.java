@@ -35,7 +35,12 @@ class OrgModelOverrideServiceTest {
     registry = mock(ModelRegistry.class);
     // Lenient identity canonicalisation — most tests don't care about aliasing.
     lenient().when(registry.canonicalize(anyString())).thenAnswer(inv -> inv.getArgument(0));
-    svc = new OrgModelOverrideService(orgRepo, registry, new ObjectMapper());
+    svc =
+        new OrgModelOverrideService(
+            orgRepo,
+            registry,
+            new ObjectMapper(),
+            mock(com.navneet.executespec.auth.service.ActivityAuditService.class));
   }
 
   private Org seed(String tier, String json) {

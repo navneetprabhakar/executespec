@@ -1,8 +1,10 @@
 # ExecuteSpec — Tech-Debt Register
 
-> **Audit date:** 2026-05-24 · `1.0.0-M1` · migration head **V208**.
+> **Audit date:** 2026-05-24 · `1.0.0-M1` · migration head **V214**.
 > Read-only audit of `src/main/java` (~155K LOC) + `frontend/src` (~75K LOC).
 > Severity = production risk, not effort. **Living doc** — strike items as they're paid down and cross-link the fixing PR / RL id.
+> **Remediation batch 1 (2026-05-26, RL-2026-05-041):** #3 (SupplyChainScanner) struck; concurrency dead code deleted; `FallbackLlmRouter` deprecated.
+> **Remediation batch 2 (2026-05-26, RL-2026-05-042 — the founder's 12-item order):** saga branch-delete (#7 here) RESOLVED; audit trail / dual codemap / Spring-AI reroute / cost estimator / verified-score guards / mid-run durability / frontend vitest+code-split all fixed; backend + frontend god-objects deferred to a dedicated branch. See [`docs/reviews/audit-remediation-2026-05-26.md`](reviews/audit-remediation-2026-05-26.md).
 
 Severity key: **HIGH** = security / correctness / scaling risk or a major maintainability blocker · **MED** = real debt, contained · **LOW** = cleanup / cosmetic.
 
@@ -17,11 +19,11 @@ Severity key: **HIGH** = security / correctness / scaling risk or a major mainta
 
 ### MED
 
-3. **`SupplyChainScanner` advertised but un-wired** — `security/dependency/SupplyChainScanner.java:30` has **zero callers**; a documented defense layer that never runs.
+3. ✅ **RESOLVED** (RL-2026-05-041, `fix/audit-remediation`, 2026-05-26) — ~~`SupplyChainScanner` advertised but un-wired~~. The interface + `NoopSupplyChainScanner` impl had **zero callers** — a documented defense layer that never ran. Both deleted rather than left implying a control that doesn't exist (`DependencySecurityPolicy`, which `ShellSandboxPolicy` actually uses, is retained).
 4. **Two silent OPENAI→ANTHROPIC reroutes + in-memory `run.aiProvider` mutation** — `integration/RunOrchestrator.java:3446,3510`, to dodge a "Spring AI 1.1.4 `extra_body` bug". The project is on Spring AI **1.1.6** now, so the workaround may be stale, and mutating the run's provider in-memory muddies billing attribution (self-flagged at :3520).
 5. **`ActivityEventEmitter` dependency cycle** — lazily `ObjectProvider`-injected at **5** contracts/standards call sites; a band-aid over a cyclic design. (13 `ObjectProvider` lazy fields total — each marks a wiring cycle worth a structural look.)
 6. **Bare swallowed exceptions in lint scope-detection** — `lint/LintPass.java:200,236` (`catch (Exception ignored) {}`, no log) return wrong mtime / touched-file counts that feed lint-scope decisions; violates the "no swallowed exceptions" rule. (Minor swallows also at `memory/ProjectChatService.java:589`, `integration/jira/JiraAdapter.java:147`.)
-7. **Saga compensation incomplete** — `saga/SideEffectExecutor.java:199` branch-deletion is a no-op (`GitHubRepoService` has no `deleteBranch`); failed runs leave orphan branches.
+7. ✅ **RESOLVED** (RL-2026-05-042, `fix/audit-remediation`, 2026-05-26) — ~~Saga compensation incomplete~~. `SideEffectExecutor.compensateGitHubBranch` now actually deletes the orphan branch via `GitHubRepoService.deleteBranch` (PAT resolved from the run owner at execution time — never stored in the outbox payload); `ScmPushService` enqueues `COMPENSATE_GITHUB_BRANCH` when a branch is pushed but PR creation fails (single + multi-repo). The 30s `@Scheduled` outbox poller was already live.
 8. **Billing/tier migration churn** — V140–V167 + V200 set→loosen→revert→re-bump the FREE/TEAM limits; the V143 product-split was rolled back by V179/V185. Each reversal is a permanent immutable migration — process debt around pricing decisions, not a code bug.
 9. **`DevDockerfileGenerator` — 3,538-line file with a 3,138-line escaped-JS-string method** (`crViteAllowedHostsPatch`), self-flagged at :395 as "should be a real file."
 
@@ -78,4 +80,4 @@ Severity key: **HIGH** = security / correctness / scaling risk or a major mainta
 2. **Code-split the frontend bundle** — `manualChunks` + a handful of `React.lazy` route boundaries + lazy OTel.
 3. **Wire a frontend test runner** (vitest) into CI and un-dormant `contrast.test.ts`.
 4. **Decompose the two god-files** — `RunOrchestrator.java` (backend) and `lib/api.ts` (frontend).
-5. **Wire or delete `SupplyChainScanner`; finish saga branch-deletion compensation.**
+5. ✅ ~~Delete `SupplyChainScanner`~~ — **done** (RL-2026-05-041, deleted, never ran). Still open: finish saga branch-deletion compensation (enqueue `COMPENSATE_GITHUB_BRANCH` + thread the caller PAT through the payload — `deleteBranch` itself now exists).

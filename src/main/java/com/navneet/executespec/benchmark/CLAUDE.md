@@ -79,8 +79,9 @@ for `finding:*`. (RL-2026-05-028.)
 
 Validated locally on SWE-bench **Lite** (iteration surface) + **Live** (publish surface) across all
 three providers, blind. **First blind Live run (2026-05-24, Anthropic Sonnet): 5/11 = 45% resolved**
-before stopping — full result + miss-analysis in
-[`docs/benchmarks/swebench-live-2026-05-24.md`](../../../../../../../docs/benchmarks/swebench-live-2026-05-24.md).
+before stopping — full result + miss-analysis was in `docs/benchmarks/swebench-live-2026-05-24.md`
+(cleared 2026-05-26 — archived in git history; the canonical SWE-bench record is now
+`docs/reports/swebench-exec-brief.{html,pdf}`).
 Dominant miss mode: **under-scoping multi-file changes** (the actionable scaffold lever). Run stopped
 at 11/50 because the local arm64/Rosetta environment kept stalling (a credible full run belongs on
 native x86_64 infra). `BenchmarkGenerationService` (`POST /generate`) is **compile-verified but not

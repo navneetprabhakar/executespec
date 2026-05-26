@@ -9,8 +9,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,9 @@ public class OrgModelOverrideService {
   private final OrgRepository orgRepo;
   private final ModelRegistry modelRegistry;
   private final ObjectMapper objectMapper;
+
+  /** RL-2026-05-041 (audit #11) — model-matrix overrides are a compliance-relevant admin action. */
+  private final ActivityAuditService auditService;
 
   /** Short-TTL cache so the per-run binding doesn't hit the DB on every run start. */
   private final Cache<String, Map<String, String>> cache =
@@ -119,6 +124,25 @@ public class OrgModelOverrideService {
     org.setUpdatedAt(Instant.now());
     orgRepo.save(org);
     cache.invalidate(orgId);
+    // RL-2026-05-041 (audit #11) — immutable audit row: who changed which (provider,tier)→model
+    // cells. ENTERPRISE-only knob that affects every run's cost + behavior, so it belongs in the
+    // compliance trail. Best-effort: never fail the update on an audit-write hiccup.
+    try {
+      auditService.record(
+          ActivityAudit.builder()
+              .id(java.util.UUID.randomUUID().toString())
+              .eventType("ORG_MODEL_MATRIX_CHANGED")
+              .entityType("ORG")
+              .entityId(orgId)
+              .orgId(orgId)
+              .actorId(actorId)
+              .newValue(clean.isEmpty() ? "(cleared all model overrides)" : clean.toString())
+              .createdAt(Instant.now())
+              .build());
+    } catch (Exception ex) {
+      log.warn(
+          "[OrgModelOverrideService] audit-write failed for org {}: {}", orgId, ex.getMessage());
+    }
     log.info(
         "[OrgModelOverride] org {} set {} override cell(s) by {}", orgId, clean.size(), actorId);
   }

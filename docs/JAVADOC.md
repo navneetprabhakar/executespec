@@ -1216,7 +1216,7 @@ static boolean isPaidTier(AppUser)
 - `security/KeyEncryptor` — `encrypt`, `decrypt` (AES-256-GCM via JWT-derived key).
 - `security/ContextSanitizer` — `sanitizeInput`, `wrapInBoundary`, `sanitizeOutput`.
 - `security/dependency/DependencySecurityPolicy` — `validateSegment(seg, fullCommand [, level])`.
-- `security/dependency/SupplyChainScanner` (interface) + `NoopSupplyChainScanner`.
+  (`SupplyChainScanner` interface + `NoopSupplyChainScanner` deleted 2026-05-26, RL-2026-05-041 — zero callers.)
 - `security/guardrail/GuardrailLevel` (enum LOW/MEDIUM/HIGH) + `GuardrailLevelResolver.current()`, `recordBlock(layer)`.
 
 ### Crypto / contact / export / finding / run helpers / SWE-bench / ProgramBench / batch / rollout / eval / preview / deploy / folder
