@@ -282,9 +282,10 @@ model-matrix:
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
-    # RL-2026-05-045 — new ENTERPRISE-selectable models (per-run pin + F3 org matrix). Pricing is a
-    # PLACEHOLDER (mirrors the predecessor) until the founder confirms the real provider model
-    # strings + per-token rates. Non-enterprise users are unaffected (they stay on the tier defaults
+    # RL-2026-05-045 — new ENTERPRISE-selectable models (per-run pin + F3 org matrix). Pricing
+    # VERIFIED 2026-05-26 against OpenRouter pass-through (≈ direct provider rates); see per-model
+    # notes. Exception: gpt-5.5-mini is not yet on the public catalogue, so it uses GPT-5.4 Mini's
+    # verified rates as a proxy. Non-enterprise users are unaffected (they stay on the tier defaults
     # in model-matrix.providers above). These appear in the picker because ModelRegistry.allModels()
     # enumerates this registry; ModelResolver + OrgModelOverrideService validate/resolve from it too.
     claude-opus-4-7:
@@ -297,7 +298,7 @@ model-matrix:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
-      notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing placeholder = Opus 4.6; confirm rates."
+      notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26: $5 in / $0.50 cached / $25 out per 1M."
     "[gpt-5.5]":
       provider: openai
       chain-tier: CAPABLE
@@ -305,10 +306,10 @@ model-matrix:
       max-output-tokens: 16384
       display-label: "GPT-5.5"
       pricing:
-        input-per-1m: 2.50
-        cached-input-per-1m: 1.25
-        output-per-1m: 15.00
-      notes: "GPT-5.5 — ENTERPRISE-only pin (Beta). Pricing placeholder = GPT-5.4; confirm rates."
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 30.00
+      notes: "GPT-5.5 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26 (OpenRouter pass-through ≈ direct): $5 in / $0.50 cached / $30 out per 1M."
     "[gpt-5.5-mini]":
       provider: openai
       chain-tier: UTILITY
@@ -317,9 +318,9 @@ model-matrix:
       display-label: "GPT-5.5 Mini"
       pricing:
         input-per-1m: 0.75
-        cached-input-per-1m: 0.375
+        cached-input-per-1m: 0.075
         output-per-1m: 4.50
-      notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Pricing placeholder = GPT-5.4 Mini; confirm rates."
+      notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Not yet on the public catalogue (2026-05-26); uses GPT-5.4 Mini's verified rates as proxy: $0.75 in / $0.075 cached / $4.50 out per 1M. Update when listed."
     # RL-2026-05-048 — DeepSeek + Kimi via OpenRouter (ENTERPRISE BYOK, F3 grid + per-run pin).
     # provider: openrouter → routed through callOpenRouter (OpenAI-wire-compatible) with the slug
     # from OpenRouterModelMapper. Slugs verified against the live OpenRouter catalogue 2026-05-26.
@@ -332,10 +333,10 @@ model-matrix:
       max-output-tokens: 32000
       display-label: "DeepSeek V4 Pro (OpenRouter)"
       pricing:
-        input-per-1m: 0.50
-        cached-input-per-1m: 0.50
-        output-per-1m: 1.50
-      notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing approximate; confirm rates."
+        input-per-1m: 0.435
+        cached-input-per-1m: 0.0036
+        output-per-1m: 0.87
+      notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.435 in / $0.0036 cached / $0.87 out per 1M."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -343,10 +344,10 @@ model-matrix:
       max-output-tokens: 16384
       display-label: "DeepSeek V4 Flash (OpenRouter)"
       pricing:
-        input-per-1m: 0.15
-        cached-input-per-1m: 0.15
-        output-per-1m: 0.40
-      notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing approximate; confirm rates."
+        input-per-1m: 0.10
+        cached-input-per-1m: 0.02
+        output-per-1m: 0.20
+      notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.10 in / $0.02 cached / $0.20 out per 1M."
     "[kimi-k2.6]":
       provider: openrouter
       chain-tier: CAPABLE
@@ -354,10 +355,10 @@ model-matrix:
       max-output-tokens: 32000
       display-label: "Kimi K2.6 (OpenRouter)"
       pricing:
-        input-per-1m: 0.60
-        cached-input-per-1m: 0.60
-        output-per-1m: 2.50
-      notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing approximate; confirm rates."
+        input-per-1m: 0.73
+        cached-input-per-1m: 0.25
+        output-per-1m: 3.49
+      notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.73 in / $0.25 cached / $3.49 out per 1M."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
