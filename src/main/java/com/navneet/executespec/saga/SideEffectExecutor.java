@@ -50,6 +50,9 @@ public class SideEffectExecutor {
   private final com.navneet.executespec.deployment.GcsWorkspaceStore gcsStore;
   private final com.navneet.executespec.config.AgentProperties agentProps;
   private final com.navneet.executespec.state.StateStore stateStore;
+  // RL-2026-05-041 (audit #16) — real branch-delete compensation.
+  private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
+  private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
 
   @Scheduled(fixedRate = 30_000)
   public void processDue() {
@@ -184,26 +187,69 @@ public class SideEffectExecutor {
     }
   }
 
+  /**
+   * RL-2026-05-041 (audit #16) — deletes an orphan GitHub branch left behind when a run pushed a
+   * branch but PR creation failed. Enqueued by {@code ScmPushService} at exactly that point.
+   *
+   * <p>Payload carries {@code repoFullName} + {@code branch} only — never the PAT (no secrets at
+   * rest in the outbox). The caller's PAT is resolved from the run owner at execution time,
+   * honoring the "every GitHub op uses the caller's own PAT — there is no system PAT" rule. {@code
+   * deleteBranch} refuses protected branches (main/master/develop) as a safety net, so this can
+   * never delete a real target branch.
+   */
   private void compensateGitHubBranch(String runId, Map<String, Object> payload) {
-    String owner = (String) payload.get("owner");
-    String repo = (String) payload.get("repo");
+    String repoFullName = (String) payload.get("repoFullName");
     String branch = (String) payload.get("branch");
-    if (owner == null || repo == null || branch == null) {
+    // Back-compat with the legacy owner/repo payload shape.
+    if (repoFullName == null) {
+      String owner = (String) payload.get("owner");
+      String repo = (String) payload.get("repo");
+      if (owner != null && repo != null) repoFullName = owner + "/" + repo;
+    }
+    if (repoFullName == null || branch == null || branch.isBlank()) {
       log.warn(
-          "[SideEffectExecutor] Missing owner/repo/branch in COMPENSATE_GITHUB_BRANCH payload for"
-              + " run {}",
+          "[SideEffectExecutor] COMPENSATE_GITHUB_BRANCH missing repoFullName/branch for run {}",
           runId);
+      return; // malformed payload — not retryable
+    }
+    String pat = resolveOwnerPat(runId);
+    if (pat == null || pat.isBlank()) {
+      // No system PAT exists; if the owner has none, retrying won't help — give up cleanly.
+      log.warn(
+          "[SideEffectExecutor] No GitHub PAT for run {} owner — cannot delete orphan branch {} on"
+              + " {}",
+          runId,
+          branch,
+          repoFullName);
       return;
     }
-    // GitHub API: DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
-    // GitHubRepoService doesn't yet expose deleteBranch — log for now; full impl in #3
-    // (DistributedSSE phase)
-    log.info(
-        "[SideEffectExecutor] COMPENSATE: Would delete GitHub branch {}/{}/{} for failed run {}",
-        owner,
-        repo,
-        branch,
-        runId);
+    boolean ok = gitHubRepoService.deleteBranch(repoFullName, branch, pat);
+    if (ok) {
+      log.info(
+          "[SideEffectExecutor] COMPENSATE: deleted orphan branch {} on {} for run {}",
+          branch,
+          repoFullName,
+          runId);
+    } else {
+      // Real failure (network / 403 / 401) — throw so the outbox retries with backoff.
+      throw new RuntimeException(
+          "deleteBranch returned false for " + repoFullName + " branch " + branch);
+    }
+  }
+
+  /** Resolve the run owner's GitHub PAT (no system PAT exists). Null when unavailable. */
+  private String resolveOwnerPat(String runId) {
+    try {
+      var run = stateStore.findRun(runId).orElse(null);
+      if (run == null || run.getCreatedByUserId() == null) return null;
+      return appUserRepository
+          .findById(run.getCreatedByUserId())
+          .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
+          .orElse(null);
+    } catch (Exception e) {
+      log.debug("[SideEffectExecutor] PAT resolve failed for run {}: {}", runId, e.getMessage());
+      return null;
+    }
   }
 
   @SuppressWarnings("unchecked")

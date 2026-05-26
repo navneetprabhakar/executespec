@@ -72,6 +72,11 @@ public class ProjectInviteService {
   private final OrgMemberRepository orgMemberRepo;
   private final MailService mailService;
 
+  /**
+   * RL-2026-05-041 (audit #11) — cross-org membership changes belong in the project activity feed.
+   */
+  private final com.navneet.executespec.activity.ActivityEventEmitter activityEmitter;
+
   /** Public-facing base URL — used to build accept-invite links in the email body. */
   @Value("${app.base-url:http://localhost:5173}")
   private String appBaseUrl;
@@ -253,6 +258,7 @@ public class ProjectInviteService {
     }
 
     // Idempotent — if a member row already exists, mark accepted + return.
+    boolean memberAdded = false;
     if (!memberRepo.existsByProjectIdAndUserId(invite.getProjectId(), caller.getId())) {
       memberRepo.save(
           ProjectMember.builder()
@@ -263,11 +269,17 @@ public class ProjectInviteService {
               .external(true)
               .assignedAt(Instant.now())
               .build());
+      memberAdded = true;
     }
     invite.setStatus("ACCEPTED");
     invite.setAcceptedAt(Instant.now());
     invite.setAcceptedByUserId(caller.getId());
     inviteRepo.save(invite);
+
+    // RL-2026-05-041 (audit #11) — record the external member joining on the project activity feed.
+    if (memberAdded) {
+      emitMemberAdded(invite, caller);
+    }
     return invite.getProjectId();
   }
 
@@ -285,6 +297,35 @@ public class ProjectInviteService {
     invite.setRevokedAt(Instant.now());
     invite.setRevokedByUserId(actor == null ? null : actor.getId());
     inviteRepo.save(invite);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #11) — emit MEMBER_ADDED to the project activity feed when an external
+   * collaborator accepts an invite. MEMBER_ADDED is HIGH_SIGNAL (feed-only); the cross-org grant is
+   * also captured in the immutable {@code activity_audit} trail via the existing org/auth audit
+   * paths. Best-effort: the emitter is @Async + self-swallowing.
+   */
+  private void emitMemberAdded(ProjectInvite invite, AppUser caller) {
+    try {
+      UUID projectUuid = UUID.fromString(invite.getProjectId());
+      activityEmitter.emit(
+          projectUuid,
+          com.navneet.executespec.activity.ActivityEventType.MEMBER_ADDED,
+          caller.getId() == null ? null : UUID.fromString(caller.getId()),
+          "MEMBER",
+          caller.getId(),
+          (caller.getEmail() == null ? "A collaborator" : caller.getEmail())
+              + " joined as "
+              + invite.getProjectRole()
+              + " (external)",
+          java.util.Map.of(
+              "userId", caller.getId() == null ? "" : caller.getId(),
+              "email", caller.getEmail() == null ? "" : caller.getEmail(),
+              "projectRole", invite.getProjectRole() == null ? "" : invite.getProjectRole(),
+              "external", true));
+    } catch (Exception e) {
+      log.warn("[ProjectInviteService] MEMBER_ADDED emit failed: {}", e.getMessage());
+    }
   }
 
   // ── Read paths ──────────────────────────────────────────────────────────

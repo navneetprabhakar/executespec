@@ -26,8 +26,10 @@ import com.navneet.executespec.tool.ExecutionContext;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -35,12 +37,17 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * V2 post-run chat copilot. Answers questions about a completed run's workspace using {@link
- * LlmRouter} with no tool callbacks — read-only conversation, never modifies files. History is
- * persisted as a JSON array of {role,content} objects on {@code pipeline_run.chat_history_json}.
+ * LlmRouter} with a small set of <b>read-only</b> tool callbacks ({@link RunChatTools}: {@code
+ * list_run_files} / {@code read_run_file}) so the copilot can ground its answers + suggestions in
+ * the actual generated code rather than the truncated file-tree snapshot. History is persisted as a
+ * JSON array of {role,content} objects on {@code pipeline_run.chat_history_json} (intermediate
+ * tool-call turns are NOT persisted — only the final user + assistant text).
  *
- * <p>Intentionally minimal: no streaming, no tool calls, no multi-turn tool agent. If the user
- * wants to edit code, they submit a new run (the UI's "Iterate as new run" path — not yet wired on
- * V2). This service just lets them reason about the existing run.
+ * <p>Strictly advisory: the tools never write / shell / push, and there is no re-run tool. If the
+ * user wants to edit code, they submit a new run (the UI's "Iterate as new run" / "Apply to Run"
+ * paths), which keep their own gates. This service just lets them reason about the existing run.
+ * (2026-05-26 — RL-2026-05-047: added the read-only run tools per the founder's "give suggestions"
+ * ask; previously this ran with {@code toolsOverride(List.of())}.)
  */
 @Slf4j
 @Service
@@ -56,11 +63,15 @@ public class ChatService {
    */
   private static final int MAX_FILE_TREE_LINES = 120;
 
+  /** Hard cap on tool-execution rounds per chat turn — mirrors ProjectChatService. */
+  private static final int MAX_TOOL_ROUNDS = 4;
+
   private final PipelineRunRepository runRepo;
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
   private final ValidationReportRepository validationReportRepo;
+  private final RunChatTools runChatTools;
   private final ObjectMapper mapper = new ObjectMapper();
 
   public record ChatMessage(String role, String content) {}
@@ -139,27 +150,15 @@ public class ChatService {
     }
     messages.add(new UserMessage(userMessage));
 
-    // No tool callbacks — chat is read-only. ExecutionContext is synthesised
-    // because LlmRequest requires a non-null context even when tools are off.
+    // Read-only run tools (list_run_files / read_run_file) let the copilot drill into the
+    // actual generated code to ground a suggestion. ExecutionContext is run-scoped so
+    // LlmRouter attributes token cost to this run.
     ExecutionContext ctx = new ExecutionContext(runId, "chat", workspace);
-    LlmRequest req =
-        LlmRequest.builder()
-            .provider(providerName)
-            .model(model.getModel())
-            .messages(messages)
-            .context(ctx)
-            .temperature(0.2) // tiny bit of variety for a chat voice
-            .maxTokens(1200) // ~900-1000 word answer cap
-            .toolsOverride(List.of()) // read-only: no file writes, no shell
-            .build();
+    List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId));
 
     String reply;
     try {
-      ChatResponse resp = router.call(req);
-      reply =
-          resp.getResult() != null && resp.getResult().getOutput() != null
-              ? String.valueOf(resp.getResult().getOutput().getText())
-              : "";
+      reply = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
       if (reply.isBlank())
         reply = "(The model returned an empty response. Try rephrasing the question.)";
     } catch (Exception e) {
@@ -179,6 +178,111 @@ public class ChatService {
 
   // ──────────────────────────────────────────────────────────────────────
 
+  /**
+   * Manual tool-execution loop. {@link LlmRouter} sets {@code internalToolExecutionEnabled(false)}
+   * (the V2 worker pattern handles its own loop), so we dispatch each {@code tool_use} block
+   * through the matching read-only {@link ToolCallback}, append a {@link ToolResponseMessage}, and
+   * re-call the LLM until it stops emitting tool calls (or we hit {@link #MAX_TOOL_ROUNDS}).
+   * Mirrors {@code ProjectChatService.send}. Returns only the model's accumulated narration text —
+   * the intermediate tool turns are kept in the in-memory conversation but never persisted to chat
+   * history.
+   */
+  private String runToolLoop(
+      String runId,
+      String providerName,
+      String modelName,
+      List<Message> seed,
+      ExecutionContext ctx,
+      List<ToolCallback> tools) {
+    List<Message> conversation = new ArrayList<>(seed);
+    StringBuilder finalText = new StringBuilder();
+
+    for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      LlmRequest req =
+          LlmRequest.builder()
+              .provider(providerName)
+              .model(modelName)
+              .messages(conversation)
+              .context(ctx)
+              .temperature(0.2) // tiny bit of variety for a chat voice
+              .maxTokens(1200) // ~900-1000 word answer cap
+              .toolsOverride(tools) // read-only: list_run_files / read_run_file only
+              .build();
+
+      ChatResponse resp = router.call(req);
+
+      // Aggregate text + tool calls across generations (Spring AI normally returns one).
+      StringBuilder turnText = new StringBuilder();
+      List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+      for (var gen : resp.getResults()) {
+        String t = gen.getOutput().getText();
+        if (t != null && !t.isEmpty()) {
+          if (turnText.length() > 0) turnText.append('\n');
+          turnText.append(t);
+        }
+        if (gen.getOutput().getToolCalls() != null) {
+          calls.addAll(gen.getOutput().getToolCalls());
+        }
+      }
+      if (turnText.length() > 0) {
+        if (finalText.length() > 0) finalText.append("\n\n");
+        finalText.append(turnText);
+      }
+
+      // No tool calls → final answer reached.
+      if (calls.isEmpty()) break;
+
+      // Append the assistant turn (text + tool_calls), then dispatch each read-only tool.
+      conversation.add(
+          AssistantMessage.builder().content(turnText.toString()).toolCalls(calls).build());
+
+      List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
+      for (AssistantMessage.ToolCall tc : calls) {
+        ToolCallback callback = findCallback(tools, tc.name());
+        String envelope;
+        if (callback == null) {
+          envelope = "{\"ok\":false,\"message\":\"unknown tool '" + tc.name() + "'\"}";
+          log.warn("Run chat: model called unknown tool '{}' for run {}", tc.name(), runId);
+        } else {
+          try {
+            envelope = callback.call(tc.arguments());
+          } catch (Exception ex) {
+            log.warn(
+                "Run chat tool '{}' threw {}: {}",
+                tc.name(),
+                ex.getClass().getSimpleName(),
+                ex.getMessage());
+            envelope = "{\"ok\":false,\"message\":\"" + ex.getClass().getSimpleName() + "\"}";
+          }
+        }
+        toolResponses.add(
+            new ToolResponseMessage.ToolResponse(
+                tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
+      }
+      conversation.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+      if (round == MAX_TOOL_ROUNDS - 1) {
+        log.warn("Run chat hit MAX_TOOL_ROUNDS={} for run {}", MAX_TOOL_ROUNDS, runId);
+        if (finalText.length() > 0) finalText.append("\n\n");
+        finalText.append(
+            "_(I hit my tool-call limit for this turn. Ask me to continue if you want me to keep"
+                + " going.)_");
+      }
+    }
+    return finalText.toString();
+  }
+
+  /**
+   * Lookup a {@link ToolCallback} by tool name. Returns null when the model calls an unknown tool.
+   */
+  private static ToolCallback findCallback(List<ToolCallback> tools, String name) {
+    if (name == null) return null;
+    for (ToolCallback t : tools) {
+      if (name.equals(t.getToolDefinition().name())) return t;
+    }
+    return null;
+  }
+
   private static boolean isTerminal(String status) {
     return "COMPLETE".equals(status)
         || "FAILED".equals(status)
@@ -190,9 +294,19 @@ public class ChatService {
     StringBuilder sb = new StringBuilder();
     sb.append("You are a conversational assistant for a completed code-generation run. ");
     sb.append("Answer questions about the generated code, the plan, the build/test results, and ");
-    sb.append("suggest fixes when asked. You do NOT have file-edit or shell tools — your replies ");
-    sb.append("are advisory. When suggesting code changes, output full file-diff blocks the user ");
-    sb.append("can paste into a new run's spec.\n\n");
+    sb.append("suggest fixes when asked.\n\n");
+
+    sb.append("## Tools (read-only)\n");
+    sb.append("You have two read-only tools to inspect the run's generated code:\n");
+    sb.append("- `list_run_files` — the complete file manifest (the tree below is truncated).\n");
+    sb.append(
+        "- `read_run_file` — the full content of one file by relative path. Call it before "
+            + "asserting what a file contains or suggesting a change to it, so your answer is "
+            + "grounded in the real code rather than a guess.\n");
+    sb.append(
+        "You have NO file-edit, shell, push, or re-run tools — your replies are advisory only. "
+            + "When suggesting code changes, output full file-diff blocks the user can apply via a "
+            + "new run; do NOT claim you have changed anything.\n\n");
 
     sb.append("## Run\n");
     sb.append("- runId: ").append(run.getRunId()).append('\n');

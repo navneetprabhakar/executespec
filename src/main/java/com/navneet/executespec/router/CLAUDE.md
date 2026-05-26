@@ -8,7 +8,7 @@ User-selected provider routing with YAML as the single source of truth and a Red
 
 | File | Purpose |
 |------|---------|
-| `LlmProvider.java` | Enum: ANTHROPIC, OPENAI, GEMINI. `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence (V120). |
+| `LlmProvider.java` | Enum: ANTHROPIC, OPENAI, GEMINI, OPENROUTER (Enterprise BYOK aggregator). `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence (V120). |
 | `ModelRegistry.java` | **Single source of truth** for model metadata. Reads `application.yml model-matrix.*` — `resolve(agentName, provider)` returns tier-routed model + max-output-tokens; `workhouseModelFor(provider)` returns the provider's default workhorse; `contextLimitForOrPrefixFallback(model)` returns the context window; `displayLabelFor(model)` returns the YAML `display-label`. `ModelContextWindowMap` was deleted in the 2026-05-06 consolidation. |
 | `ModelMatrixProperties.java` | `@ConfigurationProperties` binding for `model-matrix:` (providers + agent-tier-map + failover-order + model-pricing + display-label + chainTier + free-tier-locked). |
 | `AgentTier.java` | Enum: PLANNING, WORKHORSE, LIGHTWEIGHT. |
@@ -17,6 +17,7 @@ User-selected provider routing with YAML as the single source of truth and a Red
 | `AvailableProviderResolver.java` | Resolves available providers per run based on org policy + API key availability. |
 | `ProviderRecommendationService.java` | Heuristic project-type → provider routing. Gated by `provider.smart-routing.enabled` flag (default OFF). |
 | `OrgModelOverrideService.java` | **F3** — per-org `(provider:tier)→model` overrides stored as JSON on `Org.model_overrides_json` (V205). Validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper` allow-list), ENTERPRISE-gated, lenient on read; short-TTL Caffeine cache. Backs `GET/PUT /api/org/me/model-matrix`. |
+| `OpenRouterModelMapper.java` | Matrix-id → OpenRouter slug allow-list (explicit; unmapped id throws). `LlmRouter.dispatch` `case "openrouter"` routes via `OpenAiNativeToolClient` (OpenAI-wire-compatible). `OrgController.selectableModelsFor("openrouter")` returns the allow-list keys, so adding a model here makes it picker-selectable. **DeepSeek V4 (`deepseek-v4-pro`/`-flash`) + Kimi K2.6 (`kimi-k2.6`) added 2026-05-26 (RL-2026-05-048)** — OpenRouter-only (no native client), ENTERPRISE BYOK, also registered in `application.yml model-matrix.models` with `provider: openrouter`. |
 | `RunModelOverrides.java` | **F3** — `ThreadLocal` holder for the run's override map. `RunOrchestrator` binds it at run start (cleared in `finally`); `ModelResolver.lookupModel` consults it so worker/planner/reviewer honour the override with no per-call-site plumbing. **Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22):** static `withRunPin(orgOverrides, provider, model)` builds the bound map by overlaying the run's chosen model onto the provider's three tier cells of a mutable copy of the org map (pin out-ranks org + YAML). `RunOrchestrator` calls it at the bind site ENTERPRISE-gated (owner-tier lookup) from the raw `RunRequest.modelName`, validated provider-scoped via `ModelRegistry`. This overlay is the authoritative routing mechanism for every role — the worker no longer ignores the pin by re-resolving the tier default. UI: the ENTERPRISE-only "Model · Beta" selector on the IDE Compose surface (`frontend/src/ide/IdeSurfaces.tsx`). |
 | `OrgModelOverrideService.java` migration | **V205** `org_model_overrides` — adds `org.model_overrides_json TEXT`. |
 
@@ -34,7 +35,7 @@ Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). User-selectab
 
 Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` (ArchUnit) pins every failover-order entry to a valid `LlmProvider` enum constant.
 
-`FallbackLlmRouter` honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
+`FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
 
 ## Circuit breaker
 

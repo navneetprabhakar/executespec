@@ -77,6 +77,15 @@ public class GcsWorkspaceStore {
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /**
+   * RL-2026-05-041 (audit #2) — true when GCS is actually wired (ADC + bucket resolved at startup).
+   * Lets callers (e.g. the mid-run checkpoint) skip the expensive workspace-zip step entirely when
+   * GCS is unconfigured, e.g. on local dev — uploads would no-op anyway.
+   */
+  public boolean isConfigured() {
+    return storage != null;
+  }
+
+  /**
    * Uploads a pre-built zip to GCS.
    *
    * @param runId the pipeline run ID

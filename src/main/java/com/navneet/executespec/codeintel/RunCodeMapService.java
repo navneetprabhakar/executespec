@@ -4,8 +4,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
+import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -39,6 +43,10 @@ public class RunCodeMapService {
 
   private final CodeMapGenerator codeMapGenerator;
   private final RunCodeMapRepository repo;
+  // RL-2026-05-041 (audit #14 — dual codemap consolidation): a project-scoped run reuses the
+  // project's canonical codemap instead of regenerating + re-summarising from scratch.
+  private final ProjectCodeMapRepository projectCodeMapRepo;
+  private final ProjectRepoRepository projectRepoRepo;
 
   @Autowired(required = false)
   @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
@@ -51,8 +59,23 @@ public class RunCodeMapService {
    * @return the LLM summary (or raw markdown when summarisation isn't available) that callers
    *     should inject into prompts; {@code null} if generation failed.
    */
+  /** Backward-compatible overload for standalone (non-project) runs. */
   @Transactional
   public String generateForRun(String runId, String repoUrl, String defaultBranch, String pat) {
+    return generateForRun(runId, repoUrl, defaultBranch, pat, null);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #14 — dual codemap consolidation). When {@code projectId} is non-null and
+   * the project already has a {@link ProjectCodeMap} for this repo, reuse that content (0 LLM cost,
+   * no redundant scan) rather than regenerating an independent per-run codemap. The project codemap
+   * is produced by the same {@link CodeMapGenerator} core and is the artifact the execution planner
+   * already consumes, so reuse keeps the planner + assessment context consistent. Standalone runs
+   * (no project) fall through to the legacy generate-and-summarise path unchanged.
+   */
+  @Transactional
+  public String generateForRun(
+      String runId, String repoUrl, String defaultBranch, String pat, String projectId) {
     Optional<RunCodeMap> existing = repo.findByRunId(runId);
     if (existing.isPresent()) {
       log.debug("RunCodeMap already exists for run {}", runId);
@@ -66,6 +89,11 @@ public class RunCodeMapService {
       log.warn("Cannot extract owner/repo from {} — skipping codemap", repoUrl);
       return null;
     }
+
+    // Consolidation: reuse the project's canonical codemap when available.
+    String reused = tryReuseProjectCodeMap(runId, repoUrl, repoFullName, projectId);
+    if (reused != null) return reused;
+
     String branch = (defaultBranch == null || defaultBranch.isBlank()) ? "main" : defaultBranch;
 
     CodeMapGenerator.Result raw;
@@ -122,6 +150,59 @@ public class RunCodeMapService {
 
   public Optional<RunCodeMap> findByRunId(String runId) {
     return repo.findByRunId(runId);
+  }
+
+  /**
+   * RL-2026-05-041 (audit #14). If this run belongs to a project that already has a codemap for the
+   * same repo, persist a {@link RunCodeMap} sourced from the project codemap (0 LLM tokens, no
+   * regeneration) and return its content. Returns {@code null} when there's no project match, so
+   * the caller falls through to the legacy generate-and-summarise path.
+   */
+  private String tryReuseProjectCodeMap(
+      String runId, String repoUrl, String repoFullName, String projectId) {
+    if (projectId == null || projectId.isBlank()) return null;
+    try {
+      for (ProjectCodeMap pcm : projectCodeMapRepo.findByProjectId(projectId)) {
+        if (pcm.getRepoId() == null) continue;
+        ProjectRepo pr = projectRepoRepo.findById(pcm.getRepoId()).orElse(null);
+        if (pr == null || !repoFullName.equalsIgnoreCase(pr.getGithubRepoFullName())) continue;
+        String content = pcm.getContent();
+        if (content == null || content.isBlank()) continue;
+        // Resolve the LATEST version for this repo (findByProjectId returns all versions).
+        ProjectCodeMap latest =
+            projectCodeMapRepo
+                .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, pcm.getRepoId())
+                .orElse(pcm);
+        String latestContent = latest.getContent() != null ? latest.getContent() : content;
+        RunCodeMap reused =
+            RunCodeMap.builder()
+                .runId(runId)
+                .repoUrl(repoUrl)
+                .rawContent(truncate(latestContent, MAX_RAW_CHARS))
+                .summary(null) // reusing full project codemap; no separate per-run LLM summary
+                .fileCount(countFiles(latestContent))
+                .routeCount(countRoutes(latestContent))
+                .generatedFromSha(latest.getGeneratedFromSha())
+                .inputTokens(0)
+                .outputTokens(0)
+                .build();
+        repo.save(reused);
+        log.info(
+            "RunCodeMap for run {} REUSED project codemap (project={}, repo={}, v{}) — 0 LLM cost",
+            runId,
+            projectId,
+            repoFullName,
+            latest.getVersion());
+        return reused.getRawContent();
+      }
+    } catch (Exception e) {
+      log.warn(
+          "Project-codemap reuse probe failed for run {} (project {}): {} — regenerating",
+          runId,
+          projectId,
+          e.getMessage());
+    }
+    return null;
   }
 
   /**

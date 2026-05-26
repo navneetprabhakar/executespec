@@ -29,6 +29,18 @@ class OpenRouterModelMapperTest {
   }
 
   @Test
+  void maps_deepseek_and_kimi_to_verified_slugs() {
+    // RL-2026-05-048 — OpenRouter-only models (ENTERPRISE BYOK). Slugs verified 2026-05-26.
+    assertThat(OpenRouterModelMapper.toSlug("deepseek-v4-pro"))
+        .isEqualTo("deepseek/deepseek-v4-pro");
+    assertThat(OpenRouterModelMapper.toSlug("deepseek-v4-flash"))
+        .isEqualTo("deepseek/deepseek-v4-flash");
+    assertThat(OpenRouterModelMapper.toSlug("kimi-k2.6")).isEqualTo("moonshotai/kimi-k2.6");
+    assertThat(OpenRouterModelMapper.isSupported("deepseek-v4-pro")).isTrue();
+    assertThat(OpenRouterModelMapper.isSupported("kimi-k2.6")).isTrue();
+  }
+
+  @Test
   void unmapped_model_throws_so_we_never_send_an_unverified_slug() {
     // gemini-3-pro-preview has no exact OpenRouter slug + is not tier-routed → must fail loudly.
     assertThatThrownBy(() -> OpenRouterModelMapper.toSlug("gemini-3-pro-preview"))

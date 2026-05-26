@@ -275,6 +275,10 @@ public class RunOrchestrator {
    */
   private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
+  // RL-2026-05-041 (audit #2) — mid-run durability: restore a workspace from its latest GCS
+  // checkpoint before failing WORKSPACE_GONE on resume.
+  private final com.navneet.executespec.deployment.WorkspaceRestoreService workspaceRestoreService;
+
   /**
    * Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure is tracked
    * per-harness and canary rollout tuning is independent.
@@ -1078,7 +1082,8 @@ public class RunOrchestrator {
                 runId,
                 RunEvent.log(runId, "codemap", "Generating codebase map for planner context"));
             codemapSummary =
-                runCodeMapService.generateForRun(runId, runRow.getRepoUrl(), null, githubPat);
+                runCodeMapService.generateForRun(
+                    runId, runRow.getRepoUrl(), null, githubPat, runRow.getProjectId());
             if (codemapSummary != null) {
               broadcaster.emit(
                   runId,
@@ -2451,9 +2456,31 @@ public class RunOrchestrator {
     java.nio.file.Path workspace =
         java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
     if (!java.nio.file.Files.isDirectory(workspace)) {
-      log.warn("resumeAfterCrash run={} workspace not on this node — failing cleanly", runId);
-      terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
-      return CrashResumeOutcome.WORKSPACE_GONE;
+      // RL-2026-05-041 (audit #2) — mid-run durability. Before giving up, try to restore the latest
+      // GCS checkpoint (written at each task boundary by GcsTaskCheckpointService). This makes
+      // mid-run work durable across node loss / Cloud Run scale-down / MIG auto-heal instead of
+      // failing WORKSPACE_GONE + refunding the customer for work that was actually done.
+      boolean restored = false;
+      try {
+        workspaceRestoreService.ensureWorkspaceAvailable(runId);
+        restored = java.nio.file.Files.isDirectory(workspace);
+      } catch (Exception restoreEx) {
+        log.warn(
+            "resumeAfterCrash run={} GCS workspace restore failed: {}",
+            runId,
+            restoreEx.getMessage());
+      }
+      if (restored) {
+        log.info(
+            "resumeAfterCrash run={} restored workspace from GCS checkpoint — resuming", runId);
+      } else {
+        log.warn(
+            "resumeAfterCrash run={} workspace not on this node + no restorable GCS checkpoint —"
+                + " failing cleanly (credits refunded via RunFailed)",
+            runId);
+        terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
+        return CrashResumeOutcome.WORKSPACE_GONE;
+      }
     }
 
     // PLANNING crash → just re-run the planner (cheap) by calling the standard runPipeline.
@@ -3591,12 +3618,11 @@ public class RunOrchestrator {
       // but V2's ReviewerAgent skips it, so the ValidationReport was coming
       // back with accuracyScore=null. Call it here so the report gets populated.
       try {
-        // AccuracyAssessmentService → V1's FallbackLlmRouter → Spring AI 1.1.4,
-        // which tacks on `extra_body` for OpenAI and gets rejected. Same
-        // workaround as the narrative call below: reroute OPENAI → ANTHROPIC
-        // for the assessment call only.
+        // RL-2026-05-041 (audit #19) — no OPENAI→ANTHROPIC reroute. AccuracyAssessmentService runs
+        // through FallbackLlmRouter.callWithFallbackTracked, which routes OpenAI via
+        // OpenAiNativeToolClient (not Spring AI's OpenAiChatModel), so the extra_body 400 can't
+        // occur on this path. OpenAI runs now assess on OpenAI (correct provider attribution).
         LlmProvider provider = providerForAccuracy(run.getAiProvider());
-        if (provider == LlmProvider.OPENAI) provider = LlmProvider.ANTHROPIC;
         // 2026-05-06 — was "ReviewerAgentV2" (legacy class name). The actual reviewer is
         // ReviewerAgent in the YAML agent-tier-map. The 3-arg resolve form bypasses the
         // tier lookup so this didn't trigger a warn, but the class-name drift was real.
@@ -3662,42 +3688,16 @@ public class RunOrchestrator {
       }
       ReportInput input =
           new ReportInput(run, workerReports, review, compile, tasks, testSummary, List.of());
-      // ValidationReportGenerator uses V1's FallbackLlmRouter which triggers Spring AI 1.1.4's
-      // `extra_body` bug on OpenAI (400 Unknown parameter). V2's native wrapper fixes
-      // this for the main pipeline, but the report generator runs through Spring AI.
-      // Swap the run's provider to ANTHROPIC for the report call only (narrative-only
-      // output — provider doesn't affect accuracy), then restore. Falls through if
-      // Anthropic key isn't configured — report just won't generate for that run.
-      // Audit 2026-05-12 review item E #37: mutating run.aiProvider for the call window is a
-      // billing-attribution hazard — any code reading run.aiProvider between the swap and the
-      // finally-restore (including any saveRun() within ValidationReportService) sees the
-      // wrong provider. The mutation is in-memory only (Spring won't auto-persist on field
-      // set), but it remains fragile. Proper fix: change
-      // validationReportService.generateAndPersist to take an explicit provider override
-      // parameter, leave the entity untouched. Logging the mutation here so an operator
-      // tail can audit it.
-      String originalProvider = run.getAiProvider();
-      boolean rerouted = false;
-      if ("OPENAI".equalsIgnoreCase(originalProvider)) {
-        run.setAiProvider("ANTHROPIC");
-        rerouted = true;
-        log.info(
-            "RunOrchestrator run={} validation report rerouted OPENAI → ANTHROPIC "
-                + "(in-memory only) to bypass Spring AI 1.1.4 extra_body bug — audit E #37",
-            runId);
-      }
-      try {
-        validationReportService.generateAndPersist(runId, input);
-        log.info("RunOrchestrator run={} validation report generated", runId);
-      } finally {
-        if (rerouted) {
-          run.setAiProvider(originalProvider);
-          log.info(
-              "RunOrchestrator run={} validation report — restored aiProvider to {}",
-              runId,
-              originalProvider);
-        }
-      }
+      // RL-2026-05-041 (audit #19 + E#37) — the old OPENAI→ANTHROPIC reroute (which mutated
+      // run.aiProvider in-memory around this call) is removed. ValidationReportGenerator runs
+      // through FallbackLlmRouter.callWithFallbackTracked, which dispatches OpenAI via
+      // OpenAiNativeToolClient — NOT Spring AI's OpenAiChatModel. The Spring AI `extra_body` 400 is
+      // structurally impossible on that path (it's the bug the native client was built to bypass),
+      // so the reroute guarded a code path that isn't taken for OpenAI while introducing a
+      // billing-attribution hazard (any reader of run.aiProvider during the swap saw the wrong
+      // provider). The report now generates on the run's actual provider, entity untouched.
+      validationReportService.generateAndPersist(runId, input);
+      log.info("RunOrchestrator run={} validation report generated", runId);
     } catch (Exception e) {
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);
     }
