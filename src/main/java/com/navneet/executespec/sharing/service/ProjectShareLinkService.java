@@ -10,8 +10,14 @@ import java.util.UUID;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.codereview.entity.CodeReviewScan;
+import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
+import com.navneet.executespec.prreview.entity.PrReview;
+import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.repository.ProjectShareLinkRepository;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -40,6 +46,9 @@ public class ProjectShareLinkService {
 
   private final ProjectShareLinkRepository linkRepo;
   private final TierConfigRepository tierConfigRepo;
+  private final PipelineRunRepository runRepo;
+  private final CodeReviewScanRepository scanRepo;
+  private final PrReviewRepository prReviewRepo;
 
   // ── Tier gating ──────────────────────────────────────────────────────────
 
@@ -85,6 +94,10 @@ public class ProjectShareLinkService {
           HttpStatus.BAD_REQUEST, "scopeId is required for surface " + surface);
     }
     assertCanCreate(creator, projectId);
+    // IDOR defense (create side): the scope entity referenced by scopeId MUST belong to the same
+    // project the caller is authorized to write. Without this a project admin could mint a public,
+    // unauthenticated link whose scopeId points at another org's run / scan / PR review.
+    assertScopeBelongsToProject(surface, scopeId, projectId);
     ProjectShareLink link =
         ProjectShareLink.builder()
             .id(UUID.randomUUID())
@@ -163,6 +176,68 @@ public class ProjectShareLinkService {
       case RUN_DETAIL, CODE_REVIEW, PR_REVIEW, VALIDATION_REPORT -> true;
       case PROJECT_OVERVIEW, ARCHITECTURE_DOC -> false;
     };
+  }
+
+  /**
+   * Cross-org IDOR guard for link creation: resolve the scope entity referenced by {@code scopeId}
+   * and assert its {@code projectId} matches the project the caller is authorized for. Surfaces
+   * without a scope ({@code PROJECT_OVERVIEW}, {@code ARCHITECTURE_DOC}) are already project-scoped
+   * and need no check. Throws {@code 403 FORBIDDEN} when the scope belongs to a different project
+   * (or {@code 404 NOT_FOUND} when the scope id doesn't resolve at all).
+   *
+   * <p>Null-safe: a null {@code projectId} on either side never passes the match.
+   */
+  void assertScopeBelongsToProject(
+      ProjectShareLink.Surface surface, String scopeId, String projectId) {
+    switch (surface) {
+      case PROJECT_OVERVIEW, ARCHITECTURE_DOC -> {
+        // Project-scoped surfaces — no sub-id to validate.
+      }
+      case RUN_DETAIL, VALIDATION_REPORT -> {
+        // scopeId = runId for both surfaces; the validation report has no projectId of its own and
+        // is reached via its run, so the run's projectId is the authority for both.
+        PipelineRun run =
+            runRepo
+                .findById(scopeId)
+                .orElseThrow(
+                    () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        requireSameProject(run.getProjectId(), projectId);
+      }
+      case CODE_REVIEW -> {
+        CodeReviewScan scan =
+            scanRepo
+                .findById(parseUuid(scopeId))
+                .orElseThrow(
+                    () ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "Code review not found"));
+        requireSameProject(scan.getProjectId(), projectId);
+      }
+      case PR_REVIEW -> {
+        PrReview review =
+            prReviewRepo
+                .findById(parseUuid(scopeId))
+                .orElseThrow(
+                    () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found"));
+        requireSameProject(review.getProjectId(), projectId);
+      }
+    }
+  }
+
+  /** Null-safe string compare; mismatched (or null) project ids are rejected as 403. */
+  private static void requireSameProject(String entityProjectId, String linkProjectId) {
+    if (entityProjectId == null
+        || linkProjectId == null
+        || !entityProjectId.equals(linkProjectId)) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "scope does not belong to project");
+    }
+  }
+
+  private static UUID parseUuid(String value) {
+    try {
+      return UUID.fromString(value);
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid scope id");
+    }
   }
 
   /** 32-byte URL-safe random token (~43 chars after base64). */

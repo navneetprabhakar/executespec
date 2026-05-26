@@ -1943,7 +1943,9 @@ export function IdeProjectActivity() {
       .getActivityFeed(projectId, {sinceDays: 30})
       .then((f) =>
         setFeed(
-          ((f as unknown as {events?: unknown[]}).events as Array<Record<string, unknown>>) ??
+          // BUG-FIX (RL-2026-05-038): the activity API returns `entries`, not `events` — the
+          // Activity tab was permanently empty.
+          ((f as unknown as {entries?: unknown[]}).entries as Array<Record<string, unknown>>) ??
             (Array.isArray(f) ? (f as Array<Record<string, unknown>>) : []),
         ),
       )

@@ -29,7 +29,8 @@ public class ProjectDocumentController {
       @PathVariable String projectId,
       @RequestPart("file") MultipartFile file) {
     // GA-readiness P4.1-followup — RAG document upload writes to project state.
-    projectAccessGuard.assertCanRead(projectId, principal);
+    // RL-2026-05-040: write guard (was assertCanRead → cross-org viewer could upload).
+    projectAccessGuard.assertCanWrite(projectId, principal);
     String userId = principal != null ? principal.getUser().getId() : null;
     ProjectDocument doc = service.upload(projectId, file, userId);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(doc);
@@ -50,7 +51,8 @@ public class ProjectDocumentController {
       @PathVariable String projectId,
       @PathVariable String documentId) {
     // GA-readiness P4.1-followup — destructive op; verify tenant before delete.
-    projectAccessGuard.assertCanRead(projectId, principal);
+    // RL-2026-05-040: write guard (was assertCanRead).
+    projectAccessGuard.assertCanWrite(projectId, principal);
     service.delete(projectId, documentId);
     return ResponseEntity.ok(Map.of("status", "deleted"));
   }

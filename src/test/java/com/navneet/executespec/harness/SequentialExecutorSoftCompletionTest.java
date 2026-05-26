@@ -87,6 +87,9 @@ class SequentialExecutorSoftCompletionTest {
         taskRepo,
         modelResolver,
         retrievalService,
+        org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+        org.mockito.Mockito.mock(
+            com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker);
   }
