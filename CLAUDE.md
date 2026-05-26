@@ -244,6 +244,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/runs/{id}/tasks/{taskId}/retry` | Retry one failed task. Requires `requireBuildVerification=true` on retry attempt. Does NOT auto-push — use the `Update PR` button on `InlineRunDetail` if needed. |
 | GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token).                                                                                                                                  |
 | GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                 |
+| GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                              |
 | POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                           |
 | GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                          |
 | GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot.                                                                                                                                       |
