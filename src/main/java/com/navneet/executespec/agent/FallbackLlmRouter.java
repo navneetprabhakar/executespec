@@ -59,7 +59,14 @@ import lombok.extern.slf4j.Slf4j;
  * capability tier
  */
 /**
- * Shared multi-provider LLM router used by non-tool-calling agents (AccuracyAssessmentService,
+ * <b>DEPRECATED (RL-2026-05-041) — do NOT add new callers.</b> This V1 router is on a migration
+ * path out; non-tool-calling agents should move to {@code LlmRouter}. It is retained only because
+ * ~14 legacy agents still depend on its multi-provider failover + circuit breaker. The divergent
+ * retry/failover semantics vs. the canonical {@code LlmRouter} (audit risk #10) are therefore a
+ * known, <em>transitional</em> fork — not a permanent one. (No {@code @Deprecated} annotation yet:
+ * it would warn-cascade across the 33 live call sites before the migration lands.)
+ *
+ * <p>Shared multi-provider LLM router used by non-tool-calling agents (AccuracyAssessmentService,
  * TestPlannerAgent, TestWorkerAgent, TestReportGenerator, ApiTestSuiteAgent, ConversationAgent,
  * ContextAgent, ValidationReportGenerator, PromptOptimiserAgent, eval stack).
  *
