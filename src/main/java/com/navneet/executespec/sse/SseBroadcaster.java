@@ -276,6 +276,31 @@ public class SseBroadcaster {
     }
   }
 
+  /**
+   * RL-2026-05-046 — returns the persisted replay log for a run as parsed event objects, so the
+   * run-detail "Logs" tab can render the live log even after the run finished (within the 24h
+   * replay TTL). Reuses the same Redis list the reconnect-replay uses — no new persistence. Each
+   * entry already carries {@code type} + {@code timestamp} + payload fields (see {@link RunEvent}).
+   */
+  public List<java.util.Map<String, Object>> getReplayLog(String runId) {
+    try {
+      List<String> raw = redis.opsForList().range(REPLAY_PREFIX + runId, 0, -1);
+      if (raw == null || raw.isEmpty()) return java.util.List.of();
+      List<java.util.Map<String, Object>> out = new java.util.ArrayList<>(raw.size());
+      for (String json : raw) {
+        try {
+          out.add(mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
+        } catch (Exception ignore) {
+          // skip a single malformed entry; keep the rest of the log
+        }
+      }
+      return out;
+    } catch (Exception e) {
+      log.debug("[SSE] replay-log read failed for run {}: {}", runId, e.getMessage());
+      return java.util.List.of();
+    }
+  }
+
   private void publishToRedis(String runId, String json) {
     try {
       // Wrap with instance marker to suppress echo on receive

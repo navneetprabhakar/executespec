@@ -28,7 +28,14 @@ public final class OpenRouterModelMapper {
           Map.entry("gpt-5.4", "openai/gpt-5.4"),
           Map.entry("gpt-5.4-mini", "openai/gpt-5.4-mini"),
           Map.entry("gemini-3.5-flash", "google/gemini-3.5-flash"),
-          Map.entry("gemini-3-flash-preview", "google/gemini-3-flash-preview"));
+          Map.entry("gemini-3-flash-preview", "google/gemini-3-flash-preview"),
+          // RL-2026-05-048 — DeepSeek + Kimi (OpenRouter-only, ENTERPRISE BYOK). Slugs verified
+          // against the live catalogue 2026-05-26. These have no native ExecuteSpec provider
+          // client;
+          // they route only via OpenRouter (OpenAI-wire-compatible through OpenAiNativeToolClient).
+          Map.entry("deepseek-v4-pro", "deepseek/deepseek-v4-pro"),
+          Map.entry("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+          Map.entry("kimi-k2.6", "moonshotai/kimi-k2.6"));
 
   /**
    * @return the OpenRouter slug for a matrix model id

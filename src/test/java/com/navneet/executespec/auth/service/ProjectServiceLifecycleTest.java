@@ -207,4 +207,81 @@ class ProjectServiceLifecycleTest {
         .extracting(e -> ((ResponseStatusException) e).getStatusCode())
         .isEqualTo(HttpStatus.NOT_FOUND);
   }
+
+  // ── RL-2026-05-044 — cross-org project visibility (accepted-invite member) ──
+
+  @Test
+  void listProjectsForUser_includes_cross_org_member_projects() {
+    Project orgProj = active("p-org"); // in org-1 (the caller's org)
+    Project shared =
+        Project.builder().id("p-shared").orgId("org-2").name("Shared").createdBy("u-x").build();
+    when(projectRepo.findByOrgIdAndDeletedAtIsNull("org-1")).thenReturn(java.util.List.of(orgProj));
+    when(projectMemberRepo.findProjectIdsByUserId("u-1")).thenReturn(java.util.List.of("p-shared"));
+    when(projectRepo.findById("p-shared")).thenReturn(Optional.of(shared));
+
+    var out = svc.listProjectsForUser("org-1", "u-1", false);
+
+    assertThat(out).extracting("id").containsExactlyInAnyOrder("p-org", "p-shared");
+  }
+
+  @Test
+  void listProjectsForUser_dedupes_and_hides_soft_deleted_member_projects() {
+    Project orgProj = active("p-org");
+    Project deleted =
+        Project.builder()
+            .id("p-del")
+            .orgId("org-2")
+            .name("Del")
+            .createdBy("u-x")
+            .deletedAt(Instant.now())
+            .build();
+    when(projectRepo.findByOrgIdAndDeletedAtIsNull("org-1")).thenReturn(java.util.List.of(orgProj));
+    // member of the same org project (dup) + a soft-deleted cross-org one
+    when(projectMemberRepo.findProjectIdsByUserId("u-1"))
+        .thenReturn(java.util.List.of("p-org", "p-del"));
+    when(projectRepo.findById("p-del")).thenReturn(Optional.of(deleted));
+
+    var out = svc.listProjectsForUser("org-1", "u-1", false);
+
+    assertThat(out).extracting("id").containsExactly("p-org"); // dup collapsed, deleted hidden
+  }
+
+  @Test
+  void getProject_allows_cross_org_member() {
+    Project shared =
+        Project.builder().id("p-shared").orgId("org-2").name("Shared").createdBy("u-x").build();
+    when(projectRepo.findById("p-shared")).thenReturn(Optional.of(shared));
+    when(userRepo.findById("u-1"))
+        .thenReturn(
+            Optional.of(
+                com.navneet.executespec.auth.entity.AppUser.builder()
+                    .id("u-1")
+                    .orgId("org-1") // different org than the project
+                    .build()));
+    when(projectMemberRepo.existsByProjectIdAndUserId("p-shared", "u-1")).thenReturn(true);
+
+    var dto = svc.getProject("p-shared", "u-1", false, false);
+
+    assertThat(dto).extracting("id").isEqualTo("p-shared");
+  }
+
+  @Test
+  void getProject_blocks_cross_org_non_member() {
+    Project shared =
+        Project.builder().id("p-shared").orgId("org-2").name("Shared").createdBy("u-x").build();
+    when(projectRepo.findById("p-shared")).thenReturn(Optional.of(shared));
+    when(userRepo.findById("u-2"))
+        .thenReturn(
+            Optional.of(
+                com.navneet.executespec.auth.entity.AppUser.builder()
+                    .id("u-2")
+                    .orgId("org-1")
+                    .build()));
+    when(projectMemberRepo.existsByProjectIdAndUserId("p-shared", "u-2")).thenReturn(false);
+
+    assertThatThrownBy(() -> svc.getProject("p-shared", "u-2", false, false))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+  }
 }
