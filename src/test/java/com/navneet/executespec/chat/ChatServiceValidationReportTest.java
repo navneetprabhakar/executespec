@@ -35,9 +35,10 @@ class ChatServiceValidationReportTest {
   private final ModelResolver modelResolver = mock(ModelResolver.class);
   private final AgentProperties agentProps = mock(AgentProperties.class);
   private final ValidationReportRepository reportRepo = mock(ValidationReportRepository.class);
+  private final RunChatTools runChatTools = mock(RunChatTools.class);
 
   private ChatService newService() {
-    return new ChatService(runRepo, router, modelResolver, agentProps, reportRepo);
+    return new ChatService(runRepo, router, modelResolver, agentProps, reportRepo, runChatTools);
   }
 
   @Test
