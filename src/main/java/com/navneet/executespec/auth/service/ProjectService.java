@@ -110,9 +110,24 @@ public class ProjectService {
     // V191 (PR-B-part-2) — exclude soft-deleted tombstones from this dashboard listing.
     // Archived projects ARE returned (UI toggles them in/out via the "Show archived" switch);
     // only deletedAt-stamped rows are hidden entirely until the 30-day undo window lapses.
-    return projectRepo.findByOrgIdAndDeletedAtIsNull(orgId).stream()
-        .map(ProjectDto::from)
-        .collect(Collectors.toList());
+    // Org projects (shared grouping for all org members), keyed for dedupe.
+    java.util.LinkedHashMap<String, ProjectDto> visible = new java.util.LinkedHashMap<>();
+    for (Project p : projectRepo.findByOrgIdAndDeletedAtIsNull(orgId)) {
+      visible.put(p.getId(), ProjectDto.from(p));
+    }
+    // RL-2026-05-044 — V175 cross-org visibility fix. Also include projects this user explicitly
+    // belongs to via an accepted invite (a ProjectMember row, typically in another org). Without
+    // this, an accepted invitee could OPEN the project by URL (ProjectAccessGuard.assertCanRead
+    // honours ProjectMember) but it NEVER appeared in their project list — the reported bug.
+    // Soft-deleted projects stay hidden; dedupe keeps an org project from listing twice.
+    for (String pid : projectMemberRepo.findProjectIdsByUserId(userId)) {
+      if (pid == null || visible.containsKey(pid)) continue;
+      projectRepo
+          .findById(pid)
+          .filter(p -> p.getDeletedAt() == null)
+          .ifPresent(p -> visible.put(pid, ProjectDto.from(p)));
+    }
+    return new java.util.ArrayList<>(visible.values());
   }
 
   public ProjectDto getProject(
@@ -133,7 +148,14 @@ public class ProjectService {
     // Org membership is already validated by the controller's auth check.
     if (!isSuperAdmin) {
       AppUser user = userRepo.findById(userId).orElse(null);
-      if (user == null || user.getOrgId() == null || !user.getOrgId().equals(project.getOrgId())) {
+      boolean orgMatch =
+          user != null && user.getOrgId() != null && user.getOrgId().equals(project.getOrgId());
+      // RL-2026-05-044 — honour V175 cross-org ProjectMember access (consistent with
+      // ProjectAccessGuard.assertCanRead, which the controller already applied at the call site).
+      // Without this an accepted cross-org invitee passed the guard then got 403 from this inline
+      // org-only check — they couldn't open the project even though they're a member.
+      boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, userId);
+      if (!orgMatch && !isMember) {
         throw new ResponseStatusException(
             HttpStatus.FORBIDDEN, "Not a member of this organization");
       }
