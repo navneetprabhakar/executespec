@@ -320,6 +320,44 @@ model-matrix:
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Pricing placeholder = GPT-5.4 Mini; confirm rates."
+    # RL-2026-05-048 — DeepSeek + Kimi via OpenRouter (ENTERPRISE BYOK, F3 grid + per-run pin).
+    # provider: openrouter → routed through callOpenRouter (OpenAI-wire-compatible) with the slug
+    # from OpenRouterModelMapper. Slugs verified against the live OpenRouter catalogue 2026-05-26.
+    # Pricing is APPROXIMATE (OpenRouter public rates) — BYOK orgs pay OpenRouter directly, so these
+    # only drive the cost ESTIMATE display, not platform billing.
+    deepseek-v4-pro:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "DeepSeek V4 Pro (OpenRouter)"
+      pricing:
+        input-per-1m: 0.50
+        cached-input-per-1m: 0.50
+        output-per-1m: 1.50
+      notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing approximate; confirm rates."
+    deepseek-v4-flash:
+      provider: openrouter
+      chain-tier: UTILITY
+      context-limit: 1048576
+      max-output-tokens: 16384
+      display-label: "DeepSeek V4 Flash (OpenRouter)"
+      pricing:
+        input-per-1m: 0.15
+        cached-input-per-1m: 0.15
+        output-per-1m: 0.40
+      notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing approximate; confirm rates."
+    "[kimi-k2.6]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Kimi K2.6 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.60
+        cached-input-per-1m: 0.60
+        output-per-1m: 2.50
+      notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing approximate; confirm rates."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
