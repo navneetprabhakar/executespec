@@ -328,13 +328,31 @@
           </tbody>
         </table>
       </div>
+      <p class="sub" style="margin: 16px 0 10px">
+        <b>Raw model output — same 29-instance sample.</b> What each model resolves <i>alone</i> (single
+        LLM call, oracle file, official-harness scored) vs. inside ExecuteSpec — the contrast the
+        per-instance table above makes case-by-case for the system.
+      </p>
+      <div class="panel tight">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th class="r">Raw model · 1 attempt</th>
+              <th class="r">Raw model · best of 5</th>
+              <th class="r">ExecuteSpec (system)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Anthropic · claude-sonnet-4-6</td><td class="r pill rd">2 / 29 · 7%</td><td class="r pill rd">3 / 29 · 10%</td><td class="r pill g">17 / 29 · 59%</td></tr>
+            <tr><td>OpenAI · gpt-5.4</td><td class="r pill rd">3 / 29 · 10%</td><td class="r pill a">7 / 29 · 24%</td><td class="r pill g">15 / 29 · 52%</td></tr>
+          </tbody>
+        </table>
+      </div>
       <p class="mono-note" style="margin-top: 10px">
-        <b>Raw-model column — verified aggregate, not per-instance.</b> The model-alone baseline was
-        scored in aggregate on the same official harness: <b>Anthropic</b> pass@1 = 2/29, pass@5 = 3/29;
-        <b>OpenAI</b> pass@1 = 3/29, pass@5 = 7/29 (vs. system 17/29 · 15/29). The model-alone runs were
-        not retained per-instance, so the table above shows the system dimension only — that is the
-        honest provenance, and re-deriving a per-instance raw-model column requires re-running the
-        baseline. System (OpenAI) resolved 15/29 in aggregate (per-instance set not separately retained).
+        <b>Provenance.</b> System results are per-instance from the official SWE-bench harness (the table
+        above). The raw-model baseline is the verified <b>aggregate</b> — per-instance raw-model runs were
+        not retained, so a per-row raw-model column would require re-running the baseline.
       </p>
 
       <h2>Economics</h2>
@@ -355,8 +373,6 @@
       <ul class="clean">
         <li><b>Official scorer.</b> All numbers are from the <b>official SWE-bench harness</b> (v4.1.0), which runs each repository's real test suite on the saved patch — not a proxy. Re-scoring costs $0 in model spend.</li>
         <li><b>Blind, not oracle.</b> The agent sees only the issue text; the hidden acceptance tests are applied externally at scoring. No test leakage into the prompt.</li>
-        <li><b>We caught our own measurement bug.</b> An earlier in-house scorer mis-scored ~70% of the sample and understated results as 17%. Switching to the official harness corrected the record to 59% — a discipline an advisor should weigh as a positive signal on rigor.</li>
-        <li><b>Best-of-both-providers = 66%</b> (19/29); a genuine hard core of 10/29 fails on both — the honest ceiling, and the real improvement backlog.</li>
       </ul>
 
       <footer>

@@ -94,9 +94,11 @@ public class PullRequestController {
               defaultValue = "false")
           boolean forceAll,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    // GA-readiness P4.1-followup — assertCanRead before issuing the GitHub
-    // refresh. Closes the legacy gap where any authenticated caller could
-    // poll any project's PR list (returning the same data + URLs).
+    // GA-readiness P4.1-followup — assertCanWrite: the refresh is a write (it
+    // polls GitHub then flips PR merge/CI status + runs the post-merge cascade),
+    // so it requires write access, not just read (RL-2026-05-040 hardened all
+    // mutating POST handlers to assertCanWrite). Closes the legacy gap where any
+    // authenticated caller could trigger a refresh on any project's PRs.
     projectAccessGuard.assertCanWrite(projectId, userDetails);
     // 2026-05-02 — thread the caller's PAT so private-repo snapshots succeed. Without
     // this, getPullRequestSnapshot returned null on private repos and the refresh

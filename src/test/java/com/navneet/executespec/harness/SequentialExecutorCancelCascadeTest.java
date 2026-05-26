@@ -102,7 +102,8 @@ class SequentialExecutorCancelCascadeTest {
         null, // inLoopTestRunner
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         contextStore,
-        null /* costTracker */);
+        null /* costTracker */,
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
   }
 
   /**
