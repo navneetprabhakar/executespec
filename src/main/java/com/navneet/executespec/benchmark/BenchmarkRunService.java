@@ -410,7 +410,9 @@ public class BenchmarkRunService {
     sb.append(i.problemStatement()).append("\n\n");
     sb.append("# How to work\n");
     sb.append(
-        "1. Investigate with listFiles / searchFiles / readFile to locate the relevant source.\n");
+        "1. Investigate with listFiles / searchFiles / readFile to LOCATE the fix site. Read the"
+            + " function the issue points at AND its callers / similar functions, so you understand"
+            + " the full picture before touching anything.\n");
     sb.append(
         "2. Pin down the EXACT expected behavior BEFORE editing: re-read the issue for the precise"
             + " result it expects — a specific return value, or a raised error/exception? Then"
@@ -418,11 +420,21 @@ public class BenchmarkRunService {
             + " inputs (e.g. do they raise ValueError, or return a default?) and MATCH the"
             + " codebase's existing conventions. Do not settle for a plausible-but-different"
             + " behavior.\n");
-    sb.append("3. Make a minimal, targeted fix that produces exactly that behavior.\n");
     sb.append(
-        "4. No gold/spec tests are provided — work from the issue. After fixing, run the"
-            + " repository's EXISTING tests for the module you changed to confirm nothing"
-            + " regressed, then call completeTask.\n");
+        "3. REPRODUCE the bug first: write a tiny throwaway script OUTSIDE the repo (e.g."
+            + " /tmp/repro.py — NEVER under /testbed, so it stays out of your diff) that triggers"
+            + " the issue, and run it to confirm it currently fails the way the issue describes."
+            + " This proves you actually understand the bug before you change code.\n");
+    sb.append(
+        "4. Make the SMALLEST fix that produces exactly that behavior. Change ONLY the lines"
+            + " required — do NOT reformat, re-indent, reorder imports, rename, or refactor"
+            + " unrelated code, and do NOT edit files unrelated to the fix. A 3-line diff that"
+            + " fixes it is far better than a 40-line diff that also 'cleans up'. Do NOT add new"
+            + " test files.\n");
+    sb.append(
+        "5. VERIFY before finishing: re-run your /tmp reproduction (it must now pass) AND the"
+            + " repository's EXISTING tests for the module you changed (nothing regressed). Only"
+            + " then call completeTask. No gold/spec tests are provided — work from the issue.\n");
     return sb.toString();
   }
 
