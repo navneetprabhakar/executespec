@@ -1446,6 +1446,28 @@ public class RunOrchestrator {
         }
       }
 
+      // ── 2.9 Code-gen-only stop (benchmark) ──────────────────────────
+      // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker
+      // decisioning (the system decides its own strategy), but a CLEAN minimal diff for scoring.
+      // The reviewer's PostEditFormatter (whole-file reformats) + the downstream auto-commit /
+      // validation pollute the diff (a 469-line reformat sank the earlier BUILD smoke). So for a
+      // code-gen-only run we STOP here, right after the worker, and finalize COMPLETE — skipping
+      // reviewer + validation + push. Tightly gated on the benchmark source, so every production
+      // run is byte-identical (this branch is never taken for real customer runs).
+      if (isCodeGenOnlyRun(runId)) {
+        log.info(
+            "RunOrchestrator run={} CODEGEN_ONLY — stopping after worker (skip"
+                + " reviewer/validation/push)",
+            runId);
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId, null, "Code generation complete — code-gen-only mode (reviewer skipped)"));
+        terminate(
+            runId, "COMPLETE", "CODEGEN_ONLY", "code-gen complete; reviewer skipped", startedAt);
+        return;
+      }
+
       // ── 3. Review ───────────────────────────────────────────────────
       updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
@@ -3269,6 +3291,21 @@ public class RunOrchestrator {
   }
 
   /** Legacy 4-arg entry point — failure paths without a specific reason flow here. */
+  /**
+   * RL-2026-05-050 — true when this run is a benchmark "code-gen only" run (source prefix {@code
+   * swebench-codegen}). These execute the real classifier→planner→worker path but STOP after the
+   * worker (no reviewer / validation / push) so the captured diff is a clean, scoreable minimal
+   * patch. Never true for production customer runs (their source is MANUAL / GITHUB_* / REST).
+   */
+  private boolean isCodeGenOnlyRun(String runId) {
+    return runRepo
+        .findById(runId)
+        .map(r -> r.getSourceType())
+        .filter(s -> s != null)
+        .map(s -> s.startsWith("swebench-codegen"))
+        .orElse(false);
+  }
+
   private void terminate(String runId, String finalStatus, String note, Instant startedAt) {
     terminate(runId, finalStatus, null, note, startedAt);
   }

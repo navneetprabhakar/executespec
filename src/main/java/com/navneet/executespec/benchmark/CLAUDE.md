@@ -18,25 +18,36 @@ adapter (kept only for its sandbox plumbing — see below).
    leaderboard-comparable. The old adapter violated this (it injected the gold test into the
    prompt → oracle setting → non-publishable).
 
-## Run mode = PATCH (not BUILD)
+## Run mode = BUILD, stopped at the worker (RL-2026-05-050)
 
-We submit with `runMode=PATCH`, **the production autofix engine** — the same thin-worker loop that
-powers the four customer autofix surfaces (`finding/FindingPatchSubmitter`). This is **not** a
-benchmark fork: PATCH is a first-class production code-gen path.
+We submit `runMode=BUILD` + `source="swebench-codegen"` → the **REAL pipeline**:
+classifier → planner → worker (the **system decides its own strategy** — SINGLE_SHOT / SMALL / … —
+with the full tool set + tier routing). The orchestrator's **code-gen-only gate** (`RunOrchestrator`
+`── 2.9`, keyed on the `swebench-codegen` source) then `terminate(COMPLETE, "CODEGEN_ONLY")` **right
+after the worker, before the reviewer** — so the captured diff is a clean, scoreable minimal patch.
 
-Why PATCH and not BUILD (the originally-planned mode): the BUILD-mode smoke (`astroid-1268`) scored
-verifiedScore 94 but its diff was product churn — a 469-line reformat of `rebuilder.py` plus
-scaffolding files and a fixture rename — not the fix. BUILD's machinery (PostEditFormatter,
-scaffolding, auto-commit) pollutes the diff so it can't be scored as a minimal patch. PATCH emits
-the minimal source diff a leaderboard submission needs. (The plan doc
-[`docs/plans/swebench-harness.md`](../../../../../../../docs/plans/swebench-harness.md) §12 locked
-D2=BUILD on paper-review; the smoke flipped it to PATCH — see §13 there + RL-2026-05-028.)
+Why this and not the old `runMode=PATCH`: PATCH was a thin worker loop that SKIPPED the
+classifier/planner — so the system never decided its own approach (founder: "use the actual system,
+not hardcoded"). The originally-planned full BUILD was abandoned because the reviewer's
+`PostEditFormatter` (a 469-line whole-file reformat on the `astroid-1268` smoke) + scaffolding +
+auto-commit polluted the diff → unscoreable. **Those steps all run in/after the reviewer**, so
+stopping at the worker removes them: we get the real classifier/planner decisioning AND a clean
+diff. (Earlier history: plan doc §12 locked D2=BUILD; the smoke flipped it to PATCH for the
+diff-pollution reason — RL-2026-05-028; RL-2026-05-050 restores BUILD-stop-at-worker now that the
+gate exists.)
+
+The gate is **tightly scoped to the benchmark source** — every production customer run (MANUAL /
+GITHUB_* / REST) runs the full pipeline incl. reviewer, byte-identical.
+
+> Harness-improvement track (RL-2026-05-050, in progress): better localization tools + higher
+> iteration budget + reproduce-first/minimal-diff discipline — landing in the real product, to
+> meet/beat Claude Code + Codex on the same blind set.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `BenchmarkRunService.java` | The harness. `submit()` → `orchestrator.submitRun(source="swebench-build", repoMode="NONE", repoUrl=null, runMode=PATCH, executionMode=PROTOTYPE, skipApproval=true)`. A synchronous `@EventListener onRunStarted` does `docker pull` → `docker cp /testbed/.` into the host workspace → `docker run -d --rm --network none -v <workspace>:/testbed` → registers the container id in `SwebenchContainerStore` (so `ShellTool`/`BuildProjectTool`/`RunTestsTool` dispatch via `docker exec`). On setup failure it marks the run FAILED (status_reason `BENCH_SETUP_FAILED`) so a bad container can't poison benchmark stats. `captureOnTerminalAsync` polls to terminal then writes `submission.patch` + SWE-bench `preds.json` (the `git diff <baseCommit>` with run-infra excludes: `.agent-context`, `Dockerfile`, `.dockerignore`, `README.md`, `__pycache__`, `.pytest_cache`, `*.egg-info`). `synthesizeBlindSpec` builds the issue-only spec with an "existing repo at /testbed, fix don't scaffold, don't modify tests, pin down EXACT expected behavior + match codebase conventions" framing. |
+| `BenchmarkRunService.java` | The harness. `submit()` → `orchestrator.submitRun(source="swebench-codegen", repoMode="NONE", repoUrl=null, runMode=BUILD, executionMode=PROTOTYPE, skipApproval=true)` — the real classifier→planner→worker path, stopped after the worker by the orchestrator code-gen-only gate (RL-2026-05-050). A synchronous `@EventListener onRunStarted` does `docker pull` → `docker cp /testbed/.` into the host workspace → `docker run -d --rm --network none -v <workspace>:/testbed` → registers the container id in `SwebenchContainerStore` (so `ShellTool`/`BuildProjectTool`/`RunTestsTool` dispatch via `docker exec`). On setup failure it marks the run FAILED (status_reason `BENCH_SETUP_FAILED`) so a bad container can't poison benchmark stats. `captureOnTerminalAsync` polls to terminal then writes `submission.patch` + SWE-bench `preds.json` (the `git diff <baseCommit>` with run-infra excludes: `.agent-context`, `Dockerfile`, `.dockerignore`, `README.md`, `__pycache__`, `.pytest_cache`, `*.egg-info`). `synthesizeBlindSpec` builds the issue-only spec with an "existing repo at /testbed, fix don't scaffold, don't modify tests, pin down EXACT expected behavior + match codebase conventions" framing. |
 | `BenchmarkGenerationService.java` | **Lean, synchronous code-gen API** (RL-2026-05-028 follow-up). `generate()` reuses the code-gen components **directly** — sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls `patchAgent.run(...)` **synchronously**, captures the diff → `submission.patch` + `preds.json`, returns `{runId, outcome, patchBytes, costUsd, …}`. **No `submitRun`** → no async pipeline, no event listeners (email/preview/report), no credits, no harvesting. Workspace under the (non-Documents) output base by design. This is the going-forward benchmark path: one instance = one call → score. |
 | `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` (async, via `submitRun` — `BenchmarkRunService`), **`POST /generate` (synchronous lean code-gen — `BenchmarkGenerationService`; preferred)**, `GET /preview/{id}` (resolved image/repo/baseCommit), `GET /instances` (loaded id count). |
 
