@@ -47,6 +47,7 @@ class ContractCoverageControllerTest {
   @Mock ContractDetectionService detectionService;
   @Mock GitHubRepoService gitHub;
   @Mock AppUserRepository userRepo;
+  @Mock com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   @InjectMocks ContractCoverageController controller;
 
@@ -164,6 +165,16 @@ class ContractCoverageControllerTest {
   }
 
   private UsernamePasswordAuthenticationToken fakeAuth() {
-    return new UsernamePasswordAuthenticationToken(UUID.randomUUID().toString(), "n/a");
+    // RL-2026-05-040 follow-up: controller resolves principal(auth) as AppUserDetails (RL-036
+    // ProjectAccessGuard wiring); a bare String principal → 401 before validation. Mocked
+    // projectAccessGuard no-ops assertCanRead/Write so tests reach the 400/404 path.
+    com.navneet.executespec.auth.entity.AppUser u =
+        new com.navneet.executespec.auth.entity.AppUser();
+    u.setId(UUID.randomUUID().toString());
+    u.setOrgId(UUID.randomUUID().toString());
+    u.setEmail("ci-test@executespec.local"); // getName() = getUsername() = email;
+    // ensureLinkedAndAccessible needs it non-null
+    return new UsernamePasswordAuthenticationToken(
+        new com.navneet.executespec.auth.security.AppUserDetails(u, null), "n/a");
   }
 }
