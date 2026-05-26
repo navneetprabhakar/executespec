@@ -207,22 +207,11 @@ export function IdeIntegrations() {
       connected: ghConnected,
       sub: gh?.installed ? 'app installed' : user?.hasGithubPat ? 'token set' : undefined,
       actions: (
-        <>
-          {!gh?.installed && (
-            <button
-              className='ide-btn ghost'
-              style={INT_BTN}
-              onClick={() =>
-                openInstall(api.getGitHubAppInstallUrl as () => Promise<{installUrl?: string}>)
-              }
-            >
-              Install app
-            </button>
-          )}
-          <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('github')}>
-            {user?.hasGithubPat ? 'Update token' : 'Set token'}
-          </button>
-        </>
+        // RL-2026-05-044 — removed the dead "Install app" button (no system GitHub App is
+        // configured; every GitHub op uses the caller's own PAT). Token entry is the only path.
+        <button className='ide-btn ghost' style={INT_BTN} onClick={() => setConnect('github')}>
+          {user?.hasGithubPat ? 'Update token' : 'Set token'}
+        </button>
       ),
     },
     {
