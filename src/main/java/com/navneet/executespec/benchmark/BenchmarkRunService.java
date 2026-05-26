@@ -234,20 +234,20 @@ public class BenchmarkRunService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, instanceId));
     try {
-      // runMode=PATCH → the production autofix engine: a thin worker loop that emits a MINIMAL
-      // patch
-      // (no PostEditFormatter / scaffolding / preview / auto-commit), which is what a clean,
-      // scoreable
-      // SWE-bench submission needs. The smoke proved BUILD mode's product machinery pollutes the
-      // patch
-      // (469-line reformat of rebuilder.py, scaffolding files, fixture rename) → switched to PATCH.
+      // RL-2026-05-050 — runMode=BUILD + source="swebench-codegen" → run the REAL system end to
+      // end (classifier picks the strategy, planner plans, worker generates with the full tool
+      // set), but STOP after the worker. The orchestrator's code-gen-only gate (keyed on the
+      // "swebench-codegen" source) finalizes COMPLETE right after the executor, BEFORE the reviewer
+      // — so PostEditFormatter / scaffolding / auto-commit never run and the captured diff is a
+      // clean, scoreable minimal patch. (The earlier BUILD smoke polluted the diff precisely
+      // because it ran the full reviewer + post-steps; stopping at the worker removes that.)
       // repoMode=NONE + repoUrl=null → no clone; the workspace is populated by onRunStarted's cp.
       // Blind: the agent gets only the issue text (no FAIL_TO_PASS / gold test_patch) — those are
       // applied externally at scoring time.
       run =
           orchestrator.submitRun(
               userRequest,
-              /* source */ "swebench-build",
+              /* source */ "swebench-codegen",
               /* repoUrl */ null,
               /* repoMode */ "NONE",
               /* githubPat */ null,
@@ -265,7 +265,7 @@ public class BenchmarkRunService {
               /* tddMode */ false,
               /* branchOverride */ null,
               /* prReviewComments */ null,
-              /* runMode */ RunMode.PATCH);
+              /* runMode */ RunMode.BUILD);
     } catch (Exception e) {
       run("docker rm -f " + containerName, 30);
       throw new ResponseStatusException(
