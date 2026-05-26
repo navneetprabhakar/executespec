@@ -1071,8 +1071,9 @@ public class RunController {
 
   /**
    * RL-2026-05-046 — the run's live-log events (the same stream the Live page shows), persisted in
-   * the SSE replay log (24h TTL), so the run-detail "Logs" tab can render them with icons + readable
-   * messaging even after the run finished. Returns [] for runs older than the replay window.
+   * the SSE replay log (24h TTL), so the run-detail "Logs" tab can render them with icons +
+   * readable messaging even after the run finished. Returns [] for runs older than the replay
+   * window.
    */
   @GetMapping("/{runId}/event-log")
   public ResponseEntity<List<java.util.Map<String, Object>>> getEventLog(

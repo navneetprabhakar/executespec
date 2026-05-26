@@ -25,7 +25,7 @@ Migration head: **V208**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `batch` | - | 6 | - | - | Provider batch-mode job orchestration (Anthropic/OpenAI/Gemini) |
 | `benchmark` | 1 | 2 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean synchronous `/generate`); branch `feature/swebench-harness` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
-| `chat` | - | 3 | - | - | Post-run conversation: ChatService + ApplyService + ApplyResultStore |
+| `chat` | - | 4 | - | - | Post-run conversation: ChatService (+ read-only RunChatTools) + ApplyService + ApplyResultStore |
 | `codeintel` | 2 | 7 | - | - | Codemap + per-repo arch + cross-repo arch + RAG-backed docs |
 | `codereview` | 1 | 3 | 1 | - | Whole-repo code review (Semgrep + LLM triage) |
 | `compliance` | - | 3 | - | - | Workspace + SCM cleanup jobs + data retention service |
