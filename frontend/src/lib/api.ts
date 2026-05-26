@@ -815,6 +815,15 @@ export const sendSlackTestMessage = (channelId: string) =>
 
 export const getTimeline = (runId: string) => req<TimelineData>(`/runs/${runId}/timeline`);
 
+// RL-2026-05-046 — the run's live-log events (persisted SSE replay, 24h). Each entry is a flat
+// RunEvent object: {type, timestamp, status?, taskId?, message?/line?, relativePath?, ...}.
+export interface RunLogEvent {
+  type: string;
+  timestamp?: number;
+  [k: string]: unknown;
+}
+export const getRunEventLog = (runId: string) => req<RunLogEvent[]>(`/runs/${runId}/event-log`);
+
 // ── Files ─────────────────────────────────────────────────────────────────────
 
 export const getFiles = (runId: string) => req<string[]>(`/runs/${runId}/files`);

@@ -22,7 +22,7 @@ All LLM-calling agents + the routing infrastructure for the V2 pipeline.
 | `PlanStrategy.java` + `ClassificationResult.java` + `Plan.java` + `PlannedTask.java` + `RequirementSpec.java` | Plan data types. `RequirementSpec{id, text, kind}` (FUNCTIONAL / NON_FUNCTIONAL / TEST / CONSTRAINT) — every task cites which IDs it covers via `meetsRequirements`. |
 | `PlannerOutputUtils.java` | Static helpers: `parsePlanFromArgs`, `validatePlan` (Validation v3 Pillar 1), `salvagePlanFromText` (Gemini pseudo-code recovery), `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`, `truncate`. |
 | `CompleteTaskTool.java` | Native termination tool — the worker calls it as a tool to end the loop. |
-| `ConversationAgent.java` | Chat copilot. Uses LIGHTWEIGHT tier via `FallbackLlmRouter`. |
+| `ConversationAgent.java` | **Legacy** chat copilot + the live `generateSuggestionPlan` (Apply-to-Run mini-plan). Uses LIGHTWEIGHT tier via `FallbackLlmRouter`. The live post-run **chat** is `chat/ChatService` (LlmRouter + read-only `chat/RunChatTools` tool loop since RL-2026-05-047), NOT this `chat()` method. |
 | `CostEstimator.java` + `RunCostEstimate.java` | Pre-plan cost estimate. V2 path uses `RunCostTracker.estimateRunTierAware` (see `cost/`). |
 | `ApiKeyResolver.java` | Resolves API keys: user → org → system fallback. `isOwnKeysMode(userId)` returns true when org is `OWN_KEYS` (drives the BYOK cost-cap exemption). |
 | `RunKeyStore.java` | Caches resolved keys per run. |

@@ -82,11 +82,48 @@ function fmtDur(ms?: number | null) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+// RL-2026-05-046 — Logs tab formatting. Map a run-event type to an icon + pull a readable message
+// from either the flat replay shape ({type, line, status, …}) or the live SSE shape ({type, data}).
+function logIcon(type?: string): string {
+  const t = (type || '').toUpperCase();
+  if (t.includes('TOOL')) return '🔧';
+  if (t.includes('LLM') || t.includes('COMPLETION')) return '💬';
+  if (t.includes('FILE')) return '✏️';
+  if (t.includes('BUILD') || t.includes('COMPILE')) return '🔨';
+  if (t.includes('TEST')) return '🧪';
+  if (t.includes('GATE')) return '⏸️';
+  if (t.includes('COST') || t.includes('TOKEN')) return '💰';
+  if (t.includes('COMPLETE')) return '✅';
+  if (t.includes('FAIL') || t.includes('ERROR')) return '❌';
+  if (t.includes('WARN')) return '⚠️';
+  if (t.includes('PROVIDER')) return '🔀';
+  if (t.includes('CONTEXT')) return '🧭';
+  if (t.includes('RECOVERY')) return '♻️';
+  if (t.includes('STATUS')) return '●';
+  return '·';
+}
+function logMessage(ev: api.RunLogEvent): string {
+  const d = (ev.data && typeof ev.data === 'object' ? ev.data : ev) as Record<string, unknown>;
+  const body =
+    d.message ??
+    d.line ??
+    d.payload ??
+    d.summary ??
+    d.relativePath ??
+    d.status ??
+    d.reason ??
+    d.prompt;
+  return body != null && String(body).length
+    ? String(body)
+    : (ev.type || '').toLowerCase().replace(/_/g, ' ');
+}
+
 const TABS = [
   'Overview',
   'Code',
   'Tasks',
   'Timeline',
+  'Logs',
   'Validation',
   'Cost',
   'PR',
@@ -143,6 +180,8 @@ export default function IdeRunResult() {
   const [preview, setPreview] = useState<api.LocalPreviewStatus | null>(null);
   const [previewLogs, setPreviewLogs] = useState<string[] | null>(null);
   const [previewStarted, setPreviewStarted] = useState(false);
+  // RL-2026-05-046 — Logs tab: the run's live-log events (persisted SSE replay, 24h).
+  const [eventLog, setEventLog] = useState<api.RunLogEvent[] | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -182,6 +221,11 @@ export default function IdeRunResult() {
         .getTimeline(runId)
         .then(setTimeline)
         .catch(() => setTimeline({tasks: []}));
+    if (tab === 'Logs' && !eventLog)
+      api
+        .getRunEventLog(runId)
+        .then(setEventLog)
+        .catch(() => setEventLog([]));
     if (tab === 'Chat' && !chat)
       api
         .getRunChat(runId)
@@ -937,6 +981,89 @@ export default function IdeRunResult() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Logs ── */}
+        {tab === 'Logs' && (
+          <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
+            <div className='ide-h1'>
+              Live log{eventLog?.length ? ` · ${eventLog.length}` : ''}{' '}
+              <span
+                className='ide-mono'
+                style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+              >
+                · retained 24h
+              </span>
+            </div>
+            {eventLog == null ? (
+              <IdeLoader label='Loading event log…' />
+            ) : eventLog.length === 0 ? (
+              <div className='ide-empty'>
+                No log events retained for this run. The live log is kept for 24h after each event.
+              </div>
+            ) : (
+              <div
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid var(--ide-border)',
+                  background: 'var(--ide-bg-panel)',
+                  padding: 8,
+                }}
+              >
+                {eventLog.map((ev, i) => {
+                  const t = (ev.type || 'log').toLowerCase();
+                  const color = t.includes('tool')
+                    ? 'var(--ide-accent)'
+                    : t.includes('llm') || t.includes('completion')
+                      ? 'var(--ide-green)'
+                      : t.includes('fail') || t.includes('error')
+                        ? 'var(--ide-red)'
+                        : t.includes('warn')
+                          ? 'var(--ide-yellow)'
+                          : 'var(--ide-fg-muted)';
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        gap: 8,
+                        padding: '6px 8px',
+                        borderBottom:
+                          i < eventLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <span style={{flexShrink: 0}} aria-hidden='true'>
+                        {logIcon(ev.type)}
+                      </span>
+                      <span
+                        className='ide-mono'
+                        style={{
+                          color,
+                          flexShrink: 0,
+                          textTransform: 'uppercase',
+                          fontSize: 10,
+                          minWidth: 92,
+                        }}
+                      >
+                        {ev.type || 'log'}
+                      </span>
+                      {ev.timestamp != null && (
+                        <span
+                          className='ide-mono'
+                          style={{color: 'var(--ide-fg-muted)', flexShrink: 0, fontSize: 10}}
+                        >
+                          {new Date(ev.timestamp as string | number).toLocaleTimeString()}
+                        </span>
+                      )}
+                      <span style={{wordBreak: 'break-word'}}>{logMessage(ev)}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
