@@ -76,39 +76,10 @@ class FailoverOrderEnumAlignmentTest {
     }
   }
 
-  @Test
-  void allProviderRunPoolKeysMatchLlmProviderEnum() throws Exception {
-    Map<String, Object> root = loadApplicationYaml();
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> agent = (Map<String, Object>) root.get("agent");
-    if (agent == null) return;
-    @SuppressWarnings("unchecked")
-    Map<String, Object> runPool = (Map<String, Object>) agent.get("run-pool");
-    if (runPool == null) return;
-    @SuppressWarnings("unchecked")
-    Map<String, Object> providers = (Map<String, Object>) runPool.get("providers");
-    if (providers == null) return;
-
-    // ProviderRunPoolProperties.forProvider(LlmProvider) does
-    // providers.get(provider.name()) — so these keys MUST match the
-    // enum's .name() output (uppercase). Otherwise silent fallback
-    // to defaultConfig() — not a crash, but dead config.
-    for (String key : providers.keySet()) {
-      try {
-        LlmProvider.valueOf(key);
-      } catch (IllegalArgumentException e) {
-        fail(
-            "agent.run-pool.providers key '"
-                + key
-                + "' does not match any "
-                + "LlmProvider enum constant ("
-                + validProviderNames()
-                + "). ProviderRunPoolProperties would silently fall back to "
-                + "defaults — fix by renaming the yaml key.");
-      }
-    }
-  }
+  // (Removed RL-2026-05-041) allProviderRunPoolKeysMatchLlmProviderEnum — it guarded the
+  // now-deleted
+  // ProviderRunPoolProperties / agent.provider-pools config (audit risk #3). The failover-order
+  // alignment test above is the live invariant; provider-pool key alignment no longer exists.
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
