@@ -36,13 +36,13 @@ mvn -q verify                                         # full build incl. spotles
 
 ---
 
-## 2. Clients — `clients/` (npm workspaces: `core` + `cli`)
+## 2. Clients — `clients/` (npm workspaces: `core` + `cli` + `vscode`)
 
 ```bash
 cd clients
-npm install            # installs both workspaces (the registry was 403-blocked in-session)
-npm run build          # builds @executespec/core THEN @executespec/cli (order matters)
-npm run typecheck      # or typecheck only (also builds core first, for its .d.ts)
+npm install            # installs all workspaces (the registry was 403-blocked in-session)
+npm run build          # builds @executespec/core → @executespec/cli → executespec-vscode (order matters)
+npm run typecheck      # or typecheck only (builds core first, for its .d.ts)
 ```
 
 - `core` has zero runtime deps; `cli` depends on `core` (built first — the root scripts enforce the order). Node ≥ 18 (you have 22).
@@ -56,6 +56,7 @@ npm run typecheck      # or typecheck only (also builds core first, for its .d.t
   node clients/cli/dist/index.js run list
   ```
   (Or `npm i -g clients/cli` / `npm link` to get the `executespec` + `es` binaries.) The `run local` command is wired but **experimental** — it needs the §3 activation wiring on the server before tool calls actually arrive.
+- **VS Code extension (`clients/vscode`, esbuild-bundled):** `npm run build -w executespec-vscode` emits `dist/extension.js` (CJS, with the ESM core bundled in; `vscode` left external). Run it by opening `clients/vscode` in VS Code and pressing **F5** (Extension Development Host), or package with `npx @vscode/vsce package`. Then: `ExecuteSpec: Sign In` (paste a PAT), set `executespec.host` for dev, open the **ExecuteSpec Runs** view in the Explorer, and `ExecuteSpec: Submit Spec…`. Live events stream to the *ExecuteSpec* output channel; the plan gate is a native Approve/Reject modal; the token lives in VS Code `SecretStorage`. Native-UI MVP for now (TreeView + output channel + modals) — a rich run-detail webview is the fast-follow.
 
 ---
 
