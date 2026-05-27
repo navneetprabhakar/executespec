@@ -236,17 +236,20 @@ model-matrix grid, admin, PR/Code-review panels, PR-comment inbox, run-managemen
 technical aesthetic, ⌘K, and every backend capability already wired. The reframe changes the *shell +
 entry experience + IA*, not the product's depth.
 
-## 14. Open decisions (need founder input)
+## 14. Decisions (resolved 2026-05-27)
 
-- **Nav pattern + identity:** slim left sidebar (proposed) vs. top-only nav; and the name — drop "IDE",
-  call the web app the **Console** (vs. Dashboard / Workspace)?
-- **Real user feedback:** fold in the specific founder-collected feedback (who / which surface) to confirm
-  or reweight §1–§3 before Phase 1 builds.
-
-*(Resolved 2026-05-27: VS Code + CLI are NOT paused for this — all three clients advance in parallel.)*
+- **Nav pattern + identity:** slim **left sidebar** of product sections + a persistent top bar; the web app
+  is renamed the **Console** (drops "IDE"). *(Founder delegated: "go with your gut.")*
+- **Real user feedback:** folded in — see §3.5.
+- **VS Code + CLI:** NOT paused — all three clients advance in parallel.
+- **Branch:** built on the current `feat/benchmark-codegen-harness` *(founder: "execute complete plan in
+  this branch")*, frontend-only, riding PR #187 — not a separate branch.
+- **Spec-builder backend change (#8):** sequenced **last**, after the benchmark eval completes — it needs a
+  backend restart, which would kill the running re-run. Every other item is frontend-only and safe now.
 
 ## 15. Status
 
-Design (this doc) = the start. Phase-1 code (new shell + Home + plan-gate indicator) begins on founder
-sign-off, on a fresh `feature/web-control-plane` branch (frontend-only; independent of the benchmark /
-engine-extraction branch and of the VS Code/CLI tracks). RL-2026-05-052.
+Design done; **execution in progress** (2026-05-27) on `feat/benchmark-codegen-harness` — autonomous, slice
+by slice (commit + push + Telegram per slice). Order: quick wins (real-time Recent-runs · persistent
+telemetry · spend-vs-estimate) → run cockpit + merged Plan/Timeline → Console shell + Home + plan-gate
+indicator → chat UX + project run tracking → spec-builder suggest-first (backend part last). RL-2026-05-052.
