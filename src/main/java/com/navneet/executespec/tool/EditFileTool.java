@@ -41,6 +41,13 @@ public class EditFileTool implements Tool {
    */
   private final SseBroadcaster sseBroadcaster;
 
+  /**
+   * Read-before-write ledger (RL-2026-05-051, harness adoption #1). Enforces that the worker has
+   * read this file in the current run before editing it, and that the file hasn't drifted on disk
+   * since that read.
+   */
+  private final ReadFileStateStore readState;
+
   @Override
   public String name() {
     return "editFile";
@@ -116,6 +123,28 @@ public class EditFileTool implements Tool {
             "file not found: " + path + " — use writeFile to create new files");
       }
       String working = Files.readString(resolved);
+      // Read-before-write gate (RL-2026-05-051, harness adoption #1): the worker must have read
+      // this file in the current run, and it must not have drifted since. Grounds edits in real
+      // content + catches a file rewritten under the worker (the lint-pollution class of bug).
+      ReadFileStateStore.Status rbw = readState.check(ctx.runId(), resolved, working);
+      if (rbw == ReadFileStateStore.Status.NOT_READ) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.INVALID_ARGS,
+            "read-before-edit: you have not readFile "
+                + path
+                + " in this run. Call readFile "
+                + path
+                + " first so your edit is grounded in the actual current contents, then editFile.");
+      }
+      if (rbw == ReadFileStateStore.Status.STALE) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.INVALID_ARGS,
+            path
+                + " changed on disk since you last read it — your view is stale (no changes"
+                + " written). readFile "
+                + path
+                + " again, then re-issue your edit against the current contents.");
+      }
       List<String> appliedSummary = new ArrayList<>();
       int idx = 0;
       for (JsonNode edit : editsNode) {
@@ -147,6 +176,9 @@ public class EditFileTool implements Tool {
         idx++;
       }
       Files.writeString(resolved, working);
+      // Ledger now reflects the post-edit content, so consecutive edits to this file don't trip the
+      // read-before-write gate (the worker just edited it — its view is current).
+      readState.recordWrite(ctx.runId(), resolved, working);
       // PR-C (2026-05-13) — push the edit through SSE; see WriteFileTool for rationale.
       try {
         sseBroadcaster.emit(ctx.runId(), RunEvent.fileWritten(ctx.runId(), ctx.taskId(), path));

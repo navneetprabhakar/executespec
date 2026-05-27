@@ -229,7 +229,7 @@ public class RunTestsTool implements Tool {
           testIds.size(),
           exit,
           output.length());
-      String envelope = parseAndEnvelope(testIds, exit, output);
+      String envelope = parseAndEnvelope(ctx, testIds, exit, output);
       return ToolResult.ok(envelope);
     } catch (IOException ioe) {
       log.warn("runTests IO error: {}", ioe.getMessage());
@@ -262,7 +262,8 @@ public class RunTestsTool implements Tool {
   private static final Pattern PYTEST_SUMMARY_LINE =
       Pattern.compile("(?m)^=+\\s*(.*?passed.*?|.*?failed.*?|.*?error.*?)\\s*=+\\s*$");
 
-  private String parseAndEnvelope(List<String> requestedIds, int exit, String output) {
+  private String parseAndEnvelope(
+      ExecutionContext ctx, List<String> requestedIds, int exit, String output) {
     ObjectNode env = json.createObjectNode();
 
     // Find pass/fail counts in the summary line (e.g. "1 passed, 2 failed in 1.23s").
@@ -301,6 +302,12 @@ public class RunTestsTool implements Tool {
 
     env.put("exit_code", exit);
     env.put("raw_tail", tailLines(output, RAW_TAIL_CHARS));
+    // Output budget (#6): on large output, persist the full log + expose a readFile path so the
+    // worker can inspect the COMPLETE failure trace, not just raw_tail.
+    if (output != null && output.length() > ToolOutput.DEFAULT_INLINE_CAP) {
+      String p = ToolOutput.persistFull(ctx, "tests", output);
+      if (p != null) env.put("full_output_path", p);
+    }
     return env.toString();
   }
 

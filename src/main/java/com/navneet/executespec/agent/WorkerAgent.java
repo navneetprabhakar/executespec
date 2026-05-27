@@ -283,6 +283,15 @@ public class WorkerAgent {
     // a run that has written SOMETHING doesn't need a best-guess salvage call. RL-2026-05-005.
     int totalWriteCalls = 0;
 
+    // #3 verify-before-done (RL-2026-05-051). BUILD/blind has no hard runTests gate (the target
+    // test is held out), so instead we SOFT-nudge once: if the worker calls completeTask after
+    // editing but without having RUN anything (shell repro / buildProject) since its last edit, we
+    // refuse that one completeTask with a "verify your fix first" message, then always allow. One
+    // shot (verifyNudged) so it can never loop. Targets the wrong-fix miss bucket.
+    int lastEditIter = -1; // last writeFile/editFile
+    int lastVerifyIter = -1; // last shell or buildProject (the worker ran something to check)
+    boolean verifyNudged = false;
+
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
     // (e.g. ReviewerAgent's two passes) still get the new safety net. Zero/null = unbounded.
@@ -595,6 +604,27 @@ public class WorkerAgent {
               continue;
             }
           }
+          // #3 verify-before-done soft nudge (BUILD/blind; PATCH uses the hard gateOn above). If
+          // the
+          // worker edited but ran nothing since its last edit, refuse this completeTask ONCE and
+          // ask
+          // it to verify. One-shot (verifyNudged) → can never loop; worst case is one round-trip.
+          if (!gateOn && !verifyNudged && totalWriteCalls > 0 && lastEditIter > lastVerifyIter) {
+            verifyNudged = true;
+            String reason =
+                errEnvelope(
+                    "VERIFY",
+                    "completeTask deferred — you've edited files but haven't run anything since"
+                        + " your last edit. Verify the fix actually works: run your reproduction or"
+                        + " the relevant tests via the shell tool (or buildProject) and confirm the"
+                        + " expected behaviour, then call completeTask again. If the change is"
+                        + " genuinely unverifiable, say why in completionNotes and call"
+                        + " completeTask again now.");
+            toolResponses.add(
+                new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), reason));
+            toolLog.add(tc.name() + " → NUDGED (verify before complete)");
+            continue;
+          }
           completionSummary = extractSummary(tc.arguments());
           String envelope = okEnvelope("task marked complete: " + completionSummary);
           toolResponses.add(
@@ -645,6 +675,14 @@ public class WorkerAgent {
             && envelope.startsWith("{\"ok\":true")
             && envelope.contains("\\nexit=0\\n")) {
           lastBuildPassIter = iter;
+        }
+        // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
+        if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+          lastEditIter = iter;
+        } else if ("shell".equals(tc.name())
+            || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
+            || RUN_TESTS_TOOL_NAME.equals(tc.name())) {
+          lastVerifyIter = iter;
         }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
@@ -1111,8 +1149,10 @@ public class WorkerAgent {
         + "1. If the task is DONE, call the `completeTask` tool now with your summary as the"
         + " `completionNotes` argument. A text-only summary does NOT close the task — only the"
         + " tool does.\n"
-        + "2. If you are still working, stop reading and commit to the single most likely edit"
-        + " (writeFile/editFile), then verify with buildProject (build mode) or runTests (patch"
+        + "2. If you are still working, STOP reading. If you have not pinned the exact spot, run"
+        + " ONE searchFiles / `grep -rn <symbol>` to localize the function, then immediately"
+        + " editFile that location — do not open more files to 'understand' first. Commit to the"
+        + " single most likely edit, then verify with buildProject (build mode) or runTests (patch"
         + " mode). An empty result is an automatic failure — even an imperfect edit beats zero.\n"
         + "3. If a build or test error is blocking you, fix that file now.\n"
         + "Do NOT do another round of reads or re-verify state you have already checked.";

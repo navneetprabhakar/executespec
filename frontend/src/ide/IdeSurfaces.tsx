@@ -645,6 +645,18 @@ type LiveEntry = {
   data?: {message?: string; payload?: string};
 };
 
+// AgentTask.status is one of PENDING | LOCKED | WORKING | COMPLETE | PARTIAL | FAILED | BLOCKED
+// (see state/entity/AgentTask.java). The earlier checks for 'COMPLETED'/'DONE'/'RUNNING' matched
+// none of these, so the live task list never flipped its indicator. Tolerant + case-insensitive.
+function taskIsDone(s?: string | null): boolean {
+  const u = (s || '').toUpperCase();
+  return u === 'COMPLETE' || u === 'COMPLETED' || u === 'DONE' || u === 'SUCCESS';
+}
+function taskIsRunning(s?: string | null): boolean {
+  const u = (s || '').toUpperCase();
+  return u === 'WORKING' || u === 'RUNNING' || u === 'EXECUTING';
+}
+
 export function IdeLive() {
   const params = useParams();
   const navigate = useNavigate();
@@ -653,6 +665,9 @@ export function IdeLive() {
   const [err, setErr] = useState('');
   const [cancelBusy, setCancelBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // Live spend snapshot from GET /runs/{id}/cost. pipeline_run.actual_cost_usd is only flushed at
+  // terminal, so reading it mid-run shows $0; the /cost endpoint reflects RunCostTracker live.
+  const [liveCost, setLiveCost] = useState<number | null>(null);
 
   // Real-time event stream — same hook the Signal LivePage uses. Populates
   // useSseStore with tool / LLM / log entries as the agent runs.
@@ -674,9 +689,13 @@ export function IdeLive() {
     let timer: number | undefined;
     async function tick() {
       try {
-        const r = await api.getRun(runId);
+        const [r, cost] = await Promise.all([
+          api.getRun(runId),
+          api.getLiveCost(runId).catch(() => null),
+        ]);
         if (cancelled) return;
         setRun(r);
+        if (cost && typeof cost.costUsd === 'number') setLiveCost(cost.costUsd);
         const s = (r.status || '').toUpperCase();
         if (['COMPLETED', 'COMPLETE', 'PARTIAL'].includes(s)) {
           navigate(`/result/${runId}`, {replace: true});
@@ -719,8 +738,8 @@ export function IdeLive() {
   }
 
   const tasks = run?.tasks ?? [];
-  const completed = tasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
-  const spent = run?.actualCostUsd ?? 0;
+  const completed = tasks.filter((t) => taskIsDone(t.status)).length;
+  const spent = liveCost ?? run?.actualCostUsd ?? 0;
   const hardCap = run?.hardCapUsd ?? 0;
   const elapsed = formatElapsed(runElapsedMs(run));
 
@@ -829,22 +848,25 @@ export function IdeLive() {
               <div className='ide-h2'>Tasks</div>
               <div className='ide-card'>
                 {tasks.map((t, i) => {
-                  const done = t.status === 'COMPLETED' || t.status === 'DONE';
-                  const running = t.status === 'RUNNING' || t.status === 'EXECUTING';
+                  const u = (t.status || '').toUpperCase();
+                  const done = taskIsDone(u);
+                  const running = taskIsRunning(u);
+                  const failed = u === 'FAILED' || u === 'BLOCKED';
+                  const partial = u === 'PARTIAL';
+                  const color = done
+                    ? 'var(--ide-green)'
+                    : running
+                      ? 'var(--ide-accent)'
+                      : failed
+                        ? 'var(--ide-red)'
+                        : partial
+                          ? 'var(--ide-yellow)'
+                          : 'var(--ide-fg-muted)';
+                  const icon = done ? '●' : running ? '◉' : failed ? '✕' : partial ? '◐' : '○';
                   return (
                     <div key={t.taskId || i} className='ide-kv' style={{alignItems: 'center'}}>
                       <span style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                        <span
-                          style={{
-                            color: done
-                              ? 'var(--ide-green)'
-                              : running
-                                ? 'var(--ide-accent)'
-                                : 'var(--ide-fg-muted)',
-                          }}
-                        >
-                          {done ? '●' : running ? '◉' : '○'}
-                        </span>
+                        <span style={{color}}>{icon}</span>
                         {t.title || `Task ${i + 1}`}
                       </span>
                       <IdeBadge kind={statusKind(t.status)}>{t.status}</IdeBadge>
