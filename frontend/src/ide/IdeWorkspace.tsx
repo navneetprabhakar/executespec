@@ -13,6 +13,7 @@ import {
   IdeBadge,
   ResizeHandle,
 } from '@/ide/IdeKit';
+import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
 import {
   WorkspaceIcon,
   NewSpecIcon,
@@ -121,6 +122,7 @@ export default function IdeWorkspace() {
         </button>
         <strong style={{fontSize: 13}}>ExecuteSpec</strong>
         <span style={{flex: 1}} />
+        <PlanGateIndicator dir='down' />
         <button
           onClick={() => setPaletteOpen(true)}
           title='Command palette (⌘K)'
@@ -300,6 +302,7 @@ export default function IdeWorkspace() {
         <span className='ide-status' title={`Plan: ${tier}`}>
           <IdeBadge kind='ok'>{tier}</IdeBadge>
         </span>
+        <PlanGateIndicator dir='up' />
         <span className='ide-status-spacer' />
         <button
           className='ide-status btn'
