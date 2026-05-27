@@ -8,6 +8,7 @@ import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 // /admin/* deep links.
 import IdeWorkspace from '@/ide/IdeWorkspace';
 import ConsoleShell from '@/console/ConsoleShell';
+import ConsoleHome from '@/console/ConsoleHome';
 import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
@@ -104,7 +105,10 @@ function protectedChildren() {
     <>
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
-      <Route path='/home' element={<IdeWelcome />} />
+      <Route
+        path='/home'
+        element={localStorage.getItem('es:console') === '1' ? <ConsoleHome /> : <IdeWelcome />}
+      />
       <Route path='/runs' element={<IdeRuns />} />
       <Route path='/compose' element={<IdeCompose />} />
       <Route path='/plan' element={<IdePlan />} />

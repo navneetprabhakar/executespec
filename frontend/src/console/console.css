@@ -157,6 +157,155 @@
   background: var(--ide-bg-editor);
 }
 
+/* ── Home / dashboard ────────────────────────────────────────────────────── */
+.con-home {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 28px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.con-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+  border: 1px solid var(--ide-border);
+  border-radius: 10px;
+  background: var(--ide-bg-sidebar);
+}
+.con-hero-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  margin-bottom: 6px;
+}
+.con-hero-sub {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ide-fg-muted);
+  max-width: 520px;
+}
+.con-newrun.lg {
+  padding: 10px 16px;
+  font-size: 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.con-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.con-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ide-fg-muted);
+  margin-bottom: 4px;
+}
+.con-section-title.attn {
+  color: var(--ide-yellow);
+}
+.con-section-link,
+.con-inline-link {
+  background: none;
+  border: none;
+  color: var(--ide-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  margin-left: auto;
+}
+.con-inline-link {
+  margin-left: 0;
+  text-decoration: underline;
+}
+.con-runrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--ide-border);
+  border-radius: 7px;
+  background: var(--ide-bg-editor);
+  cursor: pointer;
+  color: var(--ide-fg);
+}
+.con-runrow:hover {
+  background: var(--ide-hover);
+}
+.con-runrow-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.con-runrow-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.con-runrow-meta {
+  font-size: 11px;
+  color: var(--ide-fg-muted);
+}
+.con-runrow-action {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ide-yellow);
+  white-space: nowrap;
+}
+.con-empty {
+  padding: 16px;
+  font-size: 12.5px;
+  color: var(--ide-fg-muted);
+  border: 1px dashed var(--ide-border);
+  border-radius: 7px;
+}
+.con-proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.con-proj-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  background: var(--ide-bg-sidebar);
+  cursor: pointer;
+  color: var(--ide-fg);
+}
+.con-proj-card:hover {
+  background: var(--ide-hover);
+}
+.con-proj-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+}
+.con-proj-desc {
+  font-size: 11px;
+  color: var(--ide-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* hidden on desktop; shown on mobile */
 .con-backdrop,
 .con-tabbar,
@@ -168,6 +317,13 @@
 @media (max-width: 860px) {
   .con-only-mobile {
     display: inline-flex;
+  }
+  .con-home {
+    padding: 16px 14px 40px;
+  }
+  .con-hero {
+    flex-direction: column;
+    align-items: flex-start;
   }
   .con-side {
     position: fixed;

@@ -10,7 +10,6 @@ import {IdeCommandPalette, usePaletteHotkey, type PaletteCmd, statusKind} from '
 import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
 import {
   WorkspaceIcon,
-  NewSpecIcon,
   RunsIcon,
   ProjectsIcon,
   AdminIcon,
