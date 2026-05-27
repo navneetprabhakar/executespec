@@ -18,7 +18,12 @@ files**, so the borrowed metaphor actively misleads. Three downstream harms: (a)
 be; (b) the **plan gate** — the single human-in-the-loop moment the whole funnel hinges on — has **no
 global indicator**, so a run can sit `AWAITING_APPROVAL` blocked on a user who never notices; (c) the web
 app **competes with our own VS Code extension** (`clients/vscode`), which is the thing that *should* own
-the IDE metaphor. Net: the chrome optimizes aesthetic at the cost of the mental model.
+the IDE metaphor. Net: the chrome optimizes aesthetic at the cost of the mental model. **(Real-user feedback, 2026-05-27,
+sharpens this — see §3.5:** users explicitly *want* the live telemetry — tokens, actual $,
+estimate-utilisation, live log, tasks+status — they want it **always-on, real-time, persisted**, NOT
+stripped. So the reframe keeps the technical depth and elevates the in-flight run to a first-class *live
+run cockpit*; the real confusion is in the *flows* — entry, chat, spec-builder, plan/timeline — and in
+*staleness*, e.g. the side-menu "Recent runs" never updates live.)
 
 ## 2. The thesis — three clients, three jobs (all advancing in parallel)
 
@@ -45,6 +50,41 @@ RUN_COMPLETE → PR_MERGED. The reframe optimizes the chrome around exactly this
    change; directly lifts SPEC_SUBMITTED → PLAN_APPROVED.
 3. **Review the PR + score** — the existing run-detail file-tree + code viewer (`IdeRunResult`) is kept;
    reviewing the agent's diff *is* a control-plane job.
+
+## 3.5 Real-user feedback (2026-05-27) → treatment
+
+Strong, specific feedback from several users. Verbatim items, mapped to where they live today and how the
+reframe answers them:
+
+| # | User said | Lives in today | Treatment |
+|---|-----------|----------------|-----------|
+| 1 | Show **token usage** in real-time + total at the end | `RUN_COST` SSE / `getLiveCost` / `RunSummary.total*Tokens` | Cockpit: live token counter, persisted; final total on the terminal view |
+| 2 | Show **estimate** + **utilisation against it** | `EstimateChip` (p25/p75) + `CostProgressBar` (vs hard cap only) | Add a **spend-vs-estimate** utilisation bar (not just vs the platform cap) |
+| 3 | Show **actual cost** in real-time + updates around it | `getLiveCost` poll + `RUN_COST` SSE | Cockpit: always-visible $ + threshold updates (50 / 80 / 100% of estimate) |
+| 4 | Keep showing the **live log** | `IdeLive` in-mem console + `IdeRunResult` Logs tab (Redis replay) | Cockpit log, **persistent** — never vanishes on navigate / after terminal |
+| 5 | Keep showing **tasks + status** | `TASK_STATUS` SSE + task list | Cockpit task list, always-on, live status |
+| 6 | **Combine Plan + Timeline**; show status via the timeline | `IdePlan` (gate) + Timeline tab (in `IdeRunResult`) | Merge into one **status-driven timeline** (gate = first node; tasks / build / review light up live) |
+| 7 | **Run / Project chat** UX needs work | `ChatService`/`RunChatTools`, `ProjectChatService`/`ProjectChatTools` | Chat UX pass (threading, streaming, copy, grounding) |
+| 8 | **Build-my-Spec** chat is bad UX; stop the 5 standard design questions — **suggest first, then ask** | `SpecChat.tsx` + its backend spec-builder agent | Behavior change: lead with a **proposed spec** from our side (one-liner + project context), then ask what to adjust; drop the 5-question script |
+| 9 | **Project run / launch tracking** needs work | `IdeProjectRuns` (Runs / PRs split) | Real-time launch + run tracking in the project surface |
+| 10 | Side-menu **"Recent runs" not real-time** | `IdeWorkspace` fetches once (`useEffect([], …)`) | Live recent-runs (poll + SSE-driven), in the new shell |
+
+**The cross-cutting principle — a "live run cockpit."** Items 1–5 (+10) say the same thing: users *value*
+the telemetry and want it **always-on, real-time, persisted**. So the reframe does NOT strip detail — it
+elevates the in-flight run to a first-class cockpit (**tokens · actual $ + estimate-utilisation · live
+log · tasks+status**), driven by the SSE events the app already dispatches (`RUN_COST` / `LIVE_LOG` /
+`TASK_STATUS` / `RUN_STATUS`), persisted to the run record so final totals survive to the terminal view,
+and surfaced live across the chrome (no more stale lists).
+
+**Plan + Timeline → one surface (item 6).** Merge `IdePlan` and the Timeline tab into a single
+status-driven timeline: the plan gate is the first node; as the run proceeds, each task / build / review
+step lights up live on the same timeline. One place to approve *and* to watch.
+
+**Chat UX (items 7–8).** (a) Run + Project chat get a UX pass (clearer threading, streaming, per-bubble
+copy, visible grounding). (b) **Spec-builder behavior change:** `SpecChat` stops asking the 5 standard
+design questions up front; instead it **proposes a spec/design first** (from the user's one-liner + project
+context), then asks what to change. Requires a backend tweak to the spec-builder agent's prompt/flow — the
+only non-trivial backend change in the whole reframe.
 
 ## 4. Information architecture + shell anatomy
 
@@ -148,6 +188,13 @@ switch). When ON, `App.tsx` mounts `console/ConsoleShell` for protected routes i
 `ide/IdeWorkspace`; when OFF, today's chrome is byte-identical. This is a **build/rollout flag, not a
 user-facing A/B toggle** — we deliberately do not reintroduce the `uiMode` mode split removed on
 2026-05-22.
+
+**Quick wins (frontend-only, shippable independently — even before the new shell).** Several feedback
+items are cheap + high-impact and need not wait for the reframe: (a) **fix the stale "Recent runs"**
+(item 10 — `IdeWorkspace` fetches once; add poll + SSE refresh); (b) **persist + always-show** the live
+log / tasks / cost / tokens through navigation and to the terminal final totals (items 1, 3, 4, 5);
+(c) the **spend-vs-estimate utilisation bar** (item 2). These can land on the current chrome and then
+carry straight into the cockpit.
 
 - **Phase 0 — Design** (this doc) [+ optional current-state screenshots]. No code.
 - **Phase 1 — Shell + Home + gate indicator.**
