@@ -168,6 +168,12 @@
 .con-content {
   flex: 1;
   min-width: 0;
+  /* position:relative + min-height:0 establish the containing block + flex
+     scroll context that IdeRunResult's `position:absolute; inset:0` panels
+     expect (mirrors .ide-editor-body) — without these the run-detail escaped
+     the content area and overlapped the top bar. */
+  min-height: 0;
+  position: relative;
   overflow-y: auto;
   background: var(--ide-bg-editor);
 }
