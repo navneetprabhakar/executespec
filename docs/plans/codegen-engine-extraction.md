@@ -107,6 +107,11 @@ verified additive scoring, project memory + RAG, the 4 autofix surfaces, billing
 
 ## 7. Status
 
-Design (this doc) = the "start" of the extraction during the benchmark window. The phase-1/2 code
-(contract + wrap facade) begins once the backend is free (after the eval re-run + Claude/Codex runs),
-on the same branch (`feat/benchmark-codegen-harness`). #5/#7/#8/#9 land in phases 4–6.
+Design (this doc) = the "start" of the extraction during the benchmark window. On the same branch
+(`feat/benchmark-codegen-harness`). #5/#7/#8/#9 land in phases 4–6.
+
+**Update (2026-05-27, RL-2026-05-052):** **Phase 1 (the contract) is shipped** — the `engine/` package
+(`CodeGenEngine.solve(EngineRequest) → EngineResult` + `EngineOutcome` / `VerifyMode` / `EngineBudget` /
+`EngineCost` / `EngineVerification`), compile + spotless green. **No behaviour change — nothing
+implements or calls `CodeGenEngine` yet, so every production run is byte-identical.** Phase 2 (the wrap
+facade `CodeGenEngineImpl` delegating to today's `SequentialExecutor`/`WorkerAgent`) is next.

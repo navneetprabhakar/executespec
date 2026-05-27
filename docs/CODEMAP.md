@@ -37,6 +37,7 @@ Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `credit` | - | 1 | - | - | LifetimeCreditService — R-161 5+5 referral lifetime credits |
 | `crypto` | - | 3 | - | - | EncryptedValueConverter + KeyMigrationRunner + crypto props |
 | `deployment` | 2 | 14 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS + `GcsTaskCheckpointService` (mid-run task-boundary checkpoints, RL-2026-05-042) |
+| `engine` | - | 8 | - | - | Code-gen engine seam (Phase 1: contract) — `CodeGenEngine.solve(EngineRequest)→EngineResult` + budget/cost/verification/outcome records. Strangler-fig extraction; nothing calls it yet (RL-2026-05-052). |
 | `eval` | 2 | 16 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) + `eval/v2/` tier-eval-v2 (production-shaped per-tier × provider eval driving live agent prompts) |
 | `execution` | 3 | 11 | - | - | V3 ExecutionRun "Launches" (multi-solution, multi-repo orchestration) |
 | `export` | 1 | 1 | - | - | Project-level ZIP export of `.executespec/` artefacts |
