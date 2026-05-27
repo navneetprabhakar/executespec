@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
+import {RunTimeline} from '@/ide/RunTimeline';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
@@ -1073,6 +1074,11 @@ export default function IdeRunResult() {
         {tab === 'Timeline' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <div className='ide-h1'>Timeline</div>
+            {timeline && (timeline.tasks || []).length > 0 && (
+              <div className='ide-card' style={{marginBottom: 12}}>
+                <RunTimeline tasks={timeline.tasks} />
+              </div>
+            )}
             {timeline == null ? (
               <IdeLoader label='Loading timeline…' />
             ) : (timeline.tasks || []).length === 0 ? (
