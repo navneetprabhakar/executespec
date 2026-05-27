@@ -124,5 +124,13 @@ but **not injected anywhere yet** (parallel + unused), so production stays byte-
 (the engine's first real consumer). The agent call is byte-identical (solve wraps the same
 `PatchAgent.run` with the same `ExecutionContext`), and the benchmark keeps its own container-based
 diff-capture for the scored patch — so the benchmark number is unchanged **by construction**. A parity
-re-run of the 30 is the remaining empirical confirmation. **Phase 4** (relocate the worker internals
-into `engine/`) is next; product runs stay on `RunOrchestrator` → byte-identical throughout.
+re-run of the 30 is the remaining empirical confirmation.
+
+**Phase 4 is done** — `WorkerAgent` + `WorkerResult` + `WorkerTaskRequest` relocated `agent/` → `engine/`
+(the worker loop now physically lives in the engine; worker tools stay in `tool/`). Behaviour-neutral
+package move — ~30 files re-pointed, `mvn compile` + `test-compile` green; `WorkerAgent.truncate` widened
+to `public` for the now-cross-package `WorkerAgentTruncateTest`. **Caveat:** 4 pre-existing worker unit-test
+off-by-ones (nudge / wall-clock / stagnation, all "expected N got N+1") are **debt from the earlier
+verify-nudge harness work (RL-2026-05-051), NOT the move** — verified by re-running them at HEAD (same 4
+red before the move). Flagged for a focused fix. Product runs stay on `RunOrchestrator` → byte-identical
+throughout. **Phase 5** (lift SSE/cost/DB behind an `EngineObserver`) is next.

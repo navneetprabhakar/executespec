@@ -1,6 +1,6 @@
 package com.navneet.executespec.harness;
 
-import com.navneet.executespec.agent.WorkerResult;
+import com.navneet.executespec.engine.WorkerResult;
 
 import lombok.Builder;
 

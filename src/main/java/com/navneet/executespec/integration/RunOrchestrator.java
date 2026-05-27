@@ -1780,7 +1780,7 @@ public class RunOrchestrator {
    * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
    * downstream notifiers / dashboards can render meaningfully.
    *
-   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.agent.WorkerAgent}'s
+   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.engine.WorkerAgent}'s
    * iter-3 budget guard, which reads {@code pipeline_run.hard_cap_usd}. We default that to {@link
    * #DEFAULT_PATCH_HARD_CAP_USD} when unset so a runaway patch agent stops without manual
    * intervention.
@@ -1870,7 +1870,7 @@ public class RunOrchestrator {
       }
     }
 
-    com.navneet.executespec.agent.WorkerResult result;
+    com.navneet.executespec.engine.WorkerResult result;
     try {
       result = patchAgent.run(provider, model, userRequestLive, rootCtx);
     } catch (Exception e) {

@@ -1,4 +1,4 @@
-package com.navneet.executespec.agent;
+package com.navneet.executespec.engine;
 
 import java.util.List;
 
@@ -40,7 +40,7 @@ public record WorkerResult(
     BUDGET_EXCEEDED,
     /**
      * Worker made no new file writes for {@link
-     * com.navneet.executespec.agent.WorkerAgent#STAGNATION_FORCE_AFTER_N} consecutive iterations
+     * com.navneet.executespec.engine.WorkerAgent#STAGNATION_FORCE_AFTER_N} consecutive iterations
      * after a one-shot "PROGRESS CHECK" warning. The change set is presumably already in the
      * workspace (otherwise we'd see writes); the worker is just being indecisive. The smoke gate
      * downstream decides whether the change set actually compiles.
@@ -48,7 +48,7 @@ public record WorkerResult(
     COMPLETED_BY_STAGNATION,
     /**
      * Worker exceeded its per-task wall-clock budget (see {@link
-     * com.navneet.executespec.agent.WorkerTaskRequest#wallClockSeconds}). Mirrors {@link
+     * com.navneet.executespec.engine.WorkerTaskRequest#wallClockSeconds}). Mirrors {@link
      * #ITERATION_LIMIT_EXCEEDED} but bounded on real time instead of LLM-call count — protects
      * against expensive long-tail tasks where a slow model burns through the iter budget very fast,
      * AND against tasks where a verbose model uses too many "thin" iterations per write.
