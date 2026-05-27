@@ -10,16 +10,18 @@ import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.navneet.executespec.agent.PatchAgent;
-import com.navneet.executespec.agent.WorkerResult;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.CodeGenEngine;
+import com.navneet.executespec.engine.EngineOutcome;
+import com.navneet.executespec.engine.EngineRequest;
+import com.navneet.executespec.engine.EngineResult;
+import com.navneet.executespec.engine.VerifyMode;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.swebench.SwebenchContainerStore;
 import com.navneet.executespec.swebench.SwebenchInstanceLoader;
 import com.navneet.executespec.swebench.SwebenchProperties;
-import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -64,7 +66,7 @@ public class BenchmarkGenerationService {
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
-  private final PatchAgent patchAgent;
+  private final CodeGenEngine codeGenEngine;
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
 
@@ -139,14 +141,6 @@ public class BenchmarkGenerationService {
               .build();
       runRepo.save(row);
 
-      ExecutionContext ctx;
-      try {
-        ctx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
-      } catch (IOException ioe) {
-        throw new ResponseStatusException(
-            HttpStatus.INTERNAL_SERVER_ERROR, "workspace realpath failed: " + ioe.getMessage());
-      }
-
       log.info(
           "benchmark-gen START run={} instance={} provider={} model={}",
           runId,
@@ -154,9 +148,22 @@ public class BenchmarkGenerationService {
           provider,
           model);
 
-      // THE code-gen call — same PatchAgent → WorkerAgent → tools → LlmRouter as production PATCH,
-      // synchronous. Gate is OFF because the run row's sourceType is "benchmark".
-      WorkerResult result = patchAgent.run(provider, model, synthesizeBlindSpec(instance), ctx);
+      // THE code-gen call — now routed through the engine seam (RL-2026-05-052, Phase 3).
+      // CodeGenEngine.solve builds the ExecutionContext + delegates to the SAME PatchAgent →
+      // WorkerAgent → tools → LlmRouter path, so the agent behaviour is byte-identical; the
+      // benchmark keeps its own container-based captureDiff below for the scored patch (so the
+      // number can't shift from a diff-capture change). Gate OFF because sourceType is "benchmark".
+      EngineResult er =
+          codeGenEngine.solve(
+              EngineRequest.builder()
+                  .taskSpec(synthesizeBlindSpec(instance))
+                  .workspace(workspace)
+                  .provider(provider)
+                  .model(model)
+                  .runId(runId)
+                  .taskId("__root__")
+                  .verifyMode(VerifyMode.NONE)
+                  .build());
 
       String patch = captureDiff(containerName, instance.baseCommit());
       Path submission = outputDir.resolve("submission.patch");
@@ -164,14 +171,14 @@ public class BenchmarkGenerationService {
       Path preds = writePreds(outputDir, instanceId, model, patch);
 
       double cost = costTracker.snapshot(runId).costUsd();
-      markTerminal(runId, result, patch.length());
+      markTerminal(runId, er.outcome(), patch.length());
 
       log.info(
           "benchmark-gen END run={} instance={} outcome={} iters={} patch={}B cost=${}",
           runId,
           instanceId,
-          result.outcome(),
-          result.iterations(),
+          er.outcome(),
+          er.iterations(),
           patch.length(),
           String.format("%.3f", cost));
 
@@ -180,9 +187,9 @@ public class BenchmarkGenerationService {
           instanceId,
           provider,
           model,
-          result.outcome().name(),
-          result.iterations(),
-          result.toolCallsDispatched(),
+          er.outcome().name(),
+          er.iterations(),
+          er.toolCalls(),
           patch.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
           cost,
           submission.toString(),
@@ -286,14 +293,14 @@ public class BenchmarkGenerationService {
     return predsPath;
   }
 
-  private void markTerminal(String runId, WorkerResult result, int patchLen) {
+  private void markTerminal(String runId, EngineOutcome outcome, int patchLen) {
     try {
       runRepo
           .findById(runId)
           .ifPresent(
               pr -> {
                 pr.setStatus(patchLen > 0 ? "COMPLETE" : "PARTIAL");
-                String reason = "BENCH_GEN:" + result.outcome().name();
+                String reason = "BENCH_GEN:" + outcome.name();
                 pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
                 pr.setCompletedAt(Instant.now());
                 runRepo.save(pr);

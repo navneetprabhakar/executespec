@@ -60,6 +60,8 @@ public class CodeGenEngineImpl implements CodeGenEngine {
           .transcript(List.of())
           .cost(EngineCost.zero())
           .outcome(EngineOutcome.ERROR)
+          .iterations(0)
+          .toolCalls(0)
           .summary("workspace realpath failed: " + ioe.getMessage())
           .build();
     }
@@ -73,6 +75,8 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .transcript(wr.toolCallLog() == null ? List.of() : wr.toolCallLog())
         .cost(costOf(request.runId()))
         .outcome(mapOutcome(wr.outcome()))
+        .iterations(wr.iterations())
+        .toolCalls(wr.toolCallsDispatched())
         .summary(wr.completionSummary())
         .build();
   }
