@@ -11,7 +11,7 @@ rollout, each phase shippable + green:
 | Phase | What | Status |
 |-------|------|--------|
 | **1** | **The contract** — `CodeGenEngine.solve(EngineRequest) → EngineResult` + supporting records. **No behaviour change.** | **done (this package)** |
-| 2 | Wrap facade — `CodeGenEngineImpl` delegating to today's `SequentialExecutor` / `WorkerAgent`; parallel + unused first, then the benchmark path. Pin with the existing eval. | next |
+| **2** | **Wrap facade — `CodeGenEngineImpl`** delegating to today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`); maps in/out of the contract. Registered as a bean but **not injected anywhere yet** (parallel + unused). | **done** |
 | 3 | Route the benchmark through the engine; re-run the 30 for parity. | |
 | 4 | Move the worker internals (`WorkerAgent` + worker tool-dispatch + context/compaction) into `engine/`. | |
 | 5 | Lift side effects out — SSE/cost/DB become an `EngineObserver` callback so the engine is pure. | |
@@ -22,6 +22,7 @@ rollout, each phase shippable + green:
 | File | Purpose |
 |------|---------|
 | `CodeGenEngine.java` | The seam — `EngineResult solve(EngineRequest)`. Pure code-gen: no credits/PRs/scoring/governance; no clone/checkout (the caller owns the workspace); no side effects beyond the workspace. |
+| `CodeGenEngineImpl.java` | **Phase 2 wrap facade** (`@Service`). `solve()` builds an `ExecutionContext` over the prepared workspace → `PatchAgent.run(provider, model, taskSpec, ctx)` → host-side `git diff` (infra-excluded) → maps `WorkerResult` + `RunCostTracker.snapshot` into `EngineResult`. Byte-identical to a direct `PatchAgent.run`; **not injected anywhere yet**. Phase-2 caveat: `budget`/`verifyMode` honoured via the existing path's mechanisms (run-row `hardCapUsd`, per-provider iter caps, `sourceType` gate); explicit pass-through lands phase 4+. |
 | `EngineRequest.java` | `taskSpec · workspace(Path) · provider · model · budget · verifyMode · runId · taskId`. |
 | `EngineResult.java` | `diff · verification · transcript · cost · outcome · summary`. |
 | `EngineOutcome.java` | COMPLETED / STAGNATED / ITER_LIMIT / BUDGET / WALL_CLOCK / STOPPED / ERROR (maps from `agent.WorkerResult.Outcome`). |
