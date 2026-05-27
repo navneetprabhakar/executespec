@@ -6,10 +6,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import com.navneet.executespec.agent.WorkerAgent;
-import com.navneet.executespec.agent.WorkerResult;
-import com.navneet.executespec.agent.WorkerTaskRequest;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.engine.WorkerAgent;
+import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.router.AgentTier;

@@ -1,4 +1,4 @@
-package com.navneet.executespec.agent;
+package com.navneet.executespec.engine;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -6,6 +6,8 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.CompleteTaskTool;
@@ -1112,10 +1114,12 @@ public class WorkerAgent {
    * ✏️} or {@code ⚠️}) are unaffected — those don't use surrogate pairs.
    *
    * <p>Visibility is package-private so {@link
-   * com.navneet.executespec.agent.WorkerAgentTruncateTest} can pin the regression directly without
+   * com.navneet.executespec.engine.WorkerAgentTruncateTest} can pin the regression directly without
    * reflection.
    */
-  static String truncate(String s, int max) {
+  // public for the cross-package WorkerAgentTruncateTest after the engine relocation
+  // (RL-2026-05-052)
+  public static String truncate(String s, int max) {
     if (s == null) return "";
     if (s.length() <= max) return s;
     int end = max - 1;

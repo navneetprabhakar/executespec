@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.agent.PatchAgent;
-import com.navneet.executespec.agent.WorkerResult;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.tool.ExecutionContext;
 

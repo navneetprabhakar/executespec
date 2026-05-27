@@ -10,7 +10,7 @@ package com.navneet.executespec.state;
  * for every product code path. Right shape for greenfield specs, multi-task work, and anything that
  * benefits from plan-approval gating.
  *
- * <p><b>PATCH</b> — single thin-agent loop. One {@link com.navneet.executespec.agent.WorkerAgent}
+ * <p><b>PATCH</b> — single thin-agent loop. One {@link com.navneet.executespec.engine.WorkerAgent}
  * dispatched on the whole user request, full conversation context, no plan / no reviewer / no
  * per-task split, force PLANNING-tier model (don't downgrade to Haiku-class for "small" tasks),
  * 75-iter cap, relaxed stagnation guard. Right shape for bug-fix work where the input is a specific

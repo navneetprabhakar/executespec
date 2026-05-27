@@ -13,11 +13,11 @@ rollout, each phase shippable + green:
 | **1** | **The contract** — `CodeGenEngine.solve(EngineRequest) → EngineResult` + supporting records. **No behaviour change.** | **done (this package)** |
 | **2** | **Wrap facade — `CodeGenEngineImpl`** delegating to today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`); maps in/out of the contract. Registered as a bean but **not injected anywhere yet** (parallel + unused). | **done** |
 | **3** | **Route the benchmark through the engine** — `BenchmarkGenerationService.generate()` now calls `CodeGenEngine.solve(...)` (the engine's first real consumer). Agent call byte-identical (solve wraps the same `PatchAgent.run`); benchmark keeps its container diff-capture for the scored patch. | **routing done** (parity re-run pending) |
-| 4 | Move the worker internals (`WorkerAgent` + worker tool-dispatch + context/compaction) into `engine/`. | |
+| **4** | **Relocated `WorkerAgent` + `WorkerResult` + `WorkerTaskRequest`** from `agent/` → `engine/` (the worker loop now lives in the engine; worker tools stay in `tool/`). Behaviour-neutral package move — ~30 files re-pointed, `mvn compile` + `test-compile` green. | **worker relocated** |
 | 5 | Lift side effects out — SSE/cost/DB become an `EngineObserver` callback so the engine is pure. | |
 | 6 | Land the pending harness internals IN the engine: #5 cache discipline · #7 compaction · #8 fork-sub-agents · #9 permission ruleset + hooks. | |
 
-## Files (Phase 1)
+## Files
 
 | File | Purpose |
 |------|---------|
@@ -30,6 +30,9 @@ rollout, each phase shippable + green:
 | `EngineBudget.java` | iterCap / wallClockSeconds / dollarCap (null = engine/tier default). |
 | `EngineCost.java` | inputTokens / outputTokens / cacheReadTokens / usd (cache-aware). |
 | `EngineVerification.java` | buildOk / testsPassed / testsTotal / detail (null field = **not measured**, distinct from failed). |
+| `WorkerAgent.java` | **(Phase 4, moved from `agent/`)** the sequential multi-turn worker loop — stream → tools → `completeTask`; progress/verify nudges; Lever-B salvage. Still imports `agent.LlmRouter` + `agent.LlmRequest`. |
+| `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
+| `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags). |
 
 ## Invariants
 

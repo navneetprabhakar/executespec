@@ -5,14 +5,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import com.navneet.executespec.agent.WorkerResult;
+import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.eval.v2.TierEvalCase.ValidationVerdict;
 import com.navneet.executespec.eval.v2.WorkhorseEvalCase;
 
 /**
  * Production-shaped WORKHORSE-tier agentic eval cases. Each drives the real {@link
- * com.navneet.executespec.agent.WorkerAgent} multi-turn loop against a seeded scratch workspace and
- * grades the file-system result.
+ * com.navneet.executespec.engine.WorkerAgent} multi-turn loop against a seeded scratch workspace
+ * and grades the file-system result.
  *
  * <p>Three cases span the worker's bread-and-butter:
  *
