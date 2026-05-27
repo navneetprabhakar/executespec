@@ -1420,7 +1420,30 @@ public class RunOrchestrator {
       int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
-      // ── 2.5 Lint auto-fix ────────────────────────────────────────────
+      // ── 2.5 Code-gen-only stop (benchmark) ──────────────────────────
+      // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker decisioning
+      // (the system picks its own strategy) but a CLEAN minimal diff for scoring. Everything after
+      // the worker pollutes that diff, so a code-gen-only run STOPS HERE — right after the worker,
+      // BEFORE the lint auto-fix below + the reviewer + validation + push. This MUST precede 2.6:
+      // the lint pass runs `black` over the WHOLE workspace (observed reformatting 225–490 files →
+      // a 13 MB git diff that buried the actual fix and made the patch unscoreable). Tightly gated
+      // on the benchmark source, so every production run is byte-identical (never taken for a real
+      // customer run).
+      if (isCodeGenOnlyRun(runId)) {
+        log.info(
+            "RunOrchestrator run={} CODEGEN_ONLY — stopping after worker (skip"
+                + " lint/reviewer/validation/push)",
+            runId);
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId, null, "Code generation complete — code-gen-only mode (reviewer skipped)"));
+        terminate(
+            runId, "COMPLETE", "CODEGEN_ONLY", "code-gen complete; reviewer skipped", startedAt);
+        return;
+      }
+
+      // ── 2.6 Lint auto-fix ────────────────────────────────────────────
       // Run deterministic formatters against the workspace before the LLM reviewer sees it.
       // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
       // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
@@ -1444,28 +1467,6 @@ public class RunOrchestrator {
               runId,
               e.getMessage());
         }
-      }
-
-      // ── 2.9 Code-gen-only stop (benchmark) ──────────────────────────
-      // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker
-      // decisioning (the system decides its own strategy), but a CLEAN minimal diff for scoring.
-      // The reviewer's PostEditFormatter (whole-file reformats) + the downstream auto-commit /
-      // validation pollute the diff (a 469-line reformat sank the earlier BUILD smoke). So for a
-      // code-gen-only run we STOP here, right after the worker, and finalize COMPLETE — skipping
-      // reviewer + validation + push. Tightly gated on the benchmark source, so every production
-      // run is byte-identical (this branch is never taken for real customer runs).
-      if (isCodeGenOnlyRun(runId)) {
-        log.info(
-            "RunOrchestrator run={} CODEGEN_ONLY — stopping after worker (skip"
-                + " reviewer/validation/push)",
-            runId);
-        broadcaster.emit(
-            runId,
-            RunEvent.log(
-                runId, null, "Code generation complete — code-gen-only mode (reviewer skipped)"));
-        terminate(
-            runId, "COMPLETE", "CODEGEN_ONLY", "code-gen complete; reviewer skipped", startedAt);
-        return;
       }
 
       // ── 3. Review ───────────────────────────────────────────────────
