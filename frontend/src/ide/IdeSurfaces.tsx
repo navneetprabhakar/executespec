@@ -668,6 +668,8 @@ export function IdeLive() {
   // Live spend snapshot from GET /runs/{id}/cost. pipeline_run.actual_cost_usd is only flushed at
   // terminal, so reading it mid-run shows $0; the /cost endpoint reflects RunCostTracker live.
   const [liveCost, setLiveCost] = useState<number | null>(null);
+  // Live token counts from the same /cost snapshot (RL-2026-05-052, feedback #1).
+  const [liveTokens, setLiveTokens] = useState<{in: number; out: number} | null>(null);
 
   // Real-time event stream — same hook the Signal LivePage uses. Populates
   // useSseStore with tool / LLM / log entries as the agent runs.
@@ -696,6 +698,8 @@ export function IdeLive() {
         if (cancelled) return;
         setRun(r);
         if (cost && typeof cost.costUsd === 'number') setLiveCost(cost.costUsd);
+        if (cost && (cost.inputTokens != null || cost.outputTokens != null))
+          setLiveTokens({in: cost.inputTokens ?? 0, out: cost.outputTokens ?? 0});
         const s = (r.status || '').toUpperCase();
         if (['COMPLETED', 'COMPLETE', 'PARTIAL'].includes(s)) {
           navigate(`/result/${runId}`, {replace: true});
@@ -741,6 +745,11 @@ export function IdeLive() {
   const completed = tasks.filter((t) => taskIsDone(t.status)).length;
   const spent = liveCost ?? run?.actualCostUsd ?? 0;
   const hardCap = run?.hardCapUsd ?? 0;
+  const estHigh = run?.costEstimateHigh ?? 0;
+  // Tokens: live snapshot while running; persisted run totals as the fallback so the
+  // final total survives at terminal (feedback #1 "total in the end").
+  const tokIn = liveTokens?.in ?? run?.totalInputTokens ?? 0;
+  const tokOut = liveTokens?.out ?? run?.totalOutputTokens ?? 0;
   const elapsed = formatElapsed(runElapsedMs(run));
 
   // Prefer SSE entries (real-time); they're the only live source here.
@@ -774,6 +783,7 @@ export function IdeLive() {
               ? `${completed}/${tasks.length} tasks`
               : (run?.status || '').toLowerCase() || 'running'}{' '}
             · {elapsed} · ${spent.toFixed(2)}
+            {tokIn + tokOut > 0 && ` · ${(tokIn + tokOut).toLocaleString()} tok`}
           </div>
         </div>
         {!terminal && (
@@ -817,6 +827,11 @@ export function IdeLive() {
                 {run.runSummary || run.userRequest}
               </div>
             )}
+            {estHigh > 0 && (
+              <div style={{margin: '10px 0'}}>
+                <CostProgressBar spent={spent} cap={estHigh} label='Spend vs estimate' />
+              </div>
+            )}
             {hardCap > 0 && (
               <div style={{margin: '10px 0'}}>
                 <CostProgressBar spent={spent} cap={hardCap} label='Spend vs hard cap' />
@@ -830,6 +845,14 @@ export function IdeLive() {
               <span>Worker model</span>
               <span className='ide-mono' style={{fontSize: 11}}>
                 {run.workerModel || '—'}
+              </span>
+            </div>
+            <div className='ide-kv'>
+              <span>Tokens</span>
+              <span className='ide-mono' style={{fontSize: 11}}>
+                {tokIn + tokOut > 0
+                  ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`
+                  : '—'}
               </span>
             </div>
             {terminal && (
