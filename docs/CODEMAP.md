@@ -37,7 +37,7 @@ Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `credit` | - | 1 | - | - | LifetimeCreditService — R-161 5+5 referral lifetime credits |
 | `crypto` | - | 3 | - | - | EncryptedValueConverter + KeyMigrationRunner + crypto props |
 | `deployment` | 2 | 14 | - | - | Cloud Run deploy + preview engine + workspace archival to GCS + `GcsTaskCheckpointService` (mid-run task-boundary checkpoints, RL-2026-05-042) |
-| `engine` | - | 8 | - | - | Code-gen engine seam (Phase 1: contract) — `CodeGenEngine.solve(EngineRequest)→EngineResult` + budget/cost/verification/outcome records. Strangler-fig extraction; nothing calls it yet (RL-2026-05-052). |
+| `engine` | - | 12 | - | - | Code-gen engine seam — `CodeGenEngine.solve(EngineRequest)→EngineResult` + budget/cost/verification/outcome records. Strangler-fig extraction (RL-2026-05-052): Phase 1 contract + Phase 2 `CodeGenEngineImpl` wrap-facade + Phase 3 benchmark routes through it + Phase 4 `WorkerAgent`/`WorkerResult`/`WorkerTaskRequest` relocated here from `agent/`. Production runs still byte-identical (facade unused on the `RunOrchestrator` path). |
 | `eval` | 2 | 16 | - | - | Model evaluation framework (LLM-judge + planner-scaffold tests) + `eval/v2/` tier-eval-v2 (production-shaped per-tier × provider eval driving live agent prompts) |
 | `execution` | 3 | 11 | - | - | V3 ExecutionRun "Launches" (multi-solution, multi-repo orchestration) |
 | `export` | 1 | 1 | - | - | Project-level ZIP export of `.executespec/` artefacts |
@@ -251,7 +251,7 @@ Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `OutlinePlannerAgent` | `agent` | PLANNING | Phase-1 planner — emits `Plan` via `submitOutline` tool call; FULL_PLAN (32k) or SKELETON_ONLY (8k) |
 | `TaskExpanderAgent` | `agent` | WORKHORSE | Phase-2 — fills body of one skeleton task; parallel for LARGE/LEGACY |
 | `CoherencePlannerAgent` | `agent` | LIGHTWEIGHT | Phase-3 — emits zero-or-more `patchPlan` minimal-delta patches |
-| `WorkerAgent` | `agent` | WORKHORSE | V2 sequential worker — one task, one ExecutionContext; per-complexity caps; Lever A/B/C; build/test verification gates |
+| `WorkerAgent` | `engine` | WORKHORSE | V2 sequential worker — one task, one ExecutionContext; per-complexity caps; one progress signal + Lever B salvage; build/test verification gates. Relocated `agent/`→`engine/` in Phase 4 (RL-2026-05-052). |
 | `PatchAgent` | `agent` | WORKHORSE | PATCH-mode entry — SWE-bench / autofix; raised iter cap (Anthropic 150 / OpenAI 100 / Gemini 120) |
 | `ConversationAgent` | `agent` | LIGHTWEIGHT | Post-run chat agent — generates ≤6-task suggestion plans |
 | `RunTitleSummarizer` | `agent` | LIGHTWEIGHT | Distils user request into 5-9 word imperative title |

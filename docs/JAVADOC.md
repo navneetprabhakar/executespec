@@ -1388,7 +1388,7 @@ Every `*Agent.java` and related agent-tier services. Tier from `application.yml 
 | `agent/OutlinePlannerAgent`                                | PLANNING    | Phase-1: emits Plan via `submitOutline`; FULL_PLAN or SKELETON_ONLY. Also `synthesizeSingleShot`.            |
 | `agent/TaskExpanderAgent`                                  | WORKHORSE   | Phase-2: fills body of one skeleton task via `submitTaskDetail`; parallel over LEAF skeletons.              |
 | `agent/CoherencePlannerAgent`                              | LIGHTWEIGHT | Phase-3: zero-or-more `patchPlan` minimal-delta tool calls; non-fatal.                                      |
-| `agent/WorkerAgent`                                        | WORKHORSE   | Sequential multi-turn worker; native tool calls; Lever A + Lever B salvage; stagnation guard.               |
+| `engine/WorkerAgent`                                       | WORKHORSE   | Sequential multi-turn worker; native tool calls; one progress signal + Lever B salvage; stagnation guard. (Relocated `agent/`→`engine/`, Phase 4.) |
 | `agent/PatchAgent`                                         | WORKHORSE   | PATCH-mode entry — single thin loop for SWE-bench / autofix surfaces; per-provider iter caps (150/100/120). |
 | `reviewer/ReviewerAgent`                                   | PLANNING    | General + wiring pass via WorkerAgent; PostEditFormatter + final build; verdict CLEAN/FIXED_ISSUES/UNRESOLVED_ISSUES/REVIEW_FAILED. |
 | `reviewer/AccuracyAssessmentService`                       | PLANNING    | Spec-adherence LLM auditor (4 dims); Layer 3 grep verify + Layer 4 execution-time filter.                    |

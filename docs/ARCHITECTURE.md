@@ -138,7 +138,7 @@ Concrete worked example, from request to LLM:
    plan gate (`GateStore.awaitPlanGate`) →
    [`SequentialExecutor.execute`](../src/main/java/com/navneet/executespec/harness/SequentialExecutor.java).
 4. `SequentialExecutor` loops over `Plan.tasks` and dispatches each to
-   [`WorkerAgent.run`](../src/main/java/com/navneet/executespec/agent/WorkerAgent.java),
+   [`WorkerAgent.run`](../src/main/java/com/navneet/executespec/engine/WorkerAgent.java),
    which iterates LLM-tool-call-LLM until `completeTask` fires.
 5. `WorkerAgent` calls
    [`agent/LlmRouter.call(LlmRequest)`](../src/main/java/com/navneet/executespec/agent/LlmRouter.java).
