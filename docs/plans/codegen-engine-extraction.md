@@ -118,6 +118,11 @@ implements or calls `CodeGenEngine` yet, so every production run is byte-identic
 **Phase 2 (the wrap facade) is also shipped** — `engine/CodeGenEngineImpl` (`@Service`) delegates to
 today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`) and maps `WorkerResult` +
 `RunCostTracker.snapshot` into `EngineResult` (with a host-side `git diff`). It is registered as a bean
-but **not injected anywhere yet** (parallel + unused), so production stays byte-identical. **Phase 3**
-— route the benchmark (`BenchmarkGenerationService`) through `CodeGenEngine.solve(...)` + a parity
-re-run of the 30 — is next.
+but **not injected anywhere yet** (parallel + unused), so production stays byte-identical.
+
+**Phase 3 routing is done** — `BenchmarkGenerationService.generate()` now calls `CodeGenEngine.solve(...)`
+(the engine's first real consumer). The agent call is byte-identical (solve wraps the same
+`PatchAgent.run` with the same `ExecutionContext`), and the benchmark keeps its own container-based
+diff-capture for the scored patch — so the benchmark number is unchanged **by construction**. A parity
+re-run of the 30 is the remaining empirical confirmation. **Phase 4** (relocate the worker internals
+into `engine/`) is next; product runs stay on `RunOrchestrator` → byte-identical throughout.

@@ -14,6 +14,8 @@ import lombok.Builder;
  * @param transcript the message + tool-call log
  * @param cost tokens + $ (cache-aware, per-model)
  * @param outcome the terminal state of the loop
+ * @param iterations LLM iterations the loop ran
+ * @param toolCalls total tools dispatched across all iterations
  * @param summary the agent's completion summary (null on non-COMPLETED outcomes)
  */
 @Builder
@@ -23,4 +25,6 @@ public record EngineResult(
     List<String> transcript,
     EngineCost cost,
     EngineOutcome outcome,
+    int iterations,
+    int toolCalls,
     String summary) {}

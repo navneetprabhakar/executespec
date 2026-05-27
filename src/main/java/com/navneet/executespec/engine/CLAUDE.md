@@ -12,7 +12,7 @@ rollout, each phase shippable + green:
 |-------|------|--------|
 | **1** | **The contract** — `CodeGenEngine.solve(EngineRequest) → EngineResult` + supporting records. **No behaviour change.** | **done (this package)** |
 | **2** | **Wrap facade — `CodeGenEngineImpl`** delegating to today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`); maps in/out of the contract. Registered as a bean but **not injected anywhere yet** (parallel + unused). | **done** |
-| 3 | Route the benchmark through the engine; re-run the 30 for parity. | |
+| **3** | **Route the benchmark through the engine** — `BenchmarkGenerationService.generate()` now calls `CodeGenEngine.solve(...)` (the engine's first real consumer). Agent call byte-identical (solve wraps the same `PatchAgent.run`); benchmark keeps its container diff-capture for the scored patch. | **routing done** (parity re-run pending) |
 | 4 | Move the worker internals (`WorkerAgent` + worker tool-dispatch + context/compaction) into `engine/`. | |
 | 5 | Lift side effects out — SSE/cost/DB become an `EngineObserver` callback so the engine is pure. | |
 | 6 | Land the pending harness internals IN the engine: #5 cache discipline · #7 compaction · #8 fork-sub-agents · #9 permission ruleset + hooks. | |
