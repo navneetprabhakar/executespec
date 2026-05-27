@@ -113,5 +113,11 @@ Design (this doc) = the "start" of the extraction during the benchmark window. O
 **Update (2026-05-27, RL-2026-05-052):** **Phase 1 (the contract) is shipped** — the `engine/` package
 (`CodeGenEngine.solve(EngineRequest) → EngineResult` + `EngineOutcome` / `VerifyMode` / `EngineBudget` /
 `EngineCost` / `EngineVerification`), compile + spotless green. **No behaviour change — nothing
-implements or calls `CodeGenEngine` yet, so every production run is byte-identical.** Phase 2 (the wrap
-facade `CodeGenEngineImpl` delegating to today's `SequentialExecutor`/`WorkerAgent`) is next.
+implements or calls `CodeGenEngine` yet, so every production run is byte-identical.**
+
+**Phase 2 (the wrap facade) is also shipped** — `engine/CodeGenEngineImpl` (`@Service`) delegates to
+today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`) and maps `WorkerResult` +
+`RunCostTracker.snapshot` into `EngineResult` (with a host-side `git diff`). It is registered as a bean
+but **not injected anywhere yet** (parallel + unused), so production stays byte-identical. **Phase 3**
+— route the benchmark (`BenchmarkGenerationService`) through `CodeGenEngine.solve(...)` + a parity
+re-run of the 30 — is next.
