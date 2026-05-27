@@ -302,10 +302,15 @@ public class BenchmarkRunService {
         }
         Thread.sleep(5_000);
       }
+      // Wall-timeout: the run never reached terminal (e.g. a frozen/slow worker). Capture a
+      // best-effort diff anyway — BEFORE the finally removes the container — so a run that did
+      // real work is never silently left without a preds.json (RL-2026-05-052: the Anthropic
+      // "16→15" was exactly this — django-14855 timed out → no preds.json → counted unresolved).
       log.warn(
-          "benchmark: run {} exceeded wall timeout {}min",
+          "benchmark: run {} exceeded wall timeout {}min — best-effort capture before teardown",
           runId,
           props.getTaskWallTimeoutMinutes());
+      captureSubmission(runId, instanceId, containerName, outputDir, "TIMEOUT");
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
     } finally {

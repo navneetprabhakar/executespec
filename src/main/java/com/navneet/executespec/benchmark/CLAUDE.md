@@ -85,6 +85,12 @@ for `finding:*`. (RL-2026-05-028.)
   must set a generous client timeout (Live runs ~2–4 min each; a *frozen* run blocks the full
   timeout). The `scripts`-side runner pre-pulls per instance + waits on the run, then scores the
   `submission.patch`.
+- **`captureOnTerminalAsync` now best-effort-captures on wall-timeout** (RL-2026-05-052). Previously a
+  run that never reached terminal within the wall window fell through to teardown (`docker rm`) with
+  **no `preds.json`** — a completed-but-slow/frozen run was silently uncaptured + counted unresolved
+  (this was the Anthropic "16→15" artifact: `django-14855` timed out → no preds). The timeout branch
+  now calls `captureSubmission(..., "TIMEOUT")` BEFORE the `finally` removes the container, so a
+  `preds.json` (whatever diff exists at the deadline) is always written.
 
 ## Status
 
