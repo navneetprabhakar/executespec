@@ -180,6 +180,16 @@ export default function ConsoleShell() {
           )}
 
           <span className='con-side-grow' />
+          <button
+            className='con-switch'
+            onClick={() => {
+              localStorage.removeItem('es:console');
+              window.location.reload();
+            }}
+            title='Switch back to the classic IDE chrome'
+          >
+            ← Classic IDE
+          </button>
           <div className='con-side-tier' title={`Plan: ${tier}`}>
             {tier}
           </div>

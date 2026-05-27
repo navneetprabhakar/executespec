@@ -322,6 +322,16 @@ export default function IdeWorkspace() {
           <ThemeIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           {theme}
         </button>
+        <button
+          className='ide-status btn'
+          onClick={() => {
+            localStorage.setItem('es:console', '1');
+            window.location.reload();
+          }}
+          title='Try the new Console layout (beta)'
+        >
+          Try Console ⤴
+        </button>
         <span className='ide-status' title='IDE workspace (Beta)'>
           IDE · Beta
         </span>
