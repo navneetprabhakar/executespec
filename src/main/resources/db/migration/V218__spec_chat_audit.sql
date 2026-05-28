@@ -12,12 +12,17 @@
 -- Schema is intentionally minimal: nothing here references message text.
 -- =====================================================================
 
+-- 2026-05-28 fix on uncommitted V218: project / app_user / org all use VARCHAR(255) PKs (the
+-- entities declare String id, not UUID). FKs must match the referenced column's type, so the
+-- VARCHAR widths here mirror the existing convention used by V102/V113/V115 and friends.
+-- session_id stays a string too — the client picks the UUID format on the wire, but the column
+-- accepts any opaque session identifier.
 CREATE TABLE spec_chat_audit (
-    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id    UUID         NOT NULL,                      -- client-generated, persisted locally
-    project_id    UUID         REFERENCES project(id) ON DELETE SET NULL,
-    user_id       UUID         NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-    org_id        UUID         NOT NULL REFERENCES org(id) ON DELETE CASCADE,
+    id            VARCHAR(64)  PRIMARY KEY,
+    session_id    VARCHAR(64)  NOT NULL,                      -- client-generated, persisted locally
+    project_id    VARCHAR(255) REFERENCES project(id) ON DELETE SET NULL,
+    user_id       VARCHAR(255) NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    org_id        VARCHAR(255) NOT NULL REFERENCES org(id) ON DELETE CASCADE,
     started_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     last_turn_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     turn_count    INTEGER      NOT NULL DEFAULT 0,
