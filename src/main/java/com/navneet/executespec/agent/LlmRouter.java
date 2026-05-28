@@ -446,8 +446,8 @@ public class LlmRouter {
    * available for comparison (use model id {@code deepseek-v4-pro-or} on provider=openrouter).
    *
    * <p>Why native: in the 2026-05-28 mixed10 eval, OpenRouter-routed DeepSeek averaged ~30 min /
-   * instance vs Anthropic native ~7 min — most of the gap is OpenRouter's routing overhead.
-   * Hitting api.deepseek.com directly should reclaim most of that.
+   * instance vs Anthropic native ~7 min — most of the gap is OpenRouter's routing overhead. Hitting
+   * api.deepseek.com directly should reclaim most of that.
    */
   private ChatResponse callDeepSeek(LlmRequest r, List<ToolCallback> tools, String apiKey) {
     String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : deepSeekApiKey;

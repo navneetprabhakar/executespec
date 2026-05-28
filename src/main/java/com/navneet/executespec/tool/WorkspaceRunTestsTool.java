@@ -37,9 +37,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>Why default OFF:</b> on-by-default would change worker behavior across every BUILD run,
  * potentially burning iter budget on a tool with unknown net impact. Default-OFF keeps production
- * byte-identical until eval data justifies it. Mirrors the rollout discipline used for
- * {@code worker.tool-compactor.enabled} (V216) and {@code scoring.real-test-exec} (V203 then
- * defaulted on).
+ * byte-identical until eval data justifies it. Mirrors the rollout discipline used for {@code
+ * worker.tool-compactor.enabled} (V216) and {@code scoring.real-test-exec} (V203 then defaulted
+ * on).
  *
  * <p>RL-2026-05-052 — BUILD-mode TDD-iteration lever (mixed10 follow-up).
  */
