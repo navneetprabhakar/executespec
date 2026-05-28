@@ -89,6 +89,15 @@ public class PatchAgent {
       case "anthropic" -> 150;
       case "openai" -> 100;
       case "gemini", "google" -> 120;
+        // 2026-05-28 (RL-2026-05-052, T3.12) — make the OpenRouter + native DeepSeek caps explicit
+        // instead of falling through to DEFAULT_MAX_ITERATIONS=120. Empirically (2026-05-28 mixed10
+        // 5-arm eval): OpenRouter-routed arms averaged 18 min/instance vs Anthropic's 8 min — the
+        // gap is per-call latency, not iter count, so a 120-iter cap doesn't bite at the iter axis.
+        // But these are families whose long-tail tasks need iter headroom (same rationale Anthropic
+        // got bumped to 150 originally); pinning them to 150 here makes intent explicit + future-
+        // proofs against the OpenRouter cap silently regressing if DEFAULT changes. Honest
+        // calibration awaits DB-side iter-count analysis; the explicit case is the safe step.
+      case "openrouter", "deepseek" -> 150;
       default -> DEFAULT_MAX_ITERATIONS;
     };
   }
