@@ -218,6 +218,8 @@ javac.*.args
 scripts/e2e-preview-results.json
 .wrangler/
 scripts/v2-eval-results/*-raw/
+scripts/v2-eval-results/*.json
+scripts/v2-eval-results/*.md
 
 # Demo media — track only the embedded hero video; ignore the rest (large/regenerable)
 website/media/*
