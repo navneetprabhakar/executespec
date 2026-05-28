@@ -12,6 +12,7 @@ import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.Tool;
+import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
 
@@ -92,6 +93,16 @@ public class WorkerAgent {
    * taskId, msg)}) so the renderer doesn't need changes.
    */
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
+
+  /**
+   * Phase 5+6 engine extraction (RL-2026-05-052). Bulk tool output flows through this before
+   * landing in the worker's history. Default OFF behind {@link ToolOutputCompactor#FLAG_ENABLED} —
+   * with the flag off, every call returns Optional.empty() and the worker uses raw output verbatim.
+   * Positioned last in the {@code @RequiredArgsConstructor} parameter order so existing test call
+   * sites only need to append a single trailing argument (null is accepted; {@link #maybeCompact}
+   * null-guards before any method call).
+   */
+  private final ToolOutputCompactor toolOutputCompactor;
 
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
@@ -517,7 +528,17 @@ public class WorkerAgent {
       // Dispatch every tool call. completeTask short-circuits the loop.
       List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
       String completionSummary = null;
-      for (AssistantMessage.ToolCall tc : calls) {
+      // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
+      // call for the next LLM turn; its output is the most likely to be re-referenced by the
+      // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
+      // Loop converted from for-each to indexed for so we can compute callIdx == lastIdx without
+      // re-iterating; behaviour-equivalent to the prior for-each (verified: the four pre-existing
+      // WorkerAgent test failures reproduce on the unmodified HEAD code with the same
+      // for-each).
+      final int lastIdx = calls.size() - 1;
+      for (int callIdx = 0; callIdx < calls.size(); callIdx++) {
+        AssistantMessage.ToolCall tc = calls.get(callIdx);
+        final boolean isImmediatelyPriorToolCall = (callIdx == lastIdx);
         toolsDispatched++;
         if (CompleteTaskTool.NAME.equals(tc.name())) {
           // V182 layer-3 verification gate. When the request opted in (patch mode),
@@ -650,7 +671,7 @@ public class WorkerAgent {
               .build();
         }
         metrics.recordToolCall(tc.name());
-        String envelope = dispatchOne(tc, req);
+        String envelope = dispatchOne(tc, req, isImmediatelyPriorToolCall);
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
         // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
@@ -905,7 +926,9 @@ public class WorkerAgent {
             .build();
       }
       if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
-        String env = dispatchOne(tc, req);
+        // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
+        // so the isLast flag is don't-care; pass false for symmetry with the main loop.
+        String env = dispatchOne(tc, req, false);
         toolLog.add(
             "SALVAGE "
                 + tc.name()
@@ -942,7 +965,8 @@ public class WorkerAgent {
     metrics.recordWorkerIterations(outcome.name(), req.provider(), req.model(), iterations);
   }
 
-  private String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req) {
+  private String dispatchOne(
+      AssistantMessage.ToolCall tc, WorkerTaskRequest req, boolean isImmediatelyPriorToolCall) {
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
     // tool by name (e.g. cached tool list, hand-crafted payload), refuse at
     // dispatch time with a clear error envelope so the model can self-correct.
@@ -970,13 +994,53 @@ public class WorkerAgent {
     try {
       ToolResult result = tool.execute(args, req.context());
       return switch (result) {
-        case ToolResult.Ok ok -> okEnvelope(ok.content());
+        // RL-2026-05-052 Phase 5+6 — wrap the OK content through ToolOutputCompactor before
+        // envelope-ing (flag-gated; default OFF returns raw verbatim, so this is byte-identical
+        // to the pre-extraction path until the flag is flipped). Error envelopes are short by
+        // construction; never compacted.
+        case ToolResult.Ok ok ->
+            okEnvelope(maybeCompact(tc.name(), ok.content(), isImmediatelyPriorToolCall, req));
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception unexpected) {
       log.error("Tool '{}' threw unexpectedly", tc.name(), unexpected);
       return errEnvelope(
           "INTERNAL", unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+    }
+  }
+
+  /**
+   * RL-2026-05-052 Phase 5+6 — route bulky tool output through the LIGHTWEIGHT-tier {@link
+   * ToolOutputCompactor} before it lands in the worker's history. Default OFF behind the
+   * compactor's feature flag; with the flag off this is a no-op pass-through. The worker NEVER
+   * loses tool output to compactor failure — fail-safe inside the compactor itself returns empty,
+   * and we fall back to raw here.
+   *
+   * <p>Null-guarded against {@code toolOutputCompactor == null} so unit tests that build a
+   * WorkerAgent without wiring the compactor (legacy {@code new WorkerAgent(...)} call sites in
+   * the test tree) keep working — the field is non-final at the test level via Mockito field
+   * injection patterns, but defensively guarding here avoids a constructor-order trap.
+   */
+  private String maybeCompact(
+      String toolName,
+      String content,
+      boolean isImmediatelyPriorToolCall,
+      WorkerTaskRequest req) {
+    if (toolOutputCompactor == null) return content;
+    try {
+      return toolOutputCompactor
+          .compactIfNeeded(toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
+          .map(ToolOutputCompactor.Compacted::summary)
+          .orElse(content);
+    } catch (RuntimeException e) {
+      // Defence-in-depth: compactor implements its own fail-safe, but if a runtime escapes
+      // (e.g. an NPE from a misconfigured dependency at construction time in some weird env),
+      // never block the worker. Log + return raw.
+      log.warn(
+          "ToolOutputCompactor unexpected runtime (tool={}): {} — using raw output",
+          toolName,
+          e.getMessage());
+      return content;
     }
   }
 
