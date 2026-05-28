@@ -187,6 +187,14 @@ model-matrix:
       planning: claude-sonnet-4-6
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
+    # DeepSeek native (api.deepseek.com) — 2026-05-28 (RL-2026-05-052). Enterprise BYOK,
+    # OpenAI-wire-compatible. All three tiers pin to deepseek-v4-pro-native (the only DeepSeek model
+    # registered with provider=deepseek; -flash variants stay on the OpenRouter route until a
+    # native flash entry is added). Native pricing is $0.27 in / $0.027 cached / $1.10 out per 1M.
+    deepseek:
+      planning: deepseek-v4-pro-native
+      workhorse: deepseek-v4-pro-native
+      lightweight: deepseek-v4-pro-native
 
   models:
     claude-opus-4-6:
