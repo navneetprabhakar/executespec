@@ -164,16 +164,16 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
-      lightweight: claude-haiku-4-5-20251001
+      workhorse: claude-sonnet-4-6
+      lightweight: claude-sonnet-4-6
     gemini:
-      planning: gemini-3.5-flash
+      planning: gemini-3-flash-preview
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4-mini
-      lightweight: gpt-5.4-mini
+      workhorse: gpt-5.4
+      lightweight: gpt-5.4
     # OpenRouter (Enterprise gateway) — tier models routed through the org's OpenRouter key.
     # Must be ids in OpenRouterModelMapper's verified allow-list; orgs override via the per-org
     # matrix (F3). Default mirrors Anthropic tiers (Sonnet planning / Haiku workhorse+lightweight).
