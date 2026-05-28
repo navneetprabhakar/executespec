@@ -56,7 +56,8 @@ class ToolOutputCompactorTest {
           "run-xyz", "task-1", Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
 
   /** Sized just above the 3 KB threshold so the size guard alone never skips. */
-  private static final String BIG_RAW = "x".repeat(ToolOutputCompactor.COMPACT_THRESHOLD_BYTES + 100);
+  private static final String BIG_RAW =
+      "x".repeat(ToolOutputCompactor.COMPACT_THRESHOLD_BYTES + 100);
 
   @BeforeEach
   void setUp() {
@@ -93,7 +94,8 @@ class ToolOutputCompactorTest {
   }
 
   @Test
-  @DisplayName("tool in SKIP_TOOLS (writeFile/editFile/gitCommit/completeTask/gitDiff/gitStatus) → empty")
+  @DisplayName(
+      "tool in SKIP_TOOLS (writeFile/editFile/gitCommit/completeTask/gitDiff/gitStatus) → empty")
   void skip_whenToolInSkipList() {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
 
