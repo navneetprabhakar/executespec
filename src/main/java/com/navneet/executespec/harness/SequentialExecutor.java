@@ -179,6 +179,7 @@ end and only call completeTask if it exits 0.
   private final SseBroadcaster broadcaster;
   private final AgentTaskRepository taskRepo;
   private final ModelResolver modelResolver;
+  private final com.navneet.executespec.router.ModelMatrixProperties matrixProps;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   // Transfer #1 (PATCH→BUILD, RL-2026-05-034): in-loop test-execution gate. After a clean compile,
   // RUN the worker's tests so "tests are mandatory" means "tests pass," not just "tests compile."
@@ -838,6 +839,43 @@ end and only call completeTask if it exits 0.
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
+      // 2026-05-28 (RL-2026-05-052, T3.9) — cross-provider fallback. After the existing
+      // same-provider retry fails, try ONCE on the next provider in the failover chain. This
+      // captures cases where one provider can't solve the task but another can (mixed10 showed
+      // this — different arms solved different cases). Hard ceiling: max one cross-provider
+      // retry per task; max MAX_CROSS_PROVIDER_PER_RUN per run; flag-gated default OFF (V220).
+      CrossProviderRetryResult crossProviderRetry =
+          maybeCrossProviderRetry(task, plan, req, cfg, taskCtx, systemPrompt, smoke, retry);
+      if (crossProviderRetry != null
+          && crossProviderRetry.result().outcome() == WorkerResult.Outcome.COMPLETED) {
+        SmokeTestResult crossSmoke = runSmokeTest(taskCtx, plan.buildCommand());
+        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
+        if (crossSmoke.passed()) {
+          log.info(
+              "Executor task={} SUCCESS_AFTER_CROSS_PROVIDER_RETRY (fallback provider={})",
+              task.id(),
+              crossProviderRetry.provider());
+          persistTaskStatus(runId, task.id(), "COMPLETE");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          return TaskOutcome.builder()
+              .taskId(task.id())
+              .taskTitle(task.title())
+              .status(TaskOutcome.Status.SUCCESS_AFTER_RETRY)
+              .workerOutcome(primary)
+              .retryAttempted(true)
+              .retryWorkerOutcome(crossProviderRetry.result())
+              .smokeTestPassed(true)
+              .smokeTestExitCode(crossSmoke.exitCode())
+              .smokeTestOutput(crossSmoke.output())
+              .totalLatencyMs(System.currentTimeMillis() - taskStart)
+              .toolCallsDispatched(totalToolCalls)
+              .dispatchedProvider(crossProviderRetry.provider())
+              .dispatchedModel(crossProviderRetry.model())
+              .build();
+        }
+      } else if (crossProviderRetry != null) {
+        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
+      }
       log.warn(
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
@@ -1456,6 +1494,22 @@ end and only call completeTask if it exits 0.
   /** Provider-fragment flag — see prompts/fragments/provider-{name}.md (RL-2026-05-052, T3.10). */
   public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
 
+  /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
+  public static final String FLAG_CROSS_PROVIDER_FALLBACK =
+      "worker.cross-provider-fallback.enabled";
+
+  /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
+  public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
+
+  /**
+   * Per-run cross-provider retry counter. Each successful cross-provider retry trigger (regardless
+   * of whether the alternate provider succeeds) increments this. Cleaned by {@link
+   * #clearCrossProviderState(String)} on terminal run state.
+   */
+  private final java.util.concurrent.ConcurrentMap<
+          String, java.util.concurrent.atomic.AtomicInteger>
+      crossProviderTriggersPerRun = new java.util.concurrent.ConcurrentHashMap<>();
+
   // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
   // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
   String composeSystemPrompt(
@@ -1529,6 +1583,126 @@ end and only call completeTask if it exits 0.
           .append("\n--- END REFERENCE DOCS ---\n");
     }
     return sb.toString();
+  }
+
+  /**
+   * Cross-provider retry result — wraps the {@link WorkerResult} with the provider + model that
+   * actually ran so we can record it on the {@link TaskOutcome}. Internal to {@link
+   * #maybeCrossProviderRetry}.
+   */
+  private record CrossProviderRetryResult(WorkerResult result, String provider, String model) {}
+
+  /**
+   * Attempt one cross-provider retry on the next provider in the failover chain, when the existing
+   * same-provider retry has failed. Hard ceilings:
+   *
+   * <ul>
+   *   <li>Flag {@link #FLAG_CROSS_PROVIDER_FALLBACK} must be ON (default OFF, V220).
+   *   <li>Max one cross-provider retry per task (this method is only called once per task).
+   *   <li>Max {@link #MAX_CROSS_PROVIDER_PER_RUN} per run.
+   *   <li>The next provider must be different from the primary AND must resolve to a real model.
+   * </ul>
+   *
+   * Returns {@code null} when no retry was attempted (any ceiling missed). Returns a wrapped {@link
+   * WorkerResult} otherwise, regardless of whether the alternate provider succeeded.
+   *
+   * <p>RL-2026-05-052, T3.9.
+   */
+  CrossProviderRetryResult maybeCrossProviderRetry(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      TierConfig primaryCfg,
+      ExecutionContext taskCtx,
+      String systemPrompt,
+      SmokeTestResult smoke,
+      WorkerResult sameProviderRetry) {
+    if (featureFlagService == null || !featureFlagService.isEnabled(FLAG_CROSS_PROVIDER_FALLBACK)) {
+      return null;
+    }
+    String runId = req.runContext().runId();
+    var counter =
+        crossProviderTriggersPerRun.computeIfAbsent(
+            runId, k -> new java.util.concurrent.atomic.AtomicInteger(0));
+    if (counter.get() >= MAX_CROSS_PROVIDER_PER_RUN) {
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — per-run ceiling {} reached for run={}",
+          task.id(),
+          MAX_CROSS_PROVIDER_PER_RUN,
+          runId);
+      return null;
+    }
+    String altProvider = nextProviderInChain(primaryCfg.provider());
+    if (altProvider == null) {
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — no failover candidate for primary={}",
+          task.id(),
+          primaryCfg.provider());
+      return null;
+    }
+    TierConfig altCfg =
+        tierConfigFor(task.complexity(), altProvider, null, req.projectId() != null);
+    if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
+      // adaptive routing or strict-provider re-resolved back to the primary — abandon.
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — alt resolved back to primary={}",
+          task.id(),
+          primaryCfg.provider());
+      return null;
+    }
+    counter.incrementAndGet();
+    log.info(
+        "Executor task={} cross-provider retry START — primary={} → alt={} (run-count={}/{})",
+        task.id(),
+        primaryCfg.provider(),
+        altCfg.provider(),
+        counter.get(),
+        MAX_CROSS_PROVIDER_PER_RUN);
+    String userPrompt = composeUserPrompt(task, smoke.output());
+    WorkerResult altResult =
+        worker.run(
+            WorkerTaskRequest.builder()
+                .provider(altCfg.provider())
+                .model(altCfg.model())
+                .systemPrompt(systemPrompt)
+                .userPrompt(userPrompt)
+                .context(taskCtx)
+                .maxIterations(altCfg.maxIter())
+                .temperature(0.0)
+                .maxTokensPerCall(altCfg.maxTokens())
+                .stagnationWarnAfter(altCfg.stagnationWarnAfter())
+                .stagnationForceAfter(altCfg.stagnationForceAfter())
+                .wallClockSeconds(altCfg.wallClockSeconds())
+                .requireBuildVerification(true)
+                .build());
+    log.info(
+        "Executor task={} cross-provider retry DONE — alt={} outcome={}",
+        task.id(),
+        altCfg.provider(),
+        altResult.outcome());
+    return new CrossProviderRetryResult(altResult, altCfg.provider(), altCfg.model());
+  }
+
+  /**
+   * Walk the YAML failover chain (`application.yml model-matrix.failover-order.<primary>`) and
+   * return the first provider that's different from the primary. Returns {@code null} when no chain
+   * exists or the chain has no different candidate.
+   */
+  String nextProviderInChain(String primary) {
+    if (primary == null || matrixProps == null || matrixProps.getFailoverOrder() == null) {
+      return null;
+    }
+    var chain = matrixProps.getFailoverOrder().get(primary.toLowerCase());
+    if (chain == null || chain.isEmpty()) return null;
+    for (String candidate : chain) {
+      if (!primary.equalsIgnoreCase(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /** Clear per-run cross-provider retry state — call from RunOrchestrator's terminal handlers. */
+  public void clearCrossProviderState(String runId) {
+    crossProviderTriggersPerRun.remove(runId);
   }
 
   /**

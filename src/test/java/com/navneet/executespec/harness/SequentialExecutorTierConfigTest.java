@@ -58,6 +58,7 @@ class SequentialExecutorTierConfigTest {
         mock(SseBroadcaster.class),
         mock(AgentTaskRepository.class),
         modelResolver,
+        mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         mock(RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),

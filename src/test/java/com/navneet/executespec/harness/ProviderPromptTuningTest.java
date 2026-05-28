@@ -36,6 +36,7 @@ class ProviderPromptTuningTest {
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         mock(com.navneet.executespec.state.repository.AgentTaskRepository.class),
         mock(com.navneet.executespec.router.ModelResolver.class),
+        mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         mock(com.navneet.executespec.project.rag.RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         ffs,

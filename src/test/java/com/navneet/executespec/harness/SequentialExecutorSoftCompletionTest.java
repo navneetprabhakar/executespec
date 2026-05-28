@@ -86,6 +86,7 @@ class SequentialExecutorSoftCompletionTest {
         broadcaster,
         taskRepo,
         modelResolver,
+        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         retrievalService,
         org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         org.mockito.Mockito.mock(
