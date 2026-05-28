@@ -158,6 +158,12 @@ spring:
     openrouter:
       base-url: https://openrouter.ai/api
       api-key: ""                   # Enterprise system fallback; org BYOK preferred
+    # DeepSeek native (RL-2026-05-052, 2026-05-28) — OpenAI-wire-compatible. Read by
+    # LlmRouter.callDeepSeek via @Value. api-key is system fallback; org BYOK via
+    # RunKeyContext.keyFor("deepseek"). Bypasses OpenRouter's routing latency.
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: ""                   # set via env or application-local.yml
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
@@ -337,6 +343,22 @@ model-matrix:
         cached-input-per-1m: 0.0036
         output-per-1m: 0.87
       notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.435 in / $0.0036 cached / $0.87 out per 1M."
+    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Pro NATIVE (api.deepseek.com direct, no OpenRouter
+    # hop). Same upstream model, different endpoint — measured to bypass OpenRouter's ~3-4× routing
+    # latency observed in the mixed10 eval. Non-breaking: existing `deepseek-v4-pro` (above) keeps
+    # routing via OpenRouter for orgs that have OpenRouter BYOK; this native variant requires a
+    # separate DeepSeek key in spring.ai.deepseek.api-key or per-org RunKeyContext.keyFor("deepseek").
+    deepseek-v4-pro-native:
+      provider: deepseek
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "DeepSeek V4 Pro (Native)"
+      pricing:
+        input-per-1m: 0.27         # native rate (DeepSeek public 2026-05-28): cheaper than OpenRouter markup
+        cached-input-per-1m: 0.027
+        output-per-1m: 1.10
+      notes: "DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M. Faster than OpenRouter route (RL-2026-05-052 mixed10 eval baseline)."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -359,6 +381,18 @@ model-matrix:
         cached-input-per-1m: 0.25
         output-per-1m: 3.49
       notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.73 in / $0.25 cached / $3.49 out per 1M."
+    # 2026-05-28 (RL-2026-05-052) — Qwen3-Coder added for the 5-provider eval cohort.
+    qwen3-coder:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Qwen3-Coder (OpenRouter)"
+      pricing:
+        input-per-1m: 0.70
+        cached-input-per-1m: 0.07
+        output-per-1m: 2.80
+      notes: "OpenRouter qwen/qwen3-coder — ENTERPRISE BYOK. Code-specialized. Pricing approximate vs OpenRouter 2026-05-28 (~$0.70 in / $0.07 cached / $2.80 out per 1M) — refine post-smoke."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
