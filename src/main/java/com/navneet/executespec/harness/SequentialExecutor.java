@@ -329,6 +329,18 @@ end and only call completeTask if it exits 0.
         result.tasksWithWarning(),
         result.tasksFailed(),
         result.totalLatencyMs());
+
+    // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
+    // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
+    // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
+    // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
+    // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
+    // state gets the same cleanup. Both calls are best-effort; failures are logged only.
+    if (contextStore != null) {
+      contextStore.deleteAll(runId);
+    }
+    clearCrossProviderState(runId);
+
     return result;
   }
 
@@ -820,22 +832,43 @@ end and only call completeTask if it exits 0.
           cfg.wallClockSeconds,
           retryWallClock);
     }
-    WorkerResult retry =
-        worker.run(
-            WorkerTaskRequest.builder()
-                .provider(cfg.provider)
-                .model(cfg.model)
-                .systemPrompt(systemPrompt)
-                .userPrompt(retryPrompt)
-                .context(taskCtx)
-                .maxIterations(retryMaxIter)
-                .temperature(0.0)
-                .maxTokensPerCall(cfg.maxTokens)
-                .stagnationWarnAfter(cfg.stagnationWarnAfter)
-                .stagnationForceAfter(cfg.stagnationForceAfter)
-                .wallClockSeconds(retryWallClock)
-                .requireBuildVerification(true)
-                .build());
+    // 2026-05-28 (RL-2026-05-052, T3.14) — context retention across retries. When the flag is
+    // ON, load the worker's prior context-snapshot so the retry continues from where it broke
+    // (re-issuing the failed build's edit on top of the prior context) instead of starting fresh
+    // and re-reading every file. Existing snapshot save happens every 5 iters inside
+    // WorkerAgent; this just wires the LOAD on the retry path. Flag-gated default OFF (V221).
+    WorkerTaskRequest retryReq =
+        WorkerTaskRequest.builder()
+            .provider(cfg.provider)
+            .model(cfg.model)
+            .systemPrompt(systemPrompt)
+            .userPrompt(retryPrompt)
+            .context(taskCtx)
+            .maxIterations(retryMaxIter)
+            .temperature(0.0)
+            .maxTokensPerCall(cfg.maxTokens)
+            .stagnationWarnAfter(cfg.stagnationWarnAfter)
+            .stagnationForceAfter(cfg.stagnationForceAfter)
+            .wallClockSeconds(retryWallClock)
+            .requireBuildVerification(true)
+            .build();
+    WorkerResult retry;
+    if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
+      java.util.Optional<com.navneet.executespec.context.SavedContext> snapshot =
+          contextStore == null ? java.util.Optional.empty() : contextStore.load(taskCtx);
+      if (snapshot.isPresent()) {
+        log.info(
+            "Executor task={} retry CONTEXT-RETAINED from snapshot (iter={})",
+            task.id(),
+            snapshot.get().iteration());
+        retry = worker.run(retryReq, snapshot.get());
+      } else {
+        log.debug("Executor task={} retry context-retention flag ON but no snapshot", task.id());
+        retry = worker.run(retryReq);
+      }
+    } else {
+      retry = worker.run(retryReq);
+    }
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
@@ -1497,6 +1530,15 @@ end and only call completeTask if it exits 0.
   /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
   public static final String FLAG_CROSS_PROVIDER_FALLBACK =
       "worker.cross-provider-fallback.enabled";
+
+  /**
+   * Context retention across task retries (RL-2026-05-052, T3.14). When ON, the retry path loads
+   * the prior worker context-snapshot from {@link com.navneet.executespec.context.ContextStore} and
+   * continues from the failure point instead of starting fresh — so the worker doesn't re-read
+   * files + re-issue the same searches before getting back to where it broke. Default OFF, V221.
+   */
+  public static final String FLAG_RETRY_CONTEXT_RETENTION =
+      "worker.retry-context-retention.enabled";
 
   /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
   public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
