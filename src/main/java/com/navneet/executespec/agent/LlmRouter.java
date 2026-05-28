@@ -114,6 +114,15 @@ public class LlmRouter {
   @Value("${spring.ai.openrouter.base-url:https://openrouter.ai/api}")
   private String openRouterBaseUrl;
 
+  // 2026-05-28 (RL-2026-05-052) — DeepSeek native client. Same OpenAI-wire-compatible plumbing as
+  // OpenRouter, but the endpoint is DeepSeek's own — no gateway hop. Org BYOK keys via
+  // RunKeyContext.keyFor("deepseek") same as every other provider; this is the system fallback.
+  @Value("${spring.ai.deepseek.api-key:}")
+  private String deepSeekApiKey;
+
+  @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
+  private String deepSeekBaseUrl;
+
   /**
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
    * matrix lost 3 runs to single 502/503 blips (incl. Gemini discarding 51 iterations of work on
@@ -251,6 +260,7 @@ public class LlmRouter {
       case "openai" -> callOpenAi(request, tools, apiKey);
       case "gemini" -> callGemini(request, tools, apiKey);
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
+      case "deepseek" -> callDeepSeek(request, tools, apiKey);
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
@@ -425,6 +435,35 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
+            .build());
+  }
+
+  /**
+   * Native DeepSeek dispatcher (RL-2026-05-052, 2026-05-28). DeepSeek's API is OpenAI-wire-
+   * compatible, so we reuse {@link OpenAiNativeToolClient} with a per-call base-URL. Unlike
+   * OpenRouter, there's no slug-map indirection — DeepSeek's own model names are passed straight
+   * through (e.g. {@code deepseek-v4-pro} → {@code deepseek-v4-pro}). The OpenRouter route stays
+   * available for comparison (use model id {@code deepseek-v4-pro-or} on provider=openrouter).
+   *
+   * <p>Why native: in the 2026-05-28 mixed10 eval, OpenRouter-routed DeepSeek averaged ~30 min /
+   * instance vs Anthropic native ~7 min — most of the gap is OpenRouter's routing overhead.
+   * Hitting api.deepseek.com directly should reclaim most of that.
+   */
+  private ChatResponse callDeepSeek(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : deepSeekApiKey;
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException(
+          "DeepSeek api-key not configured (org BYOK key or spring.ai.deepseek.api-key)");
+    }
+    return openAiNativeToolClient.call(
+        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+            .model(r.model())
+            .messages(r.messages())
+            .tools(tools)
+            .temperature(r.temperature())
+            .maxCompletionTokens(r.maxTokens())
+            .apiKey(key)
+            .baseUrl(deepSeekBaseUrl)
             .build());
   }
 }
