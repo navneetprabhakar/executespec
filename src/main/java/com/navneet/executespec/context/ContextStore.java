@@ -137,6 +137,31 @@ public class ContextStore {
     }
   }
 
+  /**
+   * Remove every snapshot for the given run (all task IDs). Called from {@link
+   * com.navneet.executespec.harness.SequentialExecutor#execute} at run-end so per-task snapshots
+   * don't squat in Redis for the full 24h TTL after the run has already finished.
+   *
+   * <p>RL-2026-05-052 (T3.14) — Redis cleanup hygiene. Best-effort: Redis outages logged but never
+   * propagate.
+   *
+   * @return number of keys deleted (or 0 if Redis is down or no keys matched).
+   */
+  public long deleteAll(String runId) {
+    if (redis == null || runId == null || runId.isBlank()) return 0;
+    try {
+      java.util.Set<String> keys = redis.keys(KEY_PREFIX + runId + ":*");
+      if (keys == null || keys.isEmpty()) return 0;
+      Long deleted = redis.delete(keys);
+      log.info(
+          "ContextStore deleteAll run={} keysFound={} keysDeleted={}", runId, keys.size(), deleted);
+      return deleted == null ? 0 : deleted;
+    } catch (Exception e) {
+      log.warn("ContextStore deleteAll FAILED run={}: {}", runId, e.getMessage());
+      return 0;
+    }
+  }
+
   /** True iff a snapshot exists for this context. Cheap probe used by recovery logic. */
   public boolean exists(ExecutionContext ctx) {
     if (redis == null) return false;
