@@ -455,9 +455,15 @@ public class LlmRouter {
       throw new IllegalStateException(
           "DeepSeek api-key not configured (org BYOK key or spring.ai.deepseek.api-key)");
     }
+    // 2026-05-28 (RL-2026-05-052) — strip our internal "-native" suffix before sending to
+    // api.deepseek.com. The matrix carries `deepseek-v4-pro-native` to disambiguate from the
+    // OpenRouter-routed `deepseek-v4-pro`, but the DeepSeek API itself only accepts the base
+    // model names (`deepseek-v4-pro` / `deepseek-v4-flash`). Verified from the API error:
+    // `"The supported API model names are deepseek-v4-pro or deepseek-v4-flash"`.
+    String apiModel = stripNativeSuffix(r.model());
     return openAiNativeToolClient.call(
         OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
-            .model(r.model())
+            .model(apiModel)
             .messages(r.messages())
             .tools(tools)
             .temperature(r.temperature())
@@ -465,5 +471,16 @@ public class LlmRouter {
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
             .build());
+  }
+
+  /**
+   * Strip the {@code -native} suffix we use in our model-matrix to disambiguate the native DeepSeek
+   * route from the OpenRouter-routed entry of the same base model. Idempotent.
+   */
+  static String stripNativeSuffix(String model) {
+    if (model == null) return null;
+    return model.endsWith("-native")
+        ? model.substring(0, model.length() - "-native".length())
+        : model;
   }
 }
