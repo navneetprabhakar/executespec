@@ -164,16 +164,16 @@ model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
-      lightweight: claude-sonnet-4-6
+      workhorse: claude-sonnet-4-6                # keep flagship (worker is reasoning-heavy; +17pp on p30)
+      lightweight: claude-haiku-4-5-20251001      # canonical (classifier/summarizer/title — Haiku-suited)
     gemini:
-      planning: gemini-3-flash-preview
+      planning: gemini-3.5-flash                  # RL-2026-05-010 eval-best for PLANNING (ties Sonnet on HIGH)
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4
-      lightweight: gpt-5.4
+      workhorse: gpt-5.4                          # keep flagship (reasoning)
+      lightweight: gpt-5.4-mini                   # canonical (cheap classifier/summarizer)
     # OpenRouter (Enterprise gateway) — tier models routed through the org's OpenRouter key.
     # Must be ids in OpenRouterModelMapper's verified allow-list; orgs override via the per-org
     # matrix (F3). Default mirrors Anthropic tiers (Sonnet planning / Haiku workhorse+lightweight).
