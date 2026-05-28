@@ -994,10 +994,10 @@ public class WorkerAgent {
     try {
       ToolResult result = tool.execute(args, req.context());
       return switch (result) {
-        // RL-2026-05-052 Phase 5+6 — wrap the OK content through ToolOutputCompactor before
-        // envelope-ing (flag-gated; default OFF returns raw verbatim, so this is byte-identical
-        // to the pre-extraction path until the flag is flipped). Error envelopes are short by
-        // construction; never compacted.
+          // RL-2026-05-052 Phase 5+6 — wrap the OK content through ToolOutputCompactor before
+          // envelope-ing (flag-gated; default OFF returns raw verbatim, so this is byte-identical
+          // to the pre-extraction path until the flag is flipped). Error envelopes are short by
+          // construction; never compacted.
         case ToolResult.Ok ok ->
             okEnvelope(maybeCompact(tc.name(), ok.content(), isImmediatelyPriorToolCall, req));
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
@@ -1017,19 +1017,17 @@ public class WorkerAgent {
    * and we fall back to raw here.
    *
    * <p>Null-guarded against {@code toolOutputCompactor == null} so unit tests that build a
-   * WorkerAgent without wiring the compactor (legacy {@code new WorkerAgent(...)} call sites in
-   * the test tree) keep working — the field is non-final at the test level via Mockito field
-   * injection patterns, but defensively guarding here avoids a constructor-order trap.
+   * WorkerAgent without wiring the compactor (legacy {@code new WorkerAgent(...)} call sites in the
+   * test tree) keep working — the field is non-final at the test level via Mockito field injection
+   * patterns, but defensively guarding here avoids a constructor-order trap.
    */
   private String maybeCompact(
-      String toolName,
-      String content,
-      boolean isImmediatelyPriorToolCall,
-      WorkerTaskRequest req) {
+      String toolName, String content, boolean isImmediatelyPriorToolCall, WorkerTaskRequest req) {
     if (toolOutputCompactor == null) return content;
     try {
       return toolOutputCompactor
-          .compactIfNeeded(toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
+          .compactIfNeeded(
+              toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
           .map(ToolOutputCompactor.Compacted::summary)
           .orElse(content);
     } catch (RuntimeException e) {

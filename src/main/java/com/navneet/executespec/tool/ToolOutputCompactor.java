@@ -27,16 +27,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 5+6 of the engine extraction (RL-2026-05-052). Compacts bulky worker tool output through the
- * LIGHTWEIGHT tier before it lands in the WORKHORSE worker's history.
+ * Phase 5+6 of the engine extraction (RL-2026-05-052). Compacts bulky worker tool output through
+ * the LIGHTWEIGHT tier before it lands in the WORKHORSE worker's history.
  *
  * <p>Pattern mirrors Anthropic's Claude Code CLI: bulk reads / searches / build output flow through
- * a cheap model (Haiku / Flash) and only the summary feeds the decision context — keeps the worker's
- * effective context window long and its prompt-cache prefix stable (large variable tool output is
- * the dominant cache-miss source).
+ * a cheap model (Haiku / Flash) and only the summary feeds the decision context — keeps the
+ * worker's effective context window long and its prompt-cache prefix stable (large variable tool
+ * output is the dominant cache-miss source).
  *
- * <p><b>Default OFF</b> behind {@link #FLAG_ENABLED}. With the flag off, callers fall through to the
- * raw tool output verbatim — production behaviour byte-identical.
+ * <p><b>Default OFF</b> behind {@link #FLAG_ENABLED}. With the flag off, callers fall through to
+ * the raw tool output verbatim — production behaviour byte-identical.
  *
  * <p>Skip rules (return {@link Optional#empty()}; caller uses raw output):
  *
@@ -85,7 +85,8 @@ public class ToolOutputCompactor {
    *   <li>{@code writeFile} / {@code editFile} — small ack envelopes; line-number anchors matter.
    *   <li>{@code gitCommit} — short commit-sha echo; denied to worker anyway (defensive).
    *   <li>{@code completeTask} — the termination signal; bypassing compaction defensively.
-   *   <li>{@code gitDiff} / {@code gitStatus} — already actionable + tightly bounded by tool truncation.
+   *   <li>{@code gitDiff} / {@code gitStatus} — already actionable + tightly bounded by tool
+   *       truncation.
    * </ul>
    */
   static final Set<String> SKIP_TOOLS =
@@ -104,7 +105,12 @@ public class ToolOutputCompactor {
 
   /** Result of a successful compaction. Caller substitutes {@link #summary} for the raw output. */
   public record Compacted(
-      String summary, int rawBytes, int compactedBytes, long tokensIn, long tokensOut, double costUsd) {}
+      String summary,
+      int rawBytes,
+      int compactedBytes,
+      long tokensIn,
+      long tokensOut,
+      double costUsd) {}
 
   /**
    * Compact {@code rawOutput} if the configured skip rules don't apply. Returns {@link
@@ -223,9 +229,7 @@ public class ToolOutputCompactor {
           toolName,
           rawOutput.length(),
           summary.length(),
-          (rawOutput.length() == 0
-              ? 0
-              : 100 - (summary.length() * 100 / rawOutput.length())),
+          (rawOutput.length() == 0 ? 0 : 100 - (summary.length() * 100 / rawOutput.length())),
           inTok,
           outTok,
           String.format(Locale.ROOT, "%.6f", cost),
