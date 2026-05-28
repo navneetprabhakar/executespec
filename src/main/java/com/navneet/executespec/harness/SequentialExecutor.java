@@ -487,7 +487,8 @@ end and only call completeTask if it exits 0.
             req.designBlock(),
             refDocs,
             req.plan() == null ? null : req.plan().projectType(),
-            req.workspaceSummary());
+            req.workspaceSummary(),
+            req.provider());
     String userPrompt = composeUserPrompt(task, null);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -1442,6 +1443,19 @@ end and only call completeTask if it exits 0.
 
   // ─── prompt composition ─────────────────────────────────────────────────
 
+  /** Backwards-compatible 5-arg overload — used by tests. Delegates with null provider. */
+  String composeSystemPrompt(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary) {
+    return composeSystemPrompt(task, designBlock, refDocs, projectType, workspaceSummary, null);
+  }
+
+  /** Provider-fragment flag — see prompts/fragments/provider-{name}.md (RL-2026-05-052, T3.10). */
+  public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
+
   // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
   // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
   String composeSystemPrompt(
@@ -1449,8 +1463,22 @@ end and only call completeTask if it exits 0.
       String designBlock,
       String refDocs,
       String projectType,
-      String workspaceSummary) {
+      String workspaceSummary,
+      String provider) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+
+    // 2026-05-28 (RL-2026-05-052, T3.10) — provider-specific prompt tuning. Each provider has
+    // characteristic failure modes (Anthropic narrates, OpenAI re-reads, Gemini cache thrashes,
+    // DeepSeek invents tool names). Per-provider fragment is appended to the base prompt when
+    // the flag is on. Default OFF (V219); flip per-run during eval to measure lift.
+    if (provider != null
+        && featureFlagService != null
+        && featureFlagService.isEnabled(FLAG_PROVIDER_TUNING)) {
+      String providerFragment = loadProviderFragment(provider);
+      if (!providerFragment.isBlank()) {
+        sb.append("\n\n").append(providerFragment);
+      }
+    }
 
     // Multi-repo correctness (2026-05-02 fix). When the orchestrator targets a multi-repo project
     // it ships a workspaceSummary with "MULTI-REPO PROJECT WORKSPACE" + the per-repo subdir list.
@@ -1501,6 +1529,26 @@ end and only call completeTask if it exits 0.
           .append("\n--- END REFERENCE DOCS ---\n");
     }
     return sb.toString();
+  }
+
+  /**
+   * Load the provider-specific tuning fragment ({@code prompts/fragments/provider-<name>.md}). The
+   * provider string is lower-cased; missing fragments resolve to "" and are skipped. Mirrors {@link
+   * #loadScaffoldForProjectType} dispatch style.
+   */
+  String loadProviderFragment(String provider) {
+    if (provider == null || provider.isBlank()) return "";
+    String key = provider.trim().toLowerCase();
+    try {
+      org.springframework.core.io.Resource r =
+          new org.springframework.core.io.ClassPathResource(
+              "prompts/fragments/provider-" + key + ".md");
+      if (!r.exists()) return "";
+      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadProviderFragment({}) failed: {}", provider, e.getMessage());
+      return "";
+    }
   }
 
   /**
