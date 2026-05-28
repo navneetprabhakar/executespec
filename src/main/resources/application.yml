@@ -188,13 +188,15 @@ model-matrix:
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
     # DeepSeek native (api.deepseek.com) — 2026-05-28 (RL-2026-05-052). Enterprise BYOK,
-    # OpenAI-wire-compatible. All three tiers pin to deepseek-v4-pro-native (the only DeepSeek model
-    # registered with provider=deepseek; -flash variants stay on the OpenRouter route until a
-    # native flash entry is added). Native pricing is $0.27 in / $0.027 cached / $1.10 out per 1M.
+    # OpenAI-wire-compatible. All three tiers pin to deepseek-v4-flash-native (the non-thinking
+    # variant): -pro-native is registered but NOT tier-active because api.deepseek.com requires
+    # reasoning_content echo on every follow-up call from -pro thinking-mode responses, and
+    # OpenAiNativeToolClient doesn't round-trip that yet. Flash matches today's bench profile
+    # cleanly. Switch any tier here back to -pro-native once the reasoning_content echo ships.
     deepseek:
-      planning: deepseek-v4-pro-native
-      workhorse: deepseek-v4-pro-native
-      lightweight: deepseek-v4-pro-native
+      planning: deepseek-v4-flash-native
+      workhorse: deepseek-v4-flash-native
+      lightweight: deepseek-v4-flash-native
 
   models:
     claude-opus-4-6:
@@ -366,7 +368,25 @@ model-matrix:
         input-per-1m: 0.27         # native rate (DeepSeek public 2026-05-28): cheaper than OpenRouter markup
         cached-input-per-1m: 0.027
         output-per-1m: 1.10
-      notes: "DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M. Faster than OpenRouter route (RL-2026-05-052 mixed10 eval baseline)."
+      notes: |
+        DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
+        NOT TIER-ACTIVE YET — Pro is a thinking-mode model and api.deepseek.com requires reasoning_content echo on every follow-up call (mirrors Gemini's thought-signature round-trip). Until OpenAiNativeToolClient captures + replays reasoning_content, use the non-thinking deepseek-v4-flash-native (below) instead. RL-2026-05-052.
+    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Flash NATIVE — the non-thinking variant. Same
+    # api.deepseek.com endpoint as pro-native but without reasoning_content in responses, so the
+    # multi-turn tool-call loop works without changes to OpenAiNativeToolClient. This is the
+    # currently TIER-ACTIVE native DeepSeek entry; pro-native re-enters when the thinking-mode
+    # round-trip ships.
+    deepseek-v4-flash-native:
+      provider: deepseek
+      chain-tier: UTILITY
+      context-limit: 1048576
+      max-output-tokens: 16384
+      display-label: "DeepSeek V4 Flash (Native)"
+      pricing:
+        input-per-1m: 0.10         # mirrors the OpenRouter flash entry's native-rate column
+        cached-input-per-1m: 0.02
+        output-per-1m: 0.20
+      notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
