@@ -123,7 +123,9 @@ class WorkerAgentHardCapTest {
             metrics,
             costTracker,
             runRepo,
-            mock(com.navneet.executespec.sse.SseBroadcaster.class));
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null);
     return new Fixture(worker);
   }
 

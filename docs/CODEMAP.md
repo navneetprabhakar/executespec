@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V216**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -272,6 +272,7 @@ Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `MemoryCompactionService` | `memory` | LIGHTWEIGHT | Rewrites `project_memory_snapshot` every 10 runs |
 | `ProjectChatCompiler` | `memory` | PLANNING | Compile chat history → spec |
 | `ProjectChatCompactor` | `memory` | LIGHTWEIGHT | Summarise older N messages, keep last 6 verbatim |
+| `ToolOutputCompactor` | `tool` | LIGHTWEIGHT | Engine Phase 5+6 — summarise bulky worker tool output (>3 KB) before WorkerAgent appends to history (RL-2026-05-052). Default OFF (V216). |
 | `TestReportGenerator` | `testgen` | LIGHTWEIGHT | Test execution report generation |
 | `ValidationReportGenerator` | `report` | WORKHORSE | Validation report assembly |
 | `AccuracyAssessmentService` | `reviewer` | (LLM judge) | Legacy `accuracyScore` floor for pre-V106 runs |
@@ -300,6 +301,8 @@ Migration head: **V215**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `CompleteTaskTool` | `{summary}` | Structured task-complete signal — WorkerAgent intercepts to exit the loop |
 
 Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, includes file-lock + CodeAbuseScanner), `GitTool` (worktree lifecycle + multi-repo push + JGit-backed merge/diff), `FileLockTool` (V1 multi-task contention).
+
+Tool-output post-processing (RL-2026-05-052 Phase 5+6, default OFF behind `worker.tool-compactor.enabled` V216): `tool/ToolOutputCompactor` — LIGHTWEIGHT-tier (Haiku / Flash) service that summarises bulky tool output (>3 KB; not in `{writeFile, editFile, gitCommit, completeTask, gitDiff, gitStatus}`; not the most-recent call in the batch) before WorkerAgent appends to the worker's history. Fail-safe (any LLM error → raw). Not a worker tool itself — wraps tool output post-execute. Mirrors Anthropic's Claude Code CLI internal pattern.
 
 ---
 
@@ -469,9 +472,9 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 ---
 
-## 6. Flyway migrations — V170..V208 + V215
+## 6. Flyway migrations — V170..V208 + V215 + V216
 
-Head: **V215**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V216**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -516,6 +519,7 @@ Head: **V215**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V208 | Widen `github_pat` VARCHAR(255) → TEXT on `app_user` + `pipeline_run` (longer GitHub tokens; RL-2026-05-024) |
 | V208 | Widen `github_pat` VARCHAR(255) → TEXT (`app_user` + `pipeline_run`) — drop the brittle length cap ahead of longer GitHub tokens (`ghs_…` ~520 chars); metadata-only ALTER (RL-2026-05-024) |
 | V215 | Create `personal_access_token` — programmatic auth for the CLI / VS Code / CI clients (SHA-256 hash, never plaintext; RL-2026-05-043). _(V209–V214 are logged in root `CLAUDE.md` + reason-log; this index wasn't backfilled for them.)_ |
+| V216 | Seed `worker.tool-compactor.enabled = false` (DEFAULT OFF) — engine extraction Phase 5+6 prompt-cache discipline; routes bulk worker tool output (> 3 KB) through the LIGHTWEIGHT tier before appending to the WORKHORSE worker history. Mirrors Claude Code CLI pattern (RL-2026-05-052). |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -639,6 +643,7 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
 | `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
 | `scoring.gaming-guards` | **true** (V214) | Anti-gaming guards on the additive verifiedScore — CODE_DELIVERED↔endpoint-intent + TESTS↔coverage-quality blend; tighten-only (RL-2026-05-042) |
+| `worker.tool-compactor.enabled` | **false** (V216) | Phase 5+6 engine extraction — summarise bulk worker tool output (>3 KB) through the LIGHTWEIGHT tier (`ToolOutputCompactor` → Haiku/Flash) before appending to the WORKHORSE worker context. Mirrors Claude Code CLI prompt-cache discipline (RL-2026-05-052) |
 | `durability.task-checkpoint.enabled` | **true** (yaml) | GCS workspace checkpoint at each task boundary for mid-run durability; no-op when GCS unconfigured (RL-2026-05-042) |
 | `enterprise.inject.enabled` | **false** (V211) | Inject `{{CONTRACTS}}` + `{{PROJECT_ADRS}}` into the planner prompt (RL-2026-05-035) |
 | `executespec.strict-provider` | (`-D` flag) | Strict-provider mode (prevents ModelResolver silent provider switch) |
@@ -701,6 +706,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V214) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V216) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |

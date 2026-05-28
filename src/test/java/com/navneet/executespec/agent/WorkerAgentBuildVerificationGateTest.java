@@ -150,7 +150,9 @@ class WorkerAgentBuildVerificationGateTest {
             metrics,
             costTracker,
             runRepo,
-            org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class));
+            org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null);
     return new Fixture(worker, router, registry);
   }
 

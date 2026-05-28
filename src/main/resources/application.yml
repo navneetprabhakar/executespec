@@ -411,6 +411,7 @@ model-matrix:
     ValidationReportGenerator: WORKHORSE
     PrReviewAgent: PLANNING
     CodeReviewAgent: PLANNING
+    ToolOutputCompactor: LIGHTWEIGHT
   failover-order:
     anthropic:
       - openai
