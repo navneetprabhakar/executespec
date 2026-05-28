@@ -453,6 +453,11 @@ public class WorkerAgent {
       // returns multi-gen responses; OpenAI/Gemini single-gen — same code path works).
       StringBuilder textBuf = new StringBuilder();
       List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+      // 2026-05-28 (RL-2026-05-052) — pass through DeepSeek's reasoning_content metadata so the
+      // next iteration's assistant turn can echo it (api.deepseek.com requires the round-trip on
+      // thinking-mode models). For multi-gen responses we take the first generation's metadata —
+      // empirically only single-gen providers (OpenAI-wire family) carry this field.
+      java.util.Map<String, Object> assistantMetadata = null;
       for (var gen : resp.getResults()) {
         String t = gen.getOutput().getText();
         if (t != null && !t.isEmpty()) {
@@ -461,6 +466,11 @@ public class WorkerAgent {
         }
         if (gen.getOutput().getToolCalls() != null) {
           calls.addAll(gen.getOutput().getToolCalls());
+        }
+        if (assistantMetadata == null
+            && gen.getOutput().getMetadata() != null
+            && !gen.getOutput().getMetadata().isEmpty()) {
+          assistantMetadata = gen.getOutput().getMetadata();
         }
       }
       String assistantText = textBuf.toString();
@@ -522,8 +532,13 @@ public class WorkerAgent {
             .build();
       }
 
-      // Append the assistant turn (text + tool_calls) to history.
-      history.add(AssistantMessage.builder().content(assistantText).toolCalls(calls).build());
+      // Append the assistant turn (text + tool_calls + optional metadata) to history.
+      AssistantMessage.Builder assistantBuilder =
+          AssistantMessage.builder().content(assistantText).toolCalls(calls);
+      if (assistantMetadata != null) {
+        assistantBuilder.properties(assistantMetadata);
+      }
+      history.add(assistantBuilder.build());
 
       // Dispatch every tool call. completeTask short-circuits the loop.
       List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
