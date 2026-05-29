@@ -118,6 +118,18 @@ public interface PipelineRunRepository
   Double sumActualCostByProjectAndSince(
       @Param("projectId") String projectId, @Param("since") Instant since);
 
+  /**
+   * B4 (audit 2026-05-29) — project lifetime LLM $ + token totals as DB SUMs, replacing the
+   * dashboard's findByProjectId(... 2000)-then-stream heap scan on a constant-hit path.
+   */
+  @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r WHERE r.projectId = :pid")
+  Double sumActualCostByProjectId(@Param("pid") String projectId);
+
+  @Query(
+      "SELECT COALESCE(SUM(COALESCE(r.totalInputTokens, 0) + COALESCE(r.totalOutputTokens, 0)), 0)"
+          + " FROM PipelineRun r WHERE r.projectId = :pid")
+  Long sumTotalTokensByProjectId(@Param("pid") String projectId);
+
   /** v2.5.8 — per-org LLM $ spent in a billing period (admin / FinOps dashboards). */
   @Query(
       "SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r "
