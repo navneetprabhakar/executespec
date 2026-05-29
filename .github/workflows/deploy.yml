@@ -236,6 +236,23 @@ jobs:
           upsert "MAIL_TRANSPORT=smtp"
           upsert "MAIL_FROM=admin@executespec.ai"
 
+          # ── JVM: survive in-place JDK upgrades (RL-2026-05-053) ──────
+          # Append the vfork process launch mechanism to the existing
+          # JAVA_OPTS (written by startup.sh) if absent, so this deploy's
+          # restart picks it up WITHOUT a VM reboot. The default posix_spawn
+          # mechanism execs the on-disk jspawnhelper, which refuses to run
+          # once Ubuntu's unattended apt upgrade bumps openjdk-21 in place
+          # under the live JVM — breaking every git/gcloud/docker exec and
+          # thus every run. Idempotent. Keep in lockstep with
+          # infra/scripts/startup.sh.
+          if grep -q '^JAVA_OPTS=' "$ENV_FILE" && ! grep -q 'launchMechanism' "$ENV_FILE"; then
+            sed -i 's|^\(JAVA_OPTS="[^"]*\)"|\1 -Djdk.lang.Process.launchMechanism=vfork"|' "$ENV_FILE"
+            echo "JAVA_OPTS patched with vfork launch mechanism"
+          elif ! grep -q '^JAVA_OPTS=' "$ENV_FILE"; then
+            echo 'JAVA_OPTS="-Xms4g -Xmx12g -XX:+UseG1GC -Djdk.lang.Process.launchMechanism=vfork"' >> "$ENV_FILE"
+            echo "JAVA_OPTS written with vfork launch mechanism"
+          fi
+
           # ── Preview-engine handoff (2026-04-21) ──────────────────────
           # main-app delegates per-run preview lifecycle to preview-engine
           # running on preview-gw (us-east4-b). PREVIEW_ENGINE_API_KEY is
