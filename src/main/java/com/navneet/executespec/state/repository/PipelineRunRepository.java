@@ -162,6 +162,18 @@ public interface PipelineRunRepository
   Long sumOutputTokensByUserAndDateRange(
       @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
 
+  /**
+   * B2 (audit 2026-05-29) — authoritative per-user $ spend over a date range. Sums the cache-aware
+   * actual_cost_usd that RunCostTracker persists per run, so usage reports stop re-estimating at
+   * stale blended-Haiku token rates. Null/0 ⇒ period predates actual-cost tracking (caller falls
+   * back to the token estimate).
+   */
+  @Query(
+      "SELECT COALESCE(SUM(r.actualCostUsd),0.0) FROM PipelineRun r WHERE r.createdByUserId = :uid"
+          + " AND r.startedAt BETWEEN :s AND :e")
+  Double sumActualCostByUserAndDateRange(
+      @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
+
   long countByOrgIdAndStartedAtBetween(String orgId, Instant start, Instant end);
 
   long countByOrgIdAndStatusAndStartedAtBetween(
@@ -177,6 +189,13 @@ public interface PipelineRunRepository
       "SELECT COALESCE(SUM(r.totalOutputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND"
           + " r.startedAt BETWEEN :s AND :e")
   Long sumOutputTokensByOrgAndDateRange(
+      @Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
+
+  /** B2 (audit 2026-05-29) — authoritative per-org $ spend over a date range (see user variant). */
+  @Query(
+      "SELECT COALESCE(SUM(r.actualCostUsd),0.0) FROM PipelineRun r WHERE r.orgId = :oid AND"
+          + " r.startedAt BETWEEN :s AND :e")
+  Double sumActualCostByOrgAndDateRange(
       @Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
 
   @Query(
