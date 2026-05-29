@@ -12,7 +12,6 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
-// ──────────────────── Terms of Service ────────────────────
 export function TermsPage() {
   return (
     <LegalShell title='Terms of Service' subtitle='Last updated 1 May 2026'>
@@ -53,7 +52,6 @@ export function TermsPage() {
   );
 }
 
-// ──────────────────── Privacy Policy ────────────────────
 export function PrivacyPage() {
   return (
     <LegalShell title='Privacy Policy' subtitle='Last updated 1 May 2026'>
@@ -93,7 +91,6 @@ export function PrivacyPage() {
   );
 }
 
-// ──────────────────── Data Processing Addendum ────────────────────
 export function DpaPage() {
   return (
     <LegalShell
@@ -198,7 +195,7 @@ function LegalShell({
   );
 }
 
-// ──────────────────── Org Settings (SSO, standards, profile) ────────────────────
+// Org Settings (SSO, standards, profile)
 export function OrgSettingsPage() {
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);

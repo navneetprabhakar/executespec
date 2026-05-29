@@ -240,8 +240,6 @@ public class SolutionExecutionService {
     return null;
   }
 
-  // ── Terminal handlers ─────────────────────────────────────────────────
-
   private void onV2Complete(ExecutionRun run, ExecutionSolution solution) {
     solution.setStatus("DONE");
     solution.setCompletedAt(Instant.now());

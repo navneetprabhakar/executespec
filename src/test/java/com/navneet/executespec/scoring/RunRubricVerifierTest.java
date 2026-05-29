@@ -58,8 +58,6 @@ class RunRubricVerifierTest {
         .build();
   }
 
-  // ── shell ─────────────────────────────────────────────────────────────
-
   @Test
   void shell_exit0_pass(@TempDir Path tmp) {
     var v = verifier.dispatch(row(RunRubricRow.VerificationType.SHELL, "true"), tmp);
@@ -95,8 +93,6 @@ class RunRubricVerifierTest {
     assertThat(v.status()).isEqualTo(RunRubricRow.Status.PASS);
   }
 
-  // ── file-exists ──────────────────────────────────────────────────────
-
   @Test
   void fileExists_present_pass(@TempDir Path tmp) throws IOException {
     Files.writeString(tmp.resolve("README.md"), "# hi");
@@ -130,8 +126,6 @@ class RunRubricVerifierTest {
     assertThat(v.status()).isEqualTo(RunRubricRow.Status.FAIL);
     assertThat(v.evidence()).contains("escapes workspace");
   }
-
-  // ── file-content ─────────────────────────────────────────────────────
 
   @Test
   void fileContent_regexMatch_pass(@TempDir Path tmp) throws IOException {
@@ -178,8 +172,6 @@ class RunRubricVerifierTest {
     assertThat(v.status()).isEqualTo(RunRubricRow.Status.UNKNOWN);
   }
 
-  // ── Phase B placeholders ─────────────────────────────────────────────
-
   @Test
   void endpoint_returnsUnknown_pendingHandler(@TempDir Path tmp) {
     var v = verifier.dispatch(row(RunRubricRow.VerificationType.ENDPOINT, "GET /health"), tmp);
@@ -201,8 +193,6 @@ class RunRubricVerifierTest {
     assertThat(v.evidence()).contains("Phase B");
   }
 
-  // ── Unknown verification type ────────────────────────────────────────
-
   @Test
   void unknownType_returnsUnknown(@TempDir Path tmp) {
     var v = verifier.dispatch(row("smoke-signals", "spec"), tmp);
@@ -215,8 +205,6 @@ class RunRubricVerifierTest {
     var v = verifier.dispatch(row(null, "spec"), tmp);
     assertThat(v.status()).isEqualTo(RunRubricRow.Status.UNKNOWN);
   }
-
-  // ── Path safety helper ───────────────────────────────────────────────
 
   @Test
   void safeResolveUnder_normalPath_returnsResolved(@TempDir Path tmp) {

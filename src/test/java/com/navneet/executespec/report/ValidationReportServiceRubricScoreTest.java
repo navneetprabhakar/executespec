@@ -26,8 +26,6 @@ class ValidationReportServiceRubricScoreTest {
       new ValidationReportService(
           null, null, null, null, null, null, mock(FeatureFlagService.class));
 
-  // ── Each-dimension-perfect → 100 ────────────────────────────────────────
-
   @Test
   void perfect_run_scores_100() {
     // build=25 + tests=20 + reviewer=20 + endpoints=15 + damper=10 + quality=10 = 100
@@ -35,7 +33,7 @@ class ValidationReportServiceRubricScoreTest {
     assertEquals(100, score);
   }
 
-  // ── Build-failure cliff (the bug we're fixing) ──────────────────────────
+  // Build-failure cliff (the bug we're fixing)
 
   @Test
   void build_failed_does_not_collapse_to_zero() {
@@ -52,8 +50,6 @@ class ValidationReportServiceRubricScoreTest {
     int score = svc.computeRubricScore(true, 50, 50, "REVIEW_FAILED", 0, 100);
     assertEquals(70, score);
   }
-
-  // ── Per-dimension increments ────────────────────────────────────────────
 
   @Test
   void no_tests_captured_gives_neutral_10_points() {
@@ -102,8 +98,6 @@ class ValidationReportServiceRubricScoreTest {
     assertEquals(85, score);
   }
 
-  // ── Reviewer verdict matrix ─────────────────────────────────────────────
-
   @Test
   void reviewer_fixed_issues_gives_15_plus_10_quality() {
     int score = svc.computeRubricScore(true, 50, 50, "FIXED_ISSUES", 0, 100);
@@ -124,8 +118,6 @@ class ValidationReportServiceRubricScoreTest {
     // build=25 + tests=20 + reviewer=10 + endpoints=15 + damper=10 + quality=10 = 90
     assertEquals(90, score);
   }
-
-  // ── Floor / ceiling ─────────────────────────────────────────────────────
 
   @Test
   void worst_case_floors_at_zero() {

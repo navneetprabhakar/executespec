@@ -38,8 +38,6 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
     return "PAGERDUTY";
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
     // Fail CLOSED: a missing secret OR a missing signature header must NOT bypass verification.
@@ -132,8 +130,6 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
       return Optional.empty();
     }
   }
-
-  // ── Outbound ──────────────────────────────────────────────────────────────
 
   @Override
   public void onRunStarted(IntegrationRun ir, PipelineRun run) {

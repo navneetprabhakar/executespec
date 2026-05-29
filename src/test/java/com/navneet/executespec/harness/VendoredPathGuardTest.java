@@ -21,8 +21,6 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class VendoredPathGuardTest {
 
-  // ── isVendored regex tests ───────────────────────────────────────────────
-
   @Test
   void isVendored_matchesEveryDeclaredDir_atRoot() {
     for (String dir : VendoredPathGuard.VENDORED_DIRS) {
@@ -64,7 +62,7 @@ class VendoredPathGuardTest {
     assertTrue(VendoredPathGuard.isVendored("repos/api/.GRADLE/cache"));
   }
 
-  // ── augmentGitignore — idempotency + missing-pattern detection ───────────
+  // augmentGitignore — idempotency + missing-pattern detection
 
   @Test
   void augmentGitignore_appendsMissingPatterns(@TempDir Path tmp) throws Exception {
@@ -132,8 +130,6 @@ class VendoredPathGuardTest {
     new VendoredPathGuard().augmentGitignore(tmp);
     assertFalse(Files.exists(tmp.resolve(".gitignore")));
   }
-
-  // ── helpers ──────────────────────────────────────────────────────────────
 
   private void initBareRepo(Path repoDir) throws IOException, InterruptedException {
     Files.createDirectories(repoDir);

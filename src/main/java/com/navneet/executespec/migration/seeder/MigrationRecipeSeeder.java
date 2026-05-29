@@ -238,8 +238,6 @@ public class MigrationRecipeSeeder {
     }
   }
 
-  // ── helpers ────────────────────────────────────────────────────────
-
   private static String asString(Object o) {
     return o == null ? null : String.valueOf(o);
   }

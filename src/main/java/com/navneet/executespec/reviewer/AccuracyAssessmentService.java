@@ -345,7 +345,6 @@ SCORE COMPUTATION GUIDANCE:
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Layer 4 — drop requirements whose evidence is execution-time / VCS-only.
   // The pipeline's post-run snapshot can't show whether `git commit` happened,
   // whether a push landed, or whether a `--check` invocation exited 0. Those
@@ -354,7 +353,6 @@ SCORE COMPUTATION GUIDANCE:
   // (Black formatting fix) verifiedScore tanked from a near-CLEAN ~85 to 43
   // because three execution-time requirements (commit message, push, --check
   // exit code) all dropped to MISSING and synthesized CRITICAL issues.
-  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * Patterns that mark a requirement as execution-time / VCS — i.e. its truth cannot be established
@@ -423,9 +421,7 @@ SCORE COMPUTATION GUIDANCE:
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Layer 3 — grep verification of missing-requirement claims
-  // ──────────────────────────────────────────────────────────────────────────
 
   /**
    * Stopwords filtered out of {@link #extractKeywords(String)}. Both common English ("must",
@@ -637,9 +633,7 @@ SCORE COMPUTATION GUIDANCE:
     return out;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Prompt builder
-  // ──────────────────────────────────────────────────────────────────────────
 
   private String buildAssessmentPrompt(
       String originalGoal, String fileTree, String keyFileSnippets, String issuesSummary) {
@@ -1012,9 +1006,7 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     return java.util.List.copyOf(picked);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Defaults and helpers
-  // ──────────────────────────────────────────────────────────────────────────
 
   /** Conservative default when LLM call fails. Derives a rough score from review issue counts. */
   AccuracyReport defaultReport(List<ReviewIssue> issues) {

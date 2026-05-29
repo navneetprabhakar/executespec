@@ -110,7 +110,6 @@ function ErrorBanner({msg}: {msg: string}) {
   );
 }
 
-// ──────────────────── Login ────────────────────
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -227,7 +226,6 @@ export function LoginPage() {
   );
 }
 
-// ──────────────────── Signup ────────────────────
 export function SignupPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -361,7 +359,7 @@ export function SignupPage() {
   );
 }
 
-// ──────────────────── Verify email (magic-link / signup splash) ────────────────────
+// Verify email (magic-link / signup splash)
 export function VerifyPage() {
   // Two flows handled here. OAuth callback is handled by AuthCallbackPage now,
   // see /signal/pages/AuthCallbackPage.tsx.
@@ -447,7 +445,7 @@ export function VerifyPage() {
   );
 }
 
-// ──────────────────── Welcome (sandbox picker + repo linking) ────────────────────
+// Welcome (sandbox picker + repo linking)
 export function WelcomePage() {
   const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2>(1);

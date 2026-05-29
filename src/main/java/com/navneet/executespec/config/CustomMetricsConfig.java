@@ -35,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CustomMetricsConfig {
 
-  // ── Gauge backing fields (updated by services via Metrics.xxx.set()) ────────
+  // Gauge backing fields (updated by services via Metrics.xxx.set())
 
   /** Gauges are backed by AtomicInteger — services update these directly. */
   public static final class Metrics {
@@ -47,7 +47,7 @@ public class CustomMetricsConfig {
     private Metrics() {}
   }
 
-  // ── Meter name constants (used by services to record metrics) ───────────────
+  // Meter name constants (used by services to record metrics)
 
   /** Run lifecycle */
   public static final String RUN_TOTAL = "executespec.run.total";
@@ -128,7 +128,7 @@ public class CustomMetricsConfig {
   public static final String DEPLOY_FAILURES = "executespec.deploy.failures";
 
   public CustomMetricsConfig(MeterRegistry registry) {
-    // ── Register gauges (backed by AtomicInteger) ───────────────────────────
+    // Register gauges (backed by AtomicInteger)
     Gauge.builder("executespec.run.active", Metrics.ACTIVE_RUNS, AtomicInteger::get)
         .description("Number of currently executing pipeline runs")
         .register(registry);

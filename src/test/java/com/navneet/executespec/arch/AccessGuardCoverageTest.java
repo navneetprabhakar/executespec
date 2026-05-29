@@ -326,8 +326,6 @@ class AccessGuardCoverageTest {
     return v;
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────
-
   /**
    * A handler "calls a tenant guard" iff it invokes a method ON one of {@link #GUARD_FQNS} (the
    * canonical {@code RunAccessGuard} / {@code ProjectAccessGuard} — covering {@code assertCanRead}

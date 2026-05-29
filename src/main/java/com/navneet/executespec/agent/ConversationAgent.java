@@ -194,8 +194,6 @@ public class ConversationAgent {
     return safeReply;
   }
 
-  // ── Apply suggestion: mini-plan generation ──────────────────────────────
-
   /**
    * Generates a mini TaskPlan (≤6 tasks) from a suggestion text. Used by both Chat Copilot "Apply
    * to Run" and Review "Apply Review" flows.
@@ -435,8 +433,6 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
     return sb.toString();
   }
 
-  // ── System prompt builder ────────────────────────────────────────────────
-
   private String buildSystemPrompt(PipelineRun run) {
     String status = run.getStatus();
     String request = run.getUserRequest() != null ? run.getUserRequest() : "(unknown)";
@@ -606,7 +602,7 @@ encourage the user to click "Apply to Run" for targeted fixes, or
             MAX_MESSAGES);
   }
 
-  // ── Design context: current design style + available options ────────────
+  // Design context: current design style + available options
 
   private String buildDesignContext(PipelineRun run) {
     StringBuilder sb = new StringBuilder();
@@ -640,7 +636,7 @@ encourage the user to click "Apply to Run" for targeted fixes, or
     return sb.toString();
   }
 
-  // ── Workspace context: file tree + key source files ─────────────────────
+  // Workspace context: file tree + key source files
 
   private String buildWorkspaceContext(String runId) {
     StringBuilder sb = new StringBuilder();
@@ -746,8 +742,6 @@ encourage the user to click "Apply to Run" for targeted fixes, or
     return file.equals("README.md") || file.startsWith(".agent-context");
   }
 
-  // ── Preview / Docker context ────────────────────────────────────────────
-
   private String buildPreviewContext(String runId) {
     try {
       PreviewSession session = previewService.getStatus(runId);
@@ -800,8 +794,6 @@ encourage the user to click "Apply to Run" for targeted fixes, or
       return "Preview status unavailable.\n";
     }
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private void tryAppendFile(
       StringBuilder sb, String runId, String path, String label, int maxChars) {

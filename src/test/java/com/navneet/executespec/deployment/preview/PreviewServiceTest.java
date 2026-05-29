@@ -131,8 +131,6 @@ class PreviewServiceTest {
     return PipelineRun.builder().runId(runId).status("WORKING").createdByUserId("user-1").build();
   }
 
-  // ── Guards / validation ─────────────────────────────────────────────────
-
   @Nested
   @DisplayName("Start guards")
   class StartGuards {
@@ -216,8 +214,6 @@ class PreviewServiceTest {
     }
   }
 
-  // ── Concurrent preview limits ───────────────────────────────────────────
-
   @Nested
   @DisplayName("Concurrent preview limits by tier")
   class ConcurrencyLimits {
@@ -275,8 +271,6 @@ class PreviewServiceTest {
     }
   }
 
-  // ── Idempotency ─────────────────────────────────────────────────────────
-
   @Nested
   @DisplayName("Idempotent start")
   class Idempotency {
@@ -298,8 +292,6 @@ class PreviewServiceTest {
       assertThat(s2.composeProjectName()).isEqualTo(s1.composeProjectName());
     }
   }
-
-  // ── Stop ────────────────────────────────────────────────────────────────
 
   @Nested
   @DisplayName("Stop")
@@ -354,8 +346,6 @@ class PreviewServiceTest {
     }
   }
 
-  // ── Status & Logs ───────────────────────────────────────────────────────
-
   @Nested
   @DisplayName("Status and Logs")
   class StatusAndLogs {
@@ -390,8 +380,6 @@ class PreviewServiceTest {
       assertThat(session.projectType()).isEqualTo(PreviewProjectType.NODE_FRONTEND);
     }
   }
-
-  // ── Initial session state ───────────────────────────────────────────────
 
   @Nested
   @DisplayName("Initial session properties")
@@ -429,8 +417,6 @@ class PreviewServiceTest {
       assertThat(ttlMinutes).isEqualTo(props.getPreviewTtlMinutes());
     }
   }
-
-  // ── Multi project type support ──────────────────────────────────────────
 
   @Nested
   @DisplayName("All project types")
@@ -489,8 +475,6 @@ class PreviewServiceTest {
       assertThat(PreviewProjectType.FULL_STACK.getContainerPort()).isEqualTo(5173);
     }
   }
-
-  // ── Per-run preview start limits ────────────────────────────────────────
 
   @Nested
   @DisplayName("Per-run preview start limits")

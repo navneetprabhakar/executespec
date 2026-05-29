@@ -78,7 +78,6 @@ public class MonthlyRunCounterResetJob {
 
     Instant resetStamp = Instant.now();
 
-    // ── Users ─────────────────────────────────────────────────────────────
     long userScanned = 0;
     List<AppUser> userBatch = new ArrayList<>();
     for (AppUser user : userRepo.findAll()) {
@@ -92,7 +91,6 @@ public class MonthlyRunCounterResetJob {
     }
     if (!userBatch.isEmpty()) userRepo.saveAll(userBatch);
 
-    // ── Orgs ──────────────────────────────────────────────────────────────
     long orgScanned = 0;
     List<Org> orgBatch = new ArrayList<>();
     for (Org org : orgRepo.findAll()) {

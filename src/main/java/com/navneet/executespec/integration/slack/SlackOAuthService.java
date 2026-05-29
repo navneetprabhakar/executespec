@@ -134,7 +134,7 @@ public class SlackOAuthService {
     return integrationRepo.findByOrgId(orgId).isPresent();
   }
 
-  // ── State parameter (HMAC-signed) ────────────────────────────────────────
+  // State parameter (HMAC-signed)
 
   private String buildState(String orgId) {
     String data = orgId + "|" + Instant.now().toEpochMilli();

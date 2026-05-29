@@ -61,8 +61,6 @@ public class GitHubRepoService {
   /** Result from a single repo creation attempt. */
   private record CreateResult(String cloneUrl, boolean nameTaken) {}
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
   /** Creates a new GitHub repo using the system PAT (backward-compat overload). */
   public String createRepo(String goal, String nameOverride, String visibility) {
     return createRepo(goal, nameOverride, visibility, null, null);
@@ -607,8 +605,6 @@ public class GitHubRepoService {
     return slug.replaceAll("-+$", "");
   }
 
-  // ── Branch + PR ──────────────────────────────────────────────────────────────
-
   /**
    * Returns the default branch name (e.g. "main", "master") for a GitHub repo.
    *
@@ -930,8 +926,6 @@ public class GitHubRepoService {
     }
   }
 
-  // ── PR review comments ──────────────────────────────────────────────────────
-
   private static final int PR_COMMENTS_MAX_CHARS = 4000;
   private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
@@ -1033,8 +1027,6 @@ public class GitHubRepoService {
   private static String textOrEmpty(JsonNode node, String field) {
     return node.has(field) && !node.get(field).isNull() ? node.get(field).asText() : "";
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   /** Returns override if non-blank, otherwise falls back to the system default. */
   private static String resolve(String override, String systemDefault) {

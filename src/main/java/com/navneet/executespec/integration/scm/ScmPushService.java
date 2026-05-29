@@ -624,7 +624,7 @@ public class ScmPushService {
     }
   }
 
-  // ─── Apply-suggestion push (Fix L, 2026-05-03) ──────────────────────────
+  // Apply-suggestion push (Fix L, 2026-05-03)
 
   /**
    * Per-repo outcome for an apply-time push. Mirrors the shape of {@link GitToolResult}'s ok/err

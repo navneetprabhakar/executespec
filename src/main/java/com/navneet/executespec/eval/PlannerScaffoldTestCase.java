@@ -35,7 +35,7 @@ public record PlannerScaffoldTestCase(
     MAX_FILES_PER_TASK
   }
 
-  // ── Factory methods for extreme scenarios ─────────────────────────────────
+  // Factory methods for extreme scenarios
 
   public static List<PlannerScaffoldTestCase> all() {
     return List.of(

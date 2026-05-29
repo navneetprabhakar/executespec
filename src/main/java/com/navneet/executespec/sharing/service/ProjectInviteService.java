@@ -81,8 +81,6 @@ public class ProjectInviteService {
   @Value("${app.base-url:http://localhost:5173}")
   private String appBaseUrl;
 
-  // ── Tier gating ──────────────────────────────────────────────────────────
-
   /**
    * Validate that the inviter is allowed to create an external invite. Three gates, in order of
    * specificity (cheapest first):
@@ -150,8 +148,6 @@ public class ProjectInviteService {
               + " before sending invites.");
     }
   }
-
-  // ── Public entry ─────────────────────────────────────────────────────────
 
   /**
    * Create or refresh a pending invite. If a PENDING invite already exists for the same (project,
@@ -328,8 +324,6 @@ public class ProjectInviteService {
     }
   }
 
-  // ── Read paths ──────────────────────────────────────────────────────────
-
   public List<ProjectInvite> listPending(String projectId) {
     return inviteRepo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, "PENDING");
   }
@@ -337,8 +331,6 @@ public class ProjectInviteService {
   public Optional<ProjectInvite> findByToken(String token) {
     return inviteRepo.findByToken(token);
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   /** 32-byte URL-safe random token (~43 chars after base64). */
   private static String generateToken() {

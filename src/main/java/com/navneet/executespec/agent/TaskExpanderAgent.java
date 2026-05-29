@@ -211,8 +211,6 @@ public class TaskExpanderAgent {
         .build();
   }
 
-  // ─── tool definition ────────────────────────────────────────────────────
-
   private ToolCallback buildSubmitTaskDetailCallback(String expectedTaskId) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -256,8 +254,6 @@ public class TaskExpanderAgent {
       }
     };
   }
-
-  // ─── helpers ────────────────────────────────────────────────────────────
 
   private String loadPrompt() {
     try {

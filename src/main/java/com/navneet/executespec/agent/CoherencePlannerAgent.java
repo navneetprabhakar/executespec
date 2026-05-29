@@ -269,8 +269,6 @@ public class CoherencePlannerAgent {
     return new PatchResult(patchedPlan, applied, summaries);
   }
 
-  // ─── tool definition ────────────────────────────────────────────────────
-
   private ToolCallback buildPatchPlanCallback() {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -323,8 +321,6 @@ public class CoherencePlannerAgent {
       }
     };
   }
-
-  // ─── helpers ────────────────────────────────────────────────────────────
 
   private String loadPrompt() {
     try {

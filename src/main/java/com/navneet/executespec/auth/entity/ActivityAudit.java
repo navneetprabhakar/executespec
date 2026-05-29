@@ -50,7 +50,7 @@ public class ActivityAudit {
   @Builder.Default
   private Instant createdAt = Instant.now();
 
-  // ── M-019 (Wave 3) — append-only hash chain (V147) ─────────────────────
+  // M-019 (Wave 3) — append-only hash chain (V147)
 
   /**
    * SHA-256 hex of the previous chained row's row_hash; '0'×64 for the genesis row. Null on

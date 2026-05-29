@@ -33,8 +33,6 @@ public class TierPermissionService {
   private final TierConfigRepository tierConfigRepo;
   private final TierEnforcementService tierEnforcementService;
 
-  // ── Public record ───────────────────────────────────────────────────────
-
   public record TierPermissions(
       boolean canManageAiKeys,
       boolean canViewPricing,
@@ -64,8 +62,6 @@ public class TierPermissionService {
       // Deploy engine
       boolean canDeploy,
       int maxDeployments) {}
-
-  // ── Main entry point ────────────────────────────────────────────────────
 
   public TierPermissions getPermissions(String userId) {
     AppUser user =
@@ -114,8 +110,6 @@ public class TierPermissionService {
     // are the typical case in dev).
     return freeUserPermissions(user);
   }
-
-  // ── Permission builders ─────────────────────────────────────────────────
 
   private TierPermissions superAdminPermissions(AppUser user) {
     // SUPER_ADMIN always unlimited — never show quota constraints
@@ -335,8 +329,6 @@ public class TierPermissionService {
         resolveMaxDeployments(tier) // [F-03] from tier_config (was: 3 hardcoded)
         );
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   /** Resolve max org members: per-org override → tier_config default. */
   private int resolveMaxOrgMembers(Org org) {

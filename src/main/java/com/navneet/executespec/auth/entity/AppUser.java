@@ -103,8 +103,6 @@ public class AppUser {
   @Column(name = "deleted_at")
   private Instant deletedAt;
 
-  // ── GitHub integration ────────────────────────────────────────────────────
-
   /**
    * Personal GitHub PAT — used to create/push repos after merge. Encrypted at rest via {@link
    * EncryptedValueConverter} (C7 — audit 2026-05-29; previously the only credential field stored
@@ -117,8 +115,6 @@ public class AppUser {
   /** GitHub username or org name to create repos under (e.g. "navneet" or "mycompany"). */
   @Column(name = "github_owner")
   private String githubOwner;
-
-  // ── Bitbucket integration ─────────────────────────────────────────────────
 
   /** Bitbucket username for API authentication (Basic auth). */
   @Column(name = "bitbucket_username")
@@ -137,8 +133,6 @@ public class AppUser {
   @Column(name = "bitbucket_repo_slug")
   private String bitbucketRepoSlug;
 
-  // ── AI provider keys ──────────────────────────────────────────────────────
-
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "openai_api_key")
   private String openAiApiKey;
@@ -151,8 +145,6 @@ public class AppUser {
   @Column(name = "gemini_api_key")
   private String geminiApiKey;
 
-  // ── JIRA integration ──────────────────────────────────────────────────────
-
   @Column(name = "jira_base_url")
   private String jiraBaseUrl;
 
@@ -163,8 +155,6 @@ public class AppUser {
   @Column(name = "jira_api_token")
   private String jiraApiToken;
 
-  // ── Payment gateway ──────────────────────────────────────────────────────
-
   @Column(name = "stripe_customer_id")
   private String stripeCustomerId;
 
@@ -172,8 +162,6 @@ public class AppUser {
   @Column(name = "payment_gateway", length = 20)
   @Builder.Default
   private String paymentGateway = "razorpay";
-
-  // ── Confluence integration ────────────────────────────────────────────────
 
   @Column(name = "confluence_base_url")
   private String confluenceBaseUrl;
@@ -185,16 +173,12 @@ public class AppUser {
   @Column(name = "confluence_api_token")
   private String confluenceApiToken;
 
-  // ── Session invalidation ─────────────────────────────────────────────────
-
   /**
    * Per-user JWT invalidation timestamp. If set, any JWT with {@code iat < tokenInvalidatedAt} is
    * rejected. Null means no per-user invalidation (global epoch check still applies).
    */
   @Column(name = "token_invalidated_at")
   private Instant tokenInvalidatedAt;
-
-  // ── OAuth ────────────────────────────────────────────────────────────────
 
   @Column(name = "oauth_provider")
   private String oauthProvider;
@@ -205,13 +189,11 @@ public class AppUser {
   @Column(name = "avatar_url")
   private String avatarUrl;
 
-  // ── View mode ────────────────────────────────────────────────────────────
-
   @Column(name = "view_mode")
   @Builder.Default
   private String viewMode = "vibe";
 
-  // ── Wave 2.1 — signup attribution (V125 migration) ───────────────────────
+  // Wave 2.1 — signup attribution (V125 migration)
   // Captured from signup request (utm_source / utm_campaign / ref). Null for
   // pre-existing users + direct-navigation signups. Used as a cohort
   // dimension on every activation event forwarded to PostHog.

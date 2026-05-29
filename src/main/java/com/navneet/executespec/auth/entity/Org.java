@@ -73,7 +73,6 @@ public class Org {
   @Builder.Default
   private boolean apiKeysProvided = false;
 
-  // ── Per-org AI provider keys ──────────────────────────────────────────────
   // Used by all org members who have not set a personal key.
   // Resolution order: user key → org key → system key (application.yml).
   // Raw values are NEVER returned to the client — only boolean flags.
@@ -97,7 +96,7 @@ public class Org {
   @Column(name = "open_router_api_key")
   private String openRouterApiKey;
 
-  // ── Key source mode & provider restrictions ──────────────────────────────
+  // Key source mode & provider restrictions
   // Controls how API keys are resolved for runs created by this org's members.
   // SYSTEM = always use platform keys; OWN_KEYS = only user/org keys (no fallback);
   // HYBRID = user/org keys first, fall back to platform (default).
@@ -120,7 +119,7 @@ public class Org {
   @Column(name = "model_overrides_json", columnDefinition = "TEXT")
   private String modelOverridesJson;
 
-  // ── Domain enforcement & member limits ────────────────────────────────────
+  // Domain enforcement & member limits
 
   /**
    * OPEN = escalate cross-domain invites; ENFORCED = reject immediately. ENTERPRISE orgs are always
@@ -155,12 +154,8 @@ public class Org {
   @Builder.Default
   private boolean externalSharingEnabled = false;
 
-  // ── Admin contact ────────────────────────────────────────────────────────
-
   @Column(name = "admin_email")
   private String adminEmail;
-
-  // ── Payment gateway ──────────────────────────────────────────────────────
 
   @Column(name = "stripe_customer_id")
   private String stripeCustomerId;
@@ -170,7 +165,6 @@ public class Org {
   @Builder.Default
   private String paymentGateway = "razorpay";
 
-  // ── Org-level JIRA credentials ───────────────────────────────────────────
   // Managed by ORG_ADMIN via the Integrations page.
   // Raw tokens are NEVER returned to the client — only boolean flags.
 
@@ -191,8 +185,6 @@ public class Org {
   @Column(name = "jira_project_key")
   private String jiraProjectKey;
 
-  // ── Org-level Confluence credentials ─────────────────────────────────────
-
   @Column(name = "confluence_base_url")
   private String confluenceBaseUrl;
 
@@ -207,7 +199,7 @@ public class Org {
   // 2026-05-06). The dual consumer/B2B surface is not on the GA roadmap;
   // every account ran on 'executespec' anyway. Org row is leaner now.
 
-  // ── V162 — solo-user bootstrap personal org ─────────────────────────────
+  // V162 — solo-user bootstrap personal org
   /**
    * True when this org was auto-provisioned by AuthService.register / findOrCreateFromOAuth as a
    * single-member personal scope so the user has somewhere to put their first project. Filtered out
@@ -219,7 +211,7 @@ public class Org {
   @Builder.Default
   private boolean isPersonal = false;
 
-  // ── V127 (Wave 3) — SSO/SAML on the org ─────────────────────────────────
+  // V127 (Wave 3) — SSO/SAML on the org
   /** null | "GOOGLE_OIDC" | "OKTA_SAML" | "AZURE_AD_SAML" */
   @Column(name = "sso_provider", length = 32)
   private String ssoProvider;
@@ -236,7 +228,7 @@ public class Org {
   @Column(name = "sso_domain")
   private String ssoDomain;
 
-  // ── V127 (Wave 3) — GitHub App installation ─────────────────────────────
+  // V127 (Wave 3) — GitHub App installation
   /** Numeric installation id from GitHub App install webhook. */
   @Column(name = "github_installation_id")
   private Long githubInstallationId;
@@ -244,7 +236,7 @@ public class Org {
   @Column(name = "github_installed_at")
   private Instant githubInstalledAt;
 
-  // ── V148 (Wave 3) — governance caps (M-032 + M-039) ─────────────────────
+  // V148 (Wave 3) — governance caps (M-032 + M-039)
 
   /**
    * M-032 — USD threshold above which a run plan can only be approved by

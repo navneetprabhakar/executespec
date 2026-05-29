@@ -40,8 +40,6 @@ public class AnalyticsService {
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
 
-  // ── Usage Metrics ──────────────────────────────────────────────────────────
-
   /**
    * Get usage metrics for a user or org over a given period.
    *
@@ -221,7 +219,7 @@ GROUP BY m.model_name ORDER BY calls DESC
         costByModel);
   }
 
-  // ── Member Usage (ORG context only) ────────────────────────────────────────
+  // Member Usage (ORG context only)
 
   public List<MemberUsage> getMemberUsage(String orgId, int periodDays) {
     Instant since = Instant.now().minus(periodDays, ChronoUnit.DAYS);
@@ -258,8 +256,6 @@ GROUP BY m.model_name ORDER BY calls DESC
             })
         .toList();
   }
-
-  // ── Billing Overview ───────────────────────────────────────────────────────
 
   public BillingOverview getBillingOverview(String entityType, String entityId) {
     String entityName;
@@ -372,7 +368,7 @@ GROUP BY m.model_name ORDER BY calls DESC
             : inv.getCreatedAt());
   }
 
-  // ── Cost Breakdown (v2.5.8) ───────────────────────────────────────────────
+  // Cost Breakdown (v2.5.8)
   //
   // FinOps support for engineering managers. Returns per-user and per-project
   // spend across pipeline_run + execution_run so teams can attribute LLM spend

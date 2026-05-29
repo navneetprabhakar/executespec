@@ -40,8 +40,6 @@ public class ProjectInviteController {
   private final ProjectInviteService inviteService;
   private final ProjectAccessGuard accessGuard;
 
-  // ── Project-scoped admin endpoints ────────────────────────────────────────
-
   /**
    * SDET 2026-05-16 — BUG-002 / BUG-003 fix.
    *
@@ -103,7 +101,7 @@ public class ProjectInviteController {
     return ResponseEntity.noContent().build();
   }
 
-  // ── Acceptance (recipient-facing) ─────────────────────────────────────────
+  // Acceptance (recipient-facing)
 
   public record AcceptResponse(String projectId) {}
 
@@ -138,8 +136,6 @@ public class ProjectInviteController {
             invite.getStatus(),
             invite.getExpiresAt()));
   }
-
-  // ── DTOs ──────────────────────────────────────────────────────────────────
 
   public record ProjectInviteDto(
       UUID id,

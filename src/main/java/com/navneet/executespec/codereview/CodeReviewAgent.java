@@ -248,8 +248,6 @@ public class CodeReviewAgent {
     return new AgentResult(summary, issues, dropped, 0L, null, null);
   }
 
-  // ── Tool definition ─────────────────────────────────────────────────────────
-
   static class SubmitCodeReviewToolCallback implements ToolCallback {
     private static final String SCHEMA =
         """
@@ -318,8 +316,6 @@ public class CodeReviewAgent {
       return "{\"ok\":true}";
     }
   }
-
-  // ── DTOs ────────────────────────────────────────────────────────────────────
 
   /** One static finding handed to the agent for triage. */
   public record StaticFinding(

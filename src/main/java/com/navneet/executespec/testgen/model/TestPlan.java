@@ -39,7 +39,7 @@ public class TestPlan {
   @Column(name = "conventions_doc", columnDefinition = "TEXT")
   private String conventionsDoc;
 
-  // ── LLM token tracking for cost breakdown ──────────────────────────────
+  // LLM token tracking for cost breakdown
   @Column(name = "planner_input_tokens")
   @Builder.Default
   private Integer plannerInputTokens = 0;

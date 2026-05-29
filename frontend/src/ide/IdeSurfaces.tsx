@@ -69,7 +69,6 @@ function phaseLabel(status?: string | null): string {
   return 'Running now';
 }
 
-// ───────────────────────── Welcome / workspace home ─────────────────────────
 export function IdeWelcome() {
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
@@ -225,7 +224,7 @@ export function IdeWelcome() {
   );
 }
 
-// ───────────────────────── Compose (new spec) ───────────────────────────────
+// Compose (new spec)
 export function IdeCompose() {
   const navigate = useNavigate();
   const tier = useAuthStore(selectNormalizedTier);
@@ -637,7 +636,6 @@ export function IdeCompose() {
   );
 }
 
-// ───────────────────────── Live run ─────────────────────────────────────────
 type LiveEntry = {
   id?: string;
   type?: string;

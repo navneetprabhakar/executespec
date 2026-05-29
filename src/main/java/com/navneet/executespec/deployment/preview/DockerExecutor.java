@@ -19,15 +19,9 @@ public class DockerExecutor {
   private static final int MAX_OUTPUT_BYTES = 1_048_576; // 1 MB
   private static final int BUILD_TIMEOUT_SECONDS = 300;
 
-  // ── Inner record ────────────────────────────────────────────────────────
-
   public record DockerBuildResult(boolean success, String imageId, String logs, long durationMs) {}
 
-  // ── Private helper record ───────────────────────────────────────────────
-
   private record ProcessResult(int exitCode, String output, boolean timedOut) {}
-
-  // ── Public methods ──────────────────────────────────────────────────────
 
   /** Check if Docker daemon is available. */
   public boolean isDockerAvailable() {
@@ -193,8 +187,6 @@ public class DockerExecutor {
     }
     return -1;
   }
-
-  // ── Private helpers ─────────────────────────────────────────────────────
 
   private ProcessResult exec(List<String> command, Duration timeout, Path workDir) {
     try {

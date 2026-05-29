@@ -39,14 +39,10 @@ public class RunTopupService {
   private final BillingNotificationService notificationService;
   private final InvoiceService invoiceService;
 
-  // ── Package listing ─────────────────────────────────────────────────────────
-
   @Transactional(readOnly = true)
   public List<TopupPackage> getPackages() {
     return packageRepo.findByActiveTrueOrderBySortOrder();
   }
-
-  // ── Bonus balance ───────────────────────────────────────────────────────────
 
   @Transactional(readOnly = true)
   public long getAvailableBonus(String userId) {
@@ -59,7 +55,7 @@ public class RunTopupService {
     return topupRepo.sumRemainingByOrgId(orgId, Instant.now());
   }
 
-  // ── Bonus consumption (FIFO) ────────────────────────────────────────────────
+  // Bonus consumption (FIFO)
 
   /**
    * Consume one bonus run from the user's personal top-ups (FIFO order). Returns true if a bonus
@@ -136,8 +132,6 @@ public class RunTopupService {
         t.getRemaining());
     return true;
   }
-
-  // ── Purchase flow ───────────────────────────────────────────────────────────
 
   /** Initiate a top-up purchase: create PENDING record + Razorpay order. */
   public TopupOrderInitResult initiatePurchase(String userId, UUID packageId) {
@@ -261,8 +255,6 @@ public class RunTopupService {
     return topup;
   }
 
-  // ── Admin grant ─────────────────────────────────────────────────────────────
-
   /** Admin grants bonus runs to a user or org. */
   public RunTopup grantBonusRuns(
       String targetUserId,
@@ -333,14 +325,10 @@ public class RunTopupService {
     return topup;
   }
 
-  // ── Listing ─────────────────────────────────────────────────────────────────
-
   @Transactional(readOnly = true)
   public List<RunTopup> listTopups(String userId) {
     return topupRepo.findByUserIdOrderByCreatedAtDesc(userId);
   }
-
-  // ── Expiry job ──────────────────────────────────────────────────────────────
 
   /** Expire overdue admin-granted top-ups. Called by scheduler. */
   public int expireOverdueTopups() {

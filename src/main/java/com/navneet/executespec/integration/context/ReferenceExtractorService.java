@@ -30,8 +30,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ReferenceExtractorService {
 
-  // ── Patterns ─────────────────────────────────────────────────────────────
-
   /**
    * Matches Jira issue keys like PROJ-123, ABC-45, MYTEAM-9999. Must be preceded by
    * whitespace/start or a slash (URL) to avoid false positives.
@@ -64,8 +62,6 @@ public class ReferenceExtractorService {
 
   private final OrgRepository orgRepository;
   private final RestTemplate integrationRestTemplate;
-
-  // ── Public API ───────────────────────────────────────────────────────────
 
   /**
    * Scans the user request for JIRA/Confluence references and enriches the request with fetched
@@ -177,8 +173,6 @@ public class ReferenceExtractorService {
     return ExtractionResult.enriched(enriched, List.of());
   }
 
-  // ── Pattern extraction ───────────────────────────────────────────────────
-
   private Set<String> extractJiraKeys(String text) {
     Set<String> keys = new LinkedHashSet<>();
 
@@ -237,8 +231,6 @@ public class ReferenceExtractorService {
     return ExtractionResult.unchanged(text);
   }
 
-  // ── Credential checks ────────────────────────────────────────────────────
-
   private boolean hasJiraCredentials(Org org) {
     return org.getJiraBaseUrl() != null
         && !org.getJiraBaseUrl().isBlank()
@@ -257,7 +249,7 @@ public class ReferenceExtractorService {
         && !org.getConfluenceApiToken().isBlank();
   }
 
-  // ── Fetch methods (use org-level credentials) ────────────────────────────
+  // Fetch methods (use org-level credentials)
 
   @SuppressWarnings("unchecked")
   private String fetchJiraIssue(String issueKey, Org org) {
@@ -344,8 +336,6 @@ public class ReferenceExtractorService {
 
     return "### Confluence Page: " + title + "\n" + plainText;
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private <T> HttpEntity<T> basicAuthEntity(String email, String apiToken, T body) {
     HttpHeaders headers = new HttpHeaders();

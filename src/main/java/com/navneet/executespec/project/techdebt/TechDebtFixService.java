@@ -104,8 +104,6 @@ public class TechDebtFixService {
     return result;
   }
 
-  // ── Issue aggregation ────────────────────────────────────────────────────
-
   private List<Map<String, Object>> collectIssuesForCategory(String projectId, String category) {
     List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
     List<Map<String, Object>> matching = new ArrayList<>();
@@ -143,8 +141,6 @@ public class TechDebtFixService {
     for (ProjectRepoLink l : links) out.add(l.getRepoId());
     return out;
   }
-
-  // ── Prompt synthesis ─────────────────────────────────────────────────────
 
   private String buildPrompt(String category, List<Map<String, Object>> issues, int repoCount) {
     int total = issues.size();

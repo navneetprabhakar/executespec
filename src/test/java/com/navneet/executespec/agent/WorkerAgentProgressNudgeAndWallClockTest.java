@@ -143,7 +143,7 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         .build();
   }
 
-  // ── Progress nudge — text-only-stop trigger ──────────────────────────────────────────────────
+  // Progress nudge — text-only-stop trigger
 
   // 2026-05-29 — DISABLED pending root-cause of the iter-counter off-by-one regression that
   // c72fa557 (engine extraction Phase 5+6, RL-2026-05-052) acknowledged in its commit message
@@ -243,8 +243,6 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         "second text-only summary must terminate (no infinite nudge loop)");
     assertEquals(6, result.iterations(), "exits on the second text-only response");
   }
-
-  // ── Wall-clock cap ─────────────────────────────────────────────────────────────────────────
 
   @Test
   void wall_clock_cap_terminates_when_exceeded() {

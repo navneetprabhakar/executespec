@@ -221,7 +221,7 @@ public class ProjectExportService {
             SCHEMA_VERSION);
   }
 
-  // ── Tiny tar writer (USTAR; no external deps) ──────────────────────────
+  // Tiny tar writer (USTAR; no external deps)
 
   /**
    * Minimal POSIX USTAR writer. Sufficient for our file-set (text + JSON, never multi-MB). Avoids

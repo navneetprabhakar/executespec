@@ -1512,8 +1512,6 @@ end and only call completeTask if it exits 0.
     };
   }
 
-  // ─── prompt composition ─────────────────────────────────────────────────
-
   /** Backwards-compatible 5-arg overload — used by tests. Delegates with null provider. */
   String composeSystemPrompt(
       PlannedTask task,
@@ -1855,8 +1853,6 @@ end and only call completeTask if it exits 0.
         + s.substring(s.length() - (cap - head));
   }
 
-  // ─── smoke test helpers ─────────────────────────────────────────────────
-
   private SmokeTestResult runSmokeTest(ExecutionContext ctx, String plannerCommand) {
     long start = System.currentTimeMillis();
     ObjectNode args = objectMapper.createObjectNode();
@@ -1929,8 +1925,6 @@ end and only call completeTask if it exits 0.
   }
 
   private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
-
-  // ─── summarization ──────────────────────────────────────────────────────
 
   private ExecutionResult summarize(List<TaskOutcome> outcomes, long totalLatency) {
     int succ = 0, warn = 0, fail = 0, skip = 0;

@@ -42,8 +42,6 @@ public class UsageReportService {
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MMM d, yyyy");
 
-  // ── Public DTOs ─────────────────────────────────────────────────────────────
-
   public record UserUsageData(
       int totalRuns,
       int completedRuns,
@@ -73,8 +71,6 @@ public class UsageReportService {
   public record TopUser(String name, String email, int runCount, long tokens) {}
 
   public record ProjectBreakdown(String projectName, int runs, long tokens) {}
-
-  // ── Trigger ─────────────────────────────────────────────────────────────────
 
   /**
    * Sends usage reports to all active orgs (→ org admin) and solo users (no org).
@@ -122,8 +118,6 @@ public class UsageReportService {
     log.info("Usage report trigger complete: period={}, emailsSent={}", period, emailCount);
     return emailCount;
   }
-
-  // ── Data collection ─────────────────────────────────────────────────────────
 
   private OrgUsageData collectOrgUsage(String orgId, DateRange range, DateRange prev) {
     int total = (int) runRepo.countByOrgIdAndStartedAtBetween(orgId, range.start, range.end);
@@ -236,8 +230,6 @@ public class UsageReportService {
         prevCost,
         projects);
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
 
   private record DateRange(Instant start, Instant end) {}
 

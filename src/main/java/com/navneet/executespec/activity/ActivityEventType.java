@@ -21,7 +21,7 @@ import java.util.Set;
  */
 public enum ActivityEventType {
 
-  // ── Tier 1 — high-signal, customer-visible (ACTIVITY surface) ────────────
+  // Tier 1 — high-signal, customer-visible (ACTIVITY surface)
 
   // Run lifecycle
   RUN_SUBMITTED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
@@ -78,7 +78,7 @@ public enum ActivityEventType {
   EXECUTESPEC_BOOTSTRAP_COMPLETED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
   EXECUTESPEC_BOOTSTRAP_FAILED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
 
-  // ── Tier 2 — admin-toggle visibility (ACTIVITY surface, admin-only filter) ──
+  // Tier 2 — admin-toggle visibility (ACTIVITY surface, admin-only filter)
 
   AUTO_DETECTION_RAN(Tier.ADMIN_TOGGLE, EnumSet.of(Surface.ACTIVITY), 1),
   ARCHITECTURE_DOC_REGENERATED(Tier.ADMIN_TOGGLE, EnumSet.of(Surface.ACTIVITY), 1),
@@ -87,14 +87,12 @@ public enum ActivityEventType {
   AI_PROVIDER_CHANGED(Tier.ADMIN_TOGGLE, EnumSet.of(Surface.ACTIVITY), 1),
   QUOTA_APPROACHING_LIMIT(Tier.ADMIN_TOGGLE, EnumSet.of(Surface.ACTIVITY), 1),
 
-  // ── Audit-only — AUDIT surface, gated by canViewAudit ──────────────────
+  // Audit-only — AUDIT surface, gated by canViewAudit
 
   BILLING_CHANGE(Tier.AUDIT_ONLY, EnumSet.of(Surface.AUDIT), 1),
   PAYMENT_EVENT(Tier.AUDIT_ONLY, EnumSet.of(Surface.AUDIT), 1),
   QUOTA_ENFORCEMENT(Tier.AUDIT_ONLY, EnumSet.of(Surface.AUDIT), 1),
   SENSITIVE_ADMIN_ACTION(Tier.AUDIT_ONLY, EnumSet.of(Surface.AUDIT), 1);
-
-  // ── Metadata accessors ──────────────────────────────────────────────────
 
   private final Tier tier;
   private final Set<Surface> surfaces;

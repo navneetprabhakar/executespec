@@ -84,8 +84,6 @@ public class UserGcpCredentialProvider {
     return credentialRepo.findUserDefault(userId, "GCP");
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────────
-
   private GoogleCredentials decryptToGoogleCredentials(DeploymentCredential credential) {
     try {
       byte[] decrypted = encryptionService.decrypt(credential.getEncryptedData());

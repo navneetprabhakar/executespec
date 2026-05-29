@@ -86,8 +86,6 @@ public class PrReviewService {
     log.info("PrReviewService dispatch pool shutdown signaled");
   }
 
-  // ── Tier gating ──────────────────────────────────────────────────────────
-
   /**
    * Validates that the supplied user is on a paid tier with the {@code pr_review_enabled} feature
    * flag flipped on AND has remaining monthly quota. Throws on rejection so the caller (HTTP
@@ -126,8 +124,6 @@ public class PrReviewService {
       }
     }
   }
-
-  // ── Public entry point ──────────────────────────────────────────────────
 
   /**
    * Submit a PR review request. Idempotent across (repo, pr, head_sha): if a COMPLETE review
@@ -365,8 +361,6 @@ public class PrReviewService {
             });
   }
 
-  // ── Read paths ──────────────────────────────────────────────────────────
-
   public PrReview findById(UUID id) {
     return reviewRepo.findById(id).orElse(null);
   }
@@ -382,8 +376,6 @@ public class PrReviewService {
   public List<PrReviewComment> commentsFor(UUID reviewId) {
     return commentRepo.findByPrReviewIdOrderByFilePathAscLineNumberAsc(reviewId);
   }
-
-  // ── Exceptions ──────────────────────────────────────────────────────────
 
   public static class TierBlockedException extends RuntimeException {
     public TierBlockedException(String msg) {

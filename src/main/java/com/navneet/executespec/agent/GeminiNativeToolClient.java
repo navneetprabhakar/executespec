@@ -233,8 +233,6 @@ public class GeminiNativeToolClient {
         : s.substring(0, max) + "...[" + (s.length() - max) + " chars omitted]";
   }
 
-  // ─── Request building ────────────────────────────────────────────────────
-
   private ObjectNode buildRequestBody(GeminiToolCallRequest request) {
     ObjectNode body = objectMapper.createObjectNode();
 
@@ -390,8 +388,6 @@ public class GeminiNativeToolClient {
     }
     return node;
   }
-
-  // ─── Response parsing ────────────────────────────────────────────────────
 
   private ChatResponse parseResponse(JsonNode response, String requestedModel) {
     List<Generation> generations = new ArrayList<>();

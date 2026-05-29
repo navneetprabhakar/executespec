@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
  */
 class RunOrchestratorEnterpriseEnforcementTest {
 
-  // ── Standards violations → persistable rows ──────────────────────────────
+  // Standards violations → persistable rows
 
   @Test
   void standards_violations_map_to_rows_with_run_and_project_stamped() {
@@ -82,7 +82,7 @@ class RunOrchestratorEnterpriseEnforcementTest {
         RunOrchestrator.toStandardsViolationRows(UUID.randomUUID(), "p", null, 200).isEmpty());
   }
 
-  // ── Breaking-change report rows → report-only run issues ─────────────────
+  // Breaking-change report rows → report-only run issues
 
   @Test
   void breaking_change_with_consumers_renders_requires_ack_issue() {

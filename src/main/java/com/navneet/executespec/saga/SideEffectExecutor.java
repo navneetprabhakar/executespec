@@ -132,8 +132,6 @@ public class SideEffectExecutor {
     }
   }
 
-  // ── Dispatcher ────────────────────────────────────────────────────────────
-
   private void dispatch(String effectType, String runId, Map<String, Object> payload) {
     switch (effectType) {
       case "COMPENSATE_GITHUB_BRANCH" -> compensateGitHubBranch(runId, payload);

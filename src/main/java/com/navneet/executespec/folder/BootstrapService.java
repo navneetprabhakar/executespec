@@ -265,8 +265,6 @@ public class BootstrapService {
             pr.get().filesWritten()));
   }
 
-  // ── PAT scope pre-flight ────────────────────────────────────────────────
-
   /**
    * GitHub returns the granted scopes for a token in the {@code X-OAuth-Scopes} header on any
    * authenticated request. We do one cheap call to {@code /user} and parse it. Fine-grained tokens
@@ -306,8 +304,6 @@ public class BootstrapService {
   }
 
   record ScopeCheckResult(boolean ok, List<String> observed) {}
-
-  // ── Internal helpers ────────────────────────────────────────────────────
 
   private void markFailed(ProjectRepo repo, String reason) {
     repo.setExecutespecFolderStatus(ProjectRepo.FolderStatus.BOOTSTRAP_FAILED.name());

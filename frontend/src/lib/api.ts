@@ -130,8 +130,6 @@ async function reqText(url: string): Promise<string> {
   return res.text();
 }
 
-// ── Run types ───────────────────────────────────────────────────────────────
-
 export interface RunSummary {
   runId: string;
   status: string;
@@ -234,7 +232,7 @@ export interface TaskSummary {
   subtaskTotal?: number | null;
 }
 
-// ── Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue) ─────
+// Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue)
 
 export interface ReviewIssue {
   severity: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -399,8 +397,6 @@ export interface DeploymentSummary {
   ttlExpiresAt: string;
 }
 
-// ── Deploy Engine Types ──────────────────────────────────────────────────────
-
 export interface RequiredPermission {
   role: string;
   label: string;
@@ -485,8 +481,6 @@ export interface ModelComparisonData {
   }>;
 }
 
-// ── Runs ────────────────────────────────────────────────────────────────────
-
 export interface PagedResponse<T> {
   content: T[];
   page: number;
@@ -568,8 +562,6 @@ export const createRun = (body: {
   skipAutoPush?: boolean;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
-// ── Model matrix ────────────────────────────────────────────────────────────
-
 export interface ModelEntry {
   id: string;
   tier: string;
@@ -619,15 +611,11 @@ export const pauseRun = (runId: string) => req<void>(`/runs/${runId}/pause`, {me
 
 export const resumeRun = (runId: string) => req<void>(`/runs/${runId}/resume`, {method: 'POST'});
 
-// ── Metrics ─────────────────────────────────────────────────────────────────
-
 export const getMetrics = (days = 0) =>
   req<MetricsResponse>(`/metrics${days > 0 ? `?days=${days}` : ''}`);
 
 export const getModelComparison = (days = 30) =>
   req<ModelComparisonData>(`/model-comparison?days=${days}`);
-
-// ── User Runs Summary ───────────────────────────────────────────────────────
 
 export interface UserRunStat {
   userId: string;
@@ -646,14 +634,10 @@ export interface UserRunsSummaryData {
 export const getUserRunsSummary = (days = 30) =>
   req<UserRunsSummaryData>(`/user-runs-summary?days=${days}`);
 
-// ── Pricing ─────────────────────────────────────────────────────────────────
-
 export const getPricing = () => req<PricingRow[]>('/pricing');
 
 export const updatePricing = (provider: string, model: string, body: Partial<PricingRow>) =>
   req<PricingRow>(`/pricing/${provider}/${model}`, {method: 'PUT', body: JSON.stringify(body)});
-
-// ── Live cost ───────────────────────────────────────────────────────────────
 
 export const getLiveCost = (runId: string) =>
   req<{runId: string; costUsd: number; inputTokens?: number; outputTokens?: number}>(
@@ -664,8 +648,6 @@ export const getLiveCost = (runId: string) =>
 // 410 Gone on V2. Use the plan-approval cost estimate
 // (RunDetail.costEstimateLow/High) instead.
 
-// ── Deployments ──────────────────────────────────────────────────────────────
-
 export const getDeployments = () => req<DeploymentSummary[]>('/deployments');
 
 export const createDeployment = (body: {runId: string; strategy?: string}) =>
@@ -675,8 +657,6 @@ export const deleteDeployment = (id: string) => req<void>(`/deployments/${id}`, 
 
 export const rollbackDeployment = (id: string) =>
   req<DeploymentSummary>(`/deployments/${id}/rollback`, {method: 'POST'});
-
-// ── Deploy Engine ────────────────────────────────────────────────────────────
 
 export const analyzeForDeploy = (runId: string) =>
   req<DeployAnalysisResult>(`/deployments/analyze?runId=${encodeURIComponent(runId)}`, {
@@ -700,8 +680,6 @@ export const engineDestroy = (id: string) =>
   req<void>(`/deployments/${id}/engine-destroy`, {method: 'DELETE'});
 
 export const getDeploymentDetail = (id: string) => req<DeploymentSummary>(`/deployments/${id}`);
-
-// ── GCP Credentials ──────────────────────────────────────────────────────────
 
 export const getRequiredPermissions = () =>
   req<RequiredPermission[]>('/credentials/gcp/required-permissions');
@@ -731,8 +709,6 @@ export const deleteGcpCredential = (projectId?: string) => {
   return req<{message: string}>(`/credentials/gcp${qs}`, {method: 'DELETE'});
 };
 
-// ── Integrations ─────────────────────────────────────────────────────────────
-
 export const getIntegrationStatus = () => req<{enabledSources: string[]}>('/integrations/status');
 
 export const getIntegrationRuns = (source?: string) =>
@@ -746,8 +722,6 @@ export const triggerConfluence = (body: {pageId: string; goal: string}) =>
 
 export const triggerJira = (body: {issueKey: string; goal?: string}) =>
   req<{runId: string}>('/integrations/jira/trigger', {method: 'POST', body: JSON.stringify(body)});
-
-// ── Slack integration ─────────────────────────────────────────────────────────
 
 export interface SlackStatus {
   connected: boolean;
@@ -811,8 +785,6 @@ export const sendSlackTestMessage = (channelId: string) =>
     body: JSON.stringify({channelId}),
   });
 
-// ── Timeline ──────────────────────────────────────────────────────────────────
-
 export const getTimeline = (runId: string) => req<TimelineData>(`/runs/${runId}/timeline`);
 
 // RL-2026-05-046 — the run's live-log events (persisted SSE replay, 24h). Each entry is a flat
@@ -823,8 +795,6 @@ export interface RunLogEvent {
   [k: string]: unknown;
 }
 export const getRunEventLog = (runId: string) => req<RunLogEvent[]>(`/runs/${runId}/event-log`);
-
-// ── Files ─────────────────────────────────────────────────────────────────────
 
 export const getFiles = (runId: string) => req<string[]>(`/runs/${runId}/files`);
 
@@ -892,7 +862,7 @@ export interface FileDiffPayload {
 export const getFileDiff = (runId: string, filePath: string) =>
   req<FileDiffPayload>(`/runs/${runId}/file/diff?path=${encodeURIComponent(filePath)}`);
 
-// ── Messages (historical log) ────────────────────────────────────────────────
+// Messages (historical log)
 
 export interface MessageResponse {
   fromAgent: string;
@@ -902,16 +872,12 @@ export interface MessageResponse {
 
 export const getMessages = (runId: string) => req<MessageResponse[]>(`/runs/${runId}/messages`);
 
-// ── Contact ─────────────────────────────────────────────────────────────────
-
 export const submitContactForm = (subject: string, body: string) =>
   req<{message: string}>('/contact', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({subject, body}),
   });
-
-// ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 /** Fetch the generated OpenAPI YAML for a run (served as text/plain). */
 export const getOpenApiSpec = (runId: string) => reqText(`/runs/${runId}/openapi.yaml`);
@@ -924,8 +890,6 @@ export interface ApiDocsProbeResult {
 }
 export const probeApiDocs = (runId: string): Promise<ApiDocsProbeResult> =>
   req<ApiDocsProbeResult>(`/runs/${runId}/preview/probe-api-docs`);
-
-// ── Cloud Run Preview ─────────────────────────────────────────────────────────
 
 export interface LocalPreviewStatus {
   runId: string;
@@ -1005,7 +969,7 @@ export const execPreviewCommand = (runId: string, cmd: string, args: string[] = 
     body: JSON.stringify({cmd, args}),
   });
 
-// ── Conversation (pre-flight chat) ────────────────────────────────────────────
+// Conversation (pre-flight chat)
 
 export interface ConversationMessage {
   role: 'user' | 'assistant';
@@ -1017,8 +981,6 @@ export const conversationChat = (messages: ConversationMessage[]) =>
     method: 'POST',
     body: JSON.stringify({messages}),
   });
-
-// ── Post-run conversation & iteration ──────────────────────────────────────────
 
 /** A single message in a post-run conversation. */
 export interface RunChatMessage {
@@ -1052,7 +1014,7 @@ export const iterateRun = (runId: string, userRequest: string) =>
     body: JSON.stringify({userRequest}),
   });
 
-// ── Apply Suggestion (Chat Copilot / Review) ──────────────────────────────
+// Apply Suggestion (Chat Copilot / Review)
 
 export interface ApplyResult {
   taskCount: number;
@@ -1069,8 +1031,6 @@ export const applyToRun = (
     method: 'POST',
     body: JSON.stringify({suggestion, source}),
   });
-
-// ── Auth types & endpoints ────────────────────────────────────────────────────
 
 export interface AuthUser {
   id: string;
@@ -1292,8 +1252,6 @@ export const updateViewMode = (viewMode: 'pro' | 'project') =>
     body: JSON.stringify({viewMode}),
   });
 
-// ── Credential Validation ──────────────────────────────────────────────────────
-
 export interface ValidationResult {
   valid: boolean;
   message: string;
@@ -1341,8 +1299,6 @@ export const validateConfluence = (baseUrl: string, email: string, apiToken: str
     method: 'POST',
     body: JSON.stringify({baseUrl, email, apiToken}),
   });
-
-// ── Org endpoints ─────────────────────────────────────────────────────────────
 
 export interface OrgDto {
   id: string;
@@ -1577,8 +1533,6 @@ export const resendInvitation = (id: string) =>
 export const acceptInvite = (token: string) =>
   req<{message: string}>(`/org/accept-invite?token=${token}`, {method: 'POST'});
 
-// ── Project endpoints ─────────────────────────────────────────────────────────
-
 export interface ProjectDto {
   id: string;
   orgId: string;
@@ -1683,8 +1637,6 @@ export const addProjectMember = (projectId: string, userId: string, role: string
 export const removeProjectMember = (projectId: string, userId: string) =>
   req<void>(`/projects/${projectId}/members/${userId}`, {method: 'DELETE'});
 
-// ── Admin endpoints ───────────────────────────────────────────────────────────
-
 export const adminListUsers = () => req<AuthUser[]>('/admin/users');
 export const adminGetUser = (id: string) => req<AuthUser>(`/admin/users/${id}`);
 export const adminUpdateUserStatus = (id: string, status: string) =>
@@ -1786,7 +1738,7 @@ export const orgSuspendMember = (userId: string, suspended: boolean) =>
     body: JSON.stringify({suspended}),
   });
 
-// ── Admin Grant Runs & Top-Up Packages ────────────────────────────────────
+// Admin Grant Runs & Top-Up Packages
 
 export const adminGrantUserRuns = (
   userId: string,
@@ -1838,14 +1790,13 @@ export const adminUpdateTopupPackage = (id: string, body: Partial<TopupPackageAd
 export const adminDeleteTopupPackage = (id: string) =>
   req<{message: string}>(`/admin/topup-packages/${id}`, {method: 'DELETE'});
 
-// ── Usage Reports ─────────────────────────────────────────────────────────
 export const adminTriggerUsageReport = (period: 'WEEKLY' | 'MONTHLY') =>
   req<{emailsSent: number; period: string}>('/admin/usage-reports/trigger', {
     method: 'POST',
     body: JSON.stringify({period}),
   });
 
-// ── Feature Flags (Admin) ────────────────────────────────────────────────────
+// Feature Flags (Admin)
 
 export interface FeatureFlagDto {
   id: number;
@@ -1869,8 +1820,6 @@ export const adminUpdateFeatureFlag = (key: string, value: string) =>
     method: 'PUT',
     body: JSON.stringify({value}),
   });
-
-// ── Plan Editing & Versioning ──────────────────────────────────────────────
 
 export const editRunPlan = (runId: string, feedback: string) =>
   req<{status: string; version: number}>(`/runs/${runId}/edit-plan`, {
@@ -1903,7 +1852,6 @@ export const updateRunProject = (runId: string, projectId: string | null) =>
     body: JSON.stringify({projectId: projectId ?? ''}),
   });
 
-// ── Audit Logs ────────────────────────────────────────────────────────────
 export interface AuditLogEntry {
   id: string;
   eventType: string;
@@ -1949,8 +1897,6 @@ export const getAuditLogs = (params: {
   const base = params.orgScoped ? '/org/me/audit-logs' : '/admin/audit-logs';
   return req<AuditLogPage>(`${base}?${qs.toString()}`);
 };
-
-// ── Validation Reports ──────────────────────────────────────────────────
 
 export interface ReportIssue {
   description: string;
@@ -2044,8 +1990,6 @@ export const getSharedReport = async (shareToken: string): Promise<SharedReportD
     return null;
   }
 };
-
-// ── Test Generation Pipeline ─────────────────────────────────────────────────
 
 export interface TestResultDetail {
   testResultId: number;
@@ -2155,7 +2099,7 @@ export const runTests = (runId: string) =>
     method: 'POST',
   });
 
-// ── Phase P1: PR review comment inbox ─────────────────────────────────────
+// Phase P1: PR review comment inbox
 
 /**
  * 2026-05-07 — Phase P1: incoming PR review comments on PRs ExecuteSpec opened. Webhook
@@ -2194,8 +2138,6 @@ export const dismissPrComment = (runId: string, commentId: number) =>
  */
 export const applyPrComment = (runId: string, commentId: number) =>
   req<{applyRunId: string}>(`/runs/${runId}/pr-comments/${commentId}/apply`, {method: 'POST'});
-
-// ── Admin Analytics ──────────────────────────────────────────────────────────
 
 export interface UsageMetrics {
   totalRuns: number;
@@ -2280,7 +2222,7 @@ export const downloadValidationReportPdf = async (runId: string): Promise<void> 
   URL.revokeObjectURL(url);
 };
 
-// ── Payment Audit (Admin) ────────────────────────────────────────────────────
+// Payment Audit (Admin)
 
 export interface PaymentAuditEntry {
   id: string;
@@ -2346,8 +2288,6 @@ export const adminListWebhookEvents = (page = 0, size = 50, gateway?: string) =>
   return req<PagedResponse<WebhookEventEntry>>(`/admin/webhook-events?${params}`);
 };
 
-// ── Notifications ─────────────────────────────────────────────────────────
-
 export interface NotificationItem {
   id: string;
   userId: string;
@@ -2370,7 +2310,7 @@ export const markNotificationRead = (id: string) =>
 export const markAllNotificationsRead = () =>
   req<void>('/notifications/read-all', {method: 'POST'});
 
-// ── Notification preferences (M-003 Wave 2) ─────────────────────────────────
+// Notification preferences (M-003 Wave 2)
 
 export interface NotificationPrefRow {
   eventType: string; // canonical ActivityEventType name
@@ -2394,7 +2334,7 @@ export const updateNotificationPreference = (
     body: JSON.stringify({eventType, channel, enabled}),
   });
 
-// ── SSO config (M-004 Wave 2) ───────────────────────────────────────────────
+// SSO config (M-004 Wave 2)
 
 export type SsoProvider = 'GOOGLE_OIDC' | 'OKTA_SAML' | 'AZURE_AD_SAML';
 
@@ -2423,12 +2363,10 @@ export const updateSsoConfig = (
 
 export const clearSsoConfig = () => req<void>('/auth/sso/config', {method: 'DELETE'});
 
-// ── SSE ────────────────────────────────────────────────────────────────────
-
 /** Fetch a short-lived scoped SSE token for a specific run. */
 export const getSseToken = (runId: string) => req<{token: string}>(`/runs/${runId}/sse-token`);
 
-// ── Pilot v3.0: Project workspace, repos, architecture, scoring ───────────
+// Pilot v3.0: Project workspace, repos, architecture, scoring
 import {} from '@/lib/utils';
 import type {
   ProjectDashboardDTO,
@@ -3055,7 +2993,7 @@ export interface StalenessReport {
 export const getArchitectureStaleness = (projectId: string) =>
   req<StalenessReport>(`/projects/${projectId}/architecture/staleness`);
 
-// ── Project Memory (v2.2.0) ──────────────────────────────────────────────
+// Project Memory (v2.2.0)
 export interface MemoryStats {
   totalRuns: number;
   snapshotVersion: number;
@@ -3163,7 +3101,7 @@ export interface ProjectChatMessageDto {
 export const getProjectChatHistory = (projectId: string) =>
   req<ProjectChatMessageDto[]>(`/projects/${projectId}/chat`);
 
-// ── Migrations product (R-336..R-339) ─────────────────────────────────────
+// Migrations product (R-336..R-339)
 
 export interface MigrationRecipeSummary {
   id: string;
@@ -3297,7 +3235,7 @@ export const migrationApply = (
     body: JSON.stringify(body),
   });
 
-// ── Readymade Solutions library (R-327..R-331) ────────────────────────────
+// Readymade Solutions library (R-327..R-331)
 
 export interface ReadymadeSolutionSummary {
   id: string;
@@ -3446,7 +3384,7 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   return true; // FREE
 }
 
-// ── v2.6.4 — PR Review + Code Review agents (paid tier only) ─────────────────
+// v2.6.4 — PR Review + Code Review agents (paid tier only)
 //
 // Both agents are gated on backend at PRO/TEAM/MAX/ENTERPRISE; FREE → 403, quota
 // exhausted → 429. The frontend treats both shapes identically — an error-shaped
@@ -3593,7 +3531,7 @@ export const dispatchCodeReviewAutofix = (
     body: JSON.stringify({severity}),
   });
 
-// ── V175 — external project sharing (invites + public share links) ──────────────
+// V175 — external project sharing (invites + public share links)
 
 export type ProjectInviteRole = 'PROJECT_ADMIN' | 'PROJECT_DEVELOPER' | 'PROJECT_VIEWER';
 export type ProjectInviteStatus = 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';

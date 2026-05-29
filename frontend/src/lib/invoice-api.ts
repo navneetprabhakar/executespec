@@ -1,7 +1,5 @@
 import {req} from './api';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 export interface BillingProfile {
   id?: string;
   userId?: string;
@@ -99,8 +97,6 @@ interface Page<T> {
   totalElements: number;
 }
 
-// ── Billing Profile ──────────────────────────────────────────────────────────
-
 export const getBillingProfile = () => req<BillingProfile>('/billing/profile');
 
 export const updateBillingProfile = (profile: BillingProfile) =>
@@ -109,22 +105,18 @@ export const updateBillingProfile = (profile: BillingProfile) =>
     body: JSON.stringify(profile),
   });
 
-// ── Invoices (own) ───────────────────────────────────────────────────────────
+// Invoices (own)
 
 export const getMyInvoices = (page = 0, size = 20) =>
   req<Page<Invoice>>(`/billing/invoices?page=${page}&size=${size}`);
 
 export const getInvoiceDetail = (id: string) => req<InvoiceDetail>(`/billing/invoices/${id}`);
 
-// ── Admin invoices ───────────────────────────────────────────────────────────
-
 export const getAllInvoices = (page = 0, size = 20) =>
   req<Page<Invoice>>(`/admin/invoices?page=${page}&size=${size}`);
 
 export const resendInvoice = (invoiceId: string) =>
   req<void>(`/admin/invoices/${invoiceId}/send`, {method: 'POST'});
-
-// ── Seller config ────────────────────────────────────────────────────────────
 
 export const getSellerConfig = () => req<SellerConfig>('/admin/seller-config');
 
@@ -134,8 +126,6 @@ export const updateSellerConfig = (config: SellerConfig) =>
     body: JSON.stringify(config),
   });
 
-// ── Accounting ───────────────────────────────────────────────────────────────
-
 export const getRevenueMetrics = (from: string, to: string) =>
   req<RevenueMetrics>(`/accounting/revenue?from=${from}&to=${to}`);
 
@@ -144,8 +134,6 @@ export const getGstSummary = (fy: string, quarter: number) =>
 
 export const getTrialBalance = (from: string, to: string) =>
   req<TrialBalanceEntry[]>(`/accounting/trial-balance?from=${from}&to=${to}`);
-
-// ── PDF downloads ────────────────────────────────────────────────────────────
 
 export async function downloadInvoicePdf(id: string, invoiceNumber: string, admin = false) {
   const url = admin ? `/api/admin/invoices/${id}/pdf` : `/api/billing/invoices/${id}/pdf`;
@@ -166,8 +154,6 @@ export async function downloadInvoicePdf(id: string, invoiceNumber: string, admi
 export function getGstr1ExportUrl(fy: string, quarter: number): string {
   return `/api/accounting/gstr1-export?fy=${fy}&quarter=${quarter}`;
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 export function formatPaise(paise: number): string {
   const rupees = paise / 100;

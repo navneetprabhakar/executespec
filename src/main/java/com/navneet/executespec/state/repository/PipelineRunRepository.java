@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public interface PipelineRunRepository
     extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
 
-  // ── Atomic token counter updates (avoids read-modify-write race) ─────────
+  // Atomic token counter updates (avoids read-modify-write race)
 
   @Modifying
   @Transactional
@@ -57,7 +57,6 @@ public interface PipelineRunRepository
 
   Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
 
-  // ── Tier 3 additions ─────────────────────────────────────────────────────
   Page<PipelineRun> findAllByOrderByStartedAtDesc(Pageable pageable);
 
   Page<PipelineRun> findByStatusOrderByStartedAtDesc(String status, Pageable pageable);
@@ -76,8 +75,6 @@ public interface PipelineRunRepository
   @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
   Long sumOutputTokens();
 
-  // ── Org-filtered metrics ────────────────────────────────────────────────────
-
   long countByOrgId(String orgId);
 
   long countByOrgIdAndStatus(String orgId, String status);
@@ -87,8 +84,6 @@ public interface PipelineRunRepository
 
   @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId")
   Long sumOutputTokensByOrgId(@Param("orgId") String orgId);
-
-  // ── Date-filtered global metrics ──────────────────────────────────────────
 
   long countByStartedAtGreaterThanEqual(Instant since);
 
@@ -136,8 +131,6 @@ public interface PipelineRunRepository
           + "WHERE r.orgId = :orgId AND r.startedAt >= :since")
   Double sumActualCostByOrgAndSince(@Param("orgId") String orgId, @Param("since") Instant since);
 
-  // ── Date-filtered org-scoped metrics ────────────────────────────────────────
-
   long countByOrgIdAndStartedAtGreaterThanEqual(String orgId, Instant since);
 
   long countByOrgIdAndStatusAndStartedAtGreaterThanEqual(
@@ -155,7 +148,7 @@ public interface PipelineRunRepository
   Long sumOutputTokensByOrgIdAndStartedAtAfter(
       @Param("orgId") String orgId, @Param("since") Instant since);
 
-  // ── Usage report queries (date-range + per-user/org) ───────────────────────
+  // Usage report queries (date-range + per-user/org)
 
   long countByCreatedByUserIdAndStartedAtBetween(String userId, Instant start, Instant end);
 
@@ -234,8 +227,6 @@ public interface PipelineRunRepository
   List<Object[]> projectBreakdownByUser(
       @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
 
-  // ── Pilot R1 project dashboard ────────────────────────────────────────────
-
   long countByProjectIdAndStatus(String projectId, String status);
 
   long countByProjectId(String projectId);
@@ -247,15 +238,11 @@ public interface PipelineRunRepository
   List<PipelineRun> findByProjectIdOrderByStartedAtDesc(
       @Param("pid") String projectId, Pageable pageable);
 
-  // ── Run title backfill ────────────────────────────────────────────────────
-
   /** Finds runs that have a plan but no run_title yet (for one-time backfill on startup). */
   @Query(
       "SELECT r FROM PipelineRun r WHERE r.runTitle IS NULL AND r.planJson IS NOT NULL AND"
           + " r.planJson <> ''")
   List<PipelineRun> findRunsWithoutTitle();
-
-  // ── GCS workspace archiving ───────────────────────────────────────────────
 
   /**
    * Finds completed/failed runs whose workspace has not yet been archived to GCS, where the run

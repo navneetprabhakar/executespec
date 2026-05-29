@@ -108,7 +108,7 @@ public class FileLockTool {
     lockRepo.deleteByRunId(runId);
   }
 
-  // ── Tier 5: Bulk lock release ─────────────────────────────────────────────
+  // Tier 5: Bulk lock release
 
   @Transactional
   public int releaseAllLocksForTask(String taskId) {

@@ -167,8 +167,6 @@ class ExecutespecMigrationControllerTest {
     assertThat(res.getBody().results().get(1).status()).isEqualTo("BOOTSTRAP_FAILED");
   }
 
-  // ── helpers ─────────────────────────────────────────────────────────────
-
   private ProjectRepo repo(String fullName, ProjectRepo.FolderStatus status) {
     ProjectRepo r = new ProjectRepo();
     r.setId(UUID.randomUUID());

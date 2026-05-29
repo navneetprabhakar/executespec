@@ -780,7 +780,7 @@ public class RunOrchestrator {
     return run;
   }
 
-  // ─── pipeline (background thread) ───────────────────────────────────────
+  // pipeline (background thread)
 
   private void runPipeline(
       String runId,
@@ -1043,7 +1043,6 @@ public class RunOrchestrator {
       ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
       setWorkspacePath(runId, workspace.toString());
 
-      // ── V182 PATCH-mode dispatch ───────────────────────────────────────
       // Bench services (swebench / programbench) submit runs with
       // RunMode.PATCH and own the workspace setup themselves (docker cp +
       // bind-mount). Skip everything build-mode does — codemap, assessment,
@@ -1060,7 +1059,7 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
+      // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
       // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
       // plan approval; the summarised codemap becomes the planner's
       // workspaceSummary AND extra context for the assessment.
@@ -1096,7 +1095,7 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 0c. Pilot R4: feature assessment ─────────────────────────────
+      // 0c. Pilot R4: feature assessment
       // Runs only when a project context is available so the assessment can
       // reason about linked repos + architecture annotations. Result is
       // persisted, broadcast over SSE, and available to the planner via
@@ -1119,7 +1118,6 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 1. Plan ─────────────────────────────────────────────────────
       perky.start(runId, "PLANNING");
       Plan plan;
       try {
@@ -1339,7 +1337,7 @@ public class RunOrchestrator {
           upperProvider,
           model);
 
-      // ── 1b. Plan approval gate (PRODUCTION only) ────────────────────
+      // 1b. Plan approval gate (PRODUCTION only)
       // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass
       // the gate so they flow straight into execution. PRODUCTION runs block
       // on GateStore.awaitPlanGate until the user approves or rejects via
@@ -1381,7 +1379,6 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 2. Execute ──────────────────────────────────────────────────
       updateStatus(runId, "WORKING");
       perky.start(runId, "WORKING");
       ExecutionResult execResult;
@@ -1420,7 +1417,7 @@ public class RunOrchestrator {
       int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
-      // ── 2.5 Code-gen-only stop (benchmark) ──────────────────────────
+      // 2.5 Code-gen-only stop (benchmark)
       // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker decisioning
       // (the system picks its own strategy) but a CLEAN minimal diff for scoring. Everything after
       // the worker pollutes that diff, so a code-gen-only run STOPS HERE — right after the worker,
@@ -1443,7 +1440,6 @@ public class RunOrchestrator {
         return;
       }
 
-      // ── 2.6 Lint auto-fix ────────────────────────────────────────────
       // Run deterministic formatters against the workspace before the LLM reviewer sees it.
       // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
       // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
@@ -1469,7 +1465,6 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 3. Review ───────────────────────────────────────────────────
       updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
@@ -1531,7 +1526,7 @@ public class RunOrchestrator {
         persistReviewFailure(runId, e);
       }
 
-      // ── 3b. Enterprise enforcement (project runs only) — make the formerly
+      // 3b. Enterprise enforcement (project runs only) — make the formerly
       // "decorative" engines real (RL-2026-05-037). StandardsRunner persists
       // standards violations so /standards/report is populated; the breaking-
       // change classifier surfaces touched-contract breaks as report-only run
@@ -1561,14 +1556,14 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 4. Ensure README.md exists in the workspace ─────────────────
+      // 4. Ensure README.md exists in the workspace
       // If the planner emitted a "create README" task the file is already there
       // and we leave it alone. If not (typical for trivial specs), write a
       // deterministic run-meta README so the download-zip experience always
       // includes an entry-point doc.
       ensureReadme(runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
 
-      // ── 4b. Pre-resolve terminal status BEFORE the validation report.
+      // 4b. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
       // status=COMPLETE + statusReason=CLEAN_WITH_INTERMEDIATE_WARNINGS but
       // the validation report was persisted with pipelineResult=FAILED.
@@ -1616,7 +1611,7 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 5. Generate validation report + kick off test generation ────
+      // 5. Generate validation report + kick off test generation
       generateValidationReport(runId, execResult, reviewResult, plan, contractBreakingIssues);
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
       // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
@@ -1648,10 +1643,10 @@ public class RunOrchestrator {
             plan.runtimeSurface());
       }
 
-      // ── 6. Final workspace commit so `/push-github` has refs to push ─
+      // 6. Final workspace commit so `/push-github` has refs to push
       commitWorkspaceOutputs(runId, workspace);
 
-      // ── 6b. Project memory: append compressed ledger entry for project-scoped runs.
+      // 6b. Project memory: append compressed ledger entry for project-scoped runs.
       // Non-fatal — any failure is swallowed inside the agent.
       if (projectId != null) {
         try {
@@ -1667,7 +1662,6 @@ public class RunOrchestrator {
         }
       }
 
-      // ── 7. Terminal status mapping ─────────────────────────────────
       // `sr` was resolved up at step 4b so the validation report could
       // see the right statusReason during reconcile. Reuse it here so
       // terminate() flips status + persists the (idempotent) reason.
@@ -1690,7 +1684,7 @@ public class RunOrchestrator {
           reviewResult == null ? "n/a" : reviewResult.overall(),
           finalReason);
 
-      // ── 7b. Auto-push every successful run ─────────────────────────
+      // 7b. Auto-push every successful run
       // Any run that reaches COMPLETE/PARTIAL and targets an EXISTING repo
       // gets pushed to GitHub automatically. Previously only project-scoped
       // runs auto-pushed; standalone /api/runs runs required the user to
@@ -1758,8 +1752,6 @@ public class RunOrchestrator {
       }
     }
   }
-
-  // ─── V182 PATCH-mode pipeline ──────────────────────────────────────────
 
   /**
    * Default per-run cost cap when bench services don't supply one. Bumped 2026-05-08 from $4 to $8
@@ -2026,8 +2018,6 @@ public class RunOrchestrator {
     }
   }
 
-  // ─── persistence helpers ────────────────────────────────────────────────
-
   private void persistPlan(String runId, Plan plan) {
     runRepo
         .findById(runId)
@@ -2255,7 +2245,7 @@ public class RunOrchestrator {
     return true;
   }
 
-  // ── V168 (2026-05-02) — pause + resume ────────────────────────────────────
+  // V168 (2026-05-02) — pause + resume
 
   /**
    * Outcome of a {@link #resume(String)} call. Mapped to HTTP status by {@code RunController}.
@@ -3436,8 +3426,6 @@ public class RunOrchestrator {
     }
   }
 
-  // ─── README generation ──────────────────────────────────────────────────
-
   /**
    * Writes a run-meta README.md into the workspace if one doesn't already exist.
    *
@@ -3555,7 +3543,7 @@ public class RunOrchestrator {
     return sb.toString();
   }
 
-  // ─── validation report (V2 adapter over V1 ValidationReportService) ────
+  // validation report (V2 adapter over V1 ValidationReportService)
 
   /**
    * Assembles a minimal {@link ReportInput} from V2 pipeline state and invokes the shared {@link
@@ -3768,7 +3756,7 @@ public class RunOrchestrator {
     }
   }
 
-  // ─── run title + design resolution ──────────────────────────────────────
+  // run title + design resolution
 
   private void persistRunTitle(String runId, Plan plan) {
     if (plan.planTitle() == null || plan.planTitle().isBlank()) return;
@@ -3808,8 +3796,6 @@ public class RunOrchestrator {
       return "";
     }
   }
-
-  // ─── cost helpers ───────────────────────────────────────────────────────
 
   /**
    * Best-effort repo count for the cost estimate. For project-scoped runs the count is the number
@@ -3952,8 +3938,6 @@ public class RunOrchestrator {
           "RunOrchestrator run={} failed to write RunCostLog: {}", r.getRunId(), e.getMessage());
     }
   }
-
-  // ─── mapping helpers ────────────────────────────────────────────────────
 
   private static String mapOverallToV1Status(ExecutionResult.Overall overall) {
     return switch (overall) {
@@ -4176,9 +4160,7 @@ public class RunOrchestrator {
     return out;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // RL-2026-05-037 — enterprise enforcement wiring (StandardsRunner + breaking-change classifier).
-  // ──────────────────────────────────────────────────────────────────────────
 
   /** Cap the workspace file walk for standards enforcement (bounded cost on large repos). */
   private static final int STANDARDS_WALK_FILE_CAP = 6_000;
@@ -4878,13 +4860,11 @@ public class RunOrchestrator {
    */
   private Plan runLargePipeline(
       String runId, PlannerRequest req, ExecutionContext rootCtx, boolean enableEpicRecursion) {
-    // ── Phase 1: skeleton outline ─────────────────────────────────────
     Plan skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
     if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
       throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
     }
 
-    // ── Phase 2: parallel expansion ──────────────────────────────────
     // For LEAF tasks: a single TaskExpanderAgent call fills the body.
     // For EPIC tasks under LEGACY recursion (slice 4): recurse via
     // OutlinePlannerAgent (skeleton-mode) to get child skeletons, then
@@ -4993,7 +4973,6 @@ public class RunOrchestrator {
         expandOut,
         String.format("%.6f", expandCost));
 
-    // ── Phase 3: coherence ───────────────────────────────────────────
     RunCostTracker.Snapshot beforeCoherence = costTracker.snapshot(runId);
     ExecutionContext coherenceCtx =
         new ExecutionContext(runId, "_coherence_", rootCtx.workspaceRoot());
@@ -5020,7 +4999,7 @@ public class RunOrchestrator {
         cohOut,
         String.format("%.6f", cohCost));
 
-    // ── Persist per-phase costs + final plan ─────────────────────────
+    // Persist per-phase costs + final plan
     try {
       PipelineRun fresh = runRepo.findById(runId).orElse(null);
       if (fresh != null) {

@@ -33,7 +33,7 @@ public final class WorkhorseCases {
     return List.of(addFunctionCase(), multiFileCreateCase(), fixBugCase());
   }
 
-  // ── Case 1: add a function to an existing file ─────────────────────────────
+  // Case 1: add a function to an existing file
   private static WorkhorseEvalCase addFunctionCase() {
     return new WorkhorseEvalCase() {
       @Override
@@ -85,7 +85,7 @@ public final class WorkhorseCases {
     };
   }
 
-  // ── Case 2: create a module + a passing test ───────────────────────────────
+  // Case 2: create a module + a passing test
   private static WorkhorseEvalCase multiFileCreateCase() {
     return new WorkhorseEvalCase() {
       @Override
@@ -145,7 +145,7 @@ public final class WorkhorseCases {
     };
   }
 
-  // ── Case 3: fix a deliberately broken function ─────────────────────────────
+  // Case 3: fix a deliberately broken function
   private static WorkhorseEvalCase fixBugCase() {
     return new WorkhorseEvalCase() {
       @Override

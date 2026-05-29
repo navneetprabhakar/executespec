@@ -41,8 +41,6 @@ public class InvoiceController {
   private final TierPermissionService permissionService;
   private final ActivityAuditService auditService;
 
-  // ── Own billing profile ──────────────────────────────────────────────────
-
   @GetMapping("/api/billing/profile")
   public BillingProfile getProfile(@AuthenticationPrincipal AppUserDetails principal) {
     String userId = principal.getUser().getId();
@@ -92,8 +90,6 @@ public class InvoiceController {
     return saved;
   }
 
-  // ── Own invoices ─────────────────────────────────────────────────────────
-
   @GetMapping("/api/billing/invoices")
   public Page<Invoice> myInvoices(
       @AuthenticationPrincipal AppUserDetails principal, Pageable pageable) {
@@ -138,8 +134,6 @@ public class InvoiceController {
     // For Razorpay and other gateways, generate PDF server-side
     return pdfResponse(invoice);
   }
-
-  // ── Admin endpoints ──────────────────────────────────────────────────────
 
   @GetMapping("/api/admin/invoices")
   public Page<Invoice> allInvoices(
@@ -216,8 +210,6 @@ public class InvoiceController {
             .build());
   }
 
-  // ── Seller config ────────────────────────────────────────────────────────
-
   @GetMapping("/api/admin/seller-config")
   public SellerConfig getSellerConfig(@AuthenticationPrincipal AppUserDetails principal) {
     requireSuperAdmin(principal);
@@ -251,8 +243,6 @@ public class InvoiceController {
 
     return saved;
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private ResponseEntity<byte[]> pdfResponse(Invoice invoice) {
     byte[] pdf = pdfService.generatePdf(invoice);
@@ -311,8 +301,6 @@ public class InvoiceController {
         .preferredCurrency("INR")
         .build();
   }
-
-  // ── DTOs ─────────────────────────────────────────────────────────────────
 
   public record InvoiceDetail(Invoice invoice, List<InvoiceLineItem> lineItems) {}
 

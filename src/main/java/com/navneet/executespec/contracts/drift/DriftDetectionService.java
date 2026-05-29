@@ -105,8 +105,6 @@ public class DriftDetectionService {
     return all;
   }
 
-  // ── Internal: single contract check ─────────────────────────────────────
-
   DriftCheckResult runCheck(ContractRegistry contract, UUID projectId, String actorPat) {
     ProjectRepo repo = projectRepoRepo.findById(contract.getRepoId()).orElse(null);
     if (repo == null) {
@@ -176,8 +174,6 @@ public class DriftDetectionService {
     }
     return new DriftCheckResult(contract.getId(), true, diffSummary, saved.getId());
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   static String extensionFor(ContractRegistry.ContractType type) {
     return switch (type) {

@@ -122,8 +122,6 @@ public class IntegrationManager {
     return userRepo.findById(runnerUserId).map(AppUser::getOrgId).orElse(null);
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   /**
    * Called by IntegrationController for every inbound webhook. Returns runId or sentinel string.
    */
@@ -198,8 +196,6 @@ public class IntegrationManager {
     return run.getRunId();
   }
 
-  // ── Query methods ─────────────────────────────────────────────────────────
-
   /** Returns which source types currently have registered adapters (enabled integrations). */
   public List<String> getEnabledSources() {
     return List.copyOf(inboundAdapters.keySet());
@@ -217,8 +213,6 @@ public class IntegrationManager {
     }
     return integrationRunRepo.findAllByOrderByCreatedAtDesc();
   }
-
-  // ── Private helpers ───────────────────────────────────────────────────────
 
   private void saveEventLog(String sourceType, String eventId) {
     IntegrationEventLog entry =

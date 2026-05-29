@@ -318,8 +318,6 @@ public class StripePaymentGateway implements PaymentGateway {
     return "STRIPE";
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-
   /**
    * v2.6.1 — resolve a Stripe Price ID for a given billing_plan.
    *

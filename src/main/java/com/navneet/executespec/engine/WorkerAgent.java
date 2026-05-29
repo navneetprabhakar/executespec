@@ -789,7 +789,7 @@ public class WorkerAgent {
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
 
-      // ─── Progress signal (RL-2026-05-005) ─────────────────────────────
+      // Progress signal (RL-2026-05-005)
       // Reset the counter on any write-class tool call (writeFile / editFile); otherwise
       // increment. Crossing progressWarnAfter injects ONE corrective nudge (the same message the
       // text-only-stop path uses); crossing progressForceAfter force-terminates with
@@ -1163,7 +1163,7 @@ public class WorkerAgent {
         .build();
   }
 
-  // ── 2026-05-04 — quirky LiveLog emitters ─────────────────────────────────────
+  // 2026-05-04 — quirky LiveLog emitters
 
   /** Emit a worker log line on the run's SSE channel, scoped to the current task. */
   private void emitWorkerLog(WorkerTaskRequest req, String message) {

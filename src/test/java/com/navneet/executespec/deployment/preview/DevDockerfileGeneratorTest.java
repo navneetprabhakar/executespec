@@ -22,8 +22,6 @@ class DevDockerfileGeneratorTest {
     gen = new DevDockerfileGenerator();
   }
 
-  // ── Detection tests ─────────────────────────────────────────────────────
-
   @Nested
   @DisplayName("Project type detection")
   class Detection {
@@ -210,8 +208,6 @@ class DevDockerfileGeneratorTest {
       assertThat(gen.detect(ws)).isEqualTo(PreviewProjectType.NODE_FRONTEND);
     }
   }
-
-  // ── Dockerfile generation tests ─────────────────────────────────────────
 
   @Nested
   @DisplayName("Dockerfile generation")
@@ -416,8 +412,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Monorepo detection tests ──────────────────────────────────────────
-
   @Nested
   @DisplayName("Monorepo detection")
   class MonorepoDetection {
@@ -530,8 +524,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Monorepo Dockerfile generation tests ────────────────────────────────
-
   @Nested
   @DisplayName("Monorepo Dockerfile generation")
   class MonorepoGeneration {
@@ -638,8 +630,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Backend port detection tests ────────────────────────────────────────
-
   @Nested
   @DisplayName("Backend port detection in monorepo")
   class BackendPortDetection {
@@ -714,8 +704,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Node install safety tests ───────────────────────────────────────────
-
   @Nested
   @DisplayName("Node install safety")
   class NodeInstallSafety {
@@ -763,8 +751,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Python edge case tests ──────────────────────────────────────────────
-
   @Nested
   @DisplayName("Python edge cases")
   class PythonEdgeCases {
@@ -801,8 +787,6 @@ class DevDockerfileGeneratorTest {
       assertThat(df).contains("COPY requirements.txt* pyproject.toml* ./");
     }
   }
-
-  // ── Full-stack detection tests ──────────────────────────────────────────
 
   @Nested
   @DisplayName("Full-stack detection (directory-based)")
@@ -921,8 +905,6 @@ class DevDockerfileGeneratorTest {
     }
   }
 
-  // ── Full-stack Dockerfile generation tests ───────────────────────────────
-
   @Nested
   @DisplayName("Full-stack Dockerfile generation")
   class FullStackGeneration {
@@ -1011,8 +993,6 @@ class DevDockerfileGeneratorTest {
       assertThat(df).contains("vite --host 0.0.0.0");
     }
   }
-
-  // ── .dockerignore tests ─────────────────────────────────────────────────
 
   @Nested
   @DisplayName("dockerIgnore generation")
