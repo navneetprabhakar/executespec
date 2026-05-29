@@ -32,6 +32,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
@@ -124,7 +126,7 @@ public class AuthService {
     if (req.signupSource() != null) signupProps.put("signupSource", req.signupSource());
     if (req.utmSource() != null) signupProps.put("utmSource", req.utmSource());
     if (req.utmCampaign() != null) signupProps.put("utmCampaign", req.utmCampaign());
-    eventTracking.track(user.getId(), EventName.SIGNUP, signupProps);
+    trackAfterCommit(user.getId(), EventName.SIGNUP, signupProps);
 
     log.info("User registered: {}", user.getEmail());
 
@@ -137,6 +139,29 @@ public class AuthService {
             .build());
 
     return UserDto.from(user, null);
+  }
+
+  /**
+   * Fire an activation event only after the surrounding transaction commits, so the referenced
+   * {@code app_user} row is visible when {@link EventTrackingService} inserts into {@code
+   * user_activation_event}. The {@code @Async track()} previously raced the signup commit on a
+   * separate thread and tripped the {@code user_id} foreign key — logging a scary SQL ERROR and
+   * silently dropping the user's SIGNUP funnel event. Falls back to an immediate call when no
+   * transaction is active (the event publisher stays fire-and-forget either way).
+   */
+  private void trackAfterCommit(
+      String userId, EventName event, java.util.Map<String, Object> props) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              eventTracking.track(userId, event, props);
+            }
+          });
+    } else {
+      eventTracking.track(userId, event, props);
+    }
   }
 
   // ── Email Verification ────────────────────────────────────────────────────
@@ -606,7 +631,7 @@ public class AuthService {
     }
 
     // Wave 2.1 — activation funnel step 1 (OAuth new-user branch only)
-    eventTracking.track(
+    trackAfterCommit(
         user.getId(),
         EventName.SIGNUP,
         java.util.Map.of(

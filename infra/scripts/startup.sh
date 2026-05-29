@@ -269,7 +269,16 @@ APP_BASE_URL=${APP_PUBLIC_URL}
 AGENT_DEPLOYMENT_GCP_PROJECT=${GCP_PROJECT}
 OTEL_SAMPLING_PROBABILITY=${OTEL_SAMPLING:-1.0}
 JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-JAVA_OPTS="-Xms4g -Xmx12g -XX:+UseG1GC"
+# -Djdk.lang.Process.launchMechanism=vfork — survive in-place JDK upgrades.
+# The default posix_spawn launch mechanism forks via the on-disk `jspawnhelper`
+# binary, which refuses to run when its version drifts from the running JVM
+# (Ubuntu's unattended apt upgrades bump openjdk-21 in place under the live
+# JVM). When that happens EVERY ProcessBuilder.start() — git workspace init,
+# gcloud, docker — fails with "Failed to exec spawn helper", which fails every
+# run. vfork bypasses jspawnhelper entirely, so a stale-minor JVM keeps working
+# until its next restart. Keep this in lockstep with the env-patch in
+# .github/workflows/deploy.yml so a normal deploy applies it without a reboot.
+JAVA_OPTS="-Xms4g -Xmx12g -XX:+UseG1GC -Djdk.lang.Process.launchMechanism=vfork"
 
 # Preview VM deployment
 PREVIEW_MODE=vm
