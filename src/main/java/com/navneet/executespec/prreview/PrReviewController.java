@@ -42,8 +42,6 @@ public class PrReviewController {
   private final ProjectAccessGuard projectAccessGuard;
   private final PrReviewAutofixService autofixService;
 
-  // ── Submit / fetch ─────────────────────────────────────────────────────────
-
   /** Body for {@link #submit}. */
   public record SubmitPrReviewRequest(String projectId, String repoFullName, Integer prNumber) {}
 
@@ -160,8 +158,6 @@ public class PrReviewController {
     return ResponseEntity.ok(
         service.findByProject(projectId).stream().map(PrReviewDto::from).toList());
   }
-
-  // ── DTOs ───────────────────────────────────────────────────────────────────
 
   /** Trim the entity for JSON; client never needs the raw cost columns sliced separately. */
   public record PrReviewDto(

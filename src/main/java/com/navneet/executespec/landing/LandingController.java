@@ -139,8 +139,6 @@ public class LandingController {
             topWins));
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   /**
    * Sanitize a raw user-submitted spec into a single line of plain text safe for the public
    * landing/exec-snapshot surface, then truncate.

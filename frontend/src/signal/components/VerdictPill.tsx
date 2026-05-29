@@ -1,6 +1,5 @@
 import {StatusPill} from '@/signal/components/Primitives';
 
-// ─────────── Shared verdict semantics ───────────
 //
 // One canonical mapping from (verifiedScore, run status) → a plain-English
 // verdict, used by every Signal surface that shows a run outcome. This kills

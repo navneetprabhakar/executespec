@@ -33,7 +33,6 @@ public class PromptPatternAnalyser {
 
     Map<String, List<String>> patternsByPrompt = new LinkedHashMap<>();
 
-    // ── Worker patterns ───────────────────────────────────────────────
     List<String> workerPatterns = new ArrayList<>();
 
     long loopCount =
@@ -71,7 +70,6 @@ public class PromptPatternAnalyser {
       patternsByPrompt.put("worker.txt", workerPatterns); // V1 legacy worker — still in classpath
     }
 
-    // ── Planner patterns ──────────────────────────────────────────────
     List<String> plannerPatterns = new ArrayList<>();
 
     long overreachRuns =
@@ -93,7 +91,6 @@ public class PromptPatternAnalyser {
       patternsByPrompt.put("outline-planner.md", plannerPatterns);
     }
 
-    // ── Reviewer patterns ─────────────────────────────────────────────
     List<String> reviewerPatterns = new ArrayList<>();
 
     long missedViolations =

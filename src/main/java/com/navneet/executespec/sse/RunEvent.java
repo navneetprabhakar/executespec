@@ -112,8 +112,6 @@ public record RunEvent(
     return new RunEvent("COMPLETE", runId, null, payload, Instant.now());
   }
 
-  // ── Context clarification events ──────────────────────────────────────────
-
   public static RunEvent clarificationNeeded(String runId, String prompt) {
     return new RunEvent("CLARIFICATION_NEEDED", runId, null, prompt, Instant.now());
   }
@@ -126,8 +124,6 @@ public record RunEvent(
     return new RunEvent("CONTEXT_EXTRACTED", runId, null, summary, Instant.now());
   }
 
-  // ── Tier 5: Recovery events ───────────────────────────────────────────────
-
   public static RunEvent recoveryAttempted(
       String runId, String taskId, String classification, String action, int locksReleased) {
     String payload = classification + "|" + action + "|locks=" + locksReleased;
@@ -137,8 +133,6 @@ public record RunEvent(
   public static RunEvent runRestarted(String originalRunId, String newRunId) {
     return new RunEvent("RUN_RESTARTED", originalRunId, null, newRunId, Instant.now());
   }
-
-  // ── Tier 6: Deploy events ─────────────────────────────────────────────────
 
   public static RunEvent deployStarted(String runId, String version, String strategy) {
     return new RunEvent("DEPLOY_STARTED", runId, null, version + "|" + strategy, Instant.now());
@@ -164,7 +158,7 @@ public record RunEvent(
     return new RunEvent("DEPLOY_DELETED", runId, null, version + "|" + reason, Instant.now());
   }
 
-  // ── Deploy Engine events (Path A/B/C — user's GCP project) ─────────────────
+  // Deploy Engine events (Path A/B/C — user's GCP project)
 
   public static RunEvent engineDeployStarted(String runId, String version, String path) {
     return new RunEvent("ENGINE_DEPLOY_STARTED", runId, null, version + "|" + path, Instant.now());
@@ -191,7 +185,7 @@ public record RunEvent(
     return new RunEvent("ENGINE_DEPLOY_FAILED", runId, null, version + "|" + error, Instant.now());
   }
 
-  // ── Tier 8: Compile + API spec + preview events ───────────────────────────
+  // Tier 8: Compile + API spec + preview events
 
   public static RunEvent apiSpecReady(String runId) {
     return new RunEvent("API_SPEC_READY", runId, null, "openapi.yaml", Instant.now());
@@ -202,7 +196,7 @@ public record RunEvent(
         "PREVIEW_READY", runId, null, serveDir != null ? serveDir : "", Instant.now());
   }
 
-  // ── Validation + Model Router events ──────────────────────────────────────
+  // Validation + Model Router events
 
   public static RunEvent validationStarted(String runId, String taskId, String file) {
     return new RunEvent("VALIDATION_STARTED", runId, taskId, file, Instant.now());
@@ -221,13 +215,9 @@ public record RunEvent(
     return new RunEvent("MODEL_ESCALATED", runId, taskId, fromModel + "|" + toModel, Instant.now());
   }
 
-  // ── Compaction events ──────────────────────────────────────────────────
-
   public static RunEvent compactionTriggered(String runId, String taskId) {
     return new RunEvent("COMPACTION_TRIGGERED", runId, taskId, null, Instant.now());
   }
-
-  // ── Review V2 events ─────────────────────────────────────────────────────
 
   public static RunEvent reviewStarted(String runId, String model) {
     return new RunEvent("REVIEW_STARTED", runId, null, model, Instant.now());
@@ -259,8 +249,6 @@ public record RunEvent(
   public static RunEvent reviewComplete(String runId, String verdict, String summary) {
     return new RunEvent("REVIEW_COMPLETE", runId, null, verdict + "|" + summary, Instant.now());
   }
-
-  // ── Test Generation Pipeline events ─────────────────────────────────────
 
   public static RunEvent testGenStarted(String runId) {
     return new RunEvent("TEST_GEN_STARTED", runId, null, null, Instant.now());
@@ -311,8 +299,6 @@ public record RunEvent(
   public static RunEvent testPipelineFailed(String runId, String error) {
     return new RunEvent("TEST_PIPELINE_FAILED", runId, null, error, Instant.now());
   }
-
-  // ── Budget events ─────────────────────────────────────────────────────────
 
   /**
    * Emitted when a run's accumulated cost exceeds its per-run budget. Payload format:

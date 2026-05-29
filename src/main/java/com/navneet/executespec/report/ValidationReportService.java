@@ -316,8 +316,6 @@ public class ValidationReportService {
     return token;
   }
 
-  // ── Private helpers ──────────────────────────────────────────────────────
-
   private List<ReportIssueDTO> extractIssues(ReportInput input) {
     List<ReportIssueDTO> issues = new ArrayList<>();
 
@@ -814,8 +812,6 @@ public class ValidationReportService {
 
     return sb.toString();
   }
-
-  // ── v2.5.10 verified score helpers ─────────────────────────────────────────
 
   /**
    * Deterministic score derived from the signals that actually exist at report time. Unlike the LLM

@@ -35,8 +35,6 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
     return "CONFLUENCE";
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
     // Audit 2026-05-12 review item C #21 — was a no-op accepting any POST. Confluence Cloud
@@ -144,8 +142,6 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
         config.isSkipApproval());
   }
 
-  // ── Outbound ──────────────────────────────────────────────────────────────
-
   @Override
   public void onRunStarted(IntegrationRun ir, PipelineRun run) {
     // Confluence doesn't need a "started" notification — child page is created on complete
@@ -205,8 +201,6 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
           e.getMessage());
     }
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private String buildOutputPage(PipelineRun run, ReviewReport review) {
     String verdict = review.getRecommendationCompat();

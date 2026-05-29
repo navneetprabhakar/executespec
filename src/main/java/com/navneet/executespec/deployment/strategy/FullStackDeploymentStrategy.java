@@ -196,8 +196,6 @@ public class FullStackDeploymentStrategy implements DeploymentStrategy {
         .formatted(backendLabel, frontendDist);
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   /**
    * Detects the frontend build output directory.
    *

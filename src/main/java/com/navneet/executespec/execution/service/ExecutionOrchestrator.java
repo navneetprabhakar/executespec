@@ -83,8 +83,6 @@ public class ExecutionOrchestrator {
   private static final long UNIFIED_POLL_INTERVAL_MS = 5_000L;
   private static final long UNIFIED_MAX_WAIT_MS = 4L * 60L * 60L * 1000L; // 4 hours
 
-  // ── Boot-time crash resume ─────────────────────────────────────────────
-
   /**
    * 2026-05-04 — boot-time recovery for ExecutionRuns interrupted mid-EXECUTING. Pairs with the V2
    * PipelineRun resume in {@code StartupRunResumer}: if a Launch's solutions had spawned V2
@@ -151,8 +149,6 @@ public class ExecutionOrchestrator {
       log.error("ExecutionOrchestrator boot-resume: scan failed", outer);
     }
   }
-
-  // ── Creation ───────────────────────────────────────────────────────────
 
   public ExecutionRun createExecution(Project project, AppUser user, CreateExecutionRequest req) {
     // Pre-create any brand-new repos before we persist the ExecutionRun —
@@ -280,8 +276,6 @@ public class ExecutionOrchestrator {
     return project.getAiProvider() != null ? project.getAiProvider().name() : null;
   }
 
-  // ── Phase 2: analysis ─────────────────────────────────────────────────
-
   @Async
   public void triggerAnalysis(String executionRunId) {
     // 2026-04-26 hotfix — extends the prior @Version retry pattern
@@ -342,8 +336,6 @@ public class ExecutionOrchestrator {
     }
   }
 
-  // ── Phase 3: arch approval ────────────────────────────────────────────
-
   public void approveArchDoc(ExecutionRun run, boolean approved, String annotations) {
     if (!approved) return;
     run.setArchApprovedAt(Instant.now());
@@ -354,7 +346,7 @@ public class ExecutionOrchestrator {
     runRepo.save(run);
   }
 
-  // ── Phase 4b: kickoffPlanning router (V188 unified vs legacy) ──────────
+  // Phase 4b: kickoffPlanning router (V188 unified vs legacy)
 
   /**
    * V188 (2026-05-13) — entry point the {@code POST /api/executions/{id}/plan} controller calls.
@@ -375,7 +367,7 @@ public class ExecutionOrchestrator {
     }
   }
 
-  // ── V188 unified-dispatch — one V2 run per execution ──────────────────
+  // V188 unified-dispatch — one V2 run per execution
 
   /**
    * V188 (2026-05-13) — dispatch a single V2 pipeline_run for this execution, then mirror its
@@ -646,7 +638,7 @@ public class ExecutionOrchestrator {
     return out;
   }
 
-  // ── Phase 5: plan approval + execute ──────────────────────────────────
+  // Phase 5: plan approval + execute
 
   @Async
   public void approvePlanAndExecute(String executionRunId) {

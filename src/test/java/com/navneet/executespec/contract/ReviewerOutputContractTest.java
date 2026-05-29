@@ -104,8 +104,6 @@ class ReviewerOutputContractTest {
     assertThat(report.isReadmeUpdated()).isFalse();
   }
 
-  // ── helper ────────────────────────────────────────────────────────────────
-
   private static TaskReviewReport load(String resourcePath) throws IOException {
     try (InputStream in =
         Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {

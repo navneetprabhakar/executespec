@@ -297,8 +297,6 @@ public class WorkspaceExportService {
         .formatted(shortId, goal, java.time.LocalDate.now());
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
   /** Per-run workspace root: {@code <agent.workspace>/<runId>/} */
   private Path workspaceRoot(String runId) {
     return Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();

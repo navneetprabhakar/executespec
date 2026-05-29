@@ -177,7 +177,7 @@ public class ReviewerAgent {
             ? DEFAULT_MAX_ITER_PER_PASS
             : req.maxIterationsPerPass();
 
-    // ── Pre-review build smoke (2026-05-08) ──────────────────────────────
+    // Pre-review build smoke (2026-05-08)
     // Capture the build state going INTO the reviewer. When the per-task pipeline ended with
     // partial / build-failing tasks, the reviewer's job changes: it's no longer "scan for subtle
     // bugs" — it's "make this thing compile, here's the exact error." Without this signal the
@@ -201,7 +201,6 @@ public class ReviewerAgent {
         req.skipWiringPass(),
         preReviewBuildError != null);
 
-    // ── General pass ─────────────────────────────────────────────────────
     // A pass that hits the iteration cap has typically done meaningful fixes
     // before running out of turns — the workspace is still in a reasonable
     // state. Only a hard ERROR outcome (LLM failure, tool dispatch crash)
@@ -230,7 +229,6 @@ public class ReviewerAgent {
           general.outcome());
     }
 
-    // ── Wiring pass ──────────────────────────────────────────────────────
     WorkerResult wiring = null;
     if (!req.skipWiringPass()) {
       // Re-capture build state before the wiring pass — the general pass may have already fixed
@@ -266,7 +264,7 @@ public class ReviewerAgent {
       }
     }
 
-    // ── Post-edit formatter pass (2026-05-13 audit Fix-1) ────────────────
+    // Post-edit formatter pass (2026-05-13 audit Fix-1)
     // After the reviewer's general/wiring edits, run any language formatters
     // present on PATH (black, prettier, gofmt) so the workspace lands in the
     // shape the customer's CI's `--check` step expects. Best-effort — no-op
@@ -298,7 +296,6 @@ public class ReviewerAgent {
           e.getMessage());
     }
 
-    // ── Final build ──────────────────────────────────────────────────────
     ObjectNode buildArgs = objectMapper.createObjectNode();
     if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
       buildArgs.put("plannerCommand", req.buildCommand());
@@ -315,7 +312,7 @@ public class ReviewerAgent {
       buildOutput = "tool error: " + err.message();
     }
 
-    // ── Phase 2 third pass — fix the red build (2026-05-19) ──────────────
+    // Phase 2 third pass — fix the red build (2026-05-19)
     // When the final build is still red after general + wiring, give the
     // reviewer one more targeted pass with the exact build error as input.
     // This is the class of failure where the agent was one typo away from
@@ -396,8 +393,6 @@ public class ReviewerAgent {
         .totalLatencyMs(elapsed)
         .build();
   }
-
-  // ─── helpers ─────────────────────────────────────────────────────────────
 
   private WorkerResult runPass(
       ReviewerRequest req,

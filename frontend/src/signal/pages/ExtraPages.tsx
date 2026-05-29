@@ -24,7 +24,7 @@ import {Search, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
-// ──────────────────── Insights (analytics) ────────────────────
+// Insights (analytics)
 export function InsightsPage() {
   const [days, setDays] = useState(30);
   const [metrics, setMetrics] = useState<api.MetricsResponse | null>(null);
@@ -296,7 +296,7 @@ export function InsightsPage() {
   );
 }
 
-// ──────────────────── Library (readymade solutions) ────────────────────
+// Library (readymade solutions)
 
 const LIB_TILE_COLORS = ['mint', 'signal', 'coral', 'lavender'] as const;
 function libTileBg(i: number): string {
@@ -1052,8 +1052,6 @@ function LibraryInstantiateModal({
   );
 }
 
-// ──────────────────── Migrations ────────────────────
-
 export function MigrationsPage() {
   const [items, setItems] = useState<api.MigrationListItem[] | null>(null);
   const [err, setErr] = useState('');
@@ -1565,7 +1563,7 @@ function MigrationApplyModal({
   );
 }
 
-// ──────────────────── Trust (public security page) ────────────────────
+// Trust (public security page)
 export function TrustPage() {
   return (
     <>
@@ -1629,7 +1627,7 @@ export function TrustPage() {
   );
 }
 
-// ──────────────────── Empty project (FREE / no repos yet) ────────────────────
+// Empty project (FREE / no repos yet)
 export function EmptyProjectPage() {
   return (
     <>
@@ -1732,7 +1730,6 @@ export function EmptyProjectPage() {
   );
 }
 
-// ──────────────────── Public pricing ────────────────────
 export function PublicPricingPage() {
   return (
     <>
@@ -1908,7 +1905,6 @@ function FormSuccess({msg}: {msg: string}) {
   );
 }
 
-// ──────────────────── Forgot password ────────────────────
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1968,7 +1964,6 @@ export function ForgotPasswordPage() {
   );
 }
 
-// ──────────────────── Reset password ────────────────────
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -2047,7 +2042,6 @@ export function ResetPasswordPage() {
   );
 }
 
-// ──────────────────── Accept invite ────────────────────
 export function AcceptInvitePage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -2120,7 +2114,7 @@ export function AcceptInvitePage() {
   );
 }
 
-// ──────────────────── Audit log (org-scoped) ────────────────────
+// Audit log (org-scoped)
 export function AuditLogPage() {
   const tier = useAuthStore(selectNormalizedTier);
   const user = useAuthStore((s) => s.user);
@@ -2324,7 +2318,6 @@ export function AuditLogPage() {
   );
 }
 
-// ──────────────────── Deployments ────────────────────
 export function DeploymentsPage() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [err, setErr] = useState('');
@@ -2532,7 +2525,6 @@ export function DeploymentsPage() {
   );
 }
 
-// ──────────────────── Spec templates ────────────────────
 export function SpecTemplatesPage() {
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);

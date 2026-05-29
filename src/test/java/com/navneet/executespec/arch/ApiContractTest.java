@@ -112,8 +112,6 @@ class ApiContractTest {
     }
   }
 
-  // ── backend pattern collection ──────────────────────────────────────────
-
   private static final List<Class<? extends Annotation>> METHOD_MAPPING_ANNOTATIONS =
       List.of(
           RequestMapping.class,
@@ -203,8 +201,6 @@ class ApiContractTest {
     if (!prefSlash && !sufSlash) return prefix + "/" + suffix;
     return prefix + suffix;
   }
-
-  // ── api.ts URL extraction ───────────────────────────────────────────────
 
   /**
    * Pulls URL templates from {@code req(...)}, {@code reqText(...)}, and {@code fetch(...)} call

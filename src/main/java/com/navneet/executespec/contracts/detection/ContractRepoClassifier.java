@@ -112,8 +112,6 @@ public class ContractRepoClassifier {
     return new Verdict(false, Verdict.Confidence.CONFIDENT, reasons);
   }
 
-  // ── Internals ───────────────────────────────────────────────────────────
-
   boolean nameMatchesContractsHint(String repoFullName) {
     if (repoFullName == null) return false;
     String lower = repoFullName.toLowerCase();

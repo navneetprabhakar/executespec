@@ -191,7 +191,7 @@ public class WorkspaceInitService {
     // Effectively final for use in inner classes
     final Path source = resolvedSource;
 
-    // ── 1. Get the list of tracked files from the source workspace ──
+    // 1. Get the list of tracked files from the source workspace
     ProcessBuilder pb =
         new ProcessBuilder("git", "ls-files").directory(source.toFile()).redirectErrorStream(true);
     Process p = pb.start();
@@ -206,13 +206,12 @@ public class WorkspaceInitService {
 
     List<String> trackedFiles = trackedFilesOutput.lines().filter(l -> !l.isBlank()).toList();
 
-    // ── 2. Initialise target workspace ────────────────────────────────
     Files.createDirectories(target);
     runGit(target, "git", "init", "-b", "main");
     runGit(target, "git", "config", "user.email", "agent@executespec.local");
     runGit(target, "git", "config", "user.name", "ExecuteSpec Agent");
 
-    // ── 3. Copy each tracked file, preserving directory structure ─────
+    // 3. Copy each tracked file, preserving directory structure
     if (trackedFiles.isEmpty()) {
       // Fallback: copy everything that is not under .git/
       log.info(
@@ -253,7 +252,7 @@ public class WorkspaceInitService {
       Files.copy(srcGitignore, target.resolve(".gitignore"));
     }
 
-    // ── 4. Commit everything in the new workspace ─────────────────────
+    // 4. Commit everything in the new workspace
     runGit(target, "git", "add", "-A");
     runGit(
         target,

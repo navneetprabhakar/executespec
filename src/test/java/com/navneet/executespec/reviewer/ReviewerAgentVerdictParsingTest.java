@@ -80,8 +80,6 @@ class ReviewerAgentVerdictParsingTest {
     return new ReviewerAgent(null, null, null, null, null, null, null);
   }
 
-  // ── Structured-verdict path ─────────────────────────────────────────────
-
   @Test
   void both_clean_with_build_pass_returns_clean() throws Exception {
     var g = workerWithSummary("VERDICT: CLEAN\nNo in-scope issues found.");
@@ -150,7 +148,7 @@ class ReviewerAgentVerdictParsingTest {
     assertEquals(ReviewerResult.Overall.CLEAN, determineOverall(agent(), g, null, true));
   }
 
-  // ── Backward-compat heuristic path (pre-prompt-update runs) ─────────────
+  // Backward-compat heuristic path (pre-prompt-update runs)
 
   @Test
   void no_verdict_prefix_falls_back_to_substring_no_issues() throws Exception {
@@ -176,7 +174,7 @@ class ReviewerAgentVerdictParsingTest {
     assertEquals(ReviewerResult.Overall.FIXED_ISSUES, determineOverall(agent(), g, w, true));
   }
 
-  // ── Write-aware downgrade (2026-05-10 — dev run 61c9fffa) ───────────────
+  // Write-aware downgrade (2026-05-10 — dev run 61c9fffa)
 
   @Test
   void fixed_issues_with_zero_writes_downgrades_to_clean() throws Exception {

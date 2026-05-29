@@ -77,8 +77,6 @@ public class RustDeploymentStrategy implements DeploymentStrategy {
         .formatted(detectBinaryName(workspacePath));
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   /** Read the binary/package name from [package] name = "..." in Cargo.toml. */
   private String detectBinaryName(Path workspacePath) {
     try {

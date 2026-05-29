@@ -85,7 +85,7 @@ class RunModelOverridesResolverTest {
         .isEqualTo("claude-haiku-4-5-20251001");
   }
 
-  // ── Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22) ──────────
+  // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22)
 
   /**
    * The per-run pin built by {@link RunModelOverrides#withRunPin} must win over BOTH an org-level

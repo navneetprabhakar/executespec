@@ -70,7 +70,6 @@ public class WeeklyAdminSummaryJob {
   Map<String, Object> buildSummary(Instant since, Instant now) {
     Map<String, Object> summary = new HashMap<>();
 
-    // ── New signups ──────────────────────────────────────────────────────
     List<AppUser> allActive = userRepo.findAllActive();
     List<AppUser> newSignups =
         allActive.stream()
@@ -100,7 +99,6 @@ public class WeeklyAdminSummaryJob {
     summary.put("newSignups", newSignups.size());
     summary.put("newSignupList", signupList);
 
-    // ── Run throughput + outcomes ────────────────────────────────────────
     long total = pipelineRunRepo.countByStartedAtGreaterThanEqual(since);
     long completed = pipelineRunRepo.countByStatusAndStartedAtGreaterThanEqual("COMPLETE", since);
     long failed = pipelineRunRepo.countByStatusAndStartedAtGreaterThanEqual("FAILED", since);
@@ -114,7 +112,7 @@ public class WeeklyAdminSummaryJob {
     summary.put("openApprovalGates", awaiting);
     summary.put("completionPct", total == 0 ? 0 : Math.round((completed * 100.0) / total));
 
-    // ── Active users (anyone who created a user account OR may have run) ─
+    // Active users (anyone who created a user account OR may have run)
     //    cheap proxy: count of distinct userIds via allActive filter on lastLoginAt
     long activeUsers =
         allActive.stream()
@@ -123,7 +121,6 @@ public class WeeklyAdminSummaryJob {
     summary.put("activeUsers", activeUsers);
     summary.put("totalUsers", allActive.size());
 
-    // ── Header labels ────────────────────────────────────────────────────
     LocalDate startDate = since.atZone(ZoneId.of("Asia/Kolkata")).toLocalDate();
     LocalDate endDate = now.atZone(ZoneId.of("Asia/Kolkata")).toLocalDate();
     summary.put("periodStart", DATE_FMT.format(startDate));

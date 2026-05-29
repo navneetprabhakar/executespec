@@ -108,8 +108,6 @@ class WorkerReportContractTest {
     assertThat(blocked.getBlockers()).isEqualTo("dep not ready");
   }
 
-  // ── helper ────────────────────────────────────────────────────────────────
-
   private static WorkerReport load(String resourcePath) throws IOException {
     try (InputStream in =
         Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {

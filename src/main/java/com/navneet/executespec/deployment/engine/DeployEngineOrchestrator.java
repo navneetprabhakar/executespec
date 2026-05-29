@@ -159,8 +159,6 @@ public class DeployEngineOrchestrator {
     return deployment;
   }
 
-  // ── Path A Pipeline ──────────────────────────────────────────────────────
-
   private void executePathA(
       Deployment deployment,
       GoogleCredentials credentials,
@@ -171,7 +169,6 @@ public class DeployEngineOrchestrator {
     String versionTag = deployment.getVersionTag();
 
     try {
-      // ── Phase 1: Restore workspace ──
       updateStatus(deployment, DeployStatus.BUILDING, "Preparing workspace...");
       sseBroadcaster.emit(
           runId, RunEvent.enginePhase(runId, "WORKSPACE_RESTORE", "Restoring workspace..."));
@@ -179,7 +176,6 @@ public class DeployEngineOrchestrator {
       Path workspace = workspaceRestore.ensureWorkspaceAvailable(runId);
       log.info("[{}] Workspace available: {}", versionTag, workspace);
 
-      // ── Phase 2: Generate Dockerfile ──
       sseBroadcaster.emit(
           runId, RunEvent.enginePhase(runId, "DOCKERFILE_GENERATE", "Generating Dockerfile..."));
 
@@ -188,7 +184,6 @@ public class DeployEngineOrchestrator {
       deployment.setDockerfilePath(workspace.resolve("Dockerfile").toString());
       deploymentRepo.save(deployment);
 
-      // ── Phase 3: Ensure infrastructure ──
       sseBroadcaster.emit(
           runId,
           RunEvent.enginePhase(
@@ -197,7 +192,7 @@ public class DeployEngineOrchestrator {
       imageBuilder.ensureBuildBucket(credentials, gcpProject, region);
       imageBuilder.ensureArtifactRegistryRepo(credentials, gcpProject, region, DEFAULT_AR_REPO);
 
-      // ── Phase 4: Build image via Cloud Build ──
+      // Phase 4: Build image via Cloud Build
       updateStatus(deployment, DeployStatus.BUILDING, "Building container image...");
       sseBroadcaster.emit(runId, RunEvent.engineBuilding(runId, versionTag));
 
@@ -210,7 +205,7 @@ public class DeployEngineOrchestrator {
       deploymentRepo.save(deployment);
       log.info("[{}] Image built: {}", versionTag, buildResult.imageUri());
 
-      // ── Phase 5: Deploy to Cloud Run ──
+      // Phase 5: Deploy to Cloud Run
       updateStatus(deployment, DeployStatus.DEPLOYING, "Deploying to Cloud Run...");
       sseBroadcaster.emit(runId, RunEvent.engineDeploying(runId, versionTag));
 
@@ -226,7 +221,6 @@ public class DeployEngineOrchestrator {
               envVars,
               true);
 
-      // ── Phase 6: Health check ──
       updateStatus(deployment, DeployStatus.HEALTH_CHECK, "Running health checks...");
       sseBroadcaster.emit(
           runId, RunEvent.enginePhase(runId, "HEALTH_CHECK", "Checking service health..."));
@@ -240,7 +234,6 @@ public class DeployEngineOrchestrator {
             versionTag);
       }
 
-      // ── Success ──
       deployment.markLive(deployResult.serviceUrl(), deployResult.revisionName());
       deploymentRepo.save(deployment);
 
@@ -261,8 +254,6 @@ public class DeployEngineOrchestrator {
       sseBroadcaster.emit(runId, RunEvent.engineDeployFailed(runId, versionTag, e.getMessage()));
     }
   }
-
-  // ── Rollback ─────────────────────────────────────────────────────────────
 
   /** Rollback a Cloud Run Direct deployment to a specific revision. */
   public void rollback(String deploymentId, String userId) throws IOException {
@@ -291,8 +282,6 @@ public class DeployEngineOrchestrator {
         RunEvent.enginePhase(
             d.getRunId(), "ROLLED_BACK", "Rolled back to revision " + d.getRevisionName()));
   }
-
-  // ── Destroy ──────────────────────────────────────────────────────────────
 
   /** Destroy a Cloud Run Direct deployment — delete the service and image. */
   public void destroy(String deploymentId, String userId) throws IOException {
@@ -326,8 +315,6 @@ public class DeployEngineOrchestrator {
       throw new IOException("Failed to destroy deployment: " + e.getMessage(), e);
     }
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private void updateStatus(Deployment d, DeployStatus status, String message) {
     d.setStatus(status);

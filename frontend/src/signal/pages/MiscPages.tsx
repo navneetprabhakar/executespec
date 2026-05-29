@@ -19,7 +19,6 @@ import {Bell, Search, Settings, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
-// ──────────────────── Notifications ────────────────────
 type NotifFilter = 'all' | 'run' | 'team' | 'billing' | 'system';
 
 export function NotificationsPage() {
@@ -233,7 +232,6 @@ function NotifRow({
   );
 }
 
-// ──────────────────── Search / palette ────────────────────
 interface SearchHit {
   id: string;
   kind: 'run' | 'project' | 'page';
@@ -428,7 +426,6 @@ export function SearchPage() {
   );
 }
 
-// ──────────────────── More tab ────────────────────
 export function MorePage() {
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -552,7 +549,7 @@ export function MorePage() {
   );
 }
 
-// ──────────────────── Admin (super-admin) ────────────────────
+// Admin (super-admin)
 // Canonical activation-funnel stage keys (uppercase + `.windowed`), aligned
 // with /admin/activation-funnel and the IDE chrome's IdeAdmin.
 const ADMIN_FUNNEL: Array<[string, string]> = [
@@ -652,7 +649,7 @@ export function AdminPage() {
   );
 }
 
-// ── Admin · Overview (funnel + tiers + flags) ────────────────────────
+// Admin · Overview (funnel + tiers + flags)
 function AdminOverview() {
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
   const [orgs, setOrgs] = useState<api.OrgDto[]>([]);
@@ -813,7 +810,6 @@ function AdminMiniSelect({
   );
 }
 
-// ── Admin · Users ────────────────────────────────────────────────────
 function AdminUsersSection({ok, bad}: SectionProps) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
   const [confirm, setConfirm] = useState<{u: api.AuthUser; status: string} | null>(null);
@@ -931,7 +927,6 @@ function AdminUsersSection({ok, bad}: SectionProps) {
   );
 }
 
-// ── Admin · Orgs ─────────────────────────────────────────────────────
 function AdminOrgsSection({ok, bad}: SectionProps) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
   const [confirm, setConfirm] = useState<{o: api.OrgDto; status: string} | null>(null);
@@ -1084,7 +1079,7 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
   );
 }
 
-// ── Admin · Analytics (org-scoped) ───────────────────────────────────
+// Admin · Analytics (org-scoped)
 function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
@@ -1183,7 +1178,6 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
   );
 }
 
-// ── Admin · Ops ──────────────────────────────────────────────────────
 function AdminOpsSection({ok, bad}: SectionProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<'halt' | 'reconcile' | null>(null);
@@ -1325,7 +1319,6 @@ function AdminOpsSection({ok, bad}: SectionProps) {
   );
 }
 
-// ── Admin · Top-up packages ──────────────────────────────────────────
 function AdminTopupsSection({ok, bad}: SectionProps) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -1441,7 +1434,6 @@ function AdminTopupsSection({ok, bad}: SectionProps) {
   );
 }
 
-// ──────────────────── Public shared report ────────────────────
 export function SharedPage() {
   const {token} = useParams<{token: string}>();
   const [data, setData] = useState<api.SharedReportData | null>(null);

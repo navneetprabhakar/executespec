@@ -228,8 +228,6 @@ public class UserCloudRunDeployer {
     return false;
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private boolean serviceExists(ServicesClient client, String fullName) {
     try {
       client.getService(fullName);

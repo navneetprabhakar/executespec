@@ -60,8 +60,6 @@ public class DevDockerfileGenerator {
     }
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────
-
   /** Detect project type from workspace contents. Returns null if unsupported. */
   public PreviewProjectType detect(Path workspace) {
     // 0. Check planner-declared project type in .agent-context/project.json
@@ -371,8 +369,6 @@ public class DevDockerfileGenerator {
     };
   }
 
-  // ── Cloud Run helpers ──────────────────────────────────────────────────
-
   /** Non-root user block: RUN adduser + USER app. Alpine vs Debian syntax. */
   private String crNonRootUser(boolean alpine) {
     if (alpine) {
@@ -533,8 +529,6 @@ public class DevDockerfileGenerator {
         + " dev\\\" \\\"'+serverCmd+'\\\"'; "
         + " }}fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n";
   }
-
-  // ── Cloud Run standalone generators ────────────────────────────────────
 
   private String cloudRun_NodeFrontend(Path workspace) {
     String viteInstall = crInstallMissingViteDeps(workspace);
@@ -754,8 +748,6 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     sb.append("CMD java ").append(mainClass).append("\n");
     return sb.toString();
   }
-
-  // ── Cloud Run full-stack generators ────────────────────────────────────
 
   /** Full-stack dispatcher for Cloud Run. Detects sub-type and delegates. */
   private String cloudRun_FullStack(Path workspace) {
@@ -1520,8 +1512,6 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
            """;
   }
 
-  // ── Security: inject non-root user ─────────────────────────────────────
-
   /**
    * Injects a non-root USER directive before the final CMD/ENTRYPOINT in the Dockerfile. Detects
    * Alpine vs Debian base images for correct user-creation syntax. STATIC_HTML (nginx) uses the
@@ -1613,8 +1603,6 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     // Insert before the CMD/ENTRYPOINT line (after the preceding newline)
     return dockerfile.substring(0, insertPoint + 1) + block + dockerfile.substring(insertPoint + 1);
   }
-
-  // ── Private Dockerfile generators ───────────────────────────────────────
 
   private String nodeFrontendDockerfile(Path workspace) {
     String cmd;
@@ -1974,7 +1962,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
         + "\n";
   }
 
-  // ── Full-stack support (directory-based) ────────────────────────────────
+  // Full-stack support (directory-based)
 
   /**
    * Scan subdirectories for frontend/backend projects. Handles cases where frontend/ and backend/
@@ -2654,8 +2642,6 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
     return sb.toString();
   }
 
-  // ── Monorepo support ───────────────────────────────────────────────────
-
   private boolean isMonorepo(JsonNode pkg, Path workspace) {
     JsonNode workspaces = pkg.get("workspaces");
     if (workspaces == null || !workspaces.isArray() || workspaces.isEmpty()) {
@@ -2864,8 +2850,6 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
     return 3000;
   }
 
-  // ── Static HTML support ────────────────────────────────────────────────
-
   private boolean hasStaticHtml(Path workspace) {
     try (Stream<Path> files = Files.list(workspace)) {
       return files.anyMatch(p -> p.getFileName().toString().toLowerCase().endsWith(".html"));
@@ -2983,8 +2967,6 @@ EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]
 """;
   }
-
-  // ── Preview mode detection ─────────────────────────────────────────────
 
   /**
    * Detect how a project should be previewed: as a web app (direct HTTP), a CLI app (wrapped by
@@ -3116,8 +3098,6 @@ CMD ["nginx", "-g", "daemon off;"]
     }
     return false;
   }
-
-  // ── Mode-aware Dockerfile generation ─────────────────────────────────────
 
   /** Generate Dockerfile content for the given project type and preview mode. */
   public String generate(PreviewProjectType type, Path workspace, PreviewMode mode) {
@@ -3253,8 +3233,6 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
 """;
   }
 
-  // ── MCP Dockerfiles ──────────────────────────────────────────────────────
-
   private String mcpDockerfile(PreviewProjectType type, Path workspace) {
     if (type == PreviewProjectType.PYTHON) return mcpPythonDockerfile(workspace);
     return mcpNodeDockerfile(workspace);
@@ -3325,8 +3303,6 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
         + entryFile
         + "\"]\n";
   }
-
-  // ── Helper methods ──────────────────────────────────────────────────────
 
   private JsonNode parsePackageJson(Path workspace) {
     Path file = workspace.resolve("package.json");

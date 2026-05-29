@@ -50,7 +50,7 @@ public class RunCostTracker {
   private final ModelPricingRepository pricingRepo;
   private final ModelResolver modelResolver;
 
-  // ── rough per-task input/output token estimates by complexity ────────────
+  // rough per-task input/output token estimates by complexity
   // Used by estimateRun() for pre-plan cost estimation. Calibrated against
   // observed V2 worker invocations (~3-8 iterations × ~1.5k input / ~500 output).
   // Bands recalibrated 2026-04-19 from real run data. Previous values
@@ -425,7 +425,6 @@ public class RunCostTracker {
     return estimateRunTierAware(provider, taskComplexities, strategy, 1, false);
   }
 
-  // ── Strategy-aware planning-phase cost ─────────────────────────────────
   // Token bands per agent (input / output) — pessimistic on the high side.
 
   /**
@@ -455,7 +454,7 @@ public class RunCostTracker {
   /** Children-per-EPIC assumption (Classification.MEDIUM caps at 4). */
   private static final int LEGACY_CHILDREN_PER_EPIC = 3;
 
-  // ── Post-planning agents the estimator USED to ignore (Stage 1, audit 2026-05-13) ──
+  // Post-planning agents the estimator USED to ignore (Stage 1, audit 2026-05-13)
 
   /**
    * ReviewerAgent general pass: PLANNING tier, reads many files + emits structured patches.
@@ -763,8 +762,6 @@ public class RunCostTracker {
   private static int safe(Integer v) {
     return v == null ? 0 : v;
   }
-
-  // ── types ────────────────────────────────────────────────────────────────
 
   private static final class Accumulator {
     final AtomicLong inputTokens = new AtomicLong();

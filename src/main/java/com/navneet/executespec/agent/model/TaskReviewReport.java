@@ -26,7 +26,6 @@ public class TaskReviewReport {
   private List<String> mergeBlockers;
   private List<String> postMergeSuggestions;
 
-  // ── Tier 3 field ─────────────────────────────────────────────────────────
   // Default false: if LLM omits the field, treat as not updated (fail-safe).
   // Set true only when README.md is explicitly confirmed present in the diff.
   @Builder.Default private boolean readmeUpdated = false;

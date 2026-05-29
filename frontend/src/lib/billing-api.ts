@@ -2,8 +2,6 @@
 
 import {req} from './api';
 
-// ─── Types ───
-
 export interface BillingPlan {
   id: string;
   name: string;
@@ -92,8 +90,6 @@ export interface SubscriptionInitResult {
   checkoutUrl: string | null;
   sessionId: string | null;
 }
-
-// ─── API Functions ───
 
 /**
  * Fetch all active plans. Pass keyMode='BYOK' or 'PLATFORM' to filter.
@@ -188,8 +184,6 @@ export const updateSeats = (totalSeats: number) =>
     method: 'POST',
     body: JSON.stringify({totalSeats}),
   });
-
-// ─── Run Top-Up ───
 
 /**
  * List available top-up packages for purchase.

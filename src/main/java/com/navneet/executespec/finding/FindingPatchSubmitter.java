@@ -71,7 +71,7 @@ public class FindingPatchSubmitter {
   public SubmitResult submit(Finding finding) {
     String key = finding.findingKey();
 
-    // ── 1. Dedupe — if there's an active run for this finding, reuse it. ──
+    // 1. Dedupe — if there's an active run for this finding, reuse it.
     List<PipelineRun> active = runRepo.findActiveByTriggeredByFinding(key);
     if (!active.isEmpty()) {
       PipelineRun existing = active.get(0);
@@ -83,14 +83,14 @@ public class FindingPatchSubmitter {
       return new SubmitResult(SubmitResult.Outcome.REUSED_ACTIVE, existing.getRunId(), key);
     }
 
-    // ── 2. Resolve user's org so the run row's tenant fields are populated. ──
+    // 2. Resolve user's org so the run row's tenant fields are populated.
     String orgId =
         Optional.ofNullable(finding.userId())
             .flatMap(userRepo::findById)
             .map(u -> u.getOrgId())
             .orElse(null);
 
-    // ── 3. Submit through the orchestrator. ──
+    // 3. Submit through the orchestrator.
     String source = "finding:" + finding.type().name();
     PipelineRun run =
         orchestrator.submitRun(
@@ -115,7 +115,7 @@ public class FindingPatchSubmitter {
             /* prReviewComments */ null,
             /* runMode */ RunMode.PATCH);
 
-    // ── 4. Stamp the finding key on the row. ──
+    // 4. Stamp the finding key on the row.
     runRepo
         .findById(run.getRunId())
         .ifPresent(

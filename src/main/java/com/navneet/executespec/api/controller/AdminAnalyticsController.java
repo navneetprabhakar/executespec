@@ -95,8 +95,6 @@ public class AdminAnalyticsController {
     return ResponseEntity.ok(analyticsService.getCostBreakdown(orgId, period));
   }
 
-  // ── RBAC ────────────────────────────────────────────────────────────────────
-
   /**
    * Asserts the caller is allowed to view analytics for the given entity.
    *

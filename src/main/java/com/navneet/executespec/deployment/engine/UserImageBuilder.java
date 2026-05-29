@@ -213,8 +213,6 @@ public class UserImageBuilder {
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private void uploadToGcs(
       GoogleCredentials credentials,
       String gcpProject,

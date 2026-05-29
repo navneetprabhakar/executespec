@@ -26,8 +26,6 @@ class ValidationReportServiceVerifiedScoreTest {
       new ValidationReportService(
           null, null, null, null, null, null, mock(FeatureFlagService.class));
 
-  // ── Multiplicative factor tests ────────────────────────────────────────
-
   @Test
   void perfect_run_caps_at_100() {
     // All factors = 1.0 → 100 * 1 = 100
@@ -115,7 +113,7 @@ class ValidationReportServiceVerifiedScoreTest {
     assertEquals(50, score);
   }
 
-  // ── Endpoint coverage scaling (no more cliff) ──────────────────────────
+  // Endpoint coverage scaling (no more cliff)
 
   @Test
   void endpoint_coverage_linear_no_cliff_at_95() {
@@ -152,7 +150,7 @@ class ValidationReportServiceVerifiedScoreTest {
     assertEquals(100, score);
   }
 
-  // ── Critical-issue damper (replaces 5×N additive penalty) ──────────────
+  // Critical-issue damper (replaces 5×N additive penalty)
 
   @Test
   void unfixed_critical_lightly_damps_floored_at_half() {
@@ -180,7 +178,7 @@ class ValidationReportServiceVerifiedScoreTest {
     assertEquals(0, score);
   }
 
-  // ── Audit-flagged regression cases (now read sensibly) ─────────────────
+  // Audit-flagged regression cases (now read sensibly)
 
   @Test
   void run_e48399bf_regression_case() {
@@ -217,7 +215,7 @@ class ValidationReportServiceVerifiedScoreTest {
     assertEquals(72, score);
   }
 
-  // ── 2026-05-10 endpoint trust gate (PR #95 follow-up) ─────────────────
+  // 2026-05-10 endpoint trust gate (PR #95 follow-up)
   // Floors endpointFactor at reviewerFactor when reviewer ∈ {CLEAN, FIXED_ISSUES}
   // so the assessment LLM's read-budget-limited endpoint count cannot
   // override the reviewer's wiring-pass verdict on the same dimension.

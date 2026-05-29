@@ -121,8 +121,6 @@ public class CodeReviewAutofixService {
     return result;
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-
   private UUID resolveLinkedRepoId(String projectId, String repoFullName) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     for (ProjectRepoLink l : links) {

@@ -11,8 +11,6 @@ import org.junit.jupiter.api.Test;
  */
 class VerifiedScoreBackfillServiceTest {
 
-  // ── countUnfixedCriticalFromIssuesJson ─────────────────────────────────────
-
   @Test
   void countUnfixedCritical_emptyOrNullJson_zero() {
     assertThat(VerifiedScoreBackfillService.countUnfixedCriticalFromIssuesJson(null)).isZero();
@@ -95,8 +93,6 @@ class VerifiedScoreBackfillServiceTest {
             + "]";
     assertThat(VerifiedScoreBackfillService.countUnfixedCriticalFromIssuesJson(json)).isEqualTo(1);
   }
-
-  // ── endpointCoverageFromAccuracyJson ───────────────────────────────────────
 
   @Test
   void endpointCoverage_nullOrEmpty_null() {

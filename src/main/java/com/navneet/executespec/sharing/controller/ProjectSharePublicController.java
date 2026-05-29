@@ -65,8 +65,6 @@ public class ProjectSharePublicController {
             link.getExpiresAt()));
   }
 
-  // ── Surface-specific public reads ─────────────────────────────────────────
-
   @GetMapping("/api/shared/{token}/run")
   public ResponseEntity<SharedRun> sharedRun(@PathVariable String token) {
     ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.RUN_DETAIL);
@@ -191,8 +189,6 @@ public class ProjectSharePublicController {
             link.getLabel()));
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private ProjectShareLink mustBe(String token, ProjectShareLink.Surface expected) {
     ProjectShareLink link = linkService.resolveActive(token);
     if (link.getSurface() != expected) {
@@ -219,7 +215,7 @@ public class ProjectSharePublicController {
     }
   }
 
-  // ── Public-safe DTOs (never include internal tokens / credentials) ───────
+  // Public-safe DTOs (never include internal tokens / credentials)
 
   public record SharedLinkMeta(
       String surface,

@@ -60,8 +60,6 @@ public class Metrics {
 
   private final MeterRegistry registry;
 
-  // ─── run-level ──────────────────────────────────────────────────────────
-
   public void recordRunOutcome(String overall) {
     Counter.builder(NS + "run.outcome")
         .tag("overall", nonNull(overall))
@@ -75,8 +73,6 @@ public class Metrics {
         .register(registry)
         .record(elapsed);
   }
-
-  // ─── planner ────────────────────────────────────────────────────────────
 
   public void recordPlannerLatency(
       String classification, String provider, String model, Duration elapsed) {
@@ -96,8 +92,6 @@ public class Metrics {
         .register(registry)
         .record(tasks);
   }
-
-  // ─── executor / task ────────────────────────────────────────────────────
 
   public void recordTaskStatus(String status) {
     Counter.builder(NS + "task.status")
@@ -119,8 +113,6 @@ public class Metrics {
         .register(registry)
         .increment();
   }
-
-  // ─── worker ─────────────────────────────────────────────────────────────
 
   public void recordWorkerIterations(
       String outcome, String provider, String model, int iterations) {
@@ -151,8 +143,6 @@ public class Metrics {
         .register(registry)
         .increment();
   }
-
-  // ─── router / LLM ───────────────────────────────────────────────────────
 
   public void recordLlmLatency(String provider, String model, String outcome, Duration elapsed) {
     Timer.builder(NS + "llm.latency")
@@ -197,16 +187,12 @@ public class Metrics {
         .increment();
   }
 
-  // ─── reviewer ───────────────────────────────────────────────────────────
-
   public void recordReviewerVerdict(String verdict) {
     Counter.builder(NS + "reviewer.verdict")
         .tag("verdict", nonNull(verdict))
         .register(registry)
         .increment();
   }
-
-  // ─── context store ──────────────────────────────────────────────────────
 
   public void recordContextSave(String result, int bytes) {
     Counter.builder(NS + "context.save")

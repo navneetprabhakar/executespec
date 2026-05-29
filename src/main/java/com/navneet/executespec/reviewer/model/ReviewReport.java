@@ -37,12 +37,12 @@ public class ReviewReport {
   private String reviewerModel; // which model did the review
   private boolean readmeUpdated; // hard gate check
 
-  // ── V1-compatible fields (populated by ReviewerAgentV2 for downstream consumers) ──
+  // V1-compatible fields (populated by ReviewerAgentV2 for downstream consumers)
   private String overallConfidence; // HIGH | MEDIUM | LOW
   @Builder.Default private List<String> mergeBlockers = List.of();
   @Builder.Default private List<String> postMergeSuggestions = List.of();
 
-  // ── Phase 3: Accuracy assessment (populated after fix phase) ──
+  // Phase 3: Accuracy assessment (populated after fix phase)
   /** Structured accuracy report: spec adherence score, endpoint coverage, missing requirements. */
   private AccuracyReport accuracyReport;
 

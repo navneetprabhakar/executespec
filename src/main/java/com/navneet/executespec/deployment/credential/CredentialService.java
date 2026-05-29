@@ -45,8 +45,6 @@ public class CredentialService {
       projectMemberRepository;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepository;
 
-  // ── Required GCP Permissions ──────────────────────────────────────────────
-
   /**
    * GCP IAM roles/permissions required for the deploy engine. Displayed to the user BEFORE they
    * upload credentials so they can configure the service account correctly.
@@ -91,8 +89,6 @@ public class CredentialService {
   public List<RequiredPermission> getRequiredPermissions() {
     return REQUIRED_PERMISSIONS;
   }
-
-  // ── Store ─────────────────────────────────────────────────────────────────
 
   /**
    * Store (or replace) a user's GCP service account key. Optionally scoped to an ExecuteSpec
@@ -169,8 +165,6 @@ public class CredentialService {
   public CredentialSummary storeCredential(String userId, String serviceAccountJson) {
     return storeCredential(userId, null, serviceAccountJson);
   }
-
-  // ── Validate ──────────────────────────────────────────────────────────────
 
   /**
    * Validate that stored credentials can authenticate to GCP and have the required permissions.
@@ -313,8 +307,6 @@ public class CredentialService {
     return results;
   }
 
-  // ── Retrieve ──────────────────────────────────────────────────────────────
-
   /** Get credential summary (no sensitive data). Resolves project → user default. */
   public Optional<CredentialSummary> getCredentialSummary(String userId) {
     return getCredentialSummary(userId, null);
@@ -331,8 +323,6 @@ public class CredentialService {
         .map(this::toSummary)
         .toList();
   }
-
-  // ── Delete ────────────────────────────────────────────────────────────────
 
   @Transactional
   public void deleteCredential(String userId) {
@@ -367,8 +357,6 @@ public class CredentialService {
     }
   }
 
-  // ── Resolution ────────────────────────────────────────────────────────────
-
   /** Resolve credential: project-level → user-level default → null. */
   private DeploymentCredential resolveCredential(String userId, String projectId) {
     if (projectId != null) {
@@ -380,8 +368,6 @@ public class CredentialService {
     // Fall back to user default
     return credentialRepo.findUserDefault(userId, "GCP").orElse(null);
   }
-
-  // ── DTOs ──────────────────────────────────────────────────────────────────
 
   public record CredentialSummary(
       String id,
@@ -406,8 +392,6 @@ public class CredentialService {
 
   public record PermissionCheck(
       String role, String label, boolean required, boolean granted, String detail) {}
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private CredentialSummary toSummary(DeploymentCredential c) {
     return new CredentialSummary(

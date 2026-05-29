@@ -33,8 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ContextSanitizer {
 
-  // ── Injection pattern detection ──────────────────────────────────────────
-
   private static final List<Pattern> INJECTION_PATTERNS =
       List.of(
           Pattern.compile("ignore\\s+previous\\s+instructions?", Pattern.CASE_INSENSITIVE),
@@ -54,7 +52,7 @@ public class ContextSanitizer {
   private static final Pattern XML_SYSTEM_TAGS =
       Pattern.compile("</?\\s*(system|instruction|prompt|context)\\s*>", Pattern.CASE_INSENSITIVE);
 
-  // ── Secret patterns in LLM output ────────────────────────────────────────
+  // Secret patterns in LLM output
 
   private static final List<Pattern> SECRET_OUTPUT_PATTERNS =
       List.of(
@@ -70,8 +68,6 @@ public class ContextSanitizer {
           Pattern.compile("(?i)password\\s*[:=]\\s*['\"]?\\S{8,}"));
 
   private static final String REDACTED = "[REDACTED]";
-
-  // ── Public API ───────────────────────────────────────────────────────────
 
   /**
    * Sanitizes user-controlled content before embedding it in a prompt.

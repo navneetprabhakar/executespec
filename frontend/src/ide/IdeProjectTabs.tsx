@@ -145,7 +145,6 @@ function Notice({msg, kind}: {msg: string; kind: 'info' | 'bad'}) {
   );
 }
 
-// ───────────────────────── Pulse ─────────────────────────
 export function IdeProjectPulse() {
   const {projectId = ''} = useParams();
   const [dash, setDash] = useState<Dash | null>(null);
@@ -397,7 +396,6 @@ export function IdeProjectPulse() {
   );
 }
 
-// ───────────────────────── Runs ─────────────────────────
 type Sub = 'runs' | 'prs';
 type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'failed';
 
@@ -942,7 +940,6 @@ export function IdeProjectRuns() {
   );
 }
 
-// ───────────────────────── Repos ─────────────────────────
 export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);

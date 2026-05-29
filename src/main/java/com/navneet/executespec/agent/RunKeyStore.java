@@ -99,8 +99,6 @@ public class RunKeyStore {
     log.debug("[RunKeyStore] Cleaned up keys for run {}", runId);
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────
-
   private void writeToRedis(String runId, ResolvedKeys keys) {
     try {
       String json = mapper.writeValueAsString(keys);

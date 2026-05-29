@@ -99,9 +99,7 @@ public class AccuracyReport {
    */
   private String nonFunctionalCoverage;
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Nested record: Endpoint coverage breakdown
-  // ──────────────────────────────────────────────────────────────────────────
 
   @Data
   @Builder
@@ -129,9 +127,7 @@ public class AccuracyReport {
     private int coveragePercent;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
   // Convenience helpers
-  // ──────────────────────────────────────────────────────────────────────────
 
   /** True if spec adherence is ≥ 90 (all critical requirements implemented). */
   public boolean isHighAccuracy() {

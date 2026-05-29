@@ -128,8 +128,6 @@ public class UiStyleResolver {
     }
   }
 
-  // ── Design Content Loading ──────────────────────────────────────────────
-
   /**
    * Load a DESIGN.md by design name. Returns truncated content, or null if not found. Results are
    * cached with TTL from config.
@@ -216,8 +214,6 @@ public class UiStyleResolver {
     return null;
   }
 
-  // ── 3-Signal Resolution ─────────────────────────────────────────────────
-
   /**
    * Resolve the design system name from 3 signals (priority order):
    *
@@ -278,8 +274,6 @@ public class UiStyleResolver {
     return null;
   }
 
-  // ── Token Truncation ────────────────────────────────────────────────────
-
   /**
    * Truncate DESIGN.md to fit within token budget. Keeps sections 1-5 (theme, colors, typography,
    * components, layout). Drops sections 6-9 (elevation, do/don't, responsive, agent guide) if over
@@ -304,8 +298,6 @@ public class UiStyleResolver {
     }
     return trimmed.toString();
   }
-
-  // ── Frontend Constraint Block ───────────────────────────────────────────
 
   /**
    * Build the frontend constraint block to inject into worker task assignment. Uses loaded
@@ -391,7 +383,7 @@ RULES (NON-NEGOTIABLE):
     }
   }
 
-  // ── Legacy API (backward compat) ────────────────────────────────────────
+  // Legacy API (backward compat)
 
   /** Returns the full theme JSON for a given theme ID. */
   public String getThemeJson(String themeId) {
@@ -510,8 +502,6 @@ RULES (NON-NEGOTIABLE):
   public Set<String> getAvailableDesigns() {
     return availableDesigns;
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private boolean isBackendOnly(String projectType) {
     if (projectType == null) return false;

@@ -244,7 +244,7 @@ public class ReferralService {
     return java.util.UUID.randomUUID().toString().replace("-", "");
   }
 
-  // ── DTOs / records (unchanged from Wave 2 wire) ─────────────────────────
+  // DTOs / records (unchanged from Wave 2 wire)
 
   public enum InviteStatus {
     PENDING,

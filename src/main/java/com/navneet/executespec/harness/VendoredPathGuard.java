@@ -336,8 +336,6 @@ public class VendoredPathGuard {
     }
   }
 
-  // ── helpers ──────────────────────────────────────────────────────────────
-
   private Set<String> readExistingPatterns(Path gitignore) throws IOException {
     Set<String> out = new LinkedHashSet<>();
     if (!Files.exists(gitignore)) return out;

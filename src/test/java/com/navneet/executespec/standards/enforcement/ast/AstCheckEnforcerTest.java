@@ -23,8 +23,6 @@ class AstCheckEnforcerTest {
     return new Standard.AstCheckEnforcement(kind, params, null);
   }
 
-  // ── forbidden-import ────────────────────────────────────────────────────
-
   @Test
   void forbiddenImport_javaFlagsExactAndSubpackage() {
     Path f = Path.of("src/main/java/com/acme/Foo.java");
@@ -70,8 +68,6 @@ class AstCheckEnforcerTest {
             fakeReader(files));
     assertThat(v).isEmpty();
   }
-
-  // ── naming-pattern ──────────────────────────────────────────────────────
 
   @Test
   void namingPattern_javaClassMustEndWithService() {
@@ -124,8 +120,6 @@ class AstCheckEnforcerTest {
     assertThat(v).isEmpty(); // logged but not thrown
   }
 
-  // ── dependency-direction ────────────────────────────────────────────────
-
   @Test
   void dependencyDirection_layerViolationDetected() {
     Path apiFile = Path.of("src/main/java/com/acme/api/Controller.java");
@@ -147,8 +141,6 @@ class AstCheckEnforcerTest {
     assertThat(v).hasSize(1);
     assertThat(v.get(0).file()).contains("domain/User.java");
   }
-
-  // ── Misc ────────────────────────────────────────────────────────────────
 
   @Test
   void unknownRuleKind_returnsEmpty_doesNotThrow() {

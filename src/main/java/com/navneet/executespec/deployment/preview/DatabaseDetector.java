@@ -21,8 +21,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DatabaseDetector {
 
-  // ── Pattern sets ─────────────────────────────────────────────────────────
-
   // PostgreSQL indicators
   private static final Pattern PG_MAVEN = Pattern.compile("org\\.postgresql|postgresql");
   private static final Pattern PG_NPM =
@@ -135,7 +133,7 @@ public class DatabaseDetector {
     return null;
   }
 
-  // ── Detection in a single directory ──────────────────────────────────────
+  // Detection in a single directory
 
   private DatabaseType detectInDir(Path dir) {
     DatabaseType prisma = checkPrismaSchema(dir);
@@ -151,8 +149,6 @@ public class DatabaseDetector {
     return python;
   }
 
-  // ── Prisma schema ────────────────────────────────────────────────────────
-
   private DatabaseType checkPrismaSchema(Path dir) {
     Path schema = dir.resolve("prisma/schema.prisma");
     if (!Files.isRegularFile(schema)) return null;
@@ -166,8 +162,6 @@ public class DatabaseDetector {
     // Prisma exists but provider unclear → default PG
     return DatabaseType.POSTGRESQL;
   }
-
-  // ── Spring config ────────────────────────────────────────────────────────
 
   private DatabaseType checkSpringConfig(Path dir) {
     for (String fileName :
@@ -188,7 +182,7 @@ public class DatabaseDetector {
     return null;
   }
 
-  // ── Java (Maven / Gradle) ────────────────────────────────────────────────
+  // Java (Maven / Gradle)
 
   private DatabaseType checkJavaDeps(Path dir) {
     // Check pom.xml
@@ -218,7 +212,7 @@ public class DatabaseDetector {
     return null;
   }
 
-  // ── Node.js (package.json) ───────────────────────────────────────────────
+  // Node.js (package.json)
 
   private DatabaseType checkNodeDeps(Path dir) {
     String pkg = readSafe(dir.resolve("package.json"));
@@ -237,8 +231,6 @@ public class DatabaseDetector {
 
     return null;
   }
-
-  // ── Python ───────────────────────────────────────────────────────────────
 
   private DatabaseType checkPythonDeps(Path dir) {
     String content = null;
@@ -310,8 +302,6 @@ public class DatabaseDetector {
     }
     return false;
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private String readSafe(Path file) {
     if (file == null || !Files.isRegularFile(file)) return null;

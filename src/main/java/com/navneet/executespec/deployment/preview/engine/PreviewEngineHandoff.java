@@ -103,8 +103,6 @@ public class PreviewEngineHandoff {
     client.unregister(previewId);
   }
 
-  // ───────────────────────── combo mapping ─────────────────────────
-
   private static String comboFor(PreviewProjectType type) {
     return switch (type) {
       case NODE_FRONTEND -> "node-frontend";

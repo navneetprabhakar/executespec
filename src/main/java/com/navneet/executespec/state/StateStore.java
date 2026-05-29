@@ -42,14 +42,11 @@ public class StateStore {
   private final CompactionEventRepository compactionEventRepo;
   private final ObjectMapper mapper;
 
-  // ── Tier 5 repositories ───────────────────────────────────
   private final RunRecoveryRepository recoveryRepo;
   private final PromptAuditRepository promptAuditRepo;
   private final AppUserRepository appUserRepo;
   private final PlanVersionRepository planVersionRepo;
   private final ModelRegistry modelRegistry;
-
-  // ── Run lifecycle ─────────────────────────────────────────
 
   /** CLI path: creates run with no repo info. */
   public PipelineRun createRun(
@@ -91,7 +88,7 @@ public class StateStore {
   public void savePlan(String runId, TaskPlan plan) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
 
-    // ── Make task IDs globally unique ────────────────────────────────────
+    // Make task IDs globally unique
     // agent_task PK is task_id alone (not composite with run_id).
     // Planner generates predictable IDs like "project_setup", "readme" — if
     // two runs use the same IDs, a stale pipeline thread from run A can
@@ -148,8 +145,6 @@ public class StateStore {
     // by the controller thread (race condition: findById may return stale entity)
     runRepo.updateStatusAndClearGate(runId, "WORKING");
   }
-
-  // ── Plan versioning ──────────────────────────────────────
 
   public void savePlanVersion(String runId, String source, String createdBy) {
     PipelineRun run = findRun(runId).orElseThrow();
@@ -279,7 +274,7 @@ public class StateStore {
     finaliseRun(runRepo.findById(runId).orElseThrow(), "PARTIAL", reason);
   }
 
-  // ── Tier 8: API spec + preview markers ───────────────────────────────────
+  // Tier 8: API spec + preview markers
 
   /**
    * Marks the run as having a generated OpenAPI spec (set after ApiTestSuiteAgent writes
@@ -385,8 +380,6 @@ public class StateStore {
               runRepo.save(run);
             });
   }
-
-  // ── Task lifecycle ────────────────────────────────────────
 
   public boolean lockTask(String taskId, String model, String branchName) {
     return taskRepo.lockAndStart(taskId, model, branchName, Instant.now()) > 0;
@@ -541,8 +534,6 @@ public class StateStore {
             });
   }
 
-  // ── Batch execution state ──────────────────────────────────────────────
-
   public void setBatchInfo(String runId, String batchId, String batchProvider) {
     runRepo
         .findById(runId)
@@ -579,8 +570,6 @@ public class StateStore {
   public java.util.List<PipelineRun> findRunsByStatusIn(java.util.List<String> statuses) {
     return runRepo.findByStatusIn(statuses);
   }
-
-  // ── Batch task helpers ──────────────────────────────────────────────────
 
   /** Mark a task as COMPLETE (batch mode — no WorkerReport). */
   public void markTaskComplete(String taskId) {
@@ -715,7 +704,7 @@ public class StateStore {
     return taskRepo.findByRunId(runId);
   }
 
-  // ── Gate events (Tier 4 timeline) ─────────────────────────
+  // Gate events (Tier 4 timeline)
 
   public String recordGateOpened(String runId, String gateType) {
     String id = UUID.randomUUID().toString();
@@ -735,15 +724,13 @@ public class StateStore {
             });
   }
 
-  // ── Resume ────────────────────────────────────────────────
-
   public Optional<PipelineRun> findResumableRun() {
     return runRepo.findTopByStatusInOrderByStartedAtDesc(
         List.of(
             "PLANNING", "AWAITING_APPROVAL", "WORKING", "STUCK", "REVIEWING", "AWAITING_MERGE"));
   }
 
-  // ── Tier 3: REST API queries ──────────────────────────────
+  // Tier 3: REST API queries
 
   public Page<PipelineRun> listRuns(String status, Pageable pageable) {
     if (status != null && !status.isBlank()) {
@@ -1128,7 +1115,7 @@ public class StateStore {
         sumOut != null ? sumOut : 0);
   }
 
-  // ── Tier 4: Timeline and model comparison ─────────────────
+  // Tier 4: Timeline and model comparison
 
   public TimelineData buildTimeline(String runId) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
@@ -1282,8 +1269,6 @@ public class StateStore {
       double avgOutputTokensPerTask,
       int compactionCount) {}
 
-  // ── Per-user run statistics ───────────────────────────────
-
   public record UserRunsSummaryData(List<UserRunStat> users) {}
 
   public record UserRunStat(
@@ -1365,8 +1350,6 @@ public class StateStore {
     return new UserRunsSummaryData(stats);
   }
 
-  // ── Logging ───────────────────────────────────────────────
-
   public void logMessage(
       String runId, String from, String to, String type, String summary, int tokenCost) {
     messageRepo.save(
@@ -1381,8 +1364,6 @@ public class StateStore {
             .tokenCost(tokenCost)
             .build());
   }
-
-  // ── Tier 5: Stuck detection ───────────────────────────────
 
   /** Find runs in any of the given statuses (used by OrphanedRunWatchdog). */
   public List<PipelineRun> findRunsByStatuses(List<String> statuses) {
@@ -1475,8 +1456,6 @@ public class StateStore {
             });
   }
 
-  // ── Tier 5: Task log ──────────────────────────────────────
-
   public List<String> getTaskEventLog(String taskId, int limit) {
     return messageRepo.findTop20ByTaskIdOrderBySentAtDesc(taskId).stream()
         .limit(limit)
@@ -1504,8 +1483,6 @@ public class StateStore {
             });
   }
 
-  // ── Tier 5: Escalation ────────────────────────────────────
-
   public AgentTask getTask(String taskId) {
     return taskRepo.findById(taskId).orElseThrow();
   }
@@ -1524,8 +1501,6 @@ public class StateStore {
               taskRepo.save(task);
             });
   }
-
-  // ── Subtask decomposition ─────────────────────────────────────────────────
 
   /**
    * Creates subtask DB rows for a decomposed multi-file task. Each subtask gets its own AgentTask
@@ -1714,7 +1689,7 @@ public class StateStore {
             });
   }
 
-  // ── Tier 5: Prompt Optimiser support ─────────────────────
+  // Tier 5: Prompt Optimiser support
 
   public List<PipelineRun> getRecentCompletedRuns(int limit) {
     // status=COMPLETE AND startedAt non-null. Excludes never-started benchmark /generate rows
@@ -1748,8 +1723,6 @@ public class StateStore {
             })
         .orElse(null);
   }
-
-  // ── Post-run conversation ─────────────────────────────────
 
   /**
    * Appends a single message to the run's chat history JSON and increments the chat message
@@ -1832,8 +1805,6 @@ public class StateStore {
       return new ArrayList<>();
     }
   }
-
-  // ── Apply suggestion tasks ──────────────────────────────────
 
   /**
    * Appends suggestion tasks to an existing run's plan. Task IDs are prefixed to indicate their
@@ -1940,8 +1911,6 @@ public class StateStore {
             });
   }
 
-  // ── GCS workspace archiving ───────────────────────────────
-
   /**
    * Returns runs eligible for GCS archiving: terminal state, completed more than {@code cutoff}
    * hours ago, not yet archived. Processed in batches of 50 to avoid loading too many records into
@@ -1983,8 +1952,6 @@ public class StateStore {
   public List<PipelineRun> findTerminalRunsWithoutGcsKey(Instant cutoff) {
     return runRepo.findTerminalRunsWithoutGcsKey(cutoff, PageRequest.of(0, 50));
   }
-
-  // ── Tech stack detection ─────────────────────────────────
 
   /**
    * Detects the technology stack from the plan and user request. Returns a comma-separated string
@@ -2104,8 +2071,6 @@ public class StateStore {
 
     return found.isEmpty() ? null : String.join(",", found);
   }
-
-  // ── Helpers ───────────────────────────────────────────────
 
   /**
    * Common terminal-state mutation: sets status, clears the approval gate, stamps completedAt, and

@@ -44,8 +44,6 @@ public record InfrastructureManifest(
     return database != null || cache != null || queue != null || storage != null;
   }
 
-  // ── Nested requirement records ────────────────────────────────────────────
-
   public record DatabaseRequirement(
       DatabaseType type, String detectedFrom // e.g., "spring-boot-starter-data-jpa in pom.xml"
       ) {}

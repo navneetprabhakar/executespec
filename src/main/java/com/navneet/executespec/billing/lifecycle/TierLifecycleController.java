@@ -43,8 +43,6 @@ public class TierLifecycleController {
   /** Request body for {@code PUT /api/admin/billing-plans/{planId}/lifecycle}. */
   public record PlanLifecycleUpdateRequest(String state, String reason) {}
 
-  // ── Tier-level routes ────────────────────────────────────────────────────
-
   @GetMapping("/tiers")
   public ResponseEntity<List<TierLifecycleService.TierLifecycleDto>> listTiers() {
     return ResponseEntity.ok(lifecycleService.listAll());
@@ -82,7 +80,7 @@ public class TierLifecycleController {
     return ResponseEntity.ok(saved);
   }
 
-  // ── Plan-level routes (per-cycle overrides) ─────────────────────────────
+  // Plan-level routes (per-cycle overrides)
 
   @PutMapping("/billing-plans/{planId}/lifecycle")
   public ResponseEntity<BillingPlan> updatePlanLifecycle(
@@ -102,8 +100,6 @@ public class TierLifecycleController {
         userDetails.getUser().getId());
     return ResponseEntity.ok(saved);
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private static LifecycleState parseState(String raw) {
     if (raw == null) {

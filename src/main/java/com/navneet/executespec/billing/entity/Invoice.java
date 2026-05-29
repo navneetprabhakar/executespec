@@ -36,8 +36,6 @@ public class Invoice {
   @Column(name = "sequence_in_year", nullable = false)
   private int sequenceInYear;
 
-  // ── Relations ──────────────────────────────────────────────────
-
   @Column(name = "user_id", nullable = false)
   private String userId;
 
@@ -53,8 +51,6 @@ public class Invoice {
   @Column(name = "topup_id")
   private UUID topupId;
 
-  // ── Type & Status ──────────────────────────────────────────────
-
   /** SUBSCRIPTION, TOPUP, CREDIT_NOTE */
   @Column(name = "invoice_type", nullable = false, length = 20)
   private String invoiceType;
@@ -64,7 +60,7 @@ public class Invoice {
   @Builder.Default
   private String status = "DRAFT";
 
-  // ── Amounts (in paise / smallest currency unit) ────────────────
+  // Amounts (in paise / smallest currency unit)
 
   @Column(length = 3, nullable = false)
   @Builder.Default
@@ -91,8 +87,6 @@ public class Invoice {
 
   @Column(name = "total_amount", nullable = false)
   private long totalAmount;
-
-  // ── GST Rates ──────────────────────────────────────────────────
 
   @Column(name = "cgst_rate")
   @Builder.Default
@@ -121,8 +115,6 @@ public class Invoice {
   @Builder.Default
   private String sacCode = "998314";
 
-  // ── Seller snapshot ────────────────────────────────────────────
-
   @Column(name = "seller_gstin", length = 15)
   private String sellerGstin;
 
@@ -134,8 +126,6 @@ public class Invoice {
 
   @Column(name = "seller_state_code", length = 2)
   private String sellerStateCode;
-
-  // ── Buyer snapshot ─────────────────────────────────────────────
 
   @Column(name = "buyer_gstin", length = 15)
   private String buyerGstin;
@@ -149,8 +139,6 @@ public class Invoice {
   @Column(name = "buyer_state_code", length = 2)
   private String buyerStateCode;
 
-  // ── Payment reference ──────────────────────────────────────────
-
   @Column(name = "gateway_payment_id", length = 100)
   private String gatewayPaymentId;
 
@@ -162,8 +150,6 @@ public class Invoice {
 
   @Column(name = "paid_at")
   private Instant paidAt;
-
-  // ── PDF ─────────────────────────────────────────────────────────
 
   @Column(name = "pdf_storage_path", length = 500)
   private String pdfStoragePath;
@@ -184,15 +170,11 @@ public class Invoice {
   @Column(name = "gateway_pdf_url", columnDefinition = "TEXT")
   private String gatewayPdfUrl;
 
-  // ── Credit note reference ──────────────────────────────────────
-
   @Column(name = "original_invoice_id")
   private UUID originalInvoiceId;
 
   @Column(name = "credit_note_reason", columnDefinition = "TEXT")
   private String creditNoteReason;
-
-  // ── Dates ───────────────────────────────────────────────────────
 
   @Column(name = "invoice_date", nullable = false)
   private LocalDate invoiceDate;

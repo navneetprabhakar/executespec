@@ -2,8 +2,6 @@ import {ReactNode} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import {ArrowLeft, HomeIcon, Check, Plus, Chat, More} from '@/signal/icons/icons';
 
-// ─────────── TopBar ───────────
-
 interface TopBarProps {
   title: string;
   sub?: string;
@@ -40,7 +38,7 @@ export function TopBar({title, sub, back, backTo, actions, avatar}: TopBarProps)
   );
 }
 
-// ─────────── TabBar (bottom) ───────────
+// TabBar (bottom)
 
 interface TabBarProps {
   active?: 'home' | 'runs' | 'chat' | 'more';
@@ -70,8 +68,6 @@ export function TabBar({active}: TabBarProps) {
   );
 }
 
-// ─────────── SectionHeader ───────────
-
 export function SectionHeader({children, action}: {children: ReactNode; action?: ReactNode}) {
   return (
     <div className='signal-section-h'>
@@ -80,8 +76,6 @@ export function SectionHeader({children, action}: {children: ReactNode; action?:
     </div>
   );
 }
-
-// ─────────── IconButton ───────────
 
 export function IconButton({
   children,

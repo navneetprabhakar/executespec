@@ -28,8 +28,6 @@ class ValidationReportServiceSpecAwareScoringTest {
       new ValidationReportService(
           null, null, null, null, null, null, mock(FeatureFlagService.class));
 
-  // ── testFactorFromCoverageLevel helper ──────────────────────────────────
-
   @Test
   void testFactor_comprehensive_givesFullCredit() {
     assertEquals(1.0, ValidationReportService.testFactorFromCoverageLevel("COMPREHENSIVE"));
@@ -69,7 +67,7 @@ class ValidationReportServiceSpecAwareScoringTest {
     assertEquals(0.3, ValidationReportService.testFactorFromCoverageLevel("none"));
   }
 
-  // ── Multiplicative — the headline bug fix ───────────────────────────────
+  // Multiplicative — the headline bug fix
 
   @Test
   void verifiedScore_helloWorld_spec_now_scores_100() {
@@ -118,7 +116,7 @@ class ValidationReportServiceSpecAwareScoringTest {
     assertEquals(30, score);
   }
 
-  // ── Rubric — same fix, additive shape ───────────────────────────────────
+  // Rubric — same fix, additive shape
 
   @Test
   void rubric_helloWorld_spec_now_scores_100() {
@@ -152,7 +150,7 @@ class ValidationReportServiceSpecAwareScoringTest {
     assertEquals(86, score);
   }
 
-  // ── Reality check: the user's exact smoke-run inputs ────────────────────
+  // Reality check: the user's exact smoke-run inputs
 
   @Test
   void smoke_run_anthropic_hello_py_scores_100_after_PR_R() {

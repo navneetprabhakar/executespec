@@ -99,8 +99,6 @@ CMD ["nginx", "-g", "daemon off;"]
         .formatted(framework, frontend ? "SPA/static build → nginx" : "server app → npm start");
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private boolean isFrontendOnly(String pkgJson, Path workspacePath) {
     // Explicit server-side frameworks → always server mode
     if (pkgJson.contains("\"express\"")

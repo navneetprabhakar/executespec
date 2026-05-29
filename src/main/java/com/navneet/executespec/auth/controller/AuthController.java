@@ -200,7 +200,7 @@ public class AuthController {
         .body(bundle.zipBytes());
   }
 
-  // ── Personal Access Tokens (programmatic auth for CLI / VS Code / CI) ──────
+  // Personal Access Tokens (programmatic auth for CLI / VS Code / CI)
 
   /**
    * Create a Personal Access Token for the authenticated user. The plaintext credential is returned
@@ -241,8 +241,6 @@ public class AuthController {
         userDetails.getUser(), "USER_PAT_REVOKED", "{\"tokenId\":\"" + tokenId + "\"}");
     return ResponseEntity.noContent().build();
   }
-
-  // ── GitHub settings ───────────────────────────────────────────────────────
 
   record GitHubSettingsRequest(String githubPat, String githubOwner) {}
 
@@ -308,8 +306,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── Bitbucket settings ─────────────────────────────────────────────────────
-
   record BitbucketSettingsRequest(
       String bitbucketUsername,
       String bitbucketAppPassword,
@@ -347,8 +343,6 @@ public class AuthController {
 
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── AI provider key settings ─────────────────────────────────────────────
 
   record AiKeySettingsRequest(String openAiApiKey, String anthropicApiKey, String geminiApiKey) {}
 
@@ -388,8 +382,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── JIRA settings ─────────────────────────────────────────────────────────
-
   record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
 
   @PutMapping("/settings/jira")
@@ -417,8 +409,6 @@ public class AuthController {
 
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── Confluence settings ───────────────────────────────────────────────────
 
   record ConfluenceSettingsRequest(
       String confluenceBaseUrl, String confluenceEmail, String confluenceApiToken) {}
@@ -450,8 +440,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── View mode settings ─────────────────────────────────────────────────────
-
   record ViewModeRequest(String viewMode) {}
 
   @PutMapping("/settings/view-mode")
@@ -468,8 +456,6 @@ public class AuthController {
     log.info("User {} updated view mode to {}", user.getId(), mode);
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── Validation endpoints ──────────────────────────────────────────────────
 
   record ValidateGitHubRequest(String pat, String owner) {}
 
@@ -620,8 +606,6 @@ public class AuthController {
   private static final HttpClient HTTP_CLIENT =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
   }
@@ -717,8 +701,6 @@ public class AuthController {
     cookie.setMaxAge(REFRESH_COOKIE_MAX_AGE_SECONDS);
     response.addCookie(cookie);
   }
-
-  // ── GDPR right-to-erasure ─────────────────────────────────────────────────
 
   /**
    * Soft-deletes all completed/failed runs belonging to the authenticated user. Active runs

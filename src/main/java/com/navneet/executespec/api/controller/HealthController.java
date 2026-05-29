@@ -50,7 +50,7 @@ public class HealthController {
   private final StateStore stateStore;
   private final RedisConnectionFactory redisConnectionFactory;
 
-  // ── Cached state (refreshed every 30s) ───────────────────────────────────
+  // Cached state (refreshed every 30s)
   private final AtomicBoolean cachedDbUp = new AtomicBoolean(false);
   private final AtomicBoolean cachedRedisUp = new AtomicBoolean(false);
   private final AtomicReference<MetricsData> cachedMetrics =
@@ -103,8 +103,6 @@ public class HealthController {
     return dbUp ? ResponseEntity.ok(body) : ResponseEntity.status(503).body(body);
   }
 
-  // ── Cached refresh ───────────────────────────────────────────────────────
-
   private void refreshCacheIfStale() {
     Instant last = lastCacheRefresh.get();
     if (Duration.between(last, Instant.now()).toMillis() > CACHE_INTERVAL_MS) {
@@ -128,7 +126,7 @@ public class HealthController {
     }
   }
 
-  // ── Live checks (used by refresh + readiness) ────────────────────────────
+  // Live checks (used by refresh + readiness)
 
   private boolean checkDatabase() {
     try (var conn = dataSource.getConnection()) {

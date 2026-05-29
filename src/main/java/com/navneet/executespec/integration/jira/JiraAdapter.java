@@ -32,8 +32,6 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
     return "JIRA";
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
     // Fail CLOSED when no secret is configured — refuse the webhook rather than accept any
@@ -131,8 +129,6 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
     }
   }
 
-  // ── Manual trigger ─────────────────────────────────────────────────────────
-
   /**
    * Build an IntegrationEvent by fetching a Jira issue directly via REST API. Mirrors
    * ConfluenceAdapter.buildFromPageId() — used by the manual trigger endpoint.
@@ -183,8 +179,6 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
         ac,
         config.isSkipApproval());
   }
-
-  // ── Outbound ──────────────────────────────────────────────────────────────
 
   @Override
   public void onRunStarted(IntegrationRun ir, PipelineRun run) {

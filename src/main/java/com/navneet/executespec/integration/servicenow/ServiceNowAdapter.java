@@ -31,8 +31,6 @@ public class ServiceNowAdapter implements InboundAdapter, OutboundAdapter {
     return "SERVICENOW";
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
     String signatureHeader = headers.get("x-servicenow-signature");
@@ -131,8 +129,6 @@ public class ServiceNowAdapter implements InboundAdapter, OutboundAdapter {
       return Optional.empty();
     }
   }
-
-  // ── Outbound ──────────────────────────────────────────────────────────────
 
   @Override
   public void onRunStarted(IntegrationRun ir, PipelineRun run) {

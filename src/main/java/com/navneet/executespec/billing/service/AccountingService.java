@@ -30,7 +30,7 @@ public class AccountingService {
   private final AccountingEntryRepository entryRepo;
   private final InvoiceRepository invoiceRepo;
 
-  // ── Record entries on invoice events ─────────────────────────────────────
+  // Record entries on invoice events
 
   @Transactional
   public void recordRevenueEntry(Invoice invoice) {
@@ -80,8 +80,6 @@ public class AccountingService {
     log.info("Recorded refund entries: journalRef={}, total={}", journalRef, total);
   }
 
-  // ── Revenue metrics ──────────────────────────────────────────────────────
-
   public record RevenueMetrics(
       long totalCollections, long totalRevenue, long totalTax, long mrr, long arr) {}
 
@@ -103,8 +101,6 @@ public class AccountingService {
 
     return new RevenueMetrics(c, r, t, mrr, mrr * 12);
   }
-
-  // ── GST summary ──────────────────────────────────────────────────────────
 
   public record GstSummary(
       long cgstCollected,
@@ -134,8 +130,6 @@ public class AccountingService {
 
     return new GstSummary(cgst, sgst, igst, cgst + sgst + igst, financialYear, quarter);
   }
-
-  // ── GSTR-1 export ────────────────────────────────────────────────────────
 
   @Transactional(readOnly = true)
   public byte[] exportGstr1(String financialYear, int quarter) {
@@ -182,8 +176,6 @@ public class AccountingService {
     return baos.toByteArray();
   }
 
-  // ── Trial balance ────────────────────────────────────────────────────────
-
   public record TrialBalanceEntry(String account, long debitTotal, long creditTotal) {}
 
   @Transactional(readOnly = true)
@@ -209,14 +201,10 @@ public class AccountingService {
         .toList();
   }
 
-  // ── Entries listing ──────────────────────────────────────────────────────
-
   @Transactional(readOnly = true)
   public Page<AccountingEntry> getEntries(LocalDate from, LocalDate to, Pageable pageable) {
     return entryRepo.findByEntryDateBetweenOrderByEntryDateDesc(from, to, pageable);
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private AccountingEntry buildEntry(
       String journalRef, String account, String entryType, long amount, Invoice invoice) {

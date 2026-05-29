@@ -62,8 +62,6 @@ class ProjectServiceLifecycleTest {
     when(projectRepo.save(any(Project.class))).thenAnswer(inv -> inv.getArgument(0));
   }
 
-  // ── helpers ─────────────────────────────────────────────────────────────
-
   private Project active(String id) {
     return Project.builder().id(id).orgId("org-1").name("Test").createdBy("u-1").build();
   }
@@ -80,8 +78,6 @@ class ProjectServiceLifecycleTest {
     p.setDeletedAt(Instant.now());
     return p;
   }
-
-  // ── archive ─────────────────────────────────────────────────────────────
 
   @Test
   void archive_stampsTimestampAndStatus() {
@@ -113,8 +109,6 @@ class ProjectServiceLifecycleTest {
         .isEqualTo(HttpStatus.CONFLICT);
   }
 
-  // ── unarchive ───────────────────────────────────────────────────────────
-
   @Test
   void unarchive_clearsTimestampAndStatus() {
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(archived("p-1")));
@@ -144,8 +138,6 @@ class ProjectServiceLifecycleTest {
         .extracting(e -> ((ResponseStatusException) e).getStatusCode())
         .isEqualTo(HttpStatus.CONFLICT);
   }
-
-  // ── soft-delete ─────────────────────────────────────────────────────────
 
   @Test
   void softDelete_stampsTimestampAndRecordsAudit() {
@@ -181,8 +173,6 @@ class ProjectServiceLifecycleTest {
         .isEqualTo(HttpStatus.NOT_FOUND);
   }
 
-  // ── restore ─────────────────────────────────────────────────────────────
-
   @Test
   void restore_clearsDeletedAtAndPreservesStatus() {
     Project p = deleted("p-1");
@@ -208,7 +198,7 @@ class ProjectServiceLifecycleTest {
         .isEqualTo(HttpStatus.NOT_FOUND);
   }
 
-  // ── RL-2026-05-044 — cross-org project visibility (accepted-invite member) ──
+  // RL-2026-05-044 — cross-org project visibility (accepted-invite member)
 
   @Test
   void listProjectsForUser_includes_cross_org_member_projects() {
