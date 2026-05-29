@@ -918,3 +918,167 @@
   border-top: 1px solid var(--ide-border);
   margin: 12px 0;
 }
+
+/* ── Plan-gate indicator (RL-2026-05-052, control-plane reframe) ───────────── */
+.ide-gate-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.ide-gate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ide-yellow);
+  border: 1px solid var(--ide-yellow);
+  background: rgba(229, 165, 10, 0.14);
+  background: color-mix(in srgb, var(--ide-yellow) 16%, transparent);
+}
+.ide-gate-badge:hover {
+  filter: brightness(1.12);
+}
+.ide-gate-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ide-gate-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ide-gate-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.ide-gate-pop {
+  position: absolute;
+  right: 0;
+  z-index: 60;
+  min-width: 260px;
+  max-width: 360px;
+  background: var(--ide-bg-widget);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--ide-shadow);
+  overflow: hidden;
+}
+.ide-gate-pop.up {
+  bottom: calc(100% + 6px);
+}
+.ide-gate-pop.down {
+  top: calc(100% + 6px);
+}
+.ide-gate-pop-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ide-fg-muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ide-border);
+}
+.ide-gate-pop-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ide-fg);
+}
+.ide-gate-pop-item:hover {
+  background: var(--ide-hover);
+}
+.ide-gate-pop-title {
+  font-size: 12px;
+}
+.ide-gate-pop-meta {
+  font-size: 10px;
+  color: var(--ide-fg-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Run timeline (RL-2026-05-052, #6 — plan gate + result share this) ─────── */
+.ide-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+.ide-timeline-node {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ide-timeline-node:not(:last-child) {
+  padding-bottom: 14px;
+}
+.ide-timeline-node:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 16px;
+  bottom: 0;
+  width: 2px;
+  background: var(--ide-border);
+}
+.ide-timeline-dot {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-top: 3px;
+  border: 2px solid var(--ide-border-strong);
+  background: var(--ide-bg-editor);
+  z-index: 1;
+}
+.ide-timeline-dot.done {
+  background: var(--ide-green);
+  border-color: var(--ide-green);
+}
+.ide-timeline-dot.failed {
+  background: var(--ide-red);
+  border-color: var(--ide-red);
+}
+.ide-timeline-dot.running {
+  background: var(--ide-yellow);
+  border-color: var(--ide-yellow);
+  animation: ide-gate-pulse 1.6s ease-in-out infinite;
+}
+.ide-timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.ide-timeline-title {
+  font-size: 13px;
+  color: var(--ide-fg);
+}
+.ide-timeline-state {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ide-fg-muted);
+}
+.ide-timeline-state.done {
+  color: var(--ide-green);
+}
+.ide-timeline-state.failed {
+  color: var(--ide-red);
+}
+.ide-timeline-state.running {
+  color: var(--ide-yellow);
+}

@@ -23,14 +23,14 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Environment is sanitized to a whitelist ({@code PATH}, {@code HOME}, {@code DOCKER_HOST}) —
  * matches V1 behavior to avoid leaking secrets to subprocesses.
  *
- * <p>Output is truncated to {@value #MAX_OUTPUT_CHARS} chars (4 KB), keeping head + tail with an
- * explicit omission marker.
+ * <p>Output is budgeted (#6): small output returns inline; larger output is persisted in full to
+ * {@code .agent-context/tool-output/} and the worker gets a head+tail preview plus a readFile path
+ * for the complete text (see {@link ToolOutput}).
  */
 @Component
 @Slf4j
 public class ShellTool implements Tool {
 
-  static final int MAX_OUTPUT_CHARS = 4_000;
   static final int DEFAULT_TIMEOUT_SEC = 60;
   static final int MAX_TIMEOUT_SEC = 300;
 
@@ -62,9 +62,11 @@ public class ShellTool implements Tool {
 
   @Override
   public String description() {
-    return "Executes a sandboxed shell command in the run's workspace. Use for build commands, "
-        + "test runs, package installs. Subshells ($(...)) and backticks are blocked. "
-        + "Output is truncated to ~4KB.";
+    return "Executes a sandboxed shell command in the run's workspace. Use for build commands, test"
+        + " runs, package installs, and running your reproduction script. Subshells ($(...))"
+        + " and backticks are blocked. Large output is saved to a file — you'll get a"
+        + " preview plus a path you can readFile for the complete output (e.g. a full"
+        + " failure trace).";
   }
 
   @Override
@@ -172,8 +174,14 @@ public class ShellTool implements Tool {
       }
       String output = new String(proc.getInputStream().readAllBytes());
       int exit = proc.exitValue();
-      String truncated = truncate(output);
-      String result = "exit=" + exit + "\n" + truncated;
+      // Output budget (#6): large output is persisted to .agent-context/tool-output and the worker
+      // gets a preview + a readFile path, so it can see a FULL failure trace instead of a 4 KB
+      // fragment (the inline preview alone could not show why a test failed).
+      String result =
+          "exit="
+              + exit
+              + "\n"
+              + ToolOutput.budget(ctx, "shell", output, ToolOutput.DEFAULT_INLINE_CAP);
       // Non-zero exits are still Ok results — the LLM needs to see stderr to react.
       return ToolResult.ok(result);
     } catch (IOException ioe) {
@@ -183,17 +191,5 @@ public class ShellTool implements Tool {
       Thread.currentThread().interrupt();
       return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
     }
-  }
-
-  private static String truncate(String s) {
-    if (s.length() <= MAX_OUTPUT_CHARS) return s;
-    int tail = Math.min(1_000, MAX_OUTPUT_CHARS / 4);
-    int head = MAX_OUTPUT_CHARS - tail;
-    int omitted = s.length() - MAX_OUTPUT_CHARS;
-    return s.substring(0, head)
-        + "\n...["
-        + omitted
-        + " chars omitted]...\n"
-        + s.substring(s.length() - tail);
   }
 }

@@ -7,9 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
-import com.navneet.executespec.agent.WorkerAgent;
-import com.navneet.executespec.agent.WorkerResult;
-import com.navneet.executespec.agent.WorkerTaskRequest;
+import com.navneet.executespec.engine.WorkerAgent;
+import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
@@ -99,6 +99,38 @@ tool — attempts to call it return FORBIDDEN. Do not run shell commands that
 mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
 `git push`). Edit files; call completeTask. That's it.
 
+FIXING A BUG IN EXISTING CODE — localize, reproduce, fix small, verify.
+When the task is to FIX a defect in code that ALREADY EXISTS (not scaffold a new
+feature), follow this discipline — it is what separates a fix that lands from one
+that only looks plausible:
+  1. LOCALIZE precisely first. Use searchFiles (or `grep -rn <symbol>`) to find
+     the exact file + function the bug lives in, then read only those one or two
+     files — not the whole repo. Reading without editing is NOT progress; the
+     moment you have found the spot, make the edit.
+  2. REPRODUCE before fixing. Write a tiny throwaway script (e.g. /tmp/repro.py —
+     NEVER inside the repo, so it stays out of your diff) that triggers the bug
+     and run it to confirm it fails as described. If you cannot reproduce it you
+     have not localized it — keep looking, do not guess-edit.
+  3. FIX minimally. Change only the lines required. Do NOT reformat, reorder
+     imports, refactor, or edit files unrelated to the fix. A 3-line fix that
+     resolves the issue beats a 40-line fix that also "cleans up."
+  4. VERIFY before completeTask. Re-run your repro and confirm it now passes (and
+     run the existing test nearest the change if one exists). A patch you have not
+     re-run is not done — only then call completeTask.
+
+Report honestly + recover deliberately:
+- Report outcomes faithfully. If a build or test fails, say so with the actual output — never claim
+  it passed, and never weaken, skip, or simplify a check (test, build, type-check) to manufacture a
+  green result. If you did not run a verification step, say that plainly rather than implying it
+  succeeded. Equally, when a check did pass, state it directly — don't hedge a confirmed result.
+- When something fails, DIAGNOSE before retrying: read the actual error, check the assumption it
+  breaks, then make a focused fix. Do NOT re-run the identical action hoping for a different result;
+  do NOT abandon a working approach after a single failure.
+- Weigh irreversible actions. Local file edits, builds, and tests are freely reversible — just do
+  them. But do not reach for a destructive or hard-to-undo shortcut to make an obstacle disappear
+  (deleting files, discarding uncommitted work, `rm -rf`, or bypassing a safety check such as
+  `--no-verify`); find and fix the root cause instead.
+
 TESTS ARE PART OF THE TASK — NOT OPTIONAL.
 If your task adds or changes a function, endpoint, route, or module, you MUST
 also create or extend a test that exercises it before calling completeTask:
@@ -147,6 +179,7 @@ end and only call completeTask if it exits 0.
   private final SseBroadcaster broadcaster;
   private final AgentTaskRepository taskRepo;
   private final ModelResolver modelResolver;
+  private final com.navneet.executespec.router.ModelMatrixProperties matrixProps;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   // Transfer #1 (PATCH→BUILD, RL-2026-05-034): in-loop test-execution gate. After a clean compile,
   // RUN the worker's tests so "tests are mandatory" means "tests pass," not just "tests compile."
@@ -296,6 +329,18 @@ end and only call completeTask if it exits 0.
         result.tasksWithWarning(),
         result.tasksFailed(),
         result.totalLatencyMs());
+
+    // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
+    // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
+    // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
+    // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
+    // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
+    // state gets the same cleanup. Both calls are best-effort; failures are logged only.
+    if (contextStore != null) {
+      contextStore.deleteAll(runId);
+    }
+    clearCrossProviderState(runId);
+
     return result;
   }
 
@@ -455,7 +500,8 @@ end and only call completeTask if it exits 0.
             req.designBlock(),
             refDocs,
             req.plan() == null ? null : req.plan().projectType(),
-            req.workspaceSummary());
+            req.workspaceSummary(),
+            req.provider());
     String userPrompt = composeUserPrompt(task, null);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -786,25 +832,83 @@ end and only call completeTask if it exits 0.
           cfg.wallClockSeconds,
           retryWallClock);
     }
-    WorkerResult retry =
-        worker.run(
-            WorkerTaskRequest.builder()
-                .provider(cfg.provider)
-                .model(cfg.model)
-                .systemPrompt(systemPrompt)
-                .userPrompt(retryPrompt)
-                .context(taskCtx)
-                .maxIterations(retryMaxIter)
-                .temperature(0.0)
-                .maxTokensPerCall(cfg.maxTokens)
-                .stagnationWarnAfter(cfg.stagnationWarnAfter)
-                .stagnationForceAfter(cfg.stagnationForceAfter)
-                .wallClockSeconds(retryWallClock)
-                .requireBuildVerification(true)
-                .build());
+    // 2026-05-28 (RL-2026-05-052, T3.14) — context retention across retries. When the flag is
+    // ON, load the worker's prior context-snapshot so the retry continues from where it broke
+    // (re-issuing the failed build's edit on top of the prior context) instead of starting fresh
+    // and re-reading every file. Existing snapshot save happens every 5 iters inside
+    // WorkerAgent; this just wires the LOAD on the retry path. Flag-gated default OFF (V221).
+    WorkerTaskRequest retryReq =
+        WorkerTaskRequest.builder()
+            .provider(cfg.provider)
+            .model(cfg.model)
+            .systemPrompt(systemPrompt)
+            .userPrompt(retryPrompt)
+            .context(taskCtx)
+            .maxIterations(retryMaxIter)
+            .temperature(0.0)
+            .maxTokensPerCall(cfg.maxTokens)
+            .stagnationWarnAfter(cfg.stagnationWarnAfter)
+            .stagnationForceAfter(cfg.stagnationForceAfter)
+            .wallClockSeconds(retryWallClock)
+            .requireBuildVerification(true)
+            .build();
+    WorkerResult retry;
+    if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
+      java.util.Optional<com.navneet.executespec.context.SavedContext> snapshot =
+          contextStore == null ? java.util.Optional.empty() : contextStore.load(taskCtx);
+      if (snapshot.isPresent()) {
+        log.info(
+            "Executor task={} retry CONTEXT-RETAINED from snapshot (iter={})",
+            task.id(),
+            snapshot.get().iteration());
+        retry = worker.run(retryReq, snapshot.get());
+      } else {
+        log.debug("Executor task={} retry context-retention flag ON but no snapshot", task.id());
+        retry = worker.run(retryReq);
+      }
+    } else {
+      retry = worker.run(retryReq);
+    }
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
+      // 2026-05-28 (RL-2026-05-052, T3.9) — cross-provider fallback. After the existing
+      // same-provider retry fails, try ONCE on the next provider in the failover chain. This
+      // captures cases where one provider can't solve the task but another can (mixed10 showed
+      // this — different arms solved different cases). Hard ceiling: max one cross-provider
+      // retry per task; max MAX_CROSS_PROVIDER_PER_RUN per run; flag-gated default OFF (V220).
+      CrossProviderRetryResult crossProviderRetry =
+          maybeCrossProviderRetry(task, plan, req, cfg, taskCtx, systemPrompt, smoke, retry);
+      if (crossProviderRetry != null
+          && crossProviderRetry.result().outcome() == WorkerResult.Outcome.COMPLETED) {
+        SmokeTestResult crossSmoke = runSmokeTest(taskCtx, plan.buildCommand());
+        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
+        if (crossSmoke.passed()) {
+          log.info(
+              "Executor task={} SUCCESS_AFTER_CROSS_PROVIDER_RETRY (fallback provider={})",
+              task.id(),
+              crossProviderRetry.provider());
+          persistTaskStatus(runId, task.id(), "COMPLETE");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          return TaskOutcome.builder()
+              .taskId(task.id())
+              .taskTitle(task.title())
+              .status(TaskOutcome.Status.SUCCESS_AFTER_RETRY)
+              .workerOutcome(primary)
+              .retryAttempted(true)
+              .retryWorkerOutcome(crossProviderRetry.result())
+              .smokeTestPassed(true)
+              .smokeTestExitCode(crossSmoke.exitCode())
+              .smokeTestOutput(crossSmoke.output())
+              .totalLatencyMs(System.currentTimeMillis() - taskStart)
+              .toolCallsDispatched(totalToolCalls)
+              .dispatchedProvider(crossProviderRetry.provider())
+              .dispatchedModel(crossProviderRetry.model())
+              .build();
+        }
+      } else if (crossProviderRetry != null) {
+        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
+      }
       log.warn(
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
@@ -1410,6 +1514,44 @@ end and only call completeTask if it exits 0.
 
   // ─── prompt composition ─────────────────────────────────────────────────
 
+  /** Backwards-compatible 5-arg overload — used by tests. Delegates with null provider. */
+  String composeSystemPrompt(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary) {
+    return composeSystemPrompt(task, designBlock, refDocs, projectType, workspaceSummary, null);
+  }
+
+  /** Provider-fragment flag — see prompts/fragments/provider-{name}.md (RL-2026-05-052, T3.10). */
+  public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
+
+  /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
+  public static final String FLAG_CROSS_PROVIDER_FALLBACK =
+      "worker.cross-provider-fallback.enabled";
+
+  /**
+   * Context retention across task retries (RL-2026-05-052, T3.14). When ON, the retry path loads
+   * the prior worker context-snapshot from {@link com.navneet.executespec.context.ContextStore} and
+   * continues from the failure point instead of starting fresh — so the worker doesn't re-read
+   * files + re-issue the same searches before getting back to where it broke. Default OFF, V221.
+   */
+  public static final String FLAG_RETRY_CONTEXT_RETENTION =
+      "worker.retry-context-retention.enabled";
+
+  /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
+  public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
+
+  /**
+   * Per-run cross-provider retry counter. Each successful cross-provider retry trigger (regardless
+   * of whether the alternate provider succeeds) increments this. Cleaned by {@link
+   * #clearCrossProviderState(String)} on terminal run state.
+   */
+  private final java.util.concurrent.ConcurrentMap<
+          String, java.util.concurrent.atomic.AtomicInteger>
+      crossProviderTriggersPerRun = new java.util.concurrent.ConcurrentHashMap<>();
+
   // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
   // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
   String composeSystemPrompt(
@@ -1417,8 +1559,22 @@ end and only call completeTask if it exits 0.
       String designBlock,
       String refDocs,
       String projectType,
-      String workspaceSummary) {
+      String workspaceSummary,
+      String provider) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+
+    // 2026-05-28 (RL-2026-05-052, T3.10) — provider-specific prompt tuning. Each provider has
+    // characteristic failure modes (Anthropic narrates, OpenAI re-reads, Gemini cache thrashes,
+    // DeepSeek invents tool names). Per-provider fragment is appended to the base prompt when
+    // the flag is on. Default OFF (V219); flip per-run during eval to measure lift.
+    if (provider != null
+        && featureFlagService != null
+        && featureFlagService.isEnabled(FLAG_PROVIDER_TUNING)) {
+      String providerFragment = loadProviderFragment(provider);
+      if (!providerFragment.isBlank()) {
+        sb.append("\n\n").append(providerFragment);
+      }
+    }
 
     // Multi-repo correctness (2026-05-02 fix). When the orchestrator targets a multi-repo project
     // it ships a workspaceSummary with "MULTI-REPO PROJECT WORKSPACE" + the per-repo subdir list.
@@ -1469,6 +1625,146 @@ end and only call completeTask if it exits 0.
           .append("\n--- END REFERENCE DOCS ---\n");
     }
     return sb.toString();
+  }
+
+  /**
+   * Cross-provider retry result — wraps the {@link WorkerResult} with the provider + model that
+   * actually ran so we can record it on the {@link TaskOutcome}. Internal to {@link
+   * #maybeCrossProviderRetry}.
+   */
+  private record CrossProviderRetryResult(WorkerResult result, String provider, String model) {}
+
+  /**
+   * Attempt one cross-provider retry on the next provider in the failover chain, when the existing
+   * same-provider retry has failed. Hard ceilings:
+   *
+   * <ul>
+   *   <li>Flag {@link #FLAG_CROSS_PROVIDER_FALLBACK} must be ON (default OFF, V220).
+   *   <li>Max one cross-provider retry per task (this method is only called once per task).
+   *   <li>Max {@link #MAX_CROSS_PROVIDER_PER_RUN} per run.
+   *   <li>The next provider must be different from the primary AND must resolve to a real model.
+   * </ul>
+   *
+   * Returns {@code null} when no retry was attempted (any ceiling missed). Returns a wrapped {@link
+   * WorkerResult} otherwise, regardless of whether the alternate provider succeeded.
+   *
+   * <p>RL-2026-05-052, T3.9.
+   */
+  CrossProviderRetryResult maybeCrossProviderRetry(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      TierConfig primaryCfg,
+      ExecutionContext taskCtx,
+      String systemPrompt,
+      SmokeTestResult smoke,
+      WorkerResult sameProviderRetry) {
+    if (featureFlagService == null || !featureFlagService.isEnabled(FLAG_CROSS_PROVIDER_FALLBACK)) {
+      return null;
+    }
+    String runId = req.runContext().runId();
+    var counter =
+        crossProviderTriggersPerRun.computeIfAbsent(
+            runId, k -> new java.util.concurrent.atomic.AtomicInteger(0));
+    if (counter.get() >= MAX_CROSS_PROVIDER_PER_RUN) {
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — per-run ceiling {} reached for run={}",
+          task.id(),
+          MAX_CROSS_PROVIDER_PER_RUN,
+          runId);
+      return null;
+    }
+    String altProvider = nextProviderInChain(primaryCfg.provider());
+    if (altProvider == null) {
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — no failover candidate for primary={}",
+          task.id(),
+          primaryCfg.provider());
+      return null;
+    }
+    TierConfig altCfg =
+        tierConfigFor(task.complexity(), altProvider, null, req.projectId() != null);
+    if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
+      // adaptive routing or strict-provider re-resolved back to the primary — abandon.
+      log.info(
+          "Executor task={} cross-provider retry SKIPPED — alt resolved back to primary={}",
+          task.id(),
+          primaryCfg.provider());
+      return null;
+    }
+    counter.incrementAndGet();
+    log.info(
+        "Executor task={} cross-provider retry START — primary={} → alt={} (run-count={}/{})",
+        task.id(),
+        primaryCfg.provider(),
+        altCfg.provider(),
+        counter.get(),
+        MAX_CROSS_PROVIDER_PER_RUN);
+    String userPrompt = composeUserPrompt(task, smoke.output());
+    WorkerResult altResult =
+        worker.run(
+            WorkerTaskRequest.builder()
+                .provider(altCfg.provider())
+                .model(altCfg.model())
+                .systemPrompt(systemPrompt)
+                .userPrompt(userPrompt)
+                .context(taskCtx)
+                .maxIterations(altCfg.maxIter())
+                .temperature(0.0)
+                .maxTokensPerCall(altCfg.maxTokens())
+                .stagnationWarnAfter(altCfg.stagnationWarnAfter())
+                .stagnationForceAfter(altCfg.stagnationForceAfter())
+                .wallClockSeconds(altCfg.wallClockSeconds())
+                .requireBuildVerification(true)
+                .build());
+    log.info(
+        "Executor task={} cross-provider retry DONE — alt={} outcome={}",
+        task.id(),
+        altCfg.provider(),
+        altResult.outcome());
+    return new CrossProviderRetryResult(altResult, altCfg.provider(), altCfg.model());
+  }
+
+  /**
+   * Walk the YAML failover chain (`application.yml model-matrix.failover-order.<primary>`) and
+   * return the first provider that's different from the primary. Returns {@code null} when no chain
+   * exists or the chain has no different candidate.
+   */
+  String nextProviderInChain(String primary) {
+    if (primary == null || matrixProps == null || matrixProps.getFailoverOrder() == null) {
+      return null;
+    }
+    var chain = matrixProps.getFailoverOrder().get(primary.toLowerCase());
+    if (chain == null || chain.isEmpty()) return null;
+    for (String candidate : chain) {
+      if (!primary.equalsIgnoreCase(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  /** Clear per-run cross-provider retry state — call from RunOrchestrator's terminal handlers. */
+  public void clearCrossProviderState(String runId) {
+    crossProviderTriggersPerRun.remove(runId);
+  }
+
+  /**
+   * Load the provider-specific tuning fragment ({@code prompts/fragments/provider-<name>.md}). The
+   * provider string is lower-cased; missing fragments resolve to "" and are skipped. Mirrors {@link
+   * #loadScaffoldForProjectType} dispatch style.
+   */
+  String loadProviderFragment(String provider) {
+    if (provider == null || provider.isBlank()) return "";
+    String key = provider.trim().toLowerCase();
+    try {
+      org.springframework.core.io.Resource r =
+          new org.springframework.core.io.ClassPathResource(
+              "prompts/fragments/provider-" + key + ".md");
+      if (!r.exists()) return "";
+      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadProviderFragment({}) failed: {}", provider, e.getMessage());
+      return "";
+    }
   }
 
   /**

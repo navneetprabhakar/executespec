@@ -59,6 +59,7 @@ class SequentialExecutorResumeKeyTest {
         null, // broadcaster
         taskRepo,
         null, // modelResolver
+        null, // matrixProps
         null, // retrievalService
         null, // inLoopTestRunner
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),

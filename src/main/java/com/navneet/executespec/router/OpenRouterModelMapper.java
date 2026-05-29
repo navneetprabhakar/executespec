@@ -35,7 +35,10 @@ public final class OpenRouterModelMapper {
           // they route only via OpenRouter (OpenAI-wire-compatible through OpenAiNativeToolClient).
           Map.entry("deepseek-v4-pro", "deepseek/deepseek-v4-pro"),
           Map.entry("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
-          Map.entry("kimi-k2.6", "moonshotai/kimi-k2.6"));
+          Map.entry("kimi-k2.6", "moonshotai/kimi-k2.6"),
+          // 2026-05-28 (RL-2026-05-052) — Qwen3-Coder added for the 5-provider eval cohort.
+          // OpenRouter-only (no native client), ENTERPRISE BYOK. Slug per the OpenRouter catalog.
+          Map.entry("qwen3-coder", "qwen/qwen3-coder"));
 
   /**
    * @return the OpenRouter slug for a matrix model id

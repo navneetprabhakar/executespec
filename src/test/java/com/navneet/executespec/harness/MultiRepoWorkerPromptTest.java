@@ -41,13 +41,14 @@ class MultiRepoWorkerPromptTest {
     // composeSystemPrompt doesn't touch ContextStore (resume only fires from execute(req,
     // ResumeRequest)), so a mock is safe.
     return new SequentialExecutor(
-        mock(com.navneet.executespec.agent.WorkerAgent.class),
+        mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(com.navneet.executespec.tool.BuildProjectTool.class),
         new com.fasterxml.jackson.databind.ObjectMapper(),
         mock(com.navneet.executespec.observability.Metrics.class),
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         mock(com.navneet.executespec.state.repository.AgentTaskRepository.class),
         mock(com.navneet.executespec.router.ModelResolver.class),
+        mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         mock(com.navneet.executespec.project.rag.RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),

@@ -115,6 +115,7 @@ public class AvailableProviderResolver {
       case OPENAI -> "openai";
       case GEMINI -> "gemini";
       case OPENROUTER -> "openrouter";
+      case DEEPSEEK -> "deepseek";
     };
   }
 

@@ -17,9 +17,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannedTask.Complexity;
-import com.navneet.executespec.agent.WorkerAgent;
-import com.navneet.executespec.agent.WorkerResult;
-import com.navneet.executespec.agent.WorkerTaskRequest;
+import com.navneet.executespec.engine.WorkerAgent;
+import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
@@ -86,6 +86,7 @@ class SequentialExecutorSoftCompletionTest {
         broadcaster,
         taskRepo,
         modelResolver,
+        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         retrievalService,
         org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         org.mockito.Mockito.mock(
