@@ -197,7 +197,8 @@ public class LintPass {
               return java.nio.file.FileVisitResult.CONTINUE;
             }
           });
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      log.warn("[LintPass] mtime scan of {} failed: {}", workspace, e.toString());
     }
     return max[0];
   }
@@ -233,7 +234,8 @@ public class LintPass {
               return java.nio.file.FileVisitResult.CONTINUE;
             }
           });
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      log.warn("[LintPass] touched-file scan of {} failed: {}", workspace, e.toString());
     }
     return count[0];
   }
