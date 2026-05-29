@@ -72,7 +72,7 @@ class ToolOutputCompactorTest {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(false);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX);
+        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isEmpty();
     verify(router, never()).call(any());
@@ -87,7 +87,7 @@ class ToolOutputCompactorTest {
     String tiny = "x".repeat(ToolOutputCompactor.COMPACT_THRESHOLD_BYTES - 1);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", tiny, "the goal", false, CTX);
+        compactor.compactIfNeeded("readFile", tiny, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isEmpty();
     verify(router, never()).call(any());
@@ -101,7 +101,7 @@ class ToolOutputCompactorTest {
 
     for (String tool : ToolOutputCompactor.SKIP_TOOLS) {
       Optional<ToolOutputCompactor.Compacted> result =
-          compactor.compactIfNeeded(tool, BIG_RAW, "the goal", false, CTX);
+          compactor.compactIfNeeded(tool, BIG_RAW, "the goal", false, CTX, "anthropic");
       assertThat(result).as("skip for tool=%s", tool).isEmpty();
     }
     verify(router, never()).call(any());
@@ -113,7 +113,7 @@ class ToolOutputCompactorTest {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", true, CTX);
+        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", true, CTX, "anthropic");
 
     assertThat(result).isEmpty();
     verify(router, never()).call(any());
@@ -125,7 +125,7 @@ class ToolOutputCompactorTest {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", null, "the goal", false, CTX);
+        compactor.compactIfNeeded("readFile", null, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isEmpty();
     verify(router, never()).call(any());
@@ -137,7 +137,7 @@ class ToolOutputCompactorTest {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, null);
+        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, null, "anthropic");
 
     assertThat(result).isEmpty();
     verify(router, never()).call(any());
@@ -157,7 +157,7 @@ class ToolOutputCompactorTest {
     when(router.call(any(LlmRequest.class))).thenThrow(new RuntimeException("boom"));
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX);
+        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isEmpty();
   }
@@ -192,7 +192,7 @@ class ToolOutputCompactorTest {
         .thenReturn(0.000123);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX);
+        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isPresent();
     assertThat(result.get().summary()).isEqualTo(summaryText);
@@ -201,5 +201,36 @@ class ToolOutputCompactorTest {
     assertThat(result.get().tokensIn()).isEqualTo(900L);
     assertThat(result.get().tokensOut()).isEqualTo(40L);
     assertThat(result.get().costUsd()).isEqualTo(0.000123);
+  }
+
+  @Test
+  @DisplayName(
+      "routes compaction to the RUN's provider (OpenAI run → OpenAI LIGHTWEIGHT, not Anthropic)")
+  void routesToRunProvider() {
+    // Flip-safety pin (RL-2026-05-052 follow-up): before this fix the compactor hard-coded
+    // ANTHROPIC, so flipping the flag would route every OpenAI/Gemini/BYOK run's bulk-output
+    // compaction through Anthropic Haiku (wrong key on BYOK + a cross-provider cache miss). The
+    // worker now threads its provider through; the compactor must resolve the LIGHTWEIGHT model
+    // for THAT provider.
+    when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
+    when(modelResolver.resolve(anyString(), any(LlmProvider.class)))
+        .thenReturn(
+            ResolvedModel.builder()
+                .actualProvider(LlmProvider.OPENAI)
+                .model("gpt-5.4-mini")
+                .build());
+    when(promptAssembler.assemble(anyString(), any())).thenReturn("compactor prompt");
+    ChatResponse resp = Mockito.mock(ChatResponse.class);
+    Generation gen = Mockito.mock(Generation.class);
+    AssistantMessage msg = Mockito.mock(AssistantMessage.class);
+    Mockito.when(resp.getResult()).thenReturn(gen);
+    Mockito.when(gen.getOutput()).thenReturn(msg);
+    Mockito.when(msg.getText()).thenReturn("short summary");
+    Mockito.when(resp.getMetadata()).thenReturn(null);
+    when(router.call(any(LlmRequest.class))).thenReturn(resp);
+
+    compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "openai");
+
+    verify(modelResolver).resolve(ToolOutputCompactor.AGENT_NAME, LlmProvider.OPENAI);
   }
 }
