@@ -3,6 +3,8 @@ package com.navneet.executespec.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.navneet.executespec.engine.WorkerAgent;
+
 import org.junit.jupiter.api.Test;
 
 /**

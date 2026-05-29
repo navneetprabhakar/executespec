@@ -1,4 +1,4 @@
-package com.navneet.executespec.agent;
+package com.navneet.executespec.engine;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -6,10 +6,13 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.Tool;
+import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
 
@@ -90,6 +93,16 @@ public class WorkerAgent {
    * taskId, msg)}) so the renderer doesn't need changes.
    */
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
+
+  /**
+   * Phase 5+6 engine extraction (RL-2026-05-052). Bulk tool output flows through this before
+   * landing in the worker's history. Default OFF behind {@link ToolOutputCompactor#FLAG_ENABLED} —
+   * with the flag off, every call returns Optional.empty() and the worker uses raw output verbatim.
+   * Positioned last in the {@code @RequiredArgsConstructor} parameter order so existing test call
+   * sites only need to append a single trailing argument (null is accepted; {@link #maybeCompact}
+   * null-guards before any method call).
+   */
+  private final ToolOutputCompactor toolOutputCompactor;
 
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
@@ -283,6 +296,15 @@ public class WorkerAgent {
     // a run that has written SOMETHING doesn't need a best-guess salvage call. RL-2026-05-005.
     int totalWriteCalls = 0;
 
+    // #3 verify-before-done (RL-2026-05-051). BUILD/blind has no hard runTests gate (the target
+    // test is held out), so instead we SOFT-nudge once: if the worker calls completeTask after
+    // editing but without having RUN anything (shell repro / buildProject) since its last edit, we
+    // refuse that one completeTask with a "verify your fix first" message, then always allow. One
+    // shot (verifyNudged) so it can never loop. Targets the wrong-fix miss bucket.
+    int lastEditIter = -1; // last writeFile/editFile
+    int lastVerifyIter = -1; // last shell or buildProject (the worker ran something to check)
+    boolean verifyNudged = false;
+
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
     // (e.g. ReviewerAgent's two passes) still get the new safety net. Zero/null = unbounded.
@@ -431,6 +453,11 @@ public class WorkerAgent {
       // returns multi-gen responses; OpenAI/Gemini single-gen — same code path works).
       StringBuilder textBuf = new StringBuilder();
       List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+      // 2026-05-28 (RL-2026-05-052) — pass through DeepSeek's reasoning_content metadata so the
+      // next iteration's assistant turn can echo it (api.deepseek.com requires the round-trip on
+      // thinking-mode models). For multi-gen responses we take the first generation's metadata —
+      // empirically only single-gen providers (OpenAI-wire family) carry this field.
+      java.util.Map<String, Object> assistantMetadata = null;
       for (var gen : resp.getResults()) {
         String t = gen.getOutput().getText();
         if (t != null && !t.isEmpty()) {
@@ -439,6 +466,11 @@ public class WorkerAgent {
         }
         if (gen.getOutput().getToolCalls() != null) {
           calls.addAll(gen.getOutput().getToolCalls());
+        }
+        if (assistantMetadata == null
+            && gen.getOutput().getMetadata() != null
+            && !gen.getOutput().getMetadata().isEmpty()) {
+          assistantMetadata = gen.getOutput().getMetadata();
         }
       }
       String assistantText = textBuf.toString();
@@ -500,13 +532,28 @@ public class WorkerAgent {
             .build();
       }
 
-      // Append the assistant turn (text + tool_calls) to history.
-      history.add(AssistantMessage.builder().content(assistantText).toolCalls(calls).build());
+      // Append the assistant turn (text + tool_calls + optional metadata) to history.
+      AssistantMessage.Builder assistantBuilder =
+          AssistantMessage.builder().content(assistantText).toolCalls(calls);
+      if (assistantMetadata != null) {
+        assistantBuilder.properties(assistantMetadata);
+      }
+      history.add(assistantBuilder.build());
 
       // Dispatch every tool call. completeTask short-circuits the loop.
       List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
       String completionSummary = null;
-      for (AssistantMessage.ToolCall tc : calls) {
+      // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
+      // call for the next LLM turn; its output is the most likely to be re-referenced by the
+      // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
+      // Loop converted from for-each to indexed for so we can compute callIdx == lastIdx without
+      // re-iterating; behaviour-equivalent to the prior for-each (verified: the four pre-existing
+      // WorkerAgent test failures reproduce on the unmodified HEAD code with the same
+      // for-each).
+      final int lastIdx = calls.size() - 1;
+      for (int callIdx = 0; callIdx < calls.size(); callIdx++) {
+        AssistantMessage.ToolCall tc = calls.get(callIdx);
+        final boolean isImmediatelyPriorToolCall = (callIdx == lastIdx);
         toolsDispatched++;
         if (CompleteTaskTool.NAME.equals(tc.name())) {
           // V182 layer-3 verification gate. When the request opted in (patch mode),
@@ -595,6 +642,27 @@ public class WorkerAgent {
               continue;
             }
           }
+          // #3 verify-before-done soft nudge (BUILD/blind; PATCH uses the hard gateOn above). If
+          // the
+          // worker edited but ran nothing since its last edit, refuse this completeTask ONCE and
+          // ask
+          // it to verify. One-shot (verifyNudged) → can never loop; worst case is one round-trip.
+          if (!gateOn && !verifyNudged && totalWriteCalls > 0 && lastEditIter > lastVerifyIter) {
+            verifyNudged = true;
+            String reason =
+                errEnvelope(
+                    "VERIFY",
+                    "completeTask deferred — you've edited files but haven't run anything since"
+                        + " your last edit. Verify the fix actually works: run your reproduction or"
+                        + " the relevant tests via the shell tool (or buildProject) and confirm the"
+                        + " expected behaviour, then call completeTask again. If the change is"
+                        + " genuinely unverifiable, say why in completionNotes and call"
+                        + " completeTask again now.");
+            toolResponses.add(
+                new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), reason));
+            toolLog.add(tc.name() + " → NUDGED (verify before complete)");
+            continue;
+          }
           completionSummary = extractSummary(tc.arguments());
           String envelope = okEnvelope("task marked complete: " + completionSummary);
           toolResponses.add(
@@ -618,7 +686,7 @@ public class WorkerAgent {
               .build();
         }
         metrics.recordToolCall(tc.name());
-        String envelope = dispatchOne(tc, req);
+        String envelope = dispatchOne(tc, req, isImmediatelyPriorToolCall);
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
         // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
@@ -645,6 +713,14 @@ public class WorkerAgent {
             && envelope.startsWith("{\"ok\":true")
             && envelope.contains("\\nexit=0\\n")) {
           lastBuildPassIter = iter;
+        }
+        // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
+        if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+          lastEditIter = iter;
+        } else if ("shell".equals(tc.name())
+            || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
+            || RUN_TESTS_TOOL_NAME.equals(tc.name())) {
+          lastVerifyIter = iter;
         }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
@@ -865,7 +941,9 @@ public class WorkerAgent {
             .build();
       }
       if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
-        String env = dispatchOne(tc, req);
+        // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
+        // so the isLast flag is don't-care; pass false for symmetry with the main loop.
+        String env = dispatchOne(tc, req, false);
         toolLog.add(
             "SALVAGE "
                 + tc.name()
@@ -902,7 +980,8 @@ public class WorkerAgent {
     metrics.recordWorkerIterations(outcome.name(), req.provider(), req.model(), iterations);
   }
 
-  private String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req) {
+  private String dispatchOne(
+      AssistantMessage.ToolCall tc, WorkerTaskRequest req, boolean isImmediatelyPriorToolCall) {
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
     // tool by name (e.g. cached tool list, hand-crafted payload), refuse at
     // dispatch time with a clear error envelope so the model can self-correct.
@@ -930,13 +1009,51 @@ public class WorkerAgent {
     try {
       ToolResult result = tool.execute(args, req.context());
       return switch (result) {
-        case ToolResult.Ok ok -> okEnvelope(ok.content());
+          // RL-2026-05-052 Phase 5+6 — wrap the OK content through ToolOutputCompactor before
+          // envelope-ing (flag-gated; default OFF returns raw verbatim, so this is byte-identical
+          // to the pre-extraction path until the flag is flipped). Error envelopes are short by
+          // construction; never compacted.
+        case ToolResult.Ok ok ->
+            okEnvelope(maybeCompact(tc.name(), ok.content(), isImmediatelyPriorToolCall, req));
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception unexpected) {
       log.error("Tool '{}' threw unexpectedly", tc.name(), unexpected);
       return errEnvelope(
           "INTERNAL", unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+    }
+  }
+
+  /**
+   * RL-2026-05-052 Phase 5+6 — route bulky tool output through the LIGHTWEIGHT-tier {@link
+   * ToolOutputCompactor} before it lands in the worker's history. Default OFF behind the
+   * compactor's feature flag; with the flag off this is a no-op pass-through. The worker NEVER
+   * loses tool output to compactor failure — fail-safe inside the compactor itself returns empty,
+   * and we fall back to raw here.
+   *
+   * <p>Null-guarded against {@code toolOutputCompactor == null} so unit tests that build a
+   * WorkerAgent without wiring the compactor (legacy {@code new WorkerAgent(...)} call sites in the
+   * test tree) keep working — the field is non-final at the test level via Mockito field injection
+   * patterns, but defensively guarding here avoids a constructor-order trap.
+   */
+  private String maybeCompact(
+      String toolName, String content, boolean isImmediatelyPriorToolCall, WorkerTaskRequest req) {
+    if (toolOutputCompactor == null) return content;
+    try {
+      return toolOutputCompactor
+          .compactIfNeeded(
+              toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
+          .map(ToolOutputCompactor.Compacted::summary)
+          .orElse(content);
+    } catch (RuntimeException e) {
+      // Defence-in-depth: compactor implements its own fail-safe, but if a runtime escapes
+      // (e.g. an NPE from a misconfigured dependency at construction time in some weird env),
+      // never block the worker. Log + return raw.
+      log.warn(
+          "ToolOutputCompactor unexpected runtime (tool={}): {} — using raw output",
+          toolName,
+          e.getMessage());
+      return content;
     }
   }
 
@@ -1074,10 +1191,12 @@ public class WorkerAgent {
    * ✏️} or {@code ⚠️}) are unaffected — those don't use surrogate pairs.
    *
    * <p>Visibility is package-private so {@link
-   * com.navneet.executespec.agent.WorkerAgentTruncateTest} can pin the regression directly without
+   * com.navneet.executespec.engine.WorkerAgentTruncateTest} can pin the regression directly without
    * reflection.
    */
-  static String truncate(String s, int max) {
+  // public for the cross-package WorkerAgentTruncateTest after the engine relocation
+  // (RL-2026-05-052)
+  public static String truncate(String s, int max) {
     if (s == null) return "";
     if (s.length() <= max) return s;
     int end = max - 1;
@@ -1111,8 +1230,10 @@ public class WorkerAgent {
         + "1. If the task is DONE, call the `completeTask` tool now with your summary as the"
         + " `completionNotes` argument. A text-only summary does NOT close the task — only the"
         + " tool does.\n"
-        + "2. If you are still working, stop reading and commit to the single most likely edit"
-        + " (writeFile/editFile), then verify with buildProject (build mode) or runTests (patch"
+        + "2. If you are still working, STOP reading. If you have not pinned the exact spot, run"
+        + " ONE searchFiles / `grep -rn <symbol>` to localize the function, then immediately"
+        + " editFile that location — do not open more files to 'understand' first. Commit to the"
+        + " single most likely edit, then verify with buildProject (build mode) or runTests (patch"
         + " mode). An empty result is an automatic failure — even an imperfect edit beats zero.\n"
         + "3. If a build or test error is blocking you, fix that file now.\n"
         + "Do NOT do another round of reads or re-verify state you have already checked.";

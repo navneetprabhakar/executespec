@@ -16,6 +16,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.WorkerAgent;
+import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -147,7 +150,9 @@ class WorkerAgentBuildVerificationGateTest {
             metrics,
             costTracker,
             runRepo,
-            org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class));
+            org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null);
     return new Fixture(worker, router, registry);
   }
 

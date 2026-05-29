@@ -6,7 +6,12 @@ public enum LlmProvider {
   GEMINI("Cheapest"),
   // Enterprise-only OpenAI-wire-compatible gateway. Routes the matrix's tier models through the
   // org's OpenRouter key; intentionally NOT part of the anthropic→openai→gemini failover chain.
-  OPENROUTER("Gateway");
+  OPENROUTER("Gateway"),
+  // 2026-05-28 (RL-2026-05-052) — DeepSeek native (api.deepseek.com), OpenAI-wire-compatible.
+  // Same DeepSeek V4 models that OpenRouter routes to, but direct → eliminates OpenRouter's
+  // routing latency (observed ~3-4× slower per instance via OpenRouter in the mixed10 eval).
+  // ENTERPRISE BYOK; not in failover chain. Cheaper than Sonnet (~7×) on input rate.
+  DEEPSEEK("Cheap-fast");
 
   private final String tag;
 

@@ -46,7 +46,15 @@ public class SearchFilesTool implements Tool {
           ".vscode",
           "worktrees");
 
-  private static final int MAX_MATCHES = 100;
+  /** Hard ceiling on matches collected per search — bounds memory + walk time on huge repos. */
+  private static final int MATCH_CEILING = 1000;
+
+  /** Default page size (matches returned per call) when the caller doesn't specify maxResults. */
+  private static final int DEFAULT_PAGE = 50;
+
+  /** Upper bound on a single page so one call can't flood the context. */
+  private static final int MAX_PAGE = 200;
+
   private static final int MAX_LINE_LEN = 240;
 
   @Override
@@ -57,33 +65,45 @@ public class SearchFilesTool implements Tool {
   @Override
   public String description() {
     return "Recursively searches file contents for a regex pattern. Returns matching lines with "
-        + "file:line prefixes. Filter file types via filePattern (glob, e.g. '*.java'). Build "
-        + "and VCS folders are always skipped.";
+        + "file:line prefixes plus a total match count. Filter file types via filePattern (glob, "
+        + "e.g. '*.java'). Page large result sets with maxResults + offset, or narrow the pattern. "
+        + "Use this to localize the exact file:line of a symbol before reading/editing — it is "
+        + "cheaper than reading whole files. Build and VCS folders are always skipped.";
   }
 
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "pattern": {
-                 "type": "string",
-                 "description": "Regular expression to search for"
-               },
-               "directory": {
-                 "type": "string",
-                 "description": "Workspace-relative root for the search; default is workspace root"
-               },
-               "filePattern": {
-                 "type": "string",
-                 "description": "Optional glob to filter filenames (e.g. '*.java', '*.{ts,tsx}')"
-               }
-             },
-             "required": ["pattern"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Regular expression to search for"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Workspace-relative root for the search; default is workspace root"
+    },
+    "filePattern": {
+      "type": "string",
+      "description": "Optional glob to filter filenames (e.g. '*.java', '*.{ts,tsx}')"
+    },
+    "maxResults": {
+      "type": "integer",
+      "description": "Max matches to return this call (default 50, cap 200). Page with offset.",
+      "minimum": 1
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Skip the first N matches (for paging through a large result set).",
+      "minimum": 0
+    }
+  },
+  "required": ["pattern"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -94,6 +114,9 @@ public class SearchFilesTool implements Tool {
     }
     String dir = args.path("directory").asText(null);
     String filePattern = args.path("filePattern").asText(null);
+    int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
+    maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
+    final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
     Pattern regex;
     try {
       regex = Pattern.compile(patternStr);
@@ -128,7 +151,7 @@ public class SearchFilesTool implements Tool {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-              if (matches.size() >= MAX_MATCHES) return FileVisitResult.TERMINATE;
+              if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
               if (fileMatcher != null && !fileMatcher.matches(file.getFileName())) {
                 return FileVisitResult.CONTINUE;
               }
@@ -155,7 +178,7 @@ public class SearchFilesTool implements Tool {
                             ? line.substring(0, MAX_LINE_LEN) + "..."
                             : line;
                     matches.add(rel + ":" + (i + 1) + ":" + preview);
-                    if (matches.size() >= MAX_MATCHES) return FileVisitResult.TERMINATE;
+                    if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
                   }
                 }
               } catch (IOException ignored) {
@@ -166,11 +189,21 @@ public class SearchFilesTool implements Tool {
           });
 
       if (matches.isEmpty()) return ToolResult.ok("(no matches)");
-      String body = String.join("\n", matches);
-      if (matches.size() == MAX_MATCHES) {
-        body += "\n...[result truncated at " + MAX_MATCHES + " matches]";
+      int total = matches.size();
+      boolean ceilingHit = total >= MATCH_CEILING;
+      int from = Math.min(offset, total);
+      int to = Math.min(from + maxResults, total);
+      List<String> page = matches.subList(from, to);
+      StringBuilder sb = new StringBuilder();
+      sb.append(total).append(ceilingHit ? "+" : "").append(" match(es)");
+      if (total > maxResults || offset > 0) {
+        sb.append("; showing ").append(from + 1).append('–').append(to);
+        if (to < total) {
+          sb.append(" — use offset=").append(to).append(" for more, or narrow the pattern");
+        }
       }
-      return ToolResult.ok(body);
+      sb.append('\n').append(String.join("\n", page));
+      return ToolResult.ok(sb.toString());
     } catch (SecurityException se) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
     } catch (IOException ioe) {

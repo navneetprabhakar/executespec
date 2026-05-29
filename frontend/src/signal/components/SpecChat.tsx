@@ -53,10 +53,26 @@ export function SpecChat({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const tail = useRef<HTMLDivElement | null>(null);
+  const kicked = useRef(false);
 
   useEffect(() => {
     tail.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
   }, [messages.length]);
+
+  // Suggest-first (RL-2026-05-052, feedback #8): the moment the panel opens with a
+  // draft to work from, auto-propose a spec instead of facing the user with an empty
+  // box. Fires once per open (the messages.length guard). Reset when closed.
+  useEffect(() => {
+    if (!open) {
+      kicked.current = false;
+      return;
+    }
+    if (!kicked.current && messages.length === 0 && draftSpec.trim() && !busy) {
+      kicked.current = true;
+      void autoPropose();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Last-assistant message becomes the candidate refined spec.
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
@@ -89,6 +105,39 @@ export function SpecChat({
         content: i === 0 && isFirstTurn ? firstTurnText : m.content,
       }));
       const resp = await api.conversationChat(wireHistory);
+      const reply =
+        (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
+        (resp as unknown as {message?: string}).message ||
+        (resp as unknown as {content?: string}).content ||
+        '(no reply)';
+      setMessages((prev) => [
+        ...prev,
+        {role: 'assistant', content: reply, ts: new Date().toISOString()},
+      ]);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Chat failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Suggest-first kickoff: show the user's idea as the first bubble, then ask the
+  // agent to PROPOSE a concrete spec (it leads with a proposal per its prompt). No
+  // question barrage — the user reacts to a draft instead of filling out a form.
+  async function autoPropose() {
+    const draft = draftSpec.trim();
+    if (!draft || busy) return;
+    setBusy(true);
+    setErr('');
+    setMessages([{role: 'user', content: draft, ts: new Date().toISOString()}]);
+    try {
+      const wire: api.ConversationMessage[] = [
+        {
+          role: 'user',
+          content: `Here's my idea:\n\n${draft}\n\nPropose a concrete spec from this — make sensible, clearly-stated assumptions, then ask me what to change.`,
+        },
+      ];
+      const resp = await api.conversationChat(wire);
       const reply =
         (resp as unknown as {reply?: string; message?: string; content?: string}).reply ||
         (resp as unknown as {message?: string}).message ||
@@ -190,9 +239,9 @@ export function SpecChat({
         >
           {messages.length === 0 && !busy && (
             <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              Refine your spec before launching. Ask the agent to clarify scope, suggest test cases,
-              or split a big change into smaller specs. Project-scoped chats also have access to
-              your codebase memory.
+              Describe what you want to build below and I&apos;ll propose a concrete spec — sensible
+              assumptions first, then you tell me what to change. No forms, no 20 questions.
+              {projectId ? ' This project-scoped chat also draws on your codebase memory.' : ''}
             </p>
           )}
           {messages.map((m, i) => (
@@ -274,7 +323,7 @@ export function SpecChat({
                 void send();
               }
             }}
-            placeholder='Ask the agent — e.g. "are there edge cases I should handle?"'
+            placeholder="Describe what you want — I'll propose a spec, then you refine."
             rows={2}
             disabled={busy}
             style={{

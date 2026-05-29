@@ -166,7 +166,8 @@ public class BuildProjectTool implements Tool {
       }
       String output = new String(proc.getInputStream().readAllBytes());
       int exit = proc.exitValue();
-      String truncated = truncate(output);
+      // Output budget (#6): persist a full build log to disk + give the worker a preview + readFile
+      // path, so a long compiler/maven failure isn't lost to a 4 KB truncation.
       String summary =
           "command="
               + bc.command()
@@ -175,7 +176,7 @@ public class BuildProjectTool implements Tool {
               + "\nexit="
               + exit
               + "\noutput:\n"
-              + truncated;
+              + ToolOutput.budget(ctx, "build", output, ToolOutput.DEFAULT_INLINE_CAP);
       // Return Ok regardless of exit code — the LLM/harness reads exit and decides.
       return ToolResult.ok(summary);
     } catch (IOException ioe) {
@@ -220,18 +221,5 @@ public class BuildProjectTool implements Tool {
         + "  exit 1; "
         + "fi; "
         + "exit $USER_RC";
-  }
-
-  private static String truncate(String s) {
-    int max = 4_000;
-    if (s.length() <= max) return s;
-    int tail = 1_000;
-    int head = max - tail;
-    int omitted = s.length() - max;
-    return s.substring(0, head)
-        + "\n...["
-        + omitted
-        + " chars omitted from build output]...\n"
-        + s.substring(s.length() - tail);
   }
 }

@@ -2,11 +2,11 @@ package com.navneet.executespec.eval.v2;
 
 import java.nio.file.Path;
 
-import com.navneet.executespec.agent.WorkerResult;
+import com.navneet.executespec.engine.WorkerResult;
 
 /**
  * A WORKHORSE-tier agentic eval case. Unlike {@link TierEvalCase} (single-shot tool-call grading),
- * a workhorse case drives the real multi-turn {@link com.navneet.executespec.agent.WorkerAgent}
+ * a workhorse case drives the real multi-turn {@link com.navneet.executespec.engine.WorkerAgent}
  * loop against a seeded scratch workspace and grades the resulting file-system state.
  *
  * <p>This is the closest the eval gets to production: same worker prompt, same tool set (readFile /

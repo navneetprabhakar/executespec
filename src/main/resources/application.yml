@@ -158,22 +158,28 @@ spring:
     openrouter:
       base-url: https://openrouter.ai/api
       api-key: ""                   # Enterprise system fallback; org BYOK preferred
+    # DeepSeek native (RL-2026-05-052, 2026-05-28) — OpenAI-wire-compatible. Read by
+    # LlmRouter.callDeepSeek via @Value. api-key is system fallback; org BYOK via
+    # RunKeyContext.keyFor("deepseek"). Bypasses OpenRouter's routing latency.
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: ""                   # set via env or application-local.yml
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
-      lightweight: claude-haiku-4-5-20251001
+      workhorse: claude-sonnet-4-6                # keep flagship (worker is reasoning-heavy; +17pp on p30)
+      lightweight: claude-haiku-4-5-20251001      # canonical (classifier/summarizer/title — Haiku-suited)
     gemini:
-      planning: gemini-3.5-flash
+      planning: gemini-3.5-flash                  # RL-2026-05-010 eval-best for PLANNING (ties Sonnet on HIGH)
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4-mini
-      lightweight: gpt-5.4-mini
+      workhorse: gpt-5.4                          # keep flagship (reasoning)
+      lightweight: gpt-5.4-mini                   # canonical (cheap classifier/summarizer)
     # OpenRouter (Enterprise gateway) — tier models routed through the org's OpenRouter key.
     # Must be ids in OpenRouterModelMapper's verified allow-list; orgs override via the per-org
     # matrix (F3). Default mirrors Anthropic tiers (Sonnet planning / Haiku workhorse+lightweight).
@@ -181,6 +187,16 @@ model-matrix:
       planning: claude-sonnet-4-6
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
+    # DeepSeek native (api.deepseek.com) — 2026-05-28 (RL-2026-05-052). Enterprise BYOK,
+    # OpenAI-wire-compatible. All three tiers pin to deepseek-v4-flash-native (the non-thinking
+    # variant): -pro-native is registered but NOT tier-active because api.deepseek.com requires
+    # reasoning_content echo on every follow-up call from -pro thinking-mode responses, and
+    # OpenAiNativeToolClient doesn't round-trip that yet. Flash matches today's bench profile
+    # cleanly. Switch any tier here back to -pro-native once the reasoning_content echo ships.
+    deepseek:
+      planning: deepseek-v4-flash-native
+      workhorse: deepseek-v4-flash-native
+      lightweight: deepseek-v4-flash-native
 
   models:
     claude-opus-4-6:
@@ -337,6 +353,40 @@ model-matrix:
         cached-input-per-1m: 0.0036
         output-per-1m: 0.87
       notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.435 in / $0.0036 cached / $0.87 out per 1M."
+    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Pro NATIVE (api.deepseek.com direct, no OpenRouter
+    # hop). Same upstream model, different endpoint — measured to bypass OpenRouter's ~3-4× routing
+    # latency observed in the mixed10 eval. Non-breaking: existing `deepseek-v4-pro` (above) keeps
+    # routing via OpenRouter for orgs that have OpenRouter BYOK; this native variant requires a
+    # separate DeepSeek key in spring.ai.deepseek.api-key or per-org RunKeyContext.keyFor("deepseek").
+    deepseek-v4-pro-native:
+      provider: deepseek
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "DeepSeek V4 Pro (Native)"
+      pricing:
+        input-per-1m: 0.27         # native rate (DeepSeek public 2026-05-28): cheaper than OpenRouter markup
+        cached-input-per-1m: 0.027
+        output-per-1m: 1.10
+      notes: |
+        DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
+        NOT TIER-ACTIVE YET — Pro is a thinking-mode model and api.deepseek.com requires reasoning_content echo on every follow-up call (mirrors Gemini's thought-signature round-trip). Until OpenAiNativeToolClient captures + replays reasoning_content, use the non-thinking deepseek-v4-flash-native (below) instead. RL-2026-05-052.
+    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Flash NATIVE — the non-thinking variant. Same
+    # api.deepseek.com endpoint as pro-native but without reasoning_content in responses, so the
+    # multi-turn tool-call loop works without changes to OpenAiNativeToolClient. This is the
+    # currently TIER-ACTIVE native DeepSeek entry; pro-native re-enters when the thinking-mode
+    # round-trip ships.
+    deepseek-v4-flash-native:
+      provider: deepseek
+      chain-tier: UTILITY
+      context-limit: 1048576
+      max-output-tokens: 16384
+      display-label: "DeepSeek V4 Flash (Native)"
+      pricing:
+        input-per-1m: 0.10         # mirrors the OpenRouter flash entry's native-rate column
+        cached-input-per-1m: 0.02
+        output-per-1m: 0.20
+      notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -359,6 +409,18 @@ model-matrix:
         cached-input-per-1m: 0.25
         output-per-1m: 3.49
       notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.73 in / $0.25 cached / $3.49 out per 1M."
+    # 2026-05-28 (RL-2026-05-052) — Qwen3-Coder added for the 5-provider eval cohort.
+    qwen3-coder:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Qwen3-Coder (OpenRouter)"
+      pricing:
+        input-per-1m: 0.70
+        cached-input-per-1m: 0.07
+        output-per-1m: 2.80
+      notes: "OpenRouter qwen/qwen3-coder — ENTERPRISE BYOK. Code-specialized. Pricing approximate vs OpenRouter 2026-05-28 (~$0.70 in / $0.07 cached / $2.80 out per 1M) — refine post-smoke."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
@@ -411,6 +473,7 @@ model-matrix:
     ValidationReportGenerator: WORKHORSE
     PrReviewAgent: PLANNING
     CodeReviewAgent: PLANNING
+    ToolOutputCompactor: LIGHTWEIGHT
   failover-order:
     anthropic:
       - openai

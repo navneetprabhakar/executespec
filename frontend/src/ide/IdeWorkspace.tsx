@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {NavLink, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import './ide.css';
 import '@/signal/signal.css';
@@ -13,6 +13,7 @@ import {
   IdeBadge,
   ResizeHandle,
 } from '@/ide/IdeKit';
+import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
 import {
   WorkspaceIcon,
   NewSpecIcon,
@@ -62,20 +63,36 @@ export default function IdeWorkspace() {
 
   usePaletteHotkey(setPaletteOpen);
 
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [location.pathname]);
-
-  useEffect(() => {
+  // Recent runs must stay live (RL-2026-05-052, user feedback #10): the list was
+  // fetched once on mount and never refreshed, so a just-submitted run or a status
+  // change never appeared in the side menu. Poll every 12s (skip when the tab is
+  // hidden) + refresh on navigation; projects change rarely → mount + nav only.
+  const refreshRuns = useCallback(() => {
     api
       .getRuns({size: 8})
       .then((r) => setRuns(r.content ?? []))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshRuns();
     api
       .getProjects()
       .then(setProjects)
       .catch(() => {});
-  }, []);
+  }, [refreshRuns]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!document.hidden) refreshRuns();
+    }, 12000);
+    return () => window.clearInterval(id);
+  }, [refreshRuns]);
+
+  useEffect(() => {
+    setDrawerOpen(false);
+    refreshRuns();
+  }, [location.pathname, refreshRuns]);
 
   const path = location.pathname;
   const actActive = (p: string) =>
@@ -105,6 +122,7 @@ export default function IdeWorkspace() {
         </button>
         <strong style={{fontSize: 13}}>ExecuteSpec</strong>
         <span style={{flex: 1}} />
+        <PlanGateIndicator dir='down' />
         <button
           onClick={() => setPaletteOpen(true)}
           title='Command palette (⌘K)'
@@ -284,6 +302,7 @@ export default function IdeWorkspace() {
         <span className='ide-status' title={`Plan: ${tier}`}>
           <IdeBadge kind='ok'>{tier}</IdeBadge>
         </span>
+        <PlanGateIndicator dir='up' />
         <span className='ide-status-spacer' />
         <button
           className='ide-status btn'
@@ -302,6 +321,16 @@ export default function IdeWorkspace() {
         >
           <ThemeIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           {theme}
+        </button>
+        <button
+          className='ide-status btn'
+          onClick={() => {
+            localStorage.setItem('es:console', '1');
+            window.location.reload();
+          }}
+          title='Try the new Console layout (beta)'
+        >
+          Try Console ⤴
         </button>
         <span className='ide-status' title='IDE workspace (Beta)'>
           IDE · Beta
