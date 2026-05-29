@@ -203,6 +203,8 @@ ANTHROPIC_API_KEY=
 
 # Optional — LLM
 GOOGLE_API_KEY=                  # Gemini API key
+OPENROUTER_API_KEY=              # Enterprise gateway — DeepSeek / Qwen3-Coder / Kimi via openrouter.ai (RL-2026-05-052). Empty = provider registered but every call short-circuits with "OpenRouter api-key not configured."
+DEEPSEEK_API_KEY=                # Native DeepSeek (api.deepseek.com) — RL-2026-05-052. Same shape as OpenRouter. Empty = provider disabled.
 
 # Optional — Integrations
 # (GITHUB_PAT removed 2026-05-23 — there is no system GitHub PAT; every GitHub op uses the caller's own PAT)
