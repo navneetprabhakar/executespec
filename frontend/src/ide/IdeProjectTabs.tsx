@@ -413,7 +413,7 @@ function RunDetailPanel({
   const score =
     scoreOf(run) ?? (run as unknown as {accuracyScore?: number}).accuracyScore ?? undefined;
   const verdict =
-    score == null ? '—' : score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+    score == null ? '—' : score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;
   const prUrl =
     (run as unknown as {scmPrUrl?: string}).scmPrUrl ||

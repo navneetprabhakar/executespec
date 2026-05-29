@@ -1755,20 +1755,6 @@ export function PublicPricingPage() {
               ],
             },
             {
-              tier: 'SOLO',
-              price: '$29',
-              unit: '/mo',
-              sub: 'Indie devs · single workspace',
-              features: [
-                '100 runs / month',
-                '200 credits / month',
-                '$10 hard cap',
-                'Multi-repo',
-                '1 BYOK provider',
-                'Library + migrations',
-              ],
-            },
-            {
               tier: 'TEAM',
               price: '$31',
               unit: '/seat/mo',
