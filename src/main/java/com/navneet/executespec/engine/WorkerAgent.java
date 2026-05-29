@@ -1042,7 +1042,12 @@ public class WorkerAgent {
     try {
       return toolOutputCompactor
           .compactIfNeeded(
-              toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
+              toolName,
+              content,
+              req.userPrompt(),
+              isImmediatelyPriorToolCall,
+              req.context(),
+              req.provider())
           .map(ToolOutputCompactor.Compacted::summary)
           .orElse(content);
     } catch (RuntimeException e) {
