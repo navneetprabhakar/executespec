@@ -105,7 +105,12 @@ public class AppUser {
 
   // ── GitHub integration ────────────────────────────────────────────────────
 
-  /** Personal GitHub PAT — used to create/push repos after merge. Stored as plaintext. */
+  /**
+   * Personal GitHub PAT — used to create/push repos after merge. Encrypted at rest via {@link
+   * EncryptedValueConverter} (C7 — audit 2026-05-29; previously the only credential field stored
+   * cleartext). Legacy plaintext rows decrypt as-is and are re-encrypted on the next write.
+   */
+  @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "github_pat")
   private String githubPat;
 
