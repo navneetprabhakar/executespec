@@ -1311,7 +1311,7 @@ public class RunOrchestrator {
         }
       } catch (Exception e) {
         log.error("RunOrchestrator run={} planner failed", runId, e);
-        terminate(runId, "FAILED", "planner: " + shortMsg(e), startedAt);
+        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;
       }
       if (plan.tasks() == null || plan.tasks().isEmpty()) {
@@ -1410,7 +1410,7 @@ public class RunOrchestrator {
                     .build());
       } catch (Exception e) {
         log.error("RunOrchestrator run={} executor failed", runId, e);
-        terminate(runId, "FAILED", "executor: " + shortMsg(e), startedAt);
+        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;
       }
       applyExecutionResultToTasks(runId, execResult);
@@ -1737,7 +1737,7 @@ public class RunOrchestrator {
       }
     } catch (Exception unexpected) {
       log.error("RunOrchestrator run={} unexpected failure", runId, unexpected);
-      terminate(runId, "FAILED", "unexpected: " + shortMsg(unexpected), startedAt);
+      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
     } finally {
       perky.stop(runId);
       // F3 — drop the run-scoped model-override binding so it never leaks to the
@@ -2552,7 +2552,7 @@ public class RunOrchestrator {
           runId,
           status,
           e.getMessage());
-      terminate(runId, "FAILED", "plan corrupted on resume: " + shortMsg(e), null);
+      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, null);
       return CrashResumeOutcome.PLAN_MISSING;
     }
 
@@ -2650,7 +2650,7 @@ public class RunOrchestrator {
                   new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(null));
         } catch (Exception e) {
           log.error("resume run={} executor failed", runId, e);
-          terminate(runId, "FAILED", "executor on resume: " + shortMsg(e), startedAt);
+          terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
           return;
         }
         applyExecutionResultToTasks(runId, execResult);
@@ -2691,7 +2691,7 @@ public class RunOrchestrator {
           runId, plan, execResult, reviewResult, startedAt, upperProvider, model);
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
-      terminate(runId, "FAILED", "resume failure: " + shortMsg(e), startedAt);
+      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
     }
   }
 
@@ -3009,7 +3009,7 @@ public class RunOrchestrator {
               } catch (Exception e) {
                 log.error(
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
-                terminate(runId, "FAILED", "retryTask dispatch: " + shortMsg(e), null);
+                terminate(runId, "FAILED", INTERNAL_ERROR_REASON, null);
               } finally {
                 activeRuns.remove(runId);
               }
@@ -5234,6 +5234,14 @@ public class RunOrchestrator {
         .taskType(PlannedTask.TaskType.LEAF)
         .build();
   }
+
+  /**
+   * Customer-safe terminal {@code statusReason} for internal / infrastructure failures. The raw
+   * exception (class + message + stack) is logged at each call site for operators; it must NEVER
+   * reach {@code statusReason}, which surfaces verbatim in the customer failure email + UI badge.
+   * (2026-05-29: a JDK spawn-helper IOException stack trace had been leaking into both.)
+   */
+  static final String INTERNAL_ERROR_REASON = "INTERNAL_ERROR";
 
   private static String shortMsg(Exception e) {
     String msg = e.getMessage();

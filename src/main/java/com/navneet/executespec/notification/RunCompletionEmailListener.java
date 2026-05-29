@@ -117,7 +117,7 @@ public class RunCompletionEmailListener {
           firstName,
           runId,
           run.getStatus(),
-          statusReason,
+          friendlyFailureReason(statusReason),
           run.getRunTitle(),
           verifiedScore,
           run.getActualCostUsd(),
@@ -136,5 +136,37 @@ public class RunCompletionEmailListener {
           eventType,
           e.getMessage());
     }
+  }
+
+  /**
+   * Convert the controlled {@code statusReason} token into a customer-safe sentence for the failure
+   * email. Anything not explicitly recognized — including legacy rows that stored a raw exception
+   * or stack trace (e.g. the JDK spawn-helper IOException seen 2026-05-29) — collapses to a generic
+   * internal-error message, so a raw exception can never reach the customer. Returns {@code null}
+   * to omit the line entirely.
+   */
+  static String friendlyFailureReason(String statusReason) {
+    if (statusReason == null || statusReason.isBlank()) return null;
+    String r = statusReason.trim();
+    if (r.startsWith("TESTS_FAILED")) {
+      int colon = r.indexOf(':');
+      if (colon > 0 && colon < r.length() - 1) {
+        String counts = r.substring(colon + 1).replace("_OF_", " of ").replace('_', ' ').trim();
+        return "some generated tests failed (" + counts + ").";
+      }
+      return "some generated tests failed.";
+    }
+    return switch (r) {
+      case "FINAL_BUILD_FAILED" -> "the generated code didn't compile.";
+      case "ALL_TASKS_FAILED" -> "the run couldn't complete its tasks.";
+      case "REVIEWER_FAILED", "REVIEWER_UNRESOLVED" ->
+          "the automated review couldn't be completed.";
+      case "CLEAN_WITH_INTERMEDIATE_WARNINGS" -> "completed with some intermediate warnings.";
+      case "LEGACY_UNKNOWN" -> null;
+        // INTERNAL_ERROR, PATCH_AGENT_ERROR, RE_REVIEW_*, and any unrecognized / legacy raw text.
+      default ->
+          "an internal error on our end. You weren't charged — please try again, and contact"
+              + " support if it keeps happening.";
+    };
   }
 }
