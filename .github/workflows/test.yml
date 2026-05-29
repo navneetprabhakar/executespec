@@ -1,0 +1,65 @@
+name: Test
+
+# 2026-05-29 — Java unit-test gate on PRs.
+# Catches test failures before merge so the deploy pipeline (deploy.yml) never
+# has to fail on a test regression — same rationale as lint.yml. The pom.xml
+# Surefire config sets `<excludedGroups>e2e,integration,chaos</excludedGroups>`,
+# so this job runs the fast in-process unit suite only — no real LLM API calls,
+# no Testcontainers, no real Postgres. The deploy still runs the same `mvn test`
+# as a safety net; this just shifts the feedback loop earlier.
+#
+# Cost: $0 in LLM tokens — every LlmRouter / provider client in the unit tests
+# is mocked via Mockito (`mock(LlmRouter.class)` in test fixtures). Real-API
+# tests live under @Tag("e2e") and are explicitly excluded by Surefire +
+# require manual `mvn test -Dgroups=e2e` to run.
+#
+# Triggers:
+#   - Every pull request opened against dev or main
+#   - Manual workflow_dispatch for ad-hoc runs
+
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '21'
+
+jobs:
+  java-test:
+    name: Java · mvn test (unit suite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      # `-B` (batch mode) silences the download-progress noise that bloats the
+      # log without losing the failure summaries. Surefire's <excludedGroups>
+      # in pom.xml already keeps e2e/integration/chaos out of this run.
+      - name: Run unit tests
+        run: mvn -B test
+
+      # Upload the Surefire reports on failure so reviewers can see the full
+      # per-method stack trace without re-running the workflow locally.
+      - name: Upload Surefire reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+      - name: Failure hint
+        if: failure()
+        run: |
+          echo "::error::Run 'mvn test' locally to reproduce."
+          echo "::error::Surefire reports uploaded as an artifact above."
+          echo "::error::If a test is a known-pre-existing flake/regression, mark it @Disabled with a clear TODO."
