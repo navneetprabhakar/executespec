@@ -125,6 +125,9 @@ class WorkerAgentHardCapTest {
             runRepo,
             mock(com.navneet.executespec.sse.SseBroadcaster.class),
             // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null,
+            // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
+            // disabled.
             null);
     return new Fixture(worker);
   }
