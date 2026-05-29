@@ -13,6 +13,7 @@ import com.navneet.executespec.migration.entity.MigrationRecipe.Tier;
 import com.navneet.executespec.migration.service.MigrationDryRunService;
 import com.navneet.executespec.migration.service.MigrationOrchestrator;
 import com.navneet.executespec.migration.service.MigrationService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,6 +40,7 @@ public class MigrationController {
   private final MigrationService migrationService;
   private final MigrationDryRunService dryRunService;
   private final MigrationOrchestrator migrationOrchestrator;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public List<MigrationListItemDto> list(
@@ -77,6 +79,10 @@ public class MigrationController {
     if (body == null || body.projectId() == null || body.projectId().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId required");
     }
+    // Tenant guard — projectId is caller-supplied; without this any authenticated user could
+    // compute applicability + cost + sample diff for another org's project. Read-only.
+    // C2 — audit 2026-05-29.
+    projectAccessGuard.assertCanRead(body.projectId(), userDetails);
     // [F-05] tier gate — refuse dry-run on locked recipes.
     Tier required =
         migrationService
@@ -108,6 +114,10 @@ public class MigrationController {
       return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
           .body(Map.of("status", "unauthenticated"));
     }
+    // Tenant guard — req.projectId() is caller-supplied; without this any authenticated user
+    // could apply a migration run against another org's project (cross-org billing + repo writes).
+    // C2 — audit 2026-05-29.
+    projectAccessGuard.assertCanWrite(req == null ? null : req.projectId(), userDetails);
     ExecutionRun run = migrationOrchestrator.apply(slug, req, userDetails.getUser().getId());
     log.info("[R-339] migration {} applied — executionRun {}", slug, run.getId());
     return ResponseEntity.status(HttpStatus.ACCEPTED)

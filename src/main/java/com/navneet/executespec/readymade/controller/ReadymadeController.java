@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.execution.entity.ExecutionRun;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.readymade.dto.ReadymadeDetailDto;
 import com.navneet.executespec.readymade.dto.ReadymadeListItemDto;
 import com.navneet.executespec.readymade.dto.VariantResolutionDto;
@@ -59,6 +60,7 @@ public class ReadymadeController {
   private final ReadymadeOrchestrator readymadeOrchestrator;
   private final ReadymadeFavouriteRepository favouriteRepo;
   private final ReadymadeSolutionRepository solutionRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public List<ReadymadeListItemDto> list(
@@ -94,7 +96,11 @@ public class ReadymadeController {
   public VariantResolutionDto resolve(
       @PathVariable String slug,
       @RequestParam("projectId") String projectId,
-      @RequestParam("repoId") UUID repoId) {
+      @RequestParam("repoId") UUID repoId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    // Tenant guard — projectId is caller-supplied; without this any authenticated user could
+    // resolve a variant against another org's project/repo. Read-only. C2 — audit 2026-05-29.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     ReadymadeSolution solution =
         solutionRepo
             .findBySlug(slug)
@@ -121,6 +127,10 @@ public class ReadymadeController {
       return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
           .body(Map.of("status", "unauthenticated"));
     }
+    // Tenant guard — req.projectId() is caller-supplied; without this any authenticated user
+    // could instantiate a run against another org's project (cross-org billing + repo writes).
+    // C2 — audit 2026-05-29.
+    projectAccessGuard.assertCanWrite(req == null ? null : req.projectId(), userDetails);
     ExecutionRun run = readymadeOrchestrator.instantiate(slug, req, userDetails.getUser().getId());
     log.info("[R-331] solution {} instantiated — executionRun {}", slug, run.getId());
     return ResponseEntity.status(HttpStatus.ACCEPTED)

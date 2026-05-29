@@ -106,7 +106,18 @@ class AccessGuardCoverageTest {
    * method is in scope for the guard requirement.
    */
   private static final Set<String> PROTECTED_SEGMENTS =
-      Set.of("/runs/{", "/projects/{", "/executions/{", "/launches/{", "/repos/{");
+      Set.of(
+          "/runs/{",
+          "/projects/{",
+          "/executions/{",
+          "/launches/{",
+          "/repos/{",
+          // C2 (audit 2026-05-29) — the readymade/migration libraries take the tenant projectId
+          // in the body/param (not a path id) and reference the recipe by a public {slug}. Scoping
+          // their {slug} surfaces forces a guard on resolve / instantiate / dry-run / apply, the
+          // cross-org-IDOR cluster the path-id-only matcher previously missed.
+          "/library/{",
+          "/migrations/{");
 
   /**
    * Allowlisted methods (FQCN#methodName) — controllers that legitimately don't need a tenant
@@ -145,7 +156,11 @@ class AccessGuardCoverageTest {
               // separate storage from the production `pipeline_run` table; they're scoped to
               // V2 bring-up testing, not customer data. Live V2 runs go through the production
               // `/api/runs` surface which has its own RunAccessGuard coverage.
-              "com.navneet.executespec.rollout.RolloutRunController#poll"));
+              "com.navneet.executespec.rollout.RolloutRunController#poll",
+              // Public solution/recipe reads keyed by a non-tenant {slug} — no project / run id
+              // bind; tier-gating is per-row in the response body. C2 — audit 2026-05-29.
+              "com.navneet.executespec.readymade.controller.ReadymadeController#detail",
+              "com.navneet.executespec.migration.controller.MigrationController#detail"));
 
   /**
    * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit Risk
@@ -186,7 +201,12 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkContract",
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkProject",
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkRepo",
-              "com.navneet.executespec.export.ProjectExportController#export"));
+              "com.navneet.executespec.export.ProjectExportController#export",
+              // Read-only POST computations gated by assertCanRead (mutate no tenant state):
+              // resolve picks a variant; dry-run computes applicability + cost + sample diff.
+              // C2 — audit 2026-05-29.
+              "com.navneet.executespec.readymade.controller.ReadymadeController#resolve",
+              "com.navneet.executespec.migration.controller.MigrationController#dryRun"));
 
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
