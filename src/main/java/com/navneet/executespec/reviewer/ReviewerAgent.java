@@ -404,6 +404,7 @@ public class ReviewerAgent {
       int maxIter,
       String taskIdSuffix,
       String systemPrompt,
+      long wallClockSeconds,
       String preBuildError) {
     ExecutionContext passCtx =
         new ExecutionContext(
@@ -444,6 +445,10 @@ public class ReviewerAgent {
             .userPrompt(userPrompt)
             .context(passCtx)
             .maxIterations(maxIter)
+            // A4 (audit 2026-05-29) — give the worker the same wall-clock budget the pass executor
+            // enforces, so a runaway reviewer pass self-terminates at the cap even independent of
+            // the future.cancel(true) interrupt. Belt-and-braces with the worker's interrupt check.
+            .wallClockSeconds((int) wallClockSeconds)
             .temperature(0.0)
             .maxTokensPerCall(8192)
             // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
@@ -544,7 +549,8 @@ exit=0 — the harness will reject premature completions.
       long timeoutSeconds,
       String preBuildError) {
     Future<WorkerResult> future =
-        passExecutor.submit(() -> runPass(req, maxIter, taskIdSuffix, systemPrompt, preBuildError));
+        passExecutor.submit(
+            () -> runPass(req, maxIter, taskIdSuffix, systemPrompt, timeoutSeconds, preBuildError));
     try {
       return future.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException te) {

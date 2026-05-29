@@ -346,6 +346,29 @@ public class WorkerAgent {
     long lastInputTokens = 0L;
 
     for (int iter = startIter; iter <= maxIter; iter++) {
+      // A4 (audit 2026-05-29) — cooperative cancellation. A reviewer pass / orchestrator cancels a
+      // runaway via future.cancel(true), which sets this thread's interrupt flag; with no check the
+      // loop kept generating to completion (still billed). Bail at the iter boundary, before the
+      // next (billable) LLM call — same "stop on the next boundary" contract as the wall-clock cap
+      // below. No salvage call: a cancellation means stop now, don't spend another LLM call.
+      if (Thread.currentThread().isInterrupted()) {
+        log.warn(
+            "WorkerAgent INTERRUPTED run={} task={} iter={} elapsedMs={} totalWrites={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            System.currentTimeMillis() - start,
+            totalWriteCalls);
+        recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+            .iterations(iter)
+            .toolCallsDispatched(toolsDispatched)
+            .finalAssistantText(lastText)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
       // 2026-05-10 — wall-clock cap check. Top-of-iter so we never start a new LLM call once
       // we've blown past the budget. In-flight LLM calls are not interrupted (the stop happens
       // on the next iter boundary), so the actual termination time is "wall-clock cap +

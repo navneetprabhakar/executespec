@@ -228,9 +228,16 @@ public class ReviewScoringService {
 
   private static int llmCoverageLevel(AccuracyReport accuracy) {
     if (accuracy == null || accuracy.getTestCoverageLevel() == null) return 40;
+    // A6 (audit 2026-05-29) — AccuracyAssessmentService now grades against the
+    // NONE / PARTIAL / GOOD / COMPREHENSIVE bands. GOOD + PARTIAL had no case and fell through to
+    // the 40 default, under-scoring the dashboard test-coverage signal for honest runs (a GOOD run
+    // read as 40). Map them; keep the legacy HIGH/MEDIUM/LOW/ADEQUATE/MINIMAL aliases for backward
+    // compat with already-persisted reports.
     return switch (accuracy.getTestCoverageLevel().toUpperCase()) {
       case "HIGH", "COMPREHENSIVE" -> 95;
+      case "GOOD" -> 80;
       case "MEDIUM", "ADEQUATE" -> 70;
+      case "PARTIAL" -> 50;
       case "LOW", "MINIMAL" -> 35;
       case "NONE" -> 10;
       default -> 40;
