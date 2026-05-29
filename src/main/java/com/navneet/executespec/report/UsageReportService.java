@@ -142,8 +142,14 @@ public class UsageReportService {
     long prevInTok = runRepo.sumInputTokensByOrgAndDateRange(orgId, prev.start, prev.end);
     long prevOutTok = runRepo.sumOutputTokensByOrgAndDateRange(orgId, prev.start, prev.end);
 
-    double cost = estimateCost(inTok, outTok);
-    double prevCost = estimateCost(prevInTok, prevOutTok);
+    double cost =
+        costOrFallback(
+            runRepo.sumActualCostByOrgAndDateRange(orgId, range.start, range.end), inTok, outTok);
+    double prevCost =
+        costOrFallback(
+            runRepo.sumActualCostByOrgAndDateRange(orgId, prev.start, prev.end),
+            prevInTok,
+            prevOutTok);
 
     // Top 5 users
     List<TopUser> topUsers = new ArrayList<>();
@@ -206,8 +212,14 @@ public class UsageReportService {
     long prevInTok = runRepo.sumInputTokensByUserAndDateRange(userId, prev.start, prev.end);
     long prevOutTok = runRepo.sumOutputTokensByUserAndDateRange(userId, prev.start, prev.end);
 
-    double cost = estimateCost(inTok, outTok);
-    double prevCost = estimateCost(prevInTok, prevOutTok);
+    double cost =
+        costOrFallback(
+            runRepo.sumActualCostByUserAndDateRange(userId, range.start, range.end), inTok, outTok);
+    double prevCost =
+        costOrFallback(
+            runRepo.sumActualCostByUserAndDateRange(userId, prev.start, prev.end),
+            prevInTok,
+            prevOutTok);
 
     List<ProjectBreakdown> projects =
         resolveProjects(runRepo.projectBreakdownByUser(userId, range.start, range.end));
@@ -262,8 +274,20 @@ public class UsageReportService {
   }
 
   /**
-   * Rough cost estimate based on blended Haiku pricing (majority of tokens). Input: $0.80/1M
-   * tokens, Output: $4.00/1M tokens.
+   * B2 (audit 2026-05-29) — prefer the authoritative per-run {@code actual_cost_usd} (the
+   * cache-aware, per-model pricing RunCostTracker persists). Fall back to the blended-Haiku token
+   * estimate only for periods whose rows predate actual-cost tracking (sum null/0).
+   */
+  private double costOrFallback(Double actualSum, long inputTokens, long outputTokens) {
+    if (actualSum != null && actualSum > 0.0) {
+      return actualSum;
+    }
+    return estimateCost(inputTokens, outputTokens);
+  }
+
+  /**
+   * Fallback only (since B2) — rough estimate at blended Haiku pricing (Input $0.80/1M, Output
+   * $4.00/1M) for periods predating actual-cost tracking. Live runs report {@code actual_cost_usd}.
    */
   private double estimateCost(long inputTokens, long outputTokens) {
     return (inputTokens * 0.80 / 1_000_000.0) + (outputTokens * 4.00 / 1_000_000.0);
