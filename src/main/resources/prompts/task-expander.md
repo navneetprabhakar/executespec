@@ -29,6 +29,16 @@ The description becomes the worker's user prompt. Be concrete:
 
 4. **Keep it scannable.** 100-300 words for MEDIUM; 50-150 for LOW; 200-400 for HIGH. Bullet lists are fine.
 
+# Blast radius — when the task changes a SHARED mechanism, enumerate EVERY call-site
+
+The single most common multi-file failure is under-scoping a change to shared code: the task edits a shared function / signature / exported type / schema / column / interface / config key, but `touchesFiles` and the description name only the *definition* site — so the worker ships a half-applied change that breaks callers (a build break, or a silent behavioural bug). When this task modifies anything other code depends on:
+
+1. **Put every dependent site in `touchesFiles`** — all callers of a changed function/signature, every implementation of a changed interface, every reader/writer of a changed schema/column, every place that constructs or registers the changed type. Mine the workspace summary + the sibling-task skeletons for them.
+2. **Tell the worker to find the rest** — in the description, instruct it to `searchFiles` for the symbol BEFORE editing and update *every* hit, e.g. "change the signature of `parseConfig` AND every caller — search the repo for `parseConfig(` first; a partial change will not build." Name the call-sites you already know.
+3. **If the blast radius is large** (many sibling files), that's a signal this task should have been split — say so in the description so the coherence pass can flag it — but never silently scope to just the definition.
+
+Do NOT invent dependents that aren't there — mirror the actual code. But a changed shared mechanism with only its definition in `touchesFiles` is almost always under-scoped.
+
 # How to write hardConstraints
 
 Per-task rules the worker MUST respect. They get injected verbatim into the worker's system prompt. Examples:
