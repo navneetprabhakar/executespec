@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.lang.reflect.Method;
 import java.util.List;
 
-import com.navneet.executespec.agent.WorkerResult;
+import com.navneet.executespec.engine.WorkerResult;
 
 import org.junit.jupiter.api.Test;
 

@@ -801,6 +801,16 @@ public class StateStore {
       final String pid = projectId;
       combined = combined.and((root, q, cb) -> cb.equal(root.get("projectId"), pid));
     }
+    // Newest-first by startedAt, with NULL-startedAt rows excluded. submitRun() stamps startedAt at
+    // creation (RunOrchestrator ~L699), so every real run — even QUEUED — is timestamped; the ONLY
+    // NULL-startedAt rows are synthetic benchmark /generate artifacts (BenchmarkGenerationService
+    // creates a minimal PipelineRun that never starts a pipeline). Under Postgres' default NULLS
+    // FIRST those synthetic rows sorted ahead of every real run and buried live/recent runs off the
+    // first page. We can't sort NULLS LAST here — Hibernate's Criteria path throws
+    // UnsupportedOperationException on null precedence — so we filter them: a run that never
+    // started
+    // has nothing to list. No real run is hidden.
+    combined = combined.and((root, q, cb) -> cb.isNotNull(root.get("startedAt")));
     Pageable sorted =
         PageRequest.of(
             pageable.getPageNumber(),
@@ -1707,9 +1717,17 @@ public class StateStore {
   // ── Tier 5: Prompt Optimiser support ─────────────────────
 
   public List<PipelineRun> getRecentCompletedRuns(int limit) {
-    return runRepo
-        .findByStatusOrderByStartedAtDesc("COMPLETE", PageRequest.of(0, limit))
-        .getContent();
+    // status=COMPLETE AND startedAt non-null. Excludes never-started benchmark /generate rows
+    // (which
+    // can be COMPLETE with a NULL startedAt) from the prompt-optimiser sample so it trains on real
+    // completed runs, not benchmark noise. Plain DESC sort — Criteria can't express NULLS LAST, and
+    // with the non-null filter there are no NULLs left to mis-order under Postgres' NULLS-FIRST
+    // DESC.
+    Specification<PipelineRun> completed =
+        (root, q, cb) ->
+            cb.and(cb.equal(root.get("status"), "COMPLETE"), cb.isNotNull(root.get("startedAt")));
+    Pageable sorted = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "startedAt"));
+    return runRepo.findAll(completed, sorted).getContent();
   }
 
   public long countCompletedRuns() {

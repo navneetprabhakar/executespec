@@ -12,7 +12,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>V1 detected completion by checking whether the worker's text response started with
  * {@code "{"} (a strict JSON-prefix heuristic). That broke whenever the model emitted
  * a non-JSON preamble or escaped quotes weirdly. V2 replaces the heuristic with this
- * registered Tool — when the worker calls it, {@link com.navneet.executespec.agent.WorkerAgent}
+ * registered Tool — when the worker calls it, {@link com.navneet.executespec.engine.WorkerAgent}
  * recognizes the structured tool name and exits the loop with the supplied summary.
  *
  * <p>The tool itself is intentionally a no-op at the dispatch level — calling it from

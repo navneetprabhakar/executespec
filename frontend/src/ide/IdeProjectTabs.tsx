@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
@@ -152,6 +152,16 @@ export function IdeProjectPulse() {
   const [health, setHealth] = useState<Array<Record<string, unknown>>>([]);
   const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
 
+  // RL-2026-05-052 (#9): refresh recent runs via a callback so we can poll while a
+  // run is live — the pulse fetched once on mount, so live project runs never updated.
+  const refreshRuns = useCallback(() => {
+    if (!projectId) return;
+    api
+      .getRuns({projectId, page: 0, size: 6})
+      .then((r) => setRecent(r.content ?? []))
+      .catch(() => setRecent([]));
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId) return;
     api
@@ -165,11 +175,24 @@ export function IdeProjectPulse() {
         setHealth(arr as Array<Record<string, unknown>>);
       })
       .catch(() => setHealth([]));
-    api
-      .getRuns({projectId, page: 0, size: 6})
-      .then((r) => setRecent(r.content ?? []))
-      .catch(() => setRecent([]));
-  }, [projectId]);
+    refreshRuns();
+  }, [projectId, refreshRuns]);
+
+  // Live tracking (#9): poll recent runs every 12s while any is non-terminal
+  // (skipped when the tab is hidden); stops once all runs are terminal.
+  const hasLiveRun = (recent ?? []).some(
+    (r) =>
+      !['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(
+        (r.status || '').toUpperCase(),
+      ),
+  );
+  useEffect(() => {
+    if (!hasLiveRun) return;
+    const id = window.setInterval(() => {
+      if (!document.hidden) refreshRuns();
+    }, 12000);
+    return () => window.clearInterval(id);
+  }, [hasLiveRun, refreshRuns]);
 
   const avgScore = dash ? (numOf(dash, 'recencyAvgScore') ?? numOf(dash, 'avgScore')) : undefined;
   const dur = dash ? numOf(dash, 'avgDurationMs') : undefined;

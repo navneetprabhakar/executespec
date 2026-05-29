@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {RunTimeline} from '@/ide/RunTimeline';
 
 const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 const EXEC = ['EXECUTING', 'RUNNING', 'REVIEWING', 'BUILDING'];
@@ -145,23 +146,11 @@ export default function IdePlan() {
             </div>
           </div>
 
-          <div className='ide-h2'>Tasks · {tasks.length}</div>
-          <div className='ide-card' style={{padding: 0}}>
-            {tasks.map((t, i) => (
-              <div
-                key={t.taskId}
-                style={{
-                  padding: '10px 16px',
-                  borderBottom: i < tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                }}
-              >
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 11, width: 18}}>{i + 1}</span>
-                <span style={{flex: 1}}>{t.title}</span>
-              </div>
-            ))}
+          <div className='ide-h2'>
+            Plan · {tasks.length} step{tasks.length === 1 ? '' : 's'}
+          </div>
+          <div className='ide-card'>
+            <RunTimeline tasks={tasks} />
           </div>
 
           <div className='ide-h2'>Not quite right?</div>

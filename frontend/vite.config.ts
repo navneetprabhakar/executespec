@@ -18,7 +18,15 @@ export default defineConfig({
     //   VITE_BACKEND_URL=http://localhost:8081 npm --prefix frontend run dev
     port: Number(process.env.VITE_PORT ?? 5173),
     proxy: {
-      '/api': process.env.VITE_BACKEND_URL ?? 'http://localhost:8080',
+      '/api': {
+        target: process.env.VITE_BACKEND_URL ?? 'http://localhost:8080',
+        // changeOrigin rewrites Host header to the backend, so Spring Security's
+        // OAuth2 redirect_uri + Set-Cookie state get scoped to the backend host —
+        // without this, the OAuth state cookie ends up bound to localhost:5173,
+        // Google's callback hits localhost:8080 directly, and the cookie mismatch
+        // breaks login (RL-2026-05-052 dev-fix).
+        changeOrigin: true,
+      },
     },
   },
   build: {

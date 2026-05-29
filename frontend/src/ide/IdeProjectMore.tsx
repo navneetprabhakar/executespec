@@ -368,16 +368,25 @@ export function IdeProjectChat() {
         <div ref={endRef} />
       </div>
 
-      <div style={{display: 'flex', gap: 8}}>
-        <input
+      <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+        <textarea
           className='ide-input'
+          rows={2}
           placeholder={
-            gated ? 'Upgrade to TEAM to enable project chat.' : 'Ask about the codebase…'
+            gated
+              ? 'Upgrade to TEAM to enable project chat.'
+              : 'Ask about the codebase…  (Enter to send · Shift+Enter for a new line)'
           }
           value={text}
           disabled={gated}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          style={{resize: 'vertical', minHeight: 40, maxHeight: 160, fontFamily: 'inherit'}}
         />
         <button className='ide-btn' onClick={send} disabled={busy || gated}>
           {busy ? '…' : 'Send'}

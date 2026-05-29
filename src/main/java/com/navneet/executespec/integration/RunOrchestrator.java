@@ -1420,7 +1420,30 @@ public class RunOrchestrator {
       int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
-      // ── 2.5 Lint auto-fix ────────────────────────────────────────────
+      // ── 2.5 Code-gen-only stop (benchmark) ──────────────────────────
+      // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker decisioning
+      // (the system picks its own strategy) but a CLEAN minimal diff for scoring. Everything after
+      // the worker pollutes that diff, so a code-gen-only run STOPS HERE — right after the worker,
+      // BEFORE the lint auto-fix below + the reviewer + validation + push. This MUST precede 2.6:
+      // the lint pass runs `black` over the WHOLE workspace (observed reformatting 225–490 files →
+      // a 13 MB git diff that buried the actual fix and made the patch unscoreable). Tightly gated
+      // on the benchmark source, so every production run is byte-identical (never taken for a real
+      // customer run).
+      if (isCodeGenOnlyRun(runId)) {
+        log.info(
+            "RunOrchestrator run={} CODEGEN_ONLY — stopping after worker (skip"
+                + " lint/reviewer/validation/push)",
+            runId);
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId, null, "Code generation complete — code-gen-only mode (reviewer skipped)"));
+        terminate(
+            runId, "COMPLETE", "CODEGEN_ONLY", "code-gen complete; reviewer skipped", startedAt);
+        return;
+      }
+
+      // ── 2.6 Lint auto-fix ────────────────────────────────────────────
       // Run deterministic formatters against the workspace before the LLM reviewer sees it.
       // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
       // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
@@ -1757,7 +1780,7 @@ public class RunOrchestrator {
    * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
    * downstream notifiers / dashboards can render meaningfully.
    *
-   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.agent.WorkerAgent}'s
+   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.engine.WorkerAgent}'s
    * iter-3 budget guard, which reads {@code pipeline_run.hard_cap_usd}. We default that to {@link
    * #DEFAULT_PATCH_HARD_CAP_USD} when unset so a runaway patch agent stops without manual
    * intervention.
@@ -1847,7 +1870,7 @@ public class RunOrchestrator {
       }
     }
 
-    com.navneet.executespec.agent.WorkerResult result;
+    com.navneet.executespec.engine.WorkerResult result;
     try {
       result = patchAgent.run(provider, model, userRequestLive, rootCtx);
     } catch (Exception e) {
@@ -3269,6 +3292,21 @@ public class RunOrchestrator {
   }
 
   /** Legacy 4-arg entry point — failure paths without a specific reason flow here. */
+  /**
+   * RL-2026-05-050 — true when this run is a benchmark "code-gen only" run (source prefix {@code
+   * swebench-codegen}). These execute the real classifier→planner→worker path but STOP after the
+   * worker (no reviewer / validation / push) so the captured diff is a clean, scoreable minimal
+   * patch. Never true for production customer runs (their source is MANUAL / GITHUB_* / REST).
+   */
+  private boolean isCodeGenOnlyRun(String runId) {
+    return runRepo
+        .findById(runId)
+        .map(r -> r.getSourceType())
+        .filter(s -> s != null)
+        .map(s -> s.startsWith("swebench-codegen"))
+        .orElse(false);
+  }
+
   private void terminate(String runId, String finalStatus, String note, Instant startedAt) {
     terminate(runId, finalStatus, null, note, startedAt);
   }

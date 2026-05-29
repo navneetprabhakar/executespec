@@ -14,9 +14,9 @@ Output **ONLY** a single JSON object — no preamble, no commentary, no markdown
 
 ## Strategy definitions
 
-- `SINGLE_SHOT` — the spec is already a single coherent task. No decomposition needed. Examples: "Fix the typo on the signup button", "Add a `/healthz` route", "Update README". Pick this when one developer could do the work as one cohesive change in under an hour.
+- `SINGLE_SHOT` — the spec is already a single coherent task. No decomposition needed. **This is the default for bug-fixes and small features, even ones that touch 2-3 files.** Examples: "Fix the typo on the signup button", "Add a `/healthz` route", "Update README", "Fix issue X where Y produces wrong output", "Add validation for the email field plus a test for it". Pick this when one developer could do the work as one cohesive change in under an hour. **A spec that names one bug or one self-contained behavior is SINGLE_SHOT — splitting it into 'plan' + 'implement' + 'test' tasks burns budget and loses context across the handoff.**
 
-- `SMALL` — a small project: ≤6 cohesive tasks, 1 repo, single-feature scope. Examples: "Build a TODO app with localStorage", "Add Stripe checkout to the cart", "Wire Google OAuth on the login screen".
+- `SMALL` — a small project: ≤6 cohesive tasks, 1 repo, **multiple distinct features** that genuinely benefit from separate planning. Examples: "Build a TODO app with localStorage" (UI + storage + CRUD are independent slices), "Add Stripe checkout to the cart" (config + UI + webhook handler + receipt), "Wire Google OAuth on the login screen" (config + callback + session). **Not for single-bug fixes** — those are SINGLE_SHOT even if they need 2-3 file edits.
 
 - `MEDIUM` — moderate project: 7-15 tasks, 1-2 repos, no cross-cutting concerns. Examples: "Build a multi-page blog with comments", "Add a payment + receipts flow with admin export".
 
@@ -31,6 +31,13 @@ Output **ONLY** a single JSON object — no preamble, no commentary, no markdown
 3. **Count distinct features mentioned.** Each "and also" / "plus" / numbered bullet adds to the count.
 4. **Watch for domain-explosive nouns.** Auth, multi-tenant, RBAC, real-time, payments, search, analytics, internationalisation — all routinely fan out into many tasks even when the spec text is short.
 5. **The heuristic verdict given is a hint, not a constraint.** Override it if the spec's actual scope differs.
+
+### Anti-patterns to avoid
+
+- **Over-decomposing bug fixes.** "Fix the off-by-one in the date parser" is SINGLE_SHOT even if the fix touches the parser + a test file. Don't split it into "Plan the fix", "Apply the fix", "Add the test" — that loses context across stages and burns iteration budget.
+- **Over-decomposing single-behavior features.** "Add a /healthz endpoint that checks DB connectivity" is SINGLE_SHOT — implement + test + register in router is one cohesive change.
+- **Inflating to SMALL because the spec mentions tests.** Tests are part of the task, not a separate task. "Add X and a test for X" is the same band as "Add X".
+- **Inflating from MEDIUM to LARGE because of language like 'across the stack'.** "Across the stack" with a single feature (e.g. "Add email notifications across the stack") is usually MEDIUM unless 3+ repos are genuinely touched.
 
 ## Inputs
 
