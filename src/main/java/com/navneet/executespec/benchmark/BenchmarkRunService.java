@@ -40,11 +40,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>Principle: real system, sandbox-only.</b> The code-gen path is untouched production: the
  * real {@code submitRun} entry, real tier routing, real worker + tools. We run in {@code
- * runMode=PATCH} — the production autofix engine (the same thin-worker loop that powers the four
- * customer autofix surfaces), <i>not</i> a benchmark fork. The earlier BUILD-mode smoke proved
- * BUILD's product machinery (PostEditFormatter, scaffolding, auto-commit) pollutes the diff with
- * non-fix churn (a 469-line reformat + scaffolding files), making it unscoreable; PATCH emits the
- * minimal source diff a leaderboard submission needs. Only the <i>sandbox</i> is
+ * runMode=BUILD} with {@code source="swebench-codegen"} (RL-2026-05-050): the FULL pipeline —
+ * classifier picks the strategy, planner plans, worker generates — but the orchestrator's
+ * code-gen-only gate stops it right after the worker, BEFORE the reviewer. That gives the real
+ * classifier/planner decisioning AND a clean diff: the reviewer's {@code PostEditFormatter} (a
+ * 469-line whole-file reformat on the earlier smoke) + scaffolding + auto-commit all run in/after
+ * the reviewer, so skipping it removes exactly that non-fix churn. Only the <i>sandbox</i> is
  * benchmark-specific: the cleanroom container, the blind issue→spec input, the diff capture, and
  * (external) scoring.
  *
@@ -62,11 +63,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  *   <li>Stash the setup recipe in {@link #PENDING}.
- *   <li>{@link RunOrchestrator#submitRun} with {@code runMode=PATCH}, {@code repoMode=NONE}, the
- *       blind spec.
+ *   <li>{@link RunOrchestrator#submitRun} with {@code runMode=BUILD}, {@code
+ *       source="swebench-codegen"}, {@code repoMode=NONE}, the blind spec.
  *   <li>{@link #onRunStarted} fires synchronously → docker pull → cp {@code /testbed} into the host
  *       workspace → run with bind-mount + {@code --network none} → register the container.
- *   <li>The real PATCH pipeline (thin worker loop) runs against the bind-mounted {@code /testbed}.
+ *   <li>The real classifier→planner→worker pipeline runs against the bind-mounted {@code /testbed},
+ *       stopping at the worker (code-gen-only gate) before the reviewer.
  *   <li>{@link #captureOnTerminalAsync} polls to terminal, captures the {@code git diff} as an
  *       SWE-bench {@code preds.json}.
  * </ol>
@@ -234,20 +236,20 @@ public class BenchmarkRunService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, instanceId));
     try {
-      // runMode=PATCH → the production autofix engine: a thin worker loop that emits a MINIMAL
-      // patch
-      // (no PostEditFormatter / scaffolding / preview / auto-commit), which is what a clean,
-      // scoreable
-      // SWE-bench submission needs. The smoke proved BUILD mode's product machinery pollutes the
-      // patch
-      // (469-line reformat of rebuilder.py, scaffolding files, fixture rename) → switched to PATCH.
+      // RL-2026-05-050 — runMode=BUILD + source="swebench-codegen" → run the REAL system end to
+      // end (classifier picks the strategy, planner plans, worker generates with the full tool
+      // set), but STOP after the worker. The orchestrator's code-gen-only gate (keyed on the
+      // "swebench-codegen" source) finalizes COMPLETE right after the executor, BEFORE the reviewer
+      // — so PostEditFormatter / scaffolding / auto-commit never run and the captured diff is a
+      // clean, scoreable minimal patch. (The earlier BUILD smoke polluted the diff precisely
+      // because it ran the full reviewer + post-steps; stopping at the worker removes that.)
       // repoMode=NONE + repoUrl=null → no clone; the workspace is populated by onRunStarted's cp.
       // Blind: the agent gets only the issue text (no FAIL_TO_PASS / gold test_patch) — those are
       // applied externally at scoring time.
       run =
           orchestrator.submitRun(
               userRequest,
-              /* source */ "swebench-build",
+              /* source */ "swebench-codegen",
               /* repoUrl */ null,
               /* repoMode */ "NONE",
               /* githubPat */ null,
@@ -265,7 +267,7 @@ public class BenchmarkRunService {
               /* tddMode */ false,
               /* branchOverride */ null,
               /* prReviewComments */ null,
-              /* runMode */ RunMode.PATCH);
+              /* runMode */ RunMode.BUILD);
     } catch (Exception e) {
       run("docker rm -f " + containerName, 30);
       throw new ResponseStatusException(
@@ -300,10 +302,15 @@ public class BenchmarkRunService {
         }
         Thread.sleep(5_000);
       }
+      // Wall-timeout: the run never reached terminal (e.g. a frozen/slow worker). Capture a
+      // best-effort diff anyway — BEFORE the finally removes the container — so a run that did
+      // real work is never silently left without a preds.json (RL-2026-05-052: the Anthropic
+      // "16→15" was exactly this — django-14855 timed out → no preds.json → counted unresolved).
       log.warn(
-          "benchmark: run {} exceeded wall timeout {}min",
+          "benchmark: run {} exceeded wall timeout {}min — best-effort capture before teardown",
           runId,
           props.getTaskWallTimeoutMinutes());
+      captureSubmission(runId, instanceId, containerName, outputDir, "TIMEOUT");
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
     } finally {
@@ -410,7 +417,9 @@ public class BenchmarkRunService {
     sb.append(i.problemStatement()).append("\n\n");
     sb.append("# How to work\n");
     sb.append(
-        "1. Investigate with listFiles / searchFiles / readFile to locate the relevant source.\n");
+        "1. Investigate with listFiles / searchFiles / readFile to LOCATE the fix site. Read the"
+            + " function the issue points at AND its callers / similar functions, so you understand"
+            + " the full picture before touching anything.\n");
     sb.append(
         "2. Pin down the EXACT expected behavior BEFORE editing: re-read the issue for the precise"
             + " result it expects — a specific return value, or a raised error/exception? Then"
@@ -418,11 +427,21 @@ public class BenchmarkRunService {
             + " inputs (e.g. do they raise ValueError, or return a default?) and MATCH the"
             + " codebase's existing conventions. Do not settle for a plausible-but-different"
             + " behavior.\n");
-    sb.append("3. Make a minimal, targeted fix that produces exactly that behavior.\n");
     sb.append(
-        "4. No gold/spec tests are provided — work from the issue. After fixing, run the"
-            + " repository's EXISTING tests for the module you changed to confirm nothing"
-            + " regressed, then call completeTask.\n");
+        "3. REPRODUCE the bug first: write a tiny throwaway script OUTSIDE the repo (e.g."
+            + " /tmp/repro.py — NEVER under /testbed, so it stays out of your diff) that triggers"
+            + " the issue, and run it to confirm it currently fails the way the issue describes."
+            + " This proves you actually understand the bug before you change code.\n");
+    sb.append(
+        "4. Make the SMALLEST fix that produces exactly that behavior. Change ONLY the lines"
+            + " required — do NOT reformat, re-indent, reorder imports, rename, or refactor"
+            + " unrelated code, and do NOT edit files unrelated to the fix. A 3-line diff that"
+            + " fixes it is far better than a 40-line diff that also 'cleans up'. Do NOT add new"
+            + " test files.\n");
+    sb.append(
+        "5. VERIFY before finishing: re-run your /tmp reproduction (it must now pass) AND the"
+            + " repository's EXISTING tests for the module you changed (nothing regressed). Only"
+            + " then call completeTask. No gold/spec tests are provided — work from the issue.\n");
     return sb.toString();
   }
 

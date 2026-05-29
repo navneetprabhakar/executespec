@@ -15,10 +15,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannedTask.Complexity;
-import com.navneet.executespec.agent.WorkerAgent;
-import com.navneet.executespec.agent.WorkerResult;
-import com.navneet.executespec.agent.WorkerTaskRequest;
 import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.engine.WorkerAgent;
+import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -98,6 +98,7 @@ class SequentialExecutorCancelCascadeTest {
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         taskRepo,
         null, // modelResolver
+        null, // matrixProps
         null, // retrievalService
         null, // inLoopTestRunner
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),

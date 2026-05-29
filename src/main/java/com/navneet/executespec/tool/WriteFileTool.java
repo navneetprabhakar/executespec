@@ -36,6 +36,13 @@ public class WriteFileTool implements Tool {
    */
   private final SseBroadcaster sseBroadcaster;
 
+  /**
+   * Read-before-write ledger (RL-2026-05-051, harness adoption #1). writeFile only creates new
+   * files, so there's nothing to gate here — but recording the written content means a subsequent
+   * editFile on this file passes the read-before-edit check without forcing a redundant re-read.
+   */
+  private final ReadFileStateStore readState;
+
   @Override
   public String name() {
     return "writeFile";
@@ -99,6 +106,8 @@ public class WriteFileTool implements Tool {
         Files.createDirectories(parent);
       }
       Files.writeString(resolved, content);
+      // Record the new file's content so a later editFile on it passes the read-before-edit gate.
+      readState.recordWrite(ctx.runId(), resolved, content);
       // PR-C (2026-05-13) — push the write through SSE so RunDetail file-tree subscribers can
       // refresh immediately instead of waiting for the 5s poll. Swallow broadcast failures so a
       // transient Redis blip never fails a worker write.

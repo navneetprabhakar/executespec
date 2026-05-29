@@ -54,6 +54,18 @@ spring:
     google:
       genai:
         api-key: ${GOOGLE_API_KEY:}
+    # OpenRouter (Enterprise gateway) — RL-2026-05-052. Env-var-bound on prod so the operator
+    # sets OPENROUTER_API_KEY without touching YAML. Empty key disables the route — provider stays
+    # registered but every call short-circuits with "OpenRouter api-key not configured."
+    openrouter:
+      base-url: https://openrouter.ai/api
+      api-key: ${OPENROUTER_API_KEY:}
+    # DeepSeek native (api.deepseek.com) — RL-2026-05-052. Same shape as OpenRouter. Empty key
+    # disables the route. Tier-pinned to deepseek-v4-flash-native today (pro-native registered but
+    # not tier-active — see application.yml notes).
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: ${DEEPSEEK_API_KEY:}
   security:
     oauth2:
       client:

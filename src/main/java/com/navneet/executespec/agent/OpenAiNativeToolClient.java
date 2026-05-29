@@ -57,6 +57,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class OpenAiNativeToolClient {
 
+  /**
+   * AssistantMessage metadata key under which we stash DeepSeek's {@code reasoning_content} so the
+   * next call's assistant message can echo it back (the DeepSeek API requires this round-trip for
+   * V4 thinking-mode models). See {@code parseResponse} + {@code appendMessage}. RL-2026-05-052.
+   */
+  public static final String REASONING_CONTENT_META_KEY = "deepseek_reasoning_content";
+
   private static final String DEFAULT_BASE_URL = "https://api.openai.com";
   private static final String CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
 
@@ -205,6 +212,17 @@ public class OpenAiNativeToolClient {
       } else {
         n.putNull("content");
       }
+      // 2026-05-28 (RL-2026-05-052) — DeepSeek thinking-mode round-trip. V4-{Pro,Flash} both return
+      // `message.reasoning_content` alongside the tool calls; the API then requires that same value
+      // echoed back in the assistant turn of every follow-up call. parseResponse() captures it into
+      // the AssistantMessage's `properties` map under key REASONING_CONTENT_META_KEY; we re-emit
+      // here. OpenAI's own endpoint ignores extra fields, so this is safe for non-DeepSeek calls.
+      if (am.getMetadata() != null) {
+        Object rc = am.getMetadata().get(REASONING_CONTENT_META_KEY);
+        if (rc instanceof String rcStr && !rcStr.isEmpty()) {
+          n.put("reasoning_content", rcStr);
+        }
+      }
       if (am.getToolCalls() != null && !am.getToolCalls().isEmpty()) {
         ArrayNode tcs = n.putArray("tool_calls");
         for (var tc : am.getToolCalls()) {
@@ -263,8 +281,22 @@ public class OpenAiNativeToolClient {
       }
 
       String finishReason = choice.path("finish_reason").asText(null);
-      AssistantMessage msg =
-          AssistantMessage.builder().content(content).toolCalls(toolCalls).build();
+
+      // 2026-05-28 (RL-2026-05-052) — capture DeepSeek's reasoning_content into the
+      // AssistantMessage metadata so appendMessage() can echo it back on follow-up calls (the
+      // DeepSeek API rejects the follow-up otherwise). OpenAI proper doesn't return this field;
+      // when absent we skip and the metadata stays empty.
+      JsonNode reasoningNode = message.path("reasoning_content");
+      java.util.Map<String, Object> properties = null;
+      if (reasoningNode.isTextual() && !reasoningNode.asText().isEmpty()) {
+        properties = java.util.Map.of(REASONING_CONTENT_META_KEY, reasoningNode.asText());
+      }
+
+      AssistantMessage.Builder builder =
+          AssistantMessage.builder().content(content).toolCalls(toolCalls);
+      if (properties != null) builder.properties(properties);
+      AssistantMessage msg = builder.build();
+
       ChatGenerationMetadata genMeta =
           ChatGenerationMetadata.builder().finishReason(finishReason).build();
       generations.add(new Generation(msg, genMeta));

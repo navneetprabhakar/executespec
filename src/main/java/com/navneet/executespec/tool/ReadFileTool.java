@@ -44,6 +44,12 @@ public class ReadFileTool implements Tool {
   private final ProjectRepoLinkRepository repoLinkRepo;
   private final ProjectRepoRepository repoRepo;
 
+  /**
+   * Read-before-write ledger (RL-2026-05-051, harness adoption #1). Every run-workspace read is
+   * recorded so {@link EditFileTool} can enforce read-before-edit + staleness.
+   */
+  private final ReadFileStateStore readState;
+
   @Override
   public String name() {
     return "readFile";
@@ -138,6 +144,9 @@ public class ReadFileTool implements Tool {
         return ToolResult.err(
             ToolResult.ErrorKind.INVALID_ARGS, "path is a directory, not a file: " + path);
       }
+      // Record the read (full file content hash) so editFile can enforce read-before-write +
+      // staleness. Covers both range + full reads — any read grounds the worker on this file.
+      readState.recordReadFromDisk(ctx.runId(), resolved);
       if (start != null || end != null) {
         List<String> lines = Files.readAllLines(resolved);
         int s = start == null ? 1 : start;

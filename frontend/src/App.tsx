@@ -7,6 +7,8 @@ import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 // legal / shared) — which have no IDE chrome by design — plus AdminPage for the
 // /admin/* deep links.
 import IdeWorkspace from '@/ide/IdeWorkspace';
+import ConsoleShell from '@/console/ConsoleShell';
+import ConsoleHome from '@/console/ConsoleHome';
 import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
@@ -103,7 +105,10 @@ function protectedChildren() {
     <>
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
-      <Route path='/home' element={<IdeWelcome />} />
+      <Route
+        path='/home'
+        element={localStorage.getItem('es:console') === '1' ? <ConsoleHome /> : <IdeWelcome />}
+      />
       <Route path='/runs' element={<IdeRuns />} />
       <Route path='/compose' element={<IdeCompose />} />
       <Route path='/plan' element={<IdePlan />} />
@@ -186,9 +191,16 @@ export default function App() {
       <Route path='/reports/shared/:token' element={<SharedPage />} />
       <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
-      {/* ───── Protected app (IDE workspace — the only chrome) ───── */}
+      {/* ───── Protected app chrome ─────
+          Control-plane reframe (RL-2026-05-052): the new ConsoleShell is opt-in behind
+          localStorage `es:console`='1' (default OFF → the IDE chrome is byte-identical).
+          The same protectedChildren render in either shell's <Outlet/>. */}
       <Route element={<ProtectedRoute />}>
-        <Route element={<IdeWorkspace />}>{protectedChildren()}</Route>
+        <Route
+          element={localStorage.getItem('es:console') === '1' ? <ConsoleShell /> : <IdeWorkspace />}
+        >
+          {protectedChildren()}
+        </Route>
       </Route>
 
       {/* Legacy URL catchers — collapse to canonical equivalents */}

@@ -51,13 +51,14 @@ class SequentialExecutorTierConfigTest {
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
     return new SequentialExecutor(
-        mock(com.navneet.executespec.agent.WorkerAgent.class),
+        mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(BuildProjectTool.class),
         new ObjectMapper(),
         mock(Metrics.class),
         mock(SseBroadcaster.class),
         mock(AgentTaskRepository.class),
         modelResolver,
+        mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         mock(RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
