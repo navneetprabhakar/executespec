@@ -1,5 +1,6 @@
 package com.navneet.executespec.execution.repository;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -65,6 +66,22 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
           + "AND e.deletedAt IS NULL "
           + "AND e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED')")
   long countActiveByProjectId(@Param("projectId") String projectId);
+
+  /**
+   * B4 (audit 2026-05-29) — project lifetime Launch $ + token totals as DB SUMs, replacing the
+   * dashboard's findByProjectIdAndDeletedAtIsNull(... 2000)-then-stream heap scan.
+   */
+  // Plain SUM (no COALESCE-literal coercion on a BigDecimal column) — null on zero rows, handled
+  // at the call site.
+  @Query(
+      "SELECT SUM(e.totalCostUsd) FROM ExecutionRun e "
+          + "WHERE e.projectId = :pid AND e.deletedAt IS NULL")
+  BigDecimal sumTotalCostUsdByProjectId(@Param("pid") String projectId);
+
+  @Query(
+      "SELECT COALESCE(SUM(COALESCE(e.totalActualTokens, 0)), 0) FROM ExecutionRun e "
+          + "WHERE e.projectId = :pid AND e.deletedAt IS NULL")
+  Long sumTotalActualTokensByProjectId(@Param("pid") String projectId);
 
   /**
    * v2.5.7 — returns the full active ExecutionRun rows so the controller can craft a specific 409
