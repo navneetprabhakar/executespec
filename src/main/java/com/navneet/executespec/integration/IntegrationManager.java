@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.IntegrationEventLog;
 import com.navneet.executespec.state.entity.IntegrationRun;
@@ -36,18 +38,24 @@ public class IntegrationManager {
   private final IntegrationEventLogRepository eventLogRepo;
   private final StateStore stateStore;
   private final RunOrchestrator v2Orchestrator;
+  private final IntegrationProperties integrationProperties;
+  private final AppUserRepository userRepo;
 
   public IntegrationManager(
       List<InboundAdapter> inbound,
       IntegrationRunRepository integrationRunRepo,
       IntegrationEventLogRepository eventLogRepo,
       StateStore stateStore,
-      RunOrchestrator v2Orchestrator) {
+      RunOrchestrator v2Orchestrator,
+      IntegrationProperties integrationProperties,
+      AppUserRepository userRepo) {
     this.inboundAdapters = inbound.stream().collect(toMap(InboundAdapter::sourceType, a -> a));
     this.integrationRunRepo = integrationRunRepo;
     this.eventLogRepo = eventLogRepo;
     this.stateStore = stateStore;
     this.v2Orchestrator = v2Orchestrator;
+    this.integrationProperties = integrationProperties;
+    this.userRepo = userRepo;
   }
 
   /**
@@ -69,11 +77,17 @@ public class IntegrationManager {
       String userRequest, String sourceType, boolean skipApproval) {
     String runnerUserId = resolveIntegrationRunnerUserId(sourceType);
     String runnerOrgId = resolveIntegrationRunnerOrgId(runnerUserId);
-    if (runnerUserId == null) {
-      log.warn(
-          "[Integration] No integration-runner identity configured for source '{}' — submitting"
-              + " with null user/org attribution (legacy dev path).",
-          sourceType);
+    // C8 — fail CLOSED: a webhook-triggered run with null user/org attribution bypasses credit
+    // gating + tenant attribution + project memory. Refuse it rather than submit an orphaned run.
+    // Configure agent.integrations.run-on-behalf-of-user-id (a real user whose org owns webhook
+    // runs) before enabling inbound integrations. audit 2026-05-29 (closes the E #36 TODO).
+    if (runnerUserId == null || runnerOrgId == null) {
+      throw new IllegalStateException(
+          "Integration run for source '"
+              + sourceType
+              + "' refused: set agent.integrations.run-on-behalf-of-user-id to a real user (whose"
+              + " org owns webhook-triggered runs). Webhook runs must not be submitted with null"
+              + " user/org attribution.");
     }
     return v2Orchestrator.submitRun(
         userRequest,
@@ -98,13 +112,14 @@ public class IntegrationManager {
    * Documented so the follow-up wire-up is a one-place edit.
    */
   private String resolveIntegrationRunnerUserId(String sourceType) {
-    // TODO(audit E #36 follow-up): read integrationProperties.getXxx().getRunnerUserId().
-    return null;
+    // E #36 — global integration-runner identity (a per-source override can layer on later).
+    String configured = integrationProperties.getRunOnBehalfOfUserId();
+    return (configured != null && !configured.isBlank()) ? configured.strip() : null;
   }
 
   private String resolveIntegrationRunnerOrgId(String runnerUserId) {
-    // TODO(audit E #36 follow-up): look up org for runnerUserId via UserRepository.
-    return null;
+    if (runnerUserId == null) return null;
+    return userRepo.findById(runnerUserId).map(AppUser::getOrgId).orElse(null);
   }
 
   // ── Inbound ───────────────────────────────────────────────────────────────

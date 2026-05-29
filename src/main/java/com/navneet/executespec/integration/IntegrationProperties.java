@@ -16,6 +16,14 @@ public class IntegrationProperties {
    */
   private boolean enabled = false;
 
+  /**
+   * E #36 — the user identity that owns inbound-webhook-triggered runs. When non-blank, that user
+   * (and their org, looked up at submit time) is stamped on the run so credit gating + tenant
+   * attribution + project memory work. MUST be set before enabling inbound integrations — the
+   * IntegrationManager fails closed (refuses the run) when it's blank. C8 — audit 2026-05-29.
+   */
+  private String runOnBehalfOfUserId;
+
   private JiraConfig jira = new JiraConfig();
   private ConfluenceConfig confluence = new ConfluenceConfig();
   private ServiceNowConfig servicenow = new ServiceNowConfig();

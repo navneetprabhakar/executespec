@@ -178,6 +178,17 @@ auth:
   refresh-cookie:
     secure: true
 
+# ── Crypto ────────────────────────────────────────────────────────────────────
+# Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
+# Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
+# configured in the base profile. Safe fallback: if the key can't be loaded the
+# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
+# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
+# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+executespec:
+  crypto:
+    enabled: true
+
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:
   key-id: ${RAZORPAY_KEY_ID:}

@@ -36,7 +36,13 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
 
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
-    if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) return;
+    // Fail CLOSED when no secret is configured — refuse the webhook rather than accept any
+    // unsigned POST (matches the Confluence adapter's prod posture). C8 — audit 2026-05-29.
+    if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) {
+      throw new WebhookSignatureException(
+          "Jira webhook: configure agent.integrations.jira.webhook-secret to enable inbound"
+              + " webhooks");
+    }
     // Audit 2026-05-12 review items C #22, #23:
     //  - JWT path previously trusted "Authorization: JWT ..." without signature verification.
     //    The shared-secret fallback below is the only currently-supported posture; if Atlassian
