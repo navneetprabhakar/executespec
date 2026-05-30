@@ -2,8 +2,6 @@ import {ReactNode} from 'react';
 import {Link} from 'react-router-dom';
 import {ArrowRight} from '@/signal/icons/icons';
 
-// ─────────── LiveHero ───────────
-
 export function LiveHero({
   runId,
   title,
@@ -66,8 +64,6 @@ export function LiveHeroAction({
   );
 }
 
-// ─────────── ScoreCard ───────────
-
 export function ScoreCard({
   verdict,
   score,
@@ -99,8 +95,6 @@ export function ScoreCard({
   );
 }
 
-// ─────────── StreamCard ───────────
-
 type StreamKind = 'tool' | 'llm' | 'warn' | 'ok' | 'default';
 
 export function StreamCard({
@@ -124,8 +118,6 @@ export function StreamCard({
     </div>
   );
 }
-
-// ─────────── PrCard ───────────
 
 export function PrCard({
   label,
@@ -173,8 +165,6 @@ export function PrCard({
   }
   return <div className='signal-pr-card'>{inner}</div>;
 }
-
-// ─────────── ComposerCard ───────────
 
 export function ComposerCard({
   title = 'What should we build?',
@@ -237,8 +227,6 @@ export function ComposerCard({
     </div>
   );
 }
-
-// ─────────── TaskLine ───────────
 
 type TaskStatus = 'todo' | 'live' | 'done';
 

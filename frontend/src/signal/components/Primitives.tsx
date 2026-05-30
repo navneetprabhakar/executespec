@@ -2,7 +2,7 @@ import {ReactNode} from 'react';
 import {Link} from 'react-router-dom';
 import {Chevron} from '@/signal/icons/icons';
 
-// ─────────── Feed (scrollable phone body) ───────────
+// Feed (scrollable phone body)
 
 export function Feed({children, padBottom = 110}: {children: ReactNode; padBottom?: number}) {
   return (
@@ -11,8 +11,6 @@ export function Feed({children, padBottom = 110}: {children: ReactNode; padBotto
     </div>
   );
 }
-
-// ─────────── Card ───────────
 
 export function Card({
   children,
@@ -39,8 +37,6 @@ export function Card({
     </div>
   );
 }
-
-// ─────────── Row ───────────
 
 export type RowDot = 'mint' | 'coral' | 'signal' | 'lavender' | 'ocean' | 'live' | 'mute';
 export type RowTrailing = 'good' | 'warn' | 'fail' | 'default';
@@ -91,8 +87,6 @@ export function Row({
   return <div className='signal-row'>{inner}</div>;
 }
 
-// ─────────── Chip ───────────
-
 type ChipKind = 'default' | 'active' | 'signal' | 'mint' | 'coral' | 'lavender';
 
 export function Chip({
@@ -112,8 +106,6 @@ export function Chip({
   );
 }
 
-// ─────────── StatusPill ───────────
-
 export function StatusPill({
   kind,
   children,
@@ -124,8 +116,6 @@ export function StatusPill({
   const klass = `signal-status-pill ${kind ?? ''}`.trim();
   return <span className={klass}>{children}</span>;
 }
-
-// ─────────── Button ───────────
 
 type BtnKind = 'primary' | 'secondary' | 'mint' | 'coral' | 'ghost';
 
@@ -176,8 +166,6 @@ export function Button({
   );
 }
 
-// ─────────── KvList ───────────
-
 export function KvList({pairs}: {pairs: Array<{k: ReactNode; v: ReactNode}>}) {
   return (
     <div className='signal-kv-list'>
@@ -190,8 +178,6 @@ export function KvList({pairs}: {pairs: Array<{k: ReactNode; v: ReactNode}>}) {
     </div>
   );
 }
-
-// ─────────── TabsStrip ───────────
 
 export function TabsStrip({
   items,

@@ -95,7 +95,7 @@ public class Deployment {
   @Builder.Default
   private String tenantId = "default";
 
-  // ── Deploy Engine fields (V30) ────────────────────────────────────────────
+  // Deploy Engine fields (V30)
 
   /** Deployment path: CLOUD_RUN_DIRECT, COMPOSE_ON_VM, MANAGED_INFRASTRUCTURE */
   @Column(name = "deployment_path")
@@ -148,8 +148,6 @@ public class Deployment {
 
   @Column(name = "app_port")
   private Integer appPort;
-
-  // ── Enums ─────────────────────────────────────────────────────────────────
 
   public enum DeployStrategy {
     FULLSTACK,

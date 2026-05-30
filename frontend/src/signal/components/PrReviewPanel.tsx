@@ -192,7 +192,6 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
           ? 'Comment'
           : '—';
 
-  // ───────────────────────── IDE variant ─────────────────────────
   if (variant === 'ide') {
     const verdictKind: 'ok' | 'warn' | 'bad' =
       verdict === 'APPROVE' ? 'ok' : verdict === 'REQUEST_CHANGES' ? 'bad' : 'warn';
@@ -306,7 +305,6 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
     );
   }
 
-  // ───────────────────────── Signal variant ─────────────────────────
   const verdictPill: 'shipped' | 'needs' | 'failed' =
     verdict === 'APPROVE' ? 'shipped' : verdict === 'REQUEST_CHANGES' ? 'failed' : 'needs';
   const sevColor = (sev: api.PrReviewCommentDto['severity']): string =>

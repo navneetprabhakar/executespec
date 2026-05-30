@@ -152,34 +152,14 @@ public class ProjectDashboardController {
     // summed PipelineRun. The ExecutionRun totals are themselves maintained
     // by SolutionExecutionService.accumulateExecutionRunTotals on each
     // solution completion (v2.5.7 fix).
-    List<PipelineRun> allRuns =
-        runRepo.findByProjectIdOrderByStartedAtDesc(projectId, PageRequest.of(0, 2000));
-    long pipelineTokens =
-        allRuns.stream()
-            .mapToLong(
-                r ->
-                    (r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens())
-                        + (r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens()))
-            .sum();
-    double pipelineCost =
-        allRuns.stream()
-            .filter(r -> r.getActualCostUsd() != null)
-            .mapToDouble(PipelineRun::getActualCostUsd)
-            .sum();
-    var execRuns =
-        execRunRepo
-            .findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
-                projectId, PageRequest.of(0, 2000))
-            .getContent();
-    long execTokens =
-        execRuns.stream()
-            .mapToLong(e -> e.getTotalActualTokens() == null ? 0L : e.getTotalActualTokens())
-            .sum();
-    double execCost =
-        execRuns.stream()
-            .filter(e -> e.getTotalCostUsd() != null)
-            .mapToDouble(e -> e.getTotalCostUsd().doubleValue())
-            .sum();
+    // B4 (audit 2026-05-29) — project lifetime totals as DB SUMs. Was a
+    // findByProjectIdOrderByStartedAtDesc(... 2000)-then-stream heap scan for BOTH the run and the
+    // launch halves (~2K + 2K rows materialised per dashboard hit, on a constant-hit path).
+    long pipelineTokens = runRepo.sumTotalTokensByProjectId(projectId);
+    double pipelineCost = runRepo.sumActualCostByProjectId(projectId);
+    long execTokens = execRunRepo.sumTotalActualTokensByProjectId(projectId);
+    java.math.BigDecimal execCostBd = execRunRepo.sumTotalCostUsdByProjectId(projectId);
+    double execCost = execCostBd == null ? 0.0 : execCostBd.doubleValue();
 
     // v2.6.4 — fold review + arch + doc spend into the project rollup. Each finder is a single
     // SUM(cost_usd) query against an indexed project_id column, so this adds 5 cheap reads to

@@ -63,16 +63,12 @@ public class ProviderStatusService {
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(POLL_TIMEOUT).build();
 
-  // ── Gauge registration ────────────────────────────────────────────────────
-
   @jakarta.annotation.PostConstruct
   void registerGauges() {
     Gauge.builder("executespec.provider.outage.queued_runs", queuedDueToOutage, AtomicInteger::get)
         .description("Runs currently queued because all LLM providers are unavailable")
         .register(meterRegistry);
   }
-
-  // ── Public API ────────────────────────────────────────────────────────────
 
   /**
    * Returns true if at least one provider in the failover chain (primary + fallbacks) has a healthy
@@ -107,8 +103,6 @@ public class ProviderStatusService {
   public void recordOutageQueueReleased() {
     queuedDueToOutage.decrementAndGet();
   }
-
-  // ── Advisory status poll ──────────────────────────────────────────────────
 
   /**
    * Polls external status pages every 60 seconds. Failures are logged but never block pipeline

@@ -35,7 +35,7 @@ public enum EventName {
   /** First PR originating from the user's run was merged on GitHub. */
   PR_MERGED,
 
-  // ── R-160 (v3) — greenfield-redesign conversion funnel ────────────────────
+  // R-160 (v3) — greenfield-redesign conversion funnel
   // These mirror the v2 events for the same user actions but discriminate
   // the v3 surface so we can A/B the conversion lift cleanly. Each fires
   // at most once per user (same user_activation_event ledger as v2).

@@ -34,7 +34,7 @@ public class EvalTestCaseRegistry {
   void init() {
     testCases = new ArrayList<>();
 
-    // ── PLANNING tier (3 tests) ──────────────────────────────────────────
+    // PLANNING tier (3 tests)
     // Tests deep architectural reasoning, subtle bug detection, and
     // multi-constraint decision making.
 
@@ -121,7 +121,7 @@ public class EvalTestCaseRegistry {
             EvalScorer.latencyCeilingMs(AgentTier.PLANNING),
             0));
 
-    // ── WORKHORSE tier (3 tests) ─────────────────────────────────────────
+    // WORKHORSE tier (3 tests)
     // Tests multi-file code generation, complex state management,
     // and deep bug-fixing across interacting components.
 
@@ -212,7 +212,6 @@ public class EvalTestCaseRegistry {
             EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
             0));
 
-    // ── PLANNING: conflicting-requirements ────────────────────────────────
     // Tests judgment and tradeoff reasoning with genuinely conflicting
     // stakeholder demands. Model must identify real tensions, not just
     // list requirements.
@@ -258,7 +257,7 @@ public class EvalTestCaseRegistry {
             EvalScorer.latencyCeilingMs(AgentTier.PLANNING),
             0));
 
-    // ── WORKHORSE: optimistic-locking (hard) ─────────────────────────────
+    // WORKHORSE: optimistic-locking (hard)
     // Tests correctness on a subtle concurrency problem where @Transactional
     // placement matters critically. The spec deliberately omits what happens
     // when retries are exhausted — model must infer an explicit failure path.
@@ -312,7 +311,7 @@ public class EvalTestCaseRegistry {
             EvalScorer.latencyCeilingMs(AgentTier.WORKHORSE),
             0));
 
-    // ── LIGHTWEIGHT tier (3 tests) ───────────────────────────────────────
+    // LIGHTWEIGHT tier (3 tests)
     // Tests speed and precision: ambiguity detection, multi-audience
     // summarization, and signal-vs-noise filtering.
 
@@ -402,7 +401,7 @@ public class EvalTestCaseRegistry {
             4000 // ~1000 tokens — config diff analysis should be focused
             ));
 
-    // ── BOSS-LEVEL: Distributed saga trilogy (PLANNING tier, very high complexity) ──
+    // BOSS-LEVEL: Distributed saga trilogy (PLANNING tier, very high complexity)
     // Three linked tests that stress-test distributed systems reasoning:
     //   Test 1: Failure diagnosis + compensation design (from broken code + 6 incidents)
     //   Test 2: Distributed consistency + dedup (concrete failure timeline)
@@ -410,7 +409,7 @@ public class EvalTestCaseRegistry {
     // Models that merely regurgitate buzzwords will fail — patterns check for
     // specific reasoning, concrete numbers, and negative checks (anti-patterns rejected).
 
-    // ── Test 1: Saga failure diagnosis + compensation design ─────────────
+    // Test 1: Saga failure diagnosis + compensation design
     // Given broken code and 6 real incidents, diagnose root causes and design
     // correct compensation protocol. Don't name the problems — model must find them.
     testCases.add(
@@ -458,7 +457,7 @@ public class EvalTestCaseRegistry {
             0,
             EvalTestCase.ValidationMode.REGEX_AND_LLM));
 
-    // ── Test 2: Distributed consistency + dedup design ──────────────────
+    // Test 2: Distributed consistency + dedup design
     // Concrete failure timeline with specific numbers. Model must reason about
     // T+2800ms settlement, 340-of-500 partial fill, and Kafka replay.
     testCases.add(
@@ -503,7 +502,7 @@ public class EvalTestCaseRegistry {
             0,
             EvalTestCase.ValidationMode.REGEX_AND_LLM));
 
-    // ── Test 3: Regulatory compliance + audit integrity ─────────────────
+    // Test 3: Regulatory compliance + audit integrity
     // Pre-supplies a broken audit implementation that writes to separate DB
     // AFTER state commit. Model must spot the non-atomic audit problem.
     testCases.add(
@@ -549,7 +548,7 @@ public class EvalTestCaseRegistry {
             0,
             EvalTestCase.ValidationMode.REGEX_AND_LLM));
 
-    // ── COST EVAL: WORKHORSE tier (10 real-world customer workloads) ────
+    // COST EVAL: WORKHORSE tier (10 real-world customer workloads)
     // These test cases represent typical code generation requests that customers
     // submit. They stress-test the cost/quality tradeoff for the WORKHORSE tier,
     // ranging from simple landing pages to complex full-stack apps.

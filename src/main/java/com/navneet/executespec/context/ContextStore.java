@@ -172,8 +172,6 @@ public class ContextStore {
     }
   }
 
-  // ─── serialization ───────────────────────────────────────────────────────
-
   private String serialize(List<Message> history, int iteration, ExecutionContext ctx) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("runId", ctx.runId());

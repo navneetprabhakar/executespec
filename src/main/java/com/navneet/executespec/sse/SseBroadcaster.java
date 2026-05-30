@@ -238,8 +238,6 @@ public class SseBroadcaster {
     }
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────
-
   private void deliverLocal(String runId, String json, long seqNum) {
     List<SseEmitter> clients = emitters.getOrDefault(runId, new CopyOnWriteArrayList<>());
     if (clients.isEmpty()) return;
@@ -354,8 +352,6 @@ public class SseBroadcaster {
       totalEmitterCount.decrementAndGet();
     }
   }
-
-  // ── Redis pub/sub listener ────────────────────────────────────────────────
 
   private class SseRedisListener implements MessageListener {
     @Override

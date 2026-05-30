@@ -52,7 +52,7 @@ public class GitTool {
     return Git.open(Path.of(workspaceRoot, runId).toFile());
   }
 
-  // ── Worktree lifecycle (called by WorkerAgent, not exposed as @Tool) ──────
+  // Worktree lifecycle (called by WorkerAgent, not exposed as @Tool)
 
   /**
    * Creates a git worktree for a task so it gets its own isolated working directory. The worktree
@@ -288,8 +288,6 @@ public class GitTool {
     }
   }
 
-  // ── Worker-safe operations ────────────────────────────────────────────────
-
   @Tool(description = "Creates and checks out a new git branch in the workspace.")
   public String createBranch(
       @ToolParam(description = "runId", required = true) String runId,
@@ -355,7 +353,7 @@ public class GitTool {
     return shellDiff(workDir);
   }
 
-  // ── Worker-safe: merge a dependency branch into the current branch ───────
+  // Worker-safe: merge a dependency branch into the current branch
 
   /**
    * Merges {@code branchName} into the currently-checked-out branch. Used by WorkerAgent to pull in
@@ -389,8 +387,6 @@ public class GitTool {
       return "Merge failed for " + branchName + ": " + e.getMessage();
     }
   }
-
-  // ── Harness-only operations ───────────────────────────────────────────────
 
   public String mergeBranchToMain(String runId, String branchName) {
     return withWorkspaceLock(
@@ -836,8 +832,6 @@ public class GitTool {
     }
   }
 
-  // ── Conflict resolution helpers ──────────────────────────────────────────
-
   /**
    * Merges a branch into main WITHOUT committing, so the caller can inspect and resolve conflicts
    * before finalizing.
@@ -982,7 +976,7 @@ public class GitTool {
     }
   }
 
-  // ── Shell git helpers (worktree-safe) ────────────────────────────────────
+  // Shell git helpers (worktree-safe)
   // JGit's Git.open() on a linked worktree (.git is a FILE, not a directory)
   // resolves Repository.getWorkTree() to the MAIN repo root instead of the
   // linked worktree directory. This causes addFilepattern("."), status(), and
@@ -1064,8 +1058,6 @@ public class GitTool {
     }
     return p;
   }
-
-  // ── Workspace-level locking ───────────────────────────────────────────────
 
   /**
    * Acquires a Redis-backed mutex for the given run's workspace, executes {@code work}, then

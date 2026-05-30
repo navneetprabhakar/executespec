@@ -34,7 +34,6 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
       nativeQuery = true)
   List<ValidationReport> findAllByProjectId(@Param("projectId") String projectId);
 
-  // ─── Selling-point landing aggregates ─────────────────────────────────────
   // The next four queries power the public, anonymized /api/v3/landing/*
   // surfaces. Kept native so we can index-hit fast paths and so we don't
   // load whole entity rows when we only need counts.

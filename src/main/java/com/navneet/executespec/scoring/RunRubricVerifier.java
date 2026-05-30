@@ -150,8 +150,6 @@ public class RunRubricVerifier {
     };
   }
 
-  // ── shell ────────────────────────────────────────────────────────────────
-
   Verdict verifyShell(RunRubricRow row, Path workspace) {
     String cmd = row.getVerificationSpec();
     if (cmd == null || cmd.isBlank()) {
@@ -182,8 +180,6 @@ public class RunRubricVerifier {
     }
   }
 
-  // ── file-exists ──────────────────────────────────────────────────────────
-
   Verdict verifyFileExists(RunRubricRow row, Path workspace) {
     String relPath = row.getVerificationSpec();
     if (relPath == null || relPath.isBlank()) {
@@ -199,8 +195,6 @@ public class RunRubricVerifier {
     }
     return new Verdict(RunRubricRow.Status.FAIL, "file-exists: " + relPath + " missing");
   }
-
-  // ── file-content ─────────────────────────────────────────────────────────
 
   /**
    * Spec format: {@code <relativePath>::<regex>} (double-colon separator avoids colliding with
@@ -237,8 +231,6 @@ public class RunRubricVerifier {
           RunRubricRow.Status.UNKNOWN, "file-content: invalid regex: " + pse.getMessage());
     }
   }
-
-  // ── helpers ──────────────────────────────────────────────────────────────
 
   Path workspaceFor(String runId) {
     return Path.of(workspaceRoot).resolve(runId).toAbsolutePath().normalize();

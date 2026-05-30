@@ -15,6 +15,7 @@ import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
+import com.navneet.executespec.tool.WorkerHistoryCompactor;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -103,6 +104,17 @@ public class WorkerAgent {
    * null-guards before any method call).
    */
   private final ToolOutputCompactor toolOutputCompactor;
+
+  /**
+   * RL-2026-05-052 follow-up — worker conversation-history compaction (the complement to {@link
+   * ToolOutputCompactor}: that shrinks individual tool outputs, this summarises the oldest TURNS
+   * once the accumulated input crosses a token threshold). Default OFF behind {@link
+   * WorkerHistoryCompactor#FLAG_ENABLED}; with the flag off {@code compactIfNeeded} returns the
+   * same list reference and the loop is byte-identical. Last in the
+   * {@code @RequiredArgsConstructor} order (after {@link #toolOutputCompactor}) so test call sites
+   * append one more trailing arg; the loop null-guards before use.
+   */
+  private final WorkerHistoryCompactor workerHistoryCompactor;
 
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
@@ -329,7 +341,34 @@ public class WorkerAgent {
     final Double hardCapUsd =
         pipelineRunRepository.findById(runId).map(r -> r.getHardCapUsd()).orElse(null);
 
+    // RL-2026-05-052 follow-up — prompt (input) tokens the previous LLM call reported; the trigger
+    // signal for WorkerHistoryCompactor. 0 until the first call returns usage.
+    long lastInputTokens = 0L;
+
     for (int iter = startIter; iter <= maxIter; iter++) {
+      // A4 (audit 2026-05-29) — cooperative cancellation. A reviewer pass / orchestrator cancels a
+      // runaway via future.cancel(true), which sets this thread's interrupt flag; with no check the
+      // loop kept generating to completion (still billed). Bail at the iter boundary, before the
+      // next (billable) LLM call — same "stop on the next boundary" contract as the wall-clock cap
+      // below. No salvage call: a cancellation means stop now, don't spend another LLM call.
+      if (Thread.currentThread().isInterrupted()) {
+        log.warn(
+            "WorkerAgent INTERRUPTED run={} task={} iter={} elapsedMs={} totalWrites={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            System.currentTimeMillis() - start,
+            totalWriteCalls);
+        recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+            .iterations(iter)
+            .toolCallsDispatched(toolsDispatched)
+            .finalAssistantText(lastText)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
       // 2026-05-10 — wall-clock cap check. Top-of-iter so we never start a new LLM call once
       // we've blown past the budget. In-flight LLM calls are not interrupted (the stop happens
       // on the next iter boundary), so the actual termination time is "wall-clock cap +
@@ -414,6 +453,15 @@ public class WorkerAgent {
         }
       }
 
+      // RL-2026-05-052 follow-up — compact the oldest turns once the previous call's input crossed
+      // the threshold, BEFORE building this request. Flag-gated + default OFF → returns the same
+      // `history` reference (byte-identical loop). Null-guarded for test call sites that pass null.
+      if (workerHistoryCompactor != null) {
+        history =
+            workerHistoryCompactor.compactIfNeeded(
+                history, req.provider(), req.context(), lastInputTokens, req.userPrompt());
+      }
+
       ChatResponse resp;
       try {
         resp =
@@ -447,6 +495,14 @@ public class WorkerAgent {
             toolLog,
             start,
             "router error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+      }
+
+      // RL-2026-05-052 follow-up — remember this call's INPUT size so the next iteration's
+      // history-compaction trigger has a real signal (cost-tracking already records usage).
+      if (resp.getMetadata() != null
+          && resp.getMetadata().getUsage() != null
+          && resp.getMetadata().getUsage().getPromptTokens() != null) {
+        lastInputTokens = resp.getMetadata().getUsage().getPromptTokens();
       }
 
       // Collect tool calls + assistant text across all generations (Anthropic
@@ -733,7 +789,7 @@ public class WorkerAgent {
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
 
-      // ─── Progress signal (RL-2026-05-005) ─────────────────────────────
+      // Progress signal (RL-2026-05-005)
       // Reset the counter on any write-class tool call (writeFile / editFile); otherwise
       // increment. Crossing progressWarnAfter injects ONE corrective nudge (the same message the
       // text-only-stop path uses); crossing progressForceAfter force-terminates with
@@ -1042,7 +1098,12 @@ public class WorkerAgent {
     try {
       return toolOutputCompactor
           .compactIfNeeded(
-              toolName, content, req.userPrompt(), isImmediatelyPriorToolCall, req.context())
+              toolName,
+              content,
+              req.userPrompt(),
+              isImmediatelyPriorToolCall,
+              req.context(),
+              req.provider())
           .map(ToolOutputCompactor.Compacted::summary)
           .orElse(content);
     } catch (RuntimeException e) {
@@ -1102,7 +1163,7 @@ public class WorkerAgent {
         .build();
   }
 
-  // ── 2026-05-04 — quirky LiveLog emitters ─────────────────────────────────────
+  // 2026-05-04 — quirky LiveLog emitters
 
   /** Emit a worker log line on the run's SSE channel, scoped to the current task. */
   private void emitWorkerLog(WorkerTaskRequest req, String message) {

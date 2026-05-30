@@ -81,8 +81,6 @@ class FailoverOrderEnumAlignmentTest {
   // ProviderRunPoolProperties / agent.provider-pools config (audit risk #3). The failover-order
   // alignment test above is the live invariant; provider-pool key alignment no longer exists.
 
-  // ── helpers ──────────────────────────────────────────────────────────────
-
   @SuppressWarnings("unchecked")
   private static Map<String, Object> loadApplicationYaml() throws Exception {
     // application.yml is a multi-document file (separated by `---`).

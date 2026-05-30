@@ -64,7 +64,6 @@ public class ComposeFileGenerator {
     var sb = new StringBuilder();
     sb.append("services:\n");
 
-    // ── App service ──────────────────────────────────────────────────────
     sb.append("  app:\n");
     sb.append("    build:\n");
     sb.append("      context: .\n");
@@ -115,12 +114,11 @@ public class ComposeFileGenerator {
     sb.append("      - \"169.254.169.254:127.0.0.1\"\n");
     sb.append("\n");
 
-    // ── Database service (optional) ──────────────────────────────────────
+    // Database service (optional)
     if (databaseType != null) {
       sb.append(buildDatabaseConfig(databaseType));
     }
 
-    // ── Network ──
     // NOTE: Do NOT use "internal: true" here — it blocks host-to-container port forwarding
     // via published ports on many Docker Engine versions (iptables DNAT rules not created).
     // Sandbox isolation is provided by Docker's default network namespace + container security_opt.
@@ -141,8 +139,6 @@ public class ComposeFileGenerator {
     }
     return composeFile;
   }
-
-  // ── Extracted helpers ─────────────────────────────────────────────────────
 
   /** Determine resource limits — CLI/MCP are lightweight, heavy-weight apps get more. */
   private ContainerResources calculateContainerResources(
@@ -199,8 +195,6 @@ public class ComposeFileGenerator {
 
     return sb.toString();
   }
-
-  // ── DB connection string injection ───────────────────────────────────────
 
   /**
    * Build environment variables for the app service to connect to the DB. Auto-detects framework
@@ -314,8 +308,6 @@ public class ComposeFileGenerator {
 
     return env;
   }
-
-  // ── YAML helpers ─────────────────────────────────────────────────────────
 
   /** Quote a YAML value if it contains special characters. */
   private String yamlQuote(String value) {

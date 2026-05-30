@@ -11,12 +11,12 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum SlackEventType {
 
-  // ── MINIMAL — always sent ─────────────────────────────────────────────
+  // MINIMAL — always sent
   RUN_STARTED("RUN_STATUS", "PLANNING", SlackVerbosity.MINIMAL),
   RUN_COMPLETE("COMPLETE", "COMPLETE", SlackVerbosity.MINIMAL),
   RUN_FAILED("COMPLETE", "FAILED", SlackVerbosity.MINIMAL),
 
-  // ── STANDARD — stage transitions + approvals ──────────────────────────
+  // STANDARD — stage transitions + approvals
   PLAN_APPROVAL_NEEDED("GATE_OPENED", "PLAN_APPROVAL", SlackVerbosity.STANDARD),
   PLAN_APPROVED("GATE_RESOLVED", "APPROVED", SlackVerbosity.STANDARD),
   PLAN_REJECTED("GATE_RESOLVED", "REJECTED", SlackVerbosity.STANDARD),
@@ -27,7 +27,7 @@ public enum SlackEventType {
   RUN_PARTIAL("COMPLETE", "PARTIAL", SlackVerbosity.STANDARD),
   STUCK_RUN("RECOVERY_ATTEMPTED", null, SlackVerbosity.STANDARD),
 
-  // ── VERBOSE — everything ──────────────────────────────────────────────
+  // VERBOSE — everything
   TASK_STARTED("TASK_STATUS", "PENDING", SlackVerbosity.VERBOSE),
   REVIEW_STARTED("REVIEW_STARTED", null, SlackVerbosity.VERBOSE),
   MODEL_ESCALATED("MODEL_ESCALATED", null, SlackVerbosity.VERBOSE),

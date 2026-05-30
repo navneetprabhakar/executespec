@@ -177,7 +177,7 @@ class ProjectExportServiceTest {
     assertThat(readme).contains("0 contract(s)");
   }
 
-  // ── tar.gz reader (USTAR; matches the writer in the service) ────────────
+  // tar.gz reader (USTAR; matches the writer in the service)
 
   static Map<String, byte[]> readTarGz(byte[] gz) throws IOException {
     Map<String, byte[]> out = new HashMap<>();

@@ -45,7 +45,7 @@ public class WorkspaceGcsUploadListener {
   private final StateStore stateStore;
   private final SideEffectOutbox sideEffectOutbox;
 
-  // ── Event-driven upload (covers COMPLETE + FAILED + PARTIAL) ─────────────
+  // Event-driven upload (covers COMPLETE + FAILED + PARTIAL)
 
   @Async
   @EventListener
@@ -59,7 +59,7 @@ public class WorkspaceGcsUploadListener {
     uploadWorkspaceToGcs(event.runId());
   }
 
-  // ── Fallback sweep (catches PARTIAL runs + any missed events) ────────────
+  // Fallback sweep (catches PARTIAL runs + any missed events)
 
   /** Every 5 minutes, find terminal runs without a GCS key and upload them. */
   @Scheduled(fixedRate = 300_000)
@@ -76,8 +76,6 @@ public class WorkspaceGcsUploadListener {
       uploadWorkspaceToGcs(run.getRunId());
     }
   }
-
-  // ── Core upload logic ────────────────────────────────────────────────────
 
   private void uploadWorkspaceToGcs(String runId) {
     if (!deploymentProps.workspace().gcsEnabled()) return;

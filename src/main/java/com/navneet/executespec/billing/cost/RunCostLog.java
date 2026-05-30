@@ -69,7 +69,6 @@ public class RunCostLog {
   @Column(name = "margin_usd")
   private Double marginUsd;
 
-  // ── Batch execution fields ───────────────────────────────────────────────
   /** "REALTIME" or "BATCH". */
   @Builder.Default
   @Column(name = "execution_mode", nullable = false, length = 10)

@@ -84,8 +84,6 @@ public class DependencySecurityPolicy {
           + "https://registry.bun.sh,https://registry.pnpm.io}")
   private String allowedRegistriesCsv;
 
-  // ── Regex constants ──────────────────────────────────────────────────────
-
   /** Pre-release version like {@code 1.2.3-beta.4}, {@code 0.0.0-canary}, {@code 2.0.0-rc.1}. */
   private static final Pattern PRERELEASE =
       Pattern.compile(
@@ -103,8 +101,6 @@ public class DependencySecurityPolicy {
   /** Detects {@code --registry=<url>} or {@code --registry <url>}. */
   private static final Pattern REGISTRY_FLAG =
       Pattern.compile("--registry[\\s=]([^\\s]+)", Pattern.CASE_INSENSITIVE);
-
-  // ── Public API ──────────────────────────────────────────────────────────
 
   /**
    * Validate a single chained-command segment that has already passed allowlist + pattern checks.
@@ -132,8 +128,6 @@ public class DependencySecurityPolicy {
     if (inv == null) {
       return ValidationResult.allow(); // not an install command
     }
-
-    // ── MEDIUM rules ────────────────────────────────────────────────────────
 
     if (requireIgnoreScripts && !hasIgnoreScripts(segment, inv.tool)) {
       return block(
@@ -167,8 +161,6 @@ public class DependencySecurityPolicy {
               + segment);
     }
 
-    // ── HIGH rules ──────────────────────────────────────────────────────────
-
     if (effective == GuardrailLevel.HIGH) {
       if (requireAudit && !hasAuditCoverage(fullCommand, inv.tool)) {
         return block(
@@ -196,8 +188,6 @@ public class DependencySecurityPolicy {
 
     return ValidationResult.allow();
   }
-
-  // ── Parsing ──────────────────────────────────────────────────────────────
 
   /** Recognised install-command shape. {@code tool} is the package manager name. */
   record InstallInvocation(String tool, String verb) {}
@@ -238,8 +228,6 @@ public class DependencySecurityPolicy {
       default -> null;
     };
   }
-
-  // ── Per-tool checks ──────────────────────────────────────────────────────
 
   private static boolean hasIgnoreScripts(String segment, String tool) {
     String s = " " + segment + " ";
@@ -303,8 +291,6 @@ public class DependencySecurityPolicy {
     return List.of(allowedRegistriesCsv.split("\\s*,\\s*"));
   }
 
-  // ── Hint copy ────────────────────────────────────────────────────────────
-
   private static String ignoreScriptsHint(String tool) {
     return switch (tool) {
       case "npm", "bun", "pnpm" -> "the `--ignore-scripts` flag";
@@ -339,8 +325,6 @@ public class DependencySecurityPolicy {
       default -> "an inline audit flag (not supported for this tool — use the chained form)";
     };
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private ValidationResult block(GuardrailLevel level, String message) {
     log.warn("DEP-SECURITY BLOCKED guardrail={} — {}", level, message);

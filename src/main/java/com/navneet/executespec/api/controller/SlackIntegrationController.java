@@ -50,8 +50,6 @@ public class SlackIntegrationController {
   // members can read but not mutate.
   private final ProjectAccessGuard projectAccessGuard;
 
-  // ── OAuth flow ────────────────────────────────────────────────────────────
-
   /** Returns the Slack OAuth install URL. The frontend redirects the user here. */
   @GetMapping("/install")
   public ResponseEntity<Map<String, String>> getInstallUrl(
@@ -151,8 +149,6 @@ public class SlackIntegrationController {
     result.put("installedAt", integration.getInstalledAt().toString());
     return ResponseEntity.ok(result);
   }
-
-  // ── Channel management ────────────────────────────────────────────────────
 
   /** Lists available Slack channels the bot can post to. */
   @GetMapping("/channels")
@@ -298,8 +294,6 @@ public class SlackIntegrationController {
     channelRepo.save(mapping);
     return ResponseEntity.noContent().build();
   }
-
-  // ── Test + audit ──────────────────────────────────────────────────────────
 
   /** Sends a test message to a Slack channel. */
   @PostMapping("/test")

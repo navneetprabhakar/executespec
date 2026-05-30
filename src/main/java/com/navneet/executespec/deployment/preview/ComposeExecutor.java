@@ -39,8 +39,6 @@ public class ComposeExecutor {
     }
   }
 
-  // ── Public API ───────────────────────────────────────────────────────────
-
   /**
    * Start all services defined in the compose file. Builds images if needed, runs in detached mode.
    *
@@ -229,8 +227,6 @@ public class ComposeExecutor {
     var result = exec(cmd, timeout, null);
     return new ExecResult(result.output(), "", result.exitCode());
   }
-
-  // ── Private helpers ─────────────────────────────────────────────────────
 
   private List<String> baseCmd(String projectName) {
     var cmd = new ArrayList<>(List.of("docker", "compose", "--project-name", projectName));

@@ -192,7 +192,7 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
-  // ── 1: T2-class case — multi-task, intermediate, iter-limit + writes ──────
+  // 1: T2-class case — multi-task, intermediate, iter-limit + writes
 
   @Test
   void multitask_intermediate_iter_limit_with_writes_is_COMPLETE_not_PARTIAL() {
@@ -228,7 +228,7 @@ class SequentialExecutorSoftCompletionTest {
             + saveLog);
   }
 
-  // ── 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning ──
+  // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
 
   @Test
   void singletask_iter_limit_with_writes_smoke_pass_is_COMPLETE() {
@@ -246,7 +246,7 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(0, t1.smokeTestExitCode());
   }
 
-  // ── 3: Single-task + iter-limit + writes + smoke FAIL → PARTIAL ──────────
+  // 3: Single-task + iter-limit + writes + smoke FAIL → PARTIAL
 
   @Test
   void singletask_iter_limit_with_writes_smoke_fail_is_PARTIAL_with_combined_reason() {
@@ -278,7 +278,7 @@ class SequentialExecutorSoftCompletionTest {
         "Expected DB PARTIAL with combined reason (iter-cap + smoke-fail). Saw: " + saveLog);
   }
 
-  // ── 4: zero file writes → FAILED (regression check) ─────────────────────
+  // 4: zero file writes → FAILED (regression check)
 
   @Test
   void iter_limit_with_zero_writes_is_FAILED_regression_check() {
@@ -299,7 +299,7 @@ class SequentialExecutorSoftCompletionTest {
     assertTrue(sawFailed, "Expected DB row to persist as FAILED. Saw: " + saveLog);
   }
 
-  // ── 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate ─
+  // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate
 
   @Test
   void stagnation_outcome_with_writes_also_flows_through_soft_completion() {

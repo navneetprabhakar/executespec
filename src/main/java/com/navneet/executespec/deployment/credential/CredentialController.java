@@ -28,7 +28,7 @@ public class CredentialController {
   private final CredentialService credentialService;
   private final ProjectAccessGuard projectAccessGuard;
 
-  // ── Permission Requirements (shown BEFORE upload) ─────────────────────────
+  // Permission Requirements (shown BEFORE upload)
 
   /**
    * Returns the list of required GCP IAM roles/permissions the service account needs. Show this to
@@ -38,8 +38,6 @@ public class CredentialController {
   public ResponseEntity<List<CredentialService.RequiredPermission>> requiredPermissions() {
     return ResponseEntity.ok(credentialService.getRequiredPermissions());
   }
-
-  // ── Store ─────────────────────────────────────────────────────────────────
 
   /**
    * Store (or replace) GCP service account credentials. The request body is the raw JSON key file
@@ -65,8 +63,6 @@ public class CredentialController {
     return ResponseEntity.ok(summary);
   }
 
-  // ── Retrieve ──────────────────────────────────────────────────────────────
-
   /**
    * Get current credential status (without sensitive data). Resolves: project-level → user-level
    * default.
@@ -88,8 +84,6 @@ public class CredentialController {
     return ResponseEntity.ok(credentialService.listCredentials(userDetails.getUser().getId()));
   }
 
-  // ── Validate ──────────────────────────────────────────────────────────────
-
   /**
    * Validate stored credentials can authenticate to GCP and have required permissions. Returns
    * per-permission validation status (e.g., Cloud Run Admin: ✓, Cloud Build: ✗).
@@ -101,8 +95,6 @@ public class CredentialController {
     var result = credentialService.validateCredential(userDetails.getUser().getId(), projectId);
     return ResponseEntity.ok(result);
   }
-
-  // ── Delete ────────────────────────────────────────────────────────────────
 
   /** Delete stored GCP credentials. */
   @DeleteMapping

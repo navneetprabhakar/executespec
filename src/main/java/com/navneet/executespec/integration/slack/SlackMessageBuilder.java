@@ -29,8 +29,6 @@ public class SlackMessageBuilder {
     this.dashboardUrl = dashboardUrl.replaceAll("/+$", "");
   }
 
-  // ── Public builders ───────────────────────────────────────────────────────
-
   public Map<String, Object> build(SlackEventType eventType, PipelineRun run, String payload) {
     return switch (eventType) {
       case RUN_STARTED -> runStarted(run);
@@ -51,8 +49,6 @@ public class SlackMessageBuilder {
       case VALIDATION_FAILED -> validationFailed(run, payload);
     };
   }
-
-  // ── MINIMAL events ────────────────────────────────────────────────────────
 
   private Map<String, Object> runStarted(PipelineRun run) {
     return simpleMessage(
@@ -92,8 +88,6 @@ public class SlackMessageBuilder {
             field("*Project:*", projectName(run)),
             field("*Reason:*", truncate(failReason, 200))));
   }
-
-  // ── STANDARD events ───────────────────────────────────────────────────────
 
   private Map<String, Object> planApprovalNeeded(PipelineRun run) {
     return attachmentMessage(
@@ -175,8 +169,6 @@ public class SlackMessageBuilder {
         fields(field("*Run:*", runLink(run)), field("*Details:*", truncate(payload, 200))));
   }
 
-  // ── VERBOSE events ────────────────────────────────────────────────────────
-
   private Map<String, Object> taskStarted(PipelineRun run, String payload) {
     return simpleMessage(
         "\u25B6\uFE0F Task Started",
@@ -212,8 +204,6 @@ public class SlackMessageBuilder {
         run,
         fields(field("*Run:*", runLink(run)), field("*Details:*", truncate(payload, 200))));
   }
-
-  // ── Block Kit construction helpers ────────────────────────────────────────
 
   private Map<String, Object> simpleMessage(
       String title, PipelineRun run, List<Map<String, Object>> contentBlocks) {
@@ -277,8 +267,6 @@ public class SlackMessageBuilder {
   private Map<String, Object> context(String text) {
     return Map.of("type", "context", "elements", List.of(mrkdwn(text)));
   }
-
-  // ── Formatting helpers ────────────────────────────────────────────────────
 
   private String runUrl(PipelineRun run) {
     return dashboardUrl + "/runs/" + run.getRunId();

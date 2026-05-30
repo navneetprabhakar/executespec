@@ -56,8 +56,6 @@ public class AgentModelConfig {
     return builder -> builder.requestFactory(factory);
   }
 
-  // ── Model bean resolution ─────────────────────────────────────────────────
-
   @Bean("plannerModel")
   public ChatModel plannerModel() {
     return resolveModel(props.getRoles().getPlanner());

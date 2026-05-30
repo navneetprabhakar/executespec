@@ -71,8 +71,6 @@ class BootstrapServiceTest {
     when(readme.render(any(), any())).thenReturn("# README");
   }
 
-  // ── Happy path ──────────────────────────────────────────────────────────
-
   @Test
   void bootstrap_happyPath_opensPrAndMarksBootstrapPrOpen() {
     // PAT scope check returns repo scope
@@ -108,8 +106,6 @@ class BootstrapServiceTest {
             anyString(),
             anyMap());
   }
-
-  // ── PAT preflight ───────────────────────────────────────────────────────
 
   @Test
   void bootstrap_patMissingRepoScope_marksFailedAndDoesNotCallWriter() {
@@ -171,8 +167,6 @@ class BootstrapServiceTest {
     assertThat(result.ok()).isTrue();
   }
 
-  // ── Idempotency ─────────────────────────────────────────────────────────
-
   @Test
   void bootstrap_existingFolderOnRepo_marksBootstrappedWithoutOpeningPr() {
     http.queueGet(200, "{}", Map.of("X-OAuth-Scopes", "repo"));
@@ -201,8 +195,6 @@ class BootstrapServiceTest {
             anyMap());
   }
 
-  // ── Writer failure path ─────────────────────────────────────────────────
-
   @Test
   void bootstrap_writerFailure_marksFailedAndEmitsFailedEvent() {
     http.queueGet(200, "{}", Map.of("X-OAuth-Scopes", "repo"));
@@ -226,8 +218,6 @@ class BootstrapServiceTest {
             anyMap());
   }
 
-  // ── Edge cases ──────────────────────────────────────────────────────────
-
   @Test
   void bootstrap_repoNotFound_isNoop() {
     when(repoRepo.findById(repoId)).thenReturn(Optional.empty());
@@ -244,8 +234,6 @@ class BootstrapServiceTest {
     assertThat(BootstrapService.slugify("")).isEqualTo("default");
     assertThat(BootstrapService.slugify("---")).isEqualTo("default");
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   static class CannedHttpClient extends HttpClient {
     private final Deque<HttpResponse<String>> getQueue = new ArrayDeque<>();

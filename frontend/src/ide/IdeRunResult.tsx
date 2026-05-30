@@ -103,9 +103,16 @@ function logIcon(type?: string): string {
   if (t.includes('STATUS')) return '●';
   return '·';
 }
+// Noisy event types whose payload is a whole object dump, not a human line — the
+// persisted-replay log must skip them exactly as the live path (hooks/useSse.ts)
+// does, or the Logs tab renders the entire run-detail JSON as one giant row
+// (founder report #4, 2026-05-29).
+function isNoisyLogEvent(ev: api.RunLogEvent): boolean {
+  return (ev.type || '').toUpperCase().includes('RUN_DETAIL');
+}
 function logMessage(ev: api.RunLogEvent): string {
   const d = (ev.data && typeof ev.data === 'object' ? ev.data : ev) as Record<string, unknown>;
-  const body =
+  const raw =
     d.message ??
     d.line ??
     d.payload ??
@@ -114,9 +121,13 @@ function logMessage(ev: api.RunLogEvent): string {
     d.status ??
     d.reason ??
     d.prompt;
-  return body != null && String(body).length
-    ? String(body)
-    : (ev.type || '').toLowerCase().replace(/_/g, ' ');
+  const body =
+    raw != null && String(raw).length
+      ? String(raw)
+      : (ev.type || '').toLowerCase().replace(/_/g, ' ');
+  // Defensive cap — even after filtering RUN_DETAIL, any single event that carries a
+  // large payload (a TOKEN_USAGE blob, a multi-KB prompt) shouldn't blow out the row.
+  return body.length > 280 ? `${body.slice(0, 280)}…` : body;
 }
 
 const TABS = [
@@ -204,6 +215,35 @@ export default function IdeRunResult() {
       .catch(() => setFiles([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
+
+  // BUG-FIX (2026-05-29, founder reports #1 + #3) — the result page is the TERMINAL
+  // run surface; it never offered an Approve action, so a run opened here at the plan
+  // gate (e.g. from a stale link / notification) showed Pause but no way to approve.
+  // And an actively-running run opened here showed the empty terminal chrome instead
+  // of the live console ("two different views for the same run"). Fix both by routing
+  // a non-terminal run to its correct surface as soon as we know its status:
+  //   AWAITING_APPROVAL → /plan/:id  (IdePlan owns the tested approve/cancel/revise gate)
+  //   actively running  → /live/:id  (IdeLive owns the SSE console; it auto-returns here on terminal)
+  // PAUSED + every terminal status stay here (the result page owns resume + the full detail).
+  useEffect(() => {
+    if (!runId || !run) return;
+    const s = (run.status || '').toUpperCase();
+    if (s === 'AWAITING_APPROVAL') {
+      navigate(`/plan/${runId}`, {replace: true});
+    } else if (
+      [
+        'CLASSIFYING',
+        'PLANNING',
+        'EXECUTING',
+        'RUNNING',
+        'IN_PROGRESS',
+        'PROVIDER_SWITCHING',
+      ].includes(s)
+    ) {
+      navigate(`/live/${runId}`, {replace: true});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.status, runId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -988,87 +1028,95 @@ export default function IdeRunResult() {
         )}
 
         {/* ── Logs ── */}
-        {tab === 'Logs' && (
-          <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>
-              Live log{eventLog?.length ? ` · ${eventLog.length}` : ''}{' '}
-              <span
-                className='ide-mono'
-                style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
-              >
-                · retained 24h
-              </span>
-            </div>
-            {eventLog == null ? (
-              <IdeLoader label='Loading event log…' />
-            ) : eventLog.length === 0 ? (
-              <div className='ide-empty'>
-                No log events retained for this run. The live log is kept for 24h after each event.
-              </div>
-            ) : (
-              <div
-                style={{
-                  borderRadius: 8,
-                  border: '1px solid var(--ide-border)',
-                  background: 'var(--ide-bg-panel)',
-                  padding: 8,
-                }}
-              >
-                {eventLog.map((ev, i) => {
-                  const t = (ev.type || 'log').toLowerCase();
-                  const color = t.includes('tool')
-                    ? 'var(--ide-accent)'
-                    : t.includes('llm') || t.includes('completion')
-                      ? 'var(--ide-green)'
-                      : t.includes('fail') || t.includes('error')
-                        ? 'var(--ide-red)'
-                        : t.includes('warn')
-                          ? 'var(--ide-yellow)'
-                          : 'var(--ide-fg-muted)';
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        display: 'flex',
-                        gap: 8,
-                        padding: '6px 8px',
-                        borderBottom:
-                          i < eventLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      <span style={{flexShrink: 0}} aria-hidden='true'>
-                        {logIcon(ev.type)}
-                      </span>
-                      <span
-                        className='ide-mono'
-                        style={{
-                          color,
-                          flexShrink: 0,
-                          textTransform: 'uppercase',
-                          fontSize: 10,
-                          minWidth: 92,
-                        }}
-                      >
-                        {ev.type || 'log'}
-                      </span>
-                      {ev.timestamp != null && (
-                        <span
-                          className='ide-mono'
-                          style={{color: 'var(--ide-fg-muted)', flexShrink: 0, fontSize: 10}}
+        {tab === 'Logs' &&
+          (() => {
+            // Drop the RUN_DETAIL dump events before rendering (founder report #4) so the
+            // Logs tab shows readable lines, not the raw run-detail JSON. Mirrors the
+            // live console's skip in hooks/useSse.ts.
+            const visibleLog = eventLog?.filter((ev) => !isNoisyLogEvent(ev)) ?? null;
+            return (
+              <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
+                <div className='ide-h1'>
+                  Live log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
+                  <span
+                    className='ide-mono'
+                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+                  >
+                    · retained 24h
+                  </span>
+                </div>
+                {visibleLog == null ? (
+                  <IdeLoader label='Loading event log…' />
+                ) : visibleLog.length === 0 ? (
+                  <div className='ide-empty'>
+                    No log events retained for this run. The live log is kept for 24h after each
+                    event.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      borderRadius: 8,
+                      border: '1px solid var(--ide-border)',
+                      background: 'var(--ide-bg-panel)',
+                      padding: 8,
+                    }}
+                  >
+                    {visibleLog.map((ev, i) => {
+                      const t = (ev.type || 'log').toLowerCase();
+                      const color = t.includes('tool')
+                        ? 'var(--ide-accent)'
+                        : t.includes('llm') || t.includes('completion')
+                          ? 'var(--ide-green)'
+                          : t.includes('fail') || t.includes('error')
+                            ? 'var(--ide-red)'
+                            : t.includes('warn')
+                              ? 'var(--ide-yellow)'
+                              : 'var(--ide-fg-muted)';
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            display: 'flex',
+                            gap: 8,
+                            padding: '6px 8px',
+                            borderBottom:
+                              i < visibleLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                          }}
                         >
-                          {new Date(ev.timestamp as string | number).toLocaleTimeString()}
-                        </span>
-                      )}
-                      <span style={{wordBreak: 'break-word'}}>{logMessage(ev)}</span>
-                    </div>
-                  );
-                })}
+                          <span style={{flexShrink: 0}} aria-hidden='true'>
+                            {logIcon(ev.type)}
+                          </span>
+                          <span
+                            className='ide-mono'
+                            style={{
+                              color,
+                              flexShrink: 0,
+                              textTransform: 'uppercase',
+                              fontSize: 10,
+                              minWidth: 92,
+                            }}
+                          >
+                            {ev.type || 'log'}
+                          </span>
+                          {ev.timestamp != null && (
+                            <span
+                              className='ide-mono'
+                              style={{color: 'var(--ide-fg-muted)', flexShrink: 0, fontSize: 10}}
+                            >
+                              {new Date(ev.timestamp as string | number).toLocaleTimeString()}
+                            </span>
+                          )}
+                          <span style={{wordBreak: 'break-word'}}>{logMessage(ev)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            );
+          })()}
 
         {/* ── Timeline ── */}
         {tab === 'Timeline' && (

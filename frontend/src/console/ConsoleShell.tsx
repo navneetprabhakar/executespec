@@ -14,6 +14,7 @@ import {
   ProjectsIcon,
   AdminIcon,
   AccountIcon,
+  BellIcon,
   MenuIcon,
   CommandIcon,
   SunIcon,
@@ -54,6 +55,7 @@ export default function ConsoleShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
+  const [unread, setUnread] = useState(0);
 
   usePaletteHotkey(setPaletteOpen);
 
@@ -65,19 +67,31 @@ export default function ConsoleShell() {
       .then((r) => setRuns(r.content ?? []))
       .catch(() => {});
   }, []);
+  // Unread notification count for the top-bar bell (founder report #2) — same cadence.
+  const refreshUnread = useCallback(() => {
+    api
+      .getUnreadCount()
+      .then((r) => setUnread(r.count ?? 0))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     refreshRuns();
-  }, [refreshRuns]);
+    refreshUnread();
+  }, [refreshRuns, refreshUnread]);
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (!document.hidden) refreshRuns();
+      if (!document.hidden) {
+        refreshRuns();
+        refreshUnread();
+      }
     }, 12000);
     return () => window.clearInterval(id);
-  }, [refreshRuns]);
+  }, [refreshRuns, refreshUnread]);
   useEffect(() => {
     setDrawerOpen(false);
     refreshRuns();
-  }, [location.pathname, refreshRuns]);
+    refreshUnread();
+  }, [location.pathname, refreshRuns, refreshUnread]);
 
   const path = location.pathname;
   const navActive = (p: string) =>
@@ -134,6 +148,38 @@ export default function ConsoleShell() {
         >
           <ThemeIcon size={18} />
         </button>
+        <NavLink
+          to='/notifications'
+          className='con-icon'
+          title={unread > 0 ? `Notifications · ${unread} unread` : 'Notifications'}
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+          style={{position: 'relative'}}
+        >
+          <BellIcon size={18} />
+          {unread > 0 && (
+            <span
+              aria-hidden='true'
+              style={{
+                position: 'absolute',
+                top: 2,
+                right: 2,
+                minWidth: 13,
+                height: 13,
+                padding: '0 3px',
+                borderRadius: 7,
+                background: 'var(--ide-red)',
+                color: '#fff',
+                fontSize: 9,
+                fontWeight: 700,
+                lineHeight: '13px',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+            >
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+        </NavLink>
         <NavLink to='/account' className='con-icon' title='Account' aria-label='Account'>
           <AccountIcon size={18} />
         </NavLink>

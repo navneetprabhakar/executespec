@@ -67,8 +67,6 @@ public class ApiTestSuiteAgent {
 
   private static final String[] FRONTEND_EXTENSIONS = {".html", ".jsx", ".tsx", ".vue", ".svelte"};
 
-  // ── Public API ────────────────────────────────────────────────────────────
-
   /** Called post-merge via virtual thread from RunOrchestrator. Non-fatal. */
   public void generateAsync(PipelineRun run) {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
@@ -76,8 +74,6 @@ public class ApiTestSuiteAgent {
         .name("api-spec-" + run.getRunId())
         .start(snapshot.wrap(() -> safeGenerate(run)));
   }
-
-  // ── Implementation ────────────────────────────────────────────────────────
 
   private void safeGenerate(PipelineRun run) {
     try {
@@ -181,8 +177,6 @@ public class ApiTestSuiteAgent {
     broadcaster.emit(runId, RunEvent.apiSpecReady(runId));
     log.info("ApiTestSuiteAgent: OpenAPI spec written and committed for run {}", runId);
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   boolean hasFrontendFiles(Path ws) {
     try (Stream<Path> s = Files.walk(ws)) {

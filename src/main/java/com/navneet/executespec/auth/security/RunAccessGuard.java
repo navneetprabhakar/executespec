@@ -32,8 +32,6 @@ public class RunAccessGuard {
 
   private final StateStore stateStore;
 
-  // ── Run-level access ─────────────────────────────────────────────────────
-
   /**
    * Loads the run and asserts the caller may access it.
    *
@@ -118,8 +116,6 @@ public class RunAccessGuard {
     throw forbidden(run);
   }
 
-  // ── Role helpers ─────────────────────────────────────────────────────────
-
   /** Throws 401 if no authentication principal is present. */
   public void requireAuthenticated(AppUserDetails userDetails) {
     if (userDetails == null) {
@@ -150,8 +146,6 @@ public class RunAccessGuard {
     if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) return null;
     return userDetails.getUser().getOrgId();
   }
-
-  // ── Private helpers ──────────────────────────────────────────────────────
 
   private boolean isOwner(AppUser user, PipelineRun run) {
     return user.getId() != null && user.getId().equals(run.getCreatedByUserId());

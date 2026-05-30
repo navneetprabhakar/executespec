@@ -40,8 +40,6 @@ public class AnalyticsService {
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
 
-  // ── Usage Metrics ──────────────────────────────────────────────────────────
-
   /**
    * Get usage metrics for a user or org over a given period.
    *
@@ -221,7 +219,7 @@ GROUP BY m.model_name ORDER BY calls DESC
         costByModel);
   }
 
-  // ── Member Usage (ORG context only) ────────────────────────────────────────
+  // Member Usage (ORG context only)
 
   public List<MemberUsage> getMemberUsage(String orgId, int periodDays) {
     Instant since = Instant.now().minus(periodDays, ChronoUnit.DAYS);
@@ -259,8 +257,6 @@ GROUP BY m.model_name ORDER BY calls DESC
         .toList();
   }
 
-  // ── Billing Overview ───────────────────────────────────────────────────────
-
   public BillingOverview getBillingOverview(String entityType, String entityId) {
     String entityName;
     String currentPlan = "FREE";
@@ -290,15 +286,8 @@ GROUP BY m.model_name ORDER BY calls DESC
     // Find active subscription
     BillingSubscription sub = null;
     if ("ORG".equals(entityType)) {
-      // find by orgId — look up the first user in the org and use their subscription
-      sub =
-          subscriptionRepo.findAll().stream()
-              .filter(
-                  s ->
-                      entityId.equals(s.getOrgId())
-                          && List.of("ACTIVE", "PAST_DUE", "FREE").contains(s.getStatus()))
-              .findFirst()
-              .orElse(null);
+      // N2 (audit 2026-05-29) — filtered in the DB (was findAll().stream().filter(orgId + status)).
+      sub = subscriptionRepo.findActiveByOrgId(entityId).stream().findFirst().orElse(null);
     } else {
       sub = subscriptionRepo.findActiveByUserId(entityId).orElse(null);
     }
@@ -372,7 +361,7 @@ GROUP BY m.model_name ORDER BY calls DESC
             : inv.getCreatedAt());
   }
 
-  // ── Cost Breakdown (v2.5.8) ───────────────────────────────────────────────
+  // Cost Breakdown (v2.5.8)
   //
   // FinOps support for engineering managers. Returns per-user and per-project
   // spend across pipeline_run + execution_run so teams can attribute LLM spend

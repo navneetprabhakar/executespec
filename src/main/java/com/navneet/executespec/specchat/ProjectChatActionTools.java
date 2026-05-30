@@ -70,8 +70,6 @@ public class ProjectChatActionTools {
         getRunReport(ctx));
   }
 
-  // ── Tool 1: submit_run ────────────────────────────────────────────────────
-
   private ToolCallback submitRun(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -145,8 +143,6 @@ public class ProjectChatActionTools {
         });
   }
 
-  // ── Tool 2: approve_plan ──────────────────────────────────────────────────
-
   private ToolCallback approvePlan(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -179,8 +175,6 @@ public class ProjectChatActionTools {
           return out;
         });
   }
-
-  // ── Tool 3: reject_plan ───────────────────────────────────────────────────
 
   private ToolCallback rejectPlan(ToolContext ctx) {
     ToolDefinition def =
@@ -221,8 +215,6 @@ public class ProjectChatActionTools {
         });
   }
 
-  // ── Tool 4: cancel_run ────────────────────────────────────────────────────
-
   private ToolCallback cancelRun(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -258,8 +250,6 @@ public class ProjectChatActionTools {
           return out;
         });
   }
-
-  // ── Tool 5: list_recent_runs ──────────────────────────────────────────────
 
   private ToolCallback listRecentRuns(ToolContext ctx) {
     ToolDefinition def =
@@ -311,8 +301,6 @@ public class ProjectChatActionTools {
         });
   }
 
-  // ── Tool 6: get_run_report ────────────────────────────────────────────────
-
   private ToolCallback getRunReport(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -362,8 +350,6 @@ public class ProjectChatActionTools {
           return out;
         });
   }
-
-  // ── helpers ───────────────────────────────────────────────────────────────
 
   private static String textOrNull(JsonNode args, String field) {
     if (args == null || !args.has(field) || args.get(field).isNull()) return null;

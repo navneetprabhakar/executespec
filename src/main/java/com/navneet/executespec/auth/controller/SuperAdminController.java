@@ -58,7 +58,7 @@ public class SuperAdminController {
   private final com.navneet.executespec.report.VerifiedScoreBackfillService
       verifiedScoreBackfillService;
 
-  // ── Guardrail level diagnostic (Plan 1 P1) ────────────────────────────────
+  // Guardrail level diagnostic (Plan 1 P1)
 
   /**
    * Reports the currently-resolved security posture. Useful during incident response to confirm a
@@ -85,8 +85,6 @@ public class SuperAdminController {
     return ResponseEntity.ok(body);
   }
 
-  // ── Execution reconcile ───────────────────────────────────────────────────
-
   /**
    * One-off cleanup for orphaned {@code ExecutionRun} rows stuck in non-terminal status (pre-v2.5.1
    * bug). See {@link com.navneet.executespec.execution.service.AdminReconciliationService}.
@@ -104,7 +102,7 @@ public class SuperAdminController {
     return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
   }
 
-  // ── P1.2-followup: backfill historical verified scores ────────────────────
+  // P1.2-followup: backfill historical verified scores
 
   /**
    * GA-readiness P1.2-followup (2026-05-06) — re-compute {@code validation_report.verified_score}
@@ -120,7 +118,7 @@ public class SuperAdminController {
     return ResponseEntity.ok(verifiedScoreBackfillService.backfillAll());
   }
 
-  // ── Re-review (2026-05-02 — vendored-path exclusion follow-up) ────────────
+  // Re-review (2026-05-02 — vendored-path exclusion follow-up)
 
   /**
    * Drop the existing validation report for a terminal V2 run, reset its status to {@code
@@ -203,7 +201,7 @@ public class SuperAdminController {
         .body(Map.of("status", "queued", "runId", runId, "message", "re-review submitted"));
   }
 
-  // ── Audit hash chain verifier (M-019) ─────────────────────────────────────
+  // Audit hash chain verifier (M-019)
 
   /**
    * Walks the activity_audit chain (V147) and reports the first break, if any. Used by Carmen
@@ -214,7 +212,7 @@ public class SuperAdminController {
     return ResponseEntity.ok(auditService.verifyChain());
   }
 
-  // ── Halt all active runs (M-010) ──────────────────────────────────────────
+  // Halt all active runs (M-010)
 
   /**
    * Cancels every non-terminal run on the platform — incident-response tool for SUPER_ADMINs
@@ -254,8 +252,6 @@ public class SuperAdminController {
             reason == null ? "" : reason));
   }
 
-  // ── Prompt Versioning ─────────────────────────────────────────────────────
-
   @PostMapping("/prompts/{name}/rollback")
   public ResponseEntity<Map<String, Object>> rollbackPrompt(@PathVariable String name) {
     boolean done = promptVersioningService.rollback(name);
@@ -272,8 +268,6 @@ public class SuperAdminController {
     return ResponseEntity.ok(promptAuditService.getHistory(name));
   }
 
-  // ── Usage Reports ──────────────────────────────────────────────────────────
-
   @PostMapping("/usage-reports/trigger")
   public ResponseEntity<Map<String, Object>> triggerUsageReports(
       @RequestBody Map<String, String> body) {
@@ -284,8 +278,6 @@ public class SuperAdminController {
     int count = usageReportService.triggerReports(period);
     return ResponseEntity.ok(Map.of("emailsSent", count, "period", period));
   }
-
-  // ── Users ─────────────────────────────────────────────────────────────────
 
   @GetMapping("/users")
   public ResponseEntity<List<UserDto>> listUsers() {
@@ -411,8 +403,6 @@ public class SuperAdminController {
     return ResponseEntity.ok(UserDto.from(user, null));
   }
 
-  // ── Orgs ─────────────────────────────────────────────────────────────────
-
   @GetMapping("/orgs")
   public ResponseEntity<List<OrgDto>> listOrgs() {
     return ResponseEntity.ok(orgService.listAllOrgs());
@@ -464,8 +454,6 @@ public class SuperAdminController {
         orgService.updateApiKeysProvided(id, provided, adminDetails.getUser().getId()));
   }
 
-  // ── Tier Config ───────────────────────────────────────────────────────────
-
   @GetMapping("/tier-config")
   public ResponseEntity<List<TierConfig>> listTierConfig() {
     return ResponseEntity.ok(tierConfigRepo.findAll());
@@ -482,8 +470,6 @@ public class SuperAdminController {
     config.setMonthlyRunLimit(body.get("monthlyRunLimit"));
     return ResponseEntity.ok(tierConfigRepo.save(config));
   }
-
-  // ── Admin Invite ──────────────────────────────────────────────────────────
 
   @PostMapping("/invite")
   public ResponseEntity<Map<String, String>> adminInvite(
@@ -507,8 +493,6 @@ public class SuperAdminController {
     return ResponseEntity.ok(Map.of("message", "Invitation sent to " + req.email()));
   }
 
-  // ── Escalated Invitations ─────────────────────────────────────────────────
-
   @GetMapping("/invitations/escalated")
   public ResponseEntity<List<OrgInvitation>> listEscalated() {
     return ResponseEntity.ok(invitationService.listEscalated());
@@ -528,8 +512,6 @@ public class SuperAdminController {
     return ResponseEntity.ok(Map.of("message", "Invitation rejected"));
   }
 
-  // ── Audit Logs ─────────────────────────────────────────────────────────────
-
   @GetMapping("/audit-logs")
   public ResponseEntity<com.navneet.executespec.auth.dto.AuditLogPage> getAuditLogs(
       @RequestParam(required = false) String entityType,
@@ -547,8 +529,6 @@ public class SuperAdminController {
             null, entityType, eventType, actorId, entityId, fromInstant, toInstant, page, size));
   }
 
-  // ── Test Email ────────────────────────────────────────────────────────────
-
   /**
    * Sends a quick test email to verify that Gmail OAuth is configured correctly. Body: {"to":
    * "someone@example.com"}
@@ -562,8 +542,6 @@ public class SuperAdminController {
     mailService.sendNewUserAlertToAdmin(to, "test-trigger@executespec.local");
     return ResponseEntity.ok(Map.of("message", "Test email dispatched to " + to));
   }
-
-  // ── Grant Bonus Runs ──────────────────────────────────────────────────────
 
   @PostMapping("/users/{id}/grant-runs")
   public ResponseEntity<RunTopup> grantUserRuns(
@@ -607,8 +585,6 @@ public class SuperAdminController {
             null, id, quantity, expiryDays, reason, adminDetails.getUser().getId());
     return ResponseEntity.ok(topup);
   }
-
-  // ── Top-Up Package CRUD ─────────────────────────────────────────────────
 
   @GetMapping("/topup-packages")
   public ResponseEntity<List<TopupPackage>> listTopupPackages() {

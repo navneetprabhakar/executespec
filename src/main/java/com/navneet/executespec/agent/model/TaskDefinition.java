@@ -31,11 +31,10 @@ public class TaskDefinition {
       assignedModel; // LLM to use; set by planner based on complexity — null = system default
   private String taskLayer; // BACKEND | FRONTEND | DATABASE | INFRA
 
-  // ── Tier 3 nullable fields (only set in FEASIBILITY mode) ────────────────
+  // Tier 3 nullable fields (only set in FEASIBILITY mode)
   private IterationEstimate estimatedIterations; // null unless feasibility mode
   private Integer estimatedTokensPerIteration; // null unless feasibility mode
 
-  // ── File ownership ──────────────────────────────────────────────────────────
   // Declared by the planner: list of file paths this task will create or modify.
   // Used by RunOrchestrator to pre-claim file locks before worker execution.
   private List<String> ownedFiles;
@@ -45,7 +44,6 @@ public class TaskDefinition {
   // relationships or the planner should create a dedicated setup sub-task.
   private List<String> sharedFiles;
 
-  // ── Auto-remediation feedback ─────────────────────────────────────────────
   // Injected by RunOrchestrator during REWORK remediation cycles so the worker
   // knows exactly what the reviewer flagged. Null on first attempt.
   private String reworkFeedback;

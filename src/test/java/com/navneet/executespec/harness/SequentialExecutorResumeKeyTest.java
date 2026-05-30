@@ -95,7 +95,7 @@ class SequentialExecutorResumeKeyTest {
     return t;
   }
 
-  // ── Pre-fix regression: terminal tasks were skipped ONLY when the lookup matched ──
+  // Pre-fix regression: terminal tasks were skipped ONLY when the lookup matched
 
   @Test
   void terminal_task_in_db_is_skipped_when_target_is_full_prefixed_key() throws Exception {
@@ -150,7 +150,7 @@ class SequentialExecutorResumeKeyTest {
     assertEquals("SKIP_TERMINAL", kind);
   }
 
-  // ── Resume target must execute, not skip ──
+  // Resume target must execute, not skip
 
   @Test
   void resume_target_with_full_prefixed_id_runs_fresh_when_pending() throws Exception {
@@ -177,7 +177,7 @@ class SequentialExecutorResumeKeyTest {
     assertEquals("RUN_FRESH", kind);
   }
 
-  // ── No-target (auto-detect) crash-recovery path ──
+  // No-target (auto-detect) crash-recovery path
 
   @Test
   void null_target_with_terminal_task_skips() throws Exception {
@@ -204,7 +204,7 @@ class SequentialExecutorResumeKeyTest {
     assertEquals("RUN_FRESH", kind);
   }
 
-  // ── DB row missing entirely (legacy / never persisted) ──
+  // DB row missing entirely (legacy / never persisted)
 
   @Test
   void task_not_in_db_falls_through_to_run_fresh_for_target() throws Exception {

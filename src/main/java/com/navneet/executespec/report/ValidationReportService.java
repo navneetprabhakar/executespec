@@ -316,8 +316,6 @@ public class ValidationReportService {
     return token;
   }
 
-  // ── Private helpers ──────────────────────────────────────────────────────
-
   private List<ReportIssueDTO> extractIssues(ReportInput input) {
     List<ReportIssueDTO> issues = new ArrayList<>();
 
@@ -815,8 +813,6 @@ public class ValidationReportService {
     return sb.toString();
   }
 
-  // ── v2.5.10 verified score helpers ─────────────────────────────────────────
-
   /**
    * Deterministic score derived from the signals that actually exist at report time. Unlike the LLM
    * accuracy score this cannot hallucinate — every input is a hard fact observed by the pipeline.
@@ -1050,6 +1046,15 @@ public class ValidationReportService {
         double ep = Math.max(0.0, Math.min(100.0, endpointCoveragePercent));
         codeScore = 0.5 * 100.0 + 0.5 * ep;
       }
+      // A6 re-examination (audit 2026-05-29): the legacy multiplicative path floored endpointFactor
+      // at reviewerFactor when CLEAN/FIXED_ISSUES (a reviewer trust-gate). The additive path drops
+      // that gate DELIBERATELY (audit #7, founder-approved, V214) — a gamed run can fool the
+      // reviewer into CLEAN, so the endpoint-coverage blend must still tighten CODE_DELIVERED even
+      // when the reviewer vouched (pinned by ValidationReportServiceAdditiveScoreTest
+      // .guards_tighten_a_gamed_run_trivial_tests_plus_partial_endpoints). Restoring the trust-gate
+      // here would re-open that hole, so the additive divergence is intentional, NOT a regression —
+      // left as-is. (A false-low endpoint count is a measurement-accuracy concern, handled upstream
+      // in the endpoint-coverage counter, not by trusting a potentially-fooled reviewer verdict.)
       weightedSum += 30.0 * codeScore;
       weightTotal += 30.0;
     }

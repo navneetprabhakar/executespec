@@ -30,9 +30,7 @@ public final class PlannerOutputUtils {
 
   private PlannerOutputUtils() {}
 
-  // ──────────────────────────────────────────────────────────────────────
   // Plan parsing
-  // ──────────────────────────────────────────────────────────────────────
 
   /**
    * Parse a {@code submitPlan}/{@code submitOutline} tool-call argument JSON string into a {@link
@@ -217,9 +215,7 @@ public final class PlannerOutputUtils {
     return out;
   }
 
-  // ──────────────────────────────────────────────────────────────────────
   // Validation v3 / Pillar 1 — coverage rules
-  // ──────────────────────────────────────────────────────────────────────
 
   /**
    * Validate the plan's requirement graph. Returns a list of violations — empty when the plan is
@@ -324,9 +320,7 @@ public final class PlannerOutputUtils {
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────
   // Salvage / text helpers
-  // ──────────────────────────────────────────────────────────────────────
 
   /**
    * Salvage a {@code submitPlan}/{@code submitOutline} call from text when the model emits it as

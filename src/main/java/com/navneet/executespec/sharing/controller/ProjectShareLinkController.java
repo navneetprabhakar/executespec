@@ -87,8 +87,6 @@ public class ProjectShareLinkController {
     return ResponseEntity.noContent().build();
   }
 
-  // ── DTOs ──────────────────────────────────────────────────────────────────
-
   /** Includes the token because the dashboard owner needs it to copy the URL. */
   public record ShareLinkDto(
       UUID id,

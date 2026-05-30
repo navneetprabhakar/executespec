@@ -175,8 +175,6 @@ public class PreviewService {
     this.globalPreviewLimiter = globalPreviewLimiter;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────
-
   /** Analyze workspace for database and env var requirements (pre-start step). */
   public PreviewAnalysis analyze(String runId) {
     Path workspace = restoreService.ensureWorkspaceAvailable(runId);
@@ -534,7 +532,7 @@ public class PreviewService {
     return logs.isEmpty() ? "No logs available yet." : logs;
   }
 
-  // ── Allowed commands for container exec (Console feature) ─────────────────
+  // Allowed commands for container exec (Console feature)
   private static final java.util.Set<String> EXEC_ALLOWLIST =
       java.util.Set.of(
           "ls",
@@ -668,7 +666,7 @@ public class PreviewService {
     return "vm".equalsIgnoreCase(props.getMode());
   }
 
-  // ── Private: build and start with VM ──────────────────────────────────
+  // Private: build and start with VM
 
   private void buildAndStartVm(
       String runId, Path workspace, PreviewProjectType type, PreviewMode mode, String projectName) {
@@ -784,7 +782,7 @@ public class PreviewService {
             });
   }
 
-  // ── Private: build and start with Cloud Run ───────────────────────────
+  // Private: build and start with Cloud Run
 
   private void buildAndStartCloudRun(
       String runId,
@@ -1068,7 +1066,7 @@ public class PreviewService {
     }
   }
 
-  // ── Private: build + push + hand off to preview-engine ──────────────────
+  // Private: build + push + hand off to preview-engine
   //
   // Active only when `preview.engine.route-via=true`. Main app stops being a
   // runtime owner in this path — it builds + pushes the image; preview-
@@ -1178,7 +1176,7 @@ public class PreviewService {
     }
   }
 
-  // ── Private: build and start with Docker Compose ────────────────────────
+  // Private: build and start with Docker Compose
 
   private void buildAndStart(
       String runId,
@@ -1503,8 +1501,6 @@ public class PreviewService {
     }
   }
 
-  // ── Health check ────────────────────────────────────────────────────────
-
   private boolean healthCheck(String url, Instant deadline) {
     String lastError = null;
     for (int attempt = 1; attempt <= HEALTH_CHECK_RETRIES; attempt++) {
@@ -1612,8 +1608,6 @@ public class PreviewService {
       log.warn("Failed to backup {}: {}", source, e.getMessage());
     }
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   private void releaseGlobalPreviewSlot(String runId) {
     stateStore
@@ -1742,8 +1736,6 @@ public class PreviewService {
     };
   }
 
-  // ── Scheduled cleanup ───────────────────────────────────────────────────
-
   @Scheduled(fixedRate = 60000)
   void cleanupExpired() {
     active.values().stream()
@@ -1809,8 +1801,6 @@ public class PreviewService {
       active.keySet().forEach(this::stop);
     }
   }
-
-  // ── Analysis result ─────────────────────────────────────────────────────
 
   public record PreviewAnalysis(
       DatabaseType databaseType, List<EnvVarDetector.DetectedEnvVar> requiredEnvVars) {}

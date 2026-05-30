@@ -12,8 +12,6 @@ import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {ConfirmModal, PromptModal, Modal} from '@/signal/components/Modal';
 
-// ───────────────────────── shared IDE helpers ─────────────────────────
-
 // Inline error banner — red-bordered ide-card. Mirrors the Banner in IdeProjectMore.
 function ErrBanner({msg}: {msg?: string}) {
   if (!msg) return null;
@@ -143,7 +141,7 @@ function Tag({children}: {children: React.ReactNode}) {
   );
 }
 
-// ───────────────────── shared formatting helpers (ported verbatim) ─────────────────────
+// shared formatting helpers (ported verbatim)
 
 function splitTags(tags: string | null | undefined): string[] {
   if (!tags) return [];
@@ -166,7 +164,7 @@ function creditsLabel(
   return `${n} credit${n === 1 ? '' : 's'}`;
 }
 
-// ───────────────────── shared project + repo picker (ported from useProjectRepoPicker) ─────────────────────
+// shared project + repo picker (ported from useProjectRepoPicker)
 // Loads active projects on first open, auto-selects the first, reloads its
 // linked repos on project change, pre-selects all repos. Uses the canonical
 // repoIdFor / repoDisplayName helpers (repo UUID + name, not link UUID / SHA).
@@ -316,7 +314,7 @@ function ProjectRepoPickerBody({
   );
 }
 
-// ═══════════════════════ Insights (analytics) ═══════════════════════
+// Insights (analytics)
 // ← Signal InsightsPage. Route /insights. api: getMetrics, getModelComparison, getUserRunsSummary.
 export function IdeInsights() {
   const [days, setDays] = useState(30);
@@ -516,7 +514,7 @@ export function IdeInsights() {
   );
 }
 
-// ═══════════════════════ Library (readymade solutions) ═══════════════════════
+// Library (readymade solutions)
 // ← Signal LibraryPage. Route /library. api: getLibraryFacets, listLibrary.
 export function IdeLibrary() {
   const [items, setItems] = useState<api.ReadymadeListItem[] | null>(null);
@@ -687,7 +685,7 @@ export function IdeLibrary() {
   );
 }
 
-// ── Library detail — ← Signal LibraryDetailPage. Route /library/:slug.
+// Library detail — ← Signal LibraryDetailPage. Route /library/:slug.
 // api: getLibraryDetail, favouriteLibrarySolution, unfavouriteLibrarySolution,
 // resolveLibraryVariant, instantiateLibrarySolution.
 export function IdeLibraryDetail() {
@@ -1047,7 +1045,6 @@ function LibraryInstantiateModal({
   );
 }
 
-// ═══════════════════════ Migrations ═══════════════════════
 // ← Signal MigrationsPage. Route /migrations. api: listMigrations.
 export function IdeMigrations() {
   const [items, setItems] = useState<api.MigrationListItem[] | null>(null);
@@ -1162,7 +1159,7 @@ export function IdeMigrations() {
   );
 }
 
-// ── Migration detail — ← Signal MigrationDetailPage. Route /migrations/:slug.
+// Migration detail — ← Signal MigrationDetailPage. Route /migrations/:slug.
 // api: getMigrationDetail, migrationDryRun, migrationApply.
 export function IdeMigrationDetail() {
   const {slug} = useParams<{slug: string}>();
@@ -1511,7 +1508,6 @@ function MigrationApplyModal({
   );
 }
 
-// ═══════════════════════ Spec templates ═══════════════════════
 // ← Signal SpecTemplatesPage. Route /templates. api: getProjects,
 // listSpecTemplates, createProjectSpecTemplate, deleteSpecTemplate.
 export function IdeSpecTemplates() {

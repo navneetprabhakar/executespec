@@ -56,7 +56,6 @@ public class ApiKeyResolver {
     String keySourceMode = "HYBRID";
     Set<String> enabledProviders = null;
 
-    // ── Level 1: user-level keys ─────────────────────────────────────────
     if (userId != null) {
       AppUser user = userRepo.findById(userId).orElse(null);
       if (user != null) {
@@ -67,7 +66,7 @@ public class ApiKeyResolver {
       }
     }
 
-    // ── Level 2: org-level keys + policy ─────────────────────────────────
+    // Level 2: org-level keys + policy
     Org org = null;
     if (orgId != null) {
       org = orgRepo.findById(orgId).orElse(null);
@@ -92,7 +91,7 @@ public class ApiKeyResolver {
       }
     }
 
-    // ── Level 3: system keys (null = FallbackLlmRouter uses the system singleton bean) ─
+    // Level 3: system keys (null = FallbackLlmRouter uses the system singleton bean)
     ResolvedKeys keys =
         new ResolvedKeys(anthropic, openAi, gemini, openRouter, keySourceMode, enabledProviders);
     log.debug(

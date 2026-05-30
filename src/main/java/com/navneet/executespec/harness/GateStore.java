@@ -77,7 +77,7 @@ public class GateStore {
   private final ConcurrentHashMap<String, CompletableFuture<Boolean>> planFutures =
       new ConcurrentHashMap<>();
 
-  // ── Signal (write-through: in-memory + Redis) ────────────────────────────────
+  // Signal (write-through: in-memory + Redis)
 
   /**
    * Idempotently record that a plan gate is now open for a run (PENDING in DB). Called by the
@@ -197,7 +197,7 @@ public class GateStore {
     }
   }
 
-  // ── Await (in-memory future primary, Redis polling fallback) ─────────────────
+  // Await (in-memory future primary, Redis polling fallback)
 
   /**
    * Blocks the calling (pipeline) thread until the plan-approval gate is signaled. Registers an
@@ -265,7 +265,7 @@ public class GateStore {
         "Plan gate timed out after " + MAX_GATE_WAIT.toHours() + "h for run " + runId);
   }
 
-  // ── Cleanup (on run cancellation / hard failure) ─────────────────────────────
+  // Cleanup (on run cancellation / hard failure)
 
   /**
    * True if a pipeline thread is currently waiting on this run's plan gate on THIS instance. Used
@@ -282,8 +282,6 @@ public class GateStore {
     if (f != null) f.cancel(false);
     redis.delete(planKey(runId));
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
 
   private static String planKey(String runId) {
     return "gate:plan:" + runId;

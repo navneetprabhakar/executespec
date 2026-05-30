@@ -118,8 +118,6 @@ public class ContractCoverageController {
             projectId, repoId.toString(), repo.getGithubRepoFullName(), perDetector, knownGaps()));
   }
 
-  // ── Internals ───────────────────────────────────────────────────────────
-
   private com.navneet.executespec.auth.security.AppUserDetails principal(
       org.springframework.security.core.Authentication auth) {
     if (auth != null
@@ -192,8 +190,6 @@ public class ContractCoverageController {
       return null;
     }
   }
-
-  // ── DTOs ────────────────────────────────────────────────────────────────
 
   public record CoverageResponse(
       String projectId,

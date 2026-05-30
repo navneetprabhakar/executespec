@@ -2,7 +2,6 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {fileIconFor, FolderClosedIcon, FolderOpenIcon} from '@/ide/IdeIcons';
 
-// ───────── status helpers ─────────
 export function statusKind(status?: string | null): 'ok' | 'warn' | 'bad' {
   const s = (status || '').toUpperCase();
   if (s === 'COMPLETE' || s === 'COMPLETED' || s === 'MERGED') return 'ok';
@@ -20,7 +19,6 @@ export function IdeBadge({
   return <span className={`ide-badge ${kind}`}>{children}</span>;
 }
 
-// ───────── lightweight syntax tokenizer ─────────
 type Seg = {t: 'plain' | 'kw' | 'str' | 'com' | 'num'; v: string};
 
 const KEYWORDS = new Set(

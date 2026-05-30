@@ -22,8 +22,6 @@ public class SlackClient {
     this.restTemplate = restTemplate;
   }
 
-  // ── Chat ──────────────────────────────────────────────────────────────────
-
   /**
    * Posts a Block Kit message to a Slack channel.
    *
@@ -56,8 +54,6 @@ public class SlackClient {
     return result != null ? result : Map.of();
   }
 
-  // ── OAuth ─────────────────────────────────────────────────────────────────
-
   /** Exchanges an OAuth V2 authorization code for a bot access token. */
   @SuppressWarnings("unchecked")
   public Map<String, Object> oauthV2Access(
@@ -86,8 +82,6 @@ public class SlackClient {
     return result != null ? result : Map.of();
   }
 
-  // ── Auth test ─────────────────────────────────────────────────────────────
-
   /** Validates a bot token and returns workspace/bot info. */
   @SuppressWarnings("unchecked")
   public Map<String, Object> authTest(String botToken) {
@@ -96,8 +90,6 @@ public class SlackClient {
             SLACK_API + "/auth.test", HttpMethod.POST, bearerEntity(botToken, Map.of()), Map.class);
     return resp.getBody() != null ? resp.getBody() : Map.of();
   }
-
-  // ── Conversations ─────────────────────────────────────────────────────────
 
   /** Lists Slack channels the bot can post to. */
   @SuppressWarnings("unchecked")
@@ -116,8 +108,6 @@ public class SlackClient {
     return resp.getBody() != null ? resp.getBody() : Map.of();
   }
 
-  // ── Token revocation ──────────────────────────────────────────────────────
-
   @SuppressWarnings("unchecked")
   public void authRevoke(String botToken) {
     try {
@@ -127,8 +117,6 @@ public class SlackClient {
       log.warn("[Slack] Token revocation failed (may already be revoked): {}", e.getMessage());
     }
   }
-
-  // ── Private helpers ───────────────────────────────────────────────────────
 
   private <T> HttpEntity<T> bearerEntity(String botToken, T body) {
     HttpHeaders headers = new HttpHeaders();

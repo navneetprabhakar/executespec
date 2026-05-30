@@ -69,7 +69,6 @@ function phaseLabel(status?: string | null): string {
   return 'Running now';
 }
 
-// ───────────────────────── Welcome / workspace home ─────────────────────────
 export function IdeWelcome() {
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
@@ -225,7 +224,7 @@ export function IdeWelcome() {
   );
 }
 
-// ───────────────────────── Compose (new spec) ───────────────────────────────
+// Compose (new spec)
 export function IdeCompose() {
   const navigate = useNavigate();
   const tier = useAuthStore(selectNormalizedTier);
@@ -630,14 +629,15 @@ export function IdeCompose() {
       )}
 
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-        {busy ? 'Submitting…' : '▷ Run spec'}
-      </button>
+      <div className='ide-run-action'>
+        <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+          {busy ? 'Submitting…' : '▷ Run spec'}
+        </button>
+      </div>
     </div>
   );
 }
 
-// ───────────────────────── Live run ─────────────────────────────────────────
 type LiveEntry = {
   id?: string;
   type?: string;

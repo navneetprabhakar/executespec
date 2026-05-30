@@ -71,7 +71,7 @@ class ChaosScenariosTest {
   @Autowired private SideEffectOutboxRepository outboxRepo;
   @Autowired private StringRedisTemplate redis;
 
-  // ── Chaos 1: Redis evicts run state — reads fall back to DB ─────────────
+  // Chaos 1: Redis evicts run state — reads fall back to DB
 
   @Test
   @DisplayName("Chaos 1: Run state survives Redis eviction — reads fall back to Postgres")
@@ -94,7 +94,7 @@ class ChaosScenariosTest {
     assertThat(found.get().getStatus()).isEqualTo("WORKING");
   }
 
-  // ── Chaos 2: Budget exceeded mid-task ────────────────────────────────────
+  // Chaos 2: Budget exceeded mid-task
 
   @Test
   @DisplayName("Chaos 2: Run with zero budget cap and positive actual cost is detected over-budget")
@@ -116,7 +116,7 @@ class ChaosScenariosTest {
     assertThat(cost).as("Actual cost exceeds hard cap").isGreaterThan(cap);
   }
 
-  // ── Chaos 3: GCS failure → outbox entry created for retry ─────────────
+  // Chaos 3: GCS failure → outbox entry created for retry
 
   @Test
   @DisplayName("Chaos 3: GCS upload failure creates outbox entry for reliable retry")
@@ -142,7 +142,7 @@ class ChaosScenariosTest {
     assertThat(entries.get(0).getMaxAttempts()).isGreaterThan(1);
   }
 
-  // ── Chaos 4: Side-effect executor retries on failure ────────────────────
+  // Chaos 4: Side-effect executor retries on failure
 
   @Test
   @DisplayName("Chaos 4: SideEffectExecutor backs off and retries failed entries")
@@ -170,7 +170,7 @@ class ChaosScenariosTest {
     assertThat(before.getNextRetryAt()).isBeforeOrEqualTo(Instant.now().plusSeconds(5));
   }
 
-  // ── Chaos 5: Provider outage queuing ────────────────────────────────────
+  // Chaos 5: Provider outage queuing
 
   @Test
   @DisplayName("Chaos 5: Run queued due to provider outage is persisted and discoverable")

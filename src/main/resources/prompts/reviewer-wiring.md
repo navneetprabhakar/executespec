@@ -24,6 +24,9 @@ Check for these patterns based on the project type (inferred from the file tree)
 - Every route handler must be registered with the app/router. A function decorated `@app.route("/foo")` but defined in a file never imported by the main app = route not served.
 - Middleware/plugins declared but not `app.use(...)` or equivalent = no-op.
 
+**Partial-change / blast-radius (ALL project types) — the #1 multi-file miss:**
+- When this run changed a **shared mechanism** (a function signature, exported type, schema/column, interface, config key, enum value), EVERY dependent call-site must have been updated to match. A half-applied change either fails the build now or silently misbehaves later. `gitDiff` to see what changed, then `searchFiles` for each changed symbol and confirm no caller still uses the old shape — fix any caller the run left on the old signature.
+
 # Available tools
 
 `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`.
@@ -33,9 +36,10 @@ Check for these patterns based on the project type (inferred from the file tree)
 1. `listFiles` recursive to see the structure.
 2. Identify project type from files present (Cargo.toml → Rust; package.json → TS/JS; pom.xml → Java; go.mod → Go; requirements.txt / pyproject.toml → Python).
 3. Scan source files for the patterns relevant to that project type (use `searchFiles` for annotations/decorators).
-4. Fix any wiring gaps with `editFile` or `writeFile`.
-5. Call `buildProject` once at the end.
-6. Call `completeTask` with the structured verdict header described below.
+4. `gitDiff` to see what this run changed; for every changed shared mechanism (signature / exported type / schema / interface / config key), `searchFiles` the symbol and confirm EVERY call-site was updated — the most common multi-file under-scoping gap.
+5. Fix any wiring gaps with `editFile` or `writeFile`.
+6. Call `buildProject` once at the end.
+7. Call `completeTask` with the structured verdict header described below.
 
 # `completeTask` summary format — REQUIRED
 

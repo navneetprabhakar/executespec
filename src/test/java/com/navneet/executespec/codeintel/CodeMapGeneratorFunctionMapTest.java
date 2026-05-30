@@ -29,7 +29,7 @@ import org.springframework.beans.factory.ObjectProvider;
  */
 class CodeMapGeneratorFunctionMapTest {
 
-  // ── Pure regex contracts per language ──────────────────────────────────────────────────────
+  // Pure regex contracts per language
 
   @Test
   void typescript_extracts_function_const_arrow_class_method() {
@@ -205,7 +205,7 @@ class CodeMapGeneratorFunctionMapTest {
     assertEquals(1, barCount, "overloaded methods dedupe to one entry");
   }
 
-  // ── End-to-end orchestration via mocked GitHubRepoService ──────────────────────────────────
+  // End-to-end orchestration via mocked GitHubRepoService
 
   @Test
   void scanFunctions_skips_test_files_and_node_modules() {

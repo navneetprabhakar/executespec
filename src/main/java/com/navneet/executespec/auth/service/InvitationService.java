@@ -43,7 +43,7 @@ public class InvitationService {
 
   private static final String SUPER_ADMIN_EMAIL = "admin@executespec.ai";
 
-  // ── Common consumer email domains (blocked for org invitations) ──────────
+  // Common consumer email domains (blocked for org invitations)
   private static final Set<String> BLOCKED_DOMAINS =
       Set.of(
           "gmail.com",
@@ -115,7 +115,6 @@ public class InvitationService {
     String orgRole = req.orgRole() != null ? req.orgRole() : "DEVELOPER";
     String projectIdsStr = req.projectIds() != null ? String.join(",", req.projectIds()) : null;
 
-    // ── Common domain blocking ──────────────────────────────────────────
     // ENTERPRISE: always blocked. PRO: blocked only if admin has enabled it.
     boolean shouldBlockCommon = "ENTERPRISE".equals(org.getTier()) || org.isBlockCommonDomains();
     if (shouldBlockCommon && isCommonDomain(email)) {
@@ -125,7 +124,6 @@ public class InvitationService {
               + "Please use a work email address.");
     }
 
-    // ── Member limit check ──────────────────────────────────────────────
     int maxMembers = resolveMaxMembers(org);
     if (maxMembers > 0 && orgMemberRepo.countByOrgId(orgId) >= maxMembers) {
       throw new ResponseStatusException(
@@ -136,7 +134,7 @@ public class InvitationService {
               + "Upgrade to ENTERPRISE for unlimited members.");
     }
 
-    // ── TEAM seat-cap check (v2.6.0) ─────────────────────────────────────
+    // TEAM seat-cap check (v2.6.0)
     // For TEAM tier orgs, the hard cap on members is the number of paid
     // seats on the active subscription — not the tier_config.max_org_members
     // value. Exceeding seats returns 402 Payment Required so the frontend
@@ -156,7 +154,6 @@ public class InvitationService {
     String token = UUID.randomUUID().toString().replace("-", "");
     boolean domainMatches = domainMatches(email, org.getDomainPatterns());
 
-    // ── Domain enforcement mode ─────────────────────────────────────────
     // ENTERPRISE is always ENFORCED; PRO respects the stored flag.
     String effectiveMode =
         "ENTERPRISE".equals(org.getTier())
@@ -538,8 +535,6 @@ public class InvitationService {
   public List<OrgInvitation> listByOrg(String orgId) {
     return invitationRepo.findByOrgId(orgId);
   }
-
-  // ── domain matching ───────────────────────────────────────────────────────
 
   private boolean domainMatches(String email, String domainPatterns) {
     if (domainPatterns == null || domainPatterns.isBlank()) return false;

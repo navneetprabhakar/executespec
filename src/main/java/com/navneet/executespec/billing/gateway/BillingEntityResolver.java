@@ -37,8 +37,6 @@ public class BillingEntityResolver {
     return new UserBillingEntity(user);
   }
 
-  // ── Wrapper implementations ─────────────────────────────────────────────
-
   /** Wraps an AppUser as a BillingEntity. */
   public static class UserBillingEntity implements BillingEntity {
     private final AppUser user;
