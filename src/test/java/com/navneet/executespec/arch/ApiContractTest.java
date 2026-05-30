@@ -49,7 +49,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 class ApiContractTest {
 
-  private static final Path API_TS_PATH = Paths.get("frontend/src/lib/api.ts");
+  // api.ts was split into lib/api/*.ts (god-file split, audit 2026-05-29); scan the whole dir.
+  private static final Path API_DIR = Paths.get("frontend/src/lib/api");
 
   /**
    * URL templates intentionally not enforced by this test. Each entry must carry a one-line
@@ -72,16 +73,32 @@ class ApiContractTest {
             .map(ApiContractTest::normalisePlaceholders)
             .collect(Collectors.toSet());
 
-    if (!Files.exists(API_TS_PATH)) {
+    if (!Files.isDirectory(API_DIR)) {
       fail(
           "Could not find "
-              + API_TS_PATH.toAbsolutePath()
+              + API_DIR.toAbsolutePath()
               + " — run this test from the project root (mvn handles this).");
     }
 
-    Set<String> apiTsUrls = extractApiTsUrls(Files.readString(API_TS_PATH));
+    String apiSource;
+    try (var paths = Files.list(API_DIR)) {
+      apiSource =
+          paths
+              .filter(p -> p.toString().endsWith(".ts"))
+              .map(
+                  p -> {
+                    try {
+                      return Files.readString(p);
+                    } catch (Exception e) {
+                      return "";
+                    }
+                  })
+              .collect(Collectors.joining("\n"));
+    }
+
+    Set<String> apiTsUrls = extractApiTsUrls(apiSource);
     if (apiTsUrls.isEmpty()) {
-      fail("Extracted 0 URLs from api.ts; the regex is broken.");
+      fail("Extracted 0 URLs from lib/api/*.ts; the regex is broken.");
     }
 
     SortedSet<String> unresolved = new TreeSet<>();
