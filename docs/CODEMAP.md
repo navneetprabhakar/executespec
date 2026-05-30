@@ -45,7 +45,7 @@ Migration head: **V222**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `folder` | 1 | 4 | - | - | `.executespec/` folder writer + bootstrap + project config |
 | `governance` | - | 1 | - | - | GovernanceGuard — M-032/M-033 spend caps + GitHub owner allowlist |
 | `harness` | - | 7 | - | - | V2 SequentialExecutor + GateStore + WorkspaceInitService + VendoredPathGuard |
-| `integration` | 8 | 13 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — inc 1: 14 static helpers→`RunPipelineSupport`; inc 2: 10 DB-write methods→`RunPersistenceWriter`; inc 3: 7 context builders→`RunContextComposer`) |
+| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`; 5,288→4,456 LOC) |
 | `landing` | 1 | - | - | - | Public landing-page stats + sample-run endpoints |
 | `lint` | - | 1 | - | - | LintPass — deterministic auto-formatter pass (Phase L1) |
 | `memory` | 2 | 5 | 1 | - | Project memory: chat + run ledger + compaction snapshots |

@@ -30,7 +30,6 @@ import java.util.concurrent.ThreadFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Classification;
-import com.navneet.executespec.agent.ClassificationResult;
 import com.navneet.executespec.agent.CoherencePlannerAgent;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
@@ -38,7 +37,6 @@ import com.navneet.executespec.agent.PlanStrategy;
 import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannerRequest;
-import com.navneet.executespec.agent.SmartClassifierAgent;
 import com.navneet.executespec.agent.SpecClassifier;
 import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
@@ -135,7 +133,6 @@ public class RunOrchestrator {
   private final TaskExpanderAgent taskExpander;
   private final CoherencePlannerAgent coherencePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
-  private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -168,6 +165,7 @@ public class RunOrchestrator {
   private final SseBroadcaster broadcaster;
   private final RunPersistenceWriter persistenceWriter;
   private final RunContextComposer contextComposer;
+  private final RunPlanningCoordinator planningCoordinator;
   private final ValidationReportService validationReportService;
   private final TestGenOrchestrator testGenOrchestrator;
   private final PerkyMessenger perky;
@@ -1144,7 +1142,8 @@ public class RunOrchestrator {
         // PlannerAgent. Cost flows through RunCostTracker so it auto-
         // aggregates into the run total; per-phase columns get the diff.
         PlanStrategy planStrategy =
-            runClassifierShadow(runId, runRow, userRequest, projectId, selectedRepoIds, provider);
+            planningCoordinator.runClassifierShadow(
+                runId, runRow, userRequest, projectId, selectedRepoIds, provider);
         String projectMemory =
             projectId != null ? projectMemoryProvider.buildPlannerContext(projectId) : "";
         if (projectId != null) {
@@ -1283,7 +1282,9 @@ public class RunOrchestrator {
 
         if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
           try {
-            plan = runOutlinePhase(runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
+            plan =
+                planningCoordinator.runOutlinePhase(
+                    runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
             planStrategyBreaker.recordSuccess(effective);
           } catch (Exception outlineEx) {
             planStrategyBreaker.recordFailure(effective);
@@ -4093,153 +4094,6 @@ public class RunOrchestrator {
    *
    * <p>Failures are swallowed: classifier outage must never block planning.
    */
-  private PlanStrategy runClassifierShadow(
-      String runId,
-      PipelineRun runRow,
-      String userRequest,
-      String projectId,
-      List<UUID> selectedRepoIds,
-      String provider) {
-    try {
-      // Repo full names — best effort. Skip lookup if not multi-repo.
-      List<String> repoNames = new ArrayList<>();
-      if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
-        try {
-          List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
-          for (ProjectRepo r : repos) {
-            if (r.getGithubRepoFullName() != null) repoNames.add(r.getGithubRepoFullName());
-          }
-        } catch (Exception ignored) {
-          /* fall through with empty list */
-        }
-      }
-
-      // Project type — Project entity doesn't carry one yet (slice 1
-      // skips this signal). Future slices will plumb it through from
-      // detected_stack on linked repos.
-      String projectType = null;
-
-      // Project memory snippet — short tail of last 3 ledger entries.
-      String projectMemorySnippet = null;
-      if (projectId != null) {
-        try {
-          String full = projectMemoryProvider.buildPlannerContext(projectId);
-          if (full != null && !full.isBlank()) {
-            // Cap at ~600 chars so the classifier prompt stays compact.
-            projectMemorySnippet = full.length() > 600 ? full.substring(full.length() - 600) : full;
-          }
-        } catch (Exception ignored) {
-          /* leave null */
-        }
-      }
-
-      com.navneet.executespec.router.LlmProvider providerEnum;
-      try {
-        providerEnum =
-            com.navneet.executespec.router.LlmProvider.valueOf(
-                provider == null ? "OPENAI" : provider.toUpperCase());
-      } catch (Exception e) {
-        providerEnum = com.navneet.executespec.router.LlmProvider.OPENAI;
-      }
-
-      RunCostTracker.Snapshot before = costTracker.snapshot(runId);
-      ClassificationResult result =
-          smartClassifier.classify(
-              userRequest, repoNames, projectId, projectType, providerEnum, projectMemorySnippet);
-      RunCostTracker.Snapshot after = costTracker.snapshot(runId);
-
-      long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());
-      long classifierOut = Math.max(0, after.outputTokens() - before.outputTokens());
-      double classifierCost = Math.max(0.0, after.costUsd() - before.costUsd());
-
-      log.info(
-          "V2 run={} smart classifier → {} (source={}, est tasks={}, repos={}, in/out={}/{}, ${})",
-          runId,
-          result.strategy(),
-          result.source(),
-          result.estimatedTaskCount(),
-          result.estimatedRepoTouchCount(),
-          classifierIn,
-          classifierOut,
-          String.format("%.6f", classifierCost));
-
-      // Persist verdict + per-phase cost on the run row. Use a fresh load
-      // so we don't overwrite columns that other writers may have touched
-      // (initialisation log, codemap summary, etc.).
-      try {
-        PipelineRun fresh = runRepo.findById(runId).orElse(null);
-        if (fresh != null) {
-          fresh.setPlanStrategy(result.strategy().name());
-          fresh.setClassifierReasoning(result.reasoning());
-          fresh.setClassifierInputTokens(classifierIn);
-          fresh.setClassifierOutputTokens(classifierOut);
-          fresh.setClassifierCostUsd(classifierCost);
-          runRepo.save(fresh);
-        }
-      } catch (Exception persistEx) {
-        log.warn(
-            "V2 run={} smart classifier persist failed (non-fatal): {}",
-            runId,
-            persistEx.getMessage());
-      }
-      return result.strategy();
-    } catch (Exception e) {
-      log.warn(
-          "V2 run={} smart classifier shadow run failed (non-fatal): {}", runId, e.getMessage());
-      return null;
-    }
-  }
-
-  /**
-   * v2.6.2 — hierarchical-planner phase 1. Snapshots per-run cost before + after the {@link
-   * OutlinePlannerAgent} call, attributes the diff to {@code pipeline_run.outline_*} columns +
-   * persists the plan JSON to {@code plan_outline_json}. Failures bubble up so the orchestrator can
-   * fall back to the legacy planner.
-   */
-  private Plan runOutlinePhase(String runId, PlannerRequest req, OutlinePlannerAgent.Mode mode) {
-    RunCostTracker.Snapshot before = costTracker.snapshot(runId);
-    try {
-      Plan plan = outlinePlanner.plan(req, mode);
-      RunCostTracker.Snapshot after = costTracker.snapshot(runId);
-
-      long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
-      long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
-      double cost = Math.max(0.0, after.costUsd() - before.costUsd());
-
-      log.info(
-          "V2 run={} outline planner [{}] → {} tasks, in/out={}/{}, ${}",
-          runId,
-          mode,
-          plan.tasks().size(),
-          inTok,
-          outTok,
-          String.format("%.6f", cost));
-
-      try {
-        PipelineRun fresh = runRepo.findById(runId).orElse(null);
-        if (fresh != null) {
-          try {
-            fresh.setPlanOutlineJson(objectMapper.writeValueAsString(plan));
-          } catch (Exception serEx) {
-            log.warn(
-                "V2 run={} plan_outline_json serialisation failed: {}", runId, serEx.getMessage());
-          }
-          fresh.setOutlineInputTokens(inTok);
-          fresh.setOutlineOutputTokens(outTok);
-          fresh.setOutlineCostUsd(cost);
-          runRepo.save(fresh);
-        }
-      } catch (Exception persistEx) {
-        log.warn("V2 run={} outline persist failed (non-fatal): {}", runId, persistEx.getMessage());
-      }
-      return plan;
-    } catch (Exception e) {
-      log.warn(
-          "V2 run={} outline planner failed: {} — bubbling up for fallback", runId, e.getMessage());
-      throw e;
-    }
-  }
-
   /**
    * v2.6.2 slice 3 — LARGE pipeline. Drives:
    *
@@ -4258,7 +4112,8 @@ public class RunOrchestrator {
    */
   private Plan runLargePipeline(
       String runId, PlannerRequest req, ExecutionContext rootCtx, boolean enableEpicRecursion) {
-    Plan skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+    Plan skeleton =
+        planningCoordinator.runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
     if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
       throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
     }

@@ -70,7 +70,9 @@ Prompt/context string builders, ~400 LOC, no run-lifecycle state:
 `buildCodeIntelContext` (4412), `buildMultiRepoSummary` (4556), `buildLanguageParityBlock` (4609),
 `normalizeProvider` (4473), `defaultModelFor` (4528). Returns strings → easy to unit-test post-extraction.
 
-### Increment 4 — `RunPlanningCoordinator` (`@Component`, deps: `smartClassifier`, `outlinePlanner`, `taskExpander`, `coherencePlanner`, `planStrategyBreaker`)
+### Increment 4 — `RunPlanningCoordinator` (`@Component`, deps: `smartClassifier`, `outlinePlanner`, `costTracker`, `runRepo`, `objectMapper`, `projectRepoService`, `projectMemoryProvider`) ✅ PARTIAL — 2 of 4 (2026-05-30)
+> Moved the **2 pool-free** phases — `runClassifierShadow` + `runOutlinePhase` — into the new `@Component`; rewired 3 call sites + removed the now-dead `smartClassifier` field. **`runLargePipeline` + `expandEpic` deliberately STAY** in RunOrchestrator: both fan out task expansion across the internally-owned `pool` (an `ExecutorService` field used by `runPipeline` + pause/resume too, **not** a bean), so a clean move first needs the pool lifted to a shared bean (follow-up `4b`). RunOrchestrator 4,601 → 4,456 LOC; full suite 1432 green.
+
 The classify→outline→expand phase: `runClassifierShadow` (4699), `runOutlinePhase` (4802),
 `runLargePipeline` (4862), `expandEpic` (5044). Large + parallel (TaskExpander fan-out) — extract as a unit;
 `runPipeline` calls into it. Verify LARGE/LEGACY path with a hierarchical-plan eval after.
