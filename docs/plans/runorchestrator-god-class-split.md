@@ -62,7 +62,9 @@ to "fix and retry":
 `writeRunCostLog` (3911), `updateStatus` (3274), `reconstructExecResultFromTasks` (3232). ~11 methods.
 Mostly thin DB writes — clean to move; watch that `updateStatus` also broadcasts SSE (`broadcaster`).
 
-### Increment 3 — `RunContextComposer` (`@Component`, deps: `projectMemoryProvider`, `projectBriefService`, `stalenessService`, `retrievalService`, `projectArchitectureService`, `projectRepoService`, `contractInjectionService`, `adrInjectionService`, `uiStyleResolver`)
+### Increment 3 — `RunContextComposer` (`@Component`, deps: `objectMapper`, `uiStyleResolver`, `projectArchitectureService`, `projectRepository`, `modelRegistry`) ✅ DONE (2026-05-30, multi-repo pair deferred to 3b)
+> The plan's 9-dep list was aspirational — the actual methods touch only **5** collaborators. Moved **7** of the 9 (README pair, `writeAgentContext`, `buildDesignBlock`, `buildCodeIntelContext`, `normalizeProvider`, `defaultModelFor`) + the `CODEINTEL_*`/`DEFAULT_PROVIDER` constants; rewired 8 call sites (compiler-guided) + removed the now-dead `uiStyleResolver` field from the god-class. RunOrchestrator 4,872 → 4,601 LOC; full suite 1432 green. **Deferred (3b):** `buildMultiRepoSummary` + `buildLanguageParityBlock` — they call the `languageConventionHint` stayer (pinned by `LanguageParityBlockTest` via `RunOrchestrator.…`), so a byte-identical move needs that helper relocated to `RunPipelineSupport` + the test updated.
+
 Prompt/context string builders, ~400 LOC, no run-lifecycle state:
 `renderRunReadme` (3466), `ensureReadme` (3442), `writeAgentContext` (3742), `buildDesignBlock` (3779),
 `buildCodeIntelContext` (4412), `buildMultiRepoSummary` (4556), `buildLanguageParityBlock` (4609),
