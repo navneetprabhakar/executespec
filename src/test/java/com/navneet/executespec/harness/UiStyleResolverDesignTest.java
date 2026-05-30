@@ -54,8 +54,6 @@ class UiStyleResolverDesignTest {
     resolver.init();
   }
 
-  // ── loadDesignContent ─────────────────────────────────────
-
   @Test
   @EnabledIf("designRootExists")
   void loadDesignContent_existingDesign_returnsContent() {
@@ -89,8 +87,6 @@ class UiStyleResolverDesignTest {
     assertThat(first).isEqualTo(second); // same object from cache
   }
 
-  // ── fuzzyMatchDesign ──────────────────────────────────────
-
   @Test
   @EnabledIf("designRootExists")
   void fuzzyMatchDesign_exactMatch() {
@@ -115,8 +111,6 @@ class UiStyleResolverDesignTest {
   void fuzzyMatchDesign_caseInsensitive() {
     assertThat(resolver.fuzzyMatchDesign("Stripe")).isEqualTo("stripe");
   }
-
-  // ── resolveDesignName ─────────────────────────────────────
 
   @Test
   @EnabledIf("designRootExists")
@@ -149,8 +143,6 @@ class UiStyleResolverDesignTest {
     assertThat(resolver.resolveDesignName(null, null, "GO")).isNull();
   }
 
-  // ── extractStyleHint ──────────────────────────────────────
-
   @Test
   @EnabledIf("designRootExists")
   void extractStyleHint_directNameMatch() {
@@ -170,8 +162,6 @@ class UiStyleResolverDesignTest {
     assertThat(resolver.extractStyleHint("Build a simple todo app")).isNull();
   }
 
-  // ── enforceTokenLimit ─────────────────────────────────────
-
   @Test
   void enforceTokenLimit_shortContentUnchanged() {
     String shortContent = "# Design\n## Colors\nBlue and white.";
@@ -187,8 +177,6 @@ class UiStyleResolverDesignTest {
     assertThat(content).isNotNull();
     assertThat(content.length()).isLessThanOrEqualTo(12_000);
   }
-
-  // ── buildFrontendConstraintBlock ──────────────────────────
 
   @Test
   @EnabledIf("designRootExists")
@@ -209,8 +197,6 @@ class UiStyleResolverDesignTest {
     // Just verify no exception
     assertThat(true).isTrue();
   }
-
-  // ── enrichWithDesignName ──────────────────────────────────
 
   @Test
   void enrichWithDesignName_addsKey() {

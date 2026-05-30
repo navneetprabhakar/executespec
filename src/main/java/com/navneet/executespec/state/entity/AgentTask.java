@@ -63,12 +63,11 @@ public class AgentTask {
   @Builder.Default
   private Integer cacheWriteTokens = 0; // Anthropic cache_creation_input_tokens (billed at 1.25x)
 
-  // ── Tier 3 fields ─────────────────────────────────────────────────────────
   private Boolean readmeUpdated; // null = not yet reviewed, true/false = reviewer verdict
   private String provider; // provider used for this task (e.g. "anthropic")
   private String model; // model used (e.g. "claude-sonnet-4-5")
 
-  // ── Tier 5 fields — stuck detection & recovery ────────────────────────────
+  // Tier 5 fields — stuck detection & recovery
   @Column(name = "last_activity_at")
   private Instant lastActivityAt;
 
@@ -78,7 +77,7 @@ public class AgentTask {
   @Column(name = "recovery_attempt")
   private Integer recoveryAttempt;
 
-  // ── Tier 5 fields — LLM escalation ────────────────────────────────────────
+  // Tier 5 fields — LLM escalation
   @Column(name = "current_provider")
   private String currentProvider;
 
@@ -120,7 +119,6 @@ public class AgentTask {
   @Builder.Default
   private String tenantId = "default";
 
-  // ── Subtask decomposition ─────────────────────────────────────────────────
   @Column(name = "parent_task_id")
   private String parentTaskId; // null for top-level tasks
 
@@ -130,11 +128,10 @@ public class AgentTask {
   @Column(name = "subtask_total")
   private Integer subtaskTotal; // total subtasks in parent
 
-  // ── Prompt tracking ──────────────────────────────────────────────────────
   @Column(name = "prompt_hash", length = 12)
   private String promptHash; // 12-char SHA-256 prefix of assembled prompt
 
-  // ── Hierarchical Planner (v2.6.2 — V130) ────────────────────────────────
+  // Hierarchical Planner (v2.6.2 — V130)
   /** "LEAF" (terminal task) | "EPIC" (will spawn subtasks via expander). */
   @Column(name = "task_type", length = 16)
   private String taskType;

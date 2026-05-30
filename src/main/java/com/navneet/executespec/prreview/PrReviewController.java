@@ -42,8 +42,6 @@ public class PrReviewController {
   private final ProjectAccessGuard projectAccessGuard;
   private final PrReviewAutofixService autofixService;
 
-  // ── Submit / fetch ─────────────────────────────────────────────────────────
-
   /** Body for {@link #submit}. */
   public record SubmitPrReviewRequest(String projectId, String repoFullName, Integer prNumber) {}
 
@@ -109,7 +107,10 @@ public class PrReviewController {
     if (review == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found");
     }
-    projectAccessGuard.assertCanRead(review.getProjectId(), userDetails);
+    // A code-push, not a read: the autofix dispatches a patch run that pushes to the PR head
+    // branch, so require WRITE — assertCanRead would admit a cross-org PROJECT_VIEWER who could
+    // then drive a push into another org's repo. C2 — audit 2026-05-29.
+    projectAccessGuard.assertCanWrite(review.getProjectId(), userDetails);
 
     var result = autofixService.dispatch(id, userDetails.getUser());
     return ResponseEntity.status(HttpStatus.ACCEPTED)
@@ -157,8 +158,6 @@ public class PrReviewController {
     return ResponseEntity.ok(
         service.findByProject(projectId).stream().map(PrReviewDto::from).toList());
   }
-
-  // ── DTOs ───────────────────────────────────────────────────────────────────
 
   /** Trim the entity for JSON; client never needs the raw cost columns sliced separately. */
   public record PrReviewDto(

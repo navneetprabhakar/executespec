@@ -93,8 +93,6 @@ public class PythonDeploymentStrategy implements DeploymentStrategy {
     return "Python project detected (%s)".formatted(framework);
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   /**
    * Resolve the Docker CMD exec-form string at Dockerfile generation time so the correct entry
    * point is baked in without needing a shell wrapper at runtime.

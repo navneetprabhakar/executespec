@@ -207,8 +207,6 @@ public class ContractDriftController {
     return ResponseEntity.ok(new DismissResponse(dismissed));
   }
 
-  // ── Internals ───────────────────────────────────────────────────────────
-
   private com.navneet.executespec.auth.security.AppUserDetails principal(
       org.springframework.security.core.Authentication auth) {
     if (auth != null

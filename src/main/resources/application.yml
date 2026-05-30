@@ -474,6 +474,7 @@ model-matrix:
     PrReviewAgent: PLANNING
     CodeReviewAgent: PLANNING
     ToolOutputCompactor: LIGHTWEIGHT
+    WorkerHistoryCompactor: LIGHTWEIGHT
   failover-order:
     anthropic:
       - openai

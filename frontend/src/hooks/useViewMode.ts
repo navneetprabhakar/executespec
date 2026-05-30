@@ -67,7 +67,6 @@ export function useViewMode() {
     canUseProjectMode,
     tier,
 
-    // ── Feature visibility flags ────────────────────────────────────────────
     // R-190: Vibe-mode previously hid these; with Vibe gone, Pro is the
     // only mode that controls them. They remain Pro-gated for callers that
     // expect the flag-shaped API; project mode also shows them.
@@ -83,7 +82,6 @@ export function useViewMode() {
     showPreview: true,
     showDeploy: true,
 
-    // ── Tier-gated flags ────────────────────────────────────────────────────
     canUseIntegrations: tier !== 'FREE',
     canUseOwnKeys: tier === 'ENTERPRISE' || tier === 'TEAM',
     canCreateOrg: tier !== 'FREE',

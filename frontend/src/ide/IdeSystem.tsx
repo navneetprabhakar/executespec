@@ -35,7 +35,6 @@ function ErrCard({msg}: {msg: string}) {
   );
 }
 
-// ──────────────────── Notifications ────────────────────
 type NotifFilter = 'all' | 'run' | 'team' | 'billing' | 'system';
 
 export default function IdeNotifications() {
@@ -254,7 +253,6 @@ export default function IdeNotifications() {
   );
 }
 
-// ──────────────────── Search / palette ────────────────────
 interface SearchHit {
   id: string;
   kind: 'run' | 'project';
@@ -492,7 +490,6 @@ export function IdeSearch() {
   );
 }
 
-// ──────────────────── Audit log ────────────────────
 type AuditFilter = 'all' | 'auth' | 'billing' | 'members' | 'admin';
 
 export function IdeAudit() {
@@ -682,7 +679,7 @@ export function IdeAudit() {
   );
 }
 
-// ──────────────────── Empty project (onboarding) ────────────────────
+// Empty project (onboarding)
 export function IdeEmptyProject() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
@@ -749,7 +746,6 @@ export function IdeEmptyProject() {
   );
 }
 
-// ──────────────────── More menu ────────────────────
 // Named IdeMoreMenu to avoid clashing with IdeMore (the account-surface file).
 type MoreRow = {to: string; label: string; sub: string};
 

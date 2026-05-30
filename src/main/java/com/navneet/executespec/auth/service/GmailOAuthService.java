@@ -86,8 +86,6 @@ public class GmailOAuthService {
 
   private Gmail gmailService;
 
-  // ── lifecycle ────────────────────────────────────────────────────────────
-
   @PostConstruct
   public void init() {
     if (!"gmail-api".equals(transport)) {
@@ -111,8 +109,6 @@ public class GmailOAuthService {
           "Gmail OAuth init failed: {} — emails will not be sent until fixed.", e.getMessage(), e);
     }
   }
-
-  // ── public API ───────────────────────────────────────────────────────────
 
   public boolean isAvailable() {
     return gmailService != null;
@@ -149,8 +145,6 @@ public class GmailOAuthService {
       return false;
     }
   }
-
-  // ── private helpers ──────────────────────────────────────────────────────
 
   /**
    * Loads or obtains OAuth2 credentials.

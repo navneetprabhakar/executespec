@@ -86,8 +86,6 @@ public class AccountingController {
     return accountingService.getEntries(from, to, pageable);
   }
 
-  // ── Access checks ────────────────────────────────────────────────────────
-
   private void requireAccountingAccess(AppUserDetails principal) {
     var perms = permissionService.getPermissions(principal.getUser().getId());
     if (!perms.canViewAccounting()) {

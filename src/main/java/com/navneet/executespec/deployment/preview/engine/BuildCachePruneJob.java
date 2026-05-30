@@ -77,8 +77,6 @@ public class BuildCachePruneJob {
     }
   }
 
-  // ────────────────────────────────────────────────────────────────
-
   private String exec(List<String> cmd) {
     try {
       ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);

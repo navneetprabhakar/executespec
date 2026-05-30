@@ -206,8 +206,6 @@ public class BenchmarkGenerationService {
     }
   }
 
-  // ── cleanroom ──
-
   /**
    * Pull (skip if present) → cp {@code /testbed/.} into the host workspace → run a live container
    * bind-mounting it at {@code /testbed} with {@code --network none} → register the container so
@@ -309,8 +307,6 @@ public class BenchmarkGenerationService {
       log.warn("benchmark-gen: failed to mark run {} terminal: {}", runId, e.getMessage());
     }
   }
-
-  // ── helpers ──
 
   /**
    * PLANNING-tier defaults per provider (mirror {@code application.yml model-matrix} PLANNING row).

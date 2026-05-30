@@ -118,7 +118,7 @@ class ReferralServiceTest {
   void short_circuits_when_referee_already_registered() {
     user("u1", "alice@test");
     AppUser bob = user("u2", "bob@test");
-    when(userRepo.findAll()).thenReturn(List.of(bob));
+    when(userRepo.findByEmail("bob@test")).thenReturn(java.util.Optional.of(bob));
 
     ReferralService.InviteRecord rec = svc.recordInvite("u1", "bob@test");
 

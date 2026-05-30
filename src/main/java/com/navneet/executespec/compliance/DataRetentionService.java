@@ -66,8 +66,6 @@ public class DataRetentionService {
   private final TierConfigRepository tierConfigRepository;
   private final MeterRegistry meterRegistry;
 
-  // ── Scheduled sweep ───────────────────────────────────────────────────────
-
   @Scheduled(cron = "0 0 3 * * *") // 03:00 daily — low-traffic window
   public void runRetentionSweep() {
     log.info("[DataRetention] Starting retention sweep");
@@ -82,8 +80,6 @@ public class DataRetentionService {
     hardDeleteArchivedRuns();
     log.info("[DataRetention] Retention sweep complete");
   }
-
-  // ── GDPR right-to-erasure ─────────────────────────────────────────────────
 
   /**
    * Soft-deletes all non-active runs belonging to the user. Active runs
@@ -102,8 +98,6 @@ public class DataRetentionService {
         .increment(deleted);
     return deleted;
   }
-
-  // ── Internal sweep helpers ────────────────────────────────────────────────
 
   private void softDeleteExpiredRuns() {
     // Iterate over every configured tier — was a hardcoded ["FREE","PRO","ENTERPRISE"] list,

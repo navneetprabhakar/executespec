@@ -79,8 +79,6 @@ public class TierEnforcementService {
 
   private static final double DEFAULT_PRO_COST_BUDGET = 5.0;
 
-  // ── Public API ────────────────────────────────────────────────────────────
-
   /**
    * Atomically checks quota AND increments the run count in a single transaction with pessimistic
    * locking. Prevents TOCTOU race where two concurrent submissions both pass the quota check before
@@ -529,8 +527,6 @@ public class TierEnforcementService {
     }
   }
 
-  // ── Limit resolution ─────────────────────────────────────────────────────
-
   /**
    * Effective monthly limit for an org: - ENTERPRISE + api_keys_provided → unlimited - override set
    * → override value - else → tier_config default
@@ -559,8 +555,6 @@ public class TierEnforcementService {
   public int effectiveUserLimit(AppUser user) {
     return getMonthlyLimit(user.getTier());
   }
-
-  // ── Private helpers ───────────────────────────────────────────────────────
 
   private void assertUserQuota(AppUser user) {
     String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
@@ -750,7 +744,7 @@ public class TierEnforcementService {
     return now.getYear() > resetTime.getYear() || now.getMonthValue() > resetTime.getMonthValue();
   }
 
-  // ── Tier resolution for async contexts ─────────────────────────────────
+  // Tier resolution for async contexts
 
   /**
    * Resolves the effective subscription tier for a user (org tier takes precedence). Safe to call

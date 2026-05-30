@@ -94,8 +94,6 @@ public class ExecutespecFolderWriter {
     this.gh = gh;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────
-
   /**
    * Write a batch of files to {@code .executespec/}. PR-mode opens a setup branch + PR;
    * DIRECT_PUSH-mode commits directly to the default branch.
@@ -190,8 +188,6 @@ public class ExecutespecFolderWriter {
         .orElse(true); // file missing counts as drift
   }
 
-  // ── Internal: PR flow ───────────────────────────────────────────────────
-
   private Optional<PullRequestInfo> prFlow(
       ProjectRepo repo,
       String defaultBranch,
@@ -285,8 +281,6 @@ public class ExecutespecFolderWriter {
     return Optional.of(new PullRequestInfo(prUrl, branchName, writtenPaths, true));
   }
 
-  // ── Internal: DIRECT_PUSH flow ──────────────────────────────────────────
-
   private Optional<PullRequestInfo> directPush(
       ProjectRepo repo,
       String defaultBranch,
@@ -318,8 +312,6 @@ public class ExecutespecFolderWriter {
     }
     return Optional.of(new PullRequestInfo(null, defaultBranch, writtenPaths, false));
   }
-
-  // ── Internal: GitHub HTTP primitives ────────────────────────────────────
 
   Optional<String> getRefSha(String repoFullName, String branch, String pat) {
     try {
@@ -438,8 +430,6 @@ public class ExecutespecFolderWriter {
     }
   }
 
-  // ── Internal: helpers ───────────────────────────────────────────────────
-
   /**
    * Apply project-namespacing to {@code .executespec/config/...} paths and normalise the input map.
    * Other paths pass through unchanged.
@@ -493,8 +483,6 @@ public class ExecutespecFolderWriter {
       throw new IllegalStateException("SHA-256 not available", ex);
     }
   }
-
-  // ── Public records ──────────────────────────────────────────────────────
 
   /**
    * Result of a successful {@link #writeFiles} call.

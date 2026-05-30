@@ -42,8 +42,6 @@ public class IntegrationConfig {
         .build();
   }
 
-  // ── Jira ──────────────────────────────────────────────────────────────────
-
   @Bean
   @ConditionalOnProperty("agent.integrations.jira.enabled")
   public JiraClient jiraClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
@@ -56,8 +54,6 @@ public class IntegrationConfig {
       JiraClient jiraClient, IntegrationProperties props, ObjectMapper mapper) {
     return new JiraAdapter(jiraClient, props.getJira(), mapper);
   }
-
-  // ── Confluence ────────────────────────────────────────────────────────────
 
   @Bean
   @ConditionalOnProperty("agent.integrations.confluence.enabled")
@@ -73,8 +69,6 @@ public class IntegrationConfig {
     return new ConfluenceAdapter(confluenceClient, props.getConfluence(), mapper);
   }
 
-  // ── ServiceNow ────────────────────────────────────────────────────────────
-
   @Bean
   @ConditionalOnProperty("agent.integrations.servicenow.enabled")
   public ServiceNowClient serviceNowClient(
@@ -88,8 +82,6 @@ public class IntegrationConfig {
       ServiceNowClient serviceNowClient, IntegrationProperties props, ObjectMapper mapper) {
     return new ServiceNowAdapter(serviceNowClient, props.getServicenow(), mapper);
   }
-
-  // ── PagerDuty ─────────────────────────────────────────────────────────────
 
   @Bean
   @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
@@ -105,8 +97,6 @@ public class IntegrationConfig {
     return new PagerDutyAdapter(pagerDutyClient, props.getPagerduty(), mapper);
   }
 
-  // ── Bitbucket ──────────────────────────────────────────────────────────────
-
   @Bean
   @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
   public BitbucketClient bitbucketClient(
@@ -120,8 +110,6 @@ public class IntegrationConfig {
       BitbucketClient bitbucketClient, IntegrationProperties props, ObjectMapper mapper) {
     return new BitbucketAdapter(bitbucketClient, props.getBitbucket(), mapper);
   }
-
-  // ── Slack ──────────────────────────────────────────────────────────────────
 
   @Bean
   @ConditionalOnProperty("agent.integrations.slack.enabled")

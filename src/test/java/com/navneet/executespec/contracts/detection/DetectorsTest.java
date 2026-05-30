@@ -20,8 +20,6 @@ class DetectorsTest {
     return path -> files.get(path);
   }
 
-  // ── DetectorUtils ───────────────────────────────────────────────────────
-
   @Test
   void sha256_isStable_andDifferentForDifferentInputs() {
     assertThat(DetectorUtils.sha256("hello")).isEqualTo(DetectorUtils.sha256("hello"));
@@ -54,8 +52,6 @@ class DetectorsTest {
     assertThat(DetectorUtils.pullOpenApiVersion("nothing here")).isNull();
   }
 
-  // ── OpenApiFileDetector ─────────────────────────────────────────────────
-
   @Test
   void openApi_findsBundledSpec() {
     OpenApiFileDetector det = new OpenApiFileDetector();
@@ -77,8 +73,6 @@ class DetectorsTest {
     assertThat(found).isEmpty();
   }
 
-  // ── ProtoFileDetector ───────────────────────────────────────────────────
-
   @Test
   void proto_findsServiceDefinition_andSkipsBareProtos() {
     ProtoFileDetector det = new ProtoFileDetector();
@@ -94,8 +88,6 @@ class DetectorsTest {
     assertThat(found.get(0).type()).isEqualTo(ContractRegistry.ContractType.PROTO);
   }
 
-  // ── GraphQlSdlDetector ──────────────────────────────────────────────────
-
   @Test
   void graphql_findsSchemaWithQueryType() {
     GraphQlSdlDetector det = new GraphQlSdlDetector();
@@ -104,8 +96,6 @@ class DetectorsTest {
     assertThat(found).hasSize(1);
     assertThat(found.get(0).type()).isEqualTo(ContractRegistry.ContractType.GRAPHQL);
   }
-
-  // ── JsonSchemaDetector ──────────────────────────────────────────────────
 
   @Test
   void jsonSchema_requiresDollarSchemaKey() {
@@ -121,8 +111,6 @@ class DetectorsTest {
     assertThat(found.get(0).name()).isEqualTo("user");
   }
 
-  // ── AsyncApiDetector ────────────────────────────────────────────────────
-
   @Test
   void asyncApi_findsRootKey() {
     AsyncApiDetector det = new AsyncApiDetector();
@@ -132,8 +120,6 @@ class DetectorsTest {
     assertThat(found).hasSize(1);
     assertThat(found.get(0).type()).isEqualTo(ContractRegistry.ContractType.ASYNCAPI);
   }
-
-  // ── Failure handling ────────────────────────────────────────────────────
 
   @Test
   void detector_skipsFileOnLoaderException_doesNotCrashBatch() {

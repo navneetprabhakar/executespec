@@ -47,8 +47,6 @@ class PipelineE2ETest {
 
   @Autowired private TestRestTemplate rest;
 
-  // ── Timing constants ──────────────────────────────────────────────────────
-
   /** Max time to wait for the planner LLM to produce a plan. */
   static final Duration PLAN_TIMEOUT = Duration.ofMinutes(4);
 
@@ -57,8 +55,6 @@ class PipelineE2ETest {
 
   /** Max time to wait for a terminal state after a gate decision. */
   static final Duration SETTLE_TIMEOUT = Duration.ofMinutes(2);
-
-  // ── Test tasks ────────────────────────────────────────────────────────────
 
   /**
    * Smallest possible task — creates a single file. Keeps LLM calls cheap and fast; suitable for
@@ -76,15 +72,11 @@ class PipelineE2ETest {
       "Create a Python script called greet.py that accepts a --name argument "
           + "and prints 'Hello, <name>!'. Include a short README.md explaining usage.";
 
-  // ── Approval helpers ──────────────────────────────────────────────────────
-
   static final ApprovalRequest APPROVE = new ApprovalRequest(true, "E2E auto-approve", null, null);
   static final ApprovalRequest REJECT =
       new ApprovalRequest(false, "E2E test rejection", null, null);
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 1 — Happy path: full pipeline from submit to COMPLETE
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(1)
@@ -125,9 +117,7 @@ class PipelineE2ETest {
     assertThat(detail.getIntegrationSource()).isNull(); // manual run — no integration source
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 2 — Plan rejection: user rejects the plan → FAILED
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(2)
@@ -146,9 +136,7 @@ class PipelineE2ETest {
     assertThat(detail.getFailureReason()).isNotBlank();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 3 — Merge rejection: user rejects the merge → FAILED
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(3)
@@ -166,9 +154,7 @@ class PipelineE2ETest {
     assertThat(detail.getStatus()).isEqualTo("FAILED");
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 4 — Cancellation while awaiting plan approval
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(4)
@@ -186,9 +172,7 @@ class PipelineE2ETest {
     assertThat(detail.getStatus()).isEqualTo("FAILED");
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 5 — Run listing and status filter
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(5)
@@ -223,9 +207,7 @@ class PipelineE2ETest {
     awaitStatus(runId, "FAILED", SETTLE_TIMEOUT);
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 6 — GET /api/runs/{id}: 404 for unknown runId
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(6)
@@ -236,9 +218,7 @@ class PipelineE2ETest {
     assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 7 — Metrics endpoint is reachable
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(7)
@@ -250,9 +230,7 @@ class PipelineE2ETest {
     assertThat(resp.getBody()).containsKeys("totalRuns", "completedRuns", "failedRuns");
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Test 8 — Submit run with blank request returns 400
-  // ══════════════════════════════════════════════════════════════════════════
 
   @Test
   @Order(8)
@@ -264,9 +242,7 @@ class PipelineE2ETest {
     assertThat(resp.getStatusCode().value()).isGreaterThanOrEqualTo(400);
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
   // Private helpers
-  // ══════════════════════════════════════════════════════════════════════════
 
   /** Submits a run and returns its runId. Asserts 202 Accepted. */
   private String submitRun(String task) {

@@ -103,7 +103,6 @@ public class ExecutorTestController {
       out.put("classification", cx.name());
       out.put("workspace", workspace.toString());
 
-      // ── 1. Plan ─────────────────────────────────────────────────────
       long planStart = System.currentTimeMillis();
       Plan plan;
       try {
@@ -147,7 +146,6 @@ public class ExecutorTestController {
               .tasks(plan.tasks())
               .build();
 
-      // ── 2. Execute ──────────────────────────────────────────────────
       ExecutionResult result =
           executor.execute(
               ExecutionRequest.builder()
@@ -167,7 +165,6 @@ public class ExecutorTestController {
       out.put("executeLatencyMs", result.totalLatencyMs());
       out.put("perTask", summarizeOutcomes(result.perTask()));
 
-      // ── 3. Artifact verification ────────────────────────────────────
       Path sumJs = workspace.resolve("sum.js");
       Path maxJs = workspace.resolve("max.js");
       boolean sumExists = Files.exists(sumJs);

@@ -77,8 +77,6 @@ public class FolderReadmeGenerator {
             "generatorVersion", GENERATOR_VERSION));
   }
 
-  // ── Internal ────────────────────────────────────────────────────────────
-
   /**
    * Tiny {@code ${var}} substituter — no escaping, no defaults, no nested lookups. The template
    * lives in our own JAR so we trust its content; the variables are limited to what {@link #render}

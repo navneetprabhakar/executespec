@@ -174,8 +174,6 @@ public class StandardsOverrideController {
     return ResponseEntity.noContent().build();
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-
   private void requireAuth(Authentication auth) {
     if (auth == null || auth.getName() == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");

@@ -106,7 +106,7 @@ public class RunService {
     return run;
   }
 
-  // ─── pipeline orchestration (background thread) ─────────────────────────
+  // pipeline orchestration (background thread)
 
   private void executePipeline(Run run, Request req) {
     Path workspace = null;
@@ -115,7 +115,6 @@ public class RunService {
       ExecutionContext runCtx =
           new ExecutionContext(run.runId(), "__root__", workspace.toRealPath());
 
-      // ── 1. Plan ─────────────────────────────────────────────────────
       run.transition(Run.Status.PLANNING, "calling OutlinePlannerAgent");
       Plan plan;
       try {
@@ -142,7 +141,6 @@ public class RunService {
       }
       run.setPlan(plan);
 
-      // ── 2. Execute ──────────────────────────────────────────────────
       run.transition(Run.Status.EXECUTING, "plan has " + plan.tasks().size() + " tasks");
       ExecutionResult execResult;
       try {
@@ -169,7 +167,6 @@ public class RunService {
         return;
       }
 
-      // ── 3. Review ───────────────────────────────────────────────────
       if (req.runReviewer()) {
         run.transition(Run.Status.REVIEWING, "running ReviewerAgent");
         ReviewerResult review;

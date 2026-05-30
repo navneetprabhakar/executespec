@@ -4,7 +4,6 @@ import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 
-// ───────────────────────── Integrations ─────────────────────────
 // Per-user credential providers that store a token via /auth/settings/{provider}.
 // (GitHub also has the org-level App-install flow, surfaced as a second action.)
 type ConnectKind = 'github' | 'jira' | 'confluence' | 'bitbucket';
@@ -336,7 +335,6 @@ export function IdeIntegrations() {
   );
 }
 
-// ───────────────────────── Admin ─────────────────────────
 // Canonical activation funnel — label + the stage key returned by
 // /admin/activation-funnel (mirrors analytics.ts's 6-event funnel).
 const FUNNEL_STAGES: Array<[string, string]> = [
@@ -465,7 +463,7 @@ export function IdeAdmin() {
   );
 }
 
-// ───────────────────────── Overview (funnel + tiers) ─────────────────────────
+// Overview (funnel + tiers)
 function AdminOverview() {
   const [funnel, setFunnel] = useState<api.ActivationFunnelReport | null>(null);
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
@@ -527,7 +525,6 @@ function AdminOverview() {
   );
 }
 
-// ───────────────────────── Users ─────────────────────────
 function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
   const [suspendFor, setSuspendFor] = useState<api.AuthUser | null>(null);
@@ -646,7 +643,6 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   );
 }
 
-// ───────────────────────── Orgs ─────────────────────────
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
   const [suspendFor, setSuspendFor] = useState<api.OrgDto | null>(null);
@@ -800,7 +796,6 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   );
 }
 
-// ───────────────────────── Analytics ─────────────────────────
 // The analytics endpoints are entity-scoped (entityType + entityId). For the
 // admin's own org we surface usage + billing; member rollup is org-only.
 function AdminAnalytics({orgId}: {orgId: string | null}) {
@@ -1013,7 +1008,7 @@ function CollapsibleHeader({
   );
 }
 
-// ───────────────────────── Feature flags (Ops sub-panel) ─────────────────────────
+// Feature flags (Ops sub-panel)
 // Collapsed by default. SUPER_ADMIN may toggle BOOLEAN flags inline — optimistic
 // update with revert-on-error; non-boolean flags stay read-only value badges.
 function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
@@ -1102,7 +1097,6 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
   );
 }
 
-// ───────────────────────── Ops ─────────────────────────
 function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmKind, setConfirmKind] = useState<'halt' | 'reconcile' | null>(null);
@@ -1263,7 +1257,6 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
   );
 }
 
-// ───────────────────────── Top-up packages ─────────────────────────
 function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
   const [creating, setCreating] = useState(false);

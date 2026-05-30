@@ -56,8 +56,6 @@ public class ProjectLaunchController {
   private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRepo;
 
-  // ── Launches list ─────────────────────────────────────────────────────
-
   @GetMapping("/api/projects/{projectId}/launches")
   @Transactional(readOnly = true)
   public ResponseEntity<Page<ExecutionRunDto>> listLaunches(
@@ -101,7 +99,7 @@ public class ProjectLaunchController {
             merged.subList(from, to), PageRequest.of(page, size), merged.size()));
   }
 
-  // ── PR rollup (cross-launch) ──────────────────────────────────────────
+  // PR rollup (cross-launch)
 
   /**
    * Wire format for the project PR rollup.
@@ -187,8 +185,6 @@ public class ProjectLaunchController {
     return ResponseEntity.ok(out);
   }
 
-  // ── Project overview rollup ───────────────────────────────────────────
-
   public record ProjectOverview(
       int activeLaunches,
       int completedLaunches,
@@ -235,7 +231,7 @@ public class ProjectLaunchController {
         new ProjectOverview(active, complete, failed, tokens, cost, prCount, prOpen, prMerged));
   }
 
-  // ── Pre-flight GitHub owner access check ──────────────────────────────
+  // Pre-flight GitHub owner access check
 
   public record ValidateOwnerRequest(String githubOwner) {}
 
@@ -304,7 +300,7 @@ public class ProjectLaunchController {
     return ResponseEntity.ok(new ValidateOwnerResult(false, "Owner not found"));
   }
 
-  // ── Access + feature gating (mirror of ExecutionController) ───────────
+  // Access + feature gating (mirror of ExecutionController)
 
   private AppUser requireFeatureEnabled(AppUserDetails principal) {
     if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);

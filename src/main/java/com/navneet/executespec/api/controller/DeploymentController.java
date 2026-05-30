@@ -176,8 +176,6 @@ public class DeploymentController {
         .toList();
   }
 
-  // ── Deploy Engine: Analyze ────────────────────────────────────────────────
-
   /**
    * Analyze a run's workspace to determine infrastructure requirements and available deployment
    * paths.
@@ -223,7 +221,7 @@ public class DeploymentController {
             "hasGcpCredentials", hasCredentials));
   }
 
-  // ── Deploy Engine: Confirm & Deploy ───────────────────────────────────────
+  // Deploy Engine: Confirm & Deploy
 
   /**
    * Confirm a deployment after analysis. The user has chosen a path and provided environment
@@ -272,8 +270,6 @@ public class DeploymentController {
     }
   }
 
-  // ── Deploy Engine: Rollback ───────────────────────────────────────────────
-
   /**
    * Rollback a deploy-engine deployment to a previous revision. Uses user's GCP credentials (not
    * system ADC).
@@ -300,8 +296,6 @@ public class DeploymentController {
           HttpStatus.INTERNAL_SERVER_ERROR, "Rollback failed: " + e.getMessage());
     }
   }
-
-  // ── Deploy Engine: Destroy ────────────────────────────────────────────────
 
   /**
    * Destroy a deploy-engine deployment — delete Cloud Run service and image from the user's GCP

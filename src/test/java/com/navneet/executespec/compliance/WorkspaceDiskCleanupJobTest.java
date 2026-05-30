@@ -53,8 +53,6 @@ class WorkspaceDiskCleanupJobTest {
     return r;
   }
 
-  // ── ORPHAN ──────────────────────────────────────────────────────────────
-
   @Test
   void orphanDir_noDbRow_classifiesOrphan() {
     when(runRepository.findById("11111111-1111-1111-1111-111111111111"))
@@ -64,8 +62,6 @@ class WorkspaceDiskCleanupJobTest {
 
     assertThat(cat).isEqualTo(WorkspaceDiskCleanupJob.Category.ORPHAN);
   }
-
-  // ── TOMBSTONED ──────────────────────────────────────────────────────────
 
   @Test
   void softDeleted_pastWindow_classifiesTombstoned() {
@@ -101,8 +97,6 @@ class WorkspaceDiskCleanupJobTest {
 
     assertThat(cat).isEqualTo(WorkspaceDiskCleanupJob.Category.TOMBSTONED);
   }
-
-  // ── TERMINAL_OLD ────────────────────────────────────────────────────────
 
   @Test
   void terminalOld_pastWindow_classifiesTerminalOld() {
@@ -142,7 +136,7 @@ class WorkspaceDiskCleanupJobTest {
         .isEqualTo(WorkspaceDiskCleanupJob.Category.TERMINAL_OLD);
   }
 
-  // ── KEEP — protective ─────────────────────────────────────────────────
+  // KEEP — protective
 
   @Test
   void runningRun_keeps_evenWithOldCreationDate() {
@@ -173,8 +167,6 @@ class WorkspaceDiskCleanupJobTest {
     assertThat(job.classify(r.getRunId(), terminalCutoff, tombstoneCutoff))
         .isEqualTo(WorkspaceDiskCleanupJob.Category.KEEP);
   }
-
-  // ── looksLikeRunId guard ────────────────────────────────────────────────
 
   @Test
   void looksLikeRunId_validUuid_true() {

@@ -145,7 +145,6 @@ function Notice({msg, kind}: {msg: string; kind: 'info' | 'bad'}) {
   );
 }
 
-// ───────────────────────── Pulse ─────────────────────────
 export function IdeProjectPulse() {
   const {projectId = ''} = useParams();
   const [dash, setDash] = useState<Dash | null>(null);
@@ -397,7 +396,6 @@ export function IdeProjectPulse() {
   );
 }
 
-// ───────────────────────── Runs ─────────────────────────
 type Sub = 'runs' | 'prs';
 type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'failed';
 
@@ -413,7 +411,7 @@ function RunDetailPanel({
   const score =
     scoreOf(run) ?? (run as unknown as {accuracyScore?: number}).accuracyScore ?? undefined;
   const verdict =
-    score == null ? '—' : score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+    score == null ? '—' : score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;
   const prUrl =
     (run as unknown as {scmPrUrl?: string}).scmPrUrl ||
@@ -942,7 +940,6 @@ export function IdeProjectRuns() {
   );
 }
 
-// ───────────────────────── Repos ─────────────────────────
 export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);

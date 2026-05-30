@@ -134,8 +134,6 @@ class ProjectConfigPathResolverTest {
     assertThat(p.configStorageEnum()).isEqualTo(Project.ConfigStorage.DATABASE);
   }
 
-  // ── helpers ─────────────────────────────────────────────────────────────
-
   private Project projectWith(String name, Project.ConfigStorage storage) {
     Project p = new Project();
     p.setId(projectId);

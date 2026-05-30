@@ -33,8 +33,6 @@ public class BitbucketRepoService {
 
   private final ObjectMapper objectMapper;
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
   /**
    * Clones a Bitbucket repo into {@code workspacePath} using embedded credentials in the URL. Uses
    * ProcessBuilder for the shell {@code git clone} call.
@@ -257,8 +255,6 @@ public class BitbucketRepoService {
     }
     return false;
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   /**
    * Builds the HTTP Basic auth header value.

@@ -20,14 +20,14 @@ import lombok.extern.slf4j.Slf4j;
 
 @SpringBootApplication(
     exclude = {
-      // ── Anthropic — excluded so app can start without ANTHROPIC_API_KEY ──────
+      // Anthropic — excluded so app can start without ANTHROPIC_API_KEY
       // Bean created manually in AgentModelConfig with graceful degradation.
       AnthropicChatAutoConfiguration.class,
-      // ── Google Gemini — only used via manual FallbackLlmRouter calls ─────────────────
+      // Google Gemini — only used via manual FallbackLlmRouter calls
       GoogleGenAiChatAutoConfiguration.class,
       GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
       GoogleGenAiTextEmbeddingAutoConfiguration.class,
-      // ── OpenAI — all auto-configs excluded; chat bean created manually ────────
+      // OpenAI — all auto-configs excluded; chat bean created manually
       OpenAiChatAutoConfiguration.class,
       OpenAiAudioSpeechAutoConfiguration.class,
       OpenAiAudioTranscriptionAutoConfiguration.class,

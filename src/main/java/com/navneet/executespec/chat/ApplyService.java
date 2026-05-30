@@ -280,8 +280,6 @@ public class ApplyService {
         1, List.of(new TaskSummary(taskId, title)), result.outcome().name(), summary);
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-
   private static boolean isTerminal(String s) {
     return "COMPLETE".equals(s)
         || "FAILED".equals(s)

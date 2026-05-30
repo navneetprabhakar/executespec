@@ -75,7 +75,7 @@ public class ExecutionController {
   private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
   private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepo;
 
-  // ── Create / list / get ────────────────────────────────────────────────
+  // Create / list / get
 
   @PostMapping("/api/projects/{projectId}/executions")
   public ResponseEntity<ExecutionRunDto> createExecution(
@@ -150,8 +150,6 @@ public class ExecutionController {
     return ResponseEntity.ok(runs.map(r -> ExecutionRunDto.from(r, null)));
   }
 
-  // ── Phase triggers ─────────────────────────────────────────────────────
-
   @PostMapping("/api/executions/{id}/analyse")
   public ResponseEntity<Void> triggerAnalysis(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
@@ -207,8 +205,6 @@ public class ExecutionController {
     orchestrator.approvePlanAndExecute(id);
     return ResponseEntity.accepted().build();
   }
-
-  // ── Execution control ──────────────────────────────────────────────────
 
   @PostMapping("/api/executions/{id}/solutions/{solutionId}/decide")
   public ResponseEntity<Void> decide(
@@ -288,8 +284,6 @@ public class ExecutionController {
     return ResponseEntity.ok(orchestrator.buildReport(run));
   }
 
-  // ── PR review comments ──────────────────────────────────────────────────
-
   @GetMapping("/api/projects/{projectId}/prs/{prNumber}/reviews")
   public ResponseEntity<Map<String, String>> prReviewComments(
       @PathVariable String projectId,
@@ -302,8 +296,6 @@ public class ExecutionController {
     String comments = gitHubRepoService.fetchPrReviewComments(repo, prNumber, pat);
     return ResponseEntity.ok(Map.of("comments", comments));
   }
-
-  // ── SSE ────────────────────────────────────────────────────────────────
 
   @GetMapping("/api/executions/{id}/sse-token")
   public ResponseEntity<Map<String, String>> sseToken(
@@ -331,8 +323,6 @@ public class ExecutionController {
     requireRunAccess(id, principal.getUser());
     return broadcaster.subscribe(channel, lastEventId);
   }
-
-  // ── Access + feature gating ────────────────────────────────────────────
 
   private AppUser requireFeatureEnabled(AppUserDetails principal) {
     if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);

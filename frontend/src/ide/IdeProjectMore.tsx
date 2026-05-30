@@ -12,7 +12,7 @@ import {useAuthStore} from '@/stores/useAuthStore';
 
 const tok = () => localStorage.getItem('access_token') ?? '';
 
-// ───────────────────────── shared sub-tab + banner helpers ─────────────────────────
+// shared sub-tab + banner helpers
 
 type SubTab = {key: string; label: string};
 
@@ -79,7 +79,6 @@ function MetaLabel({children}: {children: React.ReactNode}) {
   );
 }
 
-// ───────────────────────── Chat ─────────────────────────
 type ChatBubble = {role: 'user' | 'assistant'; content: string; ts?: string};
 
 export function IdeProjectChat() {
@@ -406,7 +405,7 @@ export function IdeProjectChat() {
   );
 }
 
-// ───────────────────────── Code (Browse · Tech debt · Code review · Health · Standards · Docs) ─────────────────────────
+// Code (Browse · Tech debt · Code review · Health · Standards · Docs)
 type CodeSub = 'browse' | 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
 export function IdeProjectCode() {
@@ -885,7 +884,7 @@ export function IdeProjectCode() {
   );
 }
 
-// ───────────────────────── Architecture (Current · Versions · Invariants · ADRs · Contracts) ─────────────────────────
+// Architecture (Current · Versions · Invariants · ADRs · Contracts)
 type ArchSub = 'current' | 'versions' | 'invariants' | 'adrs' | 'contracts';
 
 // Split a markdown doc into a preamble (text before the first `##`) + top-level (`##`) sections.
@@ -1613,7 +1612,7 @@ export function IdeProjectArchitecture() {
   );
 }
 
-// ───────────────────────── Members (team · invites · share links) ─────────────────────────
+// Members (team · invites · share links)
 const INVITE_ROLES: api.ProjectInviteRole[] = [
   'PROJECT_VIEWER',
   'PROJECT_DEVELOPER',
@@ -1941,7 +1940,6 @@ export function IdeProjectMembers() {
   );
 }
 
-// ───────────────────────── Activity ─────────────────────────
 export function IdeProjectActivity() {
   const {projectId = ''} = useParams();
   const [feed, setFeed] = useState<Array<Record<string, unknown>> | null>(null);
@@ -1997,7 +1995,7 @@ export function IdeProjectActivity() {
   );
 }
 
-// ───────────────────────── Settings (Settings · Documents (RAG) · Memory) ─────────────────────────
+// Settings (Settings · Documents (RAG) · Memory)
 type SettingsSub = 'settings' | 'documents' | 'memory';
 
 export function IdeProjectSettings() {

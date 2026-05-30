@@ -102,8 +102,6 @@ public class MailService {
     log.info("SMTP mail transport ready — host: {}:{}, from: {}", smtpHost, smtpPort, fromEmail);
   }
 
-  // ── public send methods ──────────────────────────────────────────────────
-
   @Async
   public void sendVerificationEmail(String toEmail, String firstName, String token) {
     Context ctx = new Context();
@@ -459,8 +457,6 @@ public class MailService {
     sendHtml(toEmail, "Your subscription renews soon — executespec", "email/renewal-reminder", ctx);
   }
 
-  // ── Usage report emails ─────────────────────────────────────────────────
-
   @Async
   public void sendUserUsageReport(
       String toEmail,
@@ -620,8 +616,6 @@ public class MailService {
   private String formatDelta(long current, long previous) {
     return formatDelta((double) current, (double) previous);
   }
-
-  // ── private helpers ──────────────────────────────────────────────────────
 
   private void sendHtml(String to, String subject, String template, Context ctx) {
     if ("smtp".equals(transport)) {

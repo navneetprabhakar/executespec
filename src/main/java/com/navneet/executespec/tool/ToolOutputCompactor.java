@@ -122,15 +122,19 @@ public class ToolOutputCompactor {
    *     preserve; pass through verbatim (truncated to {@link #GOAL_TRUNCATE_CHARS} internally)
    * @param isImmediatelyPriorToolCall whether this is the LAST tool call in the current request
    *     batch (preserves the most recent output verbatim)
-   * @param workerCtx worker's execution context (used for run/task ids on the LLM call + provider
-   *     resolution)
+   * @param workerCtx worker's execution context (used for run/task ids on the LLM call)
+   * @param workerProvider the run's provider ({@code "anthropic" | "openai" | "gemini" | …}) — the
+   *     compactor's LIGHTWEIGHT call MUST stay inside the run's provider boundary so a BYOK OpenAI
+   *     / Gemini run never silently bills an Anthropic call (and the implicit-cache prefix stays
+   *     provider-local). Null/blank/unknown → ANTHROPIC (platform default).
    */
   public Optional<Compacted> compactIfNeeded(
       String toolName,
       String rawOutput,
       String workerGoal,
       boolean isImmediatelyPriorToolCall,
-      ExecutionContext workerCtx) {
+      ExecutionContext workerCtx,
+      String workerProvider) {
     if (!featureFlagService.isEnabled(FLAG_ENABLED)) {
       return Optional.empty();
     }
@@ -147,10 +151,11 @@ public class ToolOutputCompactor {
       return Optional.empty();
     }
 
-    // Provider for the LIGHTWEIGHT tier — derive from the worker's provider when possible so the
-    // compactor stays inside the run's provider boundary (BYOK key resolution + cache prefix
-    // affinity). Falls through to ANTHROPIC if anything fails; ModelResolver handles the tier.
-    LlmProvider provider = inferProvider(workerCtx);
+    // Provider for the LIGHTWEIGHT tier — the run's OWN provider, so the compactor stays inside the
+    // run's provider boundary (BYOK key resolution + implicit-cache prefix affinity). A BYOK OpenAI
+    // or Gemini run must compact via its own LIGHTWEIGHT model (gpt-*-mini / Flash), never silently
+    // bill an Anthropic Haiku call. ModelResolver maps the provider → its LIGHTWEIGHT model.
+    LlmProvider provider = resolveProvider(workerProvider);
     ResolvedModel resolved;
     try {
       resolved = modelResolver.resolve(AGENT_NAME, provider);
@@ -251,18 +256,27 @@ public class ToolOutputCompactor {
   }
 
   /**
-   * Best-effort provider inference from the worker's runId. The compactor doesn't have a direct
-   * handle on the worker's chosen provider — passing it explicitly through every call site would
-   * add ~5 plumbing seams for a value the run already knows. Fall through to ANTHROPIC (project
-   * default) so the matrix-LIGHTWEIGHT row picks Haiku; users on OpenAI/Gemini still get
-   * LIGHTWEIGHT via failover order if Anthropic is unhealthy.
-   *
-   * <p>FUTURE: plumb the worker provider through {@code compactIfNeeded} once the static/dynamic
-   * prompt-cache boundary refactor (Phase 6 scope) lands — that refactor will already need the
-   * worker's provider to know cache-block placement.
+   * Map the run's provider string to the {@link LlmProvider} whose LIGHTWEIGHT row the compactor
+   * should call. The worker already knows its provider and threads it through {@code
+   * compactIfNeeded} (RL-2026-05-052 follow-up — replaces the earlier hard-coded ANTHROPIC, which
+   * routed every OpenAI / Gemini / BYOK run's bulk-output compaction through Anthropic Haiku:
+   * wrong-key on BYOK + a cross-provider cache miss). Parse mirrors {@code SequentialExecutor}'s
+   * {@code LlmProvider.valueOf(provider.toUpperCase())}; null / blank / unknown → ANTHROPIC
+   * (platform default) so a missing value degrades safely rather than throwing.
    */
-  private LlmProvider inferProvider(ExecutionContext ctx) {
-    return LlmProvider.ANTHROPIC;
+  private LlmProvider resolveProvider(String workerProvider) {
+    if (workerProvider == null || workerProvider.isBlank()) {
+      return LlmProvider.ANTHROPIC;
+    }
+    try {
+      return LlmProvider.valueOf(workerProvider.trim().toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      log.warn(
+          "ToolOutputCompactor unknown worker provider '{}' — defaulting LIGHTWEIGHT tier to"
+              + " ANTHROPIC",
+          workerProvider);
+      return LlmProvider.ANTHROPIC;
+    }
   }
 
   private static String truncate(String s, int max) {

@@ -88,7 +88,7 @@ export function useSse(runId: string | null) {
         try {
           const data = JSON.parse(ev.data);
 
-          // ── RUN_DETAIL: backend pushes full run detail — update store directly ──
+          // RUN_DETAIL: backend pushes full run detail — update store directly
           if (data.type === 'RUN_DETAIL' && data.payload) {
             try {
               const detail = JSON.parse(data.payload);

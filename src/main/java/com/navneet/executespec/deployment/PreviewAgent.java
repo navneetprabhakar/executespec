@@ -166,8 +166,6 @@ public class PreviewAgent {
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   /**
    * Appends a "## Running with Docker" section to the workspace's README.md. If the file does not
    * exist, creates a minimal README. If a Docker section is already present (from a worker's README

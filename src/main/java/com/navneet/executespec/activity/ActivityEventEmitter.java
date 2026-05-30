@@ -100,8 +100,6 @@ public class ActivityEventEmitter {
     }
   }
 
-  // ── Internal: feed write ────────────────────────────────────────────────
-
   private void writeFeedEntry(
       UUID projectId,
       ActivityEventType type,
@@ -129,7 +127,7 @@ public class ActivityEventEmitter {
     feedRepo.save(entry);
   }
 
-  // ── Internal: audit write (dual-surface events only) ────────────────────
+  // Internal: audit write (dual-surface events only)
 
   private void writeAuditEntry(
       UUID projectId,
@@ -153,8 +151,6 @@ public class ActivityEventEmitter {
             .build();
     auditService.record(audit);
   }
-
-  // ── Internal: payload serialization ────────────────────────────────────
 
   String serializePayload(Map<String, Object> structuredPayload) {
     if (structuredPayload == null || structuredPayload.isEmpty()) return null;

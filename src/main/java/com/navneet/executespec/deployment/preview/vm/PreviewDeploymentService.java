@@ -194,8 +194,6 @@ public class PreviewDeploymentService {
         .orElseThrow(() -> new PreviewDeploymentException("All preview VMs at capacity"));
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
   private String generatePreviewId(String projectName) {
     String slug =
         projectName

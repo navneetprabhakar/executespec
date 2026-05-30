@@ -47,7 +47,7 @@ class ValidationReportServiceAdditiveScoreTest {
     return new ValidationReportService(null, null, null, null, null, null, flags);
   }
 
-  // ── RL-2026-05-041 anti-gaming guards (audit #7) ─────────────────────────
+  // RL-2026-05-041 anti-gaming guards (audit #7)
 
   @Test
   void guards_tighten_a_gamed_run_trivial_tests_plus_partial_endpoints() {
@@ -79,8 +79,6 @@ class ValidationReportServiceAdditiveScoreTest {
         100, guarded, "a clean run with full endpoint coverage must be unaffected by guards");
   }
 
-  // ── CODE_DELIVERED hard floor ──────────────────────────────────────────
-
   @Test
   void no_files_generated_floors_score_to_zero() {
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 0, null, null, 0);
@@ -94,7 +92,7 @@ class ValidationReportServiceAdditiveScoreTest {
     assertTrue(score >= 90, "Unknown filesGenerated must not zero the score. Got: " + score);
   }
 
-  // ── Reference run: build OK, full tests, CLEAN reviewer, 0 criticals ──
+  // Reference run: build OK, full tests, CLEAN reviewer, 0 criticals
 
   @Test
   void perfect_run_is_100() {
@@ -105,7 +103,7 @@ class ValidationReportServiceAdditiveScoreTest {
     assertEquals(100, score);
   }
 
-  // ── BUILD failure no longer cliffs to 0 ────────────────────────────────
+  // BUILD failure no longer cliffs to 0
 
   @Test
   void failed_build_keeps_partial_credit() {
@@ -117,8 +115,6 @@ class ValidationReportServiceAdditiveScoreTest {
     assertEquals(75, score);
   }
 
-  // ── TESTS: real run ratio ─────────────────────────────────────────────
-
   @Test
   void half_tests_pass_dampens_test_slot_proportionally() {
     // build OK + 5/10 tests + CLEAN + 0 crit + 4 files:
@@ -127,7 +123,7 @@ class ValidationReportServiceAdditiveScoreTest {
     assertEquals(90, score);
   }
 
-  // ── TESTS: no real tests, LLM grades ──────────────────────────────────
+  // TESTS: no real tests, LLM grades
 
   @Test
   void testsTotal_zero_with_GOOD_coverage_caps_test_slot_at_70() {
@@ -164,8 +160,6 @@ class ValidationReportServiceAdditiveScoreTest {
     assertEquals(90, score, "UNKNOWN coverage damps the slot; it must not be dropped.");
   }
 
-  // ── REVIEWER ──────────────────────────────────────────────────────────
-
   @Test
   void review_failed_dampens_reviewer_slot_but_doesnt_zero_headline() {
     // Multiplicative: REVIEW_FAILED → 0.2 × everything → ~20. Additive: only the 20-pt reviewer
@@ -175,8 +169,6 @@ class ValidationReportServiceAdditiveScoreTest {
         svcAdditiveOn().computeVerifiedScore(true, 50, 50, "REVIEW_FAILED", 0, null, null, 4);
     assertEquals(82, score);
   }
-
-  // ── CRITICALS ─────────────────────────────────────────────────────────
 
   @Test
   void single_critical_takes_one_point_off() {
@@ -193,8 +185,6 @@ class ValidationReportServiceAdditiveScoreTest {
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 5, null, null, 4);
     assertEquals(95, score);
   }
-
-  // ── Flag-off rollback ────────────────────────────────────────────────
 
   @Test
   void flag_off_falls_back_to_multiplicative() {

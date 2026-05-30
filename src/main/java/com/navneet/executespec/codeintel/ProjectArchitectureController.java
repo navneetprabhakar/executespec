@@ -229,7 +229,7 @@ public class ProjectArchitectureController {
     return ResponseEntity.status(HttpStatus.CREATED).body(RepoArchDto.from(doc));
   }
 
-  // ─── 2026-05-16 — file-browse endpoints for Project → Code → Browse ────────
+  // 2026-05-16 — file-browse endpoints for Project → Code → Browse
   //
   // The Browse tab now shows actual file content, not codemap-derived
   // metadata. Two endpoints back it:

@@ -83,8 +83,6 @@ public class PreviewImagePusher {
     return new PushResult(imageRef, false);
   }
 
-  // ───────────────────────────── helpers ─────────────────────────────
-
   private boolean manifestExists(String imageRef) {
     // `docker manifest inspect` doesn't auto-enable for insecure local
     // registries without config; use `docker buildx imagetools` which

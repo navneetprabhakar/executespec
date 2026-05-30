@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public interface PipelineRunRepository
     extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
 
-  // ── Atomic token counter updates (avoids read-modify-write race) ─────────
+  // Atomic token counter updates (avoids read-modify-write race)
 
   @Modifying
   @Transactional
@@ -57,7 +57,6 @@ public interface PipelineRunRepository
 
   Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
 
-  // ── Tier 3 additions ─────────────────────────────────────────────────────
   Page<PipelineRun> findAllByOrderByStartedAtDesc(Pageable pageable);
 
   Page<PipelineRun> findByStatusOrderByStartedAtDesc(String status, Pageable pageable);
@@ -76,8 +75,6 @@ public interface PipelineRunRepository
   @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r")
   Long sumOutputTokens();
 
-  // ── Org-filtered metrics ────────────────────────────────────────────────────
-
   long countByOrgId(String orgId);
 
   long countByOrgIdAndStatus(String orgId, String status);
@@ -87,8 +84,6 @@ public interface PipelineRunRepository
 
   @Query("SELECT COALESCE(SUM(r.totalOutputTokens), 0) FROM PipelineRun r WHERE r.orgId = :orgId")
   Long sumOutputTokensByOrgId(@Param("orgId") String orgId);
-
-  // ── Date-filtered global metrics ──────────────────────────────────────────
 
   long countByStartedAtGreaterThanEqual(Instant since);
 
@@ -118,13 +113,23 @@ public interface PipelineRunRepository
   Double sumActualCostByProjectAndSince(
       @Param("projectId") String projectId, @Param("since") Instant since);
 
+  /**
+   * B4 (audit 2026-05-29) — project lifetime LLM $ + token totals as DB SUMs, replacing the
+   * dashboard's findByProjectId(... 2000)-then-stream heap scan on a constant-hit path.
+   */
+  @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r WHERE r.projectId = :pid")
+  Double sumActualCostByProjectId(@Param("pid") String projectId);
+
+  @Query(
+      "SELECT COALESCE(SUM(COALESCE(r.totalInputTokens, 0) + COALESCE(r.totalOutputTokens, 0)), 0)"
+          + " FROM PipelineRun r WHERE r.projectId = :pid")
+  Long sumTotalTokensByProjectId(@Param("pid") String projectId);
+
   /** v2.5.8 — per-org LLM $ spent in a billing period (admin / FinOps dashboards). */
   @Query(
       "SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r "
           + "WHERE r.orgId = :orgId AND r.startedAt >= :since")
   Double sumActualCostByOrgAndSince(@Param("orgId") String orgId, @Param("since") Instant since);
-
-  // ── Date-filtered org-scoped metrics ────────────────────────────────────────
 
   long countByOrgIdAndStartedAtGreaterThanEqual(String orgId, Instant since);
 
@@ -143,7 +148,7 @@ public interface PipelineRunRepository
   Long sumOutputTokensByOrgIdAndStartedAtAfter(
       @Param("orgId") String orgId, @Param("since") Instant since);
 
-  // ── Usage report queries (date-range + per-user/org) ───────────────────────
+  // Usage report queries (date-range + per-user/org)
 
   long countByCreatedByUserIdAndStartedAtBetween(String userId, Instant start, Instant end);
 
@@ -162,6 +167,18 @@ public interface PipelineRunRepository
   Long sumOutputTokensByUserAndDateRange(
       @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
 
+  /**
+   * B2 (audit 2026-05-29) — authoritative per-user $ spend over a date range. Sums the cache-aware
+   * actual_cost_usd that RunCostTracker persists per run, so usage reports stop re-estimating at
+   * stale blended-Haiku token rates. Null/0 ⇒ period predates actual-cost tracking (caller falls
+   * back to the token estimate).
+   */
+  @Query(
+      "SELECT COALESCE(SUM(r.actualCostUsd),0.0) FROM PipelineRun r WHERE r.createdByUserId = :uid"
+          + " AND r.startedAt BETWEEN :s AND :e")
+  Double sumActualCostByUserAndDateRange(
+      @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
+
   long countByOrgIdAndStartedAtBetween(String orgId, Instant start, Instant end);
 
   long countByOrgIdAndStatusAndStartedAtBetween(
@@ -177,6 +194,13 @@ public interface PipelineRunRepository
       "SELECT COALESCE(SUM(r.totalOutputTokens),0) FROM PipelineRun r WHERE r.orgId = :oid AND"
           + " r.startedAt BETWEEN :s AND :e")
   Long sumOutputTokensByOrgAndDateRange(
+      @Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
+
+  /** B2 (audit 2026-05-29) — authoritative per-org $ spend over a date range (see user variant). */
+  @Query(
+      "SELECT COALESCE(SUM(r.actualCostUsd),0.0) FROM PipelineRun r WHERE r.orgId = :oid AND"
+          + " r.startedAt BETWEEN :s AND :e")
+  Double sumActualCostByOrgAndDateRange(
       @Param("oid") String orgId, @Param("s") Instant start, @Param("e") Instant end);
 
   @Query(
@@ -203,8 +227,6 @@ public interface PipelineRunRepository
   List<Object[]> projectBreakdownByUser(
       @Param("uid") String userId, @Param("s") Instant start, @Param("e") Instant end);
 
-  // ── Pilot R1 project dashboard ────────────────────────────────────────────
-
   long countByProjectIdAndStatus(String projectId, String status);
 
   long countByProjectId(String projectId);
@@ -216,15 +238,11 @@ public interface PipelineRunRepository
   List<PipelineRun> findByProjectIdOrderByStartedAtDesc(
       @Param("pid") String projectId, Pageable pageable);
 
-  // ── Run title backfill ────────────────────────────────────────────────────
-
   /** Finds runs that have a plan but no run_title yet (for one-time backfill on startup). */
   @Query(
       "SELECT r FROM PipelineRun r WHERE r.runTitle IS NULL AND r.planJson IS NOT NULL AND"
           + " r.planJson <> ''")
   List<PipelineRun> findRunsWithoutTitle();
-
-  // ── GCS workspace archiving ───────────────────────────────────────────────
 
   /**
    * Finds completed/failed runs whose workspace has not yet been archived to GCS, where the run
@@ -333,4 +351,30 @@ public interface PipelineRunRepository
           + "COALESCE(SUM(r.totalOutputTokens), 0) "
           + "FROM PipelineRun r WHERE r.runId IN :runIds")
   Object[] aggregateCostAndTokens(@Param("runIds") java.util.Collection<String> runIds);
+
+  /**
+   * N2 (audit 2026-05-29) — org run-ids projected in one query, replacing {@code
+   * StateStore.computeModelComparisonForOrg}'s {@code findAll().stream().filter(orgId).map(runId)}
+   * which loaded every pipeline_run into heap just to collect ids.
+   */
+  @Query("SELECT r.runId FROM PipelineRun r WHERE r.orgId = :orgId")
+  List<String> findRunIdsByOrgId(@Param("orgId") String orgId);
+
+  /**
+   * N2 — org runs (and a since-windowed variant), replacing {@code
+   * StateStore.computeUserRunsSummary}'s {@code findAll().stream().filter(orgId + since)}. Derived
+   * queries (the caller branches on a null window) — no {@code :param IS NULL}. {@code After} is
+   * strict {@code >}, matching the prior {@code isAfter} (and dropping null startedAt as before).
+   */
+  List<PipelineRun> findByOrgId(String orgId);
+
+  List<PipelineRun> findByOrgIdAndStartedAtAfter(String orgId, Instant since);
+
+  /**
+   * N2 — global (SUPER_ADMIN) since-windowed variant, replacing {@code
+   * StateStore.computeUserRunsSummaryGlobal}'s windowed {@code findAll().stream().filter(since)}.
+   * The unbounded (no-window) global case keeps using {@link #findAll()} — an all-time global
+   * summary is inherently a full scan, exactly as before.
+   */
+  List<PipelineRun> findByStartedAtAfter(Instant since);
 }

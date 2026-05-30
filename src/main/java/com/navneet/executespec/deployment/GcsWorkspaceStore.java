@@ -74,8 +74,6 @@ public class GcsWorkspaceStore {
     this.storage = s;
   }
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
   /**
    * RL-2026-05-041 (audit #2) — true when GCS is actually wired (ADC + bucket resolved at startup).
    * Lets callers (e.g. the mid-run checkpoint) skip the expensive workspace-zip step entirely when
@@ -205,8 +203,6 @@ public class GcsWorkspaceStore {
       log.warn("[GcsWorkspaceStore] Object not found for deletion: gs://{}/{}", bucket(), gcsKey);
     }
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   /** Object key for a given run: {@code {env}/workspace/{runId}.zip} */
   public String objectKey(String runId) {

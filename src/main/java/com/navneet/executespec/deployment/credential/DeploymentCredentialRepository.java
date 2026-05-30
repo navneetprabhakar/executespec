@@ -9,7 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 public interface DeploymentCredentialRepository
     extends JpaRepository<DeploymentCredential, String> {
 
-  // ── User-level (default) credential queries ──────────────────────────────
+  // User-level (default) credential queries
 
   Optional<DeploymentCredential> findByUserIdAndCloudProvider(String userId, String cloudProvider);
 
@@ -18,8 +18,6 @@ public interface DeploymentCredentialRepository
   boolean existsByUserId(String userId);
 
   void deleteByUserIdAndCloudProvider(String userId, String cloudProvider);
-
-  // ── Project-scoped credential queries ────────────────────────────────────
 
   /** Find credential for a specific user + project combination. */
   Optional<DeploymentCredential> findByUserIdAndProjectIdAndCloudProvider(

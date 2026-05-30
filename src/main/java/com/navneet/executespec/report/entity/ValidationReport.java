@@ -71,7 +71,7 @@ public class ValidationReport {
   @Builder.Default
   private String status = "COMPLETE";
 
-  // ── Phase 3: Accuracy assessment fields (V74) ──────────────────────────────────────────────
+  // Phase 3: Accuracy assessment fields (V74)
 
   /** Spec adherence score 0-100 from AccuracyAssessmentService. Null if assessment was skipped. */
   @Column(name = "accuracy_score")
@@ -88,7 +88,7 @@ public class ValidationReport {
   @Column(name = "accuracy_json", columnDefinition = "TEXT")
   private String accuracyJson;
 
-  // ── Pilot R6: Multi-dimension review scoring (V83) ─────────────────────────────────────────
+  // Pilot R6: Multi-dimension review scoring (V83)
 
   @Column(name = "code_quality_score")
   private Integer codeQualityScore;
@@ -109,7 +109,7 @@ public class ValidationReport {
   @Column(name = "design_compliance_score")
   private Integer designComplianceScore;
 
-  // ── v2.5.10 (V106): verified signals for trustworthy scoring ──────────────────────────────
+  // v2.5.10 (V106): verified signals for trustworthy scoring
 
   /**
    * True when ReviewerResult.finalBuildPassed at report time. Null for rows written before V106.
@@ -157,8 +157,6 @@ public class ValidationReport {
    */
   @Column(name = "rubric_score")
   private Integer rubricScore;
-
-  // ──────────────────────────────────────────────────────────────────────────────────────────
 
   /**
    * Preview URL captured at report generation time. Null if preview expired or was never started.

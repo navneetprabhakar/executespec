@@ -113,8 +113,6 @@ public class CodeReviewService {
     log.info("CodeReviewService dispatch pool shutdown signaled");
   }
 
-  // ── Tier gating ──────────────────────────────────────────────────────────
-
   public void assertTierAndQuota(AppUser user) {
     if (user == null) throw new TierBlockedException("authentication required");
     String tier = user.getTier();
@@ -147,8 +145,6 @@ public class CodeReviewService {
       }
     }
   }
-
-  // ── Public entry ─────────────────────────────────────────────────────────
 
   /** Submit a code-review scan. Returns the QUEUED row immediately. */
   @Transactional
@@ -214,8 +210,6 @@ public class CodeReviewService {
         });
     return saved;
   }
-
-  // ── Background runner ────────────────────────────────────────────────────
 
   void runScan(
       UUID scanId, String projectId, UUID repoId, String repoFullName, String sha, String pat) {
@@ -482,7 +476,7 @@ public class CodeReviewService {
             });
   }
 
-  // ── File sampling for the LLM prompt ─────────────────────────────────────
+  // File sampling for the LLM prompt
 
   /**
    * Walk the workspace, prioritise risky / interesting files, return at most {@link
@@ -627,8 +621,6 @@ public class CodeReviewService {
           Map.entry(".sh", "bash"),
           Map.entry(".tf", "terraform"));
 
-  // ── Read paths ──────────────────────────────────────────────────────────
-
   public CodeReviewScan findScan(UUID id) {
     return scanRepo.findById(id).orElse(null);
   }
@@ -664,8 +656,6 @@ public class CodeReviewService {
   public List<CodeReviewIssue> openIssuesFor(UUID scanId) {
     return issueRepo.findByScanIdAndStatusOrderBySeverityAscFilePathAscLineStartAsc(scanId, "OPEN");
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   private String resolveCloneUrl(UUID repoId, String repoFullName) {
     if (repoId != null) {
@@ -707,8 +697,6 @@ public class CodeReviewService {
       return Integer.toHexString(key.hashCode());
     }
   }
-
-  // ── Internal records ────────────────────────────────────────────────────
 
   /** Mutable score holder used during file sampling. */
   static final class FileMeta {
@@ -758,8 +746,6 @@ public class CodeReviewService {
       int majorCount,
       int droppedCount,
       int staticFindingsTotal) {}
-
-  // ── Exceptions ──────────────────────────────────────────────────────────
 
   public static class TierBlockedException extends RuntimeException {
     public TierBlockedException(String msg) {
