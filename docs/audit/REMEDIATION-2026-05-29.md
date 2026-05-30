@@ -87,3 +87,15 @@ is **intentionally not committed on this branch** — the working tree carries t
 GCP cost-optimization edits to those exact files, and the standing instruction is to leave that work
 uncommitted. This changelog + the PR body carry the record for now; the root-doc fold-in should happen when the
 GCP work is committed (or in a follow-up once this branch merges).
+
+---
+
+## 5. Handoff docs for the deferred items
+
+Every deferred item has a concrete handoff (created 2026-05-30) — index:
+[`docs/plans/audit-deferred-handoff-2026-05-30.md`](../plans/audit-deferred-handoff-2026-05-30.md).
+
+- **RunOrchestrator split** → [`docs/plans/runorchestrator-god-class-split.md`](../plans/runorchestrator-god-class-split.md) (6-increment by-hand plan).
+- **B1 — OpenAI/Gemini clients + wiring** → [`docs/plans/v2-batch-execution-plan.md`](../plans/v2-batch-execution-plan.md) (Anthropic client is the reference impl; P4 wiring + human gate).
+- **C3 — tenant ORM read-isolation** → [`docs/plans/c3-tenant-orm-isolation.md`](../plans/c3-tenant-orm-isolation.md) (approach + the 5 exemption landmines + flag-gated rollout).
+- **B3 — DeepSeek smoke** + **D-residual dead-code** → the index doc above (B3 §, D-residual §) + [`docs/tech-debt.md`](../tech-debt.md).
