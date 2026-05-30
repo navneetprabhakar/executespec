@@ -7,6 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.deployment.WorkspaceFileService;
+import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.SearchFilesTool;
+import com.navneet.executespec.tool.ToolResult;
 
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -40,10 +43,14 @@ public class RunChatTools {
   private static final int MAX_FILE_CHARS = 8_000;
 
   private final WorkspaceFileService workspaceFileService;
+  private final SearchFilesTool searchFilesTool;
   private final ObjectMapper json;
 
-  /** Caller-scoped state every run tool needs. */
-  public record ToolContext(String runId) {}
+  /**
+   * Caller-scoped state every run tool needs. {@code execContext} is the run-workspace-rooted
+   * {@link ExecutionContext} the reused {@link SearchFilesTool} searches against.
+   */
+  public record ToolContext(String runId, ExecutionContext execContext) {}
 
   /**
    * Build the per-turn read-only tool list. Pass the result to {@code
@@ -51,7 +58,7 @@ public class RunChatTools {
    * calls back into this class.
    */
   public List<ToolCallback> bind(ToolContext ctx) {
-    return List.of(listRunFiles(ctx), readRunFile(ctx));
+    return List.of(listRunFiles(ctx), readRunFile(ctx), searchRunFiles(ctx));
   }
 
   // Tool 1: list every file in the run workspace
@@ -129,6 +136,65 @@ public class RunChatTools {
           out.put(
               "content",
               truncated ? content.substring(0, MAX_FILE_CHARS) + "\n…[truncated]" : content);
+          return out;
+        });
+  }
+
+  // Tool 3: regex/text content search across the run workspace
+
+  private ToolCallback searchRunFiles(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("search_run_files")
+            .description(
+                "Regex content search across this run's generated workspace. Returns matching "
+                    + "lines with file:line prefixes plus a total count — cheaper than reading "
+                    + "whole files. Use it to locate the exact file:line of a symbol or string "
+                    + "before calling read_run_file. Filter with filePattern (glob, e.g. '*.ts'). "
+                    + "Read-only.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Regular expression to search file contents for, e.g. 'login' or 'class .*Service'."
+    },
+    "filePattern": {
+      "type": "string",
+      "description": "Optional filename glob, e.g. '*.java' or '*.{ts,tsx}'."
+    },
+    "maxResults": {
+      "type": "integer",
+      "description": "Max matches to return this call (default 50, cap 200)."
+    }
+  },
+  "required": ["pattern"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String pattern =
+              args.has("pattern") && !args.get("pattern").isNull()
+                  ? args.get("pattern").asText(null)
+                  : null;
+          if (pattern == null || pattern.isBlank()) {
+            return errorEnvelope("pattern is required (a regex to search file contents for)");
+          }
+          // Reuse the worker's SearchFilesTool over the run-workspace context — identical
+          // regex/glob/paging/binary-skip semantics, so chat search matches what the run saw.
+          ToolResult result = searchFilesTool.execute(args, ctx.execContext());
+          ObjectNode out = json.createObjectNode();
+          if (result instanceof ToolResult.Ok ok) {
+            out.put("ok", true);
+            out.put("matches", ok.content());
+          } else if (result instanceof ToolResult.Err err) {
+            out.put("ok", false);
+            out.put("message", err.message());
+          }
           return out;
         });
   }
