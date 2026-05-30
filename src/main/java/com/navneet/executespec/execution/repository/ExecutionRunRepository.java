@@ -84,6 +84,13 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
   Long sumTotalActualTokensByProjectId(@Param("pid") String projectId);
 
   /**
+   * B5 (audit 2026-05-29) — find the Launch linked to a V2 pipeline run, for the event-driven
+   * terminal-mirror listener (replaces waiting on the per-launch poll). findFirst (1:1 in practice;
+   * newest-first defends against any legacy duplicate link).
+   */
+  Optional<ExecutionRun> findFirstByPipelineRunIdOrderByCreatedAtDesc(String pipelineRunId);
+
+  /**
    * v2.5.7 — returns the full active ExecutionRun rows so the controller can craft a specific 409
    * message naming the blocking run and its actual status.
    */
