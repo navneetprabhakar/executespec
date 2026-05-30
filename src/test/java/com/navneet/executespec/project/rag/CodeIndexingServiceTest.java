@@ -29,8 +29,8 @@ import org.mockito.ArgumentCaptor;
 /**
  * Unit-tests the code-RAG indexing walk in isolation — no network, no DB, no embeddings provider.
  * {@code WorkspaceInitService} (clone), {@code EmbeddingService}, and {@code CodeChunkStore} are
- * mocked; {@code ChunkingService} is real (pure). A {@link TempDir} stands in for the cloned repo so
- * the real file walk (skip-rules + per-file SHA incremental) is exercised against actual files.
+ * mocked; {@code ChunkingService} is real (pure). A {@link TempDir} stands in for the cloned repo
+ * so the real file walk (skip-rules + per-file SHA incremental) is exercised against actual files.
  */
 class CodeIndexingServiceTest {
 
