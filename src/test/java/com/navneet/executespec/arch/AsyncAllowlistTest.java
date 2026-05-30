@@ -125,6 +125,16 @@ class AsyncAllowlistTest {
               // No @OneToMany dereference, so the 3a17e9aa class of bug doesn't apply.
               "ExecutionOrchestrator#dispatchUnified",
               "ExecutionOrchestrator#pollAndMirrorV2",
+              // B5 (audit 2026-05-29) — event-driven launch terminal mirror (replaces the poll for
+              // same-JVM runs; the poll stays as a cross-JVM fallback). onV2Run{Completed,Failed} →
+              // mirrorLaunchOnV2Terminal → mirrorV2Terminal: reads ExecutionRun.status via
+              // findFirstByPipelineRunId (single row, no collection JOIN) + the V2 PipelineRun via
+              // findById (scalar reads only), then mutates the ExecutionRun through the CAS bean
+              // (scalar status/failureReason only) and recomputes totals from source pipeline_run
+              // rows. No @OneToMany dereference — identical no-lazy-nav profile to #pollAndMirrorV2
+              // above, with which it shares the same mirrorV2Terminal sink.
+              "ExecutionOrchestrator#onV2RunCompleted",
+              "ExecutionOrchestrator#onV2RunFailed",
 
               // project workspace — @Async + writeRawFile (file I/O, DB read only)
               "ProjectWorkspaceWarmer#warmDiskCache",
