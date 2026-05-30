@@ -62,8 +62,6 @@ public class GateRecord {
   @Column(name = "resolved_at")
   private Instant resolvedAt;
 
-  // ── Factory helpers ──────────────────────────────────────────────────────────
-
   public static GateRecord pending(String gateKey, String runId, String gateType) {
     GateRecord r = new GateRecord();
     r.gateKey = gateKey;

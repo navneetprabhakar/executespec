@@ -69,8 +69,6 @@ public class FeatureFlagController {
     return ResponseEntity.ok(FeatureFlagDto.from(updated));
   }
 
-  // ── DTO ──────────────────────────────────────────────────────────────────
-
   public record FeatureFlagDto(
       Long id,
       String flagKey,

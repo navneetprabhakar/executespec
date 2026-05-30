@@ -76,8 +76,6 @@ public class JsonSchemaBreakingChangeClassifier implements BreakingChangeClassif
     return new ContractDiff(summary, changes, ContractDiff.Confidence.DETERMINISTIC, name());
   }
 
-  // ── Tree walk ───────────────────────────────────────────────────────────
-
   void walk(JsonNode oldNode, JsonNode newNode, String path, List<ContractDiff.Change> out) {
     if (oldNode == null || newNode == null) return;
 

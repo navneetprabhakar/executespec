@@ -39,8 +39,8 @@ All LLM-calling agents + the routing infrastructure for the V2 pipeline.
 ## Patterns
 
 - **Native tool calling end-to-end.** No XML `<tool_call>` parsing in V2 — that was a V1 idiom. Strict JSON schemas on every `tool/` entry.
-- **Sliding-window context:** first 2 + last 18 messages.
-- **Token-cost control:** `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars.
+- **Sliding-window context:** first 2 + last 18 messages — applies to the legacy `FallbackLlmRouter` non-tool agents ONLY. The V2 `WorkerAgent` loop (`engine/`) keeps its FULL conversation history (no window); `ToolOutputCompactor` (default OFF, `worker.tool-compactor.enabled`) is the only worker-context compaction lever.
+- **Token-cost control:** `readFile` 5k chars (full-file reads; range reads untruncated), `shell` / `buildProject` 6k chars inline (`ToolOutput.budget` — full log spilled to disk + a `readFile` path).
 - **Never call providers directly** — go through `LlmRouter` (native tool agents) or `FallbackLlmRouter` (non-tool agents).
 - **Worker progress signal (RL-2026-05-005):** ONE counter `itersSinceProgress` (consecutive iters with no `writeFile`/`editFile`) drives everything. At `progressWarnAfter` (per-tier `req.stagnationWarnAfter`, default `STAGNATION_WARN_AFTER_N=8`) inject ONE "PROGRESS CHECK" UserMessage — the same one-shot nudge also fires on a premature text-only stop (model emits a summary without calling `completeTask`). At `progressForceAfter` (default `STAGNATION_FORCE_AFTER_N=12`) force-terminate with `COMPLETED_BY_STAGNATION` (Lever B salvage first if nothing was written). UserMessage (not SystemMessage) so Gemini's implicit cache prefix stays intact. This replaced the old Lever A + Lever C + stagnation warn/force quartet.
 - **gitCommit denied for the worker** — `ToolRegistry.bindForWorker(ctx)` filters it (auto-push happens at run-end via `ScmPushService.pushMultiRepo`).

@@ -213,8 +213,6 @@ public class PrReviewAgent {
     return new AgentReview(verdict, summary, comments, 0L, null, null);
   }
 
-  // ── Tool definition: submitReview ────────────────────────────────────────
-
   /**
    * Single-shot terminal tool for the PR review agent. Schema matches the structure documented in
    * {@code prompts/codereview/pr-review-agent.md}. Internal-execution disabled — the route doesn't
@@ -275,8 +273,6 @@ public class PrReviewAgent {
       return "{\"ok\":true}";
     }
   }
-
-  // ── DTOs ────────────────────────────────────────────────────────────────
 
   @Builder
   public record AgentRequest(

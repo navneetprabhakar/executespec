@@ -17,8 +17,6 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 
-// ───────────────────────── shared bits ─────────────────────────
-
 function SectionTitle({children}: {children: React.ReactNode}) {
   return <div className='ide-h2'>{children}</div>;
 }
@@ -51,7 +49,7 @@ function Stat({label, value}: {label: string; value: React.ReactNode}) {
   );
 }
 
-// ───────────────────────── Billing dashboard — /billing ─────────────────────────
+// Billing dashboard — /billing
 
 interface PaymentRowLite {
   id?: string | number;
@@ -389,7 +387,7 @@ export function IdeBilling() {
   );
 }
 
-// ───────────────────────── Plans — /plans ─────────────────────────
+// Plans — /plans
 
 type CycleTab = 'monthly' | 'yearly';
 

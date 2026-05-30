@@ -50,8 +50,6 @@ public class ProjectShareLinkService {
   private final CodeReviewScanRepository scanRepo;
   private final PrReviewRepository prReviewRepo;
 
-  // ── Tier gating ──────────────────────────────────────────────────────────
-
   /** Active link count must be below the per-tier cap. {@code -1} on the cap means unlimited. */
   void assertCanCreate(AppUser caller, String projectId) {
     if (caller == null) {
@@ -74,8 +72,6 @@ public class ProjectShareLinkService {
               + "). Revoke an existing link or upgrade.");
     }
   }
-
-  // ── Public entry ─────────────────────────────────────────────────────────
 
   @Transactional
   public ProjectShareLink createLink(
@@ -159,8 +155,6 @@ public class ProjectShareLinkService {
     }
   }
 
-  // ── Read paths ──────────────────────────────────────────────────────────
-
   public List<ProjectShareLink> listForProject(String projectId) {
     return linkRepo.findByProjectIdOrderByCreatedAtDesc(projectId);
   }
@@ -168,8 +162,6 @@ public class ProjectShareLinkService {
   public long activeCountForProject(String projectId) {
     return linkRepo.countActiveByProject(projectId, Instant.now());
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   static boolean surfaceRequiresScope(ProjectShareLink.Surface surface) {
     return switch (surface) {

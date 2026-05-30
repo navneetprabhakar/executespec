@@ -114,8 +114,6 @@ class ProjectAccessGuardTest {
     assertEquals(400, ex.getStatusCode().value());
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-
   private static Project project(String id, String orgId) {
     Project p = new Project();
     p.setId(id);

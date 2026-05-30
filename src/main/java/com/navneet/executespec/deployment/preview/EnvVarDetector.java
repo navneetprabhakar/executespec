@@ -34,7 +34,7 @@ public class EnvVarDetector {
     STANDARD // Non-secret config vars
   }
 
-  // ── Exclusion: vars auto-handled by runtime, compose, or internal wiring ──
+  // Exclusion: vars auto-handled by runtime, compose, or internal wiring
   // These are NEVER shown to the user. The preview system auto-configures them.
   private static final Set<String> EXCLUDED_VARS =
       Set.of(
@@ -182,7 +182,7 @@ public class EnvVarDetector {
           "DOCKER_HOST",
           "COMPOSE_PROJECT_NAME");
 
-  // ── Exclusion patterns: substrings that mark a var as internal config ──
+  // Exclusion patterns: substrings that mark a var as internal config
   // If a var name contains any of these, it's internal wiring and should be auto-populated
   private static final Set<String> EXCLUDED_SUBSTRINGS =
       Set.of(
@@ -373,8 +373,6 @@ public class EnvVarDetector {
     return sorted;
   }
 
-  // ── .env file scanning ───────────────────────────────────────────────────
-
   private void scanEnvFile(Path envFile, Map<String, DetectedEnvVar> result) {
     if (!Files.isRegularFile(envFile)) return;
     String content = readSafe(envFile);
@@ -392,8 +390,6 @@ public class EnvVarDetector {
       addVar(result, name, classifyVar(name), source, defaultValue);
     }
   }
-
-  // ── Spring config scanning ───────────────────────────────────────────────
 
   private void scanSpringConfig(Path workspace, Map<String, DetectedEnvVar> result) {
     for (String configFile :
@@ -416,8 +412,6 @@ public class EnvVarDetector {
       }
     }
   }
-
-  // ── Source file scanning ─────────────────────────────────────────────────
 
   private void scanSourceFiles(Path workspace, Map<String, DetectedEnvVar> result) {
     // Do NOT follow symlinks — symlink loops (e.g. node_modules/.bin/->../bin/) hang the scan
@@ -461,8 +455,6 @@ public class EnvVarDetector {
       }
     }
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private void addVar(
       Map<String, DetectedEnvVar> result,

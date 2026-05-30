@@ -240,8 +240,6 @@ public class RunTestsTool implements Tool {
     }
   }
 
-  // ── parsing ──
-
   /**
    * pytest -q output ends with a summary line like:
    *

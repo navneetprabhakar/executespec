@@ -133,7 +133,6 @@ public class AgentProperties {
     private java.util.List<String> additionalBlockedPatterns = new java.util.ArrayList<>();
   }
 
-  // ── Tier 8: Compile agent ─────────────────────────────────────────────────
   private Compiler compiler = new Compiler();
 
   @Data
@@ -151,7 +150,7 @@ public class AgentProperties {
     private String provider = "anthropic";
   }
 
-  // ── Tier 8: API test suite agent ─────────────────────────────────────────
+  // Tier 8: API test suite agent
   private ApiTestSuite apiTestSuite = new ApiTestSuite();
 
   @Data
@@ -167,7 +166,6 @@ public class AgentProperties {
     private String provider = "anthropic";
   }
 
-  // ── Tier 8: Frontend preview ──────────────────────────────────────────────
   private Preview preview = new Preview();
 
   @Data

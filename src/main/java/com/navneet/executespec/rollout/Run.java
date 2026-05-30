@@ -70,8 +70,6 @@ public class Run {
     }
   }
 
-  // ─── getters / setters ──────────────────────────────────────────────────
-
   public String runId() {
     return runId;
   }

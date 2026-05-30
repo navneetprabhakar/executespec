@@ -556,7 +556,13 @@
   color: var(--ide-red);
   border-color: var(--ide-red);
 }
-.ide-btn {
+/* Scoped under .ide-root so the IDE's filled primary button wins over the legacy
+   `.signal-app button { background: transparent; color: inherit }` reset (0,1,1),
+   which the IDE inherits because it renders inside the .signal-app wrapper. Without
+   the .ide-root prefix, .ide-btn (0,1,0) loses and every filled IDE button renders
+   as borderless plain text (founder-reported on the Run spec CTA, 2026-05-30). The
+   .ghost / :hover / :disabled variants are already ≥(0,2,0) so they're unaffected. */
+.ide-root .ide-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -580,6 +586,30 @@
 .ide-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* Grounded footer for the primary submit CTA (e.g. "Run spec"): a top divider
+   separates the action from the form so the button reads as THE main action
+   instead of a small chip floating at the bottom, and the button is enlarged.
+   Scoped here — does NOT restyle the many other .ide-btn chips across the IDE. */
+.ide-run-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ide-border);
+}
+.ide-run-action .ide-btn {
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .ide-run-action .ide-btn {
+    flex: 1;
+    justify-content: center;
+  }
 }
 .ide-input,
 .ide-textarea,

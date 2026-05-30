@@ -139,8 +139,6 @@ class ProjectShareLinkServiceTest {
     assertDoesNotThrow(() -> service.revoke(already.getId(), actor));
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-
   private static AppUser userOnTier(String id, String tier) {
     AppUser u = new AppUser();
     u.setId(id);

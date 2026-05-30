@@ -1264,8 +1264,6 @@ public class RunController {
     }
   }
 
-  // ── Plan Versioning ──────────────────────────────────────────────────────
-
   @GetMapping("/{runId}/plan-versions")
   public ResponseEntity<List<com.navneet.executespec.state.entity.PlanVersion>> getPlanVersions(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -1284,8 +1282,6 @@ public class RunController {
         "In-place plan editing not yet supported in V2 — reject the plan and submit a fresh run"
             + " with refined spec.");
   }
-
-  // ── Task Execution Graph ──────────────────────────────────────────────────
 
   /** Returns the task dependency graph for a run. */
   @GetMapping("/{runId}/task-graph")

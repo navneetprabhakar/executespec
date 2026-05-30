@@ -51,7 +51,7 @@ public class ConfigAdminController {
   @Value("${GCP_PROJECT:}")
   private String gcpProject;
 
-  // ── Non-secret config (GCS JSON) ────────────────────────────────────────
+  // Non-secret config (GCS JSON)
 
   @GetMapping
   public ResponseEntity<Map<String, Object>> listConfig() {
@@ -83,7 +83,7 @@ public class ConfigAdminController {
     return ResponseEntity.ok(Map.of("key", key, "status", "removed"));
   }
 
-  // ── Secrets (GCP Secret Manager) ────────────────────────────────────────
+  // Secrets (GCP Secret Manager)
 
   @GetMapping("/secrets")
   public ResponseEntity<Map<String, Object>> listSecrets() {
@@ -188,8 +188,6 @@ public class ConfigAdminController {
     }
   }
 
-  // ── Refresh ─────────────────────────────────────────────────────────────
-
   @PostMapping("/refresh")
   public ResponseEntity<Map<String, Object>> refresh() {
     ConfigRefreshService.RefreshResult result = configRefreshService.refresh();
@@ -199,8 +197,6 @@ public class ConfigAdminController {
     response.put("totalChanged", result.changedKeys().size());
     return ResponseEntity.ok(response);
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   private static String extractSecretId(String fullName) {
     int lastSlash = fullName.lastIndexOf('/');

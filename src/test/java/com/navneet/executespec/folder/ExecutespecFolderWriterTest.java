@@ -54,8 +54,6 @@ class ExecutespecFolderWriterTest {
     when(gh.getDefaultBranch(anyString(), anyString())).thenReturn("main");
   }
 
-  // ── Path validation ─────────────────────────────────────────────────────
-
   @Test
   void writeFiles_rejectsPathsOutsideExecutespecRoot() {
     Map<String, String> outside = Map.of("src/Foo.java", "// not allowed");
@@ -70,8 +68,6 @@ class ExecutespecFolderWriterTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining(".executespec/");
   }
-
-  // ── Project-namespacing ─────────────────────────────────────────────────
 
   @Test
   void namespaceConfigPath_appliesProjectSlugUnderConfig() {
@@ -106,8 +102,6 @@ class ExecutespecFolderWriterTest {
         .isEqualTo(".executespec/config/standards.yaml");
   }
 
-  // ── Branch name synthesis ───────────────────────────────────────────────
-
   @Test
   void synthesiseBranchName_isAlwaysExecutespecPrefixedAndSlugified() {
     String name = ExecutespecFolderWriter.synthesiseBranchName("ExecuteSpec setup: contract index");
@@ -122,8 +116,6 @@ class ExecutespecFolderWriterTest {
         ExecutespecFolderWriter.synthesiseBranchName("ExecuteSpec setup: contract index");
     assertThat(name2).isNotEqualTo(name);
   }
-
-  // ── hasDrift ────────────────────────────────────────────────────────────
 
   @Test
   void hasDrift_returnsTrue_whenFileMissing() {
@@ -148,7 +140,7 @@ class ExecutespecFolderWriterTest {
     assertThat(drift).isTrue();
   }
 
-  // ── End-to-end writeFiles (PR mode) ─────────────────────────────────────
+  // End-to-end writeFiles (PR mode)
 
   @Test
   void writeFiles_prMode_opensSetupBranchPutsFilesAndOpensPr() {
@@ -202,8 +194,6 @@ class ExecutespecFolderWriterTest {
     assertThat(result.get().prUrl()).isNull();
     assertThat(result.get().branchName()).isEqualTo("main");
   }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────
 
   /** Encode a content string into a GitHub /contents response body. */
   private String contentsResponse(String content, String sha) {

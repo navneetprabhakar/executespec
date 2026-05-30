@@ -128,8 +128,6 @@ public class WorkspaceFileService {
     return readFromGitHub(runId, relativePath);
   }
 
-  // ── Local filesystem operations ──────────────────────────────────────────
-
   private List<String> listLocalFiles(Path root) throws IOException {
     List<String> paths = new ArrayList<>();
     Files.walkFileTree(
@@ -175,8 +173,6 @@ public class WorkspaceFileService {
     return Files.readString(file);
   }
 
-  // ── GitHub fallback operations ───────────────────────────────────────────
-
   private List<String> listFromGitHub(String runId) {
     PipelineRun run = stateStore.findRun(runId).orElse(null);
     if (run == null || run.getRepoUrl() == null || run.getRepoUrl().isBlank()) {
@@ -220,7 +216,7 @@ public class WorkspaceFileService {
         : null;
   }
 
-  // ── File-status (V169-companion 2026-05-02) ──────────────────────────────
+  // File-status (V169-companion 2026-05-02)
 
   /**
    * Per-file change status surfaced on the run-detail file tree so the user can see at a glance
@@ -610,8 +606,6 @@ public class WorkspaceFileService {
     }
     return Status.UNCHANGED;
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   /** Per-run workspace root: {@code <agent.workspace>/<runId>/} */
   private Path workspaceRoot(String runId) {

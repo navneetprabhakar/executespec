@@ -176,7 +176,7 @@ class TierPermissionServiceSoloUserTest {
     assertThat(p.monthlyRunLimit()).isEqualTo(-1);
   }
 
-  // ── [J-01] (coverage Sprint 3 follow-up to F-03) ───────────────────────
+  // [J-01] (coverage Sprint 3 follow-up to F-03)
   // Personal-org users (V162 bootstrap) must resolve through the
   // tier-driven solo path, not orgMemberPermissions, otherwise
   // the F-03 fix is dead code post-V162.
@@ -246,7 +246,7 @@ class TierPermissionServiceSoloUserTest {
     assertThat(p.canManageBillingProfile()).as("personal-org PRO has billing profile").isTrue();
   }
 
-  // ── R8 (2026-05-01 follow-up Task 9 + R8) ─────────────────────────────
+  // R8 (2026-05-01 follow-up Task 9 + R8)
   // Personal-org users on TEAM/ENTERPRISE need org-management
   // permissions — they're paying for an Enterprise plan and procurement
   // expects to see audit logs + member management. Pre-fix the personal-org

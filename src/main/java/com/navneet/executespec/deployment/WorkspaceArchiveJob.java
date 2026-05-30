@@ -101,8 +101,6 @@ public class WorkspaceArchiveJob {
     log.info("[WorkspaceArchiveJob] Done — archived={}, failed={}", archived, failed);
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────────
-
   private void archiveRun(String runId) throws IOException {
     PipelineRun run = stateStore.findRun(runId).orElse(null);
     if (run == null) return;

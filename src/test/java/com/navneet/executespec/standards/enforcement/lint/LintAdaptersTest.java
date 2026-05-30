@@ -15,8 +15,6 @@ import org.junit.jupiter.api.Test;
  */
 class LintAdaptersTest {
 
-  // ── EslintAdapter ───────────────────────────────────────────────────────
-
   @Test
   void eslint_unavailableWhenCliMissing() {
     LintProcessRunner stub =
@@ -81,8 +79,6 @@ class LintAdaptersTest {
     assertThat(r.violations()).hasSize(1);
   }
 
-  // ── CheckstyleAdapter ──────────────────────────────────────────────────
-
   @Test
   void checkstyle_unavailableWhenCliMissing() {
     LintProcessRunner stub =
@@ -139,8 +135,6 @@ class LintAdaptersTest {
         .containsEntry("message", "hello world")
         .containsEntry("source", "X.Y");
   }
-
-  // ── LintResult ──────────────────────────────────────────────────────────
 
   @Test
   void lintResult_okIsTrueOnlyForSuccess() {

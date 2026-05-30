@@ -82,8 +82,6 @@ public class RunActivityFeedListener {
     emit(run, ActivityEventType.RUN_FAILED, null, "Run failed" + titleSuffix(run) + reason);
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-
   private PipelineRun lookup(String runId) {
     try {
       return runRepo.findById(runId).orElse(null);

@@ -108,8 +108,6 @@ class PlannerOutputContractTest {
     }
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-
   private static <T> T load(String resourcePath, Class<T> type) throws IOException {
     try (InputStream in =
         Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {

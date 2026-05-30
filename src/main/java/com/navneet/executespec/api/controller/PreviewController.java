@@ -34,8 +34,6 @@ public class PreviewController {
   private final StateStore stateStore;
   private final TierConfigRepository tierConfigRepo;
 
-  // ── DTOs ─────────────────────────────────────────────────────────────────
-
   public record PreviewStatusDto(
       String runId,
       String status,
@@ -62,8 +60,6 @@ public class PreviewController {
   public record PreviewStartRequest(Map<String, String> envVars) {}
 
   public record ApiDocsProbeResult(boolean found, String path, String contentType) {}
-
-  // ── Endpoints ────────────────────────────────────────────────────────────
 
   /**
    * Analyze workspace for database and environment variable requirements. Should be called before
@@ -246,8 +242,6 @@ public class PreviewController {
     return ResponseEntity.ok(new ApiDocsProbeResult(false, null, null));
   }
 
-  // ── Console exec ─────────────────────────────────────────────────────────
-
   public record ExecRequest(String cmd, List<String> args) {}
 
   public record ExecResponse(String stdout, String stderr, int exitCode) {}
@@ -278,8 +272,6 @@ public class PreviewController {
       return ResponseEntity.status(503).body(new ExecResponse("", e.getMessage(), -1));
     }
   }
-
-  // ── Mapping ──────────────────────────────────────────────────────────────
 
   private PreviewStatusDto toDto(String runId, PreviewSession session) {
     var run = stateStore.findRun(runId).orElse(null);

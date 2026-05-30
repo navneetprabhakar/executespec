@@ -97,8 +97,6 @@ public class PaymentAuditService {
         performedBy);
   }
 
-  // ── Query methods ──
-
   public Page<PaymentAudit> findAll(Pageable pageable) {
     return repo.findAllByOrderByCreatedAtDesc(pageable);
   }
@@ -114,8 +112,6 @@ public class PaymentAuditService {
   public List<PaymentAudit> findByEntity(String entityType, String entityId) {
     return repo.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(entityType, entityId);
   }
-
-  // ── CSV export ──
 
   public String exportCsv(List<PaymentAudit> records) {
     StringBuilder sb = new StringBuilder();

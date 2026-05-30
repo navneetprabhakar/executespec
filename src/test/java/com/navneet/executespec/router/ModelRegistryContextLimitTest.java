@@ -86,7 +86,7 @@ class ModelRegistryContextLimitTest {
     assertThat(registry.contextLimitForOrPrefixFallback("   ")).isEqualTo(200_000);
   }
 
-  // ── displayLabelFor — replaces ModelController.MODEL_LABELS ──────────────
+  // displayLabelFor — replaces ModelController.MODEL_LABELS
 
   @Test
   void displayLabelFor_returnsYamlLabelWhenPresent() {

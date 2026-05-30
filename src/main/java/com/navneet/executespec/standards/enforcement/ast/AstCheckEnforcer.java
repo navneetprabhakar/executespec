@@ -80,8 +80,6 @@ public class AstCheckEnforcer {
         });
   }
 
-  // ── Rule kinds ──────────────────────────────────────────────────────────
-
   List<AstViolation> forbiddenImport(
       Map<String, Object> params, List<Path> sourceFiles, FileReader reader) {
     String forbidden = strOrNull(params, "import");
@@ -168,8 +166,6 @@ public class AstCheckEnforcer {
     return out;
   }
 
-  // ── Language-aware regex helpers ────────────────────────────────────────
-
   /** True when the content contains an import that matches the target. */
   boolean importMatches(String content, Lang lang, String target) {
     Pattern p = importRegex(lang);
@@ -231,8 +227,6 @@ public class AstCheckEnforcer {
     Object v = map.get(key);
     return v == null ? null : v.toString();
   }
-
-  // ── Inner types ─────────────────────────────────────────────────────────
 
   enum Lang {
     JAVA,

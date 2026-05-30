@@ -78,8 +78,6 @@ class ProjectDocGeneratorServiceCacheHitTest {
             costTracker);
   }
 
-  // ── helpers ─────────────────────────────────────────────────────────────
-
   private Project project(String id) {
     return Project.builder().id(id).orgId("org-1").name("Test").createdBy("u-1").build();
   }
@@ -104,8 +102,6 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .sourceShasFingerprint(fingerprint)
         .build();
   }
-
-  // ── cache-hit path ──────────────────────────────────────────────────────
 
   @Test
   void cacheHit_returnsCachedDoc_andSkipsLlmCall() {

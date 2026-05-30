@@ -69,7 +69,6 @@ function Svg({
   );
 }
 
-// ─────────────────────────── activity-bar / nav icons ───────────────────────
 // All monochrome — stroke = currentColor so they pick up active/hover colour.
 
 /** Workspace / files — stacked document sheets (VS Code "Explorer"). */
@@ -132,6 +131,16 @@ export function AccountIcon(p: IconProps) {
     <Svg {...p}>
       <circle cx='12' cy='8' r='4' />
       <path d='M4 20c0-3.5 3.5-6 8-6s8 2.5 8 6' />
+    </Svg>
+  );
+}
+
+/** Notifications — bell. */
+export function BellIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9' />
+      <path d='M13.73 21a2 2 0 0 1-3.46 0' />
     </Svg>
   );
 }
@@ -240,7 +249,7 @@ export function BranchIcon(p: IconProps) {
   );
 }
 
-// ──────────────────── Material Icon Theme — file + folder glyphs ─────────────
+// Material Icon Theme — file + folder glyphs
 // The REAL Material Icon Theme SVGs (MIT — see the file header for the full
 // licence + attribution). Each entry is `{vb, inner}`: the upstream icon's own
 // viewBox + its inner markup, verbatim. We render the inner markup into a sized
@@ -695,7 +704,6 @@ export function fileIcon(path: string, props?: IconProps): React.ReactElement {
   return <Icon {...props} />;
 }
 
-// ─────────────────────────── run-status dots ────────────────────────────────
 // Small filled circles keyed to the IDE status palette. `kind` follows the
 // IdeKit `statusKind` vocabulary (ok / warn / bad) plus a neutral `idle`.
 

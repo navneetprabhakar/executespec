@@ -110,8 +110,6 @@ class SequentialExecutorTierConfigTest {
     return accessor.invoke(record);
   }
 
-  // ── Iter caps ──
-
   @Test
   void medium_fresh_run_iter_cap_is_75() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "claude-foo", false);
@@ -135,8 +133,6 @@ class SequentialExecutorTierConfigTest {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "claude-foo", true);
     assertEquals(240, c.maxIter, "HIGH iter cap untouched: 120 × 2 = 240");
   }
-
-  // ── Wall-clock caps ──
 
   @Test
   void low_wall_clock_30min_fresh_60min_project() throws Exception {
@@ -179,7 +175,7 @@ class SequentialExecutorTierConfigTest {
     }
   }
 
-  // ── Stagnation thresholds (project-run bumps) ──
+  // Stagnation thresholds (project-run bumps)
 
   @Test
   void low_stagnation_force_18_on_project_runs() throws Exception {

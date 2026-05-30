@@ -26,8 +26,6 @@ public class PreviewVmController {
   private final PreviewRegistryRepository registryRepo;
   private final PreviewMetricRepository metricsRepo;
 
-  // ── Lifecycle ────────────────────────────────────────────────────────────
-
   @DeleteMapping("/{previewId}")
   public ResponseEntity<Void> teardown(@PathVariable String previewId) {
     previewService.teardown(previewId);
@@ -40,8 +38,6 @@ public class PreviewVmController {
     previewService.extend(previewId, minutes);
     return ResponseEntity.ok().build();
   }
-
-  // ── Observability ────────────────────────────────────────────────────────
 
   @GetMapping("/active")
   public ResponseEntity<List<PreviewRegistry>> listActive() {
@@ -104,8 +100,6 @@ public class PreviewVmController {
             .collect(Collectors.toList());
     return ResponseEntity.ok(result);
   }
-
-  // ── Error Handler ────────────────────────────────────────────────────────
 
   @ExceptionHandler(PreviewDeploymentException.class)
   public ResponseEntity<Map<String, String>> handleError(PreviewDeploymentException e) {

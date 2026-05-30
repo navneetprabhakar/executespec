@@ -34,8 +34,6 @@ public class ModelRegistry {
   /** Default max output tokens when model is unknown. */
   private static final int DEFAULT_MAX_OUTPUT = 16_000;
 
-  // ── Boot-time validation ───────────────────────────────────────────────────
-
   @PostConstruct
   void validate() {
     Map<String, ModelMatrixProperties.ModelConfig> models = getModels();
@@ -106,8 +104,6 @@ public class ModelRegistry {
           context);
     }
   }
-
-  // ── Core lookups ───────────────────────────────────────────────────────────
 
   /**
    * Resolves a model name through legacy aliases to its canonical form. Returns the input unchanged
@@ -257,8 +253,6 @@ public class ModelRegistry {
     return entries.stream().map(e -> new String[] {e.getProvider(), e.getModel()}).toList();
   }
 
-  // ── Free tier ──────────────────────────────────────────────────────────────
-
   /** Returns the FREE tier locked model name. */
   public String freeTierModel() {
     return matrixProps.getFreeTier() != null
@@ -270,8 +264,6 @@ public class ModelRegistry {
   public String freeTierProvider() {
     return matrixProps.getFreeTier() != null ? matrixProps.getFreeTier().getProvider() : "openai";
   }
-
-  // ── Convenience shortcuts ──────────────────────────────────────────────────
 
   /**
    * Returns the workhorse model for a given provider from the matrix. Useful for agents that need
@@ -304,8 +296,6 @@ public class ModelRegistry {
   public Map<String, ModelMatrixProperties.ModelConfig> allModels() {
     return getModels();
   }
-
-  // ── Internal helpers ───────────────────────────────────────────────────────
 
   private ModelMatrixProperties.ModelConfig lookupConfig(String modelName) {
     if (modelName == null) return null;

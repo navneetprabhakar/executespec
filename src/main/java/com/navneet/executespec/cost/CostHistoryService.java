@@ -160,8 +160,6 @@ public class CostHistoryService {
     return Optional.of(new RunCostTracker.Estimate(low, high, credits, hardCap, taskCount));
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────
-
   private static double percentile(double[] sortedAsc, double q) {
     if (sortedAsc.length == 0) return 0.0;
     if (sortedAsc.length == 1) return sortedAsc[0];

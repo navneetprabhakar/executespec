@@ -157,14 +157,14 @@ public class ProjectArchitectureService {
       if (repo == null) continue;
       String effectiveBranch = hasOverride ? branchOverride : repo.getDefaultBranch();
 
-      // ── Step 1: per-repo codemap (idempotent by SHA) ───────────────────
+      // Step 1: per-repo codemap (idempotent by SHA)
       ProjectCodeMap cm = ensureCodeMap(projectId, repo, effectiveBranch, patOverride);
       codeMaps.add(cm);
       repoFullNames.add(repo.getGithubRepoFullName());
       shasByRepo.put(repo.getGithubRepoFullName(), cm.getGeneratedFromSha());
       branchesByRepo.put(repo.getGithubRepoFullName(), effectiveBranch);
 
-      // ── Step 2: per-repo architecture doc (idempotent by codemap) ─────
+      // Step 2: per-repo architecture doc (idempotent by codemap)
       RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);
       repoArchDocs.add(rad);
     }
@@ -195,7 +195,7 @@ public class ProjectArchitectureService {
       return cached;
     }
 
-    // ── Step 3: combined architecture doc (always regenerates) ────────
+    // Step 3: combined architecture doc (always regenerates)
     ArchitectureDocGenerator.Result combined;
     try {
       combined = archDocGenerator.generate(projectId, repoArchDocs, repoFullNames, provider);

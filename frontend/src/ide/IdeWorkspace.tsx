@@ -21,6 +21,7 @@ import {
   ProjectsIcon,
   AdminIcon,
   AccountIcon,
+  BellIcon,
   SidebarIcon,
   PlusIcon,
   MenuIcon,
@@ -60,6 +61,9 @@ export default function IdeWorkspace() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  // Notification unread count for the activity-bar bell (founder report #2 — the
+  // inbox existed at /notifications but had no entry point in the chrome).
+  const [unread, setUnread] = useState(0);
 
   usePaletteHotkey(setPaletteOpen);
 
@@ -74,25 +78,39 @@ export default function IdeWorkspace() {
       .catch(() => {});
   }, []);
 
+  // Unread notification count — polled on the same cadence as the run list so the
+  // bell badge stays live without a second timer story.
+  const refreshUnread = useCallback(() => {
+    api
+      .getUnreadCount()
+      .then((r) => setUnread(r.count ?? 0))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     refreshRuns();
+    refreshUnread();
     api
       .getProjects()
       .then(setProjects)
       .catch(() => {});
-  }, [refreshRuns]);
+  }, [refreshRuns, refreshUnread]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (!document.hidden) refreshRuns();
+      if (!document.hidden) {
+        refreshRuns();
+        refreshUnread();
+      }
     }, 12000);
     return () => window.clearInterval(id);
-  }, [refreshRuns]);
+  }, [refreshRuns, refreshUnread]);
 
   useEffect(() => {
     setDrawerOpen(false);
     refreshRuns();
-  }, [location.pathname, refreshRuns]);
+    refreshUnread();
+  }, [location.pathname, refreshRuns, refreshUnread]);
 
   const path = location.pathname;
   const actActive = (p: string) =>
@@ -124,6 +142,37 @@ export default function IdeWorkspace() {
         <span style={{flex: 1}} />
         <PlanGateIndicator dir='down' />
         <button
+          onClick={() => navigate('/notifications')}
+          title={unread > 0 ? `Notifications · ${unread} unread` : 'Notifications'}
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+          style={{position: 'relative'}}
+        >
+          <BellIcon size={20} />
+          {unread > 0 && (
+            <span
+              aria-hidden='true'
+              style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                minWidth: 13,
+                height: 13,
+                padding: '0 3px',
+                borderRadius: 7,
+                background: 'var(--ide-red)',
+                color: '#fff',
+                fontSize: 9,
+                fontWeight: 700,
+                lineHeight: '13px',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+              }}
+            >
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => setPaletteOpen(true)}
           title='Command palette (⌘K)'
           aria-label='Command palette'
@@ -147,6 +196,38 @@ export default function IdeWorkspace() {
             </NavLink>
           ))}
           <span className='ide-act-spacer' />
+          <NavLink
+            to='/notifications'
+            className={`ide-act${path.startsWith('/notifications') ? ' active' : ''}`}
+            title={unread > 0 ? `Notifications · ${unread} unread` : 'Notifications'}
+            aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+            style={{position: 'relative'}}
+          >
+            <BellIcon size={22} />
+            {unread > 0 && (
+              <span
+                aria-hidden='true'
+                style={{
+                  position: 'absolute',
+                  top: 9,
+                  right: 9,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 7,
+                  background: 'var(--ide-red)',
+                  color: '#fff',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  lineHeight: '14px',
+                  textAlign: 'center',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
+          </NavLink>
           <button
             className='ide-act'
             onClick={() => setCollapsed((c) => !c)}

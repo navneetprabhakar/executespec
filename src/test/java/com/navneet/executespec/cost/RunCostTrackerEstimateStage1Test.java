@@ -74,7 +74,7 @@ class RunCostTrackerEstimateStage1Test {
     tracker = new RunCostTracker(pricingRepo, resolver);
   }
 
-  // ── Audit run shape — SINGLE_SHOT × 1 LOW task × 3-repo project × Anthropic ──
+  // Audit run shape — SINGLE_SHOT × 1 LOW task × 3-repo project × Anthropic
 
   @Test
   void audit_6024f510_shape_bands_now_include_actual() {
@@ -155,8 +155,6 @@ class RunCostTrackerEstimateStage1Test {
     assertThat(anthropic.lowUsd()).isGreaterThan(0.0);
     assertThat(openai.lowUsd()).isGreaterThan(0.0);
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────
 
   private static void stubPricing(
       ModelPricingRepository repo, String provider, String model, double in, double out) {

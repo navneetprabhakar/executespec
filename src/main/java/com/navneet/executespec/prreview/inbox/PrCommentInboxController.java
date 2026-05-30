@@ -185,8 +185,6 @@ public class PrCommentInboxController {
     return sb.toString();
   }
 
-  // ── DTOs ──────────────────────────────────────────────────────────────
-
   public record Dto(
       Long id,
       String runId,

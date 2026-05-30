@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -113,7 +114,13 @@ public class SemgrepRunner {
     try {
       Process proc = pb.start();
       // Read stdout & stderr concurrently to avoid deadlock when output exceeds OS pipe buffer.
-      // semgrep's JSON for a medium-size repo can hit several MB.
+      // semgrep's JSON for a medium-size repo can hit several MB. Capture into method-local
+      // holders (NOT a ThreadLocal): the gobbler threads write, the caller reads after join() —
+      // a ThreadLocal keyed on the gobbler thread always read back null on the caller, which
+      // silently dropped EVERY static finding. Method-local also gives true per-call isolation
+      // for concurrent scans. C4 — audit 2026-05-29.
+      final AtomicReference<String> capturedStdout = new AtomicReference<>();
+      final AtomicReference<String> capturedStderr = new AtomicReference<>();
       Thread stdoutThread =
           new Thread(
               () -> {
@@ -138,8 +145,6 @@ public class SemgrepRunner {
                 }
               },
               "semgrep-stderr");
-      capturedStdout.remove();
-      capturedStderr.remove();
       stdoutThread.start();
       stderrThread.start();
 
@@ -252,12 +257,6 @@ public class SemgrepRunner {
   }
 
   record ParsedResult(List<Finding> findings, int scanned) {}
-
-  // Per-thread capture buffers for stdout / stderr — keyed off the current Thread so that
-  // concurrent scans (multiple repos in one project, or scheduled cron + manual run) don't
-  // overwrite each other.
-  private final ThreadLocal<String> capturedStdout = new ThreadLocal<>();
-  private final ThreadLocal<String> capturedStderr = new ThreadLocal<>();
 
   /** Static "is this binary on the PATH?" probe — keeps the main path uncluttered. */
   static class Probe {

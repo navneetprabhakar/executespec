@@ -19,7 +19,6 @@ export interface TechDef {
 }
 
 export const TECH_DEFS: TechDef[] = [
-  // ── Frontend frameworks ──────────────────────────────────────────────────
   {
     id: 'react',
     label: 'React',
@@ -65,7 +64,6 @@ export const TECH_DEFS: TechDef[] = [
     keywords: ['svelte', 'sveltekit', 'svelte kit'],
     priority: 14,
   },
-  // ── Vanilla web ────────────────────────────────────────────────────────
   {
     id: 'html',
     label: 'HTML/CSS/JS',
@@ -83,7 +81,6 @@ export const TECH_DEFS: TechDef[] = [
     ],
     priority: 15,
   },
-  // ── Type systems ─────────────────────────────────────────────────────────
   {
     id: 'typescript',
     label: 'TypeScript',
@@ -93,7 +90,6 @@ export const TECH_DEFS: TechDef[] = [
     keywords: ['typescript', ' ts ', '.ts', 'tsx', 'tsconfig'],
     priority: 20,
   },
-  // ── Backend / runtime ────────────────────────────────────────────────────
   {
     id: 'nodejs',
     label: 'Node.js',
@@ -163,7 +159,6 @@ export const TECH_DEFS: TechDef[] = [
     keywords: ['.net', 'dotnet', 'csharp', 'c#', 'asp.net', 'blazor', 'nuget'],
     priority: 38,
   },
-  // ── Databases ────────────────────────────────────────────────────────────
   {
     id: 'postgres',
     label: 'PostgreSQL',
@@ -209,7 +204,6 @@ export const TECH_DEFS: TechDef[] = [
     keywords: ['sqlite', 'sqlite3'],
     priority: 54,
   },
-  // ── Infra / cloud ────────────────────────────────────────────────────────
   {
     id: 'docker',
     label: 'Docker',
