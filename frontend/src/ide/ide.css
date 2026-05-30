@@ -556,7 +556,13 @@
   color: var(--ide-red);
   border-color: var(--ide-red);
 }
-.ide-btn {
+/* Scoped under .ide-root so the IDE's filled primary button wins over the legacy
+   `.signal-app button { background: transparent; color: inherit }` reset (0,1,1),
+   which the IDE inherits because it renders inside the .signal-app wrapper. Without
+   the .ide-root prefix, .ide-btn (0,1,0) loses and every filled IDE button renders
+   as borderless plain text (founder-reported on the Run spec CTA, 2026-05-30). The
+   .ghost / :hover / :disabled variants are already ≥(0,2,0) so they're unaffected. */
+.ide-root .ide-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
