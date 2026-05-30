@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V216**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V222**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -22,7 +22,7 @@ Migration head: **V216**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `api` | 17 | 2 | - | - | REST controllers + DTOs + global exception advisors |
 | `arch/invariants` | 1 | 1 | - | - | Org architectural invariants + violation tracking |
 | `auth` | 7 | 12 | - | - | JWT/OAuth2 auth, RBAC, org/user/project lifecycle, GDPR export |
-| `batch` | - | 6 | - | - | Provider batch-mode job orchestration (Anthropic/OpenAI/Gemini) |
+| `batch` | - | 9 | - | - | Provider batch-mode job orchestration; the 3 concrete `BatchClient`s (`Anthropic`/`OpenAi`/`Gemini`, B1 2026-05-30) landed unit-tested but **inert** — coordinator/poll/resume wiring (P4) + the human submit-gate still pending; see `docs/plans/v2-batch-execution-plan.md` |
 | `benchmark` | 1 | 2 | - | - | Clean blind SWE-bench harness — real production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean synchronous `/generate`); branch `feature/swebench-harness` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
 | `chat` | - | 4 | - | - | Post-run conversation: ChatService (+ read-only RunChatTools) + ApplyService + ApplyResultStore |
