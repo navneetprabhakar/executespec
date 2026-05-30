@@ -1,7 +1,7 @@
 # RunOrchestrator god-class split — dedicated-session plan
 
-> **Status:** IN PROGRESS — increment 1 DONE (2026-05-30); increments 2–6 pending. Audit item #43 (`docs/audit/FINDINGS-2026-05-29.md`).
-> **Owner:** active session. **Branch:** `fix/cross-org-invitee-access` (PR #196 — bundled with the invite fix per founder direction).
+> **Status (2026-05-30):** increments **1–4 DONE + pushed** (PR #196) — RunOrchestrator **5,288 → 4,456 LOC (−16%)**, 4 new collaborators, full suite 1432 green at each step, zero behaviour change. **Remaining (each carries real entanglement — warrant a careful supervised pass):** inc-3b (multi-repo pair ↔ `languageConventionHint` test-pinned stayer), inc-4b (`runLargePipeline`/`expandEpic` ↔ the internally-owned `pool`), inc 5 (`generateValidationReport` ×2 is ~250 LOC/~10 deps + `runStandardsEnforcement` ↔ test-pinned `toStandardsViolationRows`), inc 6 (lifecycle + gate/cancel/resume — highest risk). The clean low-risk extractions are done; the rest touch the run pool / gate semantics / test-pinned statics and are better done deliberately.
+> **Owner:** active session. **Branch:** `fix/cross-org-invitee-access` (PR #196 — bundled with the invite fix per founder direction). Audit item #43.
 > **File:** [`integration/RunOrchestrator.java`](../../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) — **5,288 LOC / 158 methods / ~70 injected dependencies**.
 
 ## Why this is its own session (do NOT script it)
