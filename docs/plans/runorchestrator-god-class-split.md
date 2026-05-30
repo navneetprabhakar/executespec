@@ -1,7 +1,7 @@
 # RunOrchestrator god-class split — dedicated-session plan
 
-> **Status:** PLANNED (not started). Audit item #43 (`docs/audit/FINDINGS-2026-05-29.md`).
-> **Owner:** next focused session. **Branch:** off `main` (or current remediation branch).
+> **Status:** IN PROGRESS — increment 1 DONE (2026-05-30); increments 2–6 pending. Audit item #43 (`docs/audit/FINDINGS-2026-05-29.md`).
+> **Owner:** active session. **Branch:** `fix/cross-org-invitee-access` (PR #196 — bundled with the invite fix per founder direction).
 > **File:** [`integration/RunOrchestrator.java`](../../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) — **5,288 LOC / 158 methods / ~70 injected dependencies**.
 
 ## Why this is its own session (do NOT script it)
@@ -39,7 +39,9 @@ to "fix and retry":
 
 ## Collaborator groups (extract in this order — low risk → high risk)
 
-### Increment 1 — `RunPipelineSupport` (pure statics, no instance state) — LOWEST RISK
+### Increment 1 — `RunPipelineSupport` (pure statics, no instance state) — LOWEST RISK ✅ DONE (2026-05-30)
+> Extracted to package-private `integration/RunPipelineSupport` (`@Slf4j` for the one `log` user). RunOrchestrator reaches them via **static import** — so the ~33 call sites stayed untouched (safer than rewriting each). The 4 package-private statics below STAYED. RunOrchestrator 5,288 → 5,117 LOC; full suite green. Done by exact-string surgery + compile-after-every-step, **not** the brace-counting scripts that corrupted it before.
+
 14 `private static` helpers. **Test-safe** (none are referenced by tests — they're private):
 `deserializeRepoIds` (2765), `isTerminal` (3267), `computeRepoCountForEstimate` (3807),
 `mapOverallToV1Status` (3943), `mapTaskStatusToV1` (4004), `truncate` (4392),
