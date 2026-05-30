@@ -1,5 +1,6 @@
 package com.navneet.executespec.memory.chattools;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,11 +22,15 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.codereview.CodeReviewService;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
+import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
+import com.navneet.executespec.project.rag.CodeChunkStore;
+import com.navneet.executespec.project.rag.CodeIndexingService;
+import com.navneet.executespec.project.rag.EmbeddingService;
 import com.navneet.executespec.project.rag.RetrievalService;
 import com.navneet.executespec.project.rag.entity.ProjectDocument;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentRepository;
@@ -34,6 +39,9 @@ import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.techdebt.TechDebtService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.SearchFilesTool;
+import com.navneet.executespec.tool.ToolResult;
 
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -82,6 +90,11 @@ public class ProjectChatTools {
   private final ProjectDocumentRepository projectDocumentRepository;
   private final RetrievalService retrievalService;
   private final TechDebtService techDebtService;
+  private final WorkspaceInitService workspaceInitService;
+  private final SearchFilesTool searchFilesTool;
+  private final CodeIndexingService codeIndexingService;
+  private final CodeChunkStore codeChunkStore;
+  private final EmbeddingService embeddingService;
   private final ObjectMapper json;
 
   /** Caller-scoped state every tool needs. {@code callerPat} may be null for public-repo orgs. */
@@ -105,6 +118,8 @@ public class ProjectChatTools {
         listProjectDocuments(ctx),
         readGeneratedDoc(ctx),
         searchProjectDocs(ctx),
+        searchRepoFiles(ctx),
+        searchCode(ctx),
         getTechDebtSummary(ctx));
   }
 
@@ -468,6 +483,226 @@ public class ProjectChatTools {
       log.debug("latestRepoArch unavailable for {}/{}: {}", projectId, repoId, t.getMessage());
       return Optional.empty();
     }
+  }
+
+  // Tool: lexical source search — clone the linked repo (cached per synced SHA) + grep it.
+
+  private ToolCallback searchRepoFiles(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("search_repo_files")
+            .description(
+                "Regex content search over the ACTUAL SOURCE of a linked repo. Clones the repo on"
+                    + " demand (cached per synced SHA) and greps it, returning file:line matches"
+                    + " with a total count. Use this for EXACT identifiers, strings, API names, or"
+                    + " call sites — it is literal/lexical. Complementary to search_code (semantic,"
+                    + " concept-level) and search_project_docs (uploaded docs). If the project"
+                    + " links more than one repo, pass repoFullName. Read-only.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "pattern": {"type": "string", "description": "Regular expression to search file contents for, e.g. 'class .*Controller'."},
+    "repoFullName": {"type": "string", "description": "owner/repo to search. Required only if the project links more than one repo."},
+    "filePattern": {"type": "string", "description": "Optional filename glob, e.g. '*.java' or '*.{ts,tsx}'."},
+    "maxResults": {"type": "integer", "description": "Max matches to return (default 50, cap 200)."}
+  },
+  "required": ["pattern"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String pattern = args.path("pattern").asText(null);
+          if (pattern == null || pattern.isBlank()) {
+            return errorEnvelope("pattern is required (a regex to search file contents for)");
+          }
+          String wantRepo = args.path("repoFullName").asText(null);
+
+          RepoSel sel = selectRepo(ctx.projectId(), wantRepo);
+          if (sel.error() != null) return sel.error();
+          ProjectRepo target = sel.repo();
+
+          String fullName = target.getGithubRepoFullName();
+          if (fullName == null || fullName.isBlank()) {
+            return errorEnvelope("linked repo has no GitHub full name; cannot clone.");
+          }
+          // Cache the clone per (repo, synced SHA): repeated searches reuse it (cloneFromRepo is
+          // idempotent), and a project re-sync (new lastSyncedSha) busts the cache → fresh clone.
+          String sha = target.getLastSyncedSha();
+          String shaKey =
+              sha != null && !sha.isBlank() ? sha.substring(0, Math.min(12, sha.length())) : "head";
+          String cloneWsId = "projchat-" + target.getId() + "-" + shaKey;
+          String cloneUrl = "https://github.com/" + fullName + ".git";
+
+          Path clonePath;
+          try {
+            workspaceInitService.cloneFromRepo(cloneWsId, cloneUrl, ctx.callerPat());
+            clonePath = workspaceInitService.runWorkspacePath(cloneWsId);
+          } catch (Exception e) {
+            return errorEnvelope(
+                "could not clone "
+                    + fullName
+                    + " (check repo access / your PAT): "
+                    + e.getMessage());
+          }
+
+          ExecutionContext execCtx = new ExecutionContext(cloneWsId, "search", clonePath);
+          ToolResult result = searchFilesTool.execute(args, execCtx);
+          ObjectNode out = json.createObjectNode();
+          if (result instanceof ToolResult.Ok ok) {
+            out.put("ok", true);
+            out.put("repo", fullName);
+            out.put("matches", ok.content());
+          } else if (result instanceof ToolResult.Err err) {
+            out.put("ok", false);
+            out.put("message", err.message());
+          }
+          return out;
+        });
+  }
+
+  // Tool: semantic source search — embed the query + nearest code chunks (lazy-indexed).
+
+  private ToolCallback searchCode(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("search_code")
+            .description(
+                "SEMANTIC search over a linked repo's SOURCE — finds code by concept or behaviour"
+                    + " even when you don't know the exact identifier (e.g. 'where is auth"
+                    + " enforced', 'retry/backoff logic'). Returns the most relevant file:chunk"
+                    + " snippets. Complementary to search_repo_files (exact/literal regex grep) and"
+                    + " search_project_docs (uploaded docs). On first use for a repo the index"
+                    + " builds in the background — use search_repo_files meanwhile and retry. If"
+                    + " the project links more than one repo, pass repoFullName. Read-only.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "query": {"type": "string", "description": "Natural-language description of the code/behaviour to find, e.g. 'where are JWTs validated'."},
+    "repoFullName": {"type": "string", "description": "owner/repo to search. Required only if the project links more than one repo."},
+    "limit": {"type": "integer", "description": "Max snippets to return (default 8, cap 25)."}
+  },
+  "required": ["query"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String query = args.path("query").asText(null);
+          if (query == null || query.isBlank()) {
+            return errorEnvelope(
+                "query is required (a natural-language description of the code you're looking"
+                    + " for)");
+          }
+          RepoSel sel = selectRepo(ctx.projectId(), args.path("repoFullName").asText(null));
+          if (sel.error() != null) return sel.error();
+          ProjectRepo target = sel.repo();
+          String repoId = target.getId().toString();
+
+          // Lazy index: first use for this repo kicks off a background build; answer from grep now.
+          if (!codeIndexingService.isIndexed(repoId)) {
+            codeIndexingService.indexRepoAsync(ctx.projectId(), target, ctx.callerPat());
+            ObjectNode out = json.createObjectNode();
+            out.put("ok", true);
+            out.put("indexing", true);
+            out.put(
+                "summary",
+                "Semantic index for "
+                    + target.getGithubRepoFullName()
+                    + " is building in the background (first use). Use search_repo_files (regex "
+                    + "grep) for now, and try search_code again shortly.");
+            return out;
+          }
+
+          int k = clampLimit(args, 8, 25);
+          float[] qVec;
+          try {
+            qVec = embeddingService.embedQuery(query);
+          } catch (Exception e) {
+            return errorEnvelope(
+                "could not embed the query (embeddings unavailable): " + e.getMessage());
+          }
+          List<CodeChunkStore.RetrievedCodeChunk> hits =
+              codeChunkStore.nearest(ctx.projectId(), repoId, qVec, k);
+          ArrayNode arr = json.createArrayNode();
+          for (CodeChunkStore.RetrievedCodeChunk h : hits) {
+            ObjectNode row = arr.addObject();
+            row.put("file", h.filePath());
+            row.put("chunk", h.chunkIndex());
+            row.put("relevance", Math.round((1.0 - h.distance()) * 1000.0) / 1000.0);
+            String snippet =
+                h.content().length() > 1200
+                    ? h.content().substring(0, 1200) + "\n…[truncated]"
+                    : h.content();
+            row.put("snippet", snippet);
+          }
+          ObjectNode out = json.createObjectNode();
+          out.put("ok", true);
+          out.put("repo", target.getGithubRepoFullName());
+          out.put("count", arr.size());
+          out.set("results", arr);
+          if (arr.isEmpty()) {
+            out.put(
+                "summary",
+                "No semantic matches — try search_repo_files for an exact string, or rephrase.");
+          }
+          return out;
+        });
+  }
+
+  private List<ProjectRepo> linkedRepos(String projectId) {
+    List<ProjectRepo> repos = new java.util.ArrayList<>();
+    for (ProjectRepoLink link : linkRepo.findByProjectId(projectId)) {
+      repoRepo.findById(link.getRepoId()).ifPresent(repos::add);
+    }
+    return repos;
+  }
+
+  /** Pick which linked repo a search targets; carries an error envelope when unresolved. */
+  private RepoSel selectRepo(String projectId, String wantRepo) {
+    List<ProjectRepo> repos = linkedRepos(projectId);
+    if (repos.isEmpty()) {
+      return new RepoSel(
+          null, errorEnvelope("no repositories are linked to this project — nothing to search."));
+    }
+    if (wantRepo != null && !wantRepo.isBlank()) {
+      ProjectRepo t =
+          repos.stream()
+              .filter(r -> wantRepo.equalsIgnoreCase(r.getGithubRepoFullName()))
+              .findFirst()
+              .orElse(null);
+      return t != null
+          ? new RepoSel(t, null)
+          : new RepoSel(
+              null,
+              errorEnvelope(
+                  "repo '"
+                      + wantRepo
+                      + "' is not linked to this project. Linked: "
+                      + repoNames(repos)));
+    }
+    if (repos.size() == 1) return new RepoSel(repos.get(0), null);
+    return new RepoSel(
+        null,
+        errorEnvelope(
+            "this project links "
+                + repos.size()
+                + " repos — pass repoFullName to choose one of: "
+                + repoNames(repos)));
+  }
+
+  private record RepoSel(ProjectRepo repo, ObjectNode error) {}
+
+  private static String repoNames(List<ProjectRepo> repos) {
+    return repos.stream()
+        .map(ProjectRepo::getGithubRepoFullName)
+        .collect(java.util.stream.Collectors.joining(", "));
   }
 
   private static int clampLimit(JsonNode args, int dflt, int max) {

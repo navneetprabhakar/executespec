@@ -154,7 +154,7 @@ public class ChatService {
     // actual generated code to ground a suggestion. ExecutionContext is run-scoped so
     // LlmRouter attributes token cost to this run.
     ExecutionContext ctx = new ExecutionContext(runId, "chat", workspace);
-    List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId));
+    List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId, ctx));
 
     String reply;
     try {
@@ -295,12 +295,16 @@ public class ChatService {
     sb.append("suggest fixes when asked.\n\n");
 
     sb.append("## Tools (read-only)\n");
-    sb.append("You have two read-only tools to inspect the run's generated code:\n");
+    sb.append("You have three read-only tools to inspect the run's generated code:\n");
     sb.append("- `list_run_files` — the complete file manifest (the tree below is truncated).\n");
     sb.append(
         "- `read_run_file` — the full content of one file by relative path. Call it before "
             + "asserting what a file contains or suggesting a change to it, so your answer is "
             + "grounded in the real code rather than a guess.\n");
+    sb.append(
+        "- `search_run_files` — regex content search across the whole workspace (file:line "
+            + "matches). Use it to locate where a symbol or string lives before reading a file, "
+            + "instead of guessing paths.\n");
     sb.append(
         "You have NO file-edit, shell, push, or re-run tools — your replies are advisory only. "
             + "When suggesting code changes, output full file-diff blocks the user can apply via a "
