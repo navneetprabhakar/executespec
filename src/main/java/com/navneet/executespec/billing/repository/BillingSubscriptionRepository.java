@@ -67,4 +67,15 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
       "SELECT s FROM BillingSubscription s WHERE s.status IN ('ACTIVE', 'PAST_DUE') "
           + "AND s.billingPlanId IN (SELECT p.id FROM BillingPlan p WHERE p.tier = :tier)")
   List<BillingSubscription> findActiveByTier(@Param("tier") String tier);
+
+  /**
+   * N2 (audit 2026-05-29) — single-org active-subscription lookup, replacing the {@code
+   * AnalyticsService.findAll().stream().filter(orgId + status)} full-table scan. Mirrors {@link
+   * #findActiveByUserId}. Returns a list (an org can carry more than one matching row); the caller
+   * takes the first, preserving the prior {@code findFirst()} semantics.
+   */
+  @Query(
+      "SELECT s FROM BillingSubscription s WHERE s.orgId = :orgId AND s.status IN ('FREE',"
+          + " 'ACTIVE', 'PAST_DUE')")
+  List<BillingSubscription> findActiveByOrgId(@Param("orgId") String orgId);
 }

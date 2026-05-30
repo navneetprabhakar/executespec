@@ -351,4 +351,30 @@ public interface PipelineRunRepository
           + "COALESCE(SUM(r.totalOutputTokens), 0) "
           + "FROM PipelineRun r WHERE r.runId IN :runIds")
   Object[] aggregateCostAndTokens(@Param("runIds") java.util.Collection<String> runIds);
+
+  /**
+   * N2 (audit 2026-05-29) — org run-ids projected in one query, replacing {@code
+   * StateStore.computeModelComparisonForOrg}'s {@code findAll().stream().filter(orgId).map(runId)}
+   * which loaded every pipeline_run into heap just to collect ids.
+   */
+  @Query("SELECT r.runId FROM PipelineRun r WHERE r.orgId = :orgId")
+  List<String> findRunIdsByOrgId(@Param("orgId") String orgId);
+
+  /**
+   * N2 — org runs (and a since-windowed variant), replacing {@code
+   * StateStore.computeUserRunsSummary}'s {@code findAll().stream().filter(orgId + since)}. Derived
+   * queries (the caller branches on a null window) — no {@code :param IS NULL}. {@code After} is
+   * strict {@code >}, matching the prior {@code isAfter} (and dropping null startedAt as before).
+   */
+  List<PipelineRun> findByOrgId(String orgId);
+
+  List<PipelineRun> findByOrgIdAndStartedAtAfter(String orgId, Instant since);
+
+  /**
+   * N2 — global (SUPER_ADMIN) since-windowed variant, replacing {@code
+   * StateStore.computeUserRunsSummaryGlobal}'s windowed {@code findAll().stream().filter(since)}.
+   * The unbounded (no-window) global case keeps using {@link #findAll()} — an all-time global
+   * summary is inherently a full scan, exactly as before.
+   */
+  List<PipelineRun> findByStartedAtAfter(Instant since);
 }

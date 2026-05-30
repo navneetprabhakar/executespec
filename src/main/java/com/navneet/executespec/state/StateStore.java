@@ -1128,12 +1128,9 @@ public class StateStore {
 
   public ModelComparisonData computeModelComparison(int days) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
+    // N2 (audit 2026-05-29) — filtered in the DB (was a full agent_task heap scan).
     List<AgentTask> allTasks =
-        taskRepo.findAll().stream()
-            .filter(
-                t -> since == null || (t.getStartedAt() != null && t.getStartedAt().isAfter(since)))
-            .filter(t -> t.getInputTokens() != null)
-            .toList();
+        since == null ? taskRepo.findWithTokens() : taskRepo.findWithTokensSince(since);
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
@@ -1187,20 +1184,14 @@ public class StateStore {
   public ModelComparisonData computeModelComparisonForOrg(int days, String orgId) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
     // Get run IDs for this org
-    List<String> orgRunIds =
-        runRepo.findAll().stream()
-            .filter(r -> orgId.equals(r.getOrgId()))
-            .map(PipelineRun::getRunId)
-            .toList();
+    // N2 (audit 2026-05-29) — org run-ids + tasks both filtered in the DB (was two findAll scans).
+    List<String> orgRunIds = runRepo.findRunIdsByOrgId(orgId);
     if (orgRunIds.isEmpty()) return new ModelComparisonData(List.of());
 
     List<AgentTask> allTasks =
-        taskRepo.findAll().stream()
-            .filter(t -> orgRunIds.contains(t.getRunId()))
-            .filter(
-                t -> since == null || (t.getStartedAt() != null && t.getStartedAt().isAfter(since)))
-            .filter(t -> t.getInputTokens() != null)
-            .toList();
+        since == null
+            ? taskRepo.findWithTokensByRunIds(orgRunIds)
+            : taskRepo.findWithTokensByRunIdsSince(orgRunIds, since);
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
@@ -1283,12 +1274,11 @@ public class StateStore {
   /** Computes per-user run statistics for the given org. */
   public UserRunsSummaryData computeUserRunsSummary(String orgId, int days) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
+    // N2 (audit 2026-05-29) — filtered in the DB (was a full pipeline_run heap scan).
     List<PipelineRun> runs =
-        runRepo.findAll().stream()
-            .filter(r -> orgId.equals(r.getOrgId()))
-            .filter(
-                r -> since == null || (r.getStartedAt() != null && r.getStartedAt().isAfter(since)))
-            .toList();
+        since == null
+            ? runRepo.findByOrgId(orgId)
+            : runRepo.findByOrgIdAndStartedAtAfter(orgId, since);
     Map<String, AppUser> userMap =
         appUserRepo.findActiveByOrgId(orgId).stream()
             .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
@@ -1298,11 +1288,10 @@ public class StateStore {
   /** Global (SUPER_ADMIN) variant: no org filter. */
   public UserRunsSummaryData computeUserRunsSummaryGlobal(int days) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
+    // N2 (audit 2026-05-29) — windowed query in the DB; all-time global stays a full scan as
+    // before.
     List<PipelineRun> runs =
-        runRepo.findAll().stream()
-            .filter(
-                r -> since == null || (r.getStartedAt() != null && r.getStartedAt().isAfter(since)))
-            .toList();
+        since == null ? runRepo.findAll() : runRepo.findByStartedAtAfter(since);
     Map<String, AppUser> userMap =
         appUserRepo.findAllActive().stream()
             .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
