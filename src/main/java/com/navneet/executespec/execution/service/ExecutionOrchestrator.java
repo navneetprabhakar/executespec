@@ -17,6 +17,7 @@ import com.navneet.executespec.execution.entity.ExecutionSolutionRepo;
 import com.navneet.executespec.execution.event.ExecutionEventTypes;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
+import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -148,6 +149,37 @@ public class ExecutionOrchestrator {
     } catch (Exception outer) {
       log.error("ExecutionOrchestrator boot-resume: scan failed", outer);
     }
+  }
+
+  // B5 (audit 2026-05-29) — event-driven Launch mirror. When a V2 run reaches terminal, mirror its
+  // linked V3 ExecutionRun immediately via the PipelineEvent bus instead of waiting on the
+  // per-launch poll. pollAndMirrorV2 is retained as the fallback (boot-resume + cross-JVM / any
+  // missed event); the mirror is idempotent (skipped when the Launch is already terminal), so the
+  // listener and the poll coexist safely. @Async so the run-completion publish thread isn't
+  // blocked.
+  @Async
+  @EventListener
+  public void onV2RunCompleted(PipelineEvent.RunCompleted e) {
+    mirrorLaunchOnV2Terminal(e.runId());
+  }
+
+  @Async
+  @EventListener
+  public void onV2RunFailed(PipelineEvent.RunFailed e) {
+    mirrorLaunchOnV2Terminal(e.runId());
+  }
+
+  private void mirrorLaunchOnV2Terminal(String pipelineRunId) {
+    if (pipelineRunId == null || pipelineRunId.isBlank()) return;
+    runRepo
+        .findFirstByPipelineRunIdOrderByCreatedAtDesc(pipelineRunId)
+        .filter(er -> !java.util.Set.of("COMPLETE", "FAILED", "ABORTED").contains(er.getStatus()))
+        .ifPresent(
+            er ->
+                pipelineRunRepo
+                    .findById(pipelineRunId)
+                    .filter(v2 -> V2_TERMINAL.contains(v2.getStatus()))
+                    .ifPresent(v2 -> mirrorV2Terminal(er.getId(), v2)));
   }
 
   public ExecutionRun createExecution(Project project, AppUser user, CreateExecutionRequest req) {
