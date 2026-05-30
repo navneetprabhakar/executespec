@@ -286,15 +286,8 @@ GROUP BY m.model_name ORDER BY calls DESC
     // Find active subscription
     BillingSubscription sub = null;
     if ("ORG".equals(entityType)) {
-      // find by orgId — look up the first user in the org and use their subscription
-      sub =
-          subscriptionRepo.findAll().stream()
-              .filter(
-                  s ->
-                      entityId.equals(s.getOrgId())
-                          && List.of("ACTIVE", "PAST_DUE", "FREE").contains(s.getStatus()))
-              .findFirst()
-              .orElse(null);
+      // N2 (audit 2026-05-29) — filtered in the DB (was findAll().stream().filter(orgId + status)).
+      sub = subscriptionRepo.findActiveByOrgId(entityId).stream().findFirst().orElse(null);
     } else {
       sub = subscriptionRepo.findActiveByUserId(entityId).orElse(null);
     }
