@@ -10,6 +10,7 @@ import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -22,6 +23,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -47,14 +49,21 @@ public class FeatureAssessmentService {
   private final ProjectCodeMapRepository codeMapRepo;
   private final FeatureFlagService featureFlags;
   private final ObjectMapper objectMapper;
+  private final RunCostTracker costTracker;
 
   @Autowired(required = false)
   @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
 
+  // B2 (audit 2026-05-29) — the assessment LLM call records its cost against the run via
+  // RunCostTracker.record so the (flag-gated) path no longer escapes cost attribution. Label
+  // mirrors the anthropicChatModel bean's configured model for accurate pricing.
+  @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
+  private String anthropicAssessModel;
+
   private static final String FLAG_LLM_ENABLED = "assessment.llm.enabled";
   private static final int MAX_CODEMAP_CHARS = 8_000;
 
-  public AssessmentResult assess(String projectId, String userRequest) {
+  public AssessmentResult assess(String runId, String projectId, String userRequest) {
     List<String> repoNames = repoNamesFor(projectId);
 
     // LLM path — when feature flag is on AND we have arch context AND the
@@ -65,7 +74,7 @@ public class FeatureAssessmentService {
         && projectId != null
         && !repoNames.isEmpty()) {
       try {
-        AssessmentResult llm = assessViaLlm(projectId, userRequest, repoNames);
+        AssessmentResult llm = assessViaLlm(runId, projectId, userRequest, repoNames);
         if (llm != null) return llm;
       } catch (Exception e) {
         log.warn(
@@ -88,7 +97,7 @@ public class FeatureAssessmentService {
   }
 
   private AssessmentResult assessViaLlm(
-      String projectId, String userRequest, List<String> repoNames) throws Exception {
+      String runId, String projectId, String userRequest, List<String> repoNames) throws Exception {
     ProjectArchitectureDoc arch = archService.latest(projectId).orElse(null);
     String archMd = arch == null ? "" : arch.getContent();
     String annotations =
@@ -137,6 +146,9 @@ public class FeatureAssessmentService {
 
     Prompt prompt = new Prompt(java.util.List.of(new SystemMessage(system), new UserMessage(user)));
     ChatResponse resp = anthropicModel.call(prompt);
+    if (runId != null) {
+      costTracker.record(runId, "anthropic", anthropicAssessModel, resp);
+    }
     String text = resp.getResult().getOutput().getText();
     if (text == null || text.isBlank()) return null;
 
@@ -198,9 +210,9 @@ public class FeatureAssessmentService {
   }
 
   /** Convenience: serialise {@link #assess} output to JSON for persistence. */
-  public String assessAsJson(String projectId, String userRequest) {
+  public String assessAsJson(String runId, String projectId, String userRequest) {
     try {
-      return objectMapper.writeValueAsString(assess(projectId, userRequest));
+      return objectMapper.writeValueAsString(assess(runId, projectId, userRequest));
     } catch (Exception e) {
       log.warn(
           "Failed to serialise AssessmentResult for project {}: {}", projectId, e.getMessage());

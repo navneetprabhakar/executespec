@@ -1102,7 +1102,8 @@ public class RunOrchestrator {
       // the run row. Heuristic for now (no extra LLM cost).
       if (projectId != null) {
         try {
-          String assessmentJson = featureAssessmentService.assessAsJson(projectId, userRequest);
+          String assessmentJson =
+              featureAssessmentService.assessAsJson(runId, projectId, userRequest);
           if (assessmentJson != null) {
             runRepo
                 .findById(runId)
