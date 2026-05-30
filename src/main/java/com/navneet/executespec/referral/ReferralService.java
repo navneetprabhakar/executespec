@@ -74,10 +74,9 @@ public class ReferralService {
 
     // Short-circuit when the referee already has an account — no
     // re-credit, no row created.
-    Optional<AppUser> existing =
-        userRepo.findAll().stream()
-            .filter(u -> normalised.equalsIgnoreCase(u.getEmail()))
-            .findFirst();
+    // B4 — indexed lookup instead of a findAll()-then-filter scan of every user row; emails are
+    // stored lowercased at registration so findByEmail is equivalent to the old equalsIgnoreCase.
+    Optional<AppUser> existing = userRepo.findByEmail(normalised);
     if (existing.isPresent()) {
       log.info("v3 referral invite skipped — referee {} already registered", normalised);
       return new InviteRecord(
