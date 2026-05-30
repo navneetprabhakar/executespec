@@ -54,7 +54,9 @@ to "fix and retry":
 > `RunOrchestrator.<name>(...)`. Either **leave them in RunOrchestrator** (recommended for inc. 1) or move
 > them AND update the test references in the same commit. Do not move them silently.
 
-### Increment 2 — `RunPersistenceWriter` (`@Component`, deps: `runRepo`, `taskRepo`, `objectMapper`)
+### Increment 2 — `RunPersistenceWriter` (`@Component`, deps: `runRepo`, `taskRepo`, `runCostLogRepo`, `broadcaster`, `objectMapper`) ✅ DONE (2026-05-30)
+> Moved **10** methods (byte-identical) + rewired ~20 call sites via a **compiler-guided** pass (delete defs → compiler pinpoints every call site → qualify with `persistenceWriter.`), which dodged the `r.setWorkspacePath(...)` entity-setter collision a blind replace-all would have hit. **`persistEstimate` deliberately deferred** — it's an estimation method (`costHistoryService`/`costTracker`/`apiKeyResolver` + the `clampHardCap` stayer), not a thin write. `updateStatus`'s SSE broadcast preserved via the injected `broadcaster`. RunOrchestrator 5,117 → 4,872 LOC; full suite 1432 green.
+
 `persistPlan` (2022), `persistTasks` (2048), `applyExecutionResultToTasks` (2102), `persistReview` (2120),
 `persistReviewFailure` (2150), `setWorkspacePath` (2165), `persistRunTitle` (3762), `persistEstimate` (3819),
 `writeRunCostLog` (3911), `updateStatus` (3274), `reconstructExecResultFromTasks` (3232). ~11 methods.

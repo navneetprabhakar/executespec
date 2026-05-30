@@ -11,7 +11,6 @@ import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallT
 import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStatusToV1;
 import static com.navneet.executespec.integration.RunPipelineSupport.providerForAccuracy;
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
-import static com.navneet.executespec.integration.RunPipelineSupport.shortMsg;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
 import java.io.IOException;
@@ -46,7 +45,6 @@ import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
-import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
@@ -83,7 +81,6 @@ import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -174,6 +171,7 @@ public class RunOrchestrator {
   private final RunCostLogRepository runCostLogRepo;
   private final WorkspaceInitService workspaceInit;
   private final SseBroadcaster broadcaster;
+  private final RunPersistenceWriter persistenceWriter;
   private final UiStyleResolver uiStyleResolver;
   private final ValidationReportService validationReportService;
   private final TestGenOrchestrator testGenOrchestrator;
@@ -1055,7 +1053,7 @@ public class RunOrchestrator {
       }
 
       ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
-      setWorkspacePath(runId, workspace.toString());
+      persistenceWriter.setWorkspacePath(runId, workspace.toString());
 
       // Bench services (swebench / programbench) submit runs with
       // RunMode.PATCH and own the workspace setup themselves (docker cp +
@@ -1336,9 +1334,9 @@ public class RunOrchestrator {
             startedAt);
         return;
       }
-      persistPlan(runId, plan);
-      persistTasks(runId, plan);
-      persistRunTitle(runId, plan);
+      persistenceWriter.persistPlan(runId, plan);
+      persistenceWriter.persistTasks(runId, plan);
+      persistenceWriter.persistRunTitle(runId, plan);
       writeAgentContext(workspace, plan);
       persistEstimate(runId, provider, model, plan);
       String designBlock = buildDesignBlock(userRequest, plan);
@@ -1360,7 +1358,7 @@ public class RunOrchestrator {
       boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
       if (needsApproval) {
         perky.stop(runId);
-        updateStatus(runId, "AWAITING_APPROVAL");
+        persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
         // Open a PENDING row so the approve-endpoint's atomic claim
         // (GateStore.tryClaimPlanGate) can detect concurrent approvals and
         // return 409 to the loser — adversarial-test-report Finding 4.
@@ -1394,7 +1392,7 @@ public class RunOrchestrator {
         }
       }
 
-      updateStatus(runId, "WORKING");
+      persistenceWriter.updateStatus(runId, "WORKING");
       perky.start(runId, "WORKING");
       ExecutionResult execResult;
       try {
@@ -1425,7 +1423,7 @@ public class RunOrchestrator {
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;
       }
-      applyExecutionResultToTasks(runId, execResult);
+      persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
       RunCostTracker.Snapshot afterExec = costTracker.snapshot(runId);
       int workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
@@ -1480,7 +1478,7 @@ public class RunOrchestrator {
         }
       }
 
-      updateStatus(runId, "REVIEWING");
+      persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
@@ -1522,7 +1520,7 @@ public class RunOrchestrator {
                     .skipWiringPass(skipWiring)
                     .maxIterationsPerPass(reviewerMaxIter)
                     .build());
-        persistReview(runId, reviewResult);
+        persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
         int reviewerIn = afterReview.inputTokens() - afterExec.inputTokens();
@@ -1538,7 +1536,7 @@ public class RunOrchestrator {
         log.warn("RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
         // Review failure is non-fatal; the execution already succeeded or partially
         // succeeded. Record the failure in reviewJson so the UI can surface it.
-        persistReviewFailure(runId, e);
+        persistenceWriter.persistReviewFailure(runId, e);
       }
 
       // 3b. Enterprise enforcement (project runs only) — make the formerly
@@ -2033,160 +2031,6 @@ public class RunOrchestrator {
     }
   }
 
-  private void persistPlan(String runId, Plan plan) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                r.setPlanJson(objectMapper.writeValueAsString(plan));
-              } catch (Exception e) {
-                log.warn("RunOrchestrator run={} failed to serialize plan JSON", runId, e);
-              }
-              // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
-              // requirement graph alongside the plan JSON so the reviewer (Pillar
-              // 2) and the UI (Pillar 5) can render per-requirement evidence.
-              // Null when plan.requirements is empty (legacy / flag off).
-              try {
-                if (plan.requirements() != null && !plan.requirements().isEmpty()) {
-                  r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void persistTasks(String runId, Plan plan) {
-    String prefix = runId.substring(0, 8) + "_";
-    for (PlannedTask task : plan.tasks()) {
-      String taskId = prefix + task.id();
-      AgentTask row =
-          AgentTask.builder()
-              .taskId(taskId)
-              .runId(runId)
-              .title(task.title())
-              .complexity(task.complexity().name())
-              .status("PENDING")
-              // v2.6.2 slice 5d — record the planner-shape metadata so
-              // StartupRunResumer can tell EXPANDED vs PENDING tasks
-              // apart on resume + a future auto-replay pass can skip
-              // tasks already filled in.
-              .taskType(task.taskType() == null ? "LEAF" : task.taskType().name())
-              // EXPANDED for full-bodied tasks (slices 1-2 + LEGACY's
-              // recursive children) and post-expansion LARGE tasks.
-              // Skeleton-only tasks pre-expansion would be PENDING here —
-              // but persistTasks runs after the LARGE pipeline has
-              // already stitched bodies in, so all rows reach this point
-              // with full descriptions. Distinction matters for future
-              // resume: a row written EXPANDED never needs a re-expand.
-              .expansionStatus(task.isSkeleton() ? "PENDING" : "EXPANDED")
-              .expandedAt(task.isSkeleton() ? null : java.time.Instant.now())
-              .build();
-      try {
-        row.setTaskJson(objectMapper.writeValueAsString(task));
-      } catch (Exception e) {
-        log.warn("RunOrchestrator run={} failed to serialize task {}", runId, taskId, e);
-      }
-      // v2.5.11 (Validation v3 / Pillar 1) — persist per-task requirement
-      // coverage so downstream consumers (reviewer evidence, UI table)
-      // can trace implementation back to spec requirements.
-      try {
-        if (task.meetsRequirements() != null && !task.meetsRequirements().isEmpty()) {
-          row.setMeetsRequirementsJson(objectMapper.writeValueAsString(task.meetsRequirements()));
-        }
-      } catch (Exception e) {
-        log.warn(
-            "RunOrchestrator run={} failed to serialize meets_requirements for {}",
-            runId,
-            taskId,
-            e);
-      }
-      taskRepo.save(row);
-    }
-  }
-
-  /**
-   * Map each {@link TaskOutcome} back to the corresponding {@link AgentTask} row and update status
-   * + timestamps. Task IDs are prefixed with the run's first 8 chars so we reconstruct the DB id
-   * from {@code PlannedTask.id}.
-   */
-  private void applyExecutionResultToTasks(String runId, ExecutionResult result) {
-    String prefix = runId.substring(0, 8) + "_";
-    for (TaskOutcome outcome : result.perTask()) {
-      String taskId = prefix + outcome.taskId();
-      taskRepo
-          .findById(taskId)
-          .ifPresent(
-              t -> {
-                t.setStatus(mapTaskStatusToV1(outcome.status()));
-                t.setCompletedAt(Instant.now());
-                if (outcome.totalLatencyMs() > 0) {
-                  t.setDurationMs((long) outcome.totalLatencyMs());
-                }
-                taskRepo.save(t);
-              });
-    }
-  }
-
-  private void persistReview(String runId, ReviewerResult review) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                // Minimal serialization — full ReviewerResult has WorkerResult refs that
-                // aren't Jackson-friendly; extract the user-facing fields only.
-                Map<String, Object> summary =
-                    Map.of(
-                        "overall",
-                        review.overall().name(),
-                        "finalBuildPassed",
-                        review.finalBuildPassed() != null && review.finalBuildPassed(),
-                        "finalBuildExitCode",
-                        review.finalBuildExitCode() == null ? -1 : review.finalBuildExitCode(),
-                        "generalPassSummary",
-                        review.generalPassSummary() == null ? "" : review.generalPassSummary(),
-                        "wiringPassSummary",
-                        review.wiringPassSummary() == null ? "" : review.wiringPassSummary(),
-                        "totalLatencyMs",
-                        review.totalLatencyMs());
-                r.setReviewJson(objectMapper.writeValueAsString(summary));
-              } catch (Exception e) {
-                log.warn("RunOrchestrator run={} failed to serialize review JSON", runId, e);
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void persistReviewFailure(String runId, Exception e) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                Map<String, Object> summary =
-                    Map.of("overall", "REVIEW_FAILED", "error", shortMsg(e));
-                r.setReviewJson(objectMapper.writeValueAsString(summary));
-              } catch (Exception ignored) {
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void setWorkspacePath(String runId, String path) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setWorkspacePath(path);
-              runRepo.save(r);
-            });
-    log.debug("RunOrchestrator run={} workspace={}", runId, path);
-  }
-
   /**
    * Stages and commits every change in the workspace as a single "V2 run output" commit after
    * execution + review complete. Required so {@code /push-github} has concrete refs to push — V2
@@ -2635,7 +2479,7 @@ public class RunOrchestrator {
       if (!fromReviewing) {
         // Status is WORKING — call executor with ResumeRequest so terminal AgentTasks are
         // skipped and the in-flight task resumes from its Redis snapshot.
-        updateStatus(runId, "WORKING");
+        persistenceWriter.updateStatus(runId, "WORKING");
         try {
           execResult =
               executor.execute(
@@ -2658,13 +2502,13 @@ public class RunOrchestrator {
           terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
           return;
         }
-        applyExecutionResultToTasks(runId, execResult);
+        persistenceWriter.applyExecutionResultToTasks(runId, execResult);
         afterExec = costTracker.snapshot(runId);
       }
 
       // Reviewer — runs for both WORKING-resume (after executor) and REVIEWING-resume (re-run
       // the reviewer; idempotent against the same workspace + plan).
-      updateStatus(runId, "REVIEWING");
+      persistenceWriter.updateStatus(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       try {
         reviewResult =
@@ -2676,10 +2520,10 @@ public class RunOrchestrator {
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
                     .build());
-        persistReview(runId, reviewResult);
+        persistenceWriter.persistReview(runId, reviewResult);
       } catch (Exception e) {
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
-        persistReviewFailure(runId, e);
+        persistenceWriter.persistReviewFailure(runId, e);
       }
 
       // README + validation report + test gen + preview — same as runPipeline's tail. We only
@@ -2988,7 +2832,7 @@ public class RunOrchestrator {
                             .build(),
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
-                applyExecutionResultToTasks(runId, result);
+                persistenceWriter.applyExecutionResultToTasks(runId, result);
 
                 // Re-resolve terminal status now that the retry has finished. Reviewer is NOT
                 // re-run on a single-task retry — that's a different operation (retryValidation).
@@ -3181,10 +3025,10 @@ public class RunOrchestrator {
                   .buildCommand(buildCommand)
                   .skipWiringPass(false)
                   .build());
-      persistReview(runId, reviewResult);
+      persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {
       log.warn("RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
-      persistReviewFailure(runId, e);
+      persistenceWriter.persistReviewFailure(runId, e);
       // reviewResult stays null — generateValidationReport handles that branch (it sets
       // verdict=APPROVED with summary="Review did not run." which trips status to LEGACY_UNKNOWN
       // below, surfacing the failure on the UI).
@@ -3194,7 +3038,7 @@ public class RunOrchestrator {
     // resolveTerminalStatus or the generateValidationReport(execResult != null) branch when we
     // pass null for execResult below. We use this purely to get tasksSuccessful / tasksFailed /
     // anyIntermediateWarning into the status decision.
-    ExecutionResult execResult = reconstructExecResultFromTasks(runId);
+    ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);
 
     try {
       generateValidationReport(runId, null, reviewResult, null);
@@ -3226,52 +3070,6 @@ public class RunOrchestrator {
    * is invoked with {@code execResult=null} on the re-review path so it falls through to its own
    * task-row reconstruction branch.
    */
-  private ExecutionResult reconstructExecResultFromTasks(String runId) {
-    var tasks = taskRepo.findByRunId(runId);
-    int success = 0;
-    int warn = 0;
-    int failed = 0;
-    int skipped = 0;
-    for (var t : tasks) {
-      String s = t.getStatus() == null ? "COMPLETE" : t.getStatus();
-      switch (s) {
-        case "COMPLETE" -> success++;
-        case "PARTIAL" -> warn++;
-        case "FAILED" -> failed++;
-        case "BLOCKED", "SKIPPED" -> skipped++;
-        default -> success++;
-      }
-    }
-    ExecutionResult.Overall overall;
-    if (failed > 0 && success == 0) overall = ExecutionResult.Overall.FAILED;
-    else if (failed > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else overall = ExecutionResult.Overall.ALL_SUCCESS;
-    return ExecutionResult.builder()
-        .overall(overall)
-        .tasksExecuted(tasks.size() - skipped)
-        .tasksSuccessful(success)
-        .tasksWithWarning(warn)
-        .tasksFailed(failed)
-        .tasksSkipped(skipped)
-        .perTask(java.util.List.of())
-        .totalLatencyMs(0L)
-        .finalTaskStatus(null)
-        .anyIntermediateWarning(warn > 0)
-        .build();
-  }
-
-  private void updateStatus(String runId, String newStatus) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setStatus(newStatus);
-              runRepo.save(r);
-            });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
-  }
-
   /** Legacy 4-arg entry point — failure paths without a specific reason flow here. */
   /**
    * RL-2026-05-050 — true when this run is a benchmark "code-gen only" run (source prefix {@code
@@ -3352,7 +3150,7 @@ public class RunOrchestrator {
               if (cost.inputTokens() > persistedIn) r.setTotalInputTokens(cost.inputTokens());
               if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
               runRepo.save(r);
-              writeRunCostLog(r, cost);
+              persistenceWriter.writeRunCostLog(r, cost);
 
               // R-162 — referral grant hook. Delegates to ReferralCompletionHook
               // so the conditional + try/catch + idempotency contract lives in
@@ -3749,17 +3547,6 @@ public class RunOrchestrator {
 
   // run title + design resolution
 
-  private void persistRunTitle(String runId, Plan plan) {
-    if (plan.planTitle() == null || plan.planTitle().isBlank()) return;
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setRunTitle(plan.planTitle());
-              runRepo.save(r);
-            });
-  }
-
   /**
    * Resolves and loads the design system block for this run using V1's {@link UiStyleResolver}.
    * Picks from three signals in priority order: explicit hint parsed from the user request,
@@ -3878,38 +3665,6 @@ public class RunOrchestrator {
   static double clampHardCap(double platformCap, Double userCostCap) {
     if (userCostCap == null || userCostCap <= 0) return platformCap;
     return Math.min(platformCap, userCostCap);
-  }
-
-  private void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {
-    try {
-      double estimated = r.getCostEstimateHigh() != null ? r.getCostEstimateHigh() : 0.0;
-      double hardCap = r.getHardCapUsd() != null ? r.getHardCapUsd() : 0.0;
-      int credits = r.getCreditsCharged() != null ? r.getCreditsCharged() : 1;
-      boolean budgetHit = hardCap > 0 && cost.costUsd() >= hardCap;
-      RunCostLog row =
-          RunCostLog.builder()
-              .runId(r.getRunId())
-              .userId(r.getCreatedByUserId() != null ? r.getCreatedByUserId() : "unknown")
-              .orgId(r.getOrgId())
-              .provider(r.getAiProvider() != null ? r.getAiProvider() : "unknown")
-              .estimatedCost(estimated)
-              .actualCost(cost.costUsd())
-              .hardCap(hardCap)
-              .creditsCharged(credits)
-              .status(r.getStatus())
-              .taskCount(0)
-              .tasksCompleted(0)
-              .budgetHit(budgetHit)
-              .marginUsd(estimated - cost.costUsd())
-              .executionMode("REALTIME")
-              .batchDiscount(0.0)
-              .createdAt(Instant.now())
-              .build();
-      runCostLogRepo.save(row);
-    } catch (Exception e) {
-      log.warn(
-          "RunOrchestrator run={} failed to write RunCostLog: {}", r.getRunId(), e.getMessage());
-    }
   }
 
   /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
