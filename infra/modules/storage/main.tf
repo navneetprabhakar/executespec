@@ -23,6 +23,13 @@ resource "google_storage_bucket" "deploy" {
   }
 
   labels = var.labels
+
+  # TEMP 2026-05-29: bucket is still in asia-south1 pending manual migration to us-east4.
+  # Without this, `terraform apply` would try to destroy + recreate (and fail on force_destroy=false).
+  # Remove this block once the bucket has been migrated to var.region.
+  lifecycle {
+    ignore_changes = [location]
+  }
 }
 
 # ── GCS Bucket: Workspace Archives ──────────────────────────────────────────

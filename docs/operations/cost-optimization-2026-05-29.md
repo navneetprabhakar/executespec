@@ -6,6 +6,8 @@
 
 ## TL;DR
 
+> **UPDATE 2026-05-30 — COMPLETE.** The two pending bucket migrations (runbooks A + B below) have since been executed; **nothing is left to run.** The `ignore_changes=[location]` guard in `infra/modules/storage/main.tf` remains as a defensive no-op until a future terraform state-reconcile (it does no harm if left). The runbooks below are kept for historical reference / re-use.
+
 Dev environment was burning **~$390/mo** with Cloud SQL at **2.9% avg CPU** and the GCE VM at **0.6% avg CPU** — both wildly oversized. Resized SQL, deleted dead VM + IP, and migrated one bucket to `us-east4`. **Confirmed savings: ~$158/mo** (40% reduction). Two more bucket migrations and an optional further-aggressive SQL/VM downsize are runbook'd below.
 
 ## Before / after (estimated)
