@@ -581,6 +581,30 @@
   opacity: 0.5;
   cursor: default;
 }
+/* Grounded footer for the primary submit CTA (e.g. "Run spec"): a top divider
+   separates the action from the form so the button reads as THE main action
+   instead of a small chip floating at the bottom, and the button is enlarged.
+   Scoped here — does NOT restyle the many other .ide-btn chips across the IDE. */
+.ide-run-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ide-border);
+}
+.ide-run-action .ide-btn {
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .ide-run-action .ide-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
 .ide-input,
 .ide-textarea,
 .ide-select {

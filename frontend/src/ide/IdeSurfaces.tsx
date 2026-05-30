@@ -629,9 +629,11 @@ export function IdeCompose() {
       )}
 
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-        {busy ? 'Submitting…' : '▷ Run spec'}
-      </button>
+      <div className='ide-run-action'>
+        <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+          {busy ? 'Submitting…' : '▷ Run spec'}
+        </button>
+      </div>
     </div>
   );
 }
