@@ -7,7 +7,7 @@
 | Item | Why deferred | Handoff |
 | --- | --- | --- |
 | **RunOrchestrator god-class split** | 5.3k-LOC stateful file; auto-extraction corrupted it twice (caught at compile). | [runorchestrator-god-class-split.md](runorchestrator-god-class-split.md) — concrete 6-increment by-hand plan. |
-| **B1 — OpenAI + Gemini batch clients + coordinator wiring** | Anthropic client shipped (P2); the rest is a feature against batch APIs unverifiable in-sandbox. | [v2-batch-execution-plan.md](v2-batch-execution-plan.md) — §1 add-a-provider (Anthropic is the reference impl), P4 wiring + human gate. |
+| **B1 — coordinator wiring (P4) + live smokes** | All 3 provider clients now shipped + unit-tested (Anthropic/OpenAI/Gemini); only the `BatchCoordinator` wiring into `RunOrchestrator` + per-provider live smokes remain (Gemini also needs batch-envelope shape verification). | [v2-batch-execution-plan.md](v2-batch-execution-plan.md) — P4 wiring + human gate. |
 | **C3 — tenant ORM read-isolation** | High-risk `@Filter` retrofit; C2 (app-layer guards) is the finding's hard requirement and is closed. | [c3-tenant-orm-isolation.md](c3-tenant-orm-isolation.md) — approach, the 5 exemption landmines, flag-gated entity-by-entity rollout. |
 | **B3 — DeepSeek native-client smoke** | Client lives on another branch; needs a live key + real call. | §"B3" below (short — one smoke run on `feat/benchmark-codegen-harness`). |
 | **D-residual — dead-code deletions** | Each needs per-item dynamic-ref verification; the audit's "deletable" list proved unreliable. | §"D-residual" below + [`docs/tech-debt.md`](../tech-debt.md) + REMEDIATION §3. |

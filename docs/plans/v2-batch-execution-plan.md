@@ -23,9 +23,9 @@ continue the task **realtime** (the existing `WorkerAgent` loop). So:
 | --- | --- | --- |
 | **P1** | Contract + scaffold: `BatchClient`, `BatchClientRouter`, `BatchCoordinator`, `BatchPollService`, `BatchResumeService`, `BatchRequest`/`BatchJob`/`BatchTaskResult` records. | **done** (interface-only) |
 | **P2** | **Anthropic client — [`AnthropicBatchClient`](../../src/main/java/com/navneet/executespec/batch/AnthropicBatchClient.java).** Message-Batches submit/poll/fetch/cancel; first-turn serialization; BYOK key via runId→owner. **5 unit tests** on the JSON shaping. | **done (B1, 2026-05-30)** — HTTP reasoned-not-smoked; needs a live smoke before flip. |
-| **P3a** | OpenAI client (`OpenAiBatchClient`). | **deferred** |
-| **P3b** | Gemini client (`GeminiBatchClient`). | **deferred** |
-| **P4** | Wire `BatchCoordinator`/`BatchPollService`/`BatchResumeService` into `RunOrchestrator` (BATCH `executionMode`) + the human submit-gate. | **deferred** |
+| **P3a** | **OpenAI client — [`OpenAiBatchClient`](../../src/main/java/com/navneet/executespec/batch/OpenAiBatchClient.java).** File-based: JSONL upload → create batch → output file. 4 unit tests. | **done (B1, 2026-05-30)** — HTTP reasoned-not-smoked. |
+| **P3b** | **Gemini client — [`GeminiBatchClient`](../../src/main/java/com/navneet/executespec/batch/GeminiBatchClient.java).** Inline `:batchGenerateContent`→Operation; 4 unit tests. **⚠ elevated uncertainty** — the batch envelope/endpoint is the least-stable surface (see class javadoc); confirm against live docs + may need File-API/GCS input. | **done (B1, 2026-05-30)** — **needs shape verification + smoke.** |
+| **P4** | Wire `BatchCoordinator`/`BatchPollService`/`BatchResumeService` into `RunOrchestrator` (BATCH `executionMode`) + the human submit-gate. **All 3 provider clients now exist** — this + the live smokes are the only thing between here and a flag flip. | **deferred** |
 
 ## §1 — `BatchClient` contract & how to add a provider (P3a/P3b)
 
