@@ -46,8 +46,6 @@ public class DeploymentDecisionEngine {
         .build();
   }
 
-  // ── Comparison builder ────────────────────────────────────────────────────
-
   private PathComparison buildComparison(InfrastructureManifest manifest) {
     return new PathComparison(buildStarterPath(manifest), buildProductionPath(manifest));
   }
@@ -109,7 +107,7 @@ public class DeploymentDecisionEngine {
         cost);
   }
 
-  // ── Cost estimation (simple lookup) ───────────────────────────────────────
+  // Cost estimation (simple lookup)
 
   private CostEstimate estimateVmCost(InfrastructureManifest manifest) {
     String vmType = recommendVmSize(manifest);
@@ -163,8 +161,6 @@ public class DeploymentDecisionEngine {
     };
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private String describeDeps(InfrastructureManifest manifest) {
     List<String> deps = new ArrayList<>();
     if (manifest.database() != null) deps.add(manifest.database().type().name());
@@ -173,8 +169,6 @@ public class DeploymentDecisionEngine {
     if (manifest.storage() != null) deps.add(manifest.storage().type().name());
     return String.join(" + ", deps);
   }
-
-  // ── DTOs ──────────────────────────────────────────────────────────────────
 
   @lombok.Builder
   public record DeploymentDecision(

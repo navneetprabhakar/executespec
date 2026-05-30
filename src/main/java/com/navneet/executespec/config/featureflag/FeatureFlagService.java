@@ -41,8 +41,6 @@ public class FeatureFlagService implements MessageListener {
     log.info("FeatureFlagService initialized — {} flags loaded", cache.size());
   }
 
-  // ── Public read API ──────────────────────────────────────────────────────
-
   public boolean isEnabled(String key) {
     String val = cache.get(key);
     return "true".equalsIgnoreCase(val);
@@ -62,7 +60,7 @@ public class FeatureFlagService implements MessageListener {
     }
   }
 
-  // ── Write API (admin) ────────────────────────────────────────────────────
+  // Write API (admin)
 
   @Transactional
   public FeatureFlag update(String key, String value, String userId) {
@@ -114,8 +112,6 @@ public class FeatureFlagService implements MessageListener {
     return repository.findAll();
   }
 
-  // ── Redis subscriber ─────────────────────────────────────────────────────
-
   @Override
   public void onMessage(Message message, byte[] pattern) {
     String flagKey = new String(message.getBody(), StandardCharsets.UTF_8);
@@ -123,8 +119,6 @@ public class FeatureFlagService implements MessageListener {
     // Reload just this key from DB
     repository.findByFlagKey(flagKey).ifPresent(f -> cache.put(f.getFlagKey(), f.getFlagValue()));
   }
-
-  // ── Scheduled full reload fallback ───────────────────────────────────────
 
   @Scheduled(fixedRate = 60_000)
   void scheduledReload() {

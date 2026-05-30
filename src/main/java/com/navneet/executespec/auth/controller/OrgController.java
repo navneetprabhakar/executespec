@@ -182,7 +182,7 @@ public class OrgController {
     return ResponseEntity.ok(Map.of("message", "Invitation accepted successfully"));
   }
 
-  // ── Audit Logs (ORG_ADMIN only, scoped to own org) ─────────────────────
+  // Audit Logs (ORG_ADMIN only, scoped to own org)
 
   @GetMapping("/me/audit-logs")
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
@@ -205,7 +205,7 @@ public class OrgController {
             orgId, entityType, eventType, actorId, entityId, fromInstant, toInstant, page, size));
   }
 
-  // ── Key source mode & provider restrictions (ORG_ADMIN only) ────────────
+  // Key source mode & provider restrictions (ORG_ADMIN only)
 
   record KeySourceSettingsRequest(String keySourceMode, List<String> enabledProviders) {}
 
@@ -221,7 +221,7 @@ public class OrgController {
             orgId, req.keySourceMode(), req.enabledProviders(), userDetails.getUser().getId()));
   }
 
-  // ── External sharing toggle (V198, 2026-05-16) ───────────────────────────
+  // External sharing toggle (V198, 2026-05-16)
 
   record ExternalSharingRequest(boolean enabled) {}
 
@@ -245,7 +245,7 @@ public class OrgController {
         orgService.updateExternalSharing(orgId, req.enabled(), userDetails.getUser().getId()));
   }
 
-  // ── Org-level AI provider key settings (ORG_ADMIN only) ─────────────────
+  // Org-level AI provider key settings (ORG_ADMIN only)
 
   record OrgAiKeySettingsRequest(
       String anthropicApiKey, String openAiApiKey, String geminiApiKey, String openRouterApiKey) {}
@@ -272,7 +272,7 @@ public class OrgController {
             userDetails.getUser().getId()));
   }
 
-  // ── Org-level model-matrix overrides (F3, ENTERPRISE) ───────────────────
+  // Org-level model-matrix overrides (F3, ENTERPRISE)
 
   record ModelOverridesRequest(Map<String, String> overrides) {}
 
@@ -357,7 +357,7 @@ public class OrgController {
         .toList();
   }
 
-  // ── Org-level JIRA settings (ORG_ADMIN only) ────────────────────────────
+  // Org-level JIRA settings (ORG_ADMIN only)
 
   record OrgJiraSettingsRequest(String baseUrl, String email, String apiToken) {}
 
@@ -408,7 +408,7 @@ public class OrgController {
     }
   }
 
-  // ── Org-level Confluence settings (ORG_ADMIN only) ──────────────────────
+  // Org-level Confluence settings (ORG_ADMIN only)
 
   record OrgConfluenceSettingsRequest(String baseUrl, String email, String apiToken) {}
 
@@ -461,7 +461,7 @@ public class OrgController {
   private static final HttpClient HTTP_CLIENT =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-  // ── Seat management (v2.6.0 TEAM tier) ──────────────────────────────────
+  // Seat management (v2.6.0 TEAM tier)
 
   public record SeatsAdjustRequest(int newSeats) {}
 

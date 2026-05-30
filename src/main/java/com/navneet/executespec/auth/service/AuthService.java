@@ -62,8 +62,6 @@ public class AuthService {
   @Value("${app.mail.base-url:http://localhost:5173}")
   private String baseUrl;
 
-  // ── Registration ──────────────────────────────────────────────────────────
-
   @Transactional
   public UserDto register(RegisterRequest req) {
     if (userRepo.existsByEmail(req.email().toLowerCase())) {
@@ -163,8 +161,6 @@ public class AuthService {
       eventTracking.track(userId, event, props);
     }
   }
-
-  // ── Email Verification ────────────────────────────────────────────────────
 
   @Transactional
   public void verifyEmail(String token) {
@@ -277,8 +273,6 @@ public class AuthService {
     return new LoginResponse(accessToken, UserDto.from(user, orgMember));
   }
 
-  // ── Login ─────────────────────────────────────────────────────────────────
-
   public LoginResponse login(LoginRequest req) {
     // Audit r5 (P2-2, 2026-05-06) — distinguish account-state failures
     // from real bad-credential failures so the UI shows the right
@@ -380,8 +374,6 @@ public class AuthService {
     blocklistRepo.insertIfAbsent(jti, jwtUtil.extractUserId(refreshToken), exp);
   }
 
-  // ── Password Reset ────────────────────────────────────────────────────────
-
   @Transactional
   public void forgotPassword(String email) {
     userRepo
@@ -437,8 +429,6 @@ public class AuthService {
             .build());
   }
 
-  // ── Change Password ───────────────────────────────────────────────────────
-
   @Transactional
   public void changePassword(String userId, ChangePasswordRequest req) {
     AppUser user =
@@ -470,8 +460,6 @@ public class AuthService {
             .build());
   }
 
-  // ── Resend Verification ───────────────────────────────────────────────────
-
   @Transactional
   public void resendVerification(String email) {
     userRepo
@@ -484,8 +472,6 @@ public class AuthService {
               }
             });
   }
-
-  // ── FREE subscription bootstrap ─────────────────────────────────────────
 
   /**
    * Creates a billing_subscription row with status='FREE' so that
@@ -538,8 +524,6 @@ public class AuthService {
       log.warn("v3 referral auto-bind failed user={} email={}: {}", userId, email, e.getMessage());
     }
   }
-
-  // ── OAuth ─────────────────────────────────────────────────────────────────
 
   /**
    * Find or create a user from an OAuth2 login.
@@ -658,8 +642,6 @@ public class AuthService {
 
     return user;
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private String createEmailToken(String userId, String type, int expiryHours) {
     String token = UUID.randomUUID().toString().replace("-", "");

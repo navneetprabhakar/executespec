@@ -122,6 +122,9 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             runRepo,
             mock(com.navneet.executespec.sse.SseBroadcaster.class),
             // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null,
+            // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
+            // disabled.
             null);
     return new Fixture(worker, router);
   }
@@ -140,7 +143,7 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         .build();
   }
 
-  // ── Progress nudge — text-only-stop trigger ──────────────────────────────────────────────────
+  // Progress nudge — text-only-stop trigger
 
   // 2026-05-29 — DISABLED pending root-cause of the iter-counter off-by-one regression that
   // c72fa557 (engine extraction Phase 5+6, RL-2026-05-052) acknowledged in its commit message
@@ -241,8 +244,6 @@ class WorkerAgentProgressNudgeAndWallClockTest {
     assertEquals(6, result.iterations(), "exits on the second text-only response");
   }
 
-  // ── Wall-clock cap ─────────────────────────────────────────────────────────────────────────
-
   @Test
   void wall_clock_cap_terminates_when_exceeded() {
     // 1-second wall-clock cap. Each LLM "call" returns instantly (mock), but we sleep on the
@@ -305,6 +306,9 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             runRepo,
             mock(com.navneet.executespec.sse.SseBroadcaster.class),
             // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled.
+            null,
+            // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
+            // disabled.
             null);
 
     long t0 = System.currentTimeMillis();

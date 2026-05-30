@@ -128,8 +128,6 @@ public class SlackNotificationService {
         (String) resp.get("ts"));
   }
 
-  // ── Private processing ────────────────────────────────────────────────────
-
   private void processEvent(RunEvent event) {
     // 1. Resolve Slack event type from RunEvent
     SlackEventType slackEvent = SlackEventType.resolve(event.type(), event.payload());

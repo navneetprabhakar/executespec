@@ -236,12 +236,11 @@ public class DeploymentService {
     }
 
     try {
-      // ── Phase 1: GitHub (optional) ──
+      // Phase 1: GitHub (optional)
       RunRepo repo = handleGitHub(deployment, run, workspacePath, repoMode, repoUrl, repoName);
       deployment.setRunRepoId(repo.getId());
       deploymentRepo.save(deployment);
 
-      // ── Phase 2: Docker build ──
       buildPhaseStart = java.time.Instant.now();
       deployment.setStatus(DeployStatus.BUILDING);
       deploymentRepo.save(deployment);
@@ -254,7 +253,7 @@ public class DeploymentService {
       deployment.setBuildLog(buildResult.buildLog());
       deploymentRepo.save(deployment);
 
-      // ── Phase 3: Push to Artifact Registry ──
+      // Phase 3: Push to Artifact Registry
       deployment.setStatus(DeployStatus.PUSHING);
       deploymentRepo.save(deployment);
       sseBroadcaster.emit(
@@ -264,7 +263,7 @@ public class DeploymentService {
       artifactRegistry.pushImage(buildResult.imageTag());
       pushedImageTag = buildResult.imageTag();
 
-      // ── Phase 4: Deploy to Cloud Run ──
+      // Phase 4: Deploy to Cloud Run
       deployment.setStatus(DeployStatus.DEPLOYING);
       deploymentRepo.save(deployment);
 
@@ -286,7 +285,7 @@ public class DeploymentService {
             .record(java.time.Duration.between(buildPhaseStart, java.time.Instant.now()));
       }
 
-      // ── Phase 5: Health check (status set BEFORE check, not LIVE) ──
+      // Phase 5: Health check (status set BEFORE check, not LIVE)
       healthCheckStart = java.time.Instant.now();
       deployment.setStatus(DeployStatus.HEALTH_CHECK);
       deploymentRepo.save(deployment);
@@ -297,7 +296,7 @@ public class DeploymentService {
                 + deployResult.serviceUrl());
       }
 
-      // ── Success — only now mark LIVE ──
+      // Success — only now mark LIVE
       deployment.markLive(deployResult.serviceUrl(), deployResult.revisionName());
       deploymentRepo.save(deployment);
 

@@ -45,7 +45,7 @@ public class RunDetail {
   List<TaskSummary> tasks;
   IntegrationSource integrationSource; // null for manual runs
 
-  // ── Tier 8: Compile, API spec, preview ───────────────────────────────────
+  // Tier 8: Compile, API spec, preview
   Boolean hasFrontend; // true once PreviewService builds the frontend
   Boolean hasApiSpec; // true once ApiTestSuiteAgent writes openapi.yaml
   String previewStatus; // null | "READY" | "FAILED"
@@ -177,7 +177,6 @@ public class RunDetail {
    */
   String triggeredByFinding;
 
-  // ── Retry tracking ──────────────────────────────────────────────────────
   /** True if this run is a retry of a previous run. */
   Boolean isRetry;
 
@@ -187,7 +186,6 @@ public class RunDetail {
   /** Number of auto-retry attempts on this run chain (0 = original run). */
   Integer runRetryCount;
 
-  // ── Batch execution ──────────────────────────────────────────────────────
   /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
   String approvedExecutionMode;
 
@@ -206,18 +204,18 @@ public class RunDetail {
   /** Batch progress: total tasks in batch. */
   Integer batchProgressTotal;
 
-  // ── Per-agent token breakdown (V19) ─────────────────────────────────────
+  // Per-agent token breakdown (V19)
   /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
   List<AgentTokenEntry> agentTokens;
 
-  // ── Background validation (V64) ─────────────────────────────────────────
+  // Background validation (V64)
   /** Status of the background validation thread: PENDING, RUNNING, COMPLETED, FAILED, or null. */
   String validationStatus;
 
   /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
   String validationPhase;
 
-  // ── Validation report scoring snapshot (v2.5.10 + adversarial-report Finding 13) ──
+  // Validation report scoring snapshot (v2.5.10 + adversarial-report Finding 13)
   /**
    * Mirrors the corresponding fields on the {@code ValidationReport} so clients rendering run
    * detail don't have to issue a second request to {@code GET /api/runs/{id}/report} just to show

@@ -123,8 +123,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 }));
 
-// ── Selectors ─────────────────────────────────────────────────────────────────
-
 export const selectIsSuperAdmin = (s: AuthStore) => s.user?.globalRole === 'SUPER_ADMIN';
 
 export const selectIsOrgAdmin = (s: AuthStore) =>

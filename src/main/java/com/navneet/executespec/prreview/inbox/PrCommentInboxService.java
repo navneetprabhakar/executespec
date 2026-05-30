@@ -161,8 +161,6 @@ public class PrCommentInboxService {
             });
   }
 
-  // ── DTO ───────────────────────────────────────────────────────────────
-
   /** Webhook-payload-shaped ingest request. */
   public record IngestRequest(
       String repoFullName,

@@ -48,4 +48,29 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
       @Param("model") String model,
       @Param("branch") String branch,
       @Param("now") Instant now);
+
+  /**
+   * N2 (audit 2026-05-29) — model-comparison feed filtered in the DB, replacing {@code
+   * StateStore.computeModelComparison}'s {@code findAll().stream().filter(...)} which loaded the
+   * whole agent_task table into heap. Split into all / since-windowed variants (the caller branches
+   * on a null window) so no {@code :param IS NULL} predicate is needed. {@code inputTokens IS NOT
+   * NULL} preserves the prior filter; the provider/model grouping + null-defaulting stays in Java.
+   * {@code startedAt > :since} matches the prior strict {@code isAfter} (also drops null startedAt,
+   * exactly as the prior {@code startedAt != null && isAfter}).
+   */
+  @Query("SELECT t FROM AgentTask t WHERE t.inputTokens IS NOT NULL")
+  List<AgentTask> findWithTokens();
+
+  @Query("SELECT t FROM AgentTask t WHERE t.inputTokens IS NOT NULL AND t.startedAt > :since")
+  List<AgentTask> findWithTokensSince(@Param("since") Instant since);
+
+  /** N2 — org-scoped variants: restrict to tasks whose run is in the given org's run-id set. */
+  @Query("SELECT t FROM AgentTask t WHERE t.inputTokens IS NOT NULL AND t.runId IN :runIds")
+  List<AgentTask> findWithTokensByRunIds(@Param("runIds") List<String> runIds);
+
+  @Query(
+      "SELECT t FROM AgentTask t WHERE t.inputTokens IS NOT NULL "
+          + "AND t.runId IN :runIds AND t.startedAt > :since")
+  List<AgentTask> findWithTokensByRunIdsSince(
+      @Param("runIds") List<String> runIds, @Param("since") Instant since);
 }

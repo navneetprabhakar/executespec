@@ -161,6 +161,24 @@ app:
   # V143 product-routing config retired (V179, single-surface
   # retirement 2026-05-06).
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+# Refresh-token cookie carries Secure (HTTPS-only) in prod — served over HTTPS
+# behind Cloudflare. Local dev (HTTP) keeps this false via the base profile. C1.
+auth:
+  refresh-cookie:
+    secure: true
+
+# ── Crypto ────────────────────────────────────────────────────────────────────
+# Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
+# Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
+# configured in the base profile. Safe fallback: if the key can't be loaded the
+# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
+# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
+# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+executespec:
+  crypto:
+    enabled: true
+
 # ── Billing ───────────────────────────────────────────────────────────────────
 # 2026-04-21 — US-first launch. Stripe is the prod default gateway for USD traffic.
 # Razorpay continues to serve INR customers via currency-based routing (see

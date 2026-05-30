@@ -495,7 +495,7 @@ public class OrgService {
     return result;
   }
 
-  // ── Org-level AI provider key management ─────────────────────────────────
+  // Org-level AI provider key management
 
   @Transactional
   public OrgDto updateAiKeySettings(
@@ -553,7 +553,7 @@ public class OrgService {
     return result;
   }
 
-  // ── Key source mode & provider restriction settings ─────────────────────
+  // Key source mode & provider restriction settings
 
   private static final java.util.Set<String> VALID_KEY_SOURCE_MODES =
       java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
@@ -617,8 +617,6 @@ public class OrgService {
     return result;
   }
 
-  // ── Org-level JIRA credential management ──────────────────────────────
-
   @Transactional
   public OrgDto updateJiraSettings(
       String orgId, String baseUrl, String email, String apiToken, String actorId) {
@@ -650,8 +648,6 @@ public class OrgService {
     return result;
   }
 
-  // ── Org-level Confluence credential management ──────────────────────────
-
   @Transactional
   public OrgDto updateConfluenceSettings(
       String orgId, String baseUrl, String email, String apiToken, String actorId) {
@@ -682,8 +678,6 @@ public class OrgService {
 
     return result;
   }
-
-  // ── Integration status helpers ──────────────────────────────────────────
 
   /**
    * Returns the list of integration source keys (e.g. "JIRA", "CONFLUENCE") that have fully

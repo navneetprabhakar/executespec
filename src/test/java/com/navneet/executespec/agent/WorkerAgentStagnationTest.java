@@ -136,6 +136,9 @@ class WorkerAgentStagnationTest {
             org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class),
             // RL-2026-05-052 Phase 5+6 — ToolOutputCompactor; null = compactor disabled
             // (maybeCompact null-guards), keeping existing tests behaviour-neutral.
+            null,
+            // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
+            // disabled.
             null);
     return new Fixture(worker, router, registry, responseSequence);
   }

@@ -133,8 +133,6 @@ public class BillingController {
     return ResponseEntity.ok(status);
   }
 
-  // ── Run Top-Up Endpoints ────────────────────────────────────────────────────
-
   /** GET /api/billing/topup/packages List available top-up packages for purchase. */
   @GetMapping("/topup/packages")
   public ResponseEntity<List<TopupPackage>> listTopupPackages() {

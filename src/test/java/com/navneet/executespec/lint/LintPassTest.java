@@ -174,8 +174,6 @@ class LintPassTest {
     assertFalse(skipped.changedAnything());
   }
 
-  // ── helpers ──────────────────────────────────────────────────────────
-
   private static String toolNames(List<LintPass.ToolResult> results) {
     StringBuilder sb = new StringBuilder("[");
     for (LintPass.ToolResult r : results) {

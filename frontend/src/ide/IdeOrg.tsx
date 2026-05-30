@@ -16,8 +16,6 @@ import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/u
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal} from '@/signal/components/Modal';
 
-// ───────────────────────── shared bits ─────────────────────────
-
 // Inline error / success banner — colours map to the IDE token set (mirrors
 // IdeProjectMore's Banner). Renders nothing when both are empty.
 function Banner({err, msg}: {err?: string; msg?: string}) {
@@ -78,7 +76,7 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
-// ───────────────────────── API keys (BYOK) — /api-keys ─────────────────────────
+// API keys (BYOK) — /api-keys
 export function IdeApiKeys() {
   const tier = useAuthStore(selectNormalizedTier);
   // Gate strictly by tier (FREE only is blocked). Some running JVMs return
@@ -205,7 +203,7 @@ export function IdeApiKeys() {
   );
 }
 
-// ───────────────────────── Org members — /org-members ─────────────────────────
+// Org members — /org-members
 export function IdeOrgMembers() {
   const user = useAuthStore((s) => s.user);
   const tier = useAuthStore(selectNormalizedTier);
@@ -565,7 +563,7 @@ export function IdeOrgMembers() {
   );
 }
 
-// ───────────────────────── Org settings — /org/settings ─────────────────────────
+// Org settings — /org/settings
 export function IdeOrgSettings() {
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);

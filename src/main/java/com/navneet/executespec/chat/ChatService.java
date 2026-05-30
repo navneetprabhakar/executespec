@@ -176,8 +176,6 @@ public class ChatService {
     return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
   }
 
-  // ──────────────────────────────────────────────────────────────────────
-
   /**
    * Manual tool-execution loop. {@link LlmRouter} sets {@code internalToolExecutionEnabled(false)}
    * (the V2 worker pattern handles its own loop), so we dispatch each {@code tool_use} block

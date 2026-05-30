@@ -49,8 +49,6 @@ class FilePurposeSummaryServiceTest {
             repo, modelResolver, llmRouter, featureFlagService, costTracker);
   }
 
-  // ── Feature flag gate ────────────────────────────────────────────────
-
   @Test
   void flagOff_returnsEmpty_andNeverHitsRepoOrLlm() {
     when(featureFlagService.isEnabled("codemap.purpose-summaries")).thenReturn(false);
@@ -77,8 +75,6 @@ class FilePurposeSummaryServiceTest {
     verify(repo, never()).findByRepoFullNameAndFilePathAndFileSha(any(), any(), any());
   }
 
-  // ── Blank-input protection ───────────────────────────────────────────
-
   @Test
   void nullContent_returnsEmpty() {
     when(featureFlagService.isEnabled("codemap.purpose-summaries")).thenReturn(true);
@@ -99,8 +95,6 @@ class FilePurposeSummaryServiceTest {
     Optional<String> result = svc.summariseFile("owner/repo", null, "code", null);
     assertThat(result).isEmpty();
   }
-
-  // ── Cache hit path ───────────────────────────────────────────────────
 
   @Test
   void cacheHit_returnsStoredSummary_andSkipsLlm() {
@@ -155,8 +149,6 @@ class FilePurposeSummaryServiceTest {
     verify(modelResolver).resolve("FilePurposeSummaryService", LlmProvider.ANTHROPIC);
   }
 
-  // ── SHA stability ────────────────────────────────────────────────────
-
   @Test
   void sha256_deterministic_sameInputSameHash() {
     String a = FilePurposeSummaryService.sha256Hex("hello world");
@@ -186,8 +178,6 @@ class FilePurposeSummaryServiceTest {
     String emojiAgain = FilePurposeSummaryService.sha256Hex("café 🚀");
     assertThat(emoji).isEqualTo(emojiAgain).hasSize(64);
   }
-
-  // ── Truncation guard ─────────────────────────────────────────────────
 
   @Test
   void truncate_keepsShortInputs() {

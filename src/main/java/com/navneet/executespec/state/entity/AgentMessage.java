@@ -35,10 +35,8 @@ public class AgentMessage {
   private Instant sentAt;
   private Integer tokenCost; // approximate tokens consumed by this message
 
-  // ── Tier 4 fields ─────────────────────────────────────────────────────────
   private Boolean fileLockConflict; // true if this message represents a file lock conflict
 
-  // ── Tier 5 fields ─────────────────────────────────────────────────────────
   private String taskId; // null for run-level messages; set for task activity log
 
   @Column(name = "tenant_id", nullable = false)

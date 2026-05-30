@@ -143,7 +143,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     assertThat(infer(null)).isEmpty();
   }
 
-  // ── Multi-repo budget (2026-05-02) ───────────────────────────────────────
+  // Multi-repo budget (2026-05-02)
 
   @Test
   void multiRepo_perRepoBudgetGivesEachRepoEvidence() throws Exception {
@@ -210,7 +210,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     assertThat(picked).hasSize(6);
   }
 
-  // ── Tiered structural detection (2026-05-02 b171fa52 follow-up) ─────────
+  // Tiered structural detection (2026-05-02 b171fa52 follow-up)
 
   @Test
   void multiRepo_structuralDirBeatsTopLevelStructuralFilename() throws Exception {

@@ -54,7 +54,7 @@ public class RunChatTools {
     return List.of(listRunFiles(ctx), readRunFile(ctx));
   }
 
-  // ── Tool 1: list every file in the run workspace ──────────────────────────
+  // Tool 1: list every file in the run workspace
 
   private ToolCallback listRunFiles(ToolContext ctx) {
     ToolDefinition def =
@@ -80,7 +80,7 @@ public class RunChatTools {
         });
   }
 
-  // ── Tool 2: read one file's content ───────────────────────────────────────
+  // Tool 2: read one file's content
 
   private ToolCallback readRunFile(ToolContext ctx) {
     ToolDefinition def =
@@ -132,8 +132,6 @@ public class RunChatTools {
           return out;
         });
   }
-
-  // ── helpers ────────────────────────────────────────────────────────────────
 
   private ObjectNode errorEnvelope(String message) {
     ObjectNode out = json.createObjectNode();

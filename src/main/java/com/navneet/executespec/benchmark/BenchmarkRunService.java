@@ -380,8 +380,6 @@ public class BenchmarkRunService {
     }
   }
 
-  // ── helpers ──
-
   private static boolean isTerminal(String status) {
     return "COMPLETE".equals(status)
         || "FAILED".equals(status)

@@ -151,8 +151,6 @@ class PlannerOutputUtilsValidationTest {
     assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
   }
 
-  // ── helpers ──────────────────────────────────────────────────────────────
-
   private static PlannedTask task(String id, String title, List<String> meetsRequirements) {
     return PlannedTask.builder()
         .id(id)

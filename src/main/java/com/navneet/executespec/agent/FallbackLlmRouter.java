@@ -476,8 +476,6 @@ public class FallbackLlmRouter {
     return new LlmResponse(response, provider, model);
   }
 
-  // ── Retry & metrics helpers ──────────────────────────────────────────────
-
   /** Records token usage counters and observation keys (best-effort, never throws). */
   private void recordTokenMetrics(
       ChatResponse response, String provider, String model, Observation obs) {
@@ -681,8 +679,6 @@ public class FallbackLlmRouter {
     return null;
   }
 
-  // ── Internal ───────────────────────────────────────────────────────────────
-
   /**
    * Builds a provider-specific Prompt augmented with model options and calls it. Looks up the
    * per-run resolved keys from {@link RunKeyStore} and uses a dynamically-built ChatModel if the
@@ -866,8 +862,6 @@ public class FallbackLlmRouter {
     };
   }
 
-  // ── Per-request model builders ─────────────────────────────────────────────
-
   private AnthropicChatModel buildAnthropicModel(String apiKey) {
     AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
     return AnthropicChatModel.builder()
@@ -914,8 +908,6 @@ public class FallbackLlmRouter {
     }
   }
 
-  // ── Chain helpers ───────────────────────────────────────────────────────────
-
   private List<String[]> resolveChain(String model) {
     List<String[]> chain = modelRegistry.fallbackChainFor(model);
     return chain != null && !chain.isEmpty()
@@ -930,7 +922,7 @@ public class FallbackLlmRouter {
     return 0;
   }
 
-  // ── Provider string → enum mapping ─────────────────────────────────────────
+  // Provider string → enum mapping
 
   /** Maps the chain provider string ("anthropic", "gemini", "openai") to LlmProvider enum. */
   private static LlmProvider toLlmProvider(String provider) {
@@ -941,8 +933,6 @@ public class FallbackLlmRouter {
       default -> LlmProvider.valueOf(provider.toUpperCase());
     };
   }
-
-  // ── Rate-limit / overload detection ────────────────────────────────────────
 
   private boolean isPerMinuteRateLimit(Exception e) {
     if (e == null) return false;
@@ -1005,8 +995,6 @@ public class FallbackLlmRouter {
     return false;
   }
 
-  // ── Call counter lifecycle ─────────────────────────────────────────────────
-
   /** Call when a run completes (success or failure) to free memory. */
   public void clearRunCallCounter(String runId) {
     if (runId != null) {
@@ -1022,8 +1010,6 @@ public class FallbackLlmRouter {
     return counter != null ? counter.get() : 0;
   }
 
-  // ── FREE tier model lock ──────────────────────────────────────────────────
-
   /** Register the user's subscription tier for a run. Called by RunOrchestrator at run start. */
   public void setRunUserTier(String runId, String userTier) {
     if (runId != null && userTier != null) {
@@ -1035,8 +1021,6 @@ public class FallbackLlmRouter {
   public String getRunUserTier(String runId) {
     return runId != null ? runUserTierCache.getIfPresent(runId) : null;
   }
-
-  // ── Exceptions ─────────────────────────────────────────────────────────────
 
   public static class ProviderUnavailableException extends RuntimeException {
     public ProviderUnavailableException(String message) {

@@ -61,7 +61,7 @@ class RunCostTrackerCachePricingTest {
         .thenReturn(Optional.of(p));
   }
 
-  // ── Anthropic — input is uncached-only, cache write billed at 1.25× input ─
+  // Anthropic — input is uncached-only, cache write billed at 1.25× input
 
   @Test
   void anthropic_noCacheActivity_costMatchesYaml() throws Exception {
@@ -89,7 +89,7 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(3.75, within(0.001));
   }
 
-  // ── OpenAI — prompt_tokens INCLUDES cached_tokens, so subtract. Cache rate is now $1.25. ─
+  // OpenAI — prompt_tokens INCLUDES cached_tokens, so subtract. Cache rate is now $1.25.
 
   @Test
   void openai_cacheRead_billedAtYaml1_25_perM() throws Exception {
@@ -110,7 +110,7 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(10.0, within(0.001));
   }
 
-  // ── Gemini — same shape as OpenAI. Cache rate = 10% of input (Google's 90% context-cache
+  // Gemini — same shape as OpenAI. Cache rate = 10% of input (Google's 90% context-cache
   // discount, ai.google.dev pricing; corrected from the earlier 25% matrix convention 2026-05-21).
   // ─
 
@@ -136,7 +136,7 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(0.0275, within(0.0001));
   }
 
-  // ── YAML cached rate missing — defensive fallback to 10% of input ─
+  // YAML cached rate missing — defensive fallback to 10% of input
 
   @Test
   void cachedRateMissing_fallsBackToTenPercentOfInput() throws Exception {
@@ -156,7 +156,7 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(2.5 + 0.25, within(0.001));
   }
 
-  // ── No pricing row at all → 0 ─
+  // No pricing row at all → 0
 
   @Test
   void noPricingRow_returnsZero() throws Exception {

@@ -85,8 +85,6 @@ public class WorkspaceRestoreService {
     return workspace;
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────────
-
   private void restoreFromGcs(String runId, String gcsKey, Path workspace) {
     log.info("[WorkspaceRestore] Restoring workspace for run {} from GCS: {}", runId, gcsKey);
 

@@ -98,9 +98,7 @@ public class BillingService {
     return TIER_RANK.getOrDefault(tier, 0);
   }
 
-  // ─────────────────────────────────────────────────────────────
   // LIST PLANS (for pricing page)
-  // ─────────────────────────────────────────────────────────────
 
   public List<PlanResponse> listPlans(String keyMode) {
     return listPlans(keyMode, false);
@@ -140,9 +138,7 @@ public class BillingService {
         .orElse(true); // missing row → default to LISTED so we never over-hide
   }
 
-  // ─────────────────────────────────────────────────────────────
   // CREATE SUBSCRIPTION
-  // ─────────────────────────────────────────────────────────────
 
   public SubscriptionInitResult subscribe(String userId, UUID planId) {
     return subscribe(userId, planId, null, null, null, 1);
@@ -360,9 +356,7 @@ public class BillingService {
     return result;
   }
 
-  // ─────────────────────────────────────────────────────────────
   // VERIFY PAYMENT (post-checkout callback)
-  // ─────────────────────────────────────────────────────────────
 
   public BillingStatusResponse verifyAndActivate(String userId, VerifyPaymentRequest request) {
     if (!razorpayGateway.verifyPayment(request)) {
@@ -446,9 +440,7 @@ public class BillingService {
     return getStatus(userId);
   }
 
-  // ─────────────────────────────────────────────────────────────
   // CANCEL SUBSCRIPTION
-  // ─────────────────────────────────────────────────────────────
 
   public void cancel(String userId) {
     BillingSubscription sub =
@@ -506,9 +498,7 @@ public class BillingService {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
   // UPDATE SEATS (Pro tier only, takes effect next cycle)
-  // ─────────────────────────────────────────────────────────────
 
   public BillingStatusResponse updateSeats(String userId, int newTotalSeats) {
     BillingSubscription sub =
@@ -537,9 +527,7 @@ public class BillingService {
     return getStatus(userId);
   }
 
-  // ─────────────────────────────────────────────────────────────
   // GET BILLING STATUS
-  // ─────────────────────────────────────────────────────────────
 
   @Transactional(readOnly = true)
   public BillingStatusResponse getStatus(String userId) {
@@ -644,9 +632,7 @@ public class BillingService {
     return new BillingStatusResponse(subInfo, planResponse, adjustedUsage, bonusRunsInfo, spentUsd);
   }
 
-  // ─────────────────────────────────────────────────────────────
   // WEBHOOK PROCESSING
-  // ─────────────────────────────────────────────────────────────
 
   public void processRazorpayWebhook(String rawPayload, String signature) {
     // 1. Verify signature
@@ -811,9 +797,7 @@ public class BillingService {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
   // ORDER PAYMENT WEBHOOK (top-up purchases)
-  // ─────────────────────────────────────────────────────────────
 
   private void handleOrderPaymentWebhook(String eventType, String entityId, JsonNode payload) {
     // Extract order_id from the payload
@@ -876,9 +860,7 @@ public class BillingService {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
   // STRIPE WEBHOOK PROCESSING
-  // ─────────────────────────────────────────────────────────────
 
   /**
    * Process a validated Stripe webhook event. Called by BillingWebhookController after signature
@@ -1132,9 +1114,7 @@ public class BillingService {
         sub.getUserId());
   }
 
-  // ─────────────────────────────────────────────────────────────
   // TIER BRIDGE (billing → existing auth system)
-  // ─────────────────────────────────────────────────────────────
 
   private void upgradeTier(String userId, String orgId, BillingPlan plan) {
     AppUser user = userRepo.findById(userId).orElseThrow();
@@ -1353,9 +1333,7 @@ public class BillingService {
         user.getEmail(), downgradedPlan != null ? downgradedPlan.getName() : "");
   }
 
-  // ─────────────────────────────────────────────────────────────
   // HELPERS
-  // ─────────────────────────────────────────────────────────────
 
   /**
    * Deactivate any existing FREE subscription for this user so that the new paid subscription can

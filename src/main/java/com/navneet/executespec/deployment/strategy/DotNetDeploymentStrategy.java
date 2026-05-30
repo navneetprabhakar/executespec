@@ -83,8 +83,6 @@ public class DotNetDeploymentStrategy implements DeploymentStrategy {
     return ".NET project detected (assembly: %s)".formatted(detectAssemblyName(workspacePath));
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   private String detectAssemblyName(Path workspacePath) {
     // Try to find a .csproj file
     try (Stream<Path> files = Files.list(workspacePath)) {

@@ -32,8 +32,6 @@ public class InvoiceService {
   private final GstCalculationService gstService;
   private final AccountingService accountingService;
 
-  // ── Public API ────────────────────────────────────────────────────────────
-
   @Transactional
   public Invoice generateSubscriptionInvoice(
       BillingSubscription sub, BillingPlan plan, String paymentId) {
@@ -326,8 +324,6 @@ public class InvoiceService {
     invoice.setStatus("VOID");
     return invoiceRepo.save(invoice);
   }
-
-  // ── Private ───────────────────────────────────────────────────────────────
 
   private Invoice buildInvoice(
       String userId,

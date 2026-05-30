@@ -108,8 +108,6 @@ public class ProjectChatTools {
         getTechDebtSummary(ctx));
   }
 
-  // ── Tool 1: regenerate architecture ───────────────────────────────────────
-
   private ToolCallback regenerateArchitecture(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -155,7 +153,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 2: generate project doc ──────────────────────────────────────────
+  // Tool 2: generate project doc
 
   private ToolCallback generateProjectDoc(ToolContext ctx) {
     ToolDefinition def =
@@ -220,8 +218,6 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 3: list repos ────────────────────────────────────────────────────
-
   private ToolCallback listRepos(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
@@ -260,7 +256,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 4: list recent runs ──────────────────────────────────────────────
+  // Tool 4: list recent runs
 
   private ToolCallback listRecentRuns(ToolContext ctx) {
     ToolDefinition def =
@@ -312,7 +308,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 5: list pull requests ────────────────────────────────────────────
+  // Tool 5: list pull requests
 
   private ToolCallback listPullRequests(ToolContext ctx) {
     ToolDefinition def =
@@ -388,7 +384,7 @@ public class ProjectChatTools {
     return row;
   }
 
-  // ── Tool 6: get project memory ────────────────────────────────────────────
+  // Tool 6: get project memory
 
   private ToolCallback getProjectMemory(ToolContext ctx) {
     ToolDefinition def =
@@ -411,7 +407,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 7: get latest architecture ───────────────────────────────────────
+  // Tool 7: get latest architecture
 
   private ToolCallback getLatestArchitecture(ToolContext ctx) {
     ToolDefinition def =
@@ -473,8 +469,6 @@ public class ProjectChatTools {
       return Optional.empty();
     }
   }
-
-  // ── helpers ──────────────────────────────────────────────────────────────
 
   private static int clampLimit(JsonNode args, int dflt, int max) {
     if (args == null || !args.has("limit") || args.get("limit").isNull()) return dflt;
@@ -548,7 +542,7 @@ public class ProjectChatTools {
         .orElseThrow(() -> new IllegalArgumentException("project not found: " + ctx.projectId()));
   }
 
-  // ── Tool 8: run code review (whole-repo Code Review Agent) ───────────────
+  // Tool 8: run code review (whole-repo Code Review Agent)
 
   private ToolCallback runCodeReview(ToolContext ctx) {
     ToolDefinition def =
@@ -626,7 +620,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 9: get latest code review ──────────────────────────────────────
+  // Tool 9: get latest code review
 
   private ToolCallback getLatestCodeReview(ToolContext ctx) {
     ToolDefinition def =
@@ -693,7 +687,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 10: list project documents (uploaded + generated) ───────────────
+  // Tool 10: list project documents (uploaded + generated)
 
   private ToolCallback listProjectDocuments(ToolContext ctx) {
     ToolDefinition def =
@@ -746,7 +740,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 11: read a generated doc (EXPLANATION / SETUP) verbatim ──────────
+  // Tool 11: read a generated doc (EXPLANATION / SETUP) verbatim
 
   private ToolCallback readGeneratedDoc(ToolContext ctx) {
     ToolDefinition def =
@@ -809,7 +803,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 12: semantic search over uploaded reference docs ────────────────
+  // Tool 12: semantic search over uploaded reference docs
 
   private ToolCallback searchProjectDocs(ToolContext ctx) {
     ToolDefinition def =
@@ -861,7 +855,7 @@ public class ProjectChatTools {
         });
   }
 
-  // ── Tool 13: tech-debt summary (read-only suggestion grounding) ───────────
+  // Tool 13: tech-debt summary (read-only suggestion grounding)
 
   private ToolCallback getTechDebtSummary(ToolContext ctx) {
     ToolDefinition def =

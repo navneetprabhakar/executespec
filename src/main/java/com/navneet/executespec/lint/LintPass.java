@@ -75,8 +75,6 @@ public class LintPass {
     return new LintReport(results, filesChanged, false, null);
   }
 
-  // ── Detection ─────────────────────────────────────────────────────────
-
   private Set<Tool> detect(Path workspace) {
     Set<Tool> tools = EnumSet.noneOf(Tool.class);
     if (hasPrettierConfig(workspace) || Files.exists(workspace.resolve("package.json"))) {
@@ -108,8 +106,6 @@ public class LintPass {
         || Files.exists(workspace.resolve(".prettierrc.yaml"))
         || Files.exists(workspace.resolve("prettier.config.js"));
   }
-
-  // ── Per-tool dispatch ─────────────────────────────────────────────────
 
   private ToolResult applyOne(Path workspace, Tool tool) {
     long beforeMtime = walkLatestMtime(workspace);
@@ -159,8 +155,6 @@ public class LintPass {
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────
-
   /** Recursive max-mtime walk capped at 5K files (defensive against huge node_modules trees). */
   private static long walkLatestMtime(Path workspace) {
     final long[] max = {0L};
@@ -197,7 +191,8 @@ public class LintPass {
               return java.nio.file.FileVisitResult.CONTINUE;
             }
           });
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      log.warn("[LintPass] mtime scan of {} failed: {}", workspace, e.toString());
     }
     return max[0];
   }
@@ -233,7 +228,8 @@ public class LintPass {
               return java.nio.file.FileVisitResult.CONTINUE;
             }
           });
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      log.warn("[LintPass] touched-file scan of {} failed: {}", workspace, e.toString());
     }
     return count[0];
   }
@@ -275,8 +271,6 @@ public class LintPass {
     if (s == null) return "";
     return s.length() <= max ? s : s.substring(0, max) + "…";
   }
-
-  // ── Public types ──────────────────────────────────────────────────────
 
   public enum Tool {
     PRETTIER,

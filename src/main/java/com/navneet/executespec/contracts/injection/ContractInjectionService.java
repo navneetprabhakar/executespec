@@ -83,8 +83,6 @@ public class ContractInjectionService {
     return fullBodyThreshold;
   }
 
-  // ── Internals ───────────────────────────────────────────────────────────
-
   List<ContractRegistry> listContractsForProject(String projectId) {
     // Project's contracts = (a) every contract whose producing repo is
     // linked to the project + (b) every contract that has a declared

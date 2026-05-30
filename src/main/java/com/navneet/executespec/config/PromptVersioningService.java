@@ -41,8 +41,6 @@ public class PromptVersioningService {
   private final PromptAuditRepository auditRepository;
   private final MeterRegistry meterRegistry;
 
-  // ── Backup ───────────────────────────────────────────────────────────────
-
   /**
    * Saves a versioned backup of the current prompt file before applying an optimisation. Creates
    * {@code <stem>.v<version>.txt} in the same directory.
@@ -68,8 +66,6 @@ public class PromptVersioningService {
     }
   }
 
-  // ── Auto-rollback ────────────────────────────────────────────────────────
-
   /**
    * Called after each run outcome is recorded. Checks if the latest optimisation for any prompt has
    * degraded output beyond the threshold and rolls back if so.
@@ -91,8 +87,6 @@ public class PromptVersioningService {
             });
   }
 
-  // ── Manual rollback ──────────────────────────────────────────────────────
-
   /**
    * Reverts the named prompt to the content stored in its latest audit entry (i.e. the content
    * before the last optimisation was applied).
@@ -110,8 +104,6 @@ public class PromptVersioningService {
             })
         .orElse(false);
   }
-
-  // ── Internal ─────────────────────────────────────────────────────────────
 
   private void rollback(PromptAuditEntry entry, String trigger) {
     Path promptPath = resolvePromptPath(entry.getPromptFile());

@@ -60,8 +60,6 @@ class TierEnforcementServiceProjectLimitsTest {
             linkRepo);
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────
-
   private AppUser user(String id, String role, String tier, String orgId) {
     AppUser u = new AppUser();
     u.setId(id);
@@ -93,8 +91,6 @@ class TierEnforcementServiceProjectLimitsTest {
   private Project project(String id, String orgId) {
     return Project.builder().id(id).orgId(orgId).name("Test").createdBy("u1").build();
   }
-
-  // ── assertCanCreateProject ───────────────────────────────────────────
 
   @Nested
   class CanCreateProject {
@@ -185,8 +181,6 @@ class TierEnforcementServiceProjectLimitsTest {
     }
   }
 
-  // ── assertCanLinkRepoToProject ───────────────────────────────────────
-
   @Nested
   class CanLinkRepoToProject {
 
@@ -264,8 +258,6 @@ class TierEnforcementServiceProjectLimitsTest {
           .isEqualTo(HttpStatus.NOT_FOUND);
     }
   }
-
-  // ── tier resolution edge cases ───────────────────────────────────────
 
   @Nested
   class TierResolution {

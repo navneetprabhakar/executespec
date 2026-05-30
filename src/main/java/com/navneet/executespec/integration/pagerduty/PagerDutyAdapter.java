@@ -38,12 +38,20 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
     return "PAGERDUTY";
   }
 
-  // ── Inbound ───────────────────────────────────────────────────────────────
-
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
+    // Fail CLOSED: a missing secret OR a missing signature header must NOT bypass verification.
+    // The old `signatureHeader == null || secret == null) return;` let an attacker simply omit
+    // the x-pagerduty-signature header to skip the HMAC check entirely. C8 — audit 2026-05-29.
+    if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) {
+      throw new WebhookSignatureException(
+          "PagerDuty webhook: configure agent.integrations.pagerduty.webhook-secret to enable"
+              + " inbound webhooks");
+    }
     String signatureHeader = headers.get("x-pagerduty-signature");
-    if (signatureHeader == null || config.getWebhookSecret() == null) return;
+    if (signatureHeader == null || signatureHeader.isBlank()) {
+      throw new WebhookSignatureException("PagerDuty webhook signature header missing");
+    }
 
     // Header format: "v1=<hex_hash>"
     String expected = signatureHeader.replace("v1=", "");
@@ -122,8 +130,6 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
       return Optional.empty();
     }
   }
-
-  // ── Outbound ──────────────────────────────────────────────────────────────
 
   @Override
   public void onRunStarted(IntegrationRun ir, PipelineRun run) {

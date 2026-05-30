@@ -43,7 +43,7 @@ function scoreColor(score?: number | null): string {
   return 'var(--ide-red)';
 }
 
-// ───────────────────────── All runs (list) ─────────────────────────
+// All runs (list)
 export function IdeRuns() {
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
@@ -248,7 +248,6 @@ export function IdeRuns() {
   );
 }
 
-// ───────────────────────── Account / settings ─────────────────────────
 export function IdeAccount() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -807,7 +806,7 @@ export function IdeAccount() {
   );
 }
 
-// ───────────────────────── Deployments (list + lifecycle) ─────────────────────────
+// Deployments (list + lifecycle)
 // Permanent Cloud Run deployments promoted from runs. Mirrors the Signal
 // DeploymentsPage (list + rollback + delete); the deploy itself is initiated
 // from a run's result page ("Deploy to Cloud Run").

@@ -104,8 +104,6 @@ public class BillingWebhookController {
     return ResponseEntity.ok().build();
   }
 
-  // ── Webhook event logging ────────────────────────────────────────────────
-
   private void logWebhookEvent(
       String gateway, String eventId, String eventType, String rawPayload) {
     try {

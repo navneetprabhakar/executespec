@@ -79,7 +79,6 @@ public class PostEditFormatter {
     // We aim the formatter at directory roots (not individual files) so it can resolve project-
     // local config (.pyproject.toml, .prettierrc, etc).
 
-    // ── Python via black ───────────────────────────────────────────────
     if (hasFiles(workspace, ".py") && isOnPath("black")) {
       java.util.List<Path> pyRoots = pythonRoots(workspace);
       for (Path root : pyRoots) {
@@ -93,7 +92,6 @@ public class PostEditFormatter {
       }
     }
 
-    // ── JS/TS via prettier ─────────────────────────────────────────────
     if ((hasFiles(workspace, ".js")
             || hasFiles(workspace, ".jsx")
             || hasFiles(workspace, ".ts")
@@ -123,7 +121,6 @@ public class PostEditFormatter {
       }
     }
 
-    // ── Go via gofmt ───────────────────────────────────────────────────
     if (hasFiles(workspace, ".go") && isOnPath("gofmt")) {
       try {
         int n = invokeFormatter(runId, "gofmt", workspace, List.of("-w", workspace.toString()));
@@ -142,8 +139,6 @@ public class PostEditFormatter {
         errors);
     return new Result(totalReformatted, formatters, errors);
   }
-
-  // ── Helpers ────────────────────────────────────────────────────────────
 
   /**
    * Returns true if at least one file with the given extension exists in {@code workspace} (skips

@@ -128,7 +128,6 @@ public final class TestOutputParser {
     return Optional.of(summary(pass + fail, pass, fail, 0, 0));
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────
   private static Integer firstInt(Pattern p, String s) {
     Matcher m = p.matcher(s);
     return m.find() ? Integer.parseInt(m.group(1)) : null;

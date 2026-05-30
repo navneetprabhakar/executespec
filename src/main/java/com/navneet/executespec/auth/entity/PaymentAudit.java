@@ -51,7 +51,6 @@ public class PaymentAudit {
   @Column(columnDefinition = "TEXT")
   private String notes;
 
-  // ── V55 expansion fields ──
   @Column(name = "gateway_provider", length = 20)
   private String gatewayProvider;
 

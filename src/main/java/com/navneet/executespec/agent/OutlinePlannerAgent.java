@@ -405,8 +405,6 @@ public class OutlinePlannerAgent {
     return plan;
   }
 
-  // ─── tool definition ────────────────────────────────────────────────────
-
   private ToolCallback buildSubmitOutlineCallback(Mode mode) {
     String description =
         (mode == Mode.SKELETON_ONLY)
@@ -501,8 +499,6 @@ public class OutlinePlannerAgent {
       }
     };
   }
-
-  // ─── helpers ────────────────────────────────────────────────────────────
 
   private String loadPrompt(String path) {
     try {

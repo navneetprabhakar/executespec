@@ -155,7 +155,6 @@ public class SmartClassifierAgent {
       String projectType,
       LlmProvider aiProvider,
       String projectMemorySnippet) {
-    // ── Cache lookup ─────────────────────────────────────────────────────
     String cacheKey = cacheKey(spec, repoFullNames, projectId);
     if (cacheKey != null) {
       try {
@@ -179,7 +178,6 @@ public class SmartClassifierAgent {
 
     int repoCount = repoFullNames == null ? 1 : Math.max(1, repoFullNames.size());
 
-    // ── Heuristic ───────────────────────────────────────────────────────
     HeuristicVerdict heuristic = runHeuristic(spec, repoCount);
 
     // Heuristic fast path — only when the heuristic is confidently SINGLE_SHOT.
@@ -201,7 +199,6 @@ public class SmartClassifierAgent {
       return result;
     }
 
-    // ── LLM verifier ────────────────────────────────────────────────────
     ClassificationResult verified =
         invokeLlmVerifier(
             spec,
@@ -215,9 +212,7 @@ public class SmartClassifierAgent {
     return verified;
   }
 
-  // ──────────────────────────────────────────────────────────────────────
   // Heuristic
-  // ──────────────────────────────────────────────────────────────────────
 
   private record HeuristicVerdict(PlanStrategy strategy, boolean fastPath, String reasoning) {}
 
@@ -285,9 +280,7 @@ public class SmartClassifierAgent {
         PlanStrategy.LARGE, false, ">2000 chars → at least LARGE (LLM may upgrade to LEGACY)");
   }
 
-  // ──────────────────────────────────────────────────────────────────────
   // LLM verifier
-  // ──────────────────────────────────────────────────────────────────────
 
   private ClassificationResult invokeLlmVerifier(
       String spec,
@@ -536,9 +529,7 @@ public class SmartClassifierAgent {
         0.0);
   }
 
-  // ──────────────────────────────────────────────────────────────────────
   // Cache helpers
-  // ──────────────────────────────────────────────────────────────────────
 
   private static String cacheKey(String spec, List<String> repoFullNames, String projectId) {
     if (spec == null) return null;

@@ -1,5 +1,6 @@
 package com.navneet.executespec.auth.controller;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,10 +24,10 @@ import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.UserDataExportService;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -49,7 +50,14 @@ public class AuthController {
   private final PersonalAccessTokenService personalAccessTokenService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
-  private final PasswordEncoder passwordEncoder;
+
+  /**
+   * Whether the refresh-token cookie carries the {@code Secure} attribute (HTTPS-only). Default
+   * {@code false} so local HTTP dev keeps working; the dev/prod profiles set it {@code true} (both
+   * served over HTTPS behind Cloudflare). C1 — audit 2026-05-29.
+   */
+  @Value("${auth.refresh-cookie.secure:false}")
+  private boolean refreshCookieSecure;
 
   @PostMapping("/register")
   public ResponseEntity<UserDto> register(@Valid @RequestBody RegisterRequest req) {
@@ -192,7 +200,7 @@ public class AuthController {
         .body(bundle.zipBytes());
   }
 
-  // ── Personal Access Tokens (programmatic auth for CLI / VS Code / CI) ──────
+  // Personal Access Tokens (programmatic auth for CLI / VS Code / CI)
 
   /**
    * Create a Personal Access Token for the authenticated user. The plaintext credential is returned
@@ -233,8 +241,6 @@ public class AuthController {
         userDetails.getUser(), "USER_PAT_REVOKED", "{\"tokenId\":\"" + tokenId + "\"}");
     return ResponseEntity.noContent().build();
   }
-
-  // ── GitHub settings ───────────────────────────────────────────────────────
 
   record GitHubSettingsRequest(String githubPat, String githubOwner) {}
 
@@ -300,8 +306,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── Bitbucket settings ─────────────────────────────────────────────────────
-
   record BitbucketSettingsRequest(
       String bitbucketUsername,
       String bitbucketAppPassword,
@@ -339,8 +343,6 @@ public class AuthController {
 
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── AI provider key settings ─────────────────────────────────────────────
 
   record AiKeySettingsRequest(String openAiApiKey, String anthropicApiKey, String geminiApiKey) {}
 
@@ -380,8 +382,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── JIRA settings ─────────────────────────────────────────────────────────
-
   record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
 
   @PutMapping("/settings/jira")
@@ -409,8 +409,6 @@ public class AuthController {
 
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── Confluence settings ───────────────────────────────────────────────────
 
   record ConfluenceSettingsRequest(
       String confluenceBaseUrl, String confluenceEmail, String confluenceApiToken) {}
@@ -442,8 +440,6 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  // ── View mode settings ─────────────────────────────────────────────────────
-
   record ViewModeRequest(String viewMode) {}
 
   @PutMapping("/settings/view-mode")
@@ -460,8 +456,6 @@ public class AuthController {
     log.info("User {} updated view mode to {}", user.getId(), mode);
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
-
-  // ── Validation endpoints ──────────────────────────────────────────────────
 
   record ValidateGitHubRequest(String pat, String owner) {}
 
@@ -612,8 +606,6 @@ public class AuthController {
   private static final HttpClient HTTP_CLIENT =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
   }
@@ -638,6 +630,10 @@ public class AuthController {
       Map<String, String> headers,
       String successMessage,
       String failureMessageTemplate) {
+    if (isDisallowedTarget(url)) {
+      return ResponseEntity.ok(
+          new ValidationResult(false, "Connection target is not an allowed external address"));
+    }
     try {
       HttpRequest.Builder reqBuilder =
           HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET();
@@ -654,21 +650,57 @@ public class AuthController {
     }
   }
 
+  /**
+   * SSRF guard for {@link #validateExternalConnection}: the JIRA/Confluence validators build the
+   * target from a user-supplied base URL, so an authenticated user could otherwise point us at
+   * {@code http://169.254.169.254/…} (cloud metadata) or an internal host. Require HTTPS and reject
+   * any host that resolves to a loopback / link-local / private / CGNAT / unique-local address.
+   * Returns {@code true} when the URL must NOT be fetched. C1 — audit 2026-05-29.
+   */
+  private static boolean isDisallowedTarget(String url) {
+    try {
+      URI uri = URI.create(url);
+      String scheme = uri.getScheme();
+      if (scheme == null || !scheme.equalsIgnoreCase("https")) {
+        return true;
+      }
+      String host = uri.getHost();
+      if (host == null || host.isBlank()) {
+        return true;
+      }
+      for (InetAddress addr : InetAddress.getAllByName(host)) {
+        if (addr.isAnyLocalAddress()
+            || addr.isLoopbackAddress()
+            || addr.isLinkLocalAddress()
+            || addr.isSiteLocalAddress()
+            || addr.isMulticastAddress()) {
+          return true;
+        }
+        byte[] b = addr.getAddress();
+        if (b.length == 4) {
+          int b0 = b[0] & 0xff;
+          int b1 = b[1] & 0xff;
+          if (b0 == 100 && b1 >= 64 && b1 <= 127) {
+            return true; // 100.64.0.0/10 carrier-grade NAT
+          }
+        } else if (b.length == 16 && (b[0] & 0xfe) == 0xfc) {
+          return true; // fc00::/7 IPv6 unique-local
+        }
+      }
+      return false;
+    } catch (Exception e) {
+      return true; // unparseable / unresolvable → do not fetch
+    }
+  }
+
   private void setRefreshCookie(HttpServletResponse response, String refreshToken) {
     Cookie cookie = new Cookie("refresh_token", refreshToken);
     cookie.setHttpOnly(true);
-    cookie.setSecure(false); // set true in production (HTTPS)
+    cookie.setSecure(refreshCookieSecure); // HTTPS-only in the dev/prod profiles (C1)
     cookie.setPath("/api/auth");
     cookie.setMaxAge(REFRESH_COOKIE_MAX_AGE_SECONDS);
     response.addCookie(cookie);
   }
-
-  @GetMapping("generate")
-  public String generate(@RequestParam(name = "password") String password) {
-    return passwordEncoder.encode(password);
-  }
-
-  // ── GDPR right-to-erasure ─────────────────────────────────────────────────
 
   /**
    * Soft-deletes all completed/failed runs belonging to the authenticated user. Active runs

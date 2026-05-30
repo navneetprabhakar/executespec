@@ -231,7 +231,6 @@ export function CodeReviewPanel({
   const inProgress = scanning || (scan != null && !TERMINAL.has(scan.status));
   const progressStatus = progress ?? scan?.status ?? null;
 
-  // ── shared bits ──────────────────────────────────────────────────────────
   const muted = ide ? 'var(--ide-fg-muted)' : 'var(--signal-text-dim)';
   const bright = ide ? 'var(--ide-fg-bright)' : 'inherit';
 
@@ -320,7 +319,7 @@ export function CodeReviewPanel({
     );
   }
 
-  // ── header card (scan status + counts + actions) ──────────────────────────
+  // header card (scan status + counts + actions)
   const summaryCounts = SEVERITY_ORDER.map((s) => grouped[s].length);
   const totalOpen = summaryCounts.reduce((a, b) => a + b, 0);
   const clean = isComplete && totalOpen === 0;
@@ -423,7 +422,6 @@ export function CodeReviewPanel({
     </>
   );
 
-  // ── severity-grouped issue list ───────────────────────────────────────────
   function IssueGroup({sev}: {sev: Severity}) {
     const list = grouped[sev];
     if (list.length === 0) return null;
@@ -539,7 +537,6 @@ export function CodeReviewPanel({
     );
   }
 
-  // ── render ─────────────────────────────────────────────────────────────────
   const emptyClass = ide ? 'ide-empty' : '';
   const cardClass = ide ? 'ide-card' : 'signal-card';
 

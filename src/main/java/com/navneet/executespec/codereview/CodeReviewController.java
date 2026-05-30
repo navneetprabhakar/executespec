@@ -46,8 +46,6 @@ public class CodeReviewController {
   private final ProjectAccessGuard projectAccessGuard;
   private final CodeReviewAutofixService autofixService;
 
-  // ── Submit / fetch ─────────────────────────────────────────────────────────
-
   public record SubmitCodeReviewRequest(String projectId, UUID repoId, String repoFullName) {}
 
   /** Kick off a scan. Returns a 202 with the QUEUED row. */
@@ -206,8 +204,6 @@ public class CodeReviewController {
     if (sha == null) return "none";
     return sha.length() <= 7 ? sha : sha.substring(0, 7);
   }
-
-  // ── DTOs ───────────────────────────────────────────────────────────────────
 
   public record CodeReviewScanDto(
       UUID id,
