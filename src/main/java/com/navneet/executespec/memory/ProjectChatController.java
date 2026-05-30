@@ -8,6 +8,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -33,6 +34,7 @@ public class ProjectChatController {
 
   private final ProjectChatService chatService;
   private final ProjectRepository projectRepo;
+  private final ProjectMemberRepository projectMemberRepo;
   private final OrgRepository orgRepo;
   private final TierConfigRepository tierConfigRepo;
   // 2026-05-02 — drive the chat header's context-window chip from the actual resolved model
@@ -151,7 +153,12 @@ public class ProjectChatController {
         projectRepo
             .findById(projectId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
-    if (!Objects.equals(project.getOrgId(), user.getOrgId())) {
+    // RL-2026-05-056 — honour V175 cross-org ProjectMember access (consistent with
+    // ProjectAccessGuard.assertCanRead). A cross-org invitee reaches the project via a
+    // ProjectMember row, not org match; the old org-only check 403'd them out of project chat.
+    boolean orgMatch = Objects.equals(project.getOrgId(), user.getOrgId());
+    boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, user.getId());
+    if (!orgMatch && !isMember) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
     }
     String orgId = user.getOrgId();
