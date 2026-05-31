@@ -14,7 +14,7 @@
 | `src/index.ts` | 76 | **Entry point** (carries the `#!/usr/bin/env node` shebang). Parses `argv`, handles `--version`/`--help`, builds the core client (`createClient({host})` — host from `--host` or `$EXECUTESPEC_HOST`), and dispatches the first positional to the `auth` or `run` command group. Top-level rejection → stderr + `process.exit(1)`. |
 | `src/args.ts` | 65 | Zero-dependency argv parser. Splits positionals vs `--flag` / `--flag=value`; `--` ends flag parsing (passthrough). `BOOLEAN_FLAGS` (`watch`/`yes`/`json`/`tdd`/`local`/`help`/`version`/`skip-approval`) never consume the next token, so `--yes "spec"` keeps the positional. Accessors `flagStr` / `flagBool` / `flagNum`. |
 | `src/ui.ts` | 51 | Terminal I/O. ANSI color helpers (`bold`/`dim`/`red`/`green`/`yellow`/`cyan`, gated on `stdout.isTTY` + `NO_COLOR`); `out` / `errln` / `printJson`; `prompt` / `confirm` over `node:readline/promises`; `errorMessage` (unwraps `ApiError` to `msg (HTTP nnn)`). |
-| `src/commands/auth.ts` | 66 | `auth login [--token]` (store the PAT via the core `TokenStore`, then verify by calling `/auth/me`; clears on failure), `auth status [--json]`, `auth logout`. |
+| `src/commands/auth.ts` | 90 | `auth login` — **gcloud-style browser sign-in** by default (`core.loopbackLogin`); `--token` pastes a PAT, `--no-browser` prompts for a paste. Stores via the core `TokenStore` + verifies `/auth/me` (clears on failure). `auth status [--json]`, `auth logout`. |
 | `src/commands/run.ts` | 385 | The run surface: `submit` / `watch` / `list` / `view` / `approve` / `reject` / `cancel` / `report` + experimental **`local`**. Owns the watch loop (consumes `streamRunEvents`, renders each event, prompts `[y/N]` on `GATE_OPENED`, breaks on terminal), the `RunRequest` assembly from flags, the final run-detail print, and the local-hands driver (`LocalExecutionSession` + `ToolRuntime` with a per-command permission prompt). |
 
 ## Module graph
@@ -33,7 +33,7 @@ Only runtime dependency is `@executespec/core`. No other npm runtime deps (dev: 
 
 | CLI command | core call(s) |
 | --- | --- |
-| `auth login/status` | `tokens.set/get`, `api.me()` |
+| `auth login/status` | `loopbackLogin` (browser) · `tokens.set/get` · `api.me()` |
 | `run submit` | `api.submitRun(RunRequest)` (+ `streamRunEvents` if `--watch`) |
 | `run watch` | `streamRunEvents` (+ `api.approve` on gate) |
 | `run list` / `view` / `report` | `api.listRuns` / `getRun` / `getReport` |
