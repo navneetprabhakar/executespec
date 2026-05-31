@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and override as needed. All have sensible defaults.
+#
+# project_id   = "executespecv1"
+# region       = "us-east4"
+# zone         = "us-east4-a"
+# machine_type = "e2-standard-16"   # bump to e2-standard-32 for more parallel containers
+# disk_size_gb = 1000               # ~600 GB images + headroom for the full 300
+# disk_type    = "pd-ssd"           # "pd-balanced" to shave a few $
+# use_spot     = false              # true = cheaper but preemptible
+
+# Add your own IP for direct (non-IAP) SSH — keep the IAP range too:
+# ssh_source_ranges = ["35.235.240.0/20", "YOUR.IP.ADDR.0/32"]
