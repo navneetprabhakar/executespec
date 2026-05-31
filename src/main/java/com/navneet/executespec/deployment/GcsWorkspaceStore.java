@@ -70,6 +70,14 @@ public class GcsWorkspaceStore {
               + "Run 'gcloud auth application-default login' to fix. "
               + "Workspace archiving disabled until credentials are refreshed.",
           e.getMessage());
+      // RL-2026-05-059 — the bucket-existence probe (s.get(bucket)) runs a NETWORK call that throws
+      // on expired ADC (invalid_rapt). `s` is already the (broken) client at that point, so without
+      // this reset `storage` stays non-null and every run-end upload re-attempts + hangs on the
+      // dead
+      // creds (observed: 20-min benchmark instances). The catch's own log says archiving is
+      // disabled
+      // — make that true so isConfigured() reports false and callers skip the zip+upload entirely.
+      s = null;
     }
     this.storage = s;
   }

@@ -2,6 +2,7 @@ package com.navneet.executespec.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -504,5 +505,125 @@ class WorkerAgentStagnationTest {
         "When the worker already wrote at least one file, stagnation force should NOT trigger"
             + " salvage — the prior write is the user's actual artefact and a salvage guess"
             + " could clobber it. Outcome stays COMPLETED_BY_STAGNATION.");
+  }
+
+  /**
+   * Per-task builder for the RL-2026-05-059 forced-tool-choice salvage tests. Sets {@code
+   * forceToolChoiceOnSalvage} explicitly so we can A/B the flag.
+   */
+  private static WorkerTaskRequest reqSalvage(int maxIter, boolean force, String provider) {
+    return WorkerTaskRequest.builder()
+        .provider(provider)
+        .model(
+            "deepseek".equals(provider) ? "deepseek-v4-flash-native" : "claude-haiku-4-5-20251001")
+        .systemPrompt("system")
+        .userPrompt("do thing")
+        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-salvage")))
+        .maxIterations(maxIter)
+        .temperature(0.0)
+        .maxTokensPerCall(4096)
+        .forceToolChoiceOnSalvage(force)
+        .build();
+  }
+
+  /**
+   * 2026-05-30 (RL-2026-05-059) — the deep-dive on the native-DeepSeek mixed10 eval found 4/10 runs
+   * produced ZERO edits across 18 iters and the Lever-B salvage NEVER rescued them: the salvage
+   * call returned a reasoning-only (tool-less) response and fell through to an empty patch. The
+   * fix: when {@code worker.salvage-force-tool-choice.enabled} is ON, the salvage call sets {@code
+   * tool_choice="required"} (+ restricts the tool set) so the model MUST emit a tool call. This
+   * pins that the flag drives the salvage call's tool-choice and that in-loop calls are untouched.
+   */
+  @Test
+  void salvage_with_flag_on_forces_tool_choice_required_on_the_salvage_call() {
+    // 12 readFile (force stagnation, zero writes) + 1 writeFile (the forced salvage succeeds).
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(reqSalvage(40, true, "deepseek"));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "A forced salvage that emits a writeFile should rescue the task → COMPLETED.");
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    List<LlmRequest> reqs = cap.getAllValues();
+    LlmRequest salvageReq = reqs.get(reqs.size() - 1); // salvage is the final call
+    assertEquals(
+        "required",
+        salvageReq.toolChoice(),
+        "With the flag ON, the salvage call MUST set tool_choice=required so a reasoning-only"
+            + " response can't silently fail the salvage.");
+    for (int i = 0; i < reqs.size() - 1; i++) {
+      assertNull(
+          reqs.get(i).toolChoice(),
+          "In-loop worker calls must keep tool_choice=auto (null); only the salvage forces it.");
+    }
+  }
+
+  /** Companion: with the flag OFF, NO call (in-loop or salvage) sets tool_choice. */
+  @Test
+  void salvage_with_flag_off_keeps_tool_choice_auto_everywhere() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(reqSalvage(40, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    for (LlmRequest r : cap.getAllValues()) {
+      assertNull(
+          r.toolChoice(),
+          "With the flag OFF, the salvage (and every in-loop call) keeps tool_choice=auto.");
+    }
+  }
+
+  /**
+   * Robustness: when the forced salvage attempt returns a tool-less response (a provider that emits
+   * reasoning-only text, OR one that rejected tool_choice=required), the worker falls back to a
+   * second salvage attempt with tool_choice=auto so it never REGRESSES the salvage that works
+   * today.
+   */
+  @Test
+  void salvage_forced_attempt_with_no_tool_falls_back_to_auto_attempt() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    // Forced attempt: reasoning-only, no tool call.
+    AssistantMessage toolless = AssistantMessage.builder().content("I think the fix is...").build();
+    seq.add(new ChatResponse(List.of(new Generation(toolless))));
+    // Auto fallback attempt: emits the writeFile.
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(reqSalvage(40, true, "deepseek"));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "When the forced salvage returns no tool, the worker must fall back to an auto attempt"
+            + " and still rescue via the writeFile there.");
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    List<LlmRequest> reqs = cap.getAllValues();
+    assertEquals(
+        "required",
+        reqs.get(reqs.size() - 2).toolChoice(),
+        "The first (forced) salvage attempt sets tool_choice=required.");
+    assertNull(
+        reqs.get(reqs.size() - 1).toolChoice(),
+        "The fallback salvage attempt drops back to tool_choice=auto (null).");
   }
 }

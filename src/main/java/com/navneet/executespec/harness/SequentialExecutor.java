@@ -555,6 +555,7 @@ end and only call completeTask if it exits 0.
             .stagnationWarnAfter(cfg.stagnationWarnAfter)
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
+            .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -851,6 +852,7 @@ end and only call completeTask if it exits 0.
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(retryWallClock)
             .requireBuildVerification(true)
+            .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
             .build();
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
@@ -1012,6 +1014,7 @@ end and only call completeTask if it exits 0.
                   .stagnationForceAfter(cfg.stagnationForceAfter)
                   .wallClockSeconds(cfg.wallClockSeconds)
                   .requireBuildVerification(true)
+                  .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
                   .build());
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
@@ -1120,7 +1123,8 @@ end and only call completeTask if it exits 0.
       int maxTokens,
       int stagnationWarnAfter,
       int stagnationForceAfter,
-      int wallClockSeconds) {}
+      int wallClockSeconds,
+      boolean forceToolChoiceOnSalvage) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
@@ -1236,6 +1240,10 @@ end and only call completeTask if it exits 0.
     // matching Anthropic + Gemini. This unlocks the long-tail tasks where OpenAI was stagnating
     // out of iteration budget, not capability. Telemetry in RunCostTracker per-call logs
     // (cacheRead=N) makes a regression visible in production.
+    // RL-2026-05-059 — resolve the forced-tool-choice-on-salvage flag once per tier-config so both
+    // construction paths (resolved + fallback) carry it identically.
+    boolean forceSalvageTool =
+        featureFlagService != null && featureFlagService.isEnabled(FLAG_SALVAGE_FORCE_TOOL);
     try {
       // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
       LlmProvider p =
@@ -1248,7 +1256,8 @@ end and only call completeTask if it exits 0.
           maxTokens,
           stagnationWarnAfter,
           stagnationForceAfter,
-          wallClockSeconds);
+          wallClockSeconds,
+          forceSalvageTool);
     } catch (Exception e) {
       log.warn(
           "tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
@@ -1263,7 +1272,8 @@ end and only call completeTask if it exits 0.
           maxTokens,
           stagnationWarnAfter,
           stagnationForceAfter,
-          wallClockSeconds);
+          wallClockSeconds,
+          forceSalvageTool);
     }
   }
 
@@ -1538,6 +1548,16 @@ end and only call completeTask if it exits 0.
   public static final String FLAG_RETRY_CONTEXT_RETENTION =
       "worker.retry-context-retention.enabled";
 
+  /**
+   * Forced-tool-call salvage flag (RL-2026-05-059). When ON, the worker's Lever-B salvage call
+   * restricts its tool set to write/edit/completeTask AND sets {@code tool_choice="required"} so a
+   * model that would otherwise return reasoning-only text (the verified 4/10 native-DeepSeek
+   * empty-patch failure on the 2026-05-30 mixed10 deep-dive) is forced to emit an actual edit.
+   * Default OFF, V224. Honoured by the OpenAI-wire clients (OpenAI / DeepSeek / OpenRouter); falls
+   * back to today's auto behaviour for providers that reject the forced choice.
+   */
+  public static final String FLAG_SALVAGE_FORCE_TOOL = "worker.salvage-force-tool-choice.enabled";
+
   /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
   public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
 
@@ -1714,6 +1734,7 @@ end and only call completeTask if it exits 0.
                 .stagnationForceAfter(altCfg.stagnationForceAfter())
                 .wallClockSeconds(altCfg.wallClockSeconds())
                 .requireBuildVerification(true)
+                .forceToolChoiceOnSalvage(altCfg.forceToolChoiceOnSalvage())
                 .build());
     log.info(
         "Executor task={} cross-provider retry DONE — alt={} outcome={}",

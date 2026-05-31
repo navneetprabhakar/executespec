@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -90,6 +91,7 @@ public class GeminiNativeToolClient {
   private static final long RATE_LIMIT_BACKOFF_MS = 15_000L;
 
   private final ObjectMapper objectMapper;
+  private final FeatureFlagService featureFlagService;
 
   @Value("${spring.ai.google.genai.api-key:}")
   private String defaultApiKey;
@@ -121,6 +123,29 @@ public class GeminiNativeToolClient {
   private final Cache<String, String> thoughtSignatureById =
       Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(30, TimeUnit.MINUTES).build();
 
+  /**
+   * RL-2026-05-059 — EXPLICIT context caching (the "Phase 2" the 2026-05-04 billing-audit comment
+   * below flagged as unimplemented). Gemini is the only provider on implicit/best-effort caching;
+   * the 2026-05-31 50-instance eval measured its per-call cache-hit at 45.9% vs 88-97% for
+   * Anthropic/OpenAI/DeepSeek, driving 668K input-tok/run and $33.98 total (most expensive
+   * provider). The worker's [systemInstruction + tools] prefix is byte-identical across every turn
+   * of a task (and across tasks sharing the same model + tool set), so we mint a {@code
+   * cachedContents} resource for it once, reference it by name on each {@code generateContent}
+   * call, and omit the cached parts from the request body — guaranteeing the largest stable chunk
+   * is billed at the cached rate instead of relying on opportunistic implicit caching.
+   *
+   * <p>Keyed by SHA-256(model + systemText + toolsJson). Client TTL (45m) sits under the server TTL
+   * (60m) so a live entry is always still valid server-side; a stale/evicted server cache surfaces
+   * as a 4xx on generateContent, which we catch + retry inline (fail-safe). Flag-gated (default
+   * OFF) — when off, behaviour is byte-identical to the pre-existing implicit-only path.
+   */
+  private static final String FLAG_EXPLICIT_CACHE = "gemini.explicit-cache.enabled";
+
+  private static final String EXPLICIT_CACHE_TTL = "3600s";
+
+  private final Cache<String, String> explicitCacheNameByPrefix =
+      Caffeine.newBuilder().maximumSize(256).expireAfterWrite(45, TimeUnit.MINUTES).build();
+
   public ChatResponse call(GeminiToolCallRequest request) {
     String apiKey =
         (request.apiKey() != null && !request.apiKey().isBlank())
@@ -129,14 +154,6 @@ public class GeminiNativeToolClient {
     if (apiKey == null || apiKey.isBlank()) {
       throw new IllegalStateException("Gemini api-key not configured (set GOOGLE_API_KEY)");
     }
-    ObjectNode body = buildRequestBody(request);
-    String uri = "/v1beta/models/" + request.model() + ":generateContent?key=" + apiKey;
-    log.info(
-        "Gemini wrapper POST {} model={} tools={}",
-        baseUrl + "/v1beta/models/" + request.model() + ":generateContent",
-        request.model(),
-        request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
-
     HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
     Duration effectiveReadTimeout =
@@ -145,7 +162,53 @@ public class GeminiNativeToolClient {
             : READ_TIMEOUT;
     factory.setReadTimeout(effectiveReadTimeout);
     RestClient client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
-    JsonNode response = postWithRateLimitRetry(client, uri, body);
+
+    // RL-2026-05-059 — resolve (or mint) an explicit cache for the stable system+tools prefix.
+    // null = caching disabled / ineligible / mint failed → inline body (today's behaviour).
+    String prefixKey = null;
+    String cacheName = null;
+    if (explicitCacheEligible(request)) {
+      prefixKey = explicitCachePrefixKey(request);
+      cacheName = explicitCacheNameByPrefix.getIfPresent(prefixKey);
+      log.info(
+          "Gemini cache lookup key8={} model={} sysChars={} toolN={} hit={} cacheSize={}",
+          prefixKey.substring(0, Math.min(8, prefixKey.length())),
+          request.model(),
+          systemTextOf(request.messages()).length(),
+          request.tools() == null ? 0 : request.tools().size(),
+          cacheName != null,
+          explicitCacheNameByPrefix.estimatedSize());
+      if (cacheName == null) {
+        cacheName = createExplicitCache(client, request, apiKey);
+        if (cacheName != null) explicitCacheNameByPrefix.put(prefixKey, cacheName);
+      }
+    }
+
+    ObjectNode body = buildRequestBody(request, cacheName);
+    String uri = "/v1beta/models/" + request.model() + ":generateContent?key=" + apiKey;
+    log.info(
+        "Gemini wrapper POST {} model={} tools={} cached={}",
+        baseUrl + "/v1beta/models/" + request.model() + ":generateContent",
+        request.model(),
+        request.tools().stream().map(t -> t.getToolDefinition().name()).toList(),
+        cacheName != null);
+
+    JsonNode response;
+    try {
+      response = postWithRateLimitRetry(client, uri, body);
+    } catch (HttpClientErrorException e) {
+      // A cached prefix can expire / be GC'd server-side before our 45m client TTL; the call then
+      // 4xxs. Evict + retry once inline so the run survives (fail-safe, no model/behaviour change).
+      if (cacheName != null && isExplicitCacheError(e)) {
+        if (prefixKey != null) explicitCacheNameByPrefix.invalidate(prefixKey);
+        log.warn(
+            "Gemini explicit-cache call rejected ({}); evicted + retrying inline",
+            e.getStatusCode());
+        response = postWithRateLimitRetry(client, uri, buildRequestBody(request, null));
+      } else {
+        throw e;
+      }
+    }
     if (response == null) throw new IllegalStateException("Gemini returned empty response body");
     // DEBUG: raw request+response logging to diagnose empty-response issues. Temporary.
     try {
@@ -233,7 +296,7 @@ public class GeminiNativeToolClient {
         : s.substring(0, max) + "...[" + (s.length() - max) + " chars omitted]";
   }
 
-  private ObjectNode buildRequestBody(GeminiToolCallRequest request) {
+  private ObjectNode buildRequestBody(GeminiToolCallRequest request, String cacheName) {
     ObjectNode body = objectMapper.createObjectNode();
 
     ArrayNode contents = body.putArray("contents");
@@ -313,48 +376,41 @@ public class GeminiNativeToolClient {
       }
     }
 
-    if (systemText != null && !systemText.isBlank()) {
-      ObjectNode sys = body.putObject("systemInstruction");
-      ArrayNode parts = sys.putArray("parts");
-      parts.addObject().put("text", systemText);
-    }
-
-    if (request.tools() != null && !request.tools().isEmpty()) {
-      ArrayNode toolsArr = body.putArray("tools");
-      ObjectNode toolsObj = toolsArr.addObject();
-      ArrayNode decls = toolsObj.putArray("functionDeclarations");
-      for (ToolCallback tc : request.tools()) {
-        ObjectNode decl = decls.addObject();
-        decl.put("name", tc.getToolDefinition().name());
-        decl.put("description", tc.getToolDefinition().description());
-        try {
-          JsonNode schema = objectMapper.readTree(tc.getToolDefinition().inputSchema());
-          decl.set("parameters", sanitizeSchemaForGemini(schema));
-        } catch (Exception e) {
-          throw new IllegalArgumentException(
-              "Invalid JSON schema for tool '" + tc.getToolDefinition().name() + "'", e);
-        }
+    if (cacheName != null) {
+      // RL-2026-05-059 — system_instruction + tools + tool_config ALL live in the cached
+      // resource (toolConfig baked in at mint). Gemini 400s if a generateContent request also
+      // sets any of them ("move those values to CachedContent"), so send ONLY cachedContent.
+      body.put("cachedContent", cacheName);
+    } else {
+      if (systemText != null && !systemText.isBlank()) {
+        ObjectNode sys = body.putObject("systemInstruction");
+        ArrayNode parts = sys.putArray("parts");
+        parts.addObject().put("text", systemText);
       }
-      // Explicitly constrain Gemini to emit structured function calls only. Without
-      // this, Gemini 2.5-flash sometimes emits Python code (e.g. "default_api.writeFile(...)")
-      // as a function call attempt, which its own parser rejects as MALFORMED_FUNCTION_CALL
-      // and returns an empty candidate.
-      //
-      // AUTO — model decides (text or function call). Works for multi-turn agents where
-      //   the model sometimes legitimately emits plain text.
-      // ANY  — model MUST emit a function call from allowedFunctionNames. Server rejects
-      //   any other response. Use when the caller expects exactly one function to fire
-      //   (e.g. planner's submitPlan); prevents gemini-2.5-flash's Python-code degradation.
-      ObjectNode toolConfig = body.putObject("toolConfig");
-      ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
-      if (Boolean.TRUE.equals(request.forceToolCall())) {
-        fcc.put("mode", "ANY");
-        ArrayNode allowed = fcc.putArray("allowedFunctionNames");
-        for (ToolCallback tc : request.tools()) {
-          allowed.add(tc.getToolDefinition().name());
+
+      if (request.tools() != null && !request.tools().isEmpty()) {
+        body.set("tools", buildToolsArray(request.tools()));
+        // Explicitly constrain Gemini to emit structured function calls only. Without
+        // this, Gemini 2.5-flash sometimes emits Python code (e.g. "default_api.writeFile(...)")
+        // as a function call attempt, which its own parser rejects as MALFORMED_FUNCTION_CALL
+        // and returns an empty candidate.
+        //
+        // AUTO — model decides (text or function call). Works for multi-turn agents where
+        //   the model sometimes legitimately emits plain text.
+        // ANY  — model MUST emit a function call from allowedFunctionNames. Server rejects
+        //   any other response. Use when the caller expects exactly one function to fire
+        //   (e.g. planner's submitPlan); prevents gemini-2.5-flash's Python-code degradation.
+        ObjectNode toolConfig = body.putObject("toolConfig");
+        ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
+        if (Boolean.TRUE.equals(request.forceToolCall())) {
+          fcc.put("mode", "ANY");
+          ArrayNode allowed = fcc.putArray("allowedFunctionNames");
+          for (ToolCallback tc : request.tools()) {
+            allowed.add(tc.getToolDefinition().name());
+          }
+        } else {
+          fcc.put("mode", "AUTO");
         }
-      } else {
-        fcc.put("mode", "AUTO");
       }
     }
 
@@ -492,6 +548,147 @@ public class GeminiNativeToolClient {
       }
     }
     return new ChatResponse(generations, metaBuilder.build());
+  }
+
+  /** Builds the Gemini {@code tools} value: {@code [{functionDeclarations:[...]}]} (sanitized). */
+  private ArrayNode buildToolsArray(List<ToolCallback> tools) {
+    ArrayNode toolsArr = objectMapper.createArrayNode();
+    ObjectNode toolsObj = toolsArr.addObject();
+    ArrayNode decls = toolsObj.putArray("functionDeclarations");
+    for (ToolCallback tc : tools) {
+      ObjectNode decl = decls.addObject();
+      decl.put("name", tc.getToolDefinition().name());
+      decl.put("description", tc.getToolDefinition().description());
+      try {
+        JsonNode schema = objectMapper.readTree(tc.getToolDefinition().inputSchema());
+        decl.set("parameters", sanitizeSchemaForGemini(schema));
+      } catch (Exception e) {
+        throw new IllegalArgumentException(
+            "Invalid JSON schema for tool '" + tc.getToolDefinition().name() + "'", e);
+      }
+    }
+    return toolsArr;
+  }
+
+  /** Concatenate all SystemMessages — the cacheable system prefix. "" when none. */
+  private String systemTextOf(List<Message> messages) {
+    StringBuilder sb = new StringBuilder();
+    for (Message m : messages) {
+      if (m instanceof SystemMessage sm) {
+        if (sb.length() > 0) sb.append("\n\n");
+        sb.append(sm.getText());
+      }
+    }
+    return sb.toString();
+  }
+
+  /**
+   * Explicit caching applies only when the flag is ON, the call is multi-turn (not a forced-ANY
+   * single-shot), and there is both a system prefix and a tool set to cache.
+   */
+  private boolean explicitCacheEligible(GeminiToolCallRequest request) {
+    if (!featureFlagService.isEnabled(FLAG_EXPLICIT_CACHE)) return false;
+    if (request.tools() == null || request.tools().isEmpty()) return false;
+    // Do NOT exclude forceToolCall: the multi-turn WORKER passes its tools via toolsOverride, which
+    // callGemini maps to forceToolCall=true (ANY mode). That worker IS the main token consumer we
+    // want cached. The ANY/AUTO mode is a per-request toolConfig that buildRequestBody's cache
+    // branch still sends, so caching the prefix doesn't change the mode. (RL-2026-05-059 — the
+    // initial cut wrongly excluded this and minted 0 caches.)
+    return !systemTextOf(request.messages()).isBlank();
+  }
+
+  /** Cache key = SHA-256(model + systemText + toolsJson); an identical prefix shares one cache. */
+  private String explicitCachePrefixKey(GeminiToolCallRequest request) {
+    String tools;
+    try {
+      tools = objectMapper.writeValueAsString(buildToolsArray(request.tools()));
+    } catch (Exception e) {
+      tools = String.valueOf(request.tools().size());
+    }
+    return sha256(request.model() + " " + systemTextOf(request.messages()) + " " + tools);
+  }
+
+  /**
+   * Mint a {@code cachedContents} resource for {model, systemInstruction, tools}. Returns its
+   * server name ({@code cachedContents/...}) or null on ANY failure — most commonly a 400 when the
+   * prefix is below the per-model minimum cacheable token count — so the caller falls back inline.
+   */
+  private String createExplicitCache(
+      RestClient client, GeminiToolCallRequest request, String apiKey) {
+    try {
+      log.info(
+          "Gemini explicit cache: attempting mint model={} sysChars={} tools={}",
+          request.model(),
+          systemTextOf(request.messages()).length(),
+          request.tools().size());
+      ObjectNode body = objectMapper.createObjectNode();
+      body.put("model", "models/" + request.model());
+      ObjectNode sys = body.putObject("systemInstruction");
+      sys.putArray("parts").addObject().put("text", systemTextOf(request.messages()));
+      body.set("tools", buildToolsArray(request.tools()));
+      // toolConfig MUST live IN the cache — Gemini 400s if a generateContent request sets
+      // system_instruction / tools / tool_config alongside cachedContent ("move those values to
+      // CachedContent"). Bake the caller's mode in: ANY (forced) preserves the worker's
+      // must-call-a-tool behavior (verified the cached call still emits a forced functionCall);
+      // allowedFunctionNames references the cached tool names. (RL-2026-05-059 fix.)
+      ObjectNode cacheToolConfig = body.putObject("toolConfig");
+      ObjectNode cacheFcc = cacheToolConfig.putObject("functionCallingConfig");
+      if (Boolean.TRUE.equals(request.forceToolCall())) {
+        cacheFcc.put("mode", "ANY");
+        ArrayNode allowed = cacheFcc.putArray("allowedFunctionNames");
+        for (ToolCallback tc : request.tools()) {
+          allowed.add(tc.getToolDefinition().name());
+        }
+      } else {
+        cacheFcc.put("mode", "AUTO");
+      }
+      body.put("ttl", EXPLICIT_CACHE_TTL);
+      JsonNode resp =
+          client
+              .post()
+              .uri("/v1beta/cachedContents?key=" + apiKey)
+              .contentType(MediaType.APPLICATION_JSON)
+              .body(body)
+              .retrieve()
+              .body(JsonNode.class);
+      String name = resp == null ? null : resp.path("name").asText(null);
+      if (name != null && !name.isBlank()) {
+        log.info("Gemini explicit cache minted: {} (model={})", name, request.model());
+        return name;
+      }
+      return null;
+    } catch (HttpClientErrorException he) {
+      log.warn(
+          "Gemini explicit cache mint FAILED http={} body={}",
+          he.getStatusCode(),
+          truncate(he.getResponseBodyAsString(), 500));
+      return null;
+    } catch (Exception e) {
+      log.warn("Gemini explicit cache mint skipped: {}", e.toString());
+      return null;
+    }
+  }
+
+  /** True for the 4xx classes meaning "the referenced cachedContent is gone / invalid". */
+  private boolean isExplicitCacheError(HttpClientErrorException e) {
+    int code = e.getStatusCode().value();
+    if (code == 403 || code == 404) return true;
+    String b = e.getResponseBodyAsString();
+    return b != null && b.toLowerCase().contains("cachedcontent");
+  }
+
+  private String sha256(String s) {
+    try {
+      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+      byte[] h = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder(h.length * 2);
+      for (byte b : h) {
+        sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+      }
+      return sb.toString();
+    } catch (Exception e) {
+      return Integer.toHexString(s.hashCode());
+    }
   }
 
   @Builder
