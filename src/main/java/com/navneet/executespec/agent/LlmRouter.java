@@ -410,6 +410,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(apiKey)
             .build());
   }
@@ -433,6 +434,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
             .build());
@@ -468,6 +470,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
             .build());
