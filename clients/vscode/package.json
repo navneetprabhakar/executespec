@@ -9,6 +9,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
+  "activationEvents": ["onUri"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [

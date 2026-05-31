@@ -43,10 +43,14 @@ local `ToolRuntime`). The CLI is one renderer over that core; the VS Code extens
 
 - **Host:** `--host <url>` → `$EXECUTESPEC_HOST` → default `https://executespec.ai`. Point at
   `http://localhost:8080` for local dev.
-- **Credential: Personal Access Token only.** `auth login` stores the `es_pat_…` token via the core
-  `FileTokenStore` (`~/.config/executespec/token`, `0600`; `$EXECUTESPEC_TOKEN` overrides). It is
-  sent as `Authorization: Bearer es_pat_…` and resolves to the same identity (roles + tenant) a JWT
-  would. No cookies, no refresh dance.
+- **Sign-in: gcloud-style browser flow (default).** `auth login` (no `--token`) calls
+  `core.loopbackLogin()` — starts a one-shot `127.0.0.1` server, opens the browser to
+  `${host}/cli-login?port=&state=`; the web page mints a PAT and redirects back to the loopback with
+  `?token=&state=` (state-validated, loopback-only). Fallbacks: `--token <pat>` pastes one;
+  `--no-browser` prompts for a paste (headless/SSH). The resulting `es_pat_…` is stored via the core
+  `FileTokenStore` (`~/.config/executespec/token`, `0600`; `$EXECUTESPEC_TOKEN` overrides), sent as
+  `Authorization: Bearer es_pat_…`, and resolves to the same identity (roles + tenant) a JWT would.
+  No cookies, no refresh dance.
 
 ## 4. Data flow (how it talks to the backend)
 

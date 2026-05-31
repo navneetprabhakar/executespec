@@ -15,7 +15,7 @@ Usage
   es <command> ...                      (short alias)
 
 Auth
-  auth login [--token <pat>]            store a Personal Access Token (es_pat_…)
+  auth login [--token <pat>] [--no-browser]  sign in via browser (gcloud-style), or paste a PAT
   auth status                           show the logged-in user
   auth logout                           forget the stored token
 

@@ -42,10 +42,13 @@ Everything is registered into `context.subscriptions` for clean disposal; `deact
 - **Settings** (`contributes.configuration`): `executespec.host` (default `https://executespec.ai`;
   set to `http://localhost:8080` for dev) and `executespec.defaultProvider` (`ANTHROPIC` /
   `OPENAI` / `GEMINI`).
-- **Credential: Personal Access Token**, stored in VS Code **`SecretStorage`** (encrypted) via
-  `SecretTokenStore` under key `executespec.pat`. `Sign In` prompts with a password input and
-  verifies via `/auth/me`. The PAT is the only secret held; it's sent as `Authorization: Bearer
-  es_pat_…` and resolves to the same identity a JWT would.
+- **Sign-in: gcloud-style browser flow (default).** `Sign In` opens the browser to
+  `${host}/cli-login?mode=vscode&state=`; the web page mints a PAT and redirects to
+  `vscode://executespec.executespec-vscode/auth?token=&state=`, caught by the extension's
+  `registerUriHandler` (state-validated). Cancel the "waiting for browser sign-in" notification to
+  fall back to pasting a PAT. The token is stored in VS Code **`SecretStorage`** (encrypted) via
+  `SecretTokenStore` under key `executespec.pat`, verified via `/auth/me`. It's the only secret
+  held; sent as `Authorization: Bearer es_pat_…`, it resolves to the same identity a JWT would.
 
 ## 4. Data flow
 

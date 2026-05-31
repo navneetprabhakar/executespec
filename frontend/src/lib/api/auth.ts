@@ -78,3 +78,14 @@ export const updateOrgAiKeySettings = (
   });
 export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
   req<OrgDto>(`/admin/orgs/${id}/api-keys`, {method: 'PUT', body: JSON.stringify({provided})});
+
+/**
+ * Mint a Personal Access Token for the CLI / VS Code clients (gcloud-style browser login).
+ * The plaintext `es_pat_…` is returned ONCE; it is handed straight to the local client via the
+ * loopback / vscode:// redirect and never persisted in the browser. Manage/revoke under Settings.
+ */
+export const createPat = (name: string) =>
+  req<{token: string; meta: {id: string; name: string}}>('/auth/me/tokens', {
+    method: 'POST',
+    body: JSON.stringify({name}),
+  });

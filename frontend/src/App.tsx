@@ -40,6 +40,7 @@ import {IdeBilling, IdePlans} from '@/ide/IdeBilling';
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
 import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
+import CliLoginPage from '@/signal/pages/CliLoginPage';
 
 // Admin sub-routes + public share pages are the only Signal pages that survive
 // inside the router (no IDE-native surface by design); AdminPage also backs the
@@ -179,6 +180,7 @@ export default function App() {
       <Route path='/reset-password' element={<ResetPasswordPage />} />
       <Route path='/accept-invite' element={<AcceptInvitePage />} />
       <Route path='/auth/callback' element={<AuthCallbackPage />} />
+      <Route path='/cli-login' element={<CliLoginPage />} />
 
       {/* ───── Public marketing / legal ───── */}
       <Route path='/welcome' element={<WelcomePage />} />

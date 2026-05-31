@@ -12,7 +12,7 @@
 | `package.json` | 77 | `executespec-vscode@0.1.0`. **`contributes`**: 5 commands (`signIn`/`signOut`/`submitSpec`/`refreshRuns`/`watchRun`), a `executespecRuns` Explorer view, view-title menu buttons, and config (`executespec.host`, `executespec.defaultProvider`). `main`=`dist/extension.js`; engine `vscode ^1.85`; `build`=`node esbuild.mjs`. Dep `@executespec/core`. |
 | `tsconfig.json` | 17 | NodeNext ESM, ES2022, `strict` + `noUncheckedIndexedAccess`. Typecheck only (esbuild does the emit). |
 | `esbuild.mjs` | 15 | Bundler. `src/extension.ts` → `dist/extension.js` as **CJS** (VS Code loads CommonJS), bundling the ESM `@executespec/core` in, with **`vscode` left external** (host-provided). `node18` target, sourcemaps. |
-| `src/extension.ts` | 53 | **Activation.** Creates the `ExecuteSpec` OutputChannel + `RunsTreeProvider`; registers the 5 commands + the tree data provider into `context.subscriptions`. `signIn` prompts for a PAT (password input) → stores in SecretStorage → verifies via `/auth/me`. |
+| `src/extension.ts` | 95 | **Activation.** Creates the `ExecuteSpec` OutputChannel + `RunsTreeProvider`; registers the 5 commands + tree provider + a `registerUriHandler` (catches `vscode://…/auth`). `signIn` opens the browser to `/cli-login?mode=vscode`, awaits the `vscode://` token callback (state-validated; progress notification w/ cancel), then stores in SecretStorage + verifies `/auth/me`. Falls back to pasting a PAT. |
 | `src/client.ts` | 16 | `makeClient(context)` → a core `ClientBundle` bound to the configured `executespec.host` + a `SecretTokenStore`. `defaultProvider()` reads the config. |
 | `src/secretTokenStore.ts` | 21 | `TokenStore` backed by VS Code **`SecretStorage`** (encrypted) under key `executespec.pat`. The only secret the extension holds. |
 | `src/runsTree.ts` | 57 | `RunsTreeProvider` (`TreeDataProvider<RunNode>`): lists the signed-in user's runs (`api.listRuns`, scope `mine`); a "Sign in…" node when no token; each `RunNode` shows spec + status, click → `watchRun`. `refresh()` fires the change event. |
@@ -34,7 +34,7 @@ extension.ts ─┬─ client.ts ──── secretTokenStore.ts ─┐
 
 | Command (palette / menu) | Behaviour |
 | --- | --- |
-| `ExecuteSpec: Sign In` | PAT input (password) → SecretStorage → verify `/auth/me` → refresh tree |
+| `ExecuteSpec: Sign In` | browser → `/cli-login?mode=vscode` → Authorize → `vscode://` token → SecretStorage → verify `/auth/me` (fallback: paste PAT) |
 | `ExecuteSpec: Sign Out` | clear SecretStorage token → refresh tree |
 | `ExecuteSpec: Submit Spec…` | spec from editor selection or input box → `submitRun` → stream to OutputChannel |
 | `ExecuteSpec: Refresh Runs` | `RunsTreeProvider.refresh()` |
