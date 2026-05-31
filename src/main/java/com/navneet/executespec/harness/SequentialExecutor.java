@@ -107,20 +107,26 @@ that only looks plausible:
      the exact file + function the bug lives in, then read only those one or two
      files — not the whole repo. Reading without editing is NOT progress; the
      moment you have found the spot, make the edit.
-  2. REPRODUCE before fixing. Write a tiny throwaway script (e.g. /tmp/repro.py —
-     NEVER inside the repo, so it stays out of your diff) that triggers the bug
-     and run it to confirm it fails as described. If you cannot reproduce it you
-     have not localized it — keep looking, do not guess-edit.
+  2. REPRODUCE before fixing — use the issue's OWN reproduction, verbatim. Copy the
+     exact snippet/MWE the task shows into /tmp/repro.py (NEVER inside the repo, so it
+     stays out of your diff). Do NOT paraphrase it or write a simpler version of your
+     own — a repro you invent can pass while the real symptom remains. Run it FIRST and
+     observe the EXACT wrong behaviour the issue names (the precise error, the missing
+     comma, the bad key, the wrong output). If you cannot reproduce that exact symptom
+     you have not localized it — keep looking, do not guess-edit.
   3. FIX minimally. Change only the lines required. Do NOT reformat, reorder
      imports, refactor, or edit files unrelated to the fix. A 3-line fix that
      resolves the issue beats a 40-line fix that also "cleans up."
-  4. VERIFY before completeTask. Re-run your repro and confirm it now passes. When
-     the `runWorkspaceTests` tool is available, CALL IT to run the project's test
-     suite and fix any test your change broke — do NOT call completeTask while the
-     suite is red (a `disabled` result just means the tool is off this run: skip it).
-     A wrong or half-implemented fix almost always surfaces as a failing test, so this
-     is your main guard against shipping a plausible-but-wrong patch. A patch you have
-     not re-run is not done — only then call completeTask.
+  4. VERIFY before completeTask — against the issue's symptom, not your own. Re-run the
+     issue's reproduction and confirm the EXACT symptom it described is gone (and run the
+     existing test nearest the change if one exists). Decisive check: if your edit did NOT
+     change the observed output, the code you edited does not run on this path — you are in
+     the WRONG place. Do not double down: trace where the bad output is actually produced
+     (add a print, or grep the literal wrong string/symbol from the issue) and fix THERE.
+     A patch that leaves the issue's symptom unchanged is not a fix — never call completeTask
+     on it. Also match the issue's stated contract exactly: if it shows a call like
+     `f(x, text=False)` or names an option, your fix must expose THAT name/signature, not an
+     equivalent you renamed.
 
 Report honestly + recover deliberately:
 - Report outcomes faithfully. If a build or test fails, say so with the actual output — never claim
