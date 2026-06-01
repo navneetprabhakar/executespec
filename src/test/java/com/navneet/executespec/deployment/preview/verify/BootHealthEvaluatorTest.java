@@ -41,7 +41,8 @@ class BootHealthEvaluatorTest {
   @Test
   void success_status_is_healthy() {
     assertThat(eval(true, true, 200, 300, 5000).healthy()).isTrue();
-    assertThat(eval(true, true, 302, 300, 5000).verdict()).isEqualTo(Verdict.HEALTHY); // redirect = up
+    assertThat(eval(true, true, 302, 300, 5000).verdict())
+        .isEqualTo(Verdict.HEALTHY); // redirect = up
   }
 
   @Test

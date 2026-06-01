@@ -235,8 +235,8 @@ public class SearchFilesTool implements Tool {
    * output paths are workspace-relative — identical {@code path:line:preview} shape to the Java
    * walk. Returns {@code null} (signalling fallback) on ANY problem: rg missing, non-zero error
    * exit (2, incl. an incompatible Rust-regex pattern), timeout, or IO error. Exit 1 = no matches =
-   * empty list (a valid result, not a fallback). The pattern is passed after {@code --} so a leading
-   * {@code -} can't be parsed as a flag (no shell = no injection surface).
+   * empty list (a valid result, not a fallback). The pattern is passed after {@code --} so a
+   * leading {@code -} can't be parsed as a flag (no shell = no injection surface).
    */
   private List<String> collectViaRipgrep(
       String patternStr, Path searchRoot, Path workspaceReal, String filePattern) {
@@ -273,7 +273,8 @@ public class SearchFilesTool implements Tool {
       List<String> matches = new ArrayList<>();
       try (java.io.BufferedReader r =
           new java.io.BufferedReader(
-              new java.io.InputStreamReader(proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+              new java.io.InputStreamReader(
+                  proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
         String out;
         while ((out = r.readLine()) != null && matches.size() < MATCH_CEILING) {
           String parsed = toMatchLine(out);
@@ -286,7 +287,8 @@ public class SearchFilesTool implements Tool {
         return null; // timeout -> fall back to the Java walk
       }
       int exit = proc.exitValue();
-      // 0 = matches, 1 = no matches (both valid); anything else (2 = error / bad regex) -> fallback.
+      // 0 = matches, 1 = no matches (both valid); anything else (2 = error / bad regex) ->
+      // fallback.
       if (exit == 0 || exit == 1) return matches;
       return null;
     } catch (IOException ioe) {
@@ -298,7 +300,9 @@ public class SearchFilesTool implements Tool {
     }
   }
 
-  /** Parse an {@code rg} output line {@code path:line:content} into our {@code path:line:preview}. */
+  /**
+   * Parse an {@code rg} output line {@code path:line:content} into our {@code path:line:preview}.
+   */
   private static String toMatchLine(String rgLine) {
     String[] parts = rgLine.split(":", 3);
     if (parts.length < 3) return null;

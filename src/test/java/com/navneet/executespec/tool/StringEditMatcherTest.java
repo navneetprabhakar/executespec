@@ -24,7 +24,9 @@ class StringEditMatcherTest {
   class Exact {
     @Test
     void single_occurrence_replaced() {
-      var r = StringEditMatcher.apply("int a = 1;\nint b = 2;\n", "int b = 2;", "int b = 3;", false, null);
+      var r =
+          StringEditMatcher.apply(
+              "int a = 1;\nint b = 2;\n", "int b = 2;", "int b = 3;", false, null);
       var a = applied(r);
       assertThat(a.how()).isEqualTo("exact");
       assertThat(a.updated()).isEqualTo("int a = 1;\nint b = 3;\n");
@@ -81,7 +83,8 @@ class StringEditMatcherTest {
     @Test
     void multiline_block_with_trailing_drift() {
       String file = "a = 1  \nb = 2\t\nc = 3\n";
-      var r = StringEditMatcher.apply(file, "a = 1\nb = 2\nc = 3", "a = 1\nb = 9\nc = 3", false, null);
+      var r =
+          StringEditMatcher.apply(file, "a = 1\nb = 2\nc = 3", "a = 1\nb = 9\nc = 3", false, null);
       assertThat(applied(r).updated()).isEqualTo("a = 1\nb = 9\nc = 3\n");
     }
 
@@ -99,13 +102,16 @@ class StringEditMatcherTest {
   class IndentFlexible {
     @Test
     void indentation_drift_matches_and_reindents() {
-      // File is indented 6 spaces; model used 4.
-      String file = "class C:\n      x = 1\n";
+      // File indents with a tab; model used 4 spaces. A tab and spaces never match byte-for-byte,
+      // so the exact tier (indexOf) cannot fire and this genuinely exercises the indent-flexible
+      // tier. (A spaces-only under-indent — e.g. 4-vs-6 — is instead found by exact indexOf as a
+      // mid-indent substring of the deeper line: correct output, but tier 1, not the tier here.)
+      String file = "class C:\n\tx = 1\n";
       var r = StringEditMatcher.apply(file, "    x = 1", "    x = 2", false, null);
       var a = applied(r);
       assertThat(a.how()).isEqualTo("indent-flex");
-      // newStr re-indented from 4 -> 6 spaces to match the file's block.
-      assertThat(a.updated()).isEqualTo("class C:\n      x = 2\n");
+      // newStr re-indented from 4 spaces to the file's tab.
+      assertThat(a.updated()).isEqualTo("class C:\n\tx = 2\n");
     }
 
     @Test
@@ -114,7 +120,8 @@ class StringEditMatcherTest {
       String oldStr = "    if x:\n        go()";
       String newStr = "    if x:\n        stop()";
       var r = StringEditMatcher.apply(file, oldStr, newStr, false, null);
-      assertThat(applied(r).updated()).isEqualTo("def outer():\n        if x:\n            stop()\n");
+      assertThat(applied(r).updated())
+          .isEqualTo("def outer():\n        if x:\n            stop()\n");
     }
   }
 

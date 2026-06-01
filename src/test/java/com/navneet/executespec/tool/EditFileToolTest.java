@@ -22,7 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
  * Integration test for {@link EditFileTool} — drives the real tool through the {@link
  * FileSandboxPolicy} (LOW = allow) + the read-before-write / staleness gate ({@link
  * ReadFileStateStore}) + the {@link StringEditMatcher} cascade, against a real {@link TempDir}.
- * Complements {@link StringEditMatcherTest}, which covers the pure matching algorithm. (RL-2026-05-062)
+ * Complements {@link StringEditMatcherTest}, which covers the pure matching algorithm.
+ * (RL-2026-05-062)
  */
 @DisplayName("EditFileTool end-to-end")
 class EditFileToolTest {
@@ -73,7 +74,8 @@ class EditFileToolTest {
   void whitespace_drift_is_tolerated_through_the_tool() throws IOException {
     Path f = writeAndRead("b.py", "def f():\n    return 1\n");
     // oldStr carries trailing spaces the file doesn't have -> exact fails, fuzzy applies.
-    ToolResult r = tool.execute(args("b.py", new String[] {"    return 1   ", "    return 2"}), ctx);
+    ToolResult r =
+        tool.execute(args("b.py", new String[] {"    return 1   ", "    return 2"}), ctx);
     assertThat(r).isInstanceOf(ToolResult.Ok.class);
     assertThat(Files.readString(f)).isEqualTo("def f():\n    return 2\n");
   }

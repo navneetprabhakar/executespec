@@ -71,8 +71,8 @@ import lombok.extern.slf4j.Slf4j;
  * validated). BYOK-safe: a run on a customer key only fails over to a provider the customer also
  * keyed (never silently to a platform key); {@code deepseek}/{@code openrouter} are never targets.
  * A dedicated {@code ProviderHealthTracker} circuit breaker on this path is still future work (the
- * legacy {@link FallbackLlmRouter} has one); tier-based model resolution happens upstream in
- * {@code ModelResolver}.
+ * legacy {@link FallbackLlmRouter} has one); tier-based model resolution happens upstream in {@code
+ * ModelResolver}.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
@@ -105,7 +105,9 @@ public class LlmRouter {
    */
   static final String FAILOVER_FLAG = "router.failover.enabled";
 
-  /** Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose). */
+  /**
+   * Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose).
+   */
   private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS = Set.of("deepseek", "openrouter");
 
   /**
@@ -196,11 +198,14 @@ public class LlmRouter {
 
   /**
    * Same-provider bounded transient retry (the original {@link #call} body). Returns on the first
-   * success (recording cost + metrics) or throws the last error once attempts are exhausted /
-   * the error is permanent.
+   * success (recording cost + metrics) or throws the last error once attempts are exhausted / the
+   * error is permanent.
    */
   private ChatResponse dispatchWithRetry(
-      LlmRequest request, List<ToolCallback> tools, String resolvedKey, RunKeyContext.Source source) {
+      LlmRequest request,
+      List<ToolCallback> tools,
+      String resolvedKey,
+      RunKeyContext.Source source) {
     RuntimeException lastError = null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
       long start = System.currentTimeMillis();
@@ -263,14 +268,15 @@ public class LlmRouter {
   /**
    * Multi-provider failover (audit M #68). Invoked only after the same-provider retry is exhausted.
    * Walks the primary model's YAML failover chain ({@link
-   * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each <em>different</em>
-   * provider once (each with its own same-provider transient retry). Returns the first success, or
-   * {@code null} if failover is disabled, the error isn't transient, or every alternate fails.
+   * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each
+   * <em>different</em> provider once (each with its own same-provider transient retry). Returns the
+   * first success, or {@code null} if failover is disabled, the error isn't transient, or every
+   * alternate fails.
    *
-   * <p>BYOK rule (the discussed mechanism): if the primary call used a customer key
-   * ({@code source != PLATFORM}) we only fail over to a provider the customer ALSO keyed —
-   * never silently fall to a platform key for a BYOK run. Platform-key runs (FREE/PRO on system
-   * keys) may fail over freely. {@code deepseek}/{@code openrouter} are never targets.
+   * <p>BYOK rule (the discussed mechanism): if the primary call used a customer key ({@code source
+   * != PLATFORM}) we only fail over to a provider the customer ALSO keyed — never silently fall to
+   * a platform key for a BYOK run. Platform-key runs (FREE/PRO on system keys) may fail over
+   * freely. {@code deepseek}/{@code openrouter} are never targets.
    */
   private ChatResponse maybeFailover(
       LlmRequest request,
@@ -296,11 +302,14 @@ public class LlmRouter {
       String altKey = (keys == null) ? null : keys.keyFor(altProvider);
       // Don't cross a BYOK run onto a platform key for a provider it never keyed.
       if (primaryUsedCustomerKey && altKey == null) {
-        log.info("LlmRouter failover skipping {} — BYOK run has no customer key for it", altProvider);
+        log.info(
+            "LlmRouter failover skipping {} — BYOK run has no customer key for it", altProvider);
         continue;
       }
       RunKeyContext.Source altSource =
-          (altKey == null || keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(altProvider);
+          (altKey == null || keys == null)
+              ? RunKeyContext.Source.PLATFORM
+              : keys.sourceFor(altProvider);
 
       log.warn(
           "LlmRouter FAILOVER {} {} -> {} {} (primary error: {})",

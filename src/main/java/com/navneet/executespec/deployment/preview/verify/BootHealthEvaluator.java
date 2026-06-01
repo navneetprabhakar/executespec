@@ -7,13 +7,13 @@ package com.navneet.executespec.deployment.preview.verify;
  * <p>This is the boot-verification analogue of {@code smoketest/TestOutputParser}: it takes the raw
  * signals from one boot attempt (did the image build, did the process/container start, did the
  * declared health endpoint respond, within the timeout) and produces a single deterministic verdict
- * + a model-facing reason. It performs NO I/O — the {@code PreviewVerifier} runner (the
- * {@code WorkspaceTestRunner} analogue, wired separately) gathers the signals; this class only
- * judges them. Spring-free so it is fully unit-testable in isolation.
+ * + a model-facing reason. It performs NO I/O — the {@code PreviewVerifier} runner (the {@code
+ * WorkspaceTestRunner} analogue, wired separately) gathers the signals; this class only judges
+ * them. Spring-free so it is fully unit-testable in isolation.
  *
- * <p>Design intent: the agent authors a run-recipe and this gives a HARD, deterministic
- * "boots + responds" signal that feeds the BUILD scoring slot — replacing the LLM's guess about
- * whether the app works. A failed boot is true information (the code isn't done), not a preview bug.
+ * <p>Design intent: the agent authors a run-recipe and this gives a HARD, deterministic "boots +
+ * responds" signal that feeds the BUILD scoring slot — replacing the LLM's guess about whether the
+ * app works. A failed boot is true information (the code isn't done), not a preview bug.
  */
 public final class BootHealthEvaluator {
 
@@ -45,7 +45,9 @@ public final class BootHealthEvaluator {
   /** The verdict + a boolean convenience + a short model-facing reason. */
   public record BootVerification(Verdict verdict, boolean healthy, String reason) {}
 
-  /** A success HTTP status for a health probe: 2xx or 3xx (a redirect still means "the app is up"). */
+  /**
+   * A success HTTP status for a health probe: 2xx or 3xx (a redirect still means "the app is up").
+   */
   private static boolean isSuccess(int status) {
     return status >= 200 && status < 400;
   }
@@ -76,8 +78,7 @@ public final class BootHealthEvaluator {
     }
     int status = s.healthHttpStatus();
     if (isSuccess(status)) {
-      return new BootVerification(
-          Verdict.HEALTHY, true, "boots; " + path + " responded " + status);
+      return new BootVerification(Verdict.HEALTHY, true, "boots; " + path + " responded " + status);
     }
     return new BootVerification(
         Verdict.UNHEALTHY, false, "started but " + path + " responded " + status);

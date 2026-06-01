@@ -30,13 +30,14 @@ import lombok.extern.slf4j.Slf4j;
  * model only needs to inspect part of a large file.
  *
  * <p><strong>RL-2026-06 (truncation+exact-match fix):</strong> the old behaviour kept a 5 KB
- * head+tail and dropped the <em>middle</em> of the file, inserting a {@code ...[N chars omitted]...}
- * marker that does not exist in the file. That made {@link EditFileTool} (which matches an exact
- * {@code oldStr}) impossible to satisfy for any region the model never saw. The cap is now far
- * larger and truncation is <em>head-first at a line boundary</em> with the notice appended at the
- * <em>end</em>, so every byte returned is contiguous and byte-exact from line 1 — whatever the model
- * reads, it can {@code editFile} against. Large files page in via {@code startLine}/{@code endLine}
- * (range reads remain untruncated), so the rest of the file is always reachable byte-exact.
+ * head+tail and dropped the <em>middle</em> of the file, inserting a {@code ...[N chars
+ * omitted]...} marker that does not exist in the file. That made {@link EditFileTool} (which
+ * matches an exact {@code oldStr}) impossible to satisfy for any region the model never saw. The
+ * cap is now far larger and truncation is <em>head-first at a line boundary</em> with the notice
+ * appended at the <em>end</em>, so every byte returned is contiguous and byte-exact from line 1 —
+ * whatever the model reads, it can {@code editFile} against. Large files page in via {@code
+ * startLine}/{@code endLine} (range reads remain untruncated), so the rest of the file is always
+ * reachable byte-exact.
  */
 @Component
 @Slf4j
