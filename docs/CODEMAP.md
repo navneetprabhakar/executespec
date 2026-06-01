@@ -45,7 +45,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `folder` | 1 | 4 | - | - | `.executespec/` folder writer + bootstrap + project config |
 | `governance` | - | 1 | - | - | GovernanceGuard — M-032/M-033 spend caps + GitHub owner allowlist |
 | `harness` | - | 7 | - | - | V2 SequentialExecutor + GateStore + WorkspaceInitService + VendoredPathGuard |
-| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`/`PipelineExecutorPool`; 5,288→4,324 LOC) |
+| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`/`PipelineExecutorPool`; 5,288→3,957 LOC) |
 | `landing` | 1 | - | - | - | Public landing-page stats + sample-run endpoints |
 | `lint` | - | 1 | - | - | LintPass — deterministic auto-formatter pass (Phase L1) |
 | `memory` | 2 | 5 | 1 | - | Project memory: chat + run ledger + compaction snapshots |
