@@ -1,7 +1,7 @@
 # RunOrchestrator god-class split — dedicated-session plan
 
-> **Status:** PLANNED (not started). Audit item #43 (`docs/audit/FINDINGS-2026-05-29.md`).
-> **Owner:** next focused session. **Branch:** off `main` (or current remediation branch).
+> **Status (2026-05-30):** increments **1–4 DONE + pushed** (PR #196) — RunOrchestrator **5,288 → 4,456 LOC (−16%)**, 4 new collaborators, full suite 1432 green at each step, zero behaviour change. **Remaining (each carries real entanglement — warrant a careful supervised pass):** inc-3b (multi-repo pair ↔ `languageConventionHint` test-pinned stayer), inc-4b (`runLargePipeline`/`expandEpic` ↔ the internally-owned `pool`), inc 5 (`generateValidationReport` ×2 is ~250 LOC/~10 deps + `runStandardsEnforcement` ↔ test-pinned `toStandardsViolationRows`), inc 6 (lifecycle + gate/cancel/resume — highest risk). The clean low-risk extractions are done; the rest touch the run pool / gate semantics / test-pinned statics and are better done deliberately.
+> **Owner:** active session. **Branch:** `fix/cross-org-invitee-access` (PR #196 — bundled with the invite fix per founder direction). Audit item #43.
 > **File:** [`integration/RunOrchestrator.java`](../../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) — **5,288 LOC / 158 methods / ~70 injected dependencies**.
 
 ## Why this is its own session (do NOT script it)
@@ -39,7 +39,9 @@ to "fix and retry":
 
 ## Collaborator groups (extract in this order — low risk → high risk)
 
-### Increment 1 — `RunPipelineSupport` (pure statics, no instance state) — LOWEST RISK
+### Increment 1 — `RunPipelineSupport` (pure statics, no instance state) — LOWEST RISK ✅ DONE (2026-05-30)
+> Extracted to package-private `integration/RunPipelineSupport` (`@Slf4j` for the one `log` user). RunOrchestrator reaches them via **static import** — so the ~33 call sites stayed untouched (safer than rewriting each). The 4 package-private statics below STAYED. RunOrchestrator 5,288 → 5,117 LOC; full suite green. Done by exact-string surgery + compile-after-every-step, **not** the brace-counting scripts that corrupted it before.
+
 14 `private static` helpers. **Test-safe** (none are referenced by tests — they're private):
 `deserializeRepoIds` (2765), `isTerminal` (3267), `computeRepoCountForEstimate` (3807),
 `mapOverallToV1Status` (3943), `mapTaskStatusToV1` (4004), `truncate` (4392),
@@ -52,19 +54,25 @@ to "fix and retry":
 > `RunOrchestrator.<name>(...)`. Either **leave them in RunOrchestrator** (recommended for inc. 1) or move
 > them AND update the test references in the same commit. Do not move them silently.
 
-### Increment 2 — `RunPersistenceWriter` (`@Component`, deps: `runRepo`, `taskRepo`, `objectMapper`)
+### Increment 2 — `RunPersistenceWriter` (`@Component`, deps: `runRepo`, `taskRepo`, `runCostLogRepo`, `broadcaster`, `objectMapper`) ✅ DONE (2026-05-30)
+> Moved **10** methods (byte-identical) + rewired ~20 call sites via a **compiler-guided** pass (delete defs → compiler pinpoints every call site → qualify with `persistenceWriter.`), which dodged the `r.setWorkspacePath(...)` entity-setter collision a blind replace-all would have hit. **`persistEstimate` deliberately deferred** — it's an estimation method (`costHistoryService`/`costTracker`/`apiKeyResolver` + the `clampHardCap` stayer), not a thin write. `updateStatus`'s SSE broadcast preserved via the injected `broadcaster`. RunOrchestrator 5,117 → 4,872 LOC; full suite 1432 green.
+
 `persistPlan` (2022), `persistTasks` (2048), `applyExecutionResultToTasks` (2102), `persistReview` (2120),
 `persistReviewFailure` (2150), `setWorkspacePath` (2165), `persistRunTitle` (3762), `persistEstimate` (3819),
 `writeRunCostLog` (3911), `updateStatus` (3274), `reconstructExecResultFromTasks` (3232). ~11 methods.
 Mostly thin DB writes — clean to move; watch that `updateStatus` also broadcasts SSE (`broadcaster`).
 
-### Increment 3 — `RunContextComposer` (`@Component`, deps: `projectMemoryProvider`, `projectBriefService`, `stalenessService`, `retrievalService`, `projectArchitectureService`, `projectRepoService`, `contractInjectionService`, `adrInjectionService`, `uiStyleResolver`)
+### Increment 3 — `RunContextComposer` (`@Component`, deps: `objectMapper`, `uiStyleResolver`, `projectArchitectureService`, `projectRepository`, `modelRegistry`) ✅ DONE (2026-05-30, multi-repo pair deferred to 3b)
+> The plan's 9-dep list was aspirational — the actual methods touch only **5** collaborators. Moved **7** of the 9 (README pair, `writeAgentContext`, `buildDesignBlock`, `buildCodeIntelContext`, `normalizeProvider`, `defaultModelFor`) + the `CODEINTEL_*`/`DEFAULT_PROVIDER` constants; rewired 8 call sites (compiler-guided) + removed the now-dead `uiStyleResolver` field from the god-class. RunOrchestrator 4,872 → 4,601 LOC; full suite 1432 green. **Deferred (3b):** `buildMultiRepoSummary` + `buildLanguageParityBlock` — they call the `languageConventionHint` stayer (pinned by `LanguageParityBlockTest` via `RunOrchestrator.…`), so a byte-identical move needs that helper relocated to `RunPipelineSupport` + the test updated.
+
 Prompt/context string builders, ~400 LOC, no run-lifecycle state:
 `renderRunReadme` (3466), `ensureReadme` (3442), `writeAgentContext` (3742), `buildDesignBlock` (3779),
 `buildCodeIntelContext` (4412), `buildMultiRepoSummary` (4556), `buildLanguageParityBlock` (4609),
 `normalizeProvider` (4473), `defaultModelFor` (4528). Returns strings → easy to unit-test post-extraction.
 
-### Increment 4 — `RunPlanningCoordinator` (`@Component`, deps: `smartClassifier`, `outlinePlanner`, `taskExpander`, `coherencePlanner`, `planStrategyBreaker`)
+### Increment 4 — `RunPlanningCoordinator` (`@Component`, deps: `smartClassifier`, `outlinePlanner`, `costTracker`, `runRepo`, `objectMapper`, `projectRepoService`, `projectMemoryProvider`) ✅ PARTIAL — 2 of 4 (2026-05-30)
+> Moved the **2 pool-free** phases — `runClassifierShadow` + `runOutlinePhase` — into the new `@Component`; rewired 3 call sites + removed the now-dead `smartClassifier` field. **`runLargePipeline` + `expandEpic` deliberately STAY** in RunOrchestrator: both fan out task expansion across the internally-owned `pool` (an `ExecutorService` field used by `runPipeline` + pause/resume too, **not** a bean), so a clean move first needs the pool lifted to a shared bean (follow-up `4b`). RunOrchestrator 4,601 → 4,456 LOC; full suite 1432 green.
+
 The classify→outline→expand phase: `runClassifierShadow` (4699), `runOutlinePhase` (4802),
 `runLargePipeline` (4862), `expandEpic` (5044). Large + parallel (TaskExpander fan-out) — extract as a unit;
 `runPipeline` calls into it. Verify LARGE/LEGACY path with a hierarchical-plan eval after.

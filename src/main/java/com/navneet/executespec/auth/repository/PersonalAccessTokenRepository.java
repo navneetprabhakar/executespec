@@ -18,4 +18,7 @@ public interface PersonalAccessTokenRepository extends JpaRepository<PersonalAcc
   List<PersonalAccessToken> findByUserIdOrderByCreatedAtDesc(String userId);
 
   Optional<PersonalAccessToken> findByIdAndUserId(String id, String userId);
+
+  /** Active (non-revoked) tokens for a user — used to enforce the per-tier device-login cap. */
+  List<PersonalAccessToken> findByUserIdAndRevokedAtIsNull(String userId);
 }

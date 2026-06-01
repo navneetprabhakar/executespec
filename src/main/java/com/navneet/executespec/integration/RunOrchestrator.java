@@ -1,6 +1,18 @@
 package com.navneet.executespec.integration;
 
-import java.io.IOException;
+import static com.navneet.executespec.integration.RunPipelineSupport.coerceToLeafFallback;
+import static com.navneet.executespec.integration.RunPipelineSupport.computeRepoCountForEstimate;
+import static com.navneet.executespec.integration.RunPipelineSupport.describeReviewerFixes;
+import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
+import static com.navneet.executespec.integration.RunPipelineSupport.isTerminal;
+import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
+import static com.navneet.executespec.integration.RunPipelineSupport.listWorkspaceFiles;
+import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
+import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStatusToV1;
+import static com.navneet.executespec.integration.RunPipelineSupport.providerForAccuracy;
+import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
+import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -18,7 +30,6 @@ import java.util.concurrent.ThreadFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Classification;
-import com.navneet.executespec.agent.ClassificationResult;
 import com.navneet.executespec.agent.CoherencePlannerAgent;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
@@ -26,13 +37,11 @@ import com.navneet.executespec.agent.PlanStrategy;
 import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannerRequest;
-import com.navneet.executespec.agent.SmartClassifierAgent;
 import com.navneet.executespec.agent.SpecClassifier;
 import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
-import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
@@ -43,7 +52,6 @@ import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.harness.TaskOutcome;
-import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.observability.Metrics;
@@ -69,7 +77,6 @@ import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -120,16 +127,12 @@ public class RunOrchestrator {
    */
   private static final Classification DEFAULT_CLASSIFICATION = Classification.MEDIUM;
 
-  /** Default provider when the request doesn't specify one. Matches V1 default. */
-  private static final String DEFAULT_PROVIDER = "openai";
-
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final OutlinePlannerAgent outlinePlanner;
   private final TaskExpanderAgent taskExpander;
   private final CoherencePlannerAgent coherencePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
-  private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -160,7 +163,9 @@ public class RunOrchestrator {
   private final RunCostLogRepository runCostLogRepo;
   private final WorkspaceInitService workspaceInit;
   private final SseBroadcaster broadcaster;
-  private final UiStyleResolver uiStyleResolver;
+  private final RunPersistenceWriter persistenceWriter;
+  private final RunContextComposer contextComposer;
+  private final RunPlanningCoordinator planningCoordinator;
   private final ValidationReportService validationReportService;
   private final TestGenOrchestrator testGenOrchestrator;
   private final PerkyMessenger perky;
@@ -607,7 +612,7 @@ public class RunOrchestrator {
       String prReviewComments,
       String runMode) {
     String runId = UUID.randomUUID().toString();
-    String provider = normalizeProvider(aiProvider, projectId, runId);
+    String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
     // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): only ENTERPRISE runs may
     // pin a per-run model. The actual ROUTING is governed by the RunModelOverrides overlay bound
@@ -625,7 +630,8 @@ public class RunOrchestrator {
     // the YAML workhorse default (= the model the worker will actually route to). This keeps the
     // pipeline's `model` value, the persisted workerModel column, and the tierConfigFor fallback
     // all consistent with the overlay-driven routing.
-    String model = (hasPin && enterpriseSubmit) ? modelName.trim() : defaultModelFor(provider);
+    String model =
+        (hasPin && enterpriseSubmit) ? modelName.trim() : contextComposer.defaultModelFor(provider);
 
     // 2026-05-06 — defaultModelFor was a hardcoded provider→model fallback that drifted from
     // the YAML matrix (returned Haiku/flash/mini when YAML PLANNING wanted Sonnet/Pro/gpt-5.4).
@@ -1041,7 +1047,7 @@ public class RunOrchestrator {
       }
 
       ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
-      setWorkspacePath(runId, workspace.toString());
+      persistenceWriter.setWorkspacePath(runId, workspace.toString());
 
       // Bench services (swebench / programbench) submit runs with
       // RunMode.PATCH and own the workspace setup themselves (docker cp +
@@ -1136,7 +1142,8 @@ public class RunOrchestrator {
         // PlannerAgent. Cost flows through RunCostTracker so it auto-
         // aggregates into the run total; per-phase columns get the diff.
         PlanStrategy planStrategy =
-            runClassifierShadow(runId, runRow, userRequest, projectId, selectedRepoIds, provider);
+            planningCoordinator.runClassifierShadow(
+                runId, runRow, userRequest, projectId, selectedRepoIds, provider);
         String projectMemory =
             projectId != null ? projectMemoryProvider.buildPlannerContext(projectId) : "";
         if (projectId != null) {
@@ -1187,7 +1194,7 @@ public class RunOrchestrator {
         if (projectId != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
           try {
             String codeIntel =
-                buildCodeIntelContext(
+                contextComposer.buildCodeIntelContext(
                     projectId, projectRepoService.resolveForRun(projectId, selectedRepoIds));
             if (!codeIntel.isBlank()) {
               summary = summary + "\n\n" + codeIntel;
@@ -1275,7 +1282,9 @@ public class RunOrchestrator {
 
         if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
           try {
-            plan = runOutlinePhase(runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
+            plan =
+                planningCoordinator.runOutlinePhase(
+                    runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
             planStrategyBreaker.recordSuccess(effective);
           } catch (Exception outlineEx) {
             planStrategyBreaker.recordFailure(effective);
@@ -1322,12 +1331,12 @@ public class RunOrchestrator {
             startedAt);
         return;
       }
-      persistPlan(runId, plan);
-      persistTasks(runId, plan);
-      persistRunTitle(runId, plan);
-      writeAgentContext(workspace, plan);
+      persistenceWriter.persistPlan(runId, plan);
+      persistenceWriter.persistTasks(runId, plan);
+      persistenceWriter.persistRunTitle(runId, plan);
+      contextComposer.writeAgentContext(workspace, plan);
       persistEstimate(runId, provider, model, plan);
-      String designBlock = buildDesignBlock(userRequest, plan);
+      String designBlock = contextComposer.buildDesignBlock(userRequest, plan);
       // Phase 1: attribute tokens used so far to the planner.
       RunCostTracker.Snapshot afterPlan = costTracker.snapshot(runId);
       tokenAttributor.attributePhase(
@@ -1346,7 +1355,7 @@ public class RunOrchestrator {
       boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
       if (needsApproval) {
         perky.stop(runId);
-        updateStatus(runId, "AWAITING_APPROVAL");
+        persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
         // Open a PENDING row so the approve-endpoint's atomic claim
         // (GateStore.tryClaimPlanGate) can detect concurrent approvals and
         // return 409 to the loser — adversarial-test-report Finding 4.
@@ -1380,7 +1389,7 @@ public class RunOrchestrator {
         }
       }
 
-      updateStatus(runId, "WORKING");
+      persistenceWriter.updateStatus(runId, "WORKING");
       perky.start(runId, "WORKING");
       ExecutionResult execResult;
       try {
@@ -1411,7 +1420,7 @@ public class RunOrchestrator {
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;
       }
-      applyExecutionResultToTasks(runId, execResult);
+      persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
       RunCostTracker.Snapshot afterExec = costTracker.snapshot(runId);
       int workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
@@ -1466,7 +1475,7 @@ public class RunOrchestrator {
         }
       }
 
-      updateStatus(runId, "REVIEWING");
+      persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
@@ -1508,7 +1517,7 @@ public class RunOrchestrator {
                     .skipWiringPass(skipWiring)
                     .maxIterationsPerPass(reviewerMaxIter)
                     .build());
-        persistReview(runId, reviewResult);
+        persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
         int reviewerIn = afterReview.inputTokens() - afterExec.inputTokens();
@@ -1524,7 +1533,7 @@ public class RunOrchestrator {
         log.warn("RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
         // Review failure is non-fatal; the execution already succeeded or partially
         // succeeded. Record the failure in reviewJson so the UI can surface it.
-        persistReviewFailure(runId, e);
+        persistenceWriter.persistReviewFailure(runId, e);
       }
 
       // 3b. Enterprise enforcement (project runs only) — make the formerly
@@ -1562,7 +1571,8 @@ public class RunOrchestrator {
       // and we leave it alone. If not (typical for trivial specs), write a
       // deterministic run-meta README so the download-zip experience always
       // includes an entry-point doc.
-      ensureReadme(runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
+      contextComposer.ensureReadme(
+          runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
 
       // 4b. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
@@ -1852,7 +1862,7 @@ public class RunOrchestrator {
     if (run.getProjectId() != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
       try {
         String codeIntel =
-            buildCodeIntelContext(
+            contextComposer.buildCodeIntelContext(
                 run.getProjectId(), projectRepoService.resolveForRun(run.getProjectId(), null));
         if (!codeIntel.isBlank()) {
           userRequestLive = codeIntel + "\n\n---\n\nTASK:\n" + userRequestLive;
@@ -2017,160 +2027,6 @@ public class RunOrchestrator {
     } else {
       eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, terminalReason));
     }
-  }
-
-  private void persistPlan(String runId, Plan plan) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                r.setPlanJson(objectMapper.writeValueAsString(plan));
-              } catch (Exception e) {
-                log.warn("RunOrchestrator run={} failed to serialize plan JSON", runId, e);
-              }
-              // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
-              // requirement graph alongside the plan JSON so the reviewer (Pillar
-              // 2) and the UI (Pillar 5) can render per-requirement evidence.
-              // Null when plan.requirements is empty (legacy / flag off).
-              try {
-                if (plan.requirements() != null && !plan.requirements().isEmpty()) {
-                  r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void persistTasks(String runId, Plan plan) {
-    String prefix = runId.substring(0, 8) + "_";
-    for (PlannedTask task : plan.tasks()) {
-      String taskId = prefix + task.id();
-      AgentTask row =
-          AgentTask.builder()
-              .taskId(taskId)
-              .runId(runId)
-              .title(task.title())
-              .complexity(task.complexity().name())
-              .status("PENDING")
-              // v2.6.2 slice 5d — record the planner-shape metadata so
-              // StartupRunResumer can tell EXPANDED vs PENDING tasks
-              // apart on resume + a future auto-replay pass can skip
-              // tasks already filled in.
-              .taskType(task.taskType() == null ? "LEAF" : task.taskType().name())
-              // EXPANDED for full-bodied tasks (slices 1-2 + LEGACY's
-              // recursive children) and post-expansion LARGE tasks.
-              // Skeleton-only tasks pre-expansion would be PENDING here —
-              // but persistTasks runs after the LARGE pipeline has
-              // already stitched bodies in, so all rows reach this point
-              // with full descriptions. Distinction matters for future
-              // resume: a row written EXPANDED never needs a re-expand.
-              .expansionStatus(task.isSkeleton() ? "PENDING" : "EXPANDED")
-              .expandedAt(task.isSkeleton() ? null : java.time.Instant.now())
-              .build();
-      try {
-        row.setTaskJson(objectMapper.writeValueAsString(task));
-      } catch (Exception e) {
-        log.warn("RunOrchestrator run={} failed to serialize task {}", runId, taskId, e);
-      }
-      // v2.5.11 (Validation v3 / Pillar 1) — persist per-task requirement
-      // coverage so downstream consumers (reviewer evidence, UI table)
-      // can trace implementation back to spec requirements.
-      try {
-        if (task.meetsRequirements() != null && !task.meetsRequirements().isEmpty()) {
-          row.setMeetsRequirementsJson(objectMapper.writeValueAsString(task.meetsRequirements()));
-        }
-      } catch (Exception e) {
-        log.warn(
-            "RunOrchestrator run={} failed to serialize meets_requirements for {}",
-            runId,
-            taskId,
-            e);
-      }
-      taskRepo.save(row);
-    }
-  }
-
-  /**
-   * Map each {@link TaskOutcome} back to the corresponding {@link AgentTask} row and update status
-   * + timestamps. Task IDs are prefixed with the run's first 8 chars so we reconstruct the DB id
-   * from {@code PlannedTask.id}.
-   */
-  private void applyExecutionResultToTasks(String runId, ExecutionResult result) {
-    String prefix = runId.substring(0, 8) + "_";
-    for (TaskOutcome outcome : result.perTask()) {
-      String taskId = prefix + outcome.taskId();
-      taskRepo
-          .findById(taskId)
-          .ifPresent(
-              t -> {
-                t.setStatus(mapTaskStatusToV1(outcome.status()));
-                t.setCompletedAt(Instant.now());
-                if (outcome.totalLatencyMs() > 0) {
-                  t.setDurationMs((long) outcome.totalLatencyMs());
-                }
-                taskRepo.save(t);
-              });
-    }
-  }
-
-  private void persistReview(String runId, ReviewerResult review) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                // Minimal serialization — full ReviewerResult has WorkerResult refs that
-                // aren't Jackson-friendly; extract the user-facing fields only.
-                Map<String, Object> summary =
-                    Map.of(
-                        "overall",
-                        review.overall().name(),
-                        "finalBuildPassed",
-                        review.finalBuildPassed() != null && review.finalBuildPassed(),
-                        "finalBuildExitCode",
-                        review.finalBuildExitCode() == null ? -1 : review.finalBuildExitCode(),
-                        "generalPassSummary",
-                        review.generalPassSummary() == null ? "" : review.generalPassSummary(),
-                        "wiringPassSummary",
-                        review.wiringPassSummary() == null ? "" : review.wiringPassSummary(),
-                        "totalLatencyMs",
-                        review.totalLatencyMs());
-                r.setReviewJson(objectMapper.writeValueAsString(summary));
-              } catch (Exception e) {
-                log.warn("RunOrchestrator run={} failed to serialize review JSON", runId, e);
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void persistReviewFailure(String runId, Exception e) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                Map<String, Object> summary =
-                    Map.of("overall", "REVIEW_FAILED", "error", shortMsg(e));
-                r.setReviewJson(objectMapper.writeValueAsString(summary));
-              } catch (Exception ignored) {
-              }
-              runRepo.save(r);
-            });
-  }
-
-  private void setWorkspacePath(String runId, String path) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setWorkspacePath(path);
-              runRepo.save(r);
-            });
-    log.debug("RunOrchestrator run={} workspace={}", runId, path);
   }
 
   /**
@@ -2621,7 +2477,7 @@ public class RunOrchestrator {
       if (!fromReviewing) {
         // Status is WORKING — call executor with ResumeRequest so terminal AgentTasks are
         // skipped and the in-flight task resumes from its Redis snapshot.
-        updateStatus(runId, "WORKING");
+        persistenceWriter.updateStatus(runId, "WORKING");
         try {
           execResult =
               executor.execute(
@@ -2644,13 +2500,13 @@ public class RunOrchestrator {
           terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
           return;
         }
-        applyExecutionResultToTasks(runId, execResult);
+        persistenceWriter.applyExecutionResultToTasks(runId, execResult);
         afterExec = costTracker.snapshot(runId);
       }
 
       // Reviewer — runs for both WORKING-resume (after executor) and REVIEWING-resume (re-run
       // the reviewer; idempotent against the same workspace + plan).
-      updateStatus(runId, "REVIEWING");
+      persistenceWriter.updateStatus(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       try {
         reviewResult =
@@ -2662,16 +2518,16 @@ public class RunOrchestrator {
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
                     .build());
-        persistReview(runId, reviewResult);
+        persistenceWriter.persistReview(runId, reviewResult);
       } catch (Exception e) {
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
-        persistReviewFailure(runId, e);
+        persistenceWriter.persistReviewFailure(runId, e);
       }
 
       // README + validation report + test gen + preview — same as runPipeline's tail. We only
       // need to re-run these if execution actually ran (fromReviewing=true means they may have
       // already happened pre-crash, but they're idempotent so re-running is safe and cheap).
-      ensureReadme(
+      contextComposer.ensureReadme(
           runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
       generateValidationReport(runId, execResult, reviewResult, plan);
 
@@ -2761,26 +2617,9 @@ public class RunOrchestrator {
     }
   }
 
-  /** Inverse of {@code serializeRepoIds} used at submit-time. */
-  private static List<UUID> deserializeRepoIds(String json) {
-    if (json == null || json.isBlank()) return List.of();
-    try {
-      var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
-      java.util.List<UUID> out = new java.util.ArrayList<>();
-      if (arr.isArray()) {
-        for (var n : arr) {
-          out.add(UUID.fromString(n.asText()));
-        }
-      }
-      return out;
-    } catch (Exception e) {
-      return List.of();
-    }
-  }
-
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
-   * every row; covers every status that {@link #isTerminal(String)} rejects.
+   * every row; covers every status that {@link RunPipelineSupport#isTerminal(String)} rejects.
    *
    * <p>{@code PAUSED} is intentionally excluded from halt-all (V168) — paused runs are stable
    * checkpoints, not stuck work, and the operator should resume + cancel deliberately rather than
@@ -2991,7 +2830,7 @@ public class RunOrchestrator {
                             .build(),
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
-                applyExecutionResultToTasks(runId, result);
+                persistenceWriter.applyExecutionResultToTasks(runId, result);
 
                 // Re-resolve terminal status now that the retry has finished. Reviewer is NOT
                 // re-run on a single-task retry — that's a different operation (retryValidation).
@@ -3184,10 +3023,10 @@ public class RunOrchestrator {
                   .buildCommand(buildCommand)
                   .skipWiringPass(false)
                   .build());
-      persistReview(runId, reviewResult);
+      persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {
       log.warn("RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
-      persistReviewFailure(runId, e);
+      persistenceWriter.persistReviewFailure(runId, e);
       // reviewResult stays null — generateValidationReport handles that branch (it sets
       // verdict=APPROVED with summary="Review did not run." which trips status to LEGACY_UNKNOWN
       // below, surfacing the failure on the UI).
@@ -3197,7 +3036,7 @@ public class RunOrchestrator {
     // resolveTerminalStatus or the generateValidationReport(execResult != null) branch when we
     // pass null for execResult below. We use this purely to get tasksSuccessful / tasksFailed /
     // anyIntermediateWarning into the status decision.
-    ExecutionResult execResult = reconstructExecResultFromTasks(runId);
+    ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);
 
     try {
       generateValidationReport(runId, null, reviewResult, null);
@@ -3229,59 +3068,6 @@ public class RunOrchestrator {
    * is invoked with {@code execResult=null} on the re-review path so it falls through to its own
    * task-row reconstruction branch.
    */
-  private ExecutionResult reconstructExecResultFromTasks(String runId) {
-    var tasks = taskRepo.findByRunId(runId);
-    int success = 0;
-    int warn = 0;
-    int failed = 0;
-    int skipped = 0;
-    for (var t : tasks) {
-      String s = t.getStatus() == null ? "COMPLETE" : t.getStatus();
-      switch (s) {
-        case "COMPLETE" -> success++;
-        case "PARTIAL" -> warn++;
-        case "FAILED" -> failed++;
-        case "BLOCKED", "SKIPPED" -> skipped++;
-        default -> success++;
-      }
-    }
-    ExecutionResult.Overall overall;
-    if (failed > 0 && success == 0) overall = ExecutionResult.Overall.FAILED;
-    else if (failed > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else overall = ExecutionResult.Overall.ALL_SUCCESS;
-    return ExecutionResult.builder()
-        .overall(overall)
-        .tasksExecuted(tasks.size() - skipped)
-        .tasksSuccessful(success)
-        .tasksWithWarning(warn)
-        .tasksFailed(failed)
-        .tasksSkipped(skipped)
-        .perTask(java.util.List.of())
-        .totalLatencyMs(0L)
-        .finalTaskStatus(null)
-        .anyIntermediateWarning(warn > 0)
-        .build();
-  }
-
-  private static boolean isTerminal(String status) {
-    return "COMPLETE".equals(status)
-        || "FAILED".equals(status)
-        || "CANCELLED".equals(status)
-        || "PARTIAL".equals(status);
-  }
-
-  private void updateStatus(String runId, String newStatus) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setStatus(newStatus);
-              runRepo.save(r);
-            });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
-  }
-
   /** Legacy 4-arg entry point — failure paths without a specific reason flow here. */
   /**
    * RL-2026-05-050 — true when this run is a benchmark "code-gen only" run (source prefix {@code
@@ -3362,7 +3148,7 @@ public class RunOrchestrator {
               if (cost.inputTokens() > persistedIn) r.setTotalInputTokens(cost.inputTokens());
               if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
               runRepo.save(r);
-              writeRunCostLog(r, cost);
+              persistenceWriter.writeRunCostLog(r, cost);
 
               // R-162 — referral grant hook. Delegates to ReferralCompletionHook
               // so the conditional + try/catch + idempotency contract lives in
@@ -3439,111 +3225,6 @@ public class RunOrchestrator {
    * <p>Best-effort — IO errors are logged and swallowed. A missing README isn't worth failing a run
    * over.
    */
-  private void ensureReadme(
-      String runId,
-      Path workspace,
-      String userRequest,
-      Plan plan,
-      ExecutionResult execResult,
-      ReviewerResult reviewResult,
-      Instant startedAt) {
-    Path readme = workspace.resolve("README.md");
-    if (Files.exists(readme)) {
-      log.debug(
-          "RunOrchestrator run={} README.md already present (planner-authored), skipping", runId);
-      return;
-    }
-    try {
-      Files.writeString(
-          readme, renderRunReadme(runId, userRequest, plan, execResult, reviewResult, startedAt));
-      log.info(
-          "RunOrchestrator run={} wrote run-meta README.md ({} bytes)", runId, Files.size(readme));
-    } catch (IOException e) {
-      log.warn("RunOrchestrator run={} failed to write README.md: {}", runId, e.getMessage());
-    }
-  }
-
-  private String renderRunReadme(
-      String runId,
-      String userRequest,
-      Plan plan,
-      ExecutionResult execResult,
-      ReviewerResult reviewResult,
-      Instant startedAt) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# ")
-        .append(plan.planTitle() != null ? plan.planTitle() : "Run Output")
-        .append("\n\n");
-    if (plan.planSummary() != null && !plan.planSummary().isBlank()) {
-      sb.append(plan.planSummary()).append("\n\n");
-    } else {
-      sb.append("This project was generated from the following request:\n\n> ")
-          .append(userRequest)
-          .append("\n\n");
-    }
-
-    // How to run
-    String buildCmd = plan.buildCommand();
-    if (buildCmd != null && !buildCmd.isBlank()) {
-      sb.append("## How to build / run\n\n```bash\n").append(buildCmd).append("\n```\n\n");
-    } else {
-      sb.append("## How to run\n\nSee source files for entry points.\n\n");
-    }
-
-    // Task summary
-    sb.append("## Tasks\n\n| ID | Title | Status |\n|---|---|---|\n");
-    for (TaskOutcome t : execResult.perTask()) {
-      sb.append("| `")
-          .append(t.taskId())
-          .append("` | ")
-          .append(t.taskTitle() == null ? "" : t.taskTitle().replace("|", "\\|"))
-          .append(" | `")
-          .append(t.status().name())
-          .append("` |\n");
-    }
-    sb.append("\n");
-
-    // Review verdict
-    if (reviewResult != null) {
-      sb.append("## Code review\n\n")
-          .append("**Verdict:** `")
-          .append(reviewResult.overall().name())
-          .append("`");
-      if (reviewResult.finalBuildPassed() != null) {
-        sb.append("  \n**Build passed:** `").append(reviewResult.finalBuildPassed()).append("`");
-      }
-      sb.append("\n\n");
-      if (reviewResult.generalPassSummary() != null
-          && !reviewResult.generalPassSummary().isBlank()) {
-        sb.append("**General review:** ").append(reviewResult.generalPassSummary()).append("\n\n");
-      }
-      if (reviewResult.wiringPassSummary() != null && !reviewResult.wiringPassSummary().isBlank()) {
-        sb.append("**Wiring review:** ").append(reviewResult.wiringPassSummary()).append("\n\n");
-      }
-    }
-
-    // Run metadata
-    sb.append("## Run details\n\n")
-        .append("- **Run ID:** `")
-        .append(runId)
-        .append("`\n")
-        .append("- **Started:** `")
-        .append(startedAt)
-        .append("`\n")
-        .append("- **Completed:** `")
-        .append(Instant.now())
-        .append("`\n")
-        .append("- **Harness:** ExecuteSpec V2\n")
-        .append("- **Overall:** `")
-        .append(execResult.overall().name())
-        .append("`\n");
-    if (plan.projectType() != null && !plan.projectType().isBlank()) {
-      sb.append("- **Project type:** `").append(plan.projectType()).append("`\n");
-    }
-    sb.append("\n---\n\n*Generated by ExecuteSpec V2.*\n");
-    return sb.toString();
-  }
-
   // validation report (V2 adapter over V1 ValidationReportService)
 
   /**
@@ -3739,83 +3420,6 @@ public class RunOrchestrator {
    * falls back to filesystem heuristics — works for simple cases but less reliable for polyglot
    * workspaces.
    */
-  private void writeAgentContext(Path workspace, Plan plan) {
-    if (workspace == null || plan.projectType() == null) return;
-    try {
-      Path dir = workspace.resolve(".agent-context");
-      Files.createDirectories(dir);
-      // Normalize to the canonical PreviewProjectType/DeployStrategy enum form
-      // (UPPER_SNAKE_CASE). V2 planner historically emitted lowercase-hyphenated
-      // values (e.g. "node-backend") which silently fell through to heuristic
-      // detection and picked the wrong Dockerfile template.
-      String normalizedType = plan.projectType().trim().toUpperCase().replace('-', '_');
-      String json =
-          objectMapper.writeValueAsString(java.util.Map.of("project_type", normalizedType));
-      Files.writeString(dir.resolve("project.json"), json);
-    } catch (Exception e) {
-      log.debug("writeAgentContext failed: {}", e.getMessage());
-    }
-  }
-
-  // run title + design resolution
-
-  private void persistRunTitle(String runId, Plan plan) {
-    if (plan.planTitle() == null || plan.planTitle().isBlank()) return;
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setRunTitle(plan.planTitle());
-              runRepo.save(r);
-            });
-  }
-
-  /**
-   * Resolves and loads the design system block for this run using V1's {@link UiStyleResolver}.
-   * Picks from three signals in priority order: explicit hint parsed from the user request,
-   * planner-declared ui_style, and project-type heuristic. Returns an empty string for backend-only
-   * projects so the worker prompt stays compact.
-   */
-  private String buildDesignBlock(String userRequest, Plan plan) {
-    try {
-      String hint = uiStyleResolver.extractStyleHint(userRequest);
-      String plannerStyle = null; // Plan has no explicit ui_style field today
-      String projectType = plan.projectType() == null ? "unknown" : plan.projectType();
-      String designName = uiStyleResolver.resolveDesignName(hint, plannerStyle, projectType);
-      if (designName == null) return "";
-      String content = uiStyleResolver.loadDesignContent(designName);
-      String block = uiStyleResolver.buildFrontendConstraintBlock(null, content);
-      if (block == null || block.isBlank()) return "";
-      log.info(
-          "RunOrchestrator run=? design resolved='{}' (hint='{}', project={})",
-          designName,
-          hint,
-          projectType);
-      return block;
-    } catch (Exception e) {
-      log.warn("buildDesignBlock failed: {}", e.getMessage());
-      return "";
-    }
-  }
-
-  /**
-   * Best-effort repo count for the cost estimate. For project-scoped runs the count is the number
-   * of selected/linked repos in the workspace. For standalone runs the count is 1 when a repo URL
-   * is set, 0 otherwise. Audit 2026-05-13 Stage 1 — feeds the reviewer's per-extra- repo wiring
-   * overhead in the estimator.
-   */
-  private static int computeRepoCountForEstimate(PipelineRun runRow) {
-    if (runRow == null) return 1;
-    if (runRow.getProjectId() != null) {
-      List<UUID> ids = deserializeRepoIds(runRow.getSelectedRepoIds());
-      if (!ids.isEmpty()) return ids.size();
-      // Project run with no explicit selectedRepoIds — fall back to 1 to avoid a
-      // 0-cost codemap term that hides per-repo overhead on legacy rows.
-      return 1;
-    }
-    return (runRow.getRepoUrl() != null && !runRow.getRepoUrl().isBlank()) ? 1 : 0;
-  }
-
   private void persistEstimate(String runId, String provider, String model, Plan plan) {
     java.util.List<String> complexities =
         plan.tasks().stream()
@@ -3908,47 +3512,6 @@ public class RunOrchestrator {
     return Math.min(platformCap, userCostCap);
   }
 
-  private void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {
-    try {
-      double estimated = r.getCostEstimateHigh() != null ? r.getCostEstimateHigh() : 0.0;
-      double hardCap = r.getHardCapUsd() != null ? r.getHardCapUsd() : 0.0;
-      int credits = r.getCreditsCharged() != null ? r.getCreditsCharged() : 1;
-      boolean budgetHit = hardCap > 0 && cost.costUsd() >= hardCap;
-      RunCostLog row =
-          RunCostLog.builder()
-              .runId(r.getRunId())
-              .userId(r.getCreatedByUserId() != null ? r.getCreatedByUserId() : "unknown")
-              .orgId(r.getOrgId())
-              .provider(r.getAiProvider() != null ? r.getAiProvider() : "unknown")
-              .estimatedCost(estimated)
-              .actualCost(cost.costUsd())
-              .hardCap(hardCap)
-              .creditsCharged(credits)
-              .status(r.getStatus())
-              .taskCount(0)
-              .tasksCompleted(0)
-              .budgetHit(budgetHit)
-              .marginUsd(estimated - cost.costUsd())
-              .executionMode("REALTIME")
-              .batchDiscount(0.0)
-              .createdAt(Instant.now())
-              .build();
-      runCostLogRepo.save(row);
-    } catch (Exception e) {
-      log.warn(
-          "RunOrchestrator run={} failed to write RunCostLog: {}", r.getRunId(), e.getMessage());
-    }
-  }
-
-  private static String mapOverallToV1Status(ExecutionResult.Overall overall) {
-    return switch (overall) {
-      case ALL_SUCCESS -> "COMPLETE";
-      case PARTIAL_WITH_WARNINGS -> "PARTIAL";
-      case FAILED -> "FAILED";
-      case ABORTED -> "FAILED";
-    };
-  }
-
   /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
   record StatusAndReason(String status, String reason) {}
 
@@ -3999,15 +3562,6 @@ public class RunOrchestrator {
     // know — the reviewer didn't deliver a usable verdict — so dashboards +
     // retry logic can branch on it instead of treating it as "we have no idea".
     return new StatusAndReason(mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
-  }
-
-  private static String mapTaskStatusToV1(TaskOutcome.Status status) {
-    return switch (status) {
-      case SUCCESS, SUCCESS_AFTER_RETRY -> "COMPLETE";
-      case COMPLETED_WITH_WARNING -> "PARTIAL";
-      case WORKER_FAILED -> "FAILED";
-      case SKIPPED -> "BLOCKED";
-    };
   }
 
   /**
@@ -4389,162 +3943,12 @@ public class RunOrchestrator {
     }
   }
 
-  private static String truncate(String s, int max) {
-    if (s == null) return "";
-    return s.length() <= max ? s : s.substring(0, max - 1) + "…";
-  }
-
-  // RL-2026-05-035 — "consumption is the liability" fix. The codemap/architecture pipeline produces
-  // a per-repo symbol map but it was never fed to the agents that write code (planner / worker /
-  // PATCH). This builds a HARD-BOUNDED code-intel block (per-repo codemap symbol maps) to inject so
-  // localization uses the generated map instead of re-discovering structure from scratch. Best-
-  // effort + language-neutral; flag-gated by callers (`codeintel.inject.enabled`).
-  private static final int CODEINTEL_TOTAL_CAP = 12_000;
-  private static final int CODEINTEL_PER_REPO_CAP = 6_000;
-
   /**
    * Per-block cap for enterprise-knowledge planner injection (contracts + ADRs, flag {@code
    * enterprise.inject.enabled}). Each block is independently truncated so a large registry can't
    * blow the planner cold-start budget.
    */
   private static final int ENTERPRISE_INJECT_CAP = 8_000;
-
-  private String buildCodeIntelContext(
-      String projectId, java.util.List<com.navneet.executespec.project.entity.ProjectRepo> repos) {
-    if (projectId == null || repos == null || repos.isEmpty()) return "";
-    StringBuilder sb = new StringBuilder();
-    int budget = CODEINTEL_TOTAL_CAP;
-    try {
-      for (com.navneet.executespec.project.entity.ProjectRepo r : repos) {
-        if (budget <= 0) break;
-        var cm = projectArchitectureService.latestCodeMap(projectId, r.getId());
-        if (cm.isEmpty() || cm.get().getContent() == null || cm.get().getContent().isBlank()) {
-          continue;
-        }
-        String body = truncate(cm.get().getContent(), Math.min(budget, CODEINTEL_PER_REPO_CAP));
-        sb.append("### Codemap — ")
-            .append(lastPathSegment(r.getGithubRepoFullName()))
-            .append("\n")
-            .append(body)
-            .append("\n\n");
-        budget -= body.length();
-      }
-    } catch (Exception e) {
-      log.warn("buildCodeIntelContext failed (continuing without code-intel): {}", e.getMessage());
-      return "";
-    }
-    String out = sb.toString().trim();
-    if (out.isBlank()) return "";
-    return "EXISTING CODEBASE MAP — use this to LOCATE the right files/symbols before editing;"
-        + " do NOT re-discover the structure from scratch:\n\n"
-        + out;
-  }
-
-  /**
-   * Build a short user-facing description of what the reviewer auto-fixed during this run. Prefers
-   * the reviewer's own pass-summary text (the model's completeTask() output) so the description
-   * reads like a human-written changelog line. Falls back to a generic message if both passes were
-   * silent.
-   */
-  private static String describeReviewerFixes(ReviewerResult result) {
-    String general = result.generalPassSummary();
-    String wiring = result.wiringPassSummary();
-    StringBuilder sb = new StringBuilder("Reviewer auto-fixed issues during the review pass.");
-    if (general != null && !general.isBlank()) {
-      sb.append(" General pass: ").append(truncate(general.trim(), 160));
-    }
-    if (wiring != null && !wiring.isBlank()) {
-      sb.append(" Wiring pass: ").append(truncate(wiring.trim(), 160));
-    }
-    return truncate(sb.toString(), 480);
-  }
-
-  /**
-   * Resolve the effective provider string for a run.
-   *
-   * <p>Order of precedence: 1. Request-supplied {@code aiProvider} (lowercased, "google"→"gemini").
-   * 2. Project's default {@code ai_provider} (when {@code projectId} is set). 3. Platform default
-   * ({@link #DEFAULT_PROVIDER} = "openai").
-   *
-   * <p>Levels 2/3 log a WARN so missing provider values surface in ops rather than silently
-   * defaulting. Legacy {@link com.navneet.executespec.execution.entity.ExecutionRun} rows
-   * pre-dating V92 hit level 2; the V99 backfill closes that gap for new rows.
-   */
-  private String normalizeProvider(String aiProvider, String projectId, String runId) {
-    // v2.5.8 — strict-provider mode: when the system property
-    // executespec.strict-provider=true, we refuse to fall back silently.
-    // Used by the cross-provider evaluation harness so Gemini runs never
-    // accidentally land on OpenAI due to a null flag.
-    boolean strict =
-        "true".equalsIgnoreCase(System.getProperty("executespec.strict-provider", "false"));
-    if (aiProvider != null && !aiProvider.isBlank()) {
-      String lower = aiProvider.toLowerCase();
-      String resolved = "google".equals(lower) ? "gemini" : lower;
-      log.info(
-          "normalizeProvider[strict={}] runId={} -> provider={} (explicit)",
-          strict,
-          runId,
-          resolved);
-      return resolved;
-    }
-    if (strict) {
-      throw new IllegalStateException(
-          "strict-provider mode: runId=" + runId + " has null aiProvider — refusing to fall back");
-    }
-    if (projectId != null) {
-      String projectProvider =
-          projectRepository
-              .findById(projectId)
-              .map(p -> p.getAiProvider() == null ? null : p.getAiProvider().name())
-              .orElse(null);
-      if (projectProvider != null && !projectProvider.isBlank()) {
-        log.warn(
-            "normalizeProvider: null aiProvider on runId={} — falling back to project default {}",
-            runId,
-            projectProvider);
-        String lower = projectProvider.toLowerCase();
-        return "google".equals(lower) ? "gemini" : lower;
-      }
-    }
-    log.warn(
-        "normalizeProvider: no provider resolvable for runId={} projectId={} — defaulting to {}",
-        runId,
-        projectId,
-        DEFAULT_PROVIDER);
-    return DEFAULT_PROVIDER;
-  }
-
-  /**
-   * Run-level worker model default — used when {@code RunRequest.modelName} is blank.
-   *
-   * <p>2026-05-06 single-source consolidation: routes through {@link
-   * ModelRegistry#workhouseModelFor(String)} so the YAML matrix is the only source of truth.
-   * Previously a hardcoded switch returned Haiku/flash/mini even after YAML moved Anthropic
-   * WORKHORSE to Sonnet (2026-04-19) and Gemini WORKHORSE to Pro (2026-05-04).
-   *
-   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured), fall
-   * back to the historical Anthropic-Haiku default rather than NPE'ing the run.
-   */
-  private String defaultModelFor(String provider) {
-    String model = modelRegistry.workhouseModelFor(provider);
-    if (model != null && !model.isBlank()) return model;
-    log.warn(
-        "RunOrchestrator: no workhorse model in YAML matrix for provider '{}'; falling back to"
-            + " claude-haiku-4-5-20251001",
-        provider);
-    return "claude-haiku-4-5-20251001";
-  }
-
-  /** Serialise repo IDs to a compact JSON array string, or null when empty. */
-  private static String serializeRepoIds(List<UUID> ids) {
-    if (ids == null || ids.isEmpty()) return null;
-    StringBuilder sb = new StringBuilder("[");
-    for (int i = 0; i < ids.size(); i++) {
-      if (i > 0) sb.append(',');
-      sb.append('"').append(ids.get(i).toString()).append('"');
-    }
-    return sb.append(']').toString();
-  }
 
   /**
    * Builds a workspaceSummary that tells the planner (and by extension the worker) exactly where
@@ -4674,12 +4078,6 @@ public class RunOrchestrator {
     };
   }
 
-  private static String lastPathSegment(String fullName) {
-    if (fullName == null) return "repo";
-    int slash = fullName.lastIndexOf('/');
-    return slash < 0 ? fullName : fullName.substring(slash + 1);
-  }
-
   /**
    * v2.6.2 — hierarchical-planner phase 0. Runs the smart classifier and persists the verdict +
    * per-phase token cost on the run row. Returns the resolved {@link PlanStrategy} so the
@@ -4696,153 +4094,6 @@ public class RunOrchestrator {
    *
    * <p>Failures are swallowed: classifier outage must never block planning.
    */
-  private PlanStrategy runClassifierShadow(
-      String runId,
-      PipelineRun runRow,
-      String userRequest,
-      String projectId,
-      List<UUID> selectedRepoIds,
-      String provider) {
-    try {
-      // Repo full names — best effort. Skip lookup if not multi-repo.
-      List<String> repoNames = new ArrayList<>();
-      if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
-        try {
-          List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
-          for (ProjectRepo r : repos) {
-            if (r.getGithubRepoFullName() != null) repoNames.add(r.getGithubRepoFullName());
-          }
-        } catch (Exception ignored) {
-          /* fall through with empty list */
-        }
-      }
-
-      // Project type — Project entity doesn't carry one yet (slice 1
-      // skips this signal). Future slices will plumb it through from
-      // detected_stack on linked repos.
-      String projectType = null;
-
-      // Project memory snippet — short tail of last 3 ledger entries.
-      String projectMemorySnippet = null;
-      if (projectId != null) {
-        try {
-          String full = projectMemoryProvider.buildPlannerContext(projectId);
-          if (full != null && !full.isBlank()) {
-            // Cap at ~600 chars so the classifier prompt stays compact.
-            projectMemorySnippet = full.length() > 600 ? full.substring(full.length() - 600) : full;
-          }
-        } catch (Exception ignored) {
-          /* leave null */
-        }
-      }
-
-      com.navneet.executespec.router.LlmProvider providerEnum;
-      try {
-        providerEnum =
-            com.navneet.executespec.router.LlmProvider.valueOf(
-                provider == null ? "OPENAI" : provider.toUpperCase());
-      } catch (Exception e) {
-        providerEnum = com.navneet.executespec.router.LlmProvider.OPENAI;
-      }
-
-      RunCostTracker.Snapshot before = costTracker.snapshot(runId);
-      ClassificationResult result =
-          smartClassifier.classify(
-              userRequest, repoNames, projectId, projectType, providerEnum, projectMemorySnippet);
-      RunCostTracker.Snapshot after = costTracker.snapshot(runId);
-
-      long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());
-      long classifierOut = Math.max(0, after.outputTokens() - before.outputTokens());
-      double classifierCost = Math.max(0.0, after.costUsd() - before.costUsd());
-
-      log.info(
-          "V2 run={} smart classifier → {} (source={}, est tasks={}, repos={}, in/out={}/{}, ${})",
-          runId,
-          result.strategy(),
-          result.source(),
-          result.estimatedTaskCount(),
-          result.estimatedRepoTouchCount(),
-          classifierIn,
-          classifierOut,
-          String.format("%.6f", classifierCost));
-
-      // Persist verdict + per-phase cost on the run row. Use a fresh load
-      // so we don't overwrite columns that other writers may have touched
-      // (initialisation log, codemap summary, etc.).
-      try {
-        PipelineRun fresh = runRepo.findById(runId).orElse(null);
-        if (fresh != null) {
-          fresh.setPlanStrategy(result.strategy().name());
-          fresh.setClassifierReasoning(result.reasoning());
-          fresh.setClassifierInputTokens(classifierIn);
-          fresh.setClassifierOutputTokens(classifierOut);
-          fresh.setClassifierCostUsd(classifierCost);
-          runRepo.save(fresh);
-        }
-      } catch (Exception persistEx) {
-        log.warn(
-            "V2 run={} smart classifier persist failed (non-fatal): {}",
-            runId,
-            persistEx.getMessage());
-      }
-      return result.strategy();
-    } catch (Exception e) {
-      log.warn(
-          "V2 run={} smart classifier shadow run failed (non-fatal): {}", runId, e.getMessage());
-      return null;
-    }
-  }
-
-  /**
-   * v2.6.2 — hierarchical-planner phase 1. Snapshots per-run cost before + after the {@link
-   * OutlinePlannerAgent} call, attributes the diff to {@code pipeline_run.outline_*} columns +
-   * persists the plan JSON to {@code plan_outline_json}. Failures bubble up so the orchestrator can
-   * fall back to the legacy planner.
-   */
-  private Plan runOutlinePhase(String runId, PlannerRequest req, OutlinePlannerAgent.Mode mode) {
-    RunCostTracker.Snapshot before = costTracker.snapshot(runId);
-    try {
-      Plan plan = outlinePlanner.plan(req, mode);
-      RunCostTracker.Snapshot after = costTracker.snapshot(runId);
-
-      long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
-      long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
-      double cost = Math.max(0.0, after.costUsd() - before.costUsd());
-
-      log.info(
-          "V2 run={} outline planner [{}] → {} tasks, in/out={}/{}, ${}",
-          runId,
-          mode,
-          plan.tasks().size(),
-          inTok,
-          outTok,
-          String.format("%.6f", cost));
-
-      try {
-        PipelineRun fresh = runRepo.findById(runId).orElse(null);
-        if (fresh != null) {
-          try {
-            fresh.setPlanOutlineJson(objectMapper.writeValueAsString(plan));
-          } catch (Exception serEx) {
-            log.warn(
-                "V2 run={} plan_outline_json serialisation failed: {}", runId, serEx.getMessage());
-          }
-          fresh.setOutlineInputTokens(inTok);
-          fresh.setOutlineOutputTokens(outTok);
-          fresh.setOutlineCostUsd(cost);
-          runRepo.save(fresh);
-        }
-      } catch (Exception persistEx) {
-        log.warn("V2 run={} outline persist failed (non-fatal): {}", runId, persistEx.getMessage());
-      }
-      return plan;
-    } catch (Exception e) {
-      log.warn(
-          "V2 run={} outline planner failed: {} — bubbling up for fallback", runId, e.getMessage());
-      throw e;
-    }
-  }
-
   /**
    * v2.6.2 slice 3 — LARGE pipeline. Drives:
    *
@@ -4861,7 +4112,8 @@ public class RunOrchestrator {
    */
   private Plan runLargePipeline(
       String runId, PlannerRequest req, ExecutionContext rootCtx, boolean enableEpicRecursion) {
-    Plan skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+    Plan skeleton =
+        planningCoordinator.runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
     if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
       throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
     }
@@ -5195,94 +4447,10 @@ public class RunOrchestrator {
   }
 
   /**
-   * Fallback when sub-outline fails: collapse the EPIC into a single LEAF carrying the title +
-   * description so the worker still sees the work.
-   */
-  private static PlannedTask coerceToLeafFallback(PlannedTask epic) {
-    return PlannedTask.builder()
-        .id(epic.id())
-        .title(epic.title())
-        .description(
-            epic.description() == null || epic.description().isBlank()
-                ? "Implement: " + epic.title() + " (sub-outline failed; treat as a single task)"
-                : epic.description())
-        .complexity(epic.complexity() == null ? PlannedTask.Complexity.HIGH : epic.complexity())
-        .touchesFiles(epic.touchesFiles())
-        .dependsOn(epic.dependsOn())
-        .hardConstraints(epic.hardConstraints())
-        .meetsRequirements(epic.meetsRequirements())
-        .taskType(PlannedTask.TaskType.LEAF)
-        .build();
-  }
-
-  /**
    * Customer-safe terminal {@code statusReason} for internal / infrastructure failures. The raw
    * exception (class + message + stack) is logged at each call site for operators; it must NEVER
    * reach {@code statusReason}, which surfaces verbatim in the customer failure email + UI badge.
    * (2026-05-29: a JDK spawn-helper IOException stack trace had been leaking into both.)
    */
   static final String INTERNAL_ERROR_REASON = "INTERNAL_ERROR";
-
-  private static String shortMsg(Exception e) {
-    String msg = e.getMessage();
-    String s = e.getClass().getSimpleName() + ": " + (msg == null ? "" : msg);
-    return s.length() > 500 ? s.substring(0, 500) + "..." : s;
-  }
-
-  @SuppressWarnings("unused")
-  private static String readWorkspaceFromLog(IOException ignored) {
-    return null;
-  }
-
-  /**
-   * Walks the run workspace and returns relative paths of all non-hidden, non-build files. Used to
-   * populate {@link WorkerReport#getFilesCreated()} so the validation report's {@code
-   * filesGenerated} and {@code languages} fields have real data.
-   */
-  private static List<String> listWorkspaceFiles(Path workspace) {
-    if (workspace == null || !Files.isDirectory(workspace)) return List.of();
-    java.util.Set<String> skipDirs =
-        java.util.Set.of(
-            ".git",
-            ".agent-context",
-            "node_modules",
-            "target",
-            "build",
-            "dist",
-            ".gradle",
-            ".idea",
-            ".vscode",
-            "__pycache__",
-            "venv",
-            ".venv");
-    List<String> out = new java.util.ArrayList<>();
-    try (var stream = Files.walk(workspace)) {
-      stream
-          .filter(Files::isRegularFile)
-          .filter(
-              p -> {
-                for (Path part : workspace.relativize(p)) {
-                  String name = part.toString();
-                  if (skipDirs.contains(name)) return false;
-                  if (name.startsWith(".") && !".env.example".equals(name)) return false;
-                }
-                return true;
-              })
-          .forEach(p -> out.add(workspace.relativize(p).toString()));
-    } catch (IOException e) {
-      log.debug("listWorkspaceFiles failed at {}: {}", workspace, e.getMessage());
-    }
-    return out;
-  }
-
-  private static LlmProvider providerForAccuracy(String provider) {
-    if (provider == null) return LlmProvider.OPENAI;
-    String up = provider.toUpperCase();
-    if ("GEMINI".equals(up)) return LlmProvider.GEMINI;
-    try {
-      return LlmProvider.valueOf(up);
-    } catch (IllegalArgumentException e) {
-      return LlmProvider.OPENAI;
-    }
-  }
 }

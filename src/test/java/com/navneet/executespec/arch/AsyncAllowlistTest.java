@@ -139,6 +139,9 @@ class AsyncAllowlistTest {
               // project workspace — @Async + writeRawFile (file I/O, DB read only)
               "ProjectWorkspaceWarmer#warmDiskCache",
               "ProjectDocumentService#indexAsync",
+              // code-RAG — clone + walk + embed into project_code_chunk (file I/O + DB;
+              // RL-2026-05-052)
+              "CodeIndexingService#indexRepoAsync",
 
               // deployment — reads the run then uploads to GCS; no lazy nav
               "WorkspaceGcsUploadListener#onRunCompleted",

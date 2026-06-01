@@ -72,6 +72,23 @@ public class SwebenchProperties {
   private int taskWallTimeoutMinutes = 60;
 
   /**
+   * RL-2026-05-059 — hard cap on concurrent benchmark runs (semaphore in {@link
+   * com.navneet.executespec.benchmark.BenchmarkRunService}). A flood of submissions OR orphaned
+   * runs from a killed runner can otherwise pile onto the shared orchestrator pool and OOM the box
+   * (the 2026-05-31 jetsam crash: 4 flagship runs + orphans exceeded 23GB → kernel killed the JVM).
+   * Each provider submits 1-at-a-time, so 4 = one in-flight per provider. Memory-bounded — raise
+   * only with RAM headroom.
+   */
+  private int maxConcurrentRuns = 4;
+
+  /**
+   * Seconds a {@code submit()} waits for a free concurrency slot before returning HTTP 429
+   * (backpressure / rate limit). Generous so a runner blocks rather than fails when the box is
+   * busy.
+   */
+  private int submitQueueWaitSeconds = 180;
+
+  /**
    * Docker image template — substituted with the instance ID's underscore-separated form (matches
    * SWE-bench's published image naming convention). Example: {@code sqlfluff__sqlfluff-1625} →
    * {@code docker.io/swebench/sweb.eval.x86_64.sqlfluff_1776_sqlfluff-1625:latest}.

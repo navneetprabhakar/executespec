@@ -51,6 +51,18 @@ import lombok.Builder;
  *     making real progress (see dev run a59f9798 T12: 100 iters, 92 files written, hit cap mid-test
  *     suite). Null/0 leaves wall-clock unbounded — only the iter cap + stagnation watchdog + cost
  *     cap apply.
+ * @param forceToolChoiceOnSalvage RL-2026-05-059 — when true, the Lever-B salvage call (fired on
+ *     iter-limit / budget-exceeded / progress-force with zero writes) restricts the tool set to
+ *     {@code writeFile}/{@code editFile}/{@code completeTask} AND sets {@code
+ *     tool_choice="required"} so the model MUST emit one of them instead of returning
+ *     reasoning-only text that silently fails the salvage. Deep-dive on the 2026-05-30
+ *     native-DeepSeek mixed10 eval found 4/10 runs produced ZERO edits across 18 iters and the
+ *     salvage never once rescued them (the model returned a tool-less response). Honoured only by
+ *     the OpenAI-wire clients (OpenAI / DeepSeek / OpenRouter); Anthropic + Gemini ignore the
+ *     {@code tool_choice} today, but still benefit from the restricted tool set. Set by {@link
+ *     com.navneet.executespec.harness.SequentialExecutor} from the {@code
+ *     worker.salvage-force-tool-choice.enabled} flag (V224, default OFF). Null/false ⇒ today's
+ *     behaviour (full tool set, {@code tool_choice="auto"}).
  */
 @Builder
 public record WorkerTaskRequest(
@@ -66,7 +78,8 @@ public record WorkerTaskRequest(
     Integer stagnationForceAfter,
     Boolean requireTestVerification,
     Boolean requireBuildVerification,
-    Integer wallClockSeconds) {
+    Integer wallClockSeconds,
+    Boolean forceToolChoiceOnSalvage) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

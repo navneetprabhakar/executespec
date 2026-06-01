@@ -43,10 +43,16 @@ public class ProjectController {
   public ResponseEntity<List<ProjectDto>> listProjects(
       @AuthenticationPrincipal AppUserDetails userDetails) {
     boolean isOrgAdmin = isOrgAdminOrSuperAdmin(userDetails);
-    String orgId = userDetails.getUser().getOrgId();
-    if (orgId == null) return ResponseEntity.ok(List.of());
+    // RL-2026-05-056 — do NOT short-circuit on a null orgId. orgId is null for a user with no
+    // home org (the documented "free-tier with no org" state, or a user removed from their only
+    // org). Such a user owns no org projects but may still be a cross-org collaborator via an
+    // accepted V175 ProjectMember invite — the union inside listProjectsForUser is what surfaces
+    // those. The earlier `if (orgId == null) return List.of()` returned an EMPTY list and so
+    // bypassed RL-2026-05-044's cross-org fix entirely: the invitee could open the project by URL
+    // (the access guard honours ProjectMember) but never saw it in their project options.
     List<ProjectDto> projects =
-        projectService.listProjectsForUser(orgId, userDetails.getUser().getId(), isOrgAdmin);
+        projectService.listProjectsForUser(
+            userDetails.getUser().getOrgId(), userDetails.getUser().getId(), isOrgAdmin);
     return ResponseEntity.ok(projects);
   }
 

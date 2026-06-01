@@ -112,8 +112,14 @@ public class ProjectService {
     // only deletedAt-stamped rows are hidden entirely until the 30-day undo window lapses.
     // Org projects (shared grouping for all org members), keyed for dedupe.
     java.util.LinkedHashMap<String, ProjectDto> visible = new java.util.LinkedHashMap<>();
-    for (Project p : projectRepo.findByOrgIdAndDeletedAtIsNull(orgId)) {
-      visible.put(p.getId(), ProjectDto.from(p));
+    // RL-2026-05-056 — orgId is null for a user with no home org (free-tier "no org" state, or a
+    // user removed from their only org). They own no org projects, but the cross-org ProjectMember
+    // union below still applies — so guard the org lookup and fall through to the union rather than
+    // letting the caller short-circuit on null (which hid the accepted project from invitees).
+    if (orgId != null) {
+      for (Project p : projectRepo.findByOrgIdAndDeletedAtIsNull(orgId)) {
+        visible.put(p.getId(), ProjectDto.from(p));
+      }
     }
     // RL-2026-05-044 — V175 cross-org visibility fix. Also include projects this user explicitly
     // belongs to via an accepted invite (a ProjectMember row, typically in another org). Without

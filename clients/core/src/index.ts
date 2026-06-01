@@ -12,6 +12,7 @@ export { type TokenStore, MemoryTokenStore, FileTokenStore } from './auth.js';
 export { HttpClient, type RequestOptions } from './http.js';
 export { ExecuteSpecApi } from './api.js';
 export { streamRunEvents, type StreamOptions } from './sse.js';
+export { loopbackLogin, type LoopbackLoginOptions } from './login.js';
 export { safeResolve, ToolError } from './tools/pathSafety.js';
 export {
   ToolRuntime,

@@ -403,20 +403,6 @@ public class ContextAgent {
     Files.writeString(p, entry.toString(), StandardOpenOption.APPEND, StandardOpenOption.CREATE);
   }
 
-  /**
-   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #45. Direct JGit commits
-   *     against the customer's project workspace from a background thread can co-opt in-flight
-   *     edits. The pipeline's normal push flow ({@code ScmPushService.pushMultiRepo}) stages and
-   *     pushes once at run terminal. Do NOT call.
-   */
-  @Deprecated(forRemoval = true)
-  @SuppressWarnings("unused")
-  private void commitToMain(Path projectPath, PipelineRun run) {
-    log.warn(
-        "[Context Agent] commitToMain is deprecated and disabled — see audit F #45 (run {})",
-        run.getRunId());
-  }
-
   private boolean hasAnythingChanged(ContextAgentInput input) {
     return !input.newPackagesDetected().isEmpty()
         || !input.newFilesDetected().isEmpty()

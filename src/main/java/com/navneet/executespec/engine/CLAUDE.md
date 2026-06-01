@@ -31,7 +31,7 @@ rollout, each phase shippable + green:
 | `EngineBudget.java` | iterCap / wallClockSeconds / dollarCap (null = engine/tier default). |
 | `EngineCost.java` | inputTokens / outputTokens / cacheReadTokens / usd (cache-aware). |
 | `EngineVerification.java` | buildOk / testsPassed / testsTotal / detail (null field = **not measured**, distinct from failed). |
-| `WorkerAgent.java` | **(Phase 4, moved from `agent/`)** the sequential multi-turn worker loop — stream → tools → `completeTask`; progress/verify nudges; Lever-B salvage. Still imports `agent.LlmRouter` + `agent.LlmRequest`. |
+| `WorkerAgent.java` | **(Phase 4, moved from `agent/`)** the sequential multi-turn worker loop — stream → tools → `completeTask`; progress/verify nudges; Lever-B salvage. **Forced-tool-choice salvage (RL-2026-05-059, flag `worker.salvage-force-tool-choice.enabled`, V224, default OFF):** when on, `runSalvageCall` does a `salvageAttempt` with the tool set restricted to `writeFile`/`editFile`/`completeTask` (`salvageTools(restrict=true)`) + `tool_choice="required"`, then **falls back** to today's full-tools/auto attempt if the forced one yields no tool call — so a model that returns reasoning-only text (the verified 4/10 native-DeepSeek zero-write empty-patch failure) is forced to emit an edit, with no regression for providers that reject `"required"`. Still imports `agent.LlmRouter` + `agent.LlmRequest`. |
 | `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
 | `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags). |
 
