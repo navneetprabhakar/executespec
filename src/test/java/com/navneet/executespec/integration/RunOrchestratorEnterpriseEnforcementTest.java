@@ -45,7 +45,7 @@ class RunOrchestratorEnterpriseEnforcementTest {
             Map.of());
 
     List<StandardsViolation> rows =
-        RunOrchestrator.toStandardsViolationRows(runId, "proj-1", report, 200);
+        RunStandardsEnforcer.toStandardsViolationRows(runId, "proj-1", report, 200);
 
     assertEquals(1, rows.size());
     StandardsViolation v = rows.get(0);
@@ -71,7 +71,7 @@ class RunOrchestratorEnterpriseEnforcementTest {
     StandardsRunner.RunReport report = new StandardsRunner.RunReport(many, Map.of());
 
     List<StandardsViolation> rows =
-        RunOrchestrator.toStandardsViolationRows(UUID.randomUUID(), "p", report, 10);
+        RunStandardsEnforcer.toStandardsViolationRows(UUID.randomUUID(), "p", report, 10);
 
     assertEquals(10, rows.size(), "must honour the persistence cap to avoid a runaway lint dump");
   }
@@ -79,7 +79,7 @@ class RunOrchestratorEnterpriseEnforcementTest {
   @Test
   void null_report_yields_no_rows() {
     assertTrue(
-        RunOrchestrator.toStandardsViolationRows(UUID.randomUUID(), "p", null, 200).isEmpty());
+        RunStandardsEnforcer.toStandardsViolationRows(UUID.randomUUID(), "p", null, 200).isEmpty());
   }
 
   // Breaking-change report rows → report-only run issues

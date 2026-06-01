@@ -77,9 +77,9 @@ The classify→outline→expand phase: `runClassifierShadow` (4699), `runOutline
 `runLargePipeline` (4862), `expandEpic` (5044). Large + parallel (TaskExpander fan-out) — extract as a unit;
 `runPipeline` calls into it. Verify LARGE/LEGACY path with a hierarchical-plan eval after.
 
-### Increment 5 — `RunValidationKickoff` (`@Component`, deps: `validationReportService`, `standardsRunner`, `standardsViolationRepo`, `effectiveStandardsResolver`, plus the report/standards collaborators)
-`generateValidationReport` ×2 (3563, 3573), `runStandardsEnforcement` (4199), `collectWorkspaceFiles` (4355).
-Background-dispatched today — preserve the async wrapping (invariant #3).
+### Increment 5 — `RunValidationKickoff` (`@Component`) ⏳ PARTIAL — standards cluster DONE (2026-06-01)
+**Standards cluster ✅ DONE (inc-5a, 2026-06-01):** `runStandardsEnforcement` + `collectWorkspaceFiles` + the test-pinned `toStandardsViolationRows` static + the `STANDARDS_*` constants moved byte-identically to a focused **`RunStandardsEnforcer`** `@Component` (deps `effectiveStandardsResolver` / `standardsRunner` / `standardsViolationRepository` / `projectRepository`, all removed from the god-class); the call site routes via `standardsEnforcer`; `RunOrchestratorEnterpriseEnforcementTest` repointed. RunOrchestrator 3,957 → 3,813 LOC; full `mvn verify` green.
+**Remaining (inc-5b):** `generateValidationReport` ×2 + its `synthesiseReviewIssues` private-static — the fat (~12-collaborator, scoring-path) move; do it as its own careful pass (background-dispatched → preserve the async wrapping, invariant #3).
 
 ### Increment 6 — `RunLifecycleService` (`@Component`, deps: `gateStore`, `broadcaster`, the `activeRuns` map, `scmPushService`) — HIGHEST RISK
 `cancel` (2212), `pause` (2285), `resume` (2334), `resumeAfterCrash` (2448), `runPipelineForResume` (2391),
