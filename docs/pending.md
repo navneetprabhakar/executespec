@@ -87,6 +87,12 @@ Per founder call, defaults are NOT flipped; toggle in the SUPER_ADMIN flag conso
 
 ## F. Explicitly parked by founder (tracked, not actioned)
 
+### F0 ⚪ Rebrand — rename all packages, drop personal name (name TBD)
+- **Decision (2026-06-01):** rename the product/agent away from "ExecuteSpec/Spec". Founder will choose a new name. Scope when it happens: **rename ALL packages** — including the Java base package `com.navneet.executespec` → `com.<newname>…` (**drop the personal `navneet` segment**) and the client packages (`@executespec/*`, VS Code id/publisher, CLI bins `executespec`/`es`). "Rest remains as-is."
+- **Constraints:** compiler-gated (~1,076 Java files + 29 client files); must run with a build (spotless/mvn) — not a blind sed. Do it as one clean pass (clients are slated to split to their own repos, so align the rename with that).
+- **Finding:** "Forge" was considered and **rejected-for-now** — it collides with **Atlassian Forge** (the `@forge` npm scope is likely taken; SEO/mindshare clash for a dev-tool CLI). Pick a collision-free mark + verify npm scope / VS Code publisher availability before committing.
+- **Where:** repo-wide; `com.navneet.executespec` (base pkg), `clients/{cli,vscode,core}`, domain/config strings.
+
 ### F1 ⚪ Grading / `verifiedScore` strategy
 - Parked — "we will figure out a better strategy." Review finding: 40–53% of the headline score is LLM-self-graded whenever real tests don't resolve, and the anti-gaming guard keys off the same LLM judge. No change made.
 
