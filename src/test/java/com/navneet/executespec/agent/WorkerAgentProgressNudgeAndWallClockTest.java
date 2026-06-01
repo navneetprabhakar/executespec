@@ -145,16 +145,13 @@ class WorkerAgentProgressNudgeAndWallClockTest {
 
   // Progress nudge — text-only-stop trigger
 
-  // 2026-05-29 — DISABLED pending root-cause of the iter-counter off-by-one regression that
-  // c72fa557 (engine extraction Phase 5+6, RL-2026-05-052) acknowledged in its commit message
-  // ("The 4 pre-existing WorkerAgentStagnationTest / WorkerAgentProgressNudgeAndWallClockTest
-  // failures reproduce identically on the unmodified HEAD code — NOT caused by this change; they
-  // are a separate pre-existing iter-counter regression that needs its own fix.").
-  // Every assertion fails with `expected: <N>` / `actual: <N+1>` — a single consistent extra
-  // iter is now counted somewhere in the worker loop after c72fa557. Re-enable after the
-  // root-cause fix lands. See follow-up task in docs/reason-log/2026-05.md.
-  @org.junit.jupiter.api.Disabled(
-      "iter-counter off-by-one — pre-existing regression from c72fa557 (RL-2026-05-052)")
+  // 2026-06-01 (RL-2026-05-062) — RE-ENABLED. The uniform "expected N / actual N+1" was NOT a
+  // c72fa557 loop bug: it is the one-shot verify-before-done nudge (RL-2026-05-051, which predates
+  // c72fa557). Any worker that wrote files and calls completeTask without running a verify
+  // (shell/buildProject/runTests) since its last edit gets its FIRST completeTask deferred once;
+  // the mock repeats the completeTask response so it completes on the next iter. That is the
+  // intended behaviour — these expectations were written before the nudge existed and just needed
+  // +1. (The remaining tests in this file that don't write-then-complete are unaffected.)
   @Test
   void text_only_stop_after_writes_is_nudged_and_recovers_to_completed() {
     // 6 writes, then a text-only summary at iter 7 (the dominant "summary mode" failure), then
@@ -178,11 +175,11 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         WorkerResult.Outcome.COMPLETED,
         result.outcome(),
         "model should land COMPLETED after the progress nudge");
-    assertEquals(8, result.iterations(), "completed at iter 8 (the post-nudge iter)");
+    // iter7 text-only nudge, iter8 completeTask deferred by the verify nudge, iter9 completes.
+    assertEquals(9, result.iterations(), "completed at iter 9 (text-only nudge + verify nudge)");
   }
 
-  @org.junit.jupiter.api.Disabled(
-      "iter-counter off-by-one — pre-existing regression from c72fa557 (RL-2026-05-052)")
+  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done nudge.
   @Test
   void text_only_stop_fires_at_low_iter_even_with_one_write() {
     // Regression for dev run 61c9fffa T12 (iter 31/150) + T18 (iter 18/150): the old Lever C had
@@ -197,7 +194,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
     WorkerResult result = f.worker.run(req(40, null));
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
-    assertEquals(3, result.iterations(), "completed at iter 3 (post-nudge)");
+    // iter1 write, iter2 text-only nudge, iter3 completeTask deferred (verify nudge), iter4 done.
+    assertEquals(4, result.iterations(), "completed at iter 4 (text-only nudge + verify nudge)");
   }
 
   @Test
@@ -353,8 +351,7 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         "with no wall-clock, terminate by iter cap or progress-force; got " + result.outcome());
   }
 
-  @org.junit.jupiter.api.Disabled(
-      "iter-counter off-by-one — pre-existing regression from c72fa557 (RL-2026-05-052)")
+  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done nudge.
   @Test
   void wall_clock_does_not_interrupt_completed_task() {
     // Worker calls completeTask quickly; wall-clock cap is irrelevant.
@@ -366,6 +363,7 @@ class WorkerAgentProgressNudgeAndWallClockTest {
     WorkerResult result = f.worker.run(req(40, 30 * 60)); // 30-min cap
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
-    assertEquals(2, result.iterations());
+    // iter1 write, iter2 completeTask deferred (verify nudge), iter3 completes.
+    assertEquals(3, result.iterations());
   }
 }
