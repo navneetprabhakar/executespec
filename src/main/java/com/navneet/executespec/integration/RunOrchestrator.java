@@ -232,6 +232,13 @@ public class RunOrchestrator {
    */
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
 
+  /**
+   * RL-2026-05-066 (verifyBoot) — boots the worker's app + health-checks it for the verifiedScore
+   * BUILD slot. Fail-open + flag-gated + inert until preview Phase 0; null result keeps the
+   * compile-only BUILD signal.
+   */
+  private final com.navneet.executespec.deployment.preview.verify.PreviewVerifier previewVerifier;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
@@ -3394,8 +3401,29 @@ public class RunOrchestrator {
               e.getMessage());
         }
       }
+      // RL-2026-05-066 (verifyBoot) — feed a deterministic boot verdict into the BUILD slot. Reads
+      // the run-recipe + boots in the hardened sandbox; fail-open (empty → null → compile-only
+      // BUILD
+      // signal, today's behaviour). Flag-gated (worker.verify-boot.enabled) and inert until preview
+      // Phase 0 wires the boot engine, so default runs are byte-identical.
+      com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.BootVerification
+          bootVerification = null;
+      if (featureFlagService.isEnabled(
+          com.navneet.executespec.tool.VerifyBootTool.FLAG_VERIFY_BOOT)) {
+        try {
+          Path bootWorkspace =
+              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+          bootVerification = previewVerifier.verify(bootWorkspace, runId).orElse(null);
+        } catch (Exception e) {
+          log.warn(
+              "RunOrchestrator run={} boot verification failed (fallback to compile signal): {}",
+              runId,
+              e.getMessage());
+        }
+      }
       ReportInput input =
-          new ReportInput(run, workerReports, review, compile, tasks, testSummary, List.of());
+          new ReportInput(
+              run, workerReports, review, compile, tasks, testSummary, List.of(), bootVerification);
       // RL-2026-05-041 (audit #19 + E#37) — the old OPENAI→ANTHROPIC reroute (which mutated
       // run.aiProvider in-memory around this call) is removed. ValidationReportGenerator runs
       // through FallbackLlmRouter.callWithFallbackTracked, which dispatches OpenAI via
