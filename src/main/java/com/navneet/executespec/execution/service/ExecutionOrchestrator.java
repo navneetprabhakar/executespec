@@ -58,6 +58,7 @@ public class ExecutionOrchestrator {
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.repo.GitHubRepoService gitHub;
   private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
   private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
@@ -922,7 +923,7 @@ public class ExecutionOrchestrator {
     // V188 — unified path: one V2 run for the whole execution. Cancel it.
     if (run.getPipelineRunId() != null && !run.getPipelineRunId().isBlank()) {
       try {
-        boolean cancelled = v2Orchestrator.cancel(run.getPipelineRunId());
+        boolean cancelled = runLifecycleService.cancel(run.getPipelineRunId());
         log.info(
             "abort exec={} (unified) pipelineRun={} cancel={}",
             run.getId(),
@@ -946,7 +947,7 @@ public class ExecutionOrchestrator {
       String pipelineRunId = s.getPipelineRunId();
       if (pipelineRunId == null || pipelineRunId.isBlank()) continue;
       try {
-        boolean cancelled = v2Orchestrator.cancel(pipelineRunId);
+        boolean cancelled = runLifecycleService.cancel(pipelineRunId);
         log.info(
             "abort exec={} solution={} pipelineRun={} cancel={}",
             run.getId(),

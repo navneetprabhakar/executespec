@@ -49,6 +49,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @Mock SseBroadcaster broadcaster;
   @Mock GitHubRepoService gitHub;
   @Mock RunOrchestrator v2Orchestrator;
+  @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock ObjectProvider<com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
@@ -79,6 +80,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
             broadcaster,
             gitHub,
             v2Orchestrator,
+            runLifecycleService,
             prRecordRepo,
             runCas,
             pipelineRunRepo,

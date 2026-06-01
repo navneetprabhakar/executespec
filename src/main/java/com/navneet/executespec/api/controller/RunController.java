@@ -56,6 +56,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RunController {
 
   private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
@@ -558,7 +559,7 @@ public class RunController {
           HttpStatus.SERVICE_UNAVAILABLE,
           "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
     }
-    boolean paused = v2Orchestrator.pause(runId);
+    boolean paused = runLifecycleService.pause(runId);
     if (!paused) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -822,7 +823,7 @@ public class RunController {
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}", runId);
-    boolean cancelled = v2Orchestrator.cancel(runId);
+    boolean cancelled = runLifecycleService.cancel(runId);
     return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
   }
 
