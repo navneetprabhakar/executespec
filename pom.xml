@@ -25,7 +25,7 @@
 
   <properties>
     <java.version>21</java.version>
-    <spring-ai.version>1.1.6</spring-ai.version>
+    <spring-ai.version>1.1.7</spring-ai.version>
     <!-- Override Spring Boot 3.3's Mockito 5.11 → 5.17 for Java 25 compatibility -->
     <mockito.version>5.17.0</mockito.version>
     <!-- Override ByteBuddy 1.14 → 1.16 (officially supports Java 25, class file version 69) -->
@@ -101,12 +101,12 @@
     <dependency>
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-core</artifactId>
-      <version>3.3.0</version>
+      <version>3.3.1</version>
     </dependency>
     <dependency>
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-parsers-standard-package</artifactId>
-      <version>3.3.0</version>
+      <version>3.3.1</version>
     </dependency>
 
     <!-- Jackson -->
@@ -422,7 +422,7 @@
     <dependency>
       <groupId>com.github.javaparser</groupId>
       <artifactId>javaparser-core</artifactId>
-      <version>3.28.1</version>
+      <version>3.28.2</version>
     </dependency>
   </dependencies>
 
@@ -462,10 +462,10 @@
         <artifactId>spotless-maven-plugin</artifactId>
         <!-- 2026-05-16: Dependabot #134 bumped 2.43 → 3.4 (major; config schema unchanged
              for the slots we use: googleJavaFormat, removeUnusedImports, importOrder,
-             formatAnnotations). 2026-05-22: Dependabot #149 bumped 3.4 → 3.5.1 (minor;
+             formatAnnotations). 2026-05-22: Dependabot #149 bumped 3.4 → 3.6.0 (minor;
              google-java-format stays pinned at 1.22.0 below, so the bump changes plugin
              behaviour only — no codebase reformat). -->
-        <version>3.5.1</version>
+        <version>3.6.0</version>
         <configuration>
           <java>
             <includes>
