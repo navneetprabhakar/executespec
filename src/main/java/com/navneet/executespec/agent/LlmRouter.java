@@ -88,6 +88,7 @@ public class LlmRouter {
   private final RunCostTracker costTracker;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
+  private final AnthropicForcedToolClient anthropicForcedToolClient;
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -276,6 +277,18 @@ public class LlmRouter {
     AnthropicChatModel model =
         (apiKey != null && !apiKey.isBlank()) ? perKeyAnthropicModel(apiKey) : anthropicModel;
     if (model == null) throw new IllegalStateException("Anthropic model not configured");
+    // RL-2026-05-059 — FORCED tool-choice salvage. Spring AI's AnthropicChatOptions can't set
+    // tool_choice, so when the WorkerAgent Lever-B salvage requests it (toolChoice="required"),
+    // bypass to the low-level AnthropicApi with ToolChoiceAny (the model MUST emit a tool call).
+    // Fail-safe: null result → fall through to the normal AnthropicChatModel path, so this can
+    // never regress production Anthropic traffic and only runs on an already-failing salvage call.
+    if ("required".equals(r.toolChoice())) {
+      ChatResponse forced =
+          anthropicForcedToolClient.forcedToolCall(
+              r.model(), r.messages(), tools, r.maxTokens(), apiKey);
+      if (forced != null) return forced;
+      log.info("Anthropic forced-salvage produced nothing — falling through to auto tool-choice");
+    }
     // Prompt caching — must-have for cost control on multi-iteration tasks.
     // Strategy CONVERSATION_HISTORY caches the system prompt, tool definitions,
     // and messages up through the last-but-one in the history. Each subsequent
@@ -410,6 +423,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(apiKey)
             .build());
   }
@@ -433,6 +447,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
             .build());
@@ -468,6 +483,7 @@ public class LlmRouter {
             .tools(tools)
             .temperature(r.temperature())
             .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
             .build());

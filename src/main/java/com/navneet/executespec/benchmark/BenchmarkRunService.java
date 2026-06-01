@@ -8,7 +8,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+
+import jakarta.annotation.PostConstruct;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -86,6 +89,24 @@ public class BenchmarkRunService {
   private final RunOrchestrator orchestrator;
   private final PipelineRunRepository runRepo;
   private final AgentProperties agentProps;
+
+  /**
+   * RL-2026-05-059 — hard concurrency cap. A permit is acquired in {@link #submit} before the run
+   * is dispatched and released in {@link #captureOnTerminalAsync}'s {@code finally} (so terminal,
+   * wall-timeout, and error paths all free it). Bounds concurrent benchmark pipelines regardless of
+   * how many runs are submitted or orphaned — the structural fix for the 2026-05-31 OOM crash where
+   * 4 flagship runs + orphaned runs from killed runners exceeded RAM and the kernel killed the JVM.
+   * Fair (FIFO) so providers don't starve. Sized from {@link
+   * SwebenchProperties#getMaxConcurrentRuns} at startup.
+   */
+  private Semaphore slots;
+
+  @PostConstruct
+  void initConcurrencyGate() {
+    int permits = Math.max(1, props.getMaxConcurrentRuns());
+    this.slots = new Semaphore(permits, true);
+    log.info("benchmark: concurrency gate initialised — maxConcurrentRuns={}", permits);
+  }
 
   /**
    * ThreadLocal stash for the in-flight setup recipe (set before submitRun, read by the listener).
@@ -233,55 +254,94 @@ public class BenchmarkRunService {
     String containerName = "bench-run-" + UUID.randomUUID().toString().substring(0, 8);
     String userRequest = synthesizeBlindSpec(instance);
 
-    PipelineRun run;
-    PENDING.set(new SetupRecipe(image, containerName, instanceId));
+    // RL-2026-05-059 — acquire a concurrency permit BEFORE dispatch (released in
+    // captureOnTerminalAsync's finally on success, or this method's finally on a pre-handoff
+    // failure). Bounds concurrent benchmark pipelines so a submission flood / orphan pileup can't
+    // over-subscribe RAM and OOM the JVM (the 2026-05-31 crash).
+    acquireSlotOrThrow();
+    boolean permitHandedOff = false;
     try {
-      // RL-2026-05-050 — runMode=BUILD + source="swebench-codegen" → run the REAL system end to
-      // end (classifier picks the strategy, planner plans, worker generates with the full tool
-      // set), but STOP after the worker. The orchestrator's code-gen-only gate (keyed on the
-      // "swebench-codegen" source) finalizes COMPLETE right after the executor, BEFORE the reviewer
-      // — so PostEditFormatter / scaffolding / auto-commit never run and the captured diff is a
-      // clean, scoreable minimal patch. (The earlier BUILD smoke polluted the diff precisely
-      // because it ran the full reviewer + post-steps; stopping at the worker removes that.)
-      // repoMode=NONE + repoUrl=null → no clone; the workspace is populated by onRunStarted's cp.
-      // Blind: the agent gets only the issue text (no FAIL_TO_PASS / gold test_patch) — those are
-      // applied externally at scoring time.
-      run =
-          orchestrator.submitRun(
-              userRequest,
-              /* source */ "swebench-codegen",
-              /* repoUrl */ null,
-              /* repoMode */ "NONE",
-              /* githubPat */ null,
-              /* githubOwner */ null,
-              /* skipApproval */ true,
-              /* autoMerge */ false,
-              /* modelName */ modelName,
-              /* aiProvider */ provider,
-              /* createdByUserId */ props.getBenchUserId(),
-              /* orgId */ props.getBenchOrgId(),
-              /* projectId */ props.getBenchProjectId(),
-              /* executionMode */ "PROTOTYPE",
-              /* selectedRepoIds */ java.util.List.of(),
-              /* figmaUrl */ null,
-              /* tddMode */ false,
-              /* branchOverride */ null,
-              /* prReviewComments */ null,
-              /* runMode */ RunMode.BUILD);
-    } catch (Exception e) {
-      run("docker rm -f " + containerName, 30);
-      throw new ResponseStatusException(
-          HttpStatus.INTERNAL_SERVER_ERROR, "submitRun failed: " + e.getMessage(), e);
+      PipelineRun run;
+      PENDING.set(new SetupRecipe(image, containerName, instanceId));
+      try {
+        // RL-2026-05-050 — runMode=BUILD + source="swebench-codegen" → run the REAL system end to
+        // end (classifier picks the strategy, planner plans, worker generates with the full tool
+        // set), but STOP after the worker. The orchestrator's code-gen-only gate (keyed on the
+        // "swebench-codegen" source) finalizes COMPLETE right after the executor, BEFORE the
+        // reviewer
+        // — so PostEditFormatter / scaffolding / auto-commit never run and the captured diff is a
+        // clean, scoreable minimal patch. (The earlier BUILD smoke polluted the diff precisely
+        // because it ran the full reviewer + post-steps; stopping at the worker removes that.)
+        // repoMode=NONE + repoUrl=null → no clone; the workspace is populated by onRunStarted's cp.
+        // Blind: the agent gets only the issue text (no FAIL_TO_PASS / gold test_patch) — those are
+        // applied externally at scoring time.
+        run =
+            orchestrator.submitRun(
+                userRequest,
+                /* source */ "swebench-codegen",
+                /* repoUrl */ null,
+                /* repoMode */ "NONE",
+                /* githubPat */ null,
+                /* githubOwner */ null,
+                /* skipApproval */ true,
+                /* autoMerge */ false,
+                /* modelName */ modelName,
+                /* aiProvider */ provider,
+                /* createdByUserId */ props.getBenchUserId(),
+                /* orgId */ props.getBenchOrgId(),
+                /* projectId */ props.getBenchProjectId(),
+                /* executionMode */ "PROTOTYPE",
+                /* selectedRepoIds */ java.util.List.of(),
+                /* figmaUrl */ null,
+                /* tddMode */ false,
+                /* branchOverride */ null,
+                /* prReviewComments */ null,
+                /* runMode */ RunMode.BUILD);
+      } catch (Exception e) {
+        run("docker rm -f " + containerName, 30);
+        throw new ResponseStatusException(
+            HttpStatus.INTERNAL_SERVER_ERROR, "submitRun failed: " + e.getMessage(), e);
+      } finally {
+        PENDING.remove();
+      }
+
+      Path workspaceHost =
+          Paths.get(agentProps.getWorkspace(), run.getRunId()).toAbsolutePath().normalize();
+      captureOnTerminalAsync(run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+      permitHandedOff = true; // captureOnTerminalAsync now owns releasing the permit at terminal
+
+      return new TaskSubmitResult(
+          run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
     } finally {
-      PENDING.remove();
+      // Release here ONLY if we never handed off to captureOnTerminalAsync (i.e. submitRun threw or
+      // a failure before dispatch). On the success path the async capture's finally frees it.
+      if (!permitHandedOff) {
+        slots.release();
+      }
     }
+  }
 
-    Path workspaceHost =
-        Paths.get(agentProps.getWorkspace(), run.getRunId()).toAbsolutePath().normalize();
-    captureOnTerminalAsync(run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
-
-    return new TaskSubmitResult(
-        run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+  /**
+   * Acquire a benchmark concurrency permit or fail fast with HTTP 429 (RL-2026-05-059). Waits up to
+   * {@link SwebenchProperties#getSubmitQueueWaitSeconds} for a slot — so a runner submitting
+   * against a busy box blocks (backpressure) rather than piling on. The permit is released in
+   * {@link #captureOnTerminalAsync}'s finally (terminal / wall-timeout / error) or {@link
+   * #submit}'s finally on a pre-handoff failure.
+   */
+  private void acquireSlotOrThrow() {
+    try {
+      if (!slots.tryAcquire(props.getSubmitQueueWaitSeconds(), TimeUnit.SECONDS)) {
+        throw new ResponseStatusException(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "benchmark at capacity (maxConcurrentRuns="
+                + props.getMaxConcurrentRuns()
+                + "); retry shortly");
+      }
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "interrupted while acquiring benchmark slot");
+    }
   }
 
   @Async
@@ -316,6 +376,12 @@ public class BenchmarkRunService {
     } finally {
       run("docker rm -f " + containerName, 30);
       containerStore.remove(runId);
+      // RL-2026-05-059 — release the concurrency permit acquired in submit(). This finally is the
+      // single release point for the success path (terminal / wall-timeout / interrupt all pass
+      // through here), freeing a slot for the next queued submission.
+      if (slots != null) {
+        slots.release();
+      }
     }
   }
 
@@ -340,10 +406,42 @@ public class BenchmarkRunService {
       String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
       // Diff against the REAL base commit (not HEAD) so any pipeline commit can't hide the fix, and
       // exclude run-infra noise (scaffolding / caches) so the patch is the source change only.
+      //
+      // RL-2026-05-059 — diff-capture hygiene (the standard SWE-bench-harness contract: submit the
+      // SOURCE diff only). The 2026-05-31 50-instance eval found ~38-47% of every provider's
+      // UNRESOLVED diffs were sabotaged by non-source pollution the agent added DESPITE the prompt
+      // (provider fragments + blind spec) explicitly forbidding it — models disobey under pressure:
+      //   • build/env config (pyproject.toml / setup.py / setup.cfg / tox.ini / requirements …):
+      //     pinning setuptools etc. forces a rebuild in the official scorer that breaks an
+      //     otherwise-correct fix — astropy-12907's source diff was BYTE-IDENTICAL to GOLD yet
+      // scored
+      //     unresolved purely because the same patch also touched pyproject.toml. Same astropy
+      //     pyproject cluster failed Anthropic, OpenAI, Gemini AND DeepSeek identically.
+      //   • test files: SWE-bench applies the GOLD test_patch on top, so a model test edit is at
+      // best
+      //     overwritten and at worst causes a patch-apply CONFLICT → unresolved.
+      //   • throwaway repro/scratch scripts that leaked into /testbed instead of /tmp.
+      // Stripping is model-independent + monotonic (a resolved run can't regress: the gold solution
+      // never lives in these paths — pinned by the cleaned-rescore no-regression check). This is
+      // the
+      // benchmark sandbox's capture path ONLY; production customer runs are byte-identical.
       String excludes =
           " -- . \":(exclude).agent-context\" \":(exclude)Dockerfile\" \":(exclude).dockerignore\""
               + " \":(exclude)README.md\" \":(exclude)__pycache__\" \":(exclude).pytest_cache\""
-              + " \":(exclude)*.egg-info\"";
+              + " \":(exclude)*.egg-info\""
+              // build / dependency / env config — never part of a SWE-bench source fix
+              + " \":(exclude,glob)**/pyproject.toml\" \":(exclude,glob)**/setup.py\""
+              + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
+              + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
+              + " \":(exclude,glob)**/.github/**\""
+              // test files — the gold test_patch is applied separately by the scorer
+              + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
+              + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
+              + " \":(exclude,glob)**/conftest.py\""
+              // throwaway reproduction / scratch scripts that leaked into the repo
+              + " \":(exclude,glob)**/repro*\" \":(exclude,glob)**/*_repro*\""
+              + " \":(exclude,glob)tmp/**\" \":(exclude,glob)**/tmp_*\""
+              + " \":(exclude,glob)**/scratch*\"";
       String preCmd =
           "docker exec "
               + containerName
@@ -425,6 +523,13 @@ public class BenchmarkRunService {
             + " inputs (e.g. do they raise ValueError, or return a default?) and MATCH the"
             + " codebase's existing conventions. Do not settle for a plausible-but-different"
             + " behavior.\n");
+    sb.append(
+        "2b. Use the EXACT public name the issue names or implies. If the issue mentions a specific"
+            + " parameter, keyword, method, attribute, or option name, name yours IDENTICALLY — the"
+            + " hidden test calls the API by that exact name, so a plausible synonym (e.g. a `mode`"
+            + " argument when the issue asks for `text`) fails even when the logic is correct. When"
+            + " the issue is explicit about the public surface, match it"
+            + " character-for-character.\n");
     sb.append(
         "3. REPRODUCE the bug first: write a tiny throwaway script OUTSIDE the repo (e.g."
             + " /tmp/repro.py — NEVER under /testbed, so it stays out of your diff) that triggers"

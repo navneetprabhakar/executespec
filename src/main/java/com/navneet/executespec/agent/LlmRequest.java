@@ -32,6 +32,12 @@ import lombok.Builder;
  *     their default if null. Currently plumbed only into Gemini (where the default 60s read-timeout
  *     trips up large single-shot OutlinePlanner calls on gemini-3-pro-preview). Anthropic + OpenAI
  *     clients ignore the field today — Spring AI manages their HTTP timeouts.
+ * @param toolChoice optional OpenAI-wire {@code tool_choice} override ({@code "auto"} | {@code
+ *     "required"} | {@code "none"}). Null ⇒ the client's default ({@code "auto"}). Honoured only by
+ *     the OpenAI-wire clients (OpenAI / DeepSeek / OpenRouter via {@code OpenAiNativeToolClient});
+ *     Anthropic (Spring AI) + Gemini ignore it today. Set to {@code "required"} by the WorkerAgent
+ *     Lever-B salvage call (RL-2026-05-059) to force a tool call out of a model that would
+ *     otherwise return reasoning-only text and silently fail the salvage.
  */
 @Builder
 public record LlmRequest(
@@ -42,7 +48,8 @@ public record LlmRequest(
     Double temperature,
     Integer maxTokens,
     List<ToolCallback> toolsOverride,
-    Integer readTimeoutSeconds) {
+    Integer readTimeoutSeconds,
+    String toolChoice) {
 
   public LlmRequest {
     if (provider == null || provider.isBlank())

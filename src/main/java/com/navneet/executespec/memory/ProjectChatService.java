@@ -538,6 +538,17 @@ public class ProjectChatService {
             "- \"what should I fix / improve next / where's the tech debt / worst files\" → call"
                 + " get_tech_debt_summary, then give a prioritised SUGGESTION list (read-only —"
                 + " point the user at the dashboard Fix buttons to act)\n")
+        .append(
+            "- \"where/how is X implemented / find the code for Y / which file does Z\" → SEARCH"
+                + " the source. Prefer search_code (SEMANTIC — finds code by concept even without"
+                + " the exact name) for behaviour/concept questions; use search_repo_files"
+                + " (LITERAL regex grep) for an exact identifier, string, or call site; reach for"
+                + " both when unsure — they are complementary and together cut both misses and"
+                + " hallucination. search_project_docs covers UPLOADED docs only, not source.\n")
+        .append(
+            "  Ground any claim about the code in a search hit (file:line / file:chunk) rather than"
+                + " guessing. If search_code returns indexing=true, fall back to search_repo_files"
+                + " for this turn.\n")
         .append("After a write tool returns, briefly narrate what changed (1-2 sentences) so the ")
         .append("user knows where to look in the dashboard. After a read tool, summarise the ")
         .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")

@@ -8,6 +8,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -65,6 +66,7 @@ public class ExecutionController {
   private final ExecutionSolutionRepository solutionRepo;
   private final ExecutionSolutionRunRepository solutionRunRepo;
   private final ProjectRepository projectRepo;
+  private final ProjectMemberRepository projectMemberRepo;
   private final OrgRepository orgRepo;
   private final TierConfigRepository tierConfigRepo;
   private final ExecutionOrchestrator orchestrator;
@@ -350,7 +352,12 @@ public class ExecutionController {
         projectRepo
             .findById(projectId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
-    if (!java.util.Objects.equals(p.getOrgId(), user.getOrgId())) {
+    // RL-2026-05-056 — honour V175 cross-org ProjectMember access (consistent with
+    // ProjectAccessGuard.assertCanRead). An accepted cross-org invitee reaches the project via a
+    // ProjectMember row, not org match; the old org-only check 403'd them on the Execution View.
+    boolean orgMatch = java.util.Objects.equals(p.getOrgId(), user.getOrgId());
+    boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, user.getId());
+    if (!orgMatch && !isMember) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
     }
     return p;

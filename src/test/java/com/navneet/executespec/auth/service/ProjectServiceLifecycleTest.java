@@ -256,6 +256,23 @@ class ProjectServiceLifecycleTest {
   }
 
   @Test
+  void listProjectsForUser_nullOrg_returnsCrossOrgMemberProjects_withoutOrgLookup() {
+    // RL-2026-05-056 — a user with no home org (orgId == null: the documented free-tier "no org"
+    // state, or a user removed from their only org) can still be a cross-org collaborator via an
+    // accepted ProjectMember invite. They must see those projects, and we must not run the org
+    // lookup with a null orgId. The earlier controller short-circuit returned an empty list here.
+    Project shared =
+        Project.builder().id("p-shared").orgId("org-2").name("Shared").createdBy("u-x").build();
+    when(projectMemberRepo.findProjectIdsByUserId("u-1")).thenReturn(java.util.List.of("p-shared"));
+    when(projectRepo.findById("p-shared")).thenReturn(Optional.of(shared));
+
+    var out = svc.listProjectsForUser(null, "u-1", false);
+
+    assertThat(out).extracting("id").containsExactly("p-shared");
+    verify(projectRepo, never()).findByOrgIdAndDeletedAtIsNull(any());
+  }
+
+  @Test
   void getProject_blocks_cross_org_non_member() {
     Project shared =
         Project.builder().id("p-shared").orgId("org-2").name("Shared").createdBy("u-x").build();
