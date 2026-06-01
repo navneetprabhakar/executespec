@@ -4,7 +4,12 @@
 > (`claude/agent-competitive-review-F4boG`, PR #199) and the items it deliberately parked.
 > Newest context first. Cross-referenced to RL ids in [`reason-log/2026-05.md`](reason-log/2026-05.md).
 >
-> **Legend:** 🔴 blocks merge · 🟠 should do soon · 🟡 planned / eval-gated · ⚪ optional / pre-existing.
+> **Legend:** 🔴 blocks merge · 🟠 should do soon · 🟡 planned / eval-gated · ⚪ optional / pre-existing · ✅ done.
+
+## Update 2026-06-01 (pass 2 — "fix all")
+Fixed everything feasible without a compiler/network (the sandbox blocks maven repos — 403):
+**B1 ✅** EditFileTool integration test · **B2 ✅** isTransientError 429-by-type · **B3 ✅** gold-source leak fully removed (residual noted) · **D4 ✅ (core)** `TaskWaveScheduler` + test, standalone-validated 10/10.
+Still genuinely blocked here: **A1–A3** (need a network/compiler — your machine or CI), **E1** (god-class split must be by-hand *with a compiler*, per its plan), **C/D1–D3** (founder said keep flags admin-toggleable; eval-gated), **F** (founder-parked).
 
 ---
 
@@ -29,19 +34,14 @@
 
 ## B. Owed from this branch (small, in-scope)
 
-### B1 🟠 `EditFileTool` integration test
-- **What:** a test that drives `EditFileTool.execute` end-to-end through the `FileSandboxPolicy` + read-before-write/staleness gate (not just the pure `StringEditMatcher`).
-- **Why:** `StringEditMatcherTest` covers the matching algorithm; the tool wiring (sandbox decision, `ReadFileStateStore` NOT_READ/STALE, no-partial-apply on a failed 2nd edit, SSE emit) is still only covered indirectly.
-- **Where:** new `tool/EditFileToolTest.java`.
+### B1 ✅ `EditFileTool` integration test — DONE (RL-2026-05-065)
+- Added `tool/EditFileToolTest.java` (5 cases): exact edit, whitespace-drift-through-the-tool, read-before-edit gate block, missing-file NOT_FOUND, no-partial-apply on a failed 2nd edit. Drives the real tool through `FileSandboxPolicy` + `ReadFileStateStore` against a `@TempDir`. (Not run here — needs A1.)
 
-### B2 🟠 `isTransientError` robustness
-- **What:** the classifier sniffs exception messages for `"429"` / `"rate limit"` / `"timed out"` substrings. Replace the 429 case with an instance check (`HttpClientErrorException.TooManyRequests`) and keep substrings as fallback.
-- **Why:** substring control-flow is fragile (low risk today — only matched against exception messages, not tool output).
-- **Where:** `agent/LlmRouter.java#isTransientError`.
+### B2 ✅ `isTransientError` robustness — DONE (RL-2026-05-065)
+- Added a typed `HttpClientErrorException.TooManyRequests` instanceof to `agent/LlmRouter.java#isTransientError` (robust 429); substrings kept as fallback. 400/401/403/404 still non-transient.
 
-### B3 🟡 Oracle-removal follow-up — event-flow reachability
-- **What:** verify whether the event-driven swebench setup flow (`SwebenchTaskService.onRunStarted` / `captureOnTerminalAsync`) is still reachable now that `SwebenchController` is deleted, and decide whether to retire those too.
-- **Why:** the surgical strip (RL-2026-05-064) removed the gold-test leak + the HTTP entry, but left the class for `AsyncAllowlistTest` + the bench bootstrap. The "# Failing test output" block (running FAIL_TO_PASS against the base commit) is a *lesser* oracle signal still present in `prefixWithFailingTestOutput` — out of the surgical scope, worth a follow-up decision.
+### B3 ✅ Oracle-removal follow-up — DONE-with-note (RL-2026-05-065)
+- The gold-test **source** leak is fully removed (RL-2026-05-064): `formatTestPatchSnippet` + `captureFailingTestFilesFallback` emit nothing → `captureFailingTestSource` returns "" → the "# Gold tests" prompt block is skipped (blank source). **Residual decision (not fixed):** the "# Failing test output" block in `prefixWithFailingTestOutput` still injects captured FAIL_TO_PASS *run output* — a lesser oracle signal on a path likely dead now that `SwebenchController` is gone. Left as-is rather than risk an unverifiable edit to a possibly-dead flow; revisit if the swebench event flow (`onRunStarted`) is confirmed reachable.
 - **Where:** `swebench/SwebenchTaskService.java`, `swebench/SwebenchBootstrap.java`.
 
 ---
@@ -70,9 +70,9 @@ Per founder call, defaults are NOT flipped; toggle in the SUPER_ADMIN flag conso
 - Revisit wall-clock / iteration caps once context is smaller (D1) so legit long tasks finish without the eval-script timeout.
 
 ### D4 🟡 Phase 1 — parallel task execution (the big win)
-- **What:** re-introduce concurrency on `dependsOn`-independent tasks (RL-2026-05-006). New `harness/TaskWaveScheduler.java` (Kahn levels, unit-testable), wired behind `harness.parallel-tasks.enabled` (default OFF), bounded concurrency `min(3, waveSize)`, thread-safe outcome aggregation, per-strategy task-count caps.
-- **Blockers (why it's its own session):** shared-workspace file races (only a live multi-task run can prove absence) + task-count band coupled to the legacy classifier.
-- **Prereq:** RL-2026-05-001 (real test exec — done). Eval-gated before the flag flips.
+- **Core ✅ DONE (RL-2026-05-065):** `harness/TaskWaveScheduler.java` — the pure Kahn-levels scheduler (waves of `dependsOn`-independent tasks; cycle → reported in `unscheduled`, not thrown; unknown deps recorded). Standalone-validated 10/10 + `TaskWaveSchedulerTest` (7 cases). Additive, **not wired** to the executor.
+- **Remaining (the risky, eval-gated half):** wire into `SequentialExecutor#execute` behind `harness.parallel-tasks.enabled` (default OFF), bounded concurrency `min(3, waveSize)`, thread-safe outcome aggregation, per-strategy task-count caps. **Blockers:** shared-workspace file races (only a live multi-task run can prove absence) + task-count band coupled to the legacy classifier. Eval-gated before the flag flips.
+- **Prereq:** RL-2026-05-001 (real test exec — done).
 
 ---
 
