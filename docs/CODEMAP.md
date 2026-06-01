@@ -45,7 +45,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `folder` | 1 | 4 | - | - | `.executespec/` folder writer + bootstrap + project config |
 | `governance` | - | 1 | - | - | GovernanceGuard — M-032/M-033 spend caps + GitHub owner allowlist |
 | `harness` | - | 7 | - | - | V2 SequentialExecutor + GateStore + WorkspaceInitService + VendoredPathGuard |
-| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`/`PipelineExecutorPool`/`RunStandardsEnforcer`/`RunValidationKickoff`/`RunLifecycleService` via `RunControlPort`; inc 1–5 + 6a done, 5,288→3,269 LOC; inc-6b recovery/retry remains) |
+| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split COMPLETE, audit #43 — 8 collaborators: `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`/`PipelineExecutorPool`/`RunStandardsEnforcer`/`RunValidationKickoff`/`RunLifecycleService` via `RunControlPort`; all 6 increments done, 5,288→2,549 LOC, −52%) |
 | `landing` | 1 | - | - | - | Public landing-page stats + sample-run endpoints |
 | `lint` | - | 1 | - | - | LintPass — deterministic auto-formatter pass (Phase L1) |
 | `memory` | 2 | 5 | 1 | - | Project memory: chat + run ledger + compaction snapshots |

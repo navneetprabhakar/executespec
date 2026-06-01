@@ -54,7 +54,6 @@ public class SuperAdminController {
       adminReconciliationService;
   private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver
       guardrailLevelResolver;
-  private final com.navneet.executespec.integration.RunOrchestrator v2RunOrchestrator;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.report.VerifiedScoreBackfillService
       verifiedScoreBackfillService;
@@ -185,7 +184,7 @@ public class SuperAdminController {
   public ResponseEntity<Map<String, Object>> reReviewRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails admin) {
     try {
-      v2RunOrchestrator.reReview(runId);
+      runLifecycleService.reReview(runId);
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {
