@@ -178,7 +178,12 @@ export default function App() {
       <Route path='/verify-email' element={<VerifyPage />} />
       <Route path='/forgot-password' element={<ForgotPasswordPage />} />
       <Route path='/reset-password' element={<ResetPasswordPage />} />
-      <Route path='/accept-invite' element={<AcceptInvitePage />} />
+      {/* Org-member invites (auth/) email /accept-invite → POST /api/org/accept-invite. */}
+      <Route path='/accept-invite' element={<AcceptInvitePage kind='org' />} />
+      {/* Project invites (V175) email a /invites/accept link (ProjectInviteService +
+          api.acceptProjectInvite + GET /api/invites/accept all use this path); without this route
+          the magic link dead-ended and the invitee never became a ProjectMember. RL-2026-05-066. */}
+      <Route path='/invites/accept' element={<AcceptInvitePage kind='project' />} />
       <Route path='/auth/callback' element={<AuthCallbackPage />} />
       <Route path='/cli-login' element={<CliLoginPage />} />
 
