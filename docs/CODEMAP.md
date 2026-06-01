@@ -276,7 +276,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `ValidationReportGenerator` | `report` | WORKHORSE | Validation report assembly |
 | `AccuracyAssessmentService` | `reviewer` | (LLM judge) | Legacy `accuracyScore` floor for pre-V106 runs |
 
-**LLM routers**: `agent/LlmRouter.java` (V2 native-tool-only, no failover), `agent/FallbackLlmRouter.java` (legacy V1 with 4-attempt exp backoff, provider failover, circuit breaker). Direct provider clients: `agent/OpenAiNativeToolClient.java`, `agent/GeminiNativeToolClient.java`. Spring AI bean `AnthropicChatModel` for Anthropic.
+**LLM routers**: `agent/LlmRouter.java` (V2 native-tool-only; 4-attempt same-provider transient retry + BYOK-safe multi-provider failover behind `router.failover.enabled`, RL-2026-05-062 — closes audit M#68), `agent/FallbackLlmRouter.java` (legacy V1 with 4-attempt exp backoff, provider failover, circuit breaker). Direct provider clients: `agent/OpenAiNativeToolClient.java`, `agent/GeminiNativeToolClient.java`. Spring AI bean `AnthropicChatModel` for Anthropic.
 
 ---
 
@@ -290,7 +290,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `WriteFileTool` | `{path, content}` | Create new file (errors if exists); FileSandboxPolicy + SSE `fileWritten` emit |
 | `EditFileTool` | `{path, edits[{oldStr, newStr}]}` | Multi-edit string replacement; each oldStr must occur exactly once |
 | `ListFilesTool` | `{path, recursive?}` | Directory listing; hides node_modules/target/build/dist/.git/.next/.venv/__pycache__/.gradle |
-| `SearchFilesTool` | `{pattern, directory?, filePattern?}` | Native (Java walk + regex) recursive content search; max 100 matches; 240-char preview |
+| `SearchFilesTool` | `{pattern, directory?, filePattern?, maxResults?, offset?}` | Recursive content search — ripgrep fast path (gitignore-aware) with a Java walk+regex fallback (RL-2026-05-062); paged; 240-char preview |
 | `ShellTool` | `{command, timeoutSeconds?}` | Sandboxed shell; ShellSandboxPolicy allowlist; container routes to ProgramBench/SWE-bench |
 | `GitStatusTool` | `{}` | `git status --short` of run workspace |
 | `GitDiffTool` | `{}` | Working-tree diff (staged + unstaged), truncated to 3 KB |

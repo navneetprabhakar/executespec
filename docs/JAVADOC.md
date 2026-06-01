@@ -538,7 +538,8 @@ DELETE /install                           uninstall(AppUserDetails) → Void
 GET    /install                           installRedirect(AppUserDetails) → RedirectView
 ```
 
-#### `swebench/SwebenchController` (base `/api/admin/swebench`) [SUPER_ADMIN]
+#### `swebench/SwebenchController` — REMOVED (RL-2026-05-062, oracle path)
+> Deleted. The `/api/admin/swebench` oracle entry leaked the gold `test_patch` into the prompt (non-publishable). Use the blind `benchmark/BenchmarkController` (`/api/admin/benchmark`) instead. The block below is retained for historical reference only.
 ```
 POST   /run                               submit(SubmitRequest) → TaskSubmitResult
 GET    /preview/{instanceId}              preview(instanceId) → Map<String,Object>
