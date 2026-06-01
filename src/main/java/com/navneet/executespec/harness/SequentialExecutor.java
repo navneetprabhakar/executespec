@@ -182,6 +182,31 @@ treat that as a HARD requirement: run `<formatter> --check <dir>` once at the
 end and only call completeTask if it exits 0.
 """;
 
+  /**
+   * RL-2026-05-066 (verifyBoot) — appended to the worker prompt ONLY when {@code
+   * worker.verify-boot.enabled} is on (default OFF). Kept out of {@link #SYSTEM_PROMPT_BASE} per
+   * the RL-2026-05-061 lesson that an always-present new tool/directive can cause reasoning-only
+   * stalls on some providers; the verifyBoot tool itself returns {@code available:false} when the
+   * flag is off, so the worker only ever sees this when it can actually act on it.
+   */
+  private static final String VERIFY_BOOT_DIRECTIVE =
+      """
+
+
+VERIFY THE APP BOOTS — runnable apps only.
+If this task produces a runnable app (web service, API, frontend, full-stack), then before
+completeTask:
+  1. Ensure .agent-context/run-recipe.json exists at the workspace root declaring the port and
+     health path the app serves, e.g. {"port": 3000, "healthPath": "/health", "startTimeoutSec": 60}.
+     Create it if missing. Use a Dockerfile if the app needs a non-default build; otherwise the
+     buildpack default auto-detects how to build + start it.
+  2. Call verifyBoot. It builds + boots the app in an isolated sandbox and probes healthPath.
+  3. If the verdict is not HEALTHY, read the reason and FIX the app (wrong start command, port not
+     bound to 0.0.0.0, missing dependency, crash on boot), then call verifyBoot again. A booting app
+     is the BUILD signal the score reads — "it compiles" is not enough.
+This applies ONLY to apps meant to run; pure libraries, scripts, and config-only tasks have nothing
+to boot — skip it for those.""";
+
   private final WorkerAgent worker;
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
@@ -1602,6 +1627,15 @@ end and only call completeTask if it exits 0.
       if (!providerFragment.isBlank()) {
         sb.append("\n\n").append(providerFragment);
       }
+    }
+
+    // RL-2026-05-066 (verifyBoot) — flag-gated boot-verification directive (default OFF). Appended
+    // only when worker.verify-boot.enabled is on; absent from the base prompt so production is
+    // byte-identical until the eval justifies flipping it (RL-2026-05-061 stall lesson).
+    if (featureFlagService != null
+        && featureFlagService.isEnabled(
+            com.navneet.executespec.tool.VerifyBootTool.FLAG_VERIFY_BOOT)) {
+      sb.append(VERIFY_BOOT_DIRECTIVE);
     }
 
     // Multi-repo correctness (2026-05-02 fix). When the orchestrator targets a multi-repo project
