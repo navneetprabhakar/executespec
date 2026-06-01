@@ -103,6 +103,19 @@ class LlmRouterTest {
   }
 
   @Test
+  void context_length_error_is_not_retried_or_failed_over() {
+    // A context-window-exceeded error is permanent (the next call would be identical) — must fail
+    // fast, not burn 4 retries. The real fix for the cause is history compaction (WS3).
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(openai.call(any()))
+        .thenThrow(new RuntimeException("400 maximum context length exceeded"));
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
+    verify(openai, times(1)).call(any());
+    verify(gemini, never()).call(any()); // not transient -> no failover either
+  }
+
+  @Test
   void failover_disabled_does_not_cross_provider() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(false);
