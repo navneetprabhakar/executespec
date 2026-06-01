@@ -18,14 +18,16 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 editFile tool. Multi-edit string-replacement on an existing file.
  *
- * <p>Each edit specifies an exact {@code oldStr} to replace with {@code newStr}. Edits apply <b>in
- * order</b>; if any edit's {@code oldStr} is not found, the entire batch is rejected (no partial
- * application). This forces the model to send precise edits rather than guessing — hallucinated
- * patches fail loudly.
+ * <p>Each edit specifies an {@code oldStr} to replace with {@code newStr}. Edits apply <b>in
+ * order</b>; if any edit cannot be applied, the entire batch is rejected (no partial application).
+ * This forces the model to send precise edits rather than guessing — hallucinated patches fail
+ * loudly.
  *
- * <p>Each {@code oldStr} must occur exactly once in the (current) file contents at the time that
- * edit is applied. Multiple occurrences require disambiguating context in the {@code oldStr}
- * itself.
+ * <p>Matching is delegated to {@link StringEditMatcher}: exact match first, then (only when exact
+ * finds nothing) a whitespace-tolerant / indent-flexible fallback so an edit doesn't fail purely on
+ * trailing whitespace or indentation drift (RL-2026-06 — the truncation+exact-match fix). When
+ * {@code oldStr} occurs multiple times, pass {@code replaceAll=true} or {@code occurrence=k} instead
+ * of failing.
  */
 @Component
 @Slf4j
@@ -55,10 +57,11 @@ public class EditFileTool implements Tool {
 
   @Override
   public String description() {
-    return "Applies one or more exact-string replacements to an existing file. Each edit "
-        + "must specify oldStr (exact text to find — must occur exactly once) and newStr "
-        + "(replacement). Edits apply in order; if any edit fails to find its oldStr, the "
-        + "entire batch is rejected with no changes written.";
+    return "Applies one or more string replacements to an existing file. Each edit specifies "
+        + "oldStr (text to find) and newStr (replacement). Matching tries exact first, then "
+        + "tolerates trailing-whitespace/indentation drift. If oldStr occurs more than once, set "
+        + "replaceAll=true or occurrence=<k> (1-indexed). Edits apply in order; if any edit cannot "
+        + "be applied the entire batch is rejected with no changes written.";
   }
 
   @Override
@@ -80,11 +83,20 @@ public class EditFileTool implements Tool {
                    "properties": {
                      "oldStr": {
                        "type": "string",
-                       "description": "Exact text to find (must occur exactly once)"
+                       "description": "Text to find. Exact match preferred; trailing-whitespace and indentation drift are tolerated as a fallback"
                      },
                      "newStr": {
                        "type": "string",
                        "description": "Replacement text"
+                     },
+                     "replaceAll": {
+                       "type": "boolean",
+                       "description": "Replace every occurrence of oldStr (default false)"
+                     },
+                     "occurrence": {
+                       "type": "integer",
+                       "minimum": 1,
+                       "description": "Replace only the k-th (1-indexed) occurrence of oldStr"
                      }
                    },
                    "required": ["oldStr", "newStr"],
@@ -154,25 +166,18 @@ public class EditFileTool implements Tool {
           return ToolResult.err(
               ToolResult.ErrorKind.INVALID_ARGS, "edit #" + idx + " missing oldStr or newStr");
         }
-        int firstAt = working.indexOf(oldStr);
-        if (firstAt < 0) {
+        boolean replaceAll = edit.path("replaceAll").asBoolean(false);
+        Integer occurrence = edit.hasNonNull("occurrence") ? edit.get("occurrence").asInt() : null;
+        StringEditMatcher.Result result =
+            StringEditMatcher.apply(working, oldStr, newStr, replaceAll, occurrence);
+        if (result instanceof StringEditMatcher.Failed f) {
           return ToolResult.err(
-              ToolResult.ErrorKind.INVALID_ARGS,
-              "edit #" + idx + ": oldStr not found in " + path + " (no changes written)");
+              ToolResult.ErrorKind.INVALID_ARGS, "edit #" + idx + " in " + path + ": " + f.message());
         }
-        int secondAt = working.indexOf(oldStr, firstAt + 1);
-        if (secondAt >= 0) {
-          return ToolResult.err(
-              ToolResult.ErrorKind.INVALID_ARGS,
-              "edit #"
-                  + idx
-                  + ": oldStr occurs multiple times in "
-                  + path
-                  + " — add disambiguating context (no changes written)");
-        }
-        working =
-            working.substring(0, firstAt) + newStr + working.substring(firstAt + oldStr.length());
-        appliedSummary.add("#" + idx + ": -" + oldStr.length() + " +" + newStr.length() + " chars");
+        StringEditMatcher.Applied applied = (StringEditMatcher.Applied) result;
+        working = applied.updated();
+        appliedSummary.add(
+            "#" + idx + ": -" + oldStr.length() + " +" + newStr.length() + " chars (" + applied.how() + ")");
         idx++;
       }
       Files.writeString(resolved, working);
