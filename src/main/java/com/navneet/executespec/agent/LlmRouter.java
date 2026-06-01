@@ -342,6 +342,10 @@ public class LlmRouter {
   private static boolean isTransientError(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
       if (t instanceof org.springframework.web.client.HttpServerErrorException) return true;
+      // 429 by TYPE (robust) — a TooManyRequests is always retryable; the message-sniff below is
+      // only a fallback for clients that don't throw the typed Spring exception.
+      if (t instanceof org.springframework.web.client.HttpClientErrorException.TooManyRequests)
+        return true;
       if (t instanceof org.springframework.web.client.ResourceAccessException) return true;
       if (t instanceof java.net.SocketTimeoutException) return true;
       String m = t.getMessage();
