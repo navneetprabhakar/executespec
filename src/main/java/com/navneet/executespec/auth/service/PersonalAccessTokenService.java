@@ -3,12 +3,19 @@ package com.navneet.executespec.auth.service;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.dto.CreatePatRequest;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.PersonalAccessToken;
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.PersonalAccessTokenRepository;
 
 import org.apache.commons.codec.digest.DigestUtils;
@@ -42,7 +49,14 @@ public class PersonalAccessTokenService {
   private static final int DISPLAY_PREFIX_LEN = 14; // "es_pat_" + 7 random chars
   private static final long LAST_USED_THROTTLE_SECONDS = 300; // 5 min
 
+  /** Anti-abuse device-login cap — max concurrently-active PATs. FREE = 1, all other tiers = 3. */
+  private static final int CAP_FREE = 1;
+
+  private static final int CAP_OTHER = 3;
+
   private final PersonalAccessTokenRepository repo;
+  private final AppUserRepository appUserRepo;
+  private final OrgRepository orgRepo;
   private final SecureRandom secureRandom = new SecureRandom();
 
   /** Carries the one-time plaintext alongside the persisted row. The plaintext is never stored. */
@@ -60,6 +74,10 @@ public class PersonalAccessTokenService {
       }
       expiresAt = Instant.now().plus(req.expiresInDays(), ChronoUnit.DAYS);
     }
+
+    // Anti-abuse: cap concurrently-active device logins (FREE 1 / others 3) by auto-revoking the
+    // least-recently-used active token(s) so the new one fits — login never fails.
+    enforceDeviceCap(userId);
 
     byte[] bytes = new byte[RANDOM_BYTES];
     secureRandom.nextBytes(bytes);
@@ -130,5 +148,55 @@ public class PersonalAccessTokenService {
     } catch (Exception e) {
       log.debug("[PAT] lastUsedAt stamp failed for {}: {}", token.getId(), e.getMessage());
     }
+  }
+
+  /**
+   * Enforce the per-tier device-login cap by revoking the least-recently-used active token(s) until
+   * a new one will fit. Login never fails — the newest device wins; an older device is signed out
+   * (its next request 401s). FREE = 1 active token; every other tier = 3.
+   */
+  private void enforceDeviceCap(String userId) {
+    int cap = deviceLoginCap(effectiveTier(userId));
+    Instant now = Instant.now();
+    List<PersonalAccessToken> active =
+        repo.findByUserIdAndRevokedAtIsNull(userId).stream()
+            .filter(t -> t.getExpiresAt() == null || t.getExpiresAt().isAfter(now))
+            .sorted(Comparator.comparing(PersonalAccessTokenService::lastActiveAt))
+            .collect(Collectors.toCollection(ArrayList::new));
+    int evict = active.size() - (cap - 1); // leave room for the incoming token
+    for (int i = 0; i < evict; i++) {
+      PersonalAccessToken old = active.get(i);
+      old.setRevokedAt(now);
+      repo.save(old);
+      log.info(
+          "[PAT] device-login cap {} reached for user {} — auto-revoked LRU token {}",
+          cap,
+          userId,
+          old.getId());
+    }
+  }
+
+  /** LRU ordering key: last use if present, else creation time. */
+  private static Instant lastActiveAt(PersonalAccessToken t) {
+    return t.getLastUsedAt() != null ? t.getLastUsedAt() : t.getCreatedAt();
+  }
+
+  private static int deviceLoginCap(String tier) {
+    return "FREE".equalsIgnoreCase(tier) ? CAP_FREE : CAP_OTHER;
+  }
+
+  /**
+   * Effective tier: the org's tier when the user belongs to one, else the user's own (default FREE)
+   * — mirrors {@code TierEnforcementService}'s org-or-user resolution.
+   */
+  private String effectiveTier(String userId) {
+    AppUser user = appUserRepo.findById(userId).orElse(null);
+    if (user == null) {
+      return "FREE";
+    }
+    if (user.getOrgId() != null) {
+      return orgRepo.findById(user.getOrgId()).map(Org::getTier).orElseGet(user::getTier);
+    }
+    return user.getTier() != null ? user.getTier() : "FREE";
   }
 }

@@ -11,10 +11,16 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.dto.CreatePatRequest;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.PersonalAccessToken;
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.PersonalAccessTokenRepository;
 
 import org.apache.commons.codec.digest.DigestUtils;
@@ -39,12 +45,16 @@ import org.springframework.web.server.ResponseStatusException;
 class PersonalAccessTokenServiceTest {
 
   private PersonalAccessTokenRepository repo;
+  private AppUserRepository appUserRepo;
+  private OrgRepository orgRepo;
   private PersonalAccessTokenService svc;
 
   @BeforeEach
   void setUp() {
     repo = mock(PersonalAccessTokenRepository.class);
-    svc = new PersonalAccessTokenService(repo);
+    appUserRepo = mock(AppUserRepository.class);
+    orgRepo = mock(OrgRepository.class);
+    svc = new PersonalAccessTokenService(repo, appUserRepo, orgRepo);
   }
 
   @Test
@@ -165,5 +175,76 @@ class PersonalAccessTokenServiceTest {
     when(repo.findByIdAndUserId("nope", "user-1")).thenReturn(Optional.empty());
     assertThatThrownBy(() -> svc.revoke("user-1", "nope"))
         .isInstanceOf(ResponseStatusException.class);
+  }
+
+  // ── device-login cap (anti-abuse): FREE = 1 active token, all other tiers = 3 ────────────────
+
+  @Test
+  void create_freeTier_capsAtOne_revokesAllExistingActive() {
+    AppUser free = new AppUser();
+    free.setTier("FREE");
+    free.setOrgId(null);
+    when(appUserRepo.findById("u")).thenReturn(Optional.of(free));
+    PersonalAccessToken a = pat("a", 100, 100);
+    PersonalAccessToken b = pat("b", 200, 200);
+    when(repo.findByUserIdAndRevokedAtIsNull("u")).thenReturn(new ArrayList<>(List.of(a, b)));
+
+    svc.create("u", new CreatePatRequest("new laptop", null));
+
+    // FREE = 1 active → both existing tokens are revoked to make room for the new one.
+    assertThat(a.getRevokedAt()).isNotNull();
+    assertThat(b.getRevokedAt()).isNotNull();
+    verify(repo, times(3)).save(any()); // 2 revokes + 1 mint
+  }
+
+  @Test
+  void create_paidTier_capsAtThree_revokesOnlyLeastRecentlyUsed() {
+    AppUser member = new AppUser();
+    member.setOrgId("org-1"); // org tier governs, not the user's own
+    when(appUserRepo.findById("u")).thenReturn(Optional.of(member));
+    when(orgRepo.findById("org-1")).thenReturn(Optional.of(orgWithTier("TEAM")));
+
+    PersonalAccessToken lru = pat("lru", 10, 100); // least-recently-used → the only eviction
+    PersonalAccessToken mid = pat("mid", 10, 500);
+    PersonalAccessToken recent = pat("recent", 10, 900);
+    when(repo.findByUserIdAndRevokedAtIsNull("u"))
+        .thenReturn(new ArrayList<>(List.of(recent, lru, mid))); // unsorted on purpose
+
+    svc.create("u", new CreatePatRequest("4th device", null));
+
+    assertThat(lru.getRevokedAt()).isNotNull();
+    assertThat(mid.getRevokedAt()).isNull();
+    assertThat(recent.getRevokedAt()).isNull();
+  }
+
+  @Test
+  void create_underCap_revokesNothing() {
+    AppUser member = new AppUser();
+    member.setOrgId("org-1");
+    when(appUserRepo.findById("u")).thenReturn(Optional.of(member));
+    when(orgRepo.findById("org-1")).thenReturn(Optional.of(orgWithTier("PRO")));
+    PersonalAccessToken only = pat("only", 10, 10);
+    when(repo.findByUserIdAndRevokedAtIsNull("u")).thenReturn(new ArrayList<>(List.of(only)));
+
+    svc.create("u", new CreatePatRequest("2nd device", null));
+
+    assertThat(only.getRevokedAt()).isNull(); // 1 active, under the cap of 3 → no eviction
+  }
+
+  private static PersonalAccessToken pat(String id, long createdEpoch, long lastUsedEpoch) {
+    return PersonalAccessToken.builder()
+        .id(id)
+        .userId("u")
+        .name(id)
+        .tokenHash("h-" + id)
+        .createdAt(Instant.ofEpochSecond(createdEpoch))
+        .lastUsedAt(Instant.ofEpochSecond(lastUsedEpoch))
+        .build();
+  }
+
+  private static Org orgWithTier(String tier) {
+    Org o = new Org();
+    o.setTier(tier);
+    return o;
   }
 }

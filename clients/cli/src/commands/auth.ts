@@ -1,7 +1,7 @@
-import type { ClientBundle } from '@executespec/core';
+import { loopbackLogin, type ClientBundle } from '@executespec/core';
 
-import { type ParsedArgs, flagStr } from '../args.js';
-import { dim, errln, errorMessage, green, out, printJson, prompt } from '../ui.js';
+import { type ParsedArgs, flagBool, flagStr } from '../args.js';
+import { dim, errln, errorMessage, green, out, printJson, prompt, yellow } from '../ui.js';
 
 export async function authCommand(
   sub: string,
@@ -23,6 +23,23 @@ export async function authCommand(
 
 async function login(args: ParsedArgs, client: ClientBundle): Promise<number> {
   let token = flagStr(args.flags, 'token');
+
+  // Default: gcloud-style browser sign-in. `--token` pastes a PAT directly; `--no-browser`
+  // skips straight to the paste prompt (headless / SSH).
+  if (!token && !flagBool(args.flags, 'no-browser')) {
+    out(
+      dim('Opening your browser to sign in…') +
+        dim('  (--token <pat> to paste one instead · --no-browser to skip)'),
+    );
+    try {
+      token = await loopbackLogin({
+        host: client.http.host,
+        onUrl: (url) => out(dim('  If it does not open, visit:\n  ') + url),
+      });
+    } catch (e) {
+      errln(yellow('Browser sign-in failed: ') + errorMessage(e));
+    }
+  }
   if (!token) {
     token = await prompt('Paste your Personal Access Token (es_pat_…): ');
   }
@@ -30,6 +47,7 @@ async function login(args: ParsedArgs, client: ClientBundle): Promise<number> {
     errln('No token provided. Create one in the web app: Settings → API tokens.');
     return 1;
   }
+
   await client.tokens.set(token);
   try {
     const me = await client.api.me();

@@ -13,6 +13,7 @@ const BOOLEAN_FLAGS = new Set([
   'help',
   'version',
   'skip-approval',
+  'no-browser',
 ]);
 
 export function parseArgs(argv: string[]): ParsedArgs {

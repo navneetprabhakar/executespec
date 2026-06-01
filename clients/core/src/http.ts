@@ -27,6 +27,11 @@ export class HttpClient {
     return this.cfg.apiBase;
   }
 
+  /** Web origin (no `/api`), e.g. `https://executespec.ai` — used to build the browser login URL. */
+  get host(): string {
+    return this.cfg.host;
+  }
+
   async get<T>(pathname: string, opts?: RequestOptions): Promise<T> {
     return this.request<T>('GET', pathname, undefined, opts);
   }
