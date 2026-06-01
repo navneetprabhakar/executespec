@@ -49,7 +49,9 @@ class LlmRouterTest {
     gemini = mock(GeminiNativeToolClient.class);
     Metrics metrics = mock(Metrics.class);
     RunCostTracker cost = mock(RunCostTracker.class);
-    lenient().when(cost.snapshot(anyString())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    lenient()
+        .when(cost.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
     lenient().when(keyStore.get(anyString())).thenReturn(null); // platform keys by default
@@ -58,7 +60,15 @@ class LlmRouterTest {
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
     LlmRouter real =
         new LlmRouter(
-            toolRegistry, openai, gemini, metrics, cost, broadcaster, keyStore, forced, registry,
+            toolRegistry,
+            openai,
+            gemini,
+            metrics,
+            cost,
+            broadcaster,
+            keyStore,
+            forced,
+            registry,
             flags);
     router = spy(real);
     doNothing().when(router).backoffSleep(anyLong()); // keep retry tests fast
@@ -66,7 +76,8 @@ class LlmRouterTest {
   }
 
   private static ChatResponse ok() {
-    return new ChatResponse(List.of(new Generation(AssistantMessage.builder().content("ok").build())));
+    return new ChatResponse(
+        List.of(new Generation(AssistantMessage.builder().content("ok").build())));
   }
 
   private static LlmRequest req(String provider, String model) {
@@ -89,7 +100,9 @@ class LlmRouterTest {
   @Test
   void transient_error_retries_same_provider_then_succeeds() {
     build();
-    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable")).thenReturn(ok());
+    when(openai.call(any()))
+        .thenThrow(new RuntimeException("503 service unavailable"))
+        .thenReturn(ok());
     assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
     verify(openai, times(2)).call(any());
   }
@@ -98,7 +111,8 @@ class LlmRouterTest {
   void permanent_error_is_not_retried() {
     build();
     when(openai.call(any())).thenThrow(new RuntimeException("400 bad request"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
     verify(openai, times(1)).call(any()); // no retry on a permanent 4xx
   }
 
@@ -108,9 +122,9 @@ class LlmRouterTest {
     // fast, not burn 4 retries. The real fix for the cause is history compaction (WS3).
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    when(openai.call(any()))
-        .thenThrow(new RuntimeException("400 maximum context length exceeded"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
+    when(openai.call(any())).thenThrow(new RuntimeException("400 maximum context length exceeded"));
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
     verify(openai, times(1)).call(any());
     verify(gemini, never()).call(any()); // not transient -> no failover either
   }
@@ -120,7 +134,8 @@ class LlmRouterTest {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(false);
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
     verify(gemini, never()).call(any());
   }
 
@@ -144,15 +159,25 @@ class LlmRouterTest {
     // Customer keyed OpenAI only (USER source); no Gemini key.
     RunKeyContext keys =
         new RunKeyContext(
-            null, "sk-user-openai", null, null,
-            null, RunKeyContext.Source.USER, null, null, "u1", "o1");
+            null,
+            "sk-user-openai",
+            null,
+            null,
+            null,
+            RunKeyContext.Source.USER,
+            null,
+            null,
+            "u1",
+            "o1");
     when(keyStore.get(anyString())).thenReturn(keys);
     when(registry.fallbackChainFor(anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
 
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
-    verify(gemini, never()).call(any()); // BYOK run never crosses to an unkeyed provider's platform key
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
+    verify(gemini, never())
+        .call(any()); // BYOK run never crosses to an unkeyed provider's platform key
   }
 
   @Test
@@ -163,7 +188,8 @@ class LlmRouterTest {
     when(registry.fallbackChainFor(anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"deepseek", "ds-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x"))).isInstanceOf(RuntimeException.class);
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
     verify(gemini, never()).call(any());
   }
 }

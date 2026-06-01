@@ -14,8 +14,8 @@ import java.util.List;
  *
  * <ol>
  *   <li><b>exact</b> — {@code indexOf}; honours {@code replaceAll} / {@code occurrence}.
- *   <li><b>whitespace-tolerant</b> (only when exact finds ZERO) — line-based match ignoring trailing
- *       whitespace; leading indentation must still match. Insert {@code newStr} verbatim.
+ *   <li><b>whitespace-tolerant</b> (only when exact finds ZERO) — line-based match ignoring
+ *       trailing whitespace; leading indentation must still match. Insert {@code newStr} verbatim.
  *   <li><b>indent-flexible</b> (only when the above find ZERO) — line-based match ignoring leading
  *       AND trailing whitespace; {@code newStr} is re-indented to the matched block.
  * </ol>
@@ -72,7 +72,8 @@ public final class StringEditMatcher {
                   + " time(s) (no changes written)");
         }
         int at = hits.get(occurrence - 1);
-        return new Applied(splice(content, at, oldStr.length(), newStr), "occurrence(" + occurrence + ")");
+        return new Applied(
+            splice(content, at, oldStr.length(), newStr), "occurrence(" + occurrence + ")");
       }
       if (hits.size() == 1) {
         int at = hits.get(0);
@@ -105,9 +106,9 @@ public final class StringEditMatcher {
   /**
    * Line-based match. {@code indentFlexible=false} ignores only trailing whitespace (leading
    * indentation must match) and inserts {@code newStr} verbatim. {@code indentFlexible=true} also
-   * ignores leading whitespace and re-indents {@code newStr} to the matched block. Returns null when
-   * there is no match at this tier (so the caller can fall through); returns a {@link Failed} when
-   * the pattern matches more than one region (ambiguous — must be made exact).
+   * ignores leading whitespace and re-indents {@code newStr} to the matched block. Returns null
+   * when there is no match at this tier (so the caller can fall through); returns a {@link Failed}
+   * when the pattern matches more than one region (ambiguous — must be made exact).
    */
   private static Result fuzzyLineMatch(
       String content, String oldStr, String newStr, boolean indentFlexible) {

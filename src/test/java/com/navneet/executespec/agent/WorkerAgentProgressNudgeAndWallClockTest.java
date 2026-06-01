@@ -179,7 +179,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
     assertEquals(9, result.iterations(), "completed at iter 9 (text-only nudge + verify nudge)");
   }
 
-  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done nudge.
+  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done
+  // nudge.
   @Test
   void text_only_stop_fires_at_low_iter_even_with_one_write() {
     // Regression for dev run 61c9fffa T12 (iter 31/150) + T18 (iter 18/150): the old Lever C had
@@ -351,7 +352,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         "with no wall-clock, terminate by iter cap or progress-force; got " + result.outcome());
   }
 
-  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done nudge.
+  // RE-ENABLED 2026-06-01 (RL-2026-05-062) — see the block above; +1 for the verify-before-done
+  // nudge.
   @Test
   void wall_clock_does_not_interrupt_completed_task() {
     // Worker calls completeTask quickly; wall-clock cap is irrelevant.

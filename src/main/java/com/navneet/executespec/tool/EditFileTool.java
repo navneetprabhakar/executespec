@@ -26,8 +26,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Matching is delegated to {@link StringEditMatcher}: exact match first, then (only when exact
  * finds nothing) a whitespace-tolerant / indent-flexible fallback so an edit doesn't fail purely on
  * trailing whitespace or indentation drift (RL-2026-06 — the truncation+exact-match fix). When
- * {@code oldStr} occurs multiple times, pass {@code replaceAll=true} or {@code occurrence=k} instead
- * of failing.
+ * {@code oldStr} occurs multiple times, pass {@code replaceAll=true} or {@code occurrence=k}
+ * instead of failing.
  */
 @Component
 @Slf4j
@@ -67,47 +67,47 @@ public class EditFileTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "path": {
-                 "type": "string",
-                 "description": "Workspace-relative path to the existing file"
-               },
-               "edits": {
-                 "type": "array",
-                 "minItems": 1,
-                 "description": "Ordered list of replacements to apply",
-                 "items": {
-                   "type": "object",
-                   "properties": {
-                     "oldStr": {
-                       "type": "string",
-                       "description": "Text to find. Exact match preferred; trailing-whitespace and indentation drift are tolerated as a fallback"
-                     },
-                     "newStr": {
-                       "type": "string",
-                       "description": "Replacement text"
-                     },
-                     "replaceAll": {
-                       "type": "boolean",
-                       "description": "Replace every occurrence of oldStr (default false)"
-                     },
-                     "occurrence": {
-                       "type": "integer",
-                       "minimum": 1,
-                       "description": "Replace only the k-th (1-indexed) occurrence of oldStr"
-                     }
-                   },
-                   "required": ["oldStr", "newStr"],
-                   "additionalProperties": false
-                 }
-               }
-             },
-             "required": ["path", "edits"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Workspace-relative path to the existing file"
+    },
+    "edits": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered list of replacements to apply",
+      "items": {
+        "type": "object",
+        "properties": {
+          "oldStr": {
+            "type": "string",
+            "description": "Text to find. Exact match preferred; trailing-whitespace and indentation drift are tolerated as a fallback"
+          },
+          "newStr": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "replaceAll": {
+            "type": "boolean",
+            "description": "Replace every occurrence of oldStr (default false)"
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Replace only the k-th (1-indexed) occurrence of oldStr"
+          }
+        },
+        "required": ["oldStr", "newStr"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["path", "edits"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -172,12 +172,21 @@ public class EditFileTool implements Tool {
             StringEditMatcher.apply(working, oldStr, newStr, replaceAll, occurrence);
         if (result instanceof StringEditMatcher.Failed f) {
           return ToolResult.err(
-              ToolResult.ErrorKind.INVALID_ARGS, "edit #" + idx + " in " + path + ": " + f.message());
+              ToolResult.ErrorKind.INVALID_ARGS,
+              "edit #" + idx + " in " + path + ": " + f.message());
         }
         StringEditMatcher.Applied applied = (StringEditMatcher.Applied) result;
         working = applied.updated();
         appliedSummary.add(
-            "#" + idx + ": -" + oldStr.length() + " +" + newStr.length() + " chars (" + applied.how() + ")");
+            "#"
+                + idx
+                + ": -"
+                + oldStr.length()
+                + " +"
+                + newStr.length()
+                + " chars ("
+                + applied.how()
+                + ")");
         idx++;
       }
       Files.writeString(resolved, working);
