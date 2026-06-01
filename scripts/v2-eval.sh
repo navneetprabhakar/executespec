@@ -81,10 +81,22 @@ submit_run() {
   esac
   local body; body=$(jq -n --arg req "$spec" --arg prov "$api_prov" \
     '{userRequest:$req, skipApproval:true, executionMode:"PROTOTYPE", aiProvider:$prov}')
-  curl -s -X POST "$BASE_URL/api/runs" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H 'Content-Type: application/json' \
-    -d "$body" | jq -r '.runId // empty'
+  # Robust submit: under --concurrency>1 the near-simultaneous POSTs occasionally
+  # returned a body we failed to parse a runId from (while the run still launched
+  # server-side), so a provider logged "submit FAILED (no runId)" even though it
+  # ran. Capture the full response, accept .runId OR .id, retry once, and surface
+  # the raw body on a miss so the cause is never invisible again.
+  local resp run_id
+  for attempt in 1 2; do
+    resp=$(curl -s -X POST "$BASE_URL/api/runs" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d "$body")
+    run_id=$(printf '%s' "$resp" | jq -r '.runId // .id // empty' 2>/dev/null || echo "")
+    if [[ -n "$run_id" ]]; then echo "$run_id"; return 0; fi
+    log "  submit($provider) attempt $attempt: no runId — raw: $(printf '%s' "$resp" | tr '\n' ' ' | head -c 200)"
+    sleep 2
+  done
 }
 
 poll_until_done() {
