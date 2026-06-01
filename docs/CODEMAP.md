@@ -202,8 +202,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Controller | Base path | Purpose |
 | --- | --- | --- |
-| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); supersedes oracle `swebench/` |
-| `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission (oracle-mode; superseded by `benchmark/`) |
+| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); the supported path (the oracle `swebench/SwebenchController` was removed, RL-2026-05-062) |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
 | `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |
 | `eval/v2/TierEvalController` | `/api/admin/eval/v2` | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params) |

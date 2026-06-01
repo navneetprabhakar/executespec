@@ -582,25 +582,12 @@ public class SwebenchTaskService {
    * structure". Keep the markers.
    */
   private String formatTestPatchSnippet(String testPatch) {
-    int cap = 20_000;
-    String body = testPatch;
-    if (body.length() > cap) {
-      int head = 14_000;
-      int omitted = body.length() - cap;
-      body =
-          body.substring(0, head)
-              + "\n\n... ["
-              + omitted
-              + " chars omitted from middle] ...\n\n"
-              + body.substring(body.length() - (cap - head));
-    }
-    return "\n## Gold test patch (the assertions your fix must satisfy)\n\n"
-        + "Below is the unified diff of test files that the SWE-bench harness applies AFTER\n"
-        + "your fix lands. The `+` lines are the FAIL_TO_PASS test bodies — read them carefully\n"
-        + "to see exactly what return values / behaviour the production code must produce.\n\n"
-        + "```diff\n"
-        + body
-        + "\n```\n";
+    // RL-2026-05-062 — ORACLE PATH REMOVED. This used to inject the gold `test_patch` (the
+    // FAIL_TO_PASS assertions) into the worker prompt, which makes any SWE-bench number
+    // non-publishable (the model is shown the hidden tests). The blind harness in `benchmark/`
+    // is the supported path — the agent sees only the issue, and the gold test is applied
+    // EXTERNALLY at scoring. Signature kept so callers compile; emits nothing.
+    return "";
   }
 
   /**
@@ -611,63 +598,11 @@ public class SwebenchTaskService {
    */
   private String captureFailingTestFilesFallback(
       String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
-    if (instance.failToPass() == null || instance.failToPass().isEmpty()) return "";
-    java.util.LinkedHashSet<String> testFiles = new java.util.LinkedHashSet<>();
-    for (String testId : instance.failToPass()) {
-      if (testId == null || testId.isBlank()) continue;
-      int sep = testId.indexOf("::");
-      String file = sep < 0 ? testId.trim() : testId.substring(0, sep).trim();
-      if (!file.isEmpty()) testFiles.add(file);
-      if (testFiles.size() >= 3) break;
-    }
-    if (testFiles.isEmpty()) return "";
-
-    StringBuilder sb = new StringBuilder();
-    int totalCap = 20_000;
-    int written = 0;
-    for (String file : testFiles) {
-      if (written >= totalCap) break;
-      if (file.contains(";")
-          || file.contains("&")
-          || file.contains("|")
-          || file.contains("$")
-          || file.contains("`")) {
-        continue;
-      }
-      String cmd =
-          "docker exec "
-              + containerName
-              + " bash -lc '"
-              + "if [ -f /testbed/"
-              + file
-              + " ]; then cat /testbed/"
-              + file
-              + "; fi"
-              + "'";
-      ShellResult r = run(cmd, 30);
-      if (r.exit() != 0) continue;
-      String content = r.output() == null ? "" : r.output();
-      if (content.isBlank()) continue;
-      int perFileCap = Math.min(8000, totalCap - written);
-      if (content.length() > perFileCap) {
-        int head = Math.max(1000, perFileCap - 2000);
-        int omitted = content.length() - perFileCap;
-        content =
-            content.substring(0, head)
-                + "\n\n... ["
-                + omitted
-                + " chars omitted from middle] ...\n\n"
-                + content.substring(content.length() - (perFileCap - head));
-      }
-      sb.append("\n## ")
-          .append(file)
-          .append(" (base-commit copy — gold tests applied later)\n\n")
-          .append("```python\n")
-          .append(content)
-          .append("\n```\n");
-      written += content.length();
-    }
-    return sb.toString();
+    // RL-2026-05-062 — ORACLE PATH REMOVED. This used to `docker exec cat` the FAIL_TO_PASS test
+    // FILES out of the cleanroom container and embed them in the worker prompt — the same gold-test
+    // leak as formatTestPatchSnippet, just via the base-commit file copy. Removed for the same
+    // publishability reason; the blind `benchmark/` harness is the supported path. Signature kept.
+    return "";
   }
 
   /**
