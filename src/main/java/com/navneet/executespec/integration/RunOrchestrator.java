@@ -23,10 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Classification;
@@ -291,52 +288,16 @@ public class RunOrchestrator {
   // checkpoint before failing WORKSPACE_GONE on resume.
   private final com.navneet.executespec.deployment.WorkspaceRestoreService workspaceRestoreService;
 
-  /**
-   * Dedicated thread pool — V1 has its own, V2 keeps a separate one so back-pressure is tracked
-   * per-harness and canary rollout tuning is independent.
-   */
   /** runId → in-flight pipeline future; used by {@link #cancel(String)}. */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
   /**
-   * Run-orchestration pool — sized {@code clamp(4, 16, cores × 1)}. Each run can spawn parallel
-   * tasks during the LARGE planner pipeline (skeleton expand × N + sub-expansions for EPICs), so
-   * the multiplier matches CPU and the cap protects against a 32-core dev box launching 32
-   * concurrent run pipelines that would saturate Hikari + the LLM provider rate limits.
+   * Run-orchestration thread pool — extracted to {@link PipelineExecutorPool} (god-class split
+   * inc-4b). Injected so the LARGE-pipeline fan-out + the lifecycle resubmits (resume / retry /
+   * re-review) share one bean; the sizing, daemon {@code v2-orchestrator-N} threads, and the 30s
+   * graceful {@code @PreDestroy} shutdown live there now.
    */
-  private final ExecutorService pool =
-      Executors.newFixedThreadPool(
-          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 4, 16),
-          new ThreadFactory() {
-            private int n = 0;
-
-            @Override
-            public Thread newThread(Runnable r) {
-              Thread t = new Thread(r, "v2-orchestrator-" + (++n));
-              t.setDaemon(true);
-              return t;
-            }
-          });
-
-  /**
-   * v2.5.12 — graceful shutdown. Without this, SIGTERM on the JVM abandons in-flight runs
-   * mid-planning/execution after credits were already charged at plan approval. 30 s grace window
-   * matches Kubernetes default `terminationGracePeriodSeconds`.
-   */
-  @jakarta.annotation.PreDestroy
-  public void shutdownPool() {
-    log.info("RunOrchestrator shutting down pool — active runs: {}", activeRuns.size());
-    pool.shutdown();
-    try {
-      if (!pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
-        log.warn("RunOrchestrator pool did not terminate in 30s; forcing shutdownNow");
-        pool.shutdownNow();
-      }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      pool.shutdownNow();
-    }
-  }
+  private final PipelineExecutorPool pool;
 
   /**
    * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with status {@code
@@ -4083,7 +4044,7 @@ public class RunOrchestrator {
                               .build()));
                 }
               },
-              pool));
+              pool.executor()));
     }
     try {
       java.util.concurrent.CompletableFuture.allOf(
@@ -4330,7 +4291,7 @@ public class RunOrchestrator {
                           .build());
                 }
               },
-              pool));
+              pool.executor()));
     }
     try {
       java.util.concurrent.CompletableFuture.allOf(
