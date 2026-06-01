@@ -63,13 +63,16 @@ import lombok.extern.slf4j.Slf4j;
  * prompt-caching stays on the customer's API account. OpenAI + Gemini wrappers already accept a
  * per-request key, so the router just threads it through.
  *
- * <p><strong>Audit 2026-05-12 review item M #68:</strong> Multi-provider failover, {@code
- * ProviderHealthTracker} circuit breaker, and tier-based model resolution are NOT yet wired here. A
- * single 5xx from the primary provider hard-fails the V2 pipeline call — the legacy {@link
- * FallbackLlmRouter} has all three. The follow-up is to layer the YAML {@code failover-order} chain
- * on top of {@code internalToolExecutionEnabled(false)} dispatch so workflow-mid LLM failures can
- * degrade gracefully. Tracking deliberately so this gap is visible in every router-touching change
- * until closed.
+ * <p><strong>Audit 2026-05-12 review item M #68 — CLOSED (RL-2026-05-062):</strong> multi-provider
+ * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
+ * is exhausted, the router walks the primary model's YAML failover chain ({@link
+ * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each different provider
+ * once (each with its own transient retry). Gated by {@link #FAILOVER_FLAG} (default OFF until
+ * validated). BYOK-safe: a run on a customer key only fails over to a provider the customer also
+ * keyed (never silently to a platform key); {@code deepseek}/{@code openrouter} are never targets.
+ * A dedicated {@code ProviderHealthTracker} circuit breaker on this path is still future work (the
+ * legacy {@link FallbackLlmRouter} has one); tier-based model resolution happens upstream in
+ * {@code ModelResolver}.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
@@ -89,6 +92,21 @@ public class LlmRouter {
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
   private final AnthropicForcedToolClient anthropicForcedToolClient;
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
+  private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+
+  /**
+   * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
+   * exhausted, fail over to the next provider(s) in the model's YAML failover chain. Gated by this
+   * flag (seeded default OFF, V226 — flip ON once validated) so production is byte-identical until
+   * enabled. BYOK-safe: a run already using a customer key for the primary only fails over to a
+   * provider the customer ALSO has a key for (never silently crosses to a platform key), and the
+   * enterprise-BYOK providers (deepseek / openrouter) are never failover targets.
+   */
+  static final String FAILOVER_FLAG = "router.failover.enabled";
+
+  /** Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose). */
+  private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS = Set.of("deepseek", "openrouter");
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -167,6 +185,22 @@ public class LlmRouter {
         source,
         tools.size(),
         request.messages().size());
+    try {
+      return dispatchWithRetry(request, tools, resolvedKey, source);
+    } catch (RuntimeException primaryError) {
+      ChatResponse failed = maybeFailover(request, tools, keys, source, primaryError);
+      if (failed != null) return failed;
+      throw primaryError;
+    }
+  }
+
+  /**
+   * Same-provider bounded transient retry (the original {@link #call} body). Returns on the first
+   * success (recording cost + metrics) or throws the last error once attempts are exhausted /
+   * the error is permanent.
+   */
+  private ChatResponse dispatchWithRetry(
+      LlmRequest request, List<ToolCallback> tools, String resolvedKey, RunKeyContext.Source source) {
     RuntimeException lastError = null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
       long start = System.currentTimeMillis();
@@ -207,18 +241,97 @@ public class LlmRouter {
           long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
-          try {
-            Thread.sleep(backoffMs);
-          } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            throw e;
-          }
+          backoffSleep(backoffMs);
           continue;
         }
         throw e;
       }
     }
     throw lastError; // unreachable: loop body always returns or throws
+  }
+
+  /** Backoff sleep between same-provider retries. Package-private so tests can no-op it (spy). */
+  void backoffSleep(long ms) {
+    try {
+      Thread.sleep(ms);
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new RuntimeException("interrupted during retry backoff", ie);
+    }
+  }
+
+  /**
+   * Multi-provider failover (audit M #68). Invoked only after the same-provider retry is exhausted.
+   * Walks the primary model's YAML failover chain ({@link
+   * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each <em>different</em>
+   * provider once (each with its own same-provider transient retry). Returns the first success, or
+   * {@code null} if failover is disabled, the error isn't transient, or every alternate fails.
+   *
+   * <p>BYOK rule (the discussed mechanism): if the primary call used a customer key
+   * ({@code source != PLATFORM}) we only fail over to a provider the customer ALSO keyed —
+   * never silently fall to a platform key for a BYOK run. Platform-key runs (FREE/PRO on system
+   * keys) may fail over freely. {@code deepseek}/{@code openrouter} are never targets.
+   */
+  private ChatResponse maybeFailover(
+      LlmRequest request,
+      List<ToolCallback> tools,
+      RunKeyContext keys,
+      RunKeyContext.Source source,
+      RuntimeException primaryError) {
+    if (!featureFlagService.isEnabled(FAILOVER_FLAG)) return null;
+    if (!isTransientError(primaryError)) return null;
+
+    String primaryProvider = request.provider().toLowerCase(Locale.ROOT);
+    boolean primaryUsedCustomerKey = source != RunKeyContext.Source.PLATFORM;
+    List<String[]> chain = modelRegistry.fallbackChainFor(request.model());
+    if (chain == null || chain.isEmpty()) return null;
+
+    for (String[] entry : chain) {
+      String altProvider = entry[0] == null ? "" : entry[0].toLowerCase(Locale.ROOT);
+      String altModel = entry[1];
+      if (altProvider.isEmpty() || altModel == null) continue;
+      if (altProvider.equals(primaryProvider)) continue;
+      if (FAILOVER_EXCLUDED_PROVIDERS.contains(altProvider)) continue;
+
+      String altKey = (keys == null) ? null : keys.keyFor(altProvider);
+      // Don't cross a BYOK run onto a platform key for a provider it never keyed.
+      if (primaryUsedCustomerKey && altKey == null) {
+        log.info("LlmRouter failover skipping {} — BYOK run has no customer key for it", altProvider);
+        continue;
+      }
+      RunKeyContext.Source altSource =
+          (altKey == null || keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(altProvider);
+
+      log.warn(
+          "LlmRouter FAILOVER {} {} -> {} {} (primary error: {})",
+          primaryProvider,
+          request.model(),
+          altProvider,
+          altModel,
+          primaryError.getMessage());
+      String runId = request.context().runId();
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              request.context().taskId(),
+              "⚠ provider failover: "
+                  + primaryProvider
+                  + " unavailable, retrying on "
+                  + altProvider
+                  + " ("
+                  + altModel
+                  + ")"));
+      LlmRequest altRequest = request.toBuilder().provider(altProvider).model(altModel).build();
+      try {
+        return dispatchWithRetry(altRequest, tools, altKey, altSource);
+      } catch (RuntimeException altError) {
+        log.warn(
+            "LlmRouter failover target {} also failed: {}", altProvider, altError.getMessage());
+        // try the next alternate
+      }
+    }
+    return null;
   }
 
   /**
