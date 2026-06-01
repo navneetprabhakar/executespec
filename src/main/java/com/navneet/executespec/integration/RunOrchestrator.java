@@ -156,6 +156,7 @@ public class RunOrchestrator {
   private final RunPersistenceWriter persistenceWriter;
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
+  private final RunStandardsEnforcer standardsEnforcer;
   private final ValidationReportService validationReportService;
   private final TestGenOrchestrator testGenOrchestrator;
   private final PerkyMessenger perky;
@@ -200,14 +201,6 @@ public class RunOrchestrator {
    * standards.enforcement.enabled} / {@code contracts.breaking-change.enabled}, default OFF) +
    * non-fatal; greenfield / no-project runs are a no-op.
    */
-  private final com.navneet.executespec.standards.EffectiveStandardsResolver
-      effectiveStandardsResolver;
-
-  private final com.navneet.executespec.standards.StandardsRunner standardsRunner;
-
-  private final com.navneet.executespec.standards.StandardsViolationRepository
-      standardsViolationRepository;
-
   private final com.navneet.executespec.contracts.gate.PlanBreakingChangeReport
       planBreakingChangeReport;
 
@@ -231,8 +224,6 @@ public class RunOrchestrator {
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
-
-  private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
@@ -1509,7 +1500,7 @@ public class RunOrchestrator {
       if (projectId != null) {
         if (featureFlagService.isEnabled("standards.enforcement.enabled")) {
           try {
-            runStandardsEnforcement(runId, projectId, rootCtx.workspaceRoot());
+            standardsEnforcer.runStandardsEnforcement(runId, projectId, rootCtx.workspaceRoot());
           } catch (Exception e) {
             log.warn(
                 "RunOrchestrator run={} standards enforcement skipped: {}", runId, e.getMessage());
@@ -3700,103 +3691,6 @@ public class RunOrchestrator {
     return out;
   }
 
-  // RL-2026-05-037 — enterprise enforcement wiring (StandardsRunner + breaking-change classifier).
-
-  /** Cap the workspace file walk for standards enforcement (bounded cost on large repos). */
-  private static final int STANDARDS_WALK_FILE_CAP = 6_000;
-
-  /** Cap persisted standards-violation rows per run (avoid a runaway lint dump). */
-  private static final int STANDARDS_MAX_VIOLATIONS_PERSIST = 200;
-
-  /** Dirs never worth walking for standards (vendored / build output / VCS). */
-  private static final java.util.Set<String> STANDARDS_SKIP_DIRS =
-      java.util.Set.of(
-          ".git",
-          "node_modules",
-          "target",
-          "dist",
-          "build",
-          ".venv",
-          "venv",
-          "__pycache__",
-          "vendor",
-          ".gradle",
-          ".idea",
-          ".mvn",
-          "out",
-          "bin",
-          "obj",
-          ".next",
-          "coverage");
-
-  /**
-   * Run deterministic coding standards (lint / file-pattern / AST) against the final workspace and
-   * persist any violations to {@code standards_violation} so the {@code /standards/report} endpoint
-   * reflects reality. Project-gated by the caller; non-fatal here. Zero overhead when the org has
-   * no standards defined (resolver returns empty → early return).
-   */
-  private void runStandardsEnforcement(String runId, String projectId, Path workspaceRoot) {
-    UUID runUuid;
-    try {
-      runUuid = UUID.fromString(runId);
-    } catch (Exception e) {
-      runUuid = null; // run_id is nullable on standards_violation
-    }
-    String orgId =
-        projectRepository
-            .findById(projectId)
-            .map(com.navneet.executespec.auth.entity.Project::getOrgId)
-            .orElse(null);
-    if (orgId == null) return;
-    var effective = effectiveStandardsResolver.resolve(orgId, projectId, null);
-    if (effective == null || effective.isEmpty()) return; // common case → no-op
-    java.util.List<String> repoFilePaths = new java.util.ArrayList<>();
-    java.util.List<Path> sourceFiles = new java.util.ArrayList<>();
-    collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
-    var report = standardsRunner.run(effective, workspaceRoot, repoFilePaths, sourceFiles);
-    java.util.List<com.navneet.executespec.standards.StandardsViolation> rows =
-        toStandardsViolationRows(runUuid, projectId, report, STANDARDS_MAX_VIOLATIONS_PERSIST);
-    int persisted = 0;
-    for (var row : rows) {
-      try {
-        standardsViolationRepository.save(row);
-        persisted++;
-      } catch (Exception e) {
-        log.debug("RunOrchestrator run={} standards persist skipped: {}", runId, e.getMessage());
-      }
-    }
-    log.info(
-        "RunOrchestrator run={} standards: {} standard(s) resolved, {} violation(s) persisted",
-        runId,
-        effective.size(),
-        persisted);
-  }
-
-  /** Pure mapping: StandardsRunner violations → persistable {@code standards_violation} rows. */
-  static java.util.List<com.navneet.executespec.standards.StandardsViolation>
-      toStandardsViolationRows(
-          UUID runId,
-          String projectId,
-          com.navneet.executespec.standards.StandardsRunner.RunReport report,
-          int cap) {
-    java.util.List<com.navneet.executespec.standards.StandardsViolation> out =
-        new java.util.ArrayList<>();
-    if (report == null || report.violations() == null) return out;
-    for (var v : report.violations()) {
-      if (out.size() >= cap) break;
-      out.add(
-          com.navneet.executespec.standards.StandardsViolation.builder()
-              .runId(runId)
-              .projectId(projectId)
-              .standardId(v.standardId())
-              .enforcementType(v.enforcementType())
-              .severity(v.severity() == null ? "ADVISORY" : v.severity().name())
-              .violationSummary(truncate(v.message() + " @ " + v.location(), 1000))
-              .build());
-    }
-    return out;
-  }
-
   /**
    * Classify breaking changes to contracts the run touched. Previous content comes from the latest
    * {@link com.navneet.executespec.contracts.ContractVersion#getInlineContent()}; new content is
@@ -3888,44 +3782,6 @@ public class RunOrchestrator {
               .build());
     }
     return out;
-  }
-
-  /** Bounded, pruned workspace walk for standards enforcement. */
-  private void collectWorkspaceFiles(
-      Path root, java.util.List<String> relPaths, java.util.List<Path> sourceFiles) {
-    if (root == null || !java.nio.file.Files.isDirectory(root)) return;
-    try {
-      java.nio.file.Files.walkFileTree(
-          root,
-          new java.nio.file.SimpleFileVisitor<Path>() {
-            @Override
-            public java.nio.file.FileVisitResult preVisitDirectory(
-                Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
-              if (!dir.equals(root) && STANDARDS_SKIP_DIRS.contains(dir.getFileName().toString())) {
-                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
-              }
-              return java.nio.file.FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public java.nio.file.FileVisitResult visitFile(
-                Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
-              if (relPaths.size() >= STANDARDS_WALK_FILE_CAP) {
-                return java.nio.file.FileVisitResult.TERMINATE;
-              }
-              relPaths.add(root.relativize(file).toString());
-              sourceFiles.add(file);
-              return java.nio.file.FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public java.nio.file.FileVisitResult visitFileFailed(Path file, java.io.IOException e) {
-              return java.nio.file.FileVisitResult.CONTINUE;
-            }
-          });
-    } catch (Exception e) {
-      log.debug("collectWorkspaceFiles walk failed: {}", e.getMessage());
-    }
   }
 
   /**
