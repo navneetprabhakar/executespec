@@ -107,16 +107,26 @@ that only looks plausible:
      the exact file + function the bug lives in, then read only those one or two
      files — not the whole repo. Reading without editing is NOT progress; the
      moment you have found the spot, make the edit.
-  2. REPRODUCE before fixing. Write a tiny throwaway script (e.g. /tmp/repro.py —
-     NEVER inside the repo, so it stays out of your diff) that triggers the bug
-     and run it to confirm it fails as described. If you cannot reproduce it you
-     have not localized it — keep looking, do not guess-edit.
+  2. REPRODUCE before fixing — use the issue's OWN reproduction, verbatim. Copy the
+     exact snippet/MWE the task shows into /tmp/repro.py (NEVER inside the repo, so it
+     stays out of your diff). Do NOT paraphrase it or write a simpler version of your
+     own — a repro you invent can pass while the real symptom remains. Run it FIRST and
+     observe the EXACT wrong behaviour the issue names (the precise error, the missing
+     comma, the bad key, the wrong output). If you cannot reproduce that exact symptom
+     you have not localized it — keep looking, do not guess-edit.
   3. FIX minimally. Change only the lines required. Do NOT reformat, reorder
      imports, refactor, or edit files unrelated to the fix. A 3-line fix that
      resolves the issue beats a 40-line fix that also "cleans up."
-  4. VERIFY before completeTask. Re-run your repro and confirm it now passes (and
-     run the existing test nearest the change if one exists). A patch you have not
-     re-run is not done — only then call completeTask.
+  4. VERIFY before completeTask — against the issue's symptom, not your own. Re-run the
+     issue's reproduction and confirm the EXACT symptom it described is gone (and run the
+     existing test nearest the change if one exists). Decisive check: if your edit did NOT
+     change the observed output, the code you edited does not run on this path — you are in
+     the WRONG place. Do not double down: trace where the bad output is actually produced
+     (add a print, or grep the literal wrong string/symbol from the issue) and fix THERE.
+     A patch that leaves the issue's symptom unchanged is not a fix — never call completeTask
+     on it. Also match the issue's stated contract exactly: if it shows a call like
+     `f(x, text=False)` or names an option, your fix must expose THAT name/signature, not an
+     equivalent you renamed.
 
 Report honestly + recover deliberately:
 - Report outcomes faithfully. If a build or test fails, say so with the actual output — never claim
@@ -555,6 +565,7 @@ end and only call completeTask if it exits 0.
             .stagnationWarnAfter(cfg.stagnationWarnAfter)
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
+            .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -851,6 +862,7 @@ end and only call completeTask if it exits 0.
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(retryWallClock)
             .requireBuildVerification(true)
+            .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
             .build();
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
@@ -1012,6 +1024,7 @@ end and only call completeTask if it exits 0.
                   .stagnationForceAfter(cfg.stagnationForceAfter)
                   .wallClockSeconds(cfg.wallClockSeconds)
                   .requireBuildVerification(true)
+                  .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
                   .build());
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
@@ -1120,7 +1133,8 @@ end and only call completeTask if it exits 0.
       int maxTokens,
       int stagnationWarnAfter,
       int stagnationForceAfter,
-      int wallClockSeconds) {}
+      int wallClockSeconds,
+      boolean forceToolChoiceOnSalvage) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
@@ -1236,6 +1250,10 @@ end and only call completeTask if it exits 0.
     // matching Anthropic + Gemini. This unlocks the long-tail tasks where OpenAI was stagnating
     // out of iteration budget, not capability. Telemetry in RunCostTracker per-call logs
     // (cacheRead=N) makes a regression visible in production.
+    // RL-2026-05-059 — resolve the forced-tool-choice-on-salvage flag once per tier-config so both
+    // construction paths (resolved + fallback) carry it identically.
+    boolean forceSalvageTool =
+        featureFlagService != null && featureFlagService.isEnabled(FLAG_SALVAGE_FORCE_TOOL);
     try {
       // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
       LlmProvider p =
@@ -1248,7 +1266,8 @@ end and only call completeTask if it exits 0.
           maxTokens,
           stagnationWarnAfter,
           stagnationForceAfter,
-          wallClockSeconds);
+          wallClockSeconds,
+          forceSalvageTool);
     } catch (Exception e) {
       log.warn(
           "tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
@@ -1263,7 +1282,8 @@ end and only call completeTask if it exits 0.
           maxTokens,
           stagnationWarnAfter,
           stagnationForceAfter,
-          wallClockSeconds);
+          wallClockSeconds,
+          forceSalvageTool);
     }
   }
 
@@ -1538,6 +1558,16 @@ end and only call completeTask if it exits 0.
   public static final String FLAG_RETRY_CONTEXT_RETENTION =
       "worker.retry-context-retention.enabled";
 
+  /**
+   * Forced-tool-call salvage flag (RL-2026-05-059). When ON, the worker's Lever-B salvage call
+   * restricts its tool set to write/edit/completeTask AND sets {@code tool_choice="required"} so a
+   * model that would otherwise return reasoning-only text (the verified 4/10 native-DeepSeek
+   * empty-patch failure on the 2026-05-30 mixed10 deep-dive) is forced to emit an actual edit.
+   * Default OFF, V224. Honoured by the OpenAI-wire clients (OpenAI / DeepSeek / OpenRouter); falls
+   * back to today's auto behaviour for providers that reject the forced choice.
+   */
+  public static final String FLAG_SALVAGE_FORCE_TOOL = "worker.salvage-force-tool-choice.enabled";
+
   /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
   public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
 
@@ -1714,6 +1744,7 @@ end and only call completeTask if it exits 0.
                 .stagnationForceAfter(altCfg.stagnationForceAfter())
                 .wallClockSeconds(altCfg.wallClockSeconds())
                 .requireBuildVerification(true)
+                .forceToolChoiceOnSalvage(altCfg.forceToolChoiceOnSalvage())
                 .build());
     log.info(
         "Executor task={} cross-provider retry DONE — alt={} outcome={}",

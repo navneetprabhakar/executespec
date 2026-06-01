@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V222**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -45,7 +45,7 @@ Migration head: **V222**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `folder` | 1 | 4 | - | - | `.executespec/` folder writer + bootstrap + project config |
 | `governance` | - | 1 | - | - | GovernanceGuard — M-032/M-033 spend caps + GitHub owner allowlist |
 | `harness` | - | 7 | - | - | V2 SequentialExecutor + GateStore + WorkspaceInitService + VendoredPathGuard |
-| `integration` | 8 | 10 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator |
+| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`; 5,288→4,456 LOC) |
 | `landing` | 1 | - | - | - | Public landing-page stats + sample-run endpoints |
 | `lint` | - | 1 | - | - | LintPass — deterministic auto-formatter pass (Phase L1) |
 | `memory` | 2 | 5 | 1 | - | Project memory: chat + run ledger + compaction snapshots |
@@ -709,3 +709,6 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | DB migrations | `src/main/resources/db/migration/V*.sql` (head V216) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api.ts` |
+| CLI client | `clients/cli/` — [`CODEMAP`](../clients/cli/CODEMAP.md) + [`ARCHITECTURE`](../clients/cli/ARCHITECTURE.md) (thin terminal client; slated to split to its own repo) |
+| VS Code extension | `clients/vscode/` — [`CODEMAP`](../clients/vscode/CODEMAP.md) + [`ARCHITECTURE`](../clients/vscode/ARCHITECTURE.md) (native MVP; slated to split to its own repo) |
+| Shared client core | `clients/core/` — typed REST/SSE client + PAT `TokenStore` + local `ToolRuntime` (the logic both clients render over) |

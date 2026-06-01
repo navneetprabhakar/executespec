@@ -242,17 +242,4 @@ public class PromptOptimiserAgent {
   private Path resolvePromptPath(String promptFile) {
     return Path.of("src/main/resources/prompts", promptFile);
   }
-
-  /**
-   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #44 (silently committing
-   *     to the developer's working tree from a scheduled task is a foot-gun). Kept as a reference
-   *     for future re-enabled-behind-a-flag iteration. Do NOT call.
-   */
-  @Deprecated(forRemoval = true)
-  @SuppressWarnings("unused")
-  private void commitToMain(PipelineRun run) {
-    log.warn(
-        "[Prompt Optimiser] commitToMain is deprecated and disabled — see audit F #44 (run {})",
-        run.getRunId());
-  }
 }

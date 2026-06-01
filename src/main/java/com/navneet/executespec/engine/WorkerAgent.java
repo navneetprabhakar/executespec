@@ -23,6 +23,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -950,6 +951,42 @@ public class WorkerAgent {
                 + " genuinely impossible to guess, call completeTask with summary='salvage: no fix"
                 + " identified' to exit cleanly."));
 
+    boolean force = Boolean.TRUE.equals(req.forceToolChoiceOnSalvage());
+    if (force) {
+      // RL-2026-05-059 — forced attempt: restrict the tool set to the write/complete tools and set
+      // tool_choice="required" so a model that would otherwise return reasoning-only text (the
+      // verified 4/10 native-DeepSeek empty-patch failure, where the salvage call produced 109
+      // output tokens but no tool call) MUST emit an actual edit or completeTask.
+      WorkerResult forced =
+          salvageAttempt(
+              req, history, toolsDispatched, toolLog, start, salvageTools(req, true), "required");
+      if (forced != null) return forced;
+      log.info(
+          "WorkerAgent SALVAGE forced attempt yielded nothing — retrying with auto tool-choice");
+    }
+    // Default path (flag off) AND fallback for the forced path: full tool set, tool_choice=auto.
+    // The fallback covers providers that reject tool_choice="required" (the forced call errors to
+    // null) so a forced attempt can never REGRESS the salvage that occasionally works today.
+    return salvageAttempt(
+        req, history, toolsDispatched, toolLog, start, salvageTools(req, false), null);
+  }
+
+  /**
+   * One salvage LLM call + tool dispatch. Extracted from {@link #runSalvageCall} (RL-2026-05-059)
+   * so the forced ({@code tool_choice="required"}) and auto attempts share identical dispatch
+   * handling. Returns the terminal {@link WorkerResult} when the salvage produced an edit
+   * (COMPLETED) or a completeTask (ITERATION_LIMIT_EXCEEDED), or {@code null} when nothing usable
+   * came back (router error, empty response, no tool calls, or only failed edits) so the caller can
+   * fall through.
+   */
+  private WorkerResult salvageAttempt(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      List<ToolCallback> tools,
+      String toolChoice) {
     ChatResponse resp;
     try {
       resp =
@@ -961,11 +998,12 @@ public class WorkerAgent {
                   .context(req.context())
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
-                  .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                  .toolsOverride(tools)
+                  .toolChoice(toolChoice)
                   .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
                   .build());
     } catch (Exception e) {
-      log.warn("WorkerAgent SALVAGE router error: {}", e.getMessage());
+      log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
       return null;
     }
 
@@ -1022,6 +1060,23 @@ public class WorkerAgent {
           .build();
     }
     return null;
+  }
+
+  /**
+   * The tool set for a salvage attempt (RL-2026-05-059). When {@code restrict} is true (the forced
+   * attempt) the set is narrowed to {@code writeFile}/{@code editFile}/{@code completeTask} so a
+   * forced tool call ({@code tool_choice="required"}) can only pick a productive action — not
+   * another readFile that just re-enters the read loop the salvage exists to break. Falls back to
+   * the full worker tool set if filtering leaves nothing (defensive against a registry-shape
+   * change).
+   */
+  private List<ToolCallback> salvageTools(WorkerTaskRequest req, boolean restrict) {
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    if (!restrict) return all;
+    java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
+    List<ToolCallback> filtered =
+        all.stream().filter(t -> allow.contains(t.getToolDefinition().name())).toList();
+    return filtered.isEmpty() ? all : filtered;
   }
 
   private static int maxIterOf(WorkerTaskRequest req) {

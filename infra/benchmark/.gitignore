@@ -1,0 +1,18 @@
+# Terraform — never commit local state or provider binaries
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Real tfvars may carry project-specific values/secrets — keep only the .example
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# .terraform.lock.hcl IS committed (pins provider versions) — do not ignore it

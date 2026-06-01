@@ -120,7 +120,11 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   const fromState = (location.state as {from?: {pathname: string}} | null)?.from?.pathname;
-  const target = fromState || '/home';
+  // `?redirect=` carries a full internal path (incl. query) across the login bounce — used by the
+  // CLI/VS Code `/cli-login` device-authorization flow, which must preserve its ?port=&state=.
+  const redirectParam = new URLSearchParams(location.search).get('redirect');
+  const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
+  const target = safeRedirect || fromState || '/home';
 
   // Pick up OAuth failure bounces — the backend lands us at /login?error=…
   // when the OAuth dance can't complete (no email, email conflict, etc.).
