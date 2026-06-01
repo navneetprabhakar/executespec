@@ -1187,7 +1187,7 @@ public class RunOrchestrator {
         String projectBrief = projectId != null ? projectBriefService.buildBrief(projectId) : "";
         String referenceDocs =
             projectId != null ? retrievalService.retrieve(projectId, userRequest) : "";
-        String multiRepoSummary = buildMultiRepoSummary(projectId, selectedRepoIds);
+        String multiRepoSummary = contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds);
         String summary;
         if (multiRepoSummary != null) {
           summary = multiRepoSummary;
@@ -1420,7 +1420,8 @@ public class RunOrchestrator {
                     // the scope of an inner-block local variable. Returns null on single-repo
                     // / scratch-workspace runs; the worker's composeSystemPrompt skips the
                     // block when null.
-                    .workspaceSummary(buildMultiRepoSummary(projectId, selectedRepoIds))
+                    .workspaceSummary(
+                        contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
                     .build());
       } catch (Exception e) {
         log.error("RunOrchestrator run={} executor failed", runId, e);
@@ -2497,7 +2498,8 @@ public class RunOrchestrator {
                       .enableSmokeTests(true)
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
-                      .workspaceSummary(buildMultiRepoSummary(projectId, selectedRepoIds))
+                      .workspaceSummary(
+                          contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
                       .build(),
                   // Auto-detect: ResumeRequest with null targetTaskId tells the executor to walk
                   // the plan and resume at the FIRST non-terminal task in DB.
@@ -2832,7 +2834,7 @@ public class RunOrchestrator {
                             .designBlock(null)
                             .projectId(row == null ? null : row.getProjectId())
                             .workspaceSummary(
-                                buildMultiRepoSummary(
+                                contextComposer.buildMultiRepoSummary(
                                     row == null ? null : row.getProjectId(), selectedRepoIds))
                             .build(),
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
@@ -3979,132 +3981,9 @@ public class RunOrchestrator {
   private static final int ENTERPRISE_INJECT_CAP = 8_000;
 
   /**
-   * Builds a workspaceSummary that tells the planner (and by extension the worker) exactly where
-   * each selected repo is cloned, so generated files land inside {@code repos/<name>/} — not at the
-   * workspace root. Without this the worker treats the workspace as an empty scratch dir and writes
-   * to the root, producing runs that finish COMPLETE but open no PRs (nothing to push from each
-   * {@code repos/<name>/} subdir).
+   * The multi-repo workspace summary + language-parity block moved to {@link RunContextComposer}
+   * (god-class split inc-3b); {@code languageConventionHint} moved to {@link RunPipelineSupport}.
    */
-  private String buildMultiRepoSummary(String projectId, List<UUID> selectedRepoIds) {
-    if (projectId == null || selectedRepoIds == null || selectedRepoIds.isEmpty()) return null;
-    List<ProjectRepo> repos;
-    try {
-      repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
-    } catch (Exception e) {
-      return null;
-    }
-    if (repos.isEmpty()) return null;
-    StringBuilder sb =
-        new StringBuilder(
-            "MULTI-REPO PROJECT WORKSPACE.\n\n"
-                + "Each selected repo is cloned into its own subdirectory under `repos/`.\n"
-                + "All file paths you create or edit MUST live inside the matching"
-                + " `repos/<name>/`\n"
-                + "subdirectory — never at the workspace root. Only one PR per repo is opened,\n"
-                + "based on the diff inside that subdirectory.\n\n"
-                + "Repos available for this run:\n");
-    for (ProjectRepo r : repos) {
-      String name = lastPathSegment(r.getGithubRepoFullName());
-      sb.append("- `repos/")
-          .append(name)
-          .append("/` → github.com/")
-          .append(r.getGithubRepoFullName())
-          .append(" (default branch: ")
-          .append(r.getDefaultBranch() == null ? "main" : r.getDefaultBranch())
-          .append(")\n");
-    }
-
-    // Fix D (2026-05-03, run a076c876 T2 diagnosis) — append a language parity
-    // block per repo from ProjectRepo.detectedStack so the planner doesn't
-    // template TypeScript filenames into a Python repo and vice versa. T2's
-    // task description told the worker to edit `repos/pplai-api/src/config/index.ts`
-    // when pplai-api is FastAPI/Python; the worker spent iters 1-10 reconciling
-    // the spec's TypeScript wording against the actual Python code on disk.
-    String languageBlock = buildLanguageParityBlock(repos);
-    if (!languageBlock.isEmpty()) {
-      sb.append('\n').append(languageBlock);
-    }
-    return sb.toString();
-  }
-
-  /**
-   * Render a per-repo language parity block from the {@link ProjectRepo#getDetectedStack()} JSON
-   * shape produced by {@code StackDetector} ({@code {language, framework, version}}). Returns the
-   * empty string when no repo has a non-blank detected language — there's nothing useful to say.
-   *
-   * <p>The block instructs the planner to TRANSLATE filename / extension conventions in the spec to
-   * match the repo's actual language. Without this block, planners templated TypeScript filenames
-   * into Python repos because the user's spec wording happened to use {@code .ts} extensions (run
-   * a076c876 / T2). The planner now sees an explicit rule and either translates up-front or rejects
-   * the mismatch.
-   */
-  private String buildLanguageParityBlock(List<ProjectRepo> repos) {
-    if (repos == null || repos.isEmpty()) return "";
-    StringBuilder lines = new StringBuilder();
-    for (ProjectRepo r : repos) {
-      String stackJson = r.getDetectedStack();
-      if (stackJson == null || stackJson.isBlank()) continue;
-      String language = null;
-      String framework = null;
-      try {
-        var node = objectMapper.readTree(stackJson);
-        language = node.path("language").asText("");
-        framework = node.path("framework").asText("");
-        if (language == null || language.isBlank()) continue;
-      } catch (Exception e) {
-        // detectedStack is malformed JSON — skip this repo's hint, no big deal.
-        continue;
-      }
-      String name = lastPathSegment(r.getGithubRepoFullName());
-      String hint = languageConventionHint(language, framework);
-      lines.append("- `repos/").append(name).append("/` is **").append(language);
-      if (framework != null && !framework.isBlank()) {
-        lines.append(" / ").append(framework);
-      }
-      lines.append("** — ").append(hint).append('\n');
-    }
-    if (lines.length() == 0) return "";
-    return "LANGUAGE PARITY (do not violate):\n"
-        + lines
-        + "If the user's spec uses different language conventions for a repo (e.g. asks for"
-        + " `scan.service.ts` in a Python repo), TRANSLATE the filenames + idioms to match the"
-        + " repo's actual language before emitting the task description. The repo's detected"
-        + " language is authoritative.\n";
-  }
-
-  /**
-   * Map a detected (language, framework) pair to a short worker-actionable convention hint.
-   * Conservative: when the language doesn't match any known mapping, return a generic "match the
-   * existing repo conventions" line so the planner at least sees the language name in the parity
-   * block.
-   */
-  static String languageConventionHint(String language, String framework) {
-    String l = language == null ? "" : language.trim().toLowerCase();
-    return switch (l) {
-      case "python" ->
-          "use snake_case `.py` filenames, `os.getenv()` / pydantic-settings for config,"
-              + " pytest for tests.";
-      case "typescript", "typescript/js", "javascript", "node", "nodejs" ->
-          "use kebab-case or camelCase `.ts` / `.tsx` filenames (match what's already in the"
-              + " repo), `process.env` for config, vitest / jest for tests.";
-      case "go", "golang" ->
-          "use lower_snake_case `.go` filenames, `os.Getenv` for config, `_test.go` for tests.";
-      case "rust" ->
-          "use snake_case `.rs` filenames, `std::env::var` for config, `#[cfg(test)]` modules"
-              + " or `tests/` dir.";
-      case "java" ->
-          "use PascalCase `.java` filenames, Spring `@Value` / `application.yml` for config,"
-              + " JUnit for tests.";
-      case "kotlin" ->
-          "use PascalCase `.kt` filenames, Spring `@Value` / `application.yml` for config,"
-              + " JUnit / Kotest for tests.";
-      case "ruby" -> "use snake_case `.rb` filenames, `ENV[]` for config, RSpec for tests.";
-      case "csharp", "c#", "cs" ->
-          "use PascalCase `.cs` filenames, `IConfiguration` / `appsettings.json` for config,"
-              + " xUnit for tests.";
-      default -> "match the existing repo's filename + config + test conventions.";
-    };
-  }
 
   /**
    * v2.6.2 — hierarchical-planner phase 0. Runs the smart classifier and persists the verdict +

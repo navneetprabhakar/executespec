@@ -1,5 +1,6 @@
 package com.navneet.executespec.integration;
 
+import static com.navneet.executespec.integration.RunPipelineSupport.languageConventionHint;
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
@@ -7,6 +8,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
@@ -15,6 +18,8 @@ import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.UiStyleResolver;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelRegistry;
 
@@ -30,11 +35,9 @@ import lombok.extern.slf4j.Slf4j;
  * codemap block, and provider/model resolution. Every method is a relocated, byte-identical
  * builder.
  *
- * <p>The multi-repo workspace summary (`buildMultiRepoSummary` + `buildLanguageParityBlock`) is
- * intentionally deferred to a follow-up: it's coupled to the {@code languageConventionHint} stayer
- * (which {@code LanguageParityBlockTest} pins by name via {@code RunOrchestrator.…}), so moving it
- * cleanly needs that helper relocated + the test updated — out of scope for this byte-identical
- * pass.
+ * <p>Includes the multi-repo workspace summary ({@code buildMultiRepoSummary} + {@code
+ * buildLanguageParityBlock}) since inc-3b; the {@code languageConventionHint} mapping it uses was
+ * relocated to {@link RunPipelineSupport} (still pinned by {@code LanguageParityBlockTest}).
  */
 @Component
 @RequiredArgsConstructor
@@ -52,6 +55,7 @@ class RunContextComposer {
   private final ProjectArchitectureService projectArchitectureService;
   private final ProjectRepository projectRepository;
   private final ModelRegistry modelRegistry;
+  private final ProjectRepoService projectRepoService;
 
   void ensureReadme(
       String runId,
@@ -309,5 +313,92 @@ class RunContextComposer {
             + " claude-haiku-4-5-20251001",
         provider);
     return "claude-haiku-4-5-20251001";
+  }
+
+  String buildMultiRepoSummary(String projectId, List<UUID> selectedRepoIds) {
+    if (projectId == null || selectedRepoIds == null || selectedRepoIds.isEmpty()) return null;
+    List<ProjectRepo> repos;
+    try {
+      repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+    } catch (Exception e) {
+      return null;
+    }
+    if (repos.isEmpty()) return null;
+    StringBuilder sb =
+        new StringBuilder(
+            "MULTI-REPO PROJECT WORKSPACE.\n\n"
+                + "Each selected repo is cloned into its own subdirectory under `repos/`.\n"
+                + "All file paths you create or edit MUST live inside the matching"
+                + " `repos/<name>/`\n"
+                + "subdirectory — never at the workspace root. Only one PR per repo is opened,\n"
+                + "based on the diff inside that subdirectory.\n\n"
+                + "Repos available for this run:\n");
+    for (ProjectRepo r : repos) {
+      String name = lastPathSegment(r.getGithubRepoFullName());
+      sb.append("- `repos/")
+          .append(name)
+          .append("/` → github.com/")
+          .append(r.getGithubRepoFullName())
+          .append(" (default branch: ")
+          .append(r.getDefaultBranch() == null ? "main" : r.getDefaultBranch())
+          .append(")\n");
+    }
+
+    // Fix D (2026-05-03, run a076c876 T2 diagnosis) — append a language parity
+    // block per repo from ProjectRepo.detectedStack so the planner doesn't
+    // template TypeScript filenames into a Python repo and vice versa. T2's
+    // task description told the worker to edit `repos/pplai-api/src/config/index.ts`
+    // when pplai-api is FastAPI/Python; the worker spent iters 1-10 reconciling
+    // the spec's TypeScript wording against the actual Python code on disk.
+    String languageBlock = buildLanguageParityBlock(repos);
+    if (!languageBlock.isEmpty()) {
+      sb.append('\n').append(languageBlock);
+    }
+    return sb.toString();
+  }
+
+  /**
+   * Render a per-repo language parity block from the {@link ProjectRepo#getDetectedStack()} JSON
+   * shape produced by {@code StackDetector} ({@code {language, framework, version}}). Returns the
+   * empty string when no repo has a non-blank detected language — there's nothing useful to say.
+   *
+   * <p>The block instructs the planner to TRANSLATE filename / extension conventions in the spec to
+   * match the repo's actual language. Without this block, planners templated TypeScript filenames
+   * into Python repos because the user's spec wording happened to use {@code .ts} extensions (run
+   * a076c876 / T2). The planner now sees an explicit rule and either translates up-front or rejects
+   * the mismatch.
+   */
+  private String buildLanguageParityBlock(List<ProjectRepo> repos) {
+    if (repos == null || repos.isEmpty()) return "";
+    StringBuilder lines = new StringBuilder();
+    for (ProjectRepo r : repos) {
+      String stackJson = r.getDetectedStack();
+      if (stackJson == null || stackJson.isBlank()) continue;
+      String language = null;
+      String framework = null;
+      try {
+        var node = objectMapper.readTree(stackJson);
+        language = node.path("language").asText("");
+        framework = node.path("framework").asText("");
+        if (language == null || language.isBlank()) continue;
+      } catch (Exception e) {
+        // detectedStack is malformed JSON — skip this repo's hint, no big deal.
+        continue;
+      }
+      String name = lastPathSegment(r.getGithubRepoFullName());
+      String hint = languageConventionHint(language, framework);
+      lines.append("- `repos/").append(name).append("/` is **").append(language);
+      if (framework != null && !framework.isBlank()) {
+        lines.append(" / ").append(framework);
+      }
+      lines.append("** — ").append(hint).append('\n');
+    }
+    if (lines.length() == 0) return "";
+    return "LANGUAGE PARITY (do not violate):\n"
+        + lines
+        + "If the user's spec uses different language conventions for a repo (e.g. asks for"
+        + " `scan.service.ts` in a Python repo), TRANSLATE the filenames + idioms to match the"
+        + " repo's actual language before emitting the task description. The repo's detected"
+        + " language is authoritative.\n";
   }
 }
