@@ -1130,6 +1130,23 @@ public class RunOrchestrator implements RunControlPort {
             log.warn("V2 run={} code-intel planner injection skipped: {}", runId, e.getMessage());
           }
         }
+        // Architecture-doc injection — feed the project's high-level design (cross-repo HLD/LLD)
+        // into the planner alongside the codemap. Flag-gated (`codeintel.inject-arch.enabled`,
+        // default OFF), bounded (~8k chars), best-effort; no project / no arch doc → no-op
+        // (greenfield + blind-bench fail-safe). Mirrors the codemap-injection pattern above.
+        if (projectId != null && featureFlagService.isEnabled("codeintel.inject-arch.enabled")) {
+          try {
+            String arch = contextComposer.buildArchitectureContext(projectId);
+            if (!arch.isBlank()) {
+              summary = summary + "\n\n" + arch;
+              log.info(
+                  "V2 run={} injected architecture into planner ({} chars)", runId, arch.length());
+            }
+          } catch (Exception e) {
+            log.warn(
+                "V2 run={} architecture planner injection skipped: {}", runId, e.getMessage());
+          }
+        }
         // Enterprise-knowledge injection — feed cross-repo contracts + accepted ADRs into the
         // planner so it plans changes that respect them. Flag-gated (`enterprise.inject.enabled`,
         // default OFF), bounded (~8000 chars each), best-effort per block. No project → both empty

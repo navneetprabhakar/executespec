@@ -48,6 +48,9 @@ class RunContextComposer {
   // total bounds so a large codemap can't blow the planner/worker cold-start budget.
   private static final int CODEINTEL_TOTAL_CAP = 12_000;
   private static final int CODEINTEL_PER_REPO_CAP = 6_000;
+  // Architecture-doc injection cap (flag codeintel.inject-arch.enabled). The combined cross-repo
+  // arch doc is prose (HLD/LLD narrative) — bounded so it complements, not crowds out, the codemap.
+  private static final int ARCH_INJECT_CAP = 8_000;
   private static final String DEFAULT_PROVIDER = "openai";
 
   private final ObjectMapper objectMapper;
@@ -237,6 +240,31 @@ class RunContextComposer {
     return "EXISTING CODEBASE MAP — use this to LOCATE the right files/symbols before editing;"
         + " do NOT re-discover the structure from scratch:\n\n"
         + out;
+  }
+
+  /**
+   * Build the high-level architecture-doc block for planner injection (flag {@code
+   * codeintel.inject-arch.enabled}). Complements {@link #buildCodeIntelContext} (symbol map →
+   * WHERE) with the cross-repo HLD/LLD narrative (HOW components relate). Bounded ({@link
+   * #ARCH_INJECT_CAP}), best-effort; no project / no arch doc → "" (greenfield + blind-bench
+   * fail-safe).
+   */
+  String buildArchitectureContext(String projectId) {
+    if (projectId == null) return "";
+    try {
+      var doc = projectArchitectureService.latestArchitecture(projectId);
+      if (doc.isEmpty() || doc.get().getContent() == null || doc.get().getContent().isBlank()) {
+        return "";
+      }
+      String body = truncate(doc.get().getContent(), ARCH_INJECT_CAP);
+      if (body.isBlank()) return "";
+      return "PROJECT ARCHITECTURE (high-level design — use to understand how modules/components"
+          + " relate before editing):\n\n"
+          + body;
+    } catch (Exception e) {
+      log.warn("buildArchitectureContext failed (continuing without arch): {}", e.getMessage());
+      return "";
+    }
   }
 
   /**

@@ -38,7 +38,14 @@ public class BenchmarkController {
   private final SwebenchInstanceLoader loader;
   private final SwebenchProperties props;
 
-  public record SubmitRequest(String instanceId, String aiProvider, String modelName) {}
+  public record SubmitRequest(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      // RL-2026-05-066 (project-mode eval): optional per-instance project + its repo, so the run
+      // gets the project's codemap/arch/RAG injected. Null/absent → blind (the bench project).
+      String projectId,
+      java.util.List<String> selectedRepoIds) {}
 
   /** Submit one instance for a blind PATCH-mode run through the production pipeline. */
   @PostMapping("/run")
@@ -50,7 +57,13 @@ public class BenchmarkController {
         req.aiProvider(),
         req.modelName());
     return ResponseEntity.accepted()
-        .body(runService.submit(req.instanceId(), req.aiProvider(), req.modelName()));
+        .body(
+            runService.submit(
+                req.instanceId(),
+                req.aiProvider(),
+                req.modelName(),
+                req.projectId(),
+                req.selectedRepoIds()));
   }
 
   /**
