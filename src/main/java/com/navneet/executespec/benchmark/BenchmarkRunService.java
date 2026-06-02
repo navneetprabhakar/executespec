@@ -233,9 +233,9 @@ public class BenchmarkRunService {
 
   /**
    * Project-mode overload (RL-2026-05-066): when {@code projectId} is set, the run carries that
-   * project so the pipeline injects its codemap / architecture / RAG into planner + worker.
-   * {@code selectedRepoIds} are the project's repo ids (as strings) to resolve for code-intel.
-   * Null/blank {@code projectId} → the default bench project (blind, today's behaviour).
+   * project so the pipeline injects its codemap / architecture / RAG into planner + worker. {@code
+   * selectedRepoIds} are the project's repo ids (as strings) to resolve for code-intel. Null/blank
+   * {@code projectId} → the default bench project (blind, today's behaviour).
    */
   public TaskSubmitResult submit(
       String instanceId,
@@ -305,9 +305,7 @@ public class BenchmarkRunService {
                 /* createdByUserId */ props.getBenchUserId(),
                 /* orgId */ props.getBenchOrgId(),
                 /* projectId */
-                (projectId != null && !projectId.isBlank())
-                    ? projectId
-                    : props.getBenchProjectId(),
+                (projectId != null && !projectId.isBlank()) ? projectId : props.getBenchProjectId(),
                 /* executionMode */ "PROTOTYPE",
                 /* selectedRepoIds */
                 (selectedRepoIds == null || selectedRepoIds.isEmpty())

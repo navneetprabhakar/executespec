@@ -1143,8 +1143,7 @@ public class RunOrchestrator implements RunControlPort {
                   "V2 run={} injected architecture into planner ({} chars)", runId, arch.length());
             }
           } catch (Exception e) {
-            log.warn(
-                "V2 run={} architecture planner injection skipped: {}", runId, e.getMessage());
+            log.warn("V2 run={} architecture planner injection skipped: {}", runId, e.getMessage());
           }
         }
         // Enterprise-knowledge injection — feed cross-repo contracts + accepted ADRs into the
