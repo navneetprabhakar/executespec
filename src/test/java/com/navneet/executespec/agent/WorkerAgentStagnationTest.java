@@ -181,17 +181,18 @@ class WorkerAgentStagnationTest {
         "Should terminate exactly at the force threshold, not later.");
   }
 
-  // 2026-05-29 — DISABLED pending root-cause of the iter-counter off-by-one regression that
-  // c72fa557 (engine extraction Phase 5+6, RL-2026-05-052) acknowledged in its commit message
-  // as a pre-existing iter-counter regression that needs its own fix. Re-enable after the fix.
-  @org.junit.jupiter.api.Disabled(
-      "iter-counter off-by-one — pre-existing regression from c72fa557 (RL-2026-05-052)")
+  // 2026-06-01 (RL-2026-05-062) — RE-ENABLED. The "off-by-one" was NOT a c72fa557 loop bug: it is
+  // the one-shot verify-before-done nudge (RL-2026-05-051, predates c72fa557). When the worker has
+  // written files but run no verify (shell/buildProject/runTests) since its last edit, the FIRST
+  // completeTask is deferred once with a VERIFY nudge; the mock repeats the completeTask response,
+  // so the worker completes on the NEXT iter. That is correct production behaviour — the expected
+  // iteration count just needed +1 to account for the (intended) deferral.
   @Test
   void writeFile_resets_stagnation_counter() {
     // 7 reads (one shy of the warn threshold) + 1 writeFile + 7 more reads + completeTask.
     // Without the reset this would warn-then-force at iter 13. With the reset, the post-write
-    // 7 reads only reach stagnant=7 — below the warn threshold — and the worker completes
-    // cleanly via completeTask.
+    // 7 reads stay below the force threshold and the worker completes cleanly (no
+    // COMPLETED_BY_STAGNATION) — one iter after the completeTask call due to the verify nudge.
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 7; i++) {
       seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
@@ -206,7 +207,9 @@ class WorkerAgentStagnationTest {
     WorkerResult result = f.worker.run(req(40));
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
-    assertEquals(16, result.iterations(), "Should complete on the completeTask call (iter 16).");
+    // 16 tool-call responses; completeTask at iter 16 is deferred once by the verify-before-done
+    // nudge (wrote files, no verify since), so the clean completion lands at iter 17.
+    assertEquals(17, result.iterations(), "completes one iter after completeTask (verify nudge).");
   }
 
   @Test

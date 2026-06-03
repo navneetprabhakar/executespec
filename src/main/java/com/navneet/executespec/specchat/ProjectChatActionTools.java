@@ -46,6 +46,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectChatActionTools {
 
   private final RunOrchestrator runOrchestrator;
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final PipelineRunRepository pipelineRunRepo;
   private final ValidationReportService validationReportService;
   private final GateStore gateStore;
@@ -202,7 +203,7 @@ public class ProjectChatActionTools {
           if (runId == null) return errorEnvelope("runId is required");
           PipelineRun run = runAccessGuard.requireRunAccess(runId, ctx.userDetails());
           // Same path as cancel — signals the plan gate to fail, persists CANCELLED.
-          boolean cancelled = runOrchestrator.cancel(runId);
+          boolean cancelled = runLifecycleService.cancel(runId);
           ObjectNode out = json.createObjectNode();
           out.put("ok", cancelled);
           out.put("runId", run.getRunId());
@@ -240,7 +241,7 @@ public class ProjectChatActionTools {
           String runId = textOrNull(args, "runId");
           if (runId == null) return errorEnvelope("runId is required");
           PipelineRun run = runAccessGuard.requireRunAccess(runId, ctx.userDetails());
-          boolean cancelled = runOrchestrator.cancel(runId);
+          boolean cancelled = runLifecycleService.cancel(runId);
           ObjectNode out = json.createObjectNode();
           out.put("ok", cancelled);
           out.put("runId", run.getRunId());

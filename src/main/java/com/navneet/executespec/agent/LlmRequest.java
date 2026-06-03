@@ -39,7 +39,7 @@ import lombok.Builder;
  *     Lever-B salvage call (RL-2026-05-059) to force a tool call out of a model that would
  *     otherwise return reasoning-only text and silently fail the salvage.
  */
-@Builder
+@Builder(toBuilder = true)
 public record LlmRequest(
     String provider,
     String model,

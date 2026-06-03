@@ -105,5 +105,9 @@ native x86_64 infra). `BenchmarkGenerationService` (`POST /generate`) is **compi
 yet runtime-tested** — the Live run used the older `submitRun` path (`POST /run`).
 
 Not yet merged; not wired to dev/prod (the `swebench.enabled` flag is OFF by default and only set in
-the local-only profile). Follow-up: runtime-test `/generate`, then remove the superseded oracle path
-(`swebench/SwebenchTaskService` + the old `SwebenchController`) once this is the validated default.
+the local-only profile). **Oracle path removed (RL-2026-05-062):** `swebench/SwebenchController` (the
+`/api/admin/swebench` oracle entry) is deleted, and the gold-`test_patch` injection in
+`SwebenchTaskService` (`formatTestPatchSnippet` + `captureFailingTestFilesFallback`) is neutralised
+to emit nothing — so no SWE-bench prompt can leak the hidden tests. `SwebenchTaskService` is retained
+(method signatures intact) for its event-listener / instance-loading surface that the blind harness
++ `AsyncAllowlistTest` reference.

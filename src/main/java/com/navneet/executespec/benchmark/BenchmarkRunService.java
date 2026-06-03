@@ -228,6 +228,21 @@ public class BenchmarkRunService {
    * runId so the caller can poll status / view in UI.
    */
   public TaskSubmitResult submit(String instanceId, String aiProvider, String modelName) {
+    return submit(instanceId, aiProvider, modelName, null, null);
+  }
+
+  /**
+   * Project-mode overload (RL-2026-05-066): when {@code projectId} is set, the run carries that
+   * project so the pipeline injects its codemap / architecture / RAG into planner + worker. {@code
+   * selectedRepoIds} are the project's repo ids (as strings) to resolve for code-intel. Null/blank
+   * {@code projectId} → the default bench project (blind, today's behaviour).
+   */
+  public TaskSubmitResult submit(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      String projectId,
+      java.util.List<String> selectedRepoIds) {
     if (!props.isEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
@@ -289,9 +304,15 @@ public class BenchmarkRunService {
                 /* aiProvider */ provider,
                 /* createdByUserId */ props.getBenchUserId(),
                 /* orgId */ props.getBenchOrgId(),
-                /* projectId */ props.getBenchProjectId(),
+                /* projectId */
+                (projectId != null && !projectId.isBlank()) ? projectId : props.getBenchProjectId(),
                 /* executionMode */ "PROTOTYPE",
-                /* selectedRepoIds */ java.util.List.of(),
+                /* selectedRepoIds */
+                (selectedRepoIds == null || selectedRepoIds.isEmpty())
+                    ? java.util.List.<java.util.UUID>of()
+                    : selectedRepoIds.stream()
+                        .map(java.util.UUID::fromString)
+                        .collect(java.util.stream.Collectors.toList()),
                 /* figmaUrl */ null,
                 /* tddMode */ false,
                 /* branchOverride */ null,
