@@ -43,6 +43,7 @@ because verifyBoot is preview-rebuild Phase 1 **and** the run-and-observe / veri
 11. **Mobile target** (Expo/EAS QR + `expo export --platform web` + device-cloud verification) `[low · med · L]` 🔒 — only once the preview rebuild is solid; never self-host iOS/Android simulators. [preview Phase 5]
 12. **Pre-existing debt** `[low · med · M]` — frontend code-splitting + frontend unit tests (`api.ts` ~2K LOC untested), `ProviderHealthTracker` circuit breaker on the V2 failover path, JAVADOC rewrite. [pending §G]
 13. **DeepSeek native-client smoke** `[low · low · S]` — validation only, on `feat/benchmark-codegen-harness`. [pending §I4]
+14. **Test the latest Qwen coding model via OpenRouter** `[low · low · S]` — founder request (2026-06-03), pick up at the end: add the newest verified Qwen coder slug to `OpenRouterModelMapper` + an `application.yml` matrix entry, then eval quality/latency/cost. [pending §L1]
 
 ## ⏸ Held (not scheduled)
 - **SWE-bench eval-improvement track** [pending §H] — on hold (2026-06-03). Resume after the CLI lands.
