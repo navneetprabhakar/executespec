@@ -87,14 +87,16 @@ public class StartupRunResumer {
   private String workspaceRoot;
 
   /**
-   * 2026-05-04 — lazy {@link RunOrchestrator} reference. Direct constructor injection would create
-   * a bean-init cycle (RunOrchestrator already depends on many beans that could transitively reach
-   * back here). {@link ObjectProvider} defers the lookup until {@link #scanAndRecover} actually
-   * calls into the orchestrator, by which point the bean graph is fully wired.
+   * 2026-05-04 — lazy {@code RunLifecycleService} reference (was RunOrchestrator before the inc-6b
+   * god-class split; {@code resumeAfterCrash} moved to the lifecycle service). Direct constructor
+   * injection would create a bean-init cycle (the service transitively depends on RunOrchestrator,
+   * which depends on many beans that could reach back here). {@link ObjectProvider} defers the
+   * lookup until {@link #scanAndRecover} actually calls in, by which point the graph is fully
+   * wired.
    */
   private final org.springframework.beans.factory.ObjectProvider<
-          com.navneet.executespec.integration.RunOrchestrator>
-      runOrchestratorProvider;
+          com.navneet.executespec.integration.RunLifecycleService>
+      runLifecycleServiceProvider;
 
   @Async
   @EventListener(ApplicationReadyEvent.class)
@@ -203,8 +205,8 @@ public class StartupRunResumer {
       // resume_attempts is incremented INSIDE resumeAfterCrash so the increment is tied to the
       // actual dispatch, not just our fall-through.
       try {
-        var orchestrator = runOrchestratorProvider.getObject();
-        var outcome = orchestrator.resumeAfterCrash(run.getRunId());
+        var lifecycle = runLifecycleServiceProvider.getObject();
+        var outcome = lifecycle.resumeAfterCrash(run.getRunId());
         log.info(
             "StartupRunResumer: run={} status={} resumeAfterCrash → {}",
             run.getRunId(),

@@ -56,6 +56,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RunController {
 
   private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
@@ -558,7 +559,7 @@ public class RunController {
           HttpStatus.SERVICE_UNAVAILABLE,
           "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
     }
-    boolean paused = v2Orchestrator.pause(runId);
+    boolean paused = runLifecycleService.pause(runId);
     if (!paused) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -594,7 +595,7 @@ public class RunController {
           "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
     }
     com.navneet.executespec.integration.RunOrchestrator.ResumeOutcome outcome =
-        v2Orchestrator.resume(runId);
+        runLifecycleService.resume(runId);
     return switch (outcome) {
       case OK -> ResponseEntity.accepted().build();
       case NOT_PAUSED ->
@@ -822,7 +823,7 @@ public class RunController {
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}", runId);
-    boolean cancelled = v2Orchestrator.cancel(runId);
+    boolean cancelled = runLifecycleService.cancel(runId);
     return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
   }
 
@@ -964,7 +965,7 @@ public class RunController {
     guard.requireRunAccess(runId, userDetails);
     log.info("POST /api/runs/{}/tasks/{}/retry", runId, taskId);
     try {
-      v2Orchestrator.retryTask(runId, taskId);
+      runLifecycleService.retryTask(runId, taskId);
       // SDET 2026-05-16 (BUG-017) — return a non-empty body so the UI's generic ApiResult parser
       // can surface a confirmation message instead of "ok!" silence. The 4xx mapping (task not
       // found → 404, wrong state → 409) was already in place; the empty-202 was the residual
@@ -1021,7 +1022,7 @@ public class RunController {
     guard.requireRunAccess(runId, userDetails);
     log.info("POST /api/runs/{}/retry-validation", runId);
     try {
-      v2Orchestrator.retryValidation(runId);
+      runLifecycleService.retryValidation(runId);
       return ResponseEntity.accepted().build();
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());

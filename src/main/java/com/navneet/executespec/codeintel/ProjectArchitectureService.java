@@ -771,4 +771,13 @@ public class ProjectArchitectureService {
   public Optional<ProjectCodeMap> latestCodeMap(String projectId, UUID repoId) {
     return codeMapRepo.findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repoId);
   }
+
+  /**
+   * Latest combined (cross-repo) architecture doc for a project — read-only accessor used by the
+   * run-context composer to inject the high-level design into the planner (flag {@code
+   * codeintel.inject-arch.enabled}). Mirrors {@link #latestCodeMap}.
+   */
+  public Optional<ProjectArchitectureDoc> latestArchitecture(String projectId) {
+    return archDocRepo.findFirstByProjectIdOrderByVersionDesc(projectId);
+  }
 }

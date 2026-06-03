@@ -45,6 +45,7 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   @Mock SseBroadcaster broadcaster;
   @Mock GitHubRepoService gitHub;
   @Mock RunOrchestrator v2Orchestrator;
+  @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   @Mock com.navneet.executespec.harness.GateStore gateStore;
@@ -71,6 +72,7 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
             broadcaster,
             gitHub,
             v2Orchestrator,
+            runLifecycleService,
             prRecordRepo,
             runCas,
             pipelineRunRepo,

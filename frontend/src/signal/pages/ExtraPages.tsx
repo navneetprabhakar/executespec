@@ -2042,12 +2042,13 @@ export function ResetPasswordPage() {
   );
 }
 
-export function AcceptInvitePage() {
+export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'}) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get('token') || '';
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const noun = kind === 'org' ? 'organization' : 'project';
   async function accept() {
     if (!token) {
       setErr('No invite token in the URL. Use the link from your invite email.');
@@ -2056,8 +2057,17 @@ export function AcceptInvitePage() {
     setErr('');
     setBusy(true);
     try {
-      const r = await api.acceptProjectInvite(token);
-      navigate(r?.projectId ? `/projects/${r.projectId}` : '/home', {replace: true});
+      // Two distinct invite flows reach this page by route (App.tsx): an org-member invite
+      // (/accept-invite → POST /api/org/accept-invite) vs a project invite (/invites/accept →
+      // POST /api/invites/accept). Branch on kind so each calls its own accept endpoint — calling
+      // the wrong one returns "Invite not found".
+      if (kind === 'org') {
+        await api.acceptInvite(token);
+        navigate('/home', {replace: true});
+      } else {
+        const r = await api.acceptProjectInvite(token);
+        navigate(r?.projectId ? `/projects/${r.projectId}` : '/home', {replace: true});
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Could not accept this invite.');
     } finally {
@@ -2075,7 +2085,7 @@ export function AcceptInvitePage() {
           You've been <em>invited</em>.
         </h1>
         <p className='lede'>
-          Open this page from your email invite link. We'll add you to the project and take you
+          Open this page from your email invite link. We'll add you to the {noun} and take you
           straight there.
         </p>
         <FormError msg={err} />
@@ -2104,7 +2114,7 @@ export function AcceptInvitePage() {
           />
         </Card>
         <Button kind='mint' block onClick={accept} disabled={busy || !token}>
-          {busy ? 'Accepting…' : 'Accept & open project'}
+          {busy ? 'Accepting…' : kind === 'org' ? 'Accept & continue' : 'Accept & open project'}
         </Button>
         <Button kind='ghost' block to='/home' style={{color: 'var(--signal-coral-text)'}}>
           Decline invite

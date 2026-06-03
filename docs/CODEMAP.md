@@ -45,7 +45,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `folder` | 1 | 4 | - | - | `.executespec/` folder writer + bootstrap + project config |
 | `governance` | - | 1 | - | - | GovernanceGuard — M-032/M-033 spend caps + GitHub owner allowlist |
 | `harness` | - | 7 | - | - | V2 SequentialExecutor + GateStore + WorkspaceInitService + VendoredPathGuard |
-| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split in progress, audit #43 — `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`; 5,288→4,456 LOC) |
+| `integration` | 8 | 14 | - | - | Inbound + outbound integrations: Jira/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack + RunOrchestrator (god-class split COMPLETE, audit #43 — 8 collaborators: `RunPipelineSupport`/`RunPersistenceWriter`/`RunContextComposer`/`RunPlanningCoordinator`/`PipelineExecutorPool`/`RunStandardsEnforcer`/`RunValidationKickoff`/`RunLifecycleService` via `RunControlPort`; all 6 increments done, 5,288→2,549 LOC, −52%) |
 | `landing` | 1 | - | - | - | Public landing-page stats + sample-run endpoints |
 | `lint` | - | 1 | - | - | LintPass — deterministic auto-formatter pass (Phase L1) |
 | `memory` | 2 | 5 | 1 | - | Project memory: chat + run ledger + compaction snapshots |
@@ -202,8 +202,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 | Controller | Base path | Purpose |
 | --- | --- | --- |
-| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); supersedes oracle `swebench/` |
-| `swebench/SwebenchController` | `/api/admin/swebench` | SWE-bench Lite bench-mode submission (oracle-mode; superseded by `benchmark/`) |
+| `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); the supported path (the oracle `swebench/SwebenchController` was removed, RL-2026-05-062) |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
 | `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |
 | `eval/v2/TierEvalController` | `/api/admin/eval/v2` | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params) |
@@ -277,7 +276,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `ValidationReportGenerator` | `report` | WORKHORSE | Validation report assembly |
 | `AccuracyAssessmentService` | `reviewer` | (LLM judge) | Legacy `accuracyScore` floor for pre-V106 runs |
 
-**LLM routers**: `agent/LlmRouter.java` (V2 native-tool-only, no failover), `agent/FallbackLlmRouter.java` (legacy V1 with 4-attempt exp backoff, provider failover, circuit breaker). Direct provider clients: `agent/OpenAiNativeToolClient.java`, `agent/GeminiNativeToolClient.java`. Spring AI bean `AnthropicChatModel` for Anthropic.
+**LLM routers**: `agent/LlmRouter.java` (V2 native-tool-only; 4-attempt same-provider transient retry + BYOK-safe multi-provider failover behind `router.failover.enabled`, RL-2026-05-062 — closes audit M#68), `agent/FallbackLlmRouter.java` (legacy V1 with 4-attempt exp backoff, provider failover, circuit breaker). Direct provider clients: `agent/OpenAiNativeToolClient.java`, `agent/GeminiNativeToolClient.java`. Spring AI bean `AnthropicChatModel` for Anthropic.
 
 ---
 
@@ -291,7 +290,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `WriteFileTool` | `{path, content}` | Create new file (errors if exists); FileSandboxPolicy + SSE `fileWritten` emit |
 | `EditFileTool` | `{path, edits[{oldStr, newStr}]}` | Multi-edit string replacement; each oldStr must occur exactly once |
 | `ListFilesTool` | `{path, recursive?}` | Directory listing; hides node_modules/target/build/dist/.git/.next/.venv/__pycache__/.gradle |
-| `SearchFilesTool` | `{pattern, directory?, filePattern?}` | Native (Java walk + regex) recursive content search; max 100 matches; 240-char preview |
+| `SearchFilesTool` | `{pattern, directory?, filePattern?, maxResults?, offset?}` | Recursive content search — ripgrep fast path (gitignore-aware) with a Java walk+regex fallback (RL-2026-05-062); paged; 240-char preview |
 | `ShellTool` | `{command, timeoutSeconds?}` | Sandboxed shell; ShellSandboxPolicy allowlist; container routes to ProgramBench/SWE-bench |
 | `GitStatusTool` | `{}` | `git status --short` of run workspace |
 | `GitDiffTool` | `{}` | Working-tree diff (staged + unstaged), truncated to 3 KB |
