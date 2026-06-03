@@ -70,11 +70,10 @@ export interface RunRequest {
   branch?: string;
   userCostCap?: number;
   skipAutoPush?: boolean;
-  /**
-   * Local-hands/remote-brain marker. When true the run executes tools on the connected client
-   * (no server workspace, no auto-publish). Additive on the server; ignored by older backends.
-   */
-  localExecution?: boolean;
+  // NOTE: run LOCALITY (REMOTE/LOCAL) is intentionally NOT a wire field yet. Shape B converges it
+  // on the server's PipelineRun.executionLocality, which lands in Phase 3 (migration V223+). Until
+  // the server accepts it a client field would be silently dropped (the old `localExecution`
+  // boolean was exactly that dead field — removed here, design §10 #3). Re-added in Phase 3.
 }
 
 export interface RunSummary {

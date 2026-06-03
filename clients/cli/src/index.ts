@@ -27,9 +27,8 @@ Runs
   run approve <runId> [--credits N] | run reject <runId>
   run cancel <runId>
   run report <runId>
-  run local "<spec>" [--dir .]          local-hands: tools run on YOUR tree, nothing
-                                        published by default (experimental — needs
-                                        server local-mode)
+  run local "<spec>"                    local-hands (code stays on your machine) —
+                                        not available yet; lands in Phase 3
 
 Common flags
   --host <url>        backend (default https://executespec.ai or $EXECUTESPEC_HOST)
