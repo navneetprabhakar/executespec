@@ -142,7 +142,7 @@ Every row ships to **both** surfaces. "—" is never allowed in a shipped row; a
 ### 6.2 Run lifecycle (existing REST)
 `POST /api/runs`, `GET /api/runs[/{id}]`, `POST /api/runs/{id}/approve`, `DELETE /api/runs/{id}`, `GET /api/runs/{id}/{events,sse-token,cost,report,event-log}`, `POST /api/runs/{id}/tasks/{taskId}/retry`. Consumed by `core/api.ts` (already implemented). SSE uses a 5-min scoped token minted per connection; `core/sse.ts` reconnects with `Last-Event-ID` (already implemented).
 
-### 6.3 Chat — `POST /api/spec/chat` (Phase-1 skeleton landed; loop pending)
+### 6.3 Chat — `POST /api/spec/chat` (loop landed 2026-06-03 — `SpecChatService`, flag `spec.chat.enabled`/V229 default OFF)
 PAT-authenticated SSE endpoint. Request: `{sessionId, projectId?, localContext?, conversation[], providerOverride?}`. Response SSE: `event: token {delta}`, `event: tool_call {tool,args,id}`, `event: tool_result {id, result}`, `event: done {usage, cost_usd, turn_count}`. Server is stateless for content; persists only `spec_chat_audit` (`session_id, project_id, user_id, org_id, turn_count, timestamps, model_used, ip_hash` — no bodies).
 
 **Phase-1 step 3 (the real loop) design:**
