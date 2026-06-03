@@ -108,6 +108,6 @@ Shape B locked five decisions (founder, 2026-05-28). This ADR's stance on each:
 - [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) — full technical design + Feature Matrix.
 - [`docs/plans/cli-vscode-unified-client-execution-2026-05-30.md`](../plans/cli-vscode-unified-client-execution-2026-05-30.md) — phased execution plan, scenarios, test plan, rollout.
 - [`docs/design/cli-plugin-spec-shape-b-2026-05-28.md`](../design/cli-plugin-spec-shape-b-2026-05-28.md) — the amended Shape B lock.
-- [`docs/plans/cli-and-terminal-bench-handoff-2026-05-29.md`](../plans/cli-and-terminal-bench-handoff-2026-05-29.md) — prior handoff + Terminal-Bench dependency.
+- [`docs/pending.md`](../pending.md) §J — open CLI/VS Code + Terminal-Bench work (folded in from the prior CLI/Terminal-Bench handoff, deleted 2026-06-03).
 - [`docs/competitive-analysis/COMPARISON.md`](../competitive-analysis/COMPARISON.md) — Claude Code / opencode shape analysis.
 - RL-2026-05-043 (CLI/VS Code + PAT), RL-2026-05-052 (Shape B) in [`docs/reason-log/2026-05.md`](../reason-log/2026-05.md).
