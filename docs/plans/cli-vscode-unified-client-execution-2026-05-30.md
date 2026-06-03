@@ -94,7 +94,7 @@ Sequencing note: Phase 1 (backend) and the **scaffolding** of Phase 2 (CLI verbs
 **Exit criteria:** installable from npm + Marketplace (or sideload); docs in lockstep; demo script passes on a clean machine.
 
 ### Phase 7 — Deferred
-- **Terminal-Bench via CLI** (validates local-hands; depends on Phases 1–3) — see the handoff doc §7.
+- **Terminal-Bench via CLI** (validates local-hands; depends on Phases 1–3) — see [`pending.md`](../pending.md) §J3.
 - **Editor-mode** (inline completions / gutter actions / watcher) — separate effort.
 
 ---
@@ -249,5 +249,5 @@ Grouped by failure domain. Each row states the trigger and the required behavior
 - PAT auth (V215) — done.
 - `spec_chat_audit` (V218) + `SpecChatController` skeleton + `ProjectChatActionTools` — done; loop = Phase 1.
 - Web control-plane reframe ([`web-control-plane-reframe.md`](web-control-plane-reframe.md)) — parallel; web = mission control, this = authoring client.
-- Terminal-Bench ([`cli-and-terminal-bench-handoff-2026-05-29.md`](cli-and-terminal-bench-handoff-2026-05-29.md) §7) — depends on Phases 1–3.
+- Terminal-Bench ([`pending.md`](../pending.md) §J3) — depends on Phases 1–3.
 - Open questions (design §11) — founder re-confirm on ADR §6 items 2/3/4.
