@@ -1,0 +1,56 @@
+name: Clients
+
+# 2026-06-03 — build + typecheck + parity test for the clients/ monorepo (shared core + CLI +
+# VS Code extension). Phase 0 of the unified-`spec`-client plan: the TS surface must compile and
+# the CLI ↔ VS Code capability-parity check must pass before merge, so the reasoned-not-compiled
+# drift the design called out (design §10 #6) can't recur and a feature can't ship to one surface
+# only (design §9).
+#
+# Cost: $0 — pure tsc / esbuild + Node's built-in test runner; no network beyond `npm ci`.
+#
+# Triggers:
+#   - Pull requests against dev or main that touch clients/ (path-filtered — the Java surface has
+#     its own test.yml / lint.yml gates).
+#   - Manual workflow_dispatch for ad-hoc runs.
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'clients/**'
+      - '.github/workflows/clients.yml'
+  workflow_dispatch:
+
+jobs:
+  clients:
+    name: Clients · build + parity test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: clients
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: clients/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      # Build = tsc for core + cli (so both typecheck here) and esbuild for the extension bundle.
+      - name: Build (core + cli + vscode bundle)
+        run: npm run build
+
+      # esbuild does not typecheck — this runs `tsc --noEmit` over the extension so its use of
+      # @executespec/core is verified too.
+      - name: Typecheck (incl. the esbuild-bundled extension)
+        run: npm run typecheck
+
+      - name: Parity + registry tests
+        run: npm test -w @executespec/core

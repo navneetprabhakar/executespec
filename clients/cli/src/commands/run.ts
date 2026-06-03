@@ -1,9 +1,5 @@
-import path from 'node:path';
-
 import {
-  LocalExecutionSession,
   RunEventType,
-  ToolRuntime,
   streamRunEvents,
   type ApprovalRequest,
   type ClientBundle,
@@ -254,50 +250,20 @@ async function report(args: ParsedArgs, client: ClientBundle): Promise<number> {
   return 0;
 }
 
-async function local(args: ParsedArgs, client: ClientBundle): Promise<number> {
-  const spec = args.positionals[0];
-  if (!spec) {
-    errln('Usage: executespec run local "<spec>" [--dir .]   (experimental — needs server local-mode)');
-    return 2;
-  }
-  const dir = path.resolve(flagStr(args.flags, 'dir') ?? process.cwd());
-  out(
-    yellow('local-hands run') +
-      dim(` — tools execute in ${dir}; nothing is published unless you push it yourself.`),
+async function local(_args: ParsedArgs, _client: ClientBundle): Promise<number> {
+  // LOCAL-hands execution (code stays on your machine, nothing published) needs server-side
+  // activation that lands in Phase 3 of the unified-client plan: PipelineRun.executionLocality +
+  // RemoteToolDispatcher.register(runId) so the server emits TOOL_CALL events for the client's
+  // ToolRuntime. Until then this would silently submit a normal SERVER-side run (which may even
+  // auto-push) — the opposite of "local" — so it is gated off rather than mislead (design §10 #3).
+  // The core LocalExecutionSession + ToolRuntime stay exported, ready for Phase 3 to re-wire here.
+  // Tracked: docs/pending.md §J1.
+  errln(
+    red('run local: LOCAL-hands mode is not available yet.') +
+      ' It lands in Phase 3 (server-side executionLocality + tool-proxy activation).' +
+      ' For now use `executespec run submit` for a remote run.',
   );
-  const req: RunRequest = {
-    userRequest: spec,
-    source: 'REST',
-    localExecution: true,
-    executionMode: (flagStr(args.flags, 'mode')?.toUpperCase() as RunRequest['executionMode']) ?? 'PROTOTYPE',
-    aiProvider: flagStr(args.flags, 'provider')?.toUpperCase() as RunRequest['aiProvider'],
-    skipApproval: true,
-  };
-  const summary = await client.api.submitRun(req);
-  out(`${bold('Run')} ${summary.runId}`);
-
-  const autoYes = flagBool(args.flags, 'yes');
-  const runtime = new ToolRuntime({
-    workspaceRoot: dir,
-    permissions: {
-      allowCommand: async (tool, command) => {
-        if (autoYes) {
-          out(dim(`  $ ${command}`));
-          return true;
-        }
-        return confirm(`${yellow('Allow')} ${tool}: ${command}`);
-      },
-    },
-  });
-  const session = new LocalExecutionSession(client.api, runtime, summary.runId);
-  await session.run({ onEvent: (ev) => renderEvent(ev, flagBool(args.flags, 'json')) });
-
-  try {
-    printFinal(await client.api.getRun(summary.runId), flagBool(args.flags, 'json'));
-  } catch {
-    // ignore
-  }
-  return 0;
+  return 2;
 }
 
 // ── rendering ─────────────────────────────────────────────────────────────
