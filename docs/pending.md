@@ -23,7 +23,7 @@
 > - **P2 — keystone:** `verifyBoot` ([`plans/preview-phase1-verifyboot-spec.md`](plans/preview-phase1-verifyboot-spec.md)) — de-LLM-judges the score; leads the preview/score sub-tree
 > - **P3 — latency:** §D1–D3 (Phase 0, eval-gated)
 > - **P4 — rebuild + refactor:** preview rebuild core ([`plans/preview-live-environment-rebuild.md`](plans/preview-live-environment-rebuild.md)) · §I2 (batch wiring) · §E1/I1 (RunOrchestrator split) · §D4 (parallel exec) · §J2 (drop ProgramBench) · §I3 (C3 tenant ORM isolation)
-> - **P5 — optional:** §I5 (dead-code) · mobile · §G (frontend / circuit breaker / JAVADOC) · §I4 (DeepSeek smoke)
+> - **P5 — optional / end:** §I5 (dead-code) · mobile · §G (frontend / circuit breaker / JAVADOC) · §I4 (DeepSeek smoke) · §L1 (test latest Qwen coder via OpenRouter)
 > - **⏸ Held:** §H (SWE-bench) · §J3 (Terminal-Bench) · §J5 (patchBytes fix) · §F0 (rebrand) · §F1 (score weighting) · §F2 (head-to-head)
 
 ## Update 2026-06-01 (pass 2 — "fix all")
@@ -178,6 +178,10 @@ Standings (post-diff-strip, verification OFF, /50): **Sonnet 23 · Gemini 22 · 
 ## K. Security / operational
 
 - ✅ **K1 — Rotate the 3 keys exposed in chat on 2026-05-29 (OpenRouter / DeepSeek / Google-Gemini) — DONE (rotated 2026-06-03).** Was: pasted into a chat transcript while updating the dev GCS api-keys file → treated as compromised; revoked → reissued → re-updated `gs://executespec-dev-deploy/config/api-keys` → redeployed. (The `#92` Gemini-key task row was actioned via the GCS file — close it.)
+
+## L. Model / provider experiments
+
+- ⚪ **L1 — Test the latest Qwen coding model via OpenRouter (founder request, 2026-06-03).** Pick up *at the end* (after the CLI, P1). Code-grounded state (verified in `router/OpenRouterModelMapper.java`, not assumed from docs): the allow-list currently maps only `qwen3-coder → qwen/qwen3-coder` (alongside `deepseek-v4-pro/flash`), and the mapper **fail-fasts on any unverified slug**. To test the newest Qwen coder: (1) confirm the current best Qwen coding slug against OpenRouter's live catalog (`https://openrouter.ai/api/v1/models`) — don't assume the name; (2) add `Map.entry("<matrix-id>", "qwen/<slug>")` to the allow-list; (3) add the matching `model-matrix.model-pricing` + context-window entry in `application.yml`; (4) run it through the real pipeline (`scripts/tier-eval-v2.sh` and/or a small BUILD/PATCH spec) to gauge coding quality + latency + cost vs the current providers. OpenRouter-only (no native client), ENTERPRISE BYOK; needs `OPENROUTER_API_KEY`.
 
 ## Constraints to remember (standing founder directives)
 
