@@ -202,12 +202,14 @@ logs/<runId>.log            # local run logs
 
 ## 10. Known defects in the landed code (to fix as part of this work)
 
-1. **Write actions guarded as reads.** `ProjectChatActionTools` approve/reject/cancel use `requireRunAccess`; must be `requireRunWriteAccess`. (§8)
-2. **Locality passed into the mode slot.** `ProjectChatActionTools.submit_run` passes `"REMOTE"` as `submitRun(...)`'s `executionMode` argument, which expects `PRODUCTION|PROTOTYPE`. Locality must move to `PipelineRun.executionLocality` (Phase 3); `executionMode` must carry a valid value.
-3. **Three incompatible "local" notions.** Client `RunRequest.localExecution` (`types.ts`) + gen-1 `run local` send a field the server record lacks; Shape B locks `PipelineRun.executionLocality`. Converge on `executionLocality`; delete the dead client field + retarget `run local`.
-4. **Controller error mapping.** `SpecChatController` throws raw exceptions for validation; map to 400/401.
-5. **`/api/spec` not guard-pinned.** Add to `AccessGuardCoverageTest`.
-6. **TS never compiled.** No `clients/` lockfile, not in CI; the whole TS surface is reasoned-not-compiled. First task is `npm install && npm run typecheck` + a CI job.
+> **Status (2026-06-03, Phase 0):** #1/#2/#4/#5 **fixed + verified** (`mvn test -Dtest=AccessGuardCoverageTest` + `spotless:check` green); #6 the monorepo now builds clean (`npm run build` green — core+cli+vscode). **Remaining:** #3 client-side cleanup + the clients CI job + the `capabilities.ts` parity registry.
+
+1. ✅ **Write actions guarded as reads.** `ProjectChatActionTools` approve/reject/cancel use `requireRunAccess`; must be `requireRunWriteAccess`. (§8) — **Fixed:** now `requireRunWriteAccess` (get_run_report stays on the read guard).
+2. ✅ **Locality passed into the mode slot.** `ProjectChatActionTools.submit_run` passes `"REMOTE"` as `submitRun(...)`'s `executionMode` argument, which expects `PRODUCTION|PROTOTYPE`. Locality must move to `PipelineRun.executionLocality` (Phase 3); `executionMode` must carry a valid value. — **Fixed:** now `"PRODUCTION"` (chat always hits the gate); locality deferred to Phase 3.
+3. **Three incompatible "local" notions.** Client `RunRequest.localExecution` (`types.ts`) + gen-1 `run local` send a field the server record lacks; Shape B locks `PipelineRun.executionLocality`. Converge on `executionLocality`; delete the dead client field + retarget `run local`. — *Pending (client-side).*
+4. ✅ **Controller error mapping.** `SpecChatController` throws raw exceptions for validation; map to 400/401. — **Fixed:** `ResponseStatusException` 401/400/403.
+5. ✅ **`/api/spec` not guard-pinned.** Add to `AccessGuardCoverageTest`. — **Fixed:** `/spec/` pinned in `PROTECTED_SEGMENTS`; the two no-path-id methods allowlisted with justification.
+6. ✅ **TS never compiled.** No `clients/` lockfile, not in CI; the whole TS surface is reasoned-not-compiled. First task is `npm install && npm run typecheck` + a CI job. — **Build verified** (`npm run build` green); **lockfile commit + CI job still pending.**
 
 ## 11. Open questions for the operator
 
