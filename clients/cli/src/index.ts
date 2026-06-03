@@ -4,6 +4,7 @@ import { createClient } from '@executespec/core';
 import { parseArgs, flagBool, flagStr } from './args.js';
 import { authCommand } from './commands/auth.js';
 import { runCommand } from './commands/run.js';
+import { chatRepl } from './repl.js';
 import { errln, errorMessage, out } from './ui.js';
 
 const VERSION = '0.1.0';
@@ -13,6 +14,7 @@ const HELP = `executespec — spec-driven coding from your terminal (thin client
 Usage
   executespec <command> [subcommand] [args] [--flags]
   es <command> ...                      (short alias)
+  executespec                           no command on a TTY → interactive chat
 
 Auth
   auth login [--token <pat>] [--no-browser]  sign in via browser (gcloud-style), or paste a PAT
@@ -45,9 +47,21 @@ async function main(): Promise<number> {
     out(`executespec ${VERSION}`);
     return 0;
   }
-  if (positionals.length === 0 || flagBool(flags, 'help')) {
+  if (flagBool(flags, 'help')) {
     out(HELP);
-    return positionals.length === 0 ? 1 : 0;
+    return 0;
+  }
+  if (positionals.length === 0) {
+    // No command: interactive chat on a TTY; otherwise print help (scripts use the verbs).
+    if (process.stdin.isTTY) {
+      const client = createClient({ host: flagStr(flags, 'host') });
+      return chatRepl(client, {
+        projectId: flagStr(flags, 'project'),
+        provider: flagStr(flags, 'provider'),
+      });
+    }
+    out(HELP);
+    return 1;
   }
 
   const group = positionals[0];

@@ -44,6 +44,32 @@ export class HttpClient {
     return this.request<T>('DELETE', pathname, undefined, opts);
   }
 
+  /**
+   * Authenticated streaming request — attaches the PAT bearer and returns the raw {@link Response}
+   * so the caller can read `res.body` (SSE). Unlike {@link request} it neither parses the body nor
+   * retries: a long-lived stream is the caller's to manage (a retry would re-POST the turn). Throws
+   * only on an outright network failure; HTTP error statuses come back as a non-`ok` Response for
+   * the caller to translate.
+   */
+  async stream(
+    method: string,
+    pathname: string,
+    body?: unknown,
+    opts?: { signal?: AbortSignal; accept?: string },
+  ): Promise<Response> {
+    const url = this.buildUrl(pathname);
+    return fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: opts?.accept ?? 'text/event-stream',
+        ...(await this.authHeader()),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: opts?.signal,
+    });
+  }
+
   async request<T>(
     method: string,
     pathname: string,
