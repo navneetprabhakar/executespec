@@ -52,5 +52,7 @@ jobs:
       - name: Typecheck (incl. the esbuild-bundled extension)
         run: npm run typecheck
 
-      - name: Parity + registry tests
-        run: npm test -w @executespec/core
+      - name: Tests (core parity/registry + CLI guard)
+        run: |
+          npm test -w @executespec/core
+          npm test -w @executespec/cli
