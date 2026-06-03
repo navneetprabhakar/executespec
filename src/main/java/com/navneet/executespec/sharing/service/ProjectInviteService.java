@@ -77,6 +77,12 @@ public class ProjectInviteService {
    */
   private final com.navneet.executespec.activity.ActivityEventEmitter activityEmitter;
 
+  /**
+   * RL-2026-05-066 — in-app notification for an invitee who already has an account (the email link
+   * alone was missable). Best-effort; never fails the invite.
+   */
+  private final com.navneet.executespec.notification.InAppNotificationService notificationService;
+
   /** Public-facing base URL — used to build accept-invite links in the email body. */
   @Value("${app.base-url:http://localhost:5173}")
   private String appBaseUrl;
@@ -220,6 +226,30 @@ public class ProjectInviteService {
           DEFAULT_EXPIRY_DAYS);
     } catch (Exception e) {
       log.warn("ProjectInvite email send failed for {}: {}", normalizedEmail, e.getMessage());
+    }
+
+    // RL-2026-05-066 — in-app notification when the invitee already has an account, so the invite
+    // isn't only discoverable via email. existingUser is, at this point, either empty (no account
+    // yet — they get the email + sign up) or present-and-not-yet-a-member (the already-member case
+    // threw CONFLICT above). Best-effort: never fail the invite on a notification write. The link
+    // matches the email + the /invites/accept SPA route.
+    if (existingUser.isPresent()) {
+      try {
+        notificationService.create(
+            existingUser.get().getId(),
+            "PROJECT_INVITE",
+            "Invited to " + project.getName(),
+            (inviter.getEmail() == null ? "A teammate" : inviter.getEmail())
+                + " invited you to "
+                + project.getName()
+                + " as "
+                + resolvedRole
+                + ".",
+            "/invites/accept?token=" + invite.getToken());
+      } catch (Exception e) {
+        log.warn(
+            "ProjectInvite in-app notification failed for {}: {}", normalizedEmail, e.getMessage());
+      }
     }
     return invite;
   }

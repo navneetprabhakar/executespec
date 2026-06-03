@@ -54,7 +54,7 @@ public class SuperAdminController {
       adminReconciliationService;
   private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver
       guardrailLevelResolver;
-  private final com.navneet.executespec.integration.RunOrchestrator v2RunOrchestrator;
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.report.VerifiedScoreBackfillService
       verifiedScoreBackfillService;
 
@@ -163,7 +163,7 @@ public class SuperAdminController {
     }
     Map<String, Object> result;
     try {
-      result = v2RunOrchestrator.forceFailTask(runId, taskId, reason.trim());
+      result = runLifecycleService.forceFailTask(runId, taskId, reason.trim());
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {
@@ -184,7 +184,7 @@ public class SuperAdminController {
   public ResponseEntity<Map<String, Object>> reReviewRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails admin) {
     try {
-      v2RunOrchestrator.reReview(runId);
+      runLifecycleService.reReview(runId);
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {
@@ -228,7 +228,7 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails admin,
       @RequestBody(required = false) Map<String, String> body) {
     String reason = body == null ? null : body.get("reason");
-    var halted = v2RunOrchestrator.haltAllActiveRuns(reason);
+    var halted = runLifecycleService.haltAllActiveRuns(reason);
     auditService.record(
         ActivityAudit.builder()
             .eventType("RUNS_HALTED_ALL")

@@ -1,12 +1,3 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# ExecuteSpec — Base configuration (local development)
-# ══════════════════════════════════════════════════════════════════════════════
-# This file contains hardcoded LOCAL defaults. No environment variables needed.
-# All ${VAR} references live in profile-specific files:
-#   application-dev.yml   → dev VM (GCE)     — activate with: --spring.profiles.active=dev
-#   application-prod.yml  → production (GCE) — activate with: --spring.profiles.active=prod
-# Health check: GET /api/health (custom HealthController — no actuator dependency)
-
 spring:
   application:
     name: executespec
@@ -28,171 +19,83 @@ spring:
     username: postgres
     password: postgres
     hikari:
-      maximum-pool-size: 30          # reduced — 80 exceeded PG max_connections on dev VM
-      minimum-idle: 5                # keep warm connections ready
-      connection-timeout: 10000      # 10s — fail fast instead of 30s default blocking
-      idle-timeout: 120000           # 2 min — reclaim idle connections faster
-      max-lifetime: 600000           # 10 min — rotate connections before DB-side timeouts
-      validation-timeout: 3000       # 3s — quick validation for health checks
-      # v2.6.1 — bumped 60s → 90s. Async apply-suggestion dispatch (see
-      # RunConversationController.applyExecutor) means the worker loop no
-      # longer pins a connection, but short JPA reads inside the loop
-      # (runRepo.findById, etc.) can still brush up against 60s under p99
-      # slow-query conditions. 90s reduces false positives while still
-      # flagging real leaks early.
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 10000
+      idle-timeout: 120000
+      max-lifetime: 600000
+      validation-timeout: 3000
       leak-detection-threshold: 90000
   mvc:
     async:
-      # v2.6.1 — 15 min. The apply-suggestion endpoint dispatches async
-      # (CompletableFuture) and the worker can burn up to ~25 iterations ×
-      # ~20 s/Sonnet call = ~8 min in the worst case. Default Tomcat
-      # async timeout (30 s) would cancel these before they finish.
       request-timeout: 900000
   jpa:
-    # v2.6.1 — OSIV flipped OFF after audit (2026-04-25). It was enabled in
-    # v2.5.1 to silence lazy-init crashes in execution + project view
-    # controllers, but a code-walk showed every concerning lazy walk is now
-    # covered by either entity-level FetchType.EAGER (ExecutionSolution
-    # dependencies + repoMappings) or @EntityGraph queries
-    # (ExecutionRunRepository.findListByProjectId / findDetailById +
-    # ExecutionSolutionRepository.findWith*) — and the DTO-walk endpoints
-    # in ProjectLaunchController are wrapped in @Transactional(readOnly=true).
-    # OSIV's session-scoped EM was the last reason connections were held
-    # across long async work (chat /apply); turning it off pairs with the
-    # connection.handling_mode change to release each connection at tx commit.
     open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         connection:
-          # v2.6.1 — release the JDBC connection back to Hikari on every tx
-          # commit instead of holding it for the whole EM lifetime. Without
-          # this, OSIV's request-scoped session pins the connection from the
-          # first @Transactional read (e.g. guard.requireRunAccess → findRun)
-          # until the request completes — on async endpoints like
-          # /runs/{id}/apply that's the full worker loop (~1-8 min). Trade-off:
-          # lazy-loads outside an explicit tx re-acquire a connection per
-          # query (Hikari handles the churn fine at pool-size 30).
           handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION
   flyway:
     enabled: true
-    baseline-on-migrate: true   # Safe for existing databases
-    baseline-version: 0         # Baseline before V1
+    baseline-on-migrate: true
+    baseline-version: 0
     locations: classpath:db/migration
-    # v2.6.0 — V119 was `preview_platform_v2_schema.sql` on Apr 19 when dev/prod
-    # DBs were migrated. That file belonged to preview-engine; when preview-engine
-    # moved to its own repo (commit cdc26e11), the SQL was removed from this tree
-    # but the DB still has the row. The rename_provider_google_to_gemini migration
-    # originally conflicted as V119; we renamed it V120 (see V120__*) to dodge
-    # the collision.
-    #
-    # Flyway's ignore-migration-patterns syntax is "<type>:<state>". Two hard
-    # constraints tripped me up:
-    #   1. type MUST be `*`, `repeatable`, or `versioned` — NOT a version number.
-    #      (My earlier "119:missing" crashed boot with "Invalid migration
-    #      type '119'". See commit 3faa2f13.)
-    #   2. `repeatable` + `versioned` are Flyway Redgate (paid) Edition features.
-    #      The OSS edition we use (via spring-boot-starter) only accepts `*`.
-    #      (My follow-up "versioned:missing" crashed boot with
-    #      "Flyway Redgate Edition Required". Caught by local-boot test, not CI.)
-    #
-    # Final pattern: `*:missing` — tolerate any applied-but-missing migration.
-    # This covers the V119 orphan from the preview-engine repo split (V119 was
-    # `preview_platform_v2_schema.sql` when preview-engine shared this DB; it
-    # moved to its own repo at cdc26e11, but dev + prod DBs still have the row).
-    # The rename_provider_google_to_gemini migration originally conflicted as
-    # V119; we renamed it V120 to dodge the collision.
-    #
-    # Safety trade-off: we lose automatic detection of *any* missing migration
-    # (versioned or repeatable). Mitigation: PR review is mandatory on any
-    # change under src/main/resources/db/migration/*.sql.
-    #
-    # Exit strategy: once dev + prod DBs are rebuilt, or we run a targeted
-    # `flyway repair` to drop the orphan V119 row from flyway_schema_history,
-    # remove this line to restore the full missing-migration safety net.
     ignore-migration-patterns: "*:missing"
-
-  # ── OAuth2 Login (Google + GitHub) ──────────────────────────────────────────
-  # Set GOOGLE_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_ID env vars to enable.
-  # When unset, OAuth2 auto-config is excluded (see SecurityConfig).
 
   ai:
     retry:
-      max-attempts: 3               # down from default 10 — FallbackLlmRouter handles its own fallback chain
+      max-attempts: 3
       backoff:
-        initial-interval: 2000      # 2s
-        multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
-        max-interval: 10000         # 10s cap
-    # ── Spring AI bean-init defaults ───────────────────────────────────────────
-    # These are the defaults Spring AI's auto-config uses when constructing the
-    # provider beans at startup. The V2 LlmRouter path overrides per-call from
-    # the model-matrix below, so these values are only used at bean construction
-    # time; per-call dispatch resolves through ModelRegistry. Keep them as
-    # current-WORKHORSE-tier defaults so a graceful-degraded boot uses a model
-    # that's actually current (not gemini-2.5-flash, which was retired 2026-05-04).
+        initial-interval: 2000
+        multiplier: 2
+        max-interval: 10000
     anthropic:
-      api-key: ""                   # set via env var in profile files
+      api-key: ""
       chat:
         options:
-          model: claude-haiku-4-5-20251001  # bean-init only; V2 router resolves per-call
-          max-tokens: 16384                  # Haiku default; per-call limits applied by TokenBudgetMonitor
+          model: claude-haiku-4-5-20251001
+          max-tokens: 16384
     openai:
-      api-key: ""                   # set via env var in profile files
+      api-key: ""
       chat:
         options:
-          model: gpt-5.4-mini                # bean-init only; V2 router resolves per-call
-          max-tokens: 16384                  # gpt-5.4 max; per-call limits applied by TokenBudgetMonitor
+          model: gpt-5.4-mini
+          max-tokens: 16384
     google:
       genai:
-        api-key: ""                 # set via env var in profile files
+        api-key: ""
         chat:
           options:
-            model: gemini-3-flash-preview     # bean-init only; V2 router resolves per-call (2026-05-06: was gemini-2.5-flash, retired)
-    # OpenRouter (Enterprise) — OpenAI-wire-compatible gateway, NOT a Spring AI starter.
-    # Read by LlmRouter.callOpenRouter via @Value. api-key is the system fallback; org
-    # BYOK keys flow through RunKeyContext.keyFor("openrouter"). Models are constrained to
-    # the matrix allow-list by OpenRouterModelMapper.
+            model: gemini-3-flash-preview
     openrouter:
       base-url: https://openrouter.ai/api
-      api-key: ""                   # Enterprise system fallback; org BYOK preferred
-    # DeepSeek native (RL-2026-05-052, 2026-05-28) — OpenAI-wire-compatible. Read by
-    # LlmRouter.callDeepSeek via @Value. api-key is system fallback; org BYOK via
-    # RunKeyContext.keyFor("deepseek"). Bypasses OpenRouter's routing latency.
+      api-key: ""
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: ""                   # set via env or application-local.yml
+      api-key: ""
 
-# ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6                # keep flagship (worker is reasoning-heavy; +17pp on p30)
-      lightweight: claude-haiku-4-5-20251001      # canonical (classifier/summarizer/title — Haiku-suited)
+      workhorse: claude-sonnet-4-6
+      lightweight: claude-sonnet-4-6
     gemini:
-      planning: gemini-3.5-flash                  # RL-2026-05-010 eval-best for PLANNING (ties Sonnet on HIGH)
-      workhorse: gemini-3-flash-preview
-      lightweight: gemini-3-flash-preview
+      planning: gemini-3.5-flash
+      workhorse: gemini-3.5-flash
+      lightweight: gemini-3.5-flash
     openai:
       planning: gpt-5.4
-      workhorse: gpt-5.4                          # keep flagship (reasoning)
-      lightweight: gpt-5.4-mini                   # canonical (cheap classifier/summarizer)
-    # OpenRouter (Enterprise gateway) — tier models routed through the org's OpenRouter key.
-    # Must be ids in OpenRouterModelMapper's verified allow-list; orgs override via the per-org
-    # matrix (F3). Default mirrors Anthropic tiers (Sonnet planning / Haiku workhorse+lightweight).
+      workhorse: gpt-5.4
+      lightweight: gpt-5.4
     openrouter:
       planning: claude-sonnet-4-6
-      workhorse: claude-haiku-4-5-20251001
-      lightweight: claude-haiku-4-5-20251001
-    # DeepSeek native (api.deepseek.com) — 2026-05-28 (RL-2026-05-052). Enterprise BYOK,
-    # OpenAI-wire-compatible. All three tiers pin to deepseek-v4-flash-native (the non-thinking
-    # variant): -pro-native is registered but NOT tier-active because api.deepseek.com requires
-    # reasoning_content echo on every follow-up call from -pro thinking-mode responses, and
-    # OpenAiNativeToolClient doesn't round-trip that yet. Flash matches today's bench profile
-    # cleanly. Switch any tier here back to -pro-native once the reasoning_content echo ships.
+      workhorse: claude-sonnet-4-6
+      lightweight: claude-sonnet-4-6
     deepseek:
       planning: deepseek-v4-flash-native
       workhorse: deepseek-v4-flash-native
@@ -298,12 +201,6 @@ model-matrix:
         cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
-    # RL-2026-05-045 — new ENTERPRISE-selectable models (per-run pin + F3 org matrix). Pricing
-    # VERIFIED 2026-05-26 against OpenRouter pass-through (≈ direct provider rates); see per-model
-    # notes. Exception: gpt-5.5-mini is not yet on the public catalogue, so it uses GPT-5.4 Mini's
-    # verified rates as a proxy. Non-enterprise users are unaffected (they stay on the tier defaults
-    # in model-matrix.providers above). These appear in the picker because ModelRegistry.allModels()
-    # enumerates this registry; ModelResolver + OrgModelOverrideService validate/resolve from it too.
     claude-opus-4-7:
       provider: anthropic
       chain-tier: ARCHITECT
@@ -337,11 +234,6 @@ model-matrix:
         cached-input-per-1m: 0.075
         output-per-1m: 4.50
       notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Not yet on the public catalogue (2026-05-26); uses GPT-5.4 Mini's verified rates as proxy: $0.75 in / $0.075 cached / $4.50 out per 1M. Update when listed."
-    # RL-2026-05-048 — DeepSeek + Kimi via OpenRouter (ENTERPRISE BYOK, F3 grid + per-run pin).
-    # provider: openrouter → routed through callOpenRouter (OpenAI-wire-compatible) with the slug
-    # from OpenRouterModelMapper. Slugs verified against the live OpenRouter catalogue 2026-05-26.
-    # Pricing is APPROXIMATE (OpenRouter public rates) — BYOK orgs pay OpenRouter directly, so these
-    # only drive the cost ESTIMATE display, not platform billing.
     deepseek-v4-pro:
       provider: openrouter
       chain-tier: CAPABLE
@@ -353,11 +245,6 @@ model-matrix:
         cached-input-per-1m: 0.0036
         output-per-1m: 0.87
       notes: "OpenRouter deepseek/deepseek-v4-pro — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.435 in / $0.0036 cached / $0.87 out per 1M."
-    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Pro NATIVE (api.deepseek.com direct, no OpenRouter
-    # hop). Same upstream model, different endpoint — measured to bypass OpenRouter's ~3-4× routing
-    # latency observed in the mixed10 eval. Non-breaking: existing `deepseek-v4-pro` (above) keeps
-    # routing via OpenRouter for orgs that have OpenRouter BYOK; this native variant requires a
-    # separate DeepSeek key in spring.ai.deepseek.api-key or per-org RunKeyContext.keyFor("deepseek").
     deepseek-v4-pro-native:
       provider: deepseek
       chain-tier: CAPABLE
@@ -365,17 +252,12 @@ model-matrix:
       max-output-tokens: 32000
       display-label: "DeepSeek V4 Pro (Native)"
       pricing:
-        input-per-1m: 0.27         # native rate (DeepSeek public 2026-05-28): cheaper than OpenRouter markup
+        input-per-1m: 0.27
         cached-input-per-1m: 0.027
         output-per-1m: 1.10
       notes: |
         DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
         NOT TIER-ACTIVE YET — Pro is a thinking-mode model and api.deepseek.com requires reasoning_content echo on every follow-up call (mirrors Gemini's thought-signature round-trip). Until OpenAiNativeToolClient captures + replays reasoning_content, use the non-thinking deepseek-v4-flash-native (below) instead. RL-2026-05-052.
-    # 2026-05-28 (RL-2026-05-052) — DeepSeek V4 Flash NATIVE — the non-thinking variant. Same
-    # api.deepseek.com endpoint as pro-native but without reasoning_content in responses, so the
-    # multi-turn tool-call loop works without changes to OpenAiNativeToolClient. This is the
-    # currently TIER-ACTIVE native DeepSeek entry; pro-native re-enters when the thinking-mode
-    # round-trip ships.
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
@@ -383,7 +265,7 @@ model-matrix:
       max-output-tokens: 16384
       display-label: "DeepSeek V4 Flash (Native)"
       pricing:
-        input-per-1m: 0.10         # mirrors the OpenRouter flash entry's native-rate column
+        input-per-1m: 0.10
         cached-input-per-1m: 0.02
         output-per-1m: 0.20
       notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
@@ -409,7 +291,6 @@ model-matrix:
         cached-input-per-1m: 0.25
         output-per-1m: 3.49
       notes: "OpenRouter moonshotai/kimi-k2.6 — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.73 in / $0.25 cached / $3.49 out per 1M."
-    # 2026-05-28 (RL-2026-05-052) — Qwen3-Coder added for the 5-provider eval cohort.
     qwen3-coder:
       provider: openrouter
       chain-tier: CAPABLE
@@ -486,11 +367,6 @@ model-matrix:
       - gemini
       - anthropic
 
-# RL-2026-05-041 (audit #2) — mid-run durability. When enabled (default), the workspace is
-# checkpointed to GCS at each task boundary (GcsTaskCheckpointService) so a node loss mid-run is
-# recoverable (StartupRunResumer / resumeAfterCrash restore from the latest checkpoint via
-# WorkspaceRestoreService) instead of failing WORKSPACE_GONE. No-op when GCS is unconfigured
-# (local dev), so it costs nothing there. Set false to disable the per-task GCS writes.
 durability:
   task-checkpoint:
     enabled: true
@@ -502,38 +378,31 @@ agent:
     worker: anthropic
     reviewer: anthropic
   token-budget:
-    max-tokens: 64000        # Fallback ceiling for hard-ceiling-pct calculation
-    hard-ceiling-pct: 0.90   # 90% of model max — absolute max, forces FORCE_REPORT
-    # Output ceilings are fixed in TokenBudgetMonitor (LOW=8K, MED=12K, HIGH=16K)
+    max-tokens: 64000
+    hard-ceiling-pct: 0.90
   compaction:
-    warn-pct: 0.45     # warn at 90k tokens input (balanced: was 0.25=50k too early, 0.65=130k too late)
-    compact-pct: 0.60  # compact at 120k tokens input (balanced: was 0.35=70k too frequent, 0.75=150k too late)
-    hard-stop-pct: 0.80 # hard-stop at 160k (balanced: was 0.55=110k too conservative, 0.90=180k too late)
+    warn-pct: 0.45
+    compact-pct: 0.60
+    hard-stop-pct: 0.80
   triage:
-    enabled: true    # Phase 1: Single-shot fast path — set false to route all requests through planner
+    enabled: true
   concurrency:
-    max-runs: 50   # Temporarily increased for load testing (was 10)
-    max-task-duration-minutes: 25  # Increased for HIGH complexity tasks (was 15)
-    safety-iteration-cap: 500     # Hard iteration cap — pure safety net, should never trigger
-    task-max-retries: 3           # Auto-retry failed tasks/subtasks up to 3 times before marking FAILED
-  # provider-pools: REMOVED (RL-2026-05-041, audit risk #3). ProviderRunPoolProperties had ZERO
-  # consumers — per-provider concurrency/queues were never enforced (no Semaphore in the dispatch
-  # path). Deleted the dead binder + this config rather than imply a control that doesn't exist.
-  # Real per-provider/tier concurrency limiting is scoped as a separate change (see
-  # docs/reviews/audit-remediation-2026-05-26.md). Per-tier concurrent-run-limit (TierConfig) is
-  # unrelated + retained.
+    max-runs: 50
+    max-task-duration-minutes: 25
+    safety-iteration-cap: 500
+    task-max-retries: 3
   cost:
-    credit-multiplier-usd: 5.0    # $5 of LLM compute per run credit
-    estimation-buffer: 1.10        # 10% buffer on cost estimate for retry overhead
-    budget-margin: 1.5             # Safety ceiling = credits × multiplier × margin (silent hard cap)
-    max-credits-free: 1            # FREE tier: 1-credit specs only (blocks multi-credit runs)
+    credit-multiplier-usd: 5.0
+    estimation-buffer: 1.10
+    budget-margin: 1.5
+    max-credits-free: 1
     batch:
       enabled: true
-      poll-interval-seconds: 30     # Polling interval for pending batch runs
-      max-wait-hours: 4             # Max wait before timeout
-      discount: 0.50                # Universal 50% batch discount
-      max-output-token-multiplier: 1.5  # Batch tasks get 1.5x output tokens
-      google-inline-task-limit: 10  # Google: inline <10 tasks, JSONL >=10
+      poll-interval-seconds: 30
+      max-wait-hours: 4
+      discount: 0.50
+      max-output-token-multiplier: 1.5
+      google-inline-task-limit: 10
   github:
     default-owner: ""
   shell:
@@ -543,9 +412,9 @@ agent:
     additional-allowed-commands: []
     additional-blocked-patterns: []
   recovery:
-    enabled: true    # Re-enabled — Thread.join() timeout + act-threshold tuning prevent false positives
-    warn-threshold-minutes: 8      # warn after 8 min idle (was 5 — too noisy)
-    act-threshold-minutes: 15      # recover after 15 min idle (was 10 — align with maxTaskDurationMinutes)
+    enabled: true
+    warn-threshold-minutes: 8
+    act-threshold-minutes: 15
     max-task-retries: 1
     evaluator-log-window: 20
     loop-repeat-threshold: 3
@@ -553,10 +422,10 @@ agent:
     max-transient-retries: 3
     rate-limit-backoff-seconds: 30
     server-error-backoff-seconds: 10
-    max-auto-restarts: 2           # reduced from 3 to limit cascading restarts
-    auto-restart-backoff-seconds: 90  # increased from 60 — give more cooldown between restarts
-    orphaned-run-threshold-minutes: 8  # increased from 5 — reduce false positives during slow builds
-    auto-resume-on-startup: false  # Keep disabled — manual resume via UI to avoid surprise restarts
+    max-auto-restarts: 2
+    auto-restart-backoff-seconds: 90
+    orphaned-run-threshold-minutes: 8
+    auto-resume-on-startup: false
     startup-resume-delay-seconds: 30
     default-provider: anthropic
     capable-models:
@@ -567,7 +436,6 @@ agent:
       openai: anthropic
   context:
     enabled: true
-    # model: uses ModelConstants.HAIKU (Scout: text summarization)
     run-interval: 1
   optimiser:
     enabled: true
@@ -575,7 +443,6 @@ agent:
     analysis-window-runs: 20
     failure-rate-threshold: 0.20
     pattern-min-occurrences: 2
-    # model: uses ModelConstants.HAIKU (Scout: pattern analysis)
   deployment:
     enabled: true
     gcp-project: executespecv1
@@ -602,37 +469,31 @@ agent:
       archive-after-hours: 24
       gcs-enabled: false
 
-  # ── Tier 8: Compile agent, API spec generator, frontend preview ──────────────
   compiler:
     enabled: true
     max-attempts: 3
     timeout-seconds: 300
-    # model: uses ModelConstants.HAIKU (compiler error analysis)
   api-test-suite:
     enabled: true
-    # model: uses ModelConstants.HAIKU (OpenAPI spec generation)
 
   preview:
     enabled: true
 
-  # ── Tier 7: External Integrations (all disabled by default) ─────────────────
   integrations:
-    enabled: true             # Master switch — set true to register /api/integrations/* endpoints
+    enabled: true
     jira:
       enabled: false
-      # Credentials resolved from org table (per-org, configured via Settings UI)
       webhook-secret: ""
-      trigger-status: "Ready for Coding"   # issue status name that fires the pipeline
-      in-progress-status: "In Progress"    # transition to on run start (null = skip)
-      in-review-status: "In Review"        # transition to on run complete (null = skip)
-      reopen-status: "Backlog"             # transition to on run failed (null = skip)
+      trigger-status: "Ready for Coding"
+      in-progress-status: "In Progress"
+      in-review-status: "In Review"
+      reopen-status: "Backlog"
       dashboard-url: http://localhost:8080
       skip-approval: false
     confluence:
       enabled: false
-      # Credentials resolved from org table (per-org, configured via Settings UI)
-      trigger-label: "agent-run"           # page label that fires the pipeline
-      space-key: "KAN"                     # default space for child pages
+      trigger-label: "agent-run"
+      space-key: "KAN"
       dashboard-url: http://localhost:8080
       skip-approval: false
     servicenow:
@@ -650,7 +511,7 @@ agent:
       enabled: false
       api-token: ""
       webhook-secret: ""
-      from-email: ""        # required for PATCH requests
+      from-email: ""
       trigger-types:
         - "incident.trigger"
       auto-resolve: false
@@ -658,7 +519,6 @@ agent:
       skip-approval: false
     bitbucket:
       enabled: false
-      # Credentials resolved from user table (per-user, configured via Integrations page)
       webhook-secret: ""
       dashboard-url: http://localhost:8080
       skip-approval: false
@@ -669,21 +529,6 @@ agent:
       signing-secret: ""
       redirect-uri: http://localhost:8080/api/integrations/slack/oauth/callback
       dashboard-url: http://localhost:8080
-  # 2026-05-02 — dependency-install security policy. Layered enforcement:
-  #   LOW    (default for most installs today): legacy ShellSandboxPolicy allowlist only.
-  #   MEDIUM: every JS install command (npm/bun/pnpm/yarn) MUST carry --ignore-scripts +
-  #           lockfile-strict mode + must NOT pull from off-registry (git+, github tarball,
-  #           http URL, file://). Worker LLM that omits these flags gets a clear error +
-  #           retries with the right shape. Closes lifecycle-script RCE + lockfile-drift +
-  #           off-registry typosquats.
-  #   HIGH:   + audit step REQUIRED on the chained command (npm: --audit-level=high; bun /
-  #           pnpm / yarn: separate audit subcommand chained via &&) + pre-release versions
-  #           (alpha / beta / rc / canary / nightly) blocked + --registry= flag must point at
-  #           an allowed registry. Closes known-CVE deps + supply-chain pre-release attacks
-  #           + registry hijacks.
-  # Active level resolves via the existing GuardrailLevelResolver feature flag (key:
-  # "security.guardrail_level"). Each switch below is independently flippable so an org can
-  # tighten one threat class without flipping the global guardrail.
   security:
     deps:
       require-ignore-scripts: ${AGENT_SECURITY_DEPS_IGNORE_SCRIPTS:true}
@@ -691,37 +536,25 @@ agent:
       require-audit: ${AGENT_SECURITY_DEPS_AUDIT:true}
       allow-prerelease: ${AGENT_SECURITY_DEPS_PRERELEASE:false}
       allowed-registries: ${AGENT_SECURITY_DEPS_REGISTRIES:https://registry.npmjs.org,https://registry.bun.sh,https://registry.pnpm.io,https://registry.yarnpkg.com}
-      # Supply-chain scanner config. NOTE (RL-2026-05-041): the SupplyChainScanner interface +
-      # NoopSupplyChainScanner impl were removed as unwired dead code (advertised "defense layer"
-      # with zero callers — it never ran). These keys remain only as a config hook for a future
-      # real integration; the LIVE deps protection is the registry-allowlist + audit policy above.
       scanner:
         vendor: ${AGENT_SECURITY_DEPS_SCANNER_VENDOR:none}
 
-# ── Preview ────────────────────────────────────────────────────────────────
 preview:
   enabled: true
-  mode: ${PREVIEW_MODE:docker}           # "docker" (Docker Compose, local), "cloud-run" (GCP Cloud Run), or "vm" (GCE VM)
-  total-startup-timeout-seconds: 480   # 8-minute total deadline (Spring Boot cold builds need extra time)
-  preview-ttl-minutes: 30             # auto-shutdown after 30 min (extended for PRODUCTION validation: 10-25 min)
-  port-range-start: 10000              # Docker Compose host port range
+  mode: ${PREVIEW_MODE:docker}
+  total-startup-timeout-seconds: 480
+  preview-ttl-minutes: 30
+  port-range-start: 10000
   port-range-end: 10100
-  preview-domain: executespec.ai       # single-level: preview-{id}.executespec.ai
-  fallback-host: ""                    # e.g. "http://dev.executespec.ai" — used when Caddy proxy is disabled
+  preview-domain: executespec.ai
+  fallback-host: ""
   proxy:
-    enabled: false                     # set true on GCE VM with Caddy installed
+    enabled: false
   concurrency:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
 
-  # ── Preview-engine handoff (external preview service) ──────────────────
-  # When route-via=true AND mode=docker, main app builds + pushes the image
-  # to the registry then hands off to preview-engine's /from-image endpoint.
-  # preview-engine pulls + runs + owns the container for its lifetime.
-  # Legacy docker-compose path stays the default.
-  #
-  # Flip route-via=false (or remove the block) to revert to the legacy path.
   engine:
     route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
     base-url: ${PREVIEW_ENGINE_URL:http://localhost:8090}
@@ -730,7 +563,7 @@ preview:
     timeout-seconds: 300
 
   vm:
-    enabled: false                       # set true to enable VM-based preview deployment
+    enabled: false
     default-ttl-minutes: 20
     gateway:
       ip: ${PREVIEW_GATEWAY_IP:}
@@ -744,43 +577,29 @@ preview:
         internal-ip: ${PREVIEW_GW_INTERNAL_IP:}
         max-concurrent: 10
         role: gateway
-      # Add worker VMs when scaling:
-      # - id: preview-worker-1
-      #   external-ip: ${PREVIEW_W1_IP:}
-      #   internal-ip: ${PREVIEW_W1_INTERNAL_IP:}
-      #   max-concurrent: 10
-      #   role: worker
 
 app:
   security:
     csp:
       enabled: true
-      # Override policy string per environment if needed
-      # policy: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net ..."
     hsts:
       enabled: true
       max-age-seconds: 31536000
       include-sub-domains: true
     frame-options:
       enabled: true
-      mode: SAMEORIGIN    # SAMEORIGIN allows preview iframes; DENY blocks all framing
+      mode: SAMEORIGIN
   mail:
-    # Transport: "smtp" (recommended for server) or "gmail-api" (OAuth, local dev)
     transport: smtp
     base-url: http://localhost:5173
     from: admin@executespec.ai
-    # v2.6.0 — recipient for new-signup alerts + weekly admin summary
     admin-address: ${ADMIN_NOTIFICATION_EMAIL:admin@executespec.ai}
-    # v2.6.0 — shared secret for /api/internal/reminder/send (remote-trigger hits this).
-    # Leave blank in prod to disable the endpoint (returns 503).
     admin-reminder-token: ${ADMIN_REMINDER_TOKEN:}
-    # ── SMTP config (used when transport=smtp) ──────────────────────────────
     smtp:
       host: smtp.gmail.com
       port: 587
       username: admin@executespec.ai
-      password: ""                     # set via env var in profile files
-    # ── Gmail API OAuth2 config (used when transport=gmail-api) ─────────────
+      password: ""
     gmail-api:
       enabled: false
       credentials-path: credentials.json
@@ -800,9 +619,6 @@ app:
     refresh-token-expiry-days: 7
   cors:
     allowed-origins: http://localhost:5173
-  # V143 product-routing config retired (V179, single-surface
-  # retirement 2026-05-06). The dual app/build surface was the
-  # consumer/B2B split that's no longer on the GA roadmap.
     app-return-url: ${APP_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
     build-return-url: ${BUILD_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
   tiers:
@@ -813,7 +629,7 @@ app:
       monthly-run-limit: 100
       concurrent-run-limit: 3
     enterprise:
-      monthly-run-limit: -1    # -1 = unlimited
+      monthly-run-limit: -1
       concurrent-run-limit: 10
 
 executespec:
@@ -836,11 +652,6 @@ executespec:
       - resend
       - mintlify
 
-  # R-323 (D-125 #3) — repo-size gate enforced when a repo is attached.
-  # GitHub returns repo `size` in KB (KiB-ish, but close enough for a
-  # clone-time-budget heuristic). Default 250 MB ≈ 250 000 KB; ops can
-  # bump this per environment without a redeploy. Per-tier overrides +
-  # an opt-in bypass land with R-325 alongside the multi-repo work.
   repo:
     max-size-kb: ${EXECUTESPEC_REPO_MAX_SIZE_KB:250000}
 
@@ -850,7 +661,7 @@ executespec:
   crypto:
     enabled: false
     gcp-secret-name: projects/${GCP_PROJECT:executespecv1}/secrets/executespec-crypto-key/versions/latest
-    local-key: ${CRYPTO_LOCAL_KEY:}  # Only for local dev — leave empty in prod
+    local-key: ${CRYPTO_LOCAL_KEY:}
 
   validator:
     enabled: true
@@ -862,10 +673,6 @@ executespec:
 
 billing:
   terms-version: "2026-03-v1"
-  # default-gateway: dev default is razorpay so local dev works without Stripe secrets.
-  # In prod (application-prod.yml) we override to 'stripe' for US-first traffic.
-  # Per-request routing still honours BillingEntity.paymentGateway; the default is the
-  # tie-breaker when the entity has no preference + the currency has no map entry.
   default-gateway: ${BILLING_DEFAULT_GATEWAY:razorpay}
   founder-pricing:
     max-slots: 100
@@ -877,9 +684,6 @@ billing:
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     pro-price-id: ${STRIPE_PRO_PRICE_ID:}
     enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
-    # v2.6.1 Wave 1 — TEAM tier per-seat pricing. Must be a Stripe Price with
-    # per-unit pricing enabled (LineItem.setQuantity honours the seat count).
-    # INR variant is optional; falls back to the monthly plan in database.
     team-price-id: ${STRIPE_TEAM_PRICE_ID:}
     team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR:}
   razorpay:
@@ -902,17 +706,12 @@ logging:
     "[io.opentelemetry]": WARN
     "[io.micrometer.tracing]": INFO
 
-# ── Product analytics (Wave 2.1 — 6-event activation funnel) ──────────────────
-# When posthog.api-key is blank, EventTrackingService is a no-op (safe for
-# local dev). Prod: set POSTHOG_API_KEY + POSTHOG_HOST env vars.
-# Full plan: docs/plans/activation-instrumentation-plan.md.
 analytics:
   posthog:
     enabled: ${POSTHOG_ENABLED:false}
     api-key: ${POSTHOG_API_KEY:}
     host: ${POSTHOG_HOST:https://us.i.posthog.com}
 
-# ── Observability (Actuator + OTel + Metrics) ────────────────────────────────
 management:
   endpoints:
     web:
@@ -950,22 +749,6 @@ management:
       environment: local
 
 ---
-# ── Local profile: silence the OTLP exporter loop ────────────────────────────
-# Audit r5 (P1-6, 2026-05-06) — without these overrides, the JVM ships
-# every span to http://localhost:4318/v1/traces (the path inherited from
-# the base management.otlp.tracing.endpoint above). When no Tempo / Otel
-# collector is running locally — the default — the exporter retries
-# every 5–30s indefinitely, logs a stack trace per attempt, and (in
-# extreme cases like the 2026-05-06 product-review walk-through) piled
-# up enough off-heap pressure to kill the JVM silently mid-session.
-# Local dev does not need traces shipped anywhere; flip the exporters
-# off so `mvn spring-boot:run -Dspring-boot.run.profiles=local` is
-# quiet by default. To turn them back on, run with `--spring.profiles
-# .active=local,observability` after starting the local Grafana stack
-# via `cd observability && docker compose up -d`. Lives in the base
-# application.yml (not application-local.yml) because that file is
-# .gitignored — every developer needs this default, not just whoever
-# happens to set it locally.
 spring:
   config:
     activate:
@@ -979,7 +762,6 @@ management:
         enabled: false
 
 ---
-# ── GCP profile: use Cloud Trace + Cloud Monitoring instead of OTLP/Prometheus ─
 spring:
   config:
     activate:

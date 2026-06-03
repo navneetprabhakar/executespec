@@ -9,6 +9,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.BootVerification;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ReportInput;
@@ -168,7 +170,8 @@ public class ValidationReportService {
               unfixedCritical,
               endpointCoveragePercent,
               testCoverageLevel,
-              filesGenerated);
+              filesGenerated,
+              input.bootVerification());
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
@@ -927,6 +930,36 @@ public class ValidationReportService {
       Integer endpointCoveragePercent,
       String testCoverageLevel,
       int filesGenerated) {
+    return computeVerifiedScore(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        filesGenerated,
+        null);
+  }
+
+  /**
+   * RL-2026-05-066 (verifyBoot) — boot-aware entry. When a deterministic {@code bootVerification}
+   * was captured for the run, the BUILD slot reads the boot verdict instead of the compile-only
+   * signal: a booting + health-responding app is a stronger BUILD signal than "compiles", and a
+   * failed boot is honest BUILD information. A null {@code bootVerification} (the default — the
+   * verifyBoot flag is OFF) keeps the compile-only behaviour, so runs without verifyBoot are
+   * byte-identical. Threaded through both the additive (default) and legacy multiplicative scorers.
+   */
+  int computeVerifiedScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated,
+      BootVerification bootVerification) {
     boolean additive =
         featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
     if (!additive) {
@@ -937,7 +970,8 @@ public class ValidationReportService {
           reviewerVerdictName,
           unfixedCriticalCount,
           endpointCoveragePercent,
-          testCoverageLevel);
+          testCoverageLevel,
+          bootVerification);
     }
     boolean gamingGuards =
         featureFlagService != null && featureFlagService.isEnabled(FLAG_GAMING_GUARDS);
@@ -950,7 +984,25 @@ public class ValidationReportService {
         testCoverageLevel,
         filesGenerated,
         endpointCoveragePercent,
-        gamingGuards);
+        gamingGuards,
+        bootVerification);
+  }
+
+  /**
+   * RL-2026-05-066 (verifyBoot) — maps a deterministic boot verdict to a BUILD-slot score [0,100].
+   * A booting, health-responding app is the strongest possible BUILD signal (it compiled AND runs
+   * AND serves its declared health path), so it earns full credit; a build failure earns 0, the
+   * same as a red compile. The in-between verdicts are graded down so the headline reflects "it
+   * builds but doesn't run." Used only when a verifyBoot signal was captured for the run.
+   */
+  private static double bootSlotScore(BootHealthEvaluator.Verdict verdict) {
+    return switch (verdict) {
+      case HEALTHY -> 100.0; // boots + health path returned 2xx/3xx
+      case UNHEALTHY -> 55.0; // boots + responds, but a non-success status (app-level error)
+      case TIMED_OUT -> 35.0; // process started but never served the health path in time
+      case DID_NOT_START -> 15.0; // image built but the container/process did not come up
+      case BUILD_FAILED -> 0.0; // never built — same as a red build
+    };
   }
 
   /**
@@ -1024,6 +1076,37 @@ public class ValidationReportService {
       int filesGenerated,
       Integer endpointCoveragePercent,
       boolean gamingGuards) {
+    return computeVerifiedScoreAdditive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        null);
+  }
+
+  /**
+   * RL-2026-05-066 (verifyBoot) — boot-aware additive scorer. Identical to the 9-arg form except
+   * the BUILD slot reads {@code bootVerification} when present (see {@link #bootSlotScore}): a
+   * deterministic boot verdict supersedes the compile-only signal. A null {@code bootVerification}
+   * keeps the exact compile-only behaviour, so the 9-arg callers (and every existing test pin) are
+   * unchanged.
+   */
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards,
+      BootVerification bootVerification) {
 
     // CODE_DELIVERED hard floor. -1 = unknown (legacy 7-arg call) → treat as
     // "delivered" so the call site doesn't accidentally tank scores it can't see.
@@ -1059,8 +1142,14 @@ public class ValidationReportService {
       weightTotal += 30.0;
     }
 
-    // BUILD — 25 pts, skipped when not measured.
-    if (finalBuildPassed != null) {
+    // BUILD — 25 pts, skipped when not measured. RL-2026-05-066: when a deterministic boot
+    // verification was captured it supersedes the compile-only signal — a booting + health-
+    // responding app is a stronger BUILD signal than "compiles", and a failed boot is honest BUILD
+    // information. Falls back to finalBuildPassed (compile) when no boot was measured.
+    if (bootVerification != null) {
+      weightedSum += 25.0 * bootSlotScore(bootVerification.verdict());
+      weightTotal += 25.0;
+    } else if (finalBuildPassed != null) {
       weightedSum += 25.0 * (Boolean.TRUE.equals(finalBuildPassed) ? 100.0 : 0.0);
       weightTotal += 25.0;
     }
@@ -1221,8 +1310,37 @@ public class ValidationReportService {
       int unfixedCriticalCount,
       Integer endpointCoveragePercent,
       String testCoverageLevel) {
+    return computeVerifiedScoreMultiplicative(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        null);
+  }
 
-    double buildFactor = Boolean.TRUE.equals(finalBuildPassed) ? 1.0 : 0.0;
+  /**
+   * RL-2026-05-066 (verifyBoot) — boot-aware multiplicative scorer. {@code buildFactor} reads the
+   * deterministic boot verdict ({@link #bootSlotScore} / 100) when {@code bootVerification} is
+   * present; a null {@code bootVerification} keeps the binary compile-only factor, so existing
+   * callers + test pins are unchanged.
+   */
+  int computeVerifiedScoreMultiplicative(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      BootVerification bootVerification) {
+
+    double buildFactor =
+        bootVerification != null
+            ? bootSlotScore(bootVerification.verdict()) / 100.0
+            : (Boolean.TRUE.equals(finalBuildPassed) ? 1.0 : 0.0);
 
     double testFactor;
     if (testsTotal <= 0) {

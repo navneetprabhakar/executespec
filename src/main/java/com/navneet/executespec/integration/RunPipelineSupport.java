@@ -211,4 +211,39 @@ final class RunPipelineSupport {
       return LlmProvider.OPENAI;
     }
   }
+
+  /**
+   * Map a detected (language, framework) pair to a short worker-actionable convention hint.
+   * Conservative: when the language doesn't match any known mapping, return a generic "match the
+   * existing repo conventions" line so the planner at least sees the language name in the parity
+   * block. (Relocated from RunOrchestrator — god-class split inc-3b; pinned by {@code
+   * LanguageParityBlockTest}.)
+   */
+  public static String languageConventionHint(String language, String framework) {
+    String l = language == null ? "" : language.trim().toLowerCase();
+    return switch (l) {
+      case "python" ->
+          "use snake_case `.py` filenames, `os.getenv()` / pydantic-settings for config,"
+              + " pytest for tests.";
+      case "typescript", "typescript/js", "javascript", "node", "nodejs" ->
+          "use kebab-case or camelCase `.ts` / `.tsx` filenames (match what's already in the"
+              + " repo), `process.env` for config, vitest / jest for tests.";
+      case "go", "golang" ->
+          "use lower_snake_case `.go` filenames, `os.Getenv` for config, `_test.go` for tests.";
+      case "rust" ->
+          "use snake_case `.rs` filenames, `std::env::var` for config, `#[cfg(test)]` modules"
+              + " or `tests/` dir.";
+      case "java" ->
+          "use PascalCase `.java` filenames, Spring `@Value` / `application.yml` for config,"
+              + " JUnit for tests.";
+      case "kotlin" ->
+          "use PascalCase `.kt` filenames, Spring `@Value` / `application.yml` for config,"
+              + " JUnit / Kotest for tests.";
+      case "ruby" -> "use snake_case `.rb` filenames, `ENV[]` for config, RSpec for tests.";
+      case "csharp", "c#", "cs" ->
+          "use PascalCase `.cs` filenames, `IConfiguration` / `appsettings.json` for config,"
+              + " xUnit for tests.";
+      default -> "match the existing repo's filename + config + test conventions.";
+    };
+  }
 }

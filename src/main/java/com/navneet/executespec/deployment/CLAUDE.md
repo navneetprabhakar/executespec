@@ -23,6 +23,17 @@ Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for 
 - `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h.
 - `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end) instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
 
+### `preview/verify/` — verifyBoot (RL-2026-05-066, preview Phase 1)
+
+The boot-verification spine — the agent authors a run-recipe, the platform boots + health-checks the app, and a deterministic verdict feeds the verifiedScore BUILD slot (mirrors the `smoketest/` test-execution seam). **Flag-gated OFF + fail-open + inert until preview Phase 0** wires the boot engine; production is byte-identical.
+
+- `BootHealthEvaluator.java` — pure, deterministic classifier (the `smoketest/TestOutputParser` analogue). `BootSignals` (build/start/health/timeout) → `Verdict` (BUILD_FAILED < DID_NOT_START < TIMED_OUT < UNHEALTHY < HEALTHY) + `BootVerification`. No I/O; standalone-tested.
+- `RunRecipe.java` — the agent-authored `.agent-context/run-recipe.json` contract (`port` / `healthPath` / `startTimeoutSec`), normalised + hard-capped (`MAX_START_TIMEOUT_SEC=120`) by the compact constructor.
+- `PreviewBootEngine.java` — the build-and-boot seam **preview Phase 0 fills** (buildpack adapter + isolated deny-by-default-egress network + dedicated least-privilege SA + `CodeAbuseScanner` pre-build + `--network none` cleanroom). No impl yet → fail-open.
+- `PreviewVerifier.java` — `@Component` runner (the `WorkspaceTestRunner` analogue). Reads the recipe → (capability-gated on `preview.buildpack.enabled` + an `ObjectProvider<PreviewBootEngine>` being present) → `engine.boot` → `BootHealthEvaluator.evaluate`. **Fail-open:** no recipe / no engine / flag off / any exception → `Optional.empty()` → the BUILD slot keeps its compile-only signal.
+
+Worker surface: `tool/VerifyBootTool` (`verifyBoot`, `@Component implements Tool`, gated `worker.verify-boot.enabled`, V227) + the flag-gated `SequentialExecutor` prompt directive. Scoring: `ReportInput.bootVerification` → `ValidationReportService` BUILD slot (`bootSlotScore`); populated in `RunOrchestrator.generateValidationReport` via a final `PreviewVerifier.verify`. Both flags seeded OFF by **V227**.
+
 ## Project Type Detection Flow
 ```
 Planner → plan JSON with "project_type": "STATIC_HTML"
