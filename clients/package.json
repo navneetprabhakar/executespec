@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm run build -w @executespec/core && npm run build -w @executespec/cli && npm run build -w executespec-vscode",
     "typecheck": "npm run build -w @executespec/core && npm run typecheck -w @executespec/cli && npm run typecheck -w executespec-vscode",
-    "test": "npm run build && npm test -w @executespec/core",
+    "test": "npm run build && npm test -w @executespec/core && npm test -w @executespec/cli",
     "clean": "npm run clean -w @executespec/core && npm run clean -w @executespec/cli && npm run clean -w executespec-vscode"
   }
 }

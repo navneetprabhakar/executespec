@@ -60,6 +60,16 @@ export async function chatRepl(client: ClientBundle, opts: ReplOptions = {}): Pr
         continue;
       }
 
+      // Guard: a bare CLI verb (e.g. `auth login`, `run list`) typed into chat would otherwise be
+      // shipped to the model as a spec and submitted as a run. Redirect to the shell instead.
+      const shellCmd = looksLikeShellCommand(line);
+      if (shellCmd) {
+        out(yellow(`"${shellCmd}" is a CLI command, not a chat message.`));
+        out(dim('  Run it in your shell:  ') + bold(`executespec ${shellCmd}`));
+        out(dim('  Or just describe what you want — e.g. "submit a run that adds a /health endpoint".'));
+        continue;
+      }
+
       turnAbort = new AbortController();
       try {
         await renderTurn(session.send(client.http, line, turnAbort.signal));
@@ -167,4 +177,40 @@ function summarizeEnvelope(result: string): string {
 function trunc(s: string | undefined, n: number): string {
   if (!s) return '';
   return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+/** The deterministic CLI verbs, by group → subcommands. Matched against bare chat input. */
+const KNOWN_VERBS: Record<string, ReadonlySet<string>> = {
+  auth: new Set(['login', 'status', 'logout']),
+  run: new Set([
+    'submit',
+    'list',
+    'view',
+    'watch',
+    'approve',
+    'reject',
+    'cancel',
+    'report',
+    'local',
+  ]),
+};
+
+/**
+ * Detect a bare CLI command typed into the chat (e.g. `auth login`, `es run list`) so the REPL can
+ * redirect the user to their shell instead of shipping it to the model as a spec — the footgun that
+ * turned a stray `auth login` into a submitted run. Returns the normalized command (any
+ * `executespec`/`es`/`spec` prefix stripped) or null when the line is ordinary chat. Matches only a
+ * known group + known subcommand, so natural language like "run a test for me" is left alone.
+ * Exported for tests.
+ */
+export function looksLikeShellCommand(line: string): string | null {
+  const tokens = line.trim().split(/\s+/);
+  let i = 0;
+  if (tokens[i] === 'executespec' || tokens[i] === 'es' || tokens[i] === 'spec') i++;
+  const group = tokens[i];
+  const sub = tokens[i + 1];
+  if (group && sub && KNOWN_VERBS[group]?.has(sub)) {
+    return tokens.slice(i).join(' ');
+  }
+  return null;
 }
