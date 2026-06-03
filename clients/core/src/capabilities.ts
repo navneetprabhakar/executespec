@@ -71,7 +71,7 @@ export const CAPABILITIES: readonly Capability[] = [
     { mutating: true, needsWorkspace: false, interactive: false, scriptable: true }),
   cap('F4', 'Mint PAT (deep link)', planned('auth token --new'), planned('executespec.createToken'),
     { mutating: false, needsWorkspace: false, interactive: false, scriptable: true }),
-  cap('F5', 'Chat (agentic)', planned('spec'), planned('executespec.chat'),
+  cap('F5', 'Chat (agentic)', shipped('spec'), planned('executespec.chat'),
     { mutating: true, needsWorkspace: false, interactive: true, scriptable: false }),
   cap('F6', 'Submit run', shipped('run submit'), shipped('executespec.submitSpec'),
     { mutating: true, needsWorkspace: false, interactive: false, scriptable: true }),
