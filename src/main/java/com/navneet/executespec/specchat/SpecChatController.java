@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import lombok.RequiredArgsConstructor;
@@ -59,13 +61,14 @@ public class SpecChatController {
       HttpServletRequest http) {
 
     if (userDetails == null) {
-      throw new IllegalStateException("auth required (JWT or PAT)");
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required (JWT or PAT)");
     }
     if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
-      throw new IllegalArgumentException("sessionId is required");
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
     }
     if (request.conversation() == null || request.conversation().isEmpty()) {
-      throw new IllegalArgumentException("conversation must contain at least the current turn");
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "conversation must contain at least the current turn");
     }
 
     String orgId =
@@ -73,7 +76,8 @@ public class SpecChatController {
             ? String.valueOf(userDetails.getOrgMember().getOrgId())
             : null;
     if (orgId == null) {
-      throw new IllegalStateException(
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
           "user is not a member of any org — CLI/Plugin chat requires an org context");
     }
 
@@ -127,14 +131,14 @@ public class SpecChatController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @org.springframework.web.bind.annotation.PathVariable String sessionId) {
     if (userDetails == null) {
-      throw new IllegalStateException("auth required");
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
     }
     return auditRepository
         .findBySessionId(sessionId)
         .map(
             a -> {
               if (!String.valueOf(userDetails.getUser().getId()).equals(a.getUserId())) {
-                throw new IllegalStateException("forbidden");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
               }
               return ResponseEntity.ok(a);
             })
