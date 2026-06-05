@@ -107,6 +107,30 @@ Every row ships to **both** surfaces. "—" is never allowed in a shipped row; a
 
 **Surface-specific presentation is allowed; surface-specific *capability* is not.** Example: F13 renders as ANSI text in the CLI and as a webview in VS Code — same capability, different render. What is forbidden is a capability existing in one surface only.
 
+## 4a. CLI command reference (locked 2026-06-03)
+
+The `spec`/`executespec` command surface, founder-locked. **✅ shipped · 🟡 planned (backend API ready) · ⚪ idea.** Machine-mirrored in `clients/core/src/capabilities.ts` (parity-enforced) and the `--help` text.
+
+Convention: `spec <noun> <verb> [args] [--flags]` (git/gcloud style); `--json` on every read; singular group nouns with plural aliases (`project`/`projects`); `EXECUTESPEC_HOST` / `--host` overrides the backend.
+
+| Group | Commands | Status |
+| --- | --- | --- |
+| **Auth & identity** | `login [--token] [--no-browser]` (alias of `auth login`) · `whoami` · `logout` | ✅ |
+| | `login --device` (GitHub-style code flow, headless) | ⚪ needs `POST /api/auth/device/{code,token}` |
+| | `token list \| create \| revoke` | 🟡 |
+| **Runs** | `run submit "<spec>" [--repo --project --provider --watch --local]` | ✅ |
+| | `run list \| view <id> \| watch <id> \| cost <id>` | ✅ · `logs <id>` 🟡 |
+| | `run approve \| reject \| cancel <id> \| retry <id> <task>` | ✅ |
+| | `run report <id>` · `run local "<spec>"` | ✅ · local 🟡 (Phase 3) |
+| **Projects** | `project list \| view <id> \| runs <id>` | ✅ |
+| | `project use <id>` (default) · `project stats <id>` | 🟡 |
+| **Account** | `stats` (your dashboard) · `doctor` (host/token/docker) | ✅ |
+| **Link** | `link [--project <id>] [--create]` · `unlink` | 🟡 (needs local state) |
+| **Chat & config** | `spec` (no command, TTY) / `chat` — agentic REPL | ✅ |
+| | `config get \| set \| list` | 🟡 |
+
+**Auth-flow decision:** loopback browser sign-in is the **default** (built, gcloud-style); a **device-code** flow (GitHub-style: print a code + URL, poll) is the headless/SSH path — it survives no-local-browser environments and is the one outstanding auth addition (one small backend endpoint pair).
+
 ## 5. What should and should NOT be provided
 
 ### 5.1 Should provide (in scope)

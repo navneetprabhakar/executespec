@@ -39,12 +39,49 @@ export async function runCommand(
       return cancel(args, client);
     case 'report':
       return report(args, client);
+    case 'cost':
+      return cost(args, client);
+    case 'retry':
+      return retry(args, client);
     case 'local':
       return local(args, client);
     default:
-      errln('Usage: executespec run <submit|list|view|watch|approve|reject|cancel|report|local>');
+      errln(
+        'Usage: executespec run <submit|list|view|watch|approve|reject|cancel|report|cost|retry|local>',
+      );
       return 2;
   }
+}
+
+async function cost(args: ParsedArgs, client: ClientBundle): Promise<number> {
+  const runId = args.positionals[0];
+  if (!runId) {
+    errln('Usage: executespec run cost <runId>');
+    return 2;
+  }
+  const c = await client.api.getCost(runId);
+  if (flagBool(args.flags, 'json')) {
+    printJson(c);
+    return 0;
+  }
+  out(`${bold('$' + c.costUsd.toFixed(4))}  ${dim(`${c.inputTokens} in / ${c.outputTokens} out tokens`)}`);
+  return 0;
+}
+
+async function retry(args: ParsedArgs, client: ClientBundle): Promise<number> {
+  const runId = args.positionals[0];
+  const taskId = args.positionals[1];
+  if (!runId || !taskId) {
+    errln('Usage: executespec run retry <runId> <taskId>');
+    return 2;
+  }
+  const res = await client.api.retryTask(runId, taskId);
+  if (flagBool(args.flags, 'json')) {
+    printJson(res);
+    return 0;
+  }
+  out(green(`Retrying task ${taskId}.`) + dim(' Track with `run view` / `run watch`.'));
+  return 0;
 }
 
 async function submit(args: ParsedArgs, client: ClientBundle): Promise<number> {
