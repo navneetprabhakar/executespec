@@ -4,6 +4,7 @@ import { createClient } from '@executespec/core';
 import { parseArgs, flagBool, flagStr } from './args.js';
 import { authCommand } from './commands/auth.js';
 import { doctorCommand } from './commands/doctor.js';
+import { linkCommand, unlinkCommand } from './commands/link.js';
 import { projectCommand } from './commands/project.js';
 import { runCommand } from './commands/run.js';
 import { statsCommand } from './commands/stats.js';
@@ -32,7 +33,8 @@ Runs
   run local "<spec>"                    local-hands — not available yet (Phase 3)
 
 Projects
-  project list  |  project view <id>  |  project runs <id>
+  project list  |  project view <id>  |  project runs <id>  |  project use <id>
+  link [--project <id>]  |  unlink     bind this directory to a project (run/stats default to it)
 
 Account
   stats                                 your dashboard (runs, awaiting approval)
@@ -89,6 +91,10 @@ async function main(): Promise<number> {
     case 'project':
     case 'projects':
       return projectCommand(sub, cmdArgs, client);
+    case 'link':
+      return linkCommand(cmdArgs, client);
+    case 'unlink':
+      return unlinkCommand();
     case 'stats':
       return statsCommand(cmdArgs, client);
     case 'doctor':

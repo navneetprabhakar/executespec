@@ -10,6 +10,7 @@ export { ApiError, parseErrorBody, type ParsedError } from './errors.js';
 export * from './types.js';
 export * from './capabilities.js';
 export * from './chat.js';
+export * from './localState.js';
 export { type TokenStore, MemoryTokenStore, FileTokenStore } from './auth.js';
 export { HttpClient, type RequestOptions } from './http.js';
 export { ExecuteSpecApi } from './api.js';

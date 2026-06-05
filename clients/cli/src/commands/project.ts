@@ -1,8 +1,8 @@
-import type { ClientBundle } from '@executespec/core';
+import { FileStateBackend, type ClientBundle } from '@executespec/core';
 
 import { type ParsedArgs, flagBool, flagNum } from '../args.js';
 import { runLine, truncate } from '../render.js';
-import { bold, dim, errln, out, printJson } from '../ui.js';
+import { bold, dim, errln, green, out, printJson } from '../ui.js';
 
 export async function projectCommand(
   sub: string,
@@ -17,10 +17,25 @@ export async function projectCommand(
       return view(args, client);
     case 'runs':
       return runs(args, client);
+    case 'use':
+      return use(args, client);
     default:
-      errln('Usage: executespec project <list|view|runs> [projectId] [--json]');
+      errln('Usage: executespec project <list|view|runs|use> [projectId] [--json]');
       return 2;
   }
+}
+
+async function use(args: ParsedArgs, client: ClientBundle): Promise<number> {
+  const id = args.positionals[0];
+  if (!id) {
+    errln('Usage: executespec project use <projectId>');
+    return 2;
+  }
+  const p = await client.api.getProject(id);
+  await new FileStateBackend().writeState({ defaultProjectId: p.id });
+  out(green('Default project → ') + bold(p.name) + dim(` (${p.id})`));
+  out(dim('Used when a directory has no `link`; override per-command with --project.'));
+  return 0;
 }
 
 async function list(args: ParsedArgs, client: ClientBundle): Promise<number> {
