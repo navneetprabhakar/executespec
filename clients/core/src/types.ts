@@ -171,6 +171,21 @@ export interface RunListQuery {
   size?: number;
 }
 
+// ── Projects ──────────────────────────────────────────────────────────────
+
+/** A project (mirrors the backend `ProjectDto` — the fields the CLI surfaces). */
+export interface Project {
+  id: string;
+  name: string;
+  orgId?: string | null;
+  description?: string | null;
+  status?: string | null;
+  aiProvider?: string | null;
+  githubOwner?: string | null;
+  targetBranch?: string | null;
+  createdAt?: string | null;
+}
+
 // ── SSE events ──────────────────────────────────────────────────────────────
 
 /**

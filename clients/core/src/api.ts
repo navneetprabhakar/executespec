@@ -6,6 +6,7 @@ import type {
   Me,
   Page,
   PatDto,
+  Project,
   RunCost,
   RunDetail,
   RunListQuery,
@@ -71,6 +72,15 @@ export class ExecuteSpecApi {
     return this.http.post<Record<string, unknown>>(
       `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/retry`,
     );
+  }
+
+  // ── Projects ────────────────────────────────────────────────────────────────
+  listProjects(): Promise<Project[]> {
+    return this.http.get<Project[]>('/projects');
+  }
+
+  getProject(projectId: string): Promise<Project> {
+    return this.http.get<Project>(`/projects/${encodeURIComponent(projectId)}`);
   }
 
   // ── SSE + local-execution tool proxy ───────────────────────────────────────
