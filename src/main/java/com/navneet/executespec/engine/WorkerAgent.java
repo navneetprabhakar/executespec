@@ -1108,6 +1108,16 @@ public class WorkerAgent {
     if (tool == null) {
       return errEnvelope("INVALID_ARGS", "unknown tool: " + tc.name());
     }
+    // Local-hands/remote-brain (RL-2026-06, terminal-bench): when this run is bound to a remote
+    // tool session, dispatch the tool to the connected client (over SSE) and return its result
+    // envelope verbatim — the worker loop is agnostic to where the tool ran. This branch MUST live
+    // here because the V2 worker dispatches tools manually via tool.execute() below, never through
+    // Spring AI's ContextBoundToolCallback where ToolRegistry's other remote hook sits. Compaction
+    // is skipped in remote mode (the compactor flag is OFF by default; the envelope is byte-shaped
+    // identically to the local okEnvelope/errEnvelope path).
+    if (toolRegistry.isRemoteRun(req.context())) {
+      return toolRegistry.dispatchRemote(req.context(), tc.name(), tc.arguments());
+    }
     JsonNode args;
     try {
       args =
