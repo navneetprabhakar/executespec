@@ -1,5 +1,7 @@
 import {
+  FileStateBackend,
   RunEventType,
+  resolveProjectId,
   streamRunEvents,
   type ApprovalRequest,
   type ClientBundle,
@@ -90,12 +92,18 @@ async function submit(args: ParsedArgs, client: ClientBundle): Promise<number> {
     errln('Usage: executespec run submit "<spec>" [--repo URL] [--project ID] [--provider P] [--watch]');
     return 2;
   }
+  // Project precedence: --project flag > this directory's link > global default.
+  const projectId = await resolveProjectId(
+    new FileStateBackend(),
+    process.cwd(),
+    flagStr(args.flags, 'project'),
+  );
   const req: RunRequest = {
     userRequest: spec,
     source: 'REST',
     repoUrl: flagStr(args.flags, 'repo'),
     repoMode: flagStr(args.flags, 'repo-mode')?.toUpperCase() as RunRequest['repoMode'],
-    projectId: flagStr(args.flags, 'project'),
+    projectId,
     aiProvider: flagStr(args.flags, 'provider')?.toUpperCase() as RunRequest['aiProvider'],
     modelName: flagStr(args.flags, 'model'),
     executionMode: flagStr(args.flags, 'mode')?.toUpperCase() as RunRequest['executionMode'],
