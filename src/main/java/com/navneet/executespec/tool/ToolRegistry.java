@@ -104,6 +104,29 @@ public class ToolRegistry {
   }
 
   /**
+   * True when this run is bound to a remote tool session (local-hands/remote-brain). The V2 {@code
+   * WorkerAgent} dispatches tools MANUALLY (calls {@link Tool#execute} directly rather than through
+   * the Spring-AI {@link ContextBoundToolCallback}), so the manual-dispatch path must consult this
+   * + {@link #dispatchRemote} to honor remote mode — the remote branch inside {@code
+   * ContextBoundToolCallback.call} only covers Spring-AI internal tool execution. RL-2026-06
+   * (terminal-bench).
+   */
+  public boolean isRemoteRun(ExecutionContext ctx) {
+    return remoteToolDispatcher != null
+        && ctx != null
+        && remoteToolDispatcher.isRemote(ctx.runId());
+  }
+
+  /**
+   * Dispatch a tool call to the connected client and return its result envelope verbatim (same
+   * {@code {"ok":...}} shape the local path produces). Caller must have checked {@link
+   * #isRemoteRun}. Blocks (bounded) inside the dispatcher for the client to reply.
+   */
+  public String dispatchRemote(ExecutionContext ctx, String toolName, String argsJson) {
+    return remoteToolDispatcher.dispatch(ctx.runId(), ctx.taskId(), toolName, argsJson);
+  }
+
+  /**
    * Map view: tool name → tool definition. Useful for prompt injection (when native tool calling
    * isn't being used and the schemas need to live in the prompt).
    */
