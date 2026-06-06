@@ -177,7 +177,17 @@ public class OpenAiNativeToolClient {
               "Invalid JSON schema for tool '" + tc.getToolDefinition().name() + "'", e);
         }
       }
-      body.put("tool_choice", request.toolChoice() == null ? "auto" : request.toolChoice());
+      // RL-2026-06-004 — DeepSeek's thinking-mode models 400 on ANY tool_choice
+      // ("Thinking mode does not support this tool_choice"), so NEVER send it on the native
+      // DeepSeek
+      // base-url. OpenAI/OpenRouter, by contrast, NEED the "auto" default sent when tools are
+      // present
+      // (omitting it makes gpt-5.x return text instead of calling tools) — so keep the default
+      // there.
+      boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
+      if (!isDeepSeek) {
+        body.put("tool_choice", request.toolChoice() == null ? "auto" : request.toolChoice());
+      }
     }
 
     if (request.temperature() != null) body.put("temperature", request.temperature());

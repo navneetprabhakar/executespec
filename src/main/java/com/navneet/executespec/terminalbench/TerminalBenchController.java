@@ -29,7 +29,8 @@ public class TerminalBenchController {
   private final TerminalBenchRunService service;
 
   /**
-   * Request to launch a remote-tool worker run. {@code maxIterations} null → worker default (40).
+   * Request to launch a remote-tool worker run. {@code maxIterations} null or below the
+   * Terminal-Bench floor uses the service's benchmark default.
    */
   public record StartRequest(
       String instruction, String provider, String model, Integer maxIterations) {}

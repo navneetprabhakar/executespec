@@ -273,7 +273,7 @@ public class WorkerAgent {
     //   • progressForceAfter → force-terminate (Lever B salvage first if nothing was ever written).
     // The same one-shot nudge also fires when the model stops text-only without calling
     // completeTask. Per-task override (req.stagnationWarnAfter / req.stagnationForceAfter):
-    // SequentialExecutor sets these per complexity (LOW=8/12, MEDIUM=12/18, HIGH=18/28) so that
+    // SequentialExecutor sets these per complexity (LOW=10/16, MEDIUM=16/28, HIGH=24/40) so that
     // legitimate reverse-engineering / multi-file-read iterations on HIGH tasks don't trip the
     // guard before the worker can write. Falls through to the static defaults when null.
     final int progressWarnAfter =
@@ -284,11 +284,25 @@ public class WorkerAgent {
         req.stagnationForceAfter() != null && req.stagnationForceAfter() > progressWarnAfter
             ? req.stagnationForceAfter()
             : Math.max(STAGNATION_FORCE_AFTER_N, progressWarnAfter + 4);
+    final boolean terminalTaskMode = Boolean.TRUE.equals(req.terminalTaskMode());
+    final int terminalArtifactDeadlineAfter =
+        req.terminalArtifactDeadlineAfter() != null && req.terminalArtifactDeadlineAfter() > 0
+            ? req.terminalArtifactDeadlineAfter()
+            : Math.min(
+                Math.max(progressWarnAfter * 2, 32), Math.max(progressWarnAfter + 1, maxIter - 8));
+    final int terminalForcedFinalizerAfter =
+        terminalTaskMode
+            ? Math.min(
+                Math.max(progressForceAfter, terminalArtifactDeadlineAfter + 1),
+                Math.max(terminalArtifactDeadlineAfter + 1, maxIter - 4))
+            : Integer.MAX_VALUE;
     int itersSinceProgress = 0;
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
     // the next failure terminates (force threshold, or another text-only stop).
     boolean progressNudged = false;
+    boolean terminalArtifactDeadlineNudged = false;
+    boolean terminalForcedFinalizerAttempted = false;
 
     // V182 layer-3 — last iteration on which a runTests call returned an ok envelope.
     // -1 means "never". Refreshed inside the per-tool-call dispatch when name=runTests
@@ -375,6 +389,22 @@ public class WorkerAgent {
       // on the next iter boundary), so the actual termination time is "wall-clock cap +
       // current LLM call latency" — typically <60s tail.
       if (wallClockMillisCap > 0 && (System.currentTimeMillis() - start) >= wallClockMillisCap) {
+        if (terminalTaskMode && !terminalForcedFinalizerAttempted) {
+          terminalForcedFinalizerAttempted = true;
+          log.warn(
+              "WorkerAgent TERMINAL_WALL_CLOCK_FINALIZER run={} task={} iter={} elapsedMs={} capMs={}"
+                  + " totalWrites={}",
+              runId,
+              req.context().taskId(),
+              iter,
+              System.currentTimeMillis() - start,
+              wallClockMillisCap,
+              totalWriteCalls);
+          WorkerResult finalized =
+              runTerminalFinalizerCall(
+                  req, history, toolsDispatched, toolLog, start, iter, false);
+          if (finalized != null) return finalized;
+        }
         log.warn(
             "WorkerAgent WALL_CLOCK_EXCEEDED run={} task={} iter={} elapsedMs={} capMs={}"
                 + " totalWrites={}",
@@ -563,6 +593,7 @@ public class WorkerAgent {
         // the tool). Fire the SAME one-shot progress nudge used mid-loop: if we haven't nudged
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
+        history.add(new AssistantMessage(assistantText));
         if (!progressNudged) {
           progressNudged = true;
           log.info(
@@ -573,11 +604,14 @@ public class WorkerAgent {
               iter,
               totalWriteCalls,
               previewThought(assistantText));
-          history.add(new AssistantMessage(assistantText));
-          history.add(new UserMessage(progressNudgeMessage(totalWriteCalls)));
+          history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
           continue; // Re-enter the loop; iter increments; model gets another shot.
         }
-        history.add(new AssistantMessage(assistantText));
+        if (terminalTaskMode) {
+          WorkerResult finalized =
+              runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter);
+          if (finalized != null) return finalized;
+        }
         recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
@@ -796,7 +830,8 @@ public class WorkerAgent {
       // text-only-stop path uses); crossing progressForceAfter force-terminates with
       // COMPLETED_BY_STAGNATION (Lever B salvage first if nothing was ever written). One counter,
       // one nudge — this replaces the old Lever A + Lever C + stagnation-warn trio.
-      boolean wroteThisIter = calls.stream().anyMatch(tc -> WRITE_CLASS_TOOLS.contains(tc.name()));
+      boolean wroteThisIter =
+          calls.stream().anyMatch(tc -> isProgressTool(tc.name(), terminalTaskMode));
       if (wroteThisIter) {
         itersSinceProgress = 0;
         for (AssistantMessage.ToolCall tc : calls) {
@@ -819,8 +854,54 @@ public class WorkerAgent {
         // systemInstruction, so a mid-run SystemMessage mutates the implicit-cache prefix and
         // kills caching for the rest of the task. A UserMessage stays in contents[] as a normal
         // turn — cache prefix preserved; Anthropic + OpenAI honour it equally.
-        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls)));
+        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
         progressNudged = true;
+      }
+      if (terminalTaskMode && !progressNudged && iter >= progressWarnAfter) {
+        log.info(
+            "WorkerAgent TERMINAL_ARTIFACT_NUDGE run={} task={} iter={} threshold={} totalWrites={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            progressWarnAfter,
+            totalWriteCalls);
+        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, true)));
+        progressNudged = true;
+      }
+      if (terminalTaskMode
+          && !terminalArtifactDeadlineNudged
+          && iter >= terminalArtifactDeadlineAfter) {
+        log.info(
+            "WorkerAgent TERMINAL_ARTIFACT_DEADLINE run={} task={} iter={} threshold={} totalWrites={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            terminalArtifactDeadlineAfter,
+            totalWriteCalls);
+        history.add(new UserMessage(terminalArtifactDeadlineMessage()));
+        terminalArtifactDeadlineNudged = true;
+      }
+      if (terminalTaskMode
+          && !terminalForcedFinalizerAttempted
+          && iter >= terminalForcedFinalizerAfter) {
+        terminalForcedFinalizerAttempted = true;
+        log.warn(
+            "WorkerAgent TERMINAL_FORCED_FINALIZER run={} task={} iter={} threshold={}"
+                + " totalWrites={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            terminalForcedFinalizerAfter,
+            totalWriteCalls);
+        WorkerResult finalized =
+            runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, false);
+        if (finalized != null) return finalized;
+        history.add(
+            new UserMessage(
+                "TERMINAL FINALIZER DID NOT PRODUCE A CLOSING TOOL CALL. On the next response,"
+                    + " stop exploring and either create/overwrite the exact /app deliverable with"
+                    + " writeFile/editFile, or call completeTask if the deliverable already exists."
+                    + " Do not run another broad shell investigation."));
       }
       if (itersSinceProgress >= progressForceAfter) {
         log.warn(
@@ -1060,6 +1141,199 @@ public class WorkerAgent {
           .build();
     }
     return null;
+  }
+
+  /**
+   * Terminal-Bench-specific rescue for DeepSeek-style "summary mode". The generic worker contract
+   * still nudges once and then stops on a second text-only response, but terminal tasks are scored
+   * by concrete files under /app. If the model says it is done without a tool call, make one final
+   * forced tool-call turn so it can either call completeTask or produce/verify the deliverable.
+   */
+  private WorkerResult runTerminalFinalizerCall(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      int iter) {
+    return runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, true);
+  }
+
+  private WorkerResult runTerminalFinalizerCall(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      int iter,
+      boolean allowAutoFallback) {
+    log.info(
+        "WorkerAgent TERMINAL_FINALIZER attempting run={} task={} historyLen={} iter={}",
+        req.context().runId(),
+        req.context().taskId(),
+        history.size(),
+        iter);
+
+    history.add(
+        new UserMessage(
+            "TERMINAL FINALIZATION REQUIRED. Text and further exploration do not close this"
+                + " terminal task. Emit exactly ONE closing tool call now:\n"
+                + "1. If the requested /app deliverable exists, call completeTask with a concise"
+                + " summary.\n"
+                + "2. If the deliverable is missing or stale, use writeFile/editFile to create or"
+                + " overwrite the exact required path now. For small literal answers, write the"
+                + " file directly instead of running more scripts.\n"
+                + "3. If /tests exists and you have not run a verifier-shaped check, run"
+                + " /tests/test.sh or the narrow failing test now. For performance tasks, compare"
+                + " against the provided golden/reference threshold; correctness-only is not"
+                + " sufficient.\n"
+                + "4. If visible tests or failures show exact literals, exact expected files, or"
+                + " exact directory contents, make the /app deliverable match that byte-for-byte."
+                + " Remove helper binaries/scratch files from deliverable directories unless they"
+                + " are explicitly expected.\n"
+                + "5. For sanitizer/filter/transform tasks, preserve benign input byte-for-byte"
+                + " unless the tests require normalization. Clean-input handling must be an"
+                + " explicit no-op/copy path, not a parser/pretty-printer rewrite.\n"
+                + "6. If a final verification command directly proves the deliverable, run that"
+                + " command now.\n"
+                + "Do not explain, do not browse broadly, and do not return another text-only"
+                + " summary."));
+
+    boolean force = Boolean.TRUE.equals(req.forceToolChoiceOnSalvage());
+    if (force) {
+      WorkerResult forced =
+          terminalFinalizerAttempt(
+              req,
+              history,
+              toolsDispatched,
+              toolLog,
+              start,
+              iter,
+              terminalFinalizerTools(req, true),
+              "required");
+      if (forced != null) return forced;
+      if (!allowAutoFallback) return null;
+      log.info(
+          "WorkerAgent TERMINAL_FINALIZER forced attempt yielded nothing - retrying with auto"
+              + " tool-choice");
+    }
+    if (!allowAutoFallback) return null;
+    return terminalFinalizerAttempt(
+        req,
+        history,
+        toolsDispatched,
+        toolLog,
+        start,
+        iter,
+        terminalFinalizerTools(req, false),
+        null);
+  }
+
+  private WorkerResult terminalFinalizerAttempt(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      int iter,
+      List<ToolCallback> tools,
+      String toolChoice) {
+    ChatResponse resp;
+    try {
+      resp =
+          router.call(
+              LlmRequest.builder()
+                  .provider(req.provider())
+                  .model(req.model())
+                  .messages(history)
+                  .context(req.context())
+                  .temperature(0.0)
+                  .maxTokens(req.maxTokensPerCall())
+                  .toolsOverride(tools)
+                  .toolChoice(toolChoice)
+                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .build());
+    } catch (Exception e) {
+      log.warn(
+          "WorkerAgent TERMINAL_FINALIZER router error (toolChoice={}): {}",
+          toolChoice,
+          e.getMessage());
+      return null;
+    }
+
+    if (resp == null || resp.getResults() == null || resp.getResults().isEmpty()) return null;
+    AssistantMessage assistant = resp.getResults().get(0).getOutput();
+    List<AssistantMessage.ToolCall> calls = assistant.getToolCalls();
+    if (calls == null || calls.isEmpty()) {
+      log.info(
+          "WorkerAgent TERMINAL_FINALIZER no tool calls produced - falling through to stopped");
+      return null;
+    }
+
+    int dispatched = toolsDispatched;
+    boolean productive = false;
+    List<String> productiveTools = new ArrayList<>();
+    for (AssistantMessage.ToolCall tc : calls) {
+      dispatched++;
+      if (CompleteTaskTool.NAME.equals(tc.name())) {
+        String summary = "terminal finalizer: " + extractSummary(tc.arguments());
+        toolLog.add("TERMINAL_FINALIZER completeTask -> COMPLETED");
+        log.info("WorkerAgent TERMINAL_FINALIZER got completeTask: {}", summary);
+        contextStore.delete(req.context());
+        recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(iter)
+            .toolCallsDispatched(dispatched)
+            .completionSummary(summary)
+            .finalAssistantText(assistant.getText())
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
+      if ("writeFile".equals(tc.name())
+          || "editFile".equals(tc.name())
+          || "shell".equals(tc.name())) {
+        String env = dispatchOne(tc, req, false);
+        boolean ok = env != null && env.startsWith("{\"ok\":true");
+        toolLog.add("TERMINAL_FINALIZER " + tc.name() + " -> " + (ok ? "OK" : "ERR"));
+        if (ok) {
+          productive = true;
+          productiveTools.add(tc.name());
+        }
+      } else {
+        toolLog.add("TERMINAL_FINALIZER " + tc.name() + " -> IGNORED");
+      }
+    }
+
+    if (productive) {
+      log.info(
+          "WorkerAgent TERMINAL_FINALIZER produced productive tools run={} task={} tools={}",
+          req.context().runId(),
+          req.context().taskId(),
+          productiveTools);
+      contextStore.delete(req.context());
+      recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
+      return WorkerResult.builder()
+          .outcome(WorkerResult.Outcome.COMPLETED)
+          .iterations(iter)
+          .toolCallsDispatched(dispatched)
+          .completionSummary("terminal finalizer: productive tool call " + productiveTools)
+          .finalAssistantText(assistant.getText())
+          .toolCallLog(toolLog)
+          .totalLatencyMs(System.currentTimeMillis() - start)
+          .build();
+    }
+    return null;
+  }
+
+  private List<ToolCallback> terminalFinalizerTools(WorkerTaskRequest req, boolean restrict) {
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    if (!restrict) return all;
+    java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
+    List<ToolCallback> filtered =
+        all.stream().filter(t -> allow.contains(t.getToolDefinition().name())).toList();
+    return filtered.isEmpty() ? all : filtered;
   }
 
   /**
@@ -1343,6 +1617,44 @@ public class WorkerAgent {
    * implicit cache prefix mid-run).
    */
   static String progressNudgeMessage(int totalWriteCalls) {
+    return progressNudgeMessage(totalWriteCalls, false);
+  }
+
+  static String progressNudgeMessage(int totalWriteCalls, boolean terminalTaskMode) {
+    if (terminalTaskMode) {
+      String lead =
+          totalWriteCalls > 0
+              ? "PROGRESS CHECK — you have written "
+                  + totalWriteCalls
+                  + " file"
+                  + (totalWriteCalls == 1 ? "" : "s")
+                  + " but have not closed the terminal task."
+              : "PROGRESS CHECK — you have spent several turns without using writeFile/editFile.";
+      return lead
+          + " Pick ONE:\n"
+          + "1. If the exact deliverable exists and you have verified it, call `completeTask` now"
+          + " with the `summary` argument. A text-only summary does NOT close the task.\n"
+          + "2. If you know the required output path, create or overwrite it now. Use writeFile for"
+          + " small literal answers, or one shell command/script for computed artifacts. The"
+          + " benchmark scores the actual files under /app; analysis without producing that file"
+          + " scores zero.\n"
+              + "3. If /tests exists, inspect or run /tests/test.sh or the narrow failing test now."
+              + " Visible tests are the scoring contract. For expensive/performance tests, use a"
+              + " bounded smoke command first, then the official verifier when ready.\n"
+              + "4. If visible tests or failures show an exact expected literal, output path, file"
+              + " list, or directory contents, satisfy that contract exactly. Do not add extra values"
+              + " or leave helper binaries/scratch files in deliverable directories.\n"
+              + "5. For sanitizer/filter/transform tasks, preserve benign input byte-for-byte unless"
+              + " the tests require normalization. Add a detection-first no-op path: if no"
+              + " prohibited construct is present, leave/copy the file unchanged and do not run a"
+              + " parser/formatter/serializer over it.\n"
+              + "6. If a failure names a concrete symbol/API/file/pattern, grep recursively and fix all"
+              + " relevant occurrences before retesting. If it says a required file is missing,"
+              + " create that exact file before more broad exploration.\n"
+          + "Do not keep dumping huge files or re-reading state you already checked. If a candidate"
+          + " already passes the verifier-shaped check, preserve it and complete instead of making"
+          + " risky marginal changes.";
+    }
     String lead =
         totalWriteCalls > 0
             ? "PROGRESS CHECK — you have written "
@@ -1363,5 +1675,35 @@ public class WorkerAgent {
         + " mode). An empty result is an automatic failure — even an imperfect edit beats zero.\n"
         + "3. If a build or test error is blocking you, fix that file now.\n"
         + "Do NOT do another round of reads or re-verify state you have already checked.";
+  }
+
+  static String terminalArtifactDeadlineMessage() {
+    return "TERMINAL DELIVERABLE DEADLINE:\n"
+        + "Stop broad exploration. In the next tool call, do ONE focused action:\n"
+        + "1. If the requested /app deliverable already exists, verify it with a focused shell"
+        + " command or readFile, then call completeTask.\n"
+        + "2. If you know the requested output path and it is missing or stale, create or overwrite"
+        + " that exact path now with the best verified candidate.\n"
+        + "3. If /tests exists, run /tests/test.sh or the narrow relevant check now. For expensive"
+        + " or performance checks, use timeout/reduced iterations for smoke, then the official"
+        + " verifier once the candidate is ready.\n"
+        + "4. If visible tests assert exact literals, exact file names, or exact directory contents,"
+        + " make the /app artifact match those assertions byte-for-byte. Remove temporary binaries,"
+        + " caches, and scratch files from deliverable directories unless the tests expect them.\n"
+        + "5. For sanitizer/filter/transform tasks, verify clean input remains byte-for-byte"
+        + " unchanged unless tests require normalization. Implement a detection-first no-op path"
+        + " for clean inputs; do not parse and reserialize clean files.\n"
+        + "6. If you still do not know the output path, re-read only the task/instruction file to"
+        + " extract the exact path and format, then create it immediately.\n"
+        + "If your current candidate already passes a verifier-shaped check, stop changing it and"
+        + " call completeTask. Do not overwrite a passing candidate with speculative"
+        + " optimizations.\n"
+        + "Do not spend another turn on package installs, directory listings, broad searches, or"
+        + " unrelated analysis unless that single command directly creates or verifies the required"
+        + " deliverable.";
+  }
+
+  private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
+    return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && "shell".equals(toolName));
   }
 }

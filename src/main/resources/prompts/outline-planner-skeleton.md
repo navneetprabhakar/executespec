@@ -8,7 +8,7 @@ A single `submitOutline` tool call with this shape:
 {
   "planTitle": "...",
   "planSummary": "...",  // 1-2 sentences
-  "projectType": "...",   // java-spring-boot | node-backend | node-frontend | python | go | rust | cli | unknown
+  "projectType": "...",   // java-spring-boot | node-backend | node-frontend | python | go | rust | cli | react-native-expo | unknown
   "buildCommand": "...",  // optional, omit to fall back to inference
   "smokeTestStrategy": "BUILD" | "PREVIEW_HEALTH" | "TEST_SUITE",
   "runtimeSurface": "HTTP" | "CLI" | "LIBRARY" | "STATIC_WEB" | "MOBILE_APP",
@@ -43,7 +43,9 @@ IDs are short tags — `R1`, `R2`, `R3`, …
 
 # Step 2 — break into task SKELETONS
 
-For LARGE specs (15-50 tasks) and LEGACY specs (50+ tasks):
+For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
+(LARGE normally permits up to 25 top-level tasks; LEGACY normally permits up to
+60):
 
 1. **Title** — one short imperative line ("Implement Stripe webhook handler", "Add user model with bcrypt password hashing"). No descriptions in skeleton mode — the expander writes them later from the title + spec context.
 

@@ -11,8 +11,9 @@ so an external client (the Terminal-Bench **Harbor adapter**, `~/tbench/es_harbo
 drive it: the ExecuteSpec server runs the worker loop (the *brain*); every worker tool call is
 emitted as a `TOOL_CALL` SSE event; the adapter executes it **inside the Harbor task container**
 (the *hands*) via `environment.exec` / file ops, and POSTs the result envelope back to
-`POST /api/runs/{id}/tool-results`. The worker is provider-agnostic — **DeepSeek-first** (cheap),
-then Anthropic / OpenAI / Gemini.
+`POST /api/runs/{id}/tool-results`. The worker is provider-agnostic, but the standing evaluation
+policy is **DeepSeek-first only** until the harness quality is materially better. Anthropic / OpenAI /
+Gemini runs are deferred until DeepSeek results stop exposing obvious prompt/tool/context gaps.
 
 A Terminal-Bench task is a single terminal goal, not a multi-task code spec, so this path runs the
 worker **directly** — NO classifier / planner / reviewer / scoring / PR push. It reuses the built
@@ -60,6 +61,69 @@ base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_
   client workspace, `COMPLETE`. Keystone proven with DeepSeek (RL-2026-06).
 - Real Harbor smoke (`terminal-bench/terminal-bench-2`, DeepSeek, 1 task): worker drove **19** tool
   calls executed in the container → `COMPLETE`. Integration validated end-to-end.
+- DeepSeek first-20 baseline before terminal-mode tuning (`~/tbench/es-tb-base20.yaml`, job
+  `es-deepseek-base20-v2`): **7/20 resolved (35%) for about $0.09**. Solved: `fix-git`,
+  `git-leak-recovery`, `log-summary-date-ranges`, `nginx-request-logging`,
+  `openssl-selfsigned-cert`, `prove-plus-comm`, `sqlite-db-truncate`. Full result directory:
+  `/tmp/es-tb-jobs/es-deepseek-base20/` from the baseline run; re-runs should write a new job name
+  or archive the old directory first.
+- Current DeepSeek run policy: Terminal-Bench requests below the service floor are normalized to
+  **120 worker iterations**. Terminal mode treats `shell` as progress, sends an artifact nudge near
+  iteration 16, sends a deadline nudge near iteration 32, and runs a restricted terminal finalizer at
+  the force threshold (currently iteration 64) even if shell calls keep resetting the progress
+  counter. Wall-clock-exceeded terminal runs also get one restricted finalizer attempt before they
+  fail. The server-side TB worker wall clock is **900s**, intentionally below Harbor's 1350s agent
+  timeout with buffer for one slow in-flight tool/LLM turn plus the terminal finalizer, so long runs
+  fail cleanly through ExecuteSpec instead of surfacing as Harbor `AgentTimeoutError` + orphaned
+  backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
+  runs the forced terminal finalizer so the model must emit `completeTask` or write/edit the exact
+  `/app` artifact instead of failing the ExecuteSpec run while the artifact may already be correct.
+- Latest comparable first-20 run (`/tmp/es-tb-jobs/es-deepseek-base20-iter100-finalizer-20260606-095500`):
+  **12/20 resolved (60%)**, **1 Harbor `AgentTimeoutError`**, **$0.400126**, **47m52s**. The
+  100-floor + finalizer run fixed `openssl-selfsigned-cert` and `sanitize-git-repo` versus the
+  previous 80-floor run, but regressed `largest-eigenval` and `query-optimize`; both misses were
+  verifier/performance-shaped rather than raw-iteration misses. Follow-up prompt policy now tells
+  Terminal-Bench workers to inspect `/tests` early, treat tests as the scoring contract, sweep named
+  error patterns recursively, implement detection-first no-op handling for clean transform inputs,
+  benchmark against golden/reference thresholds, and stop changing a candidate once a
+  verifier-shaped check passes.
+
+## DeepSeek first-20 runbook
+
+```bash
+# Backend, only if down; always use the local Spring profile.
+cd ~/Documents/antigravity/executespec
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.fork=false \
+  -Dspring-boot.run.profiles=local > /tmp/es-tb3.log 2>&1 &
+curl -s localhost:8080/actuator/health
+
+# Harbor adapter.
+cd ~/tbench
+. ~/swebench-bench/.espec-admin.env
+export ES_ADMIN_EMAIL="$ESPEC_ADMIN_EMAIL" ES_ADMIN_PW="$ESPEC_ADMIN_PW"
+export ES_PROVIDER=deepseek
+export ES_MODEL=deepseek-v4-flash-native
+export ES_MAX_ITERS=120
+./.venv/bin/harbor run -c es-tb-base20.yaml -y
+```
+
+Keep first follow-up tests **DeepSeek-only** unless the founder explicitly requests the provider
+matrix again. Use the first-20 slice in `es-tb-base20.yaml` as the comparable baseline; provider
+YAMLs for Anthropic/OpenAI/Gemini exist in `~/tbench` but are intentionally out of scope for the
+current pass.
+
+## Iteration policy
+
+- Test Terminal-Bench 2.0 / 2.1 with DeepSeek first. Other providers are comparison data only after
+  the ExecuteSpec harness has improved enough that DeepSeek is no longer failing on obvious harness
+  defects.
+- Use small comparable slices first (`es-tb-base20.yaml` before wider sets). Keep job names unique or
+  archive the prior `/tmp/es-tb-jobs/<job_name>` directory before rerunning.
+- After every run, inspect failures task-by-task and classify them as prompt, tool protocol,
+  context/retrieval, timeout/iteration budget, environment mismatch, or model capability. Change one
+  lever at a time, document it, and rerun the same slice before expanding.
+- Move to Anthropic/OpenAI/Gemini only after DeepSeek quality is stable enough that provider
+  comparison would answer a model-quality question instead of masking harness debt.
 
 ## Invariants
 

@@ -316,7 +316,7 @@ PR / project ──────                                                 
 
 5. The service fetches the PR head branch (for `branchOverride`) and builds a focused per-comment prompt (file:line + severity + category + body for each comment, plus a constraints block — use `runTests`, fall back to `shell`, do not branch / push, do not modify unrelated files / tests, do not reply inline). It submits a `Finding(FindingType.PR_REVIEW, reviewId, projectId, [linkedRepoId], prompt, snap.headBranch(), userId, null)` via `FindingPatchSubmitter`.
 
-6. The submitter dedupes per finding key (`PR_REVIEW|{reviewId}`), dispatches with `runMode=PATCH`, `source="finding:PR_REVIEW"`, and `branchOverride=<PR head branch>`. The patch-mode pipeline (single thin-agent loop; no classifier / planner / reviewer; per-provider iter caps Anthropic 150 / OpenAI 100 / Gemini 120) runs against the failing-comment spec. On terminal, `ScmPushService.push()` auto-pushes to the SAME PR branch — no new branch, no new PR.
+6. The submitter dedupes per finding key (`PR_REVIEW|{reviewId}`), dispatches with `runMode=PATCH`, `source="finding:PR_REVIEW"`, and `branchOverride=<PR head branch>`. The patch-mode pipeline (single thin-agent loop; no classifier / planner / reviewer; per-provider iter caps Anthropic/DeepSeek/OpenRouter 220 / OpenAI 150 / Gemini 180) runs against the failing-comment spec. On terminal, `ScmPushService.push()` auto-pushes to the SAME PR branch — no new branch, no new PR.
 
 7. The user watches the patch run on `/live/:runId`, then re-runs the PR review (or just reloads the PR on GitHub) to confirm the comments are addressed.
 

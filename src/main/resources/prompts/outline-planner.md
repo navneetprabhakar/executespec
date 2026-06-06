@@ -45,8 +45,9 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 
 6. **Task cap.** You MUST respect the following cap based on the supplied classification:
    - `SINGLE_SHOT`: 1 task (you won't be called for this — handled directly)
-   - `MEDIUM`: at most 4 tasks
-   - `MULTI_TASK`: no upper bound, but every task must have real, distinct work. "No upper bound" is a ceiling, not a target — apply invariant 2 and emit the fewest cohesive tasks the spec genuinely needs.
+   - `SMALL`: at most 4 tasks
+   - `MEDIUM`: at most {{MAX_TASKS}} tasks (normally 10). Every task must have real, distinct work; the cap is a ceiling, not a target.
+   - `LARGE` and `LEGACY`: handled by skeleton mode, not this full-plan prompt.
 
 7. **Order matters.** Tasks run top-to-bottom. Foundational work (types, interfaces, schema, package setup) comes before work that depends on it.
 

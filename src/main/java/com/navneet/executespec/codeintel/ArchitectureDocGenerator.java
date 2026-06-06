@@ -5,16 +5,18 @@ import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,9 @@ import lombok.extern.slf4j.Slf4j;
 public class ArchitectureDocGenerator {
 
   private final FallbackLlmRouter fallbackLlmRouter;
+  // ObjectProvider (lazy) breaks the bean cycle through projectArchitectureService
+  // (RL-2026-06-002).
+  private final ObjectProvider<LlmRouter> llmRouter;
   private final ModelResolver modelResolver;
 
   private static final String SYSTEM_PROMPT =
@@ -101,19 +106,19 @@ public class ArchitectureDocGenerator {
 
     String userPayload = buildPayload(projectId, repoArchDocs, repoFullNames);
 
-    Prompt prompt =
-        new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload)));
+    List<Message> messages =
+        List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
 
+    // DeepSeek / OpenRouter route via LlmRouter (FallbackLlmRouter has no such case); all other
+    // providers keep the existing FallbackLlmRouter path byte-identical. See ArchLlmDispatch.
     ChatResponse response =
-        fallbackLlmRouter.callWithFallback(
-            resolved.providerName(),
-            resolved.getModel(),
-            prompt,
+        ArchLlmDispatch.dispatch(
+            fallbackLlmRouter,
+            llmRouter.getObject(),
+            resolved,
+            messages,
             "combined-arch-" + projectId,
-            "combined-arch",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "combined-arch");
 
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {

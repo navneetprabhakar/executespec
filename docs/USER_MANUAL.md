@@ -511,7 +511,7 @@ Most pages compose the same building blocks. Knowing where they live helps if yo
 | Glossary copy            | [`lib/glossary.ts`](../frontend/src/lib/glossary.ts) - 13 tooltip entries               | `Glossary` tooltips                    |
 | Status color maps        | [`lib/constants.ts`](../frontend/src/lib/constants.ts)                                  | Status dots / chips                    |
 | Tech-stack detection     | [`lib/techDetect.ts`](../frontend/src/lib/techDetect.ts) - 19 tech keyword defs         | Run cards, run-detail headers          |
-| API client               | [`lib/api.ts`](../frontend/src/lib/api.ts) - ~3.6k LOC of typed REST helpers            | Every page                             |
+| API client               | [`lib/api/`](../frontend/src/lib/api/) - split typed REST helpers (`core.ts` + domain modules) | Every page                             |
 
 ---
 
@@ -586,7 +586,7 @@ A few production-only details surfaced by the page-by-page audit:
 - **Hidden routes.** `/more` is reachable via the mobile "more" tab but never appears in any sidebar group. It functions as a mobile-only aggregator.
 - **`AccountPage` GDPR-export error path** uses `window.alert` instead of an in-place error banner - one of the few remaining legacy `alert` call sites in Signal.
 - **Library / Migrations pages** ship with hard-coded arrays today. Backend wrappers (`api.listLibrary`, `api.listMigrations`, etc.) exist and are typed, but the BETA-labeled Signal pages do not call them yet.
-- **Raw `fetch` callers** (not using typed `api.*` wrappers): `ProjectMembersPage` (invites + share-links), `ProjectChatPage` (chat POST), `ProjectCodePage` (code-reviews submit + list), `AdminPage` (executions/reconcile), `BillingPage` (payment-history), `TopupPage` + `PlansPage` (purchase + subscribe). Working today; candidates for normalisation into `lib/api.ts`.
+- **Raw `fetch` callers** (not using typed `api.*` wrappers): some legacy/public/admin paths still bypass the split `frontend/src/lib/api/` helpers. Working today; candidates for normalisation into domain modules.
 - **Theme attributes.** `main.tsx` writes `data-signal-theme` to `<html>` (consumed by Signal's CSS in `signal/signal.css`). `tokens.css` separately checks `[data-theme='light']` - the two attributes do not overlap, and the Tailwind `dark:` variant is therefore silent unless other code sets `data-theme='dark'`.
 
 ---
@@ -595,12 +595,12 @@ A few production-only details surfaced by the page-by-page audit:
 
 | To do this                                          | Read this                                                                                          |
 | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Add a new authenticated route                       | [`frontend/src/App.tsx`](../frontend/src/App.tsx); [`Shell.tsx`](../frontend/src/signal/components/Shell.tsx) `buildSidebar()` |
-| Add a new API helper                                | [`frontend/src/lib/api.ts`](../frontend/src/lib/api.ts) - group with sibling endpoints              |
-| Add or change a sidebar tier gate                   | [`Shell.tsx`](../frontend/src/signal/components/Shell.tsx) - `buildSidebar({tier, isSuperAdmin, canDeploy})` |
+| Add a new authenticated route                       | [`frontend/src/App.tsx`](../frontend/src/App.tsx); default protected shell is [`IdeWorkspace`](../frontend/src/ide/IdeWorkspace.tsx), with [`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx) opt-in |
+| Add a new API helper                                | [`frontend/src/lib/api/`](../frontend/src/lib/api/) - add it to the matching domain module and barrel export |
+| Add or change a protected-shell tier gate           | [`frontend/src/ide/`](../frontend/src/ide/) and [`frontend/src/console/`](../frontend/src/console/) for shell/nav affordances; backend authorization remains authoritative |
 | Add a glossary tooltip term                         | [`frontend/src/lib/glossary.ts`](../frontend/src/lib/glossary.ts) + use `<Glossary term=...>` inline |
 | Build a new run-row surface                         | Reuse `Row` + `runUtils.toRunView` + `statusToDot`/`scoreKind`/`runTitleFor`                        |
 | Add a new modal / replace `window.confirm`          | [`Modal.tsx`](../frontend/src/signal/components/Modal.tsx) - `ConfirmModal` / `PromptModal`         |
 | Add a new design token                              | [`frontend/src/tokens.css`](../frontend/src/tokens.css) + [`signal/signal.css`](../frontend/src/signal/signal.css) (Signal-scoped) |
 
-Treat the route table in `App.tsx` and the API helper list in `lib/api.ts` as the canonical contract. Everything in this manual derives from them.
+Treat the route table in `App.tsx` and the API helper modules in `frontend/src/lib/api/` as the canonical contract. Everything in this manual derives from them.

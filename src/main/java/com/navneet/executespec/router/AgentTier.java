@@ -8,8 +8,7 @@ package com.navneet.executespec.router;
  * matrix is used.
  */
 public enum AgentTier {
-  PLANNING, // PlannerAgent, ReviewerAgentV2, TestPlannerAgent
-  WORKHORSE, // WorkerAgent, CompilerAgent, TestWorkerAgent, ApiTestSuiteAgent
-  LIGHTWEIGHT // ContextAgent, ConversationAgent, PromptOptimiserAgent, ValidationReportGenerator,
-  // TestReportGenerator
+  PLANNING,
+  WORKHORSE,
+  LIGHTWEIGHT
 }

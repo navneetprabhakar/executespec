@@ -32,21 +32,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 1 of the hierarchical planner — produces a {@link Plan} for runs the {@link
- * SmartClassifierAgent} marked {@code SMALL} or {@code MEDIUM}. SINGLE_SHOT still bypasses the LLM
- * via {@link PlannerAgent#plan} (synthesised plan); {@code LARGE} and {@code LEGACY} fall back to
- * {@link PlannerAgent} until slices 3-4 wire up parallel expansion + recursive outlines.
+ * Phase 1 of the hierarchical planner. SMALL/MEDIUM runs emit a complete {@link Plan} in one tool
+ * call; LARGE/LEGACY runs emit skeleton tasks that {@link TaskExpanderAgent} expands. SINGLE_SHOT
+ * runs bypass the planner LLM via {@link #synthesizeSingleShot(PlannerRequest)}.
  *
- * <p>Slice 2 contract: emit the full plan in a single tool call (32k cap — the old planner used
- * 8192 and got truncated on RN+API multi-repo specs). The output shape is the same {@code Plan};
- * only the prompt + tool name differ from {@link PlannerAgent}. Slice 3 will evolve this into a
- * "skeleton-only" mode for {@code LARGE}, with {@code TaskExpanderAgent} filling task bodies in
- * parallel.
- *
- * <p>Reuses {@link PlannerAgent#parsePlanFromArgs}, {@link PlannerAgent#validatePlan}, {@link
- * PlannerAgent#salvagePlanFromText}, and {@link PlannerAgent#warnIfConstraintsUnderpropagated} so
- * both agents produce structurally identical {@code Plan} instances. The four are package-private
- * specifically so we can share them without copy-paste.
+ * <p>Planner-output parsing and validation live in {@link PlannerOutputUtils}; this agent owns
+ * prompt selection, model routing, and the {@code submitOutline} tool schema.
  */
 @Service
 @Slf4j
@@ -74,6 +65,76 @@ public class OutlinePlannerAgent {
    * task.
    */
   private static final String PROMPT_PATH_SKELETON = "prompts/outline-planner-skeleton.md";
+
+  static final String PROJECT_TYPE_VALUES =
+      "java-spring-boot, node-backend, node-frontend, python, go, rust, cli, react-native-expo,"
+          + " unknown";
+
+  static final String RUNTIME_SURFACE_VALUES = "HTTP, CLI, LIBRARY, STATIC_WEB, MOBILE_APP";
+
+  static final String SUBMIT_OUTLINE_SCHEMA =
+      """
+{
+  "type": "object",
+  "properties": {
+    "planTitle": {"type": "string"},
+    "planSummary": {"type": "string"},
+    "projectType": {
+      "type": "string",
+      "description": "One of: %s"
+    },
+    "buildCommand": {
+      "type": "string",
+      "description": "Explicit build command, or omit to fall back to framework inference"
+    },
+    "smokeTestStrategy": {
+      "type": "string",
+      "description": "One of: BUILD, PREVIEW_HEALTH, TEST_SUITE"
+    },
+    "runtimeSurface": {
+      "type": "string",
+      "description": "How the code runs: %s. Default HTTP."
+    },
+    "requirements": {
+      "type": "array",
+      "description": "v2.5.11 — enumerate EVERY requirement from the spec.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "Short ID like R1, R2, R3"},
+          "text": {"type": "string", "description": "One-sentence requirement statement"},
+          "kind": {"type": "string", "description": "FUNCTIONAL | NON_FUNCTIONAL | TEST | CONSTRAINT"}
+        },
+        "required": ["id", "text"]
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "title": {"type": "string"},
+          "description": {"type": "string", "description": "Full task description in FULL_PLAN mode; OMIT in SKELETON_ONLY mode (the expander fills it)."},
+          "complexity": {"type": "string", "description": "LOW | MEDIUM | HIGH"},
+          "type": {"type": "string", "description": "LEAF (terminal task) or EPIC (will be expanded into subtasks). Default LEAF."},
+          "touchesFiles": {"type": "array", "items": {"type": "string"}},
+          "dependsOn": {"type": "array", "items": {"type": "string"}},
+          "hardConstraints": {"type": "array", "items": {"type": "string"}},
+          "meetsRequirements": {
+            "type": "array",
+            "description": "Requirement IDs (from the top-level requirements array) this task implements. OMIT in SKELETON_ONLY mode.",
+            "items": {"type": "string"}
+          }
+        },
+        "required": ["id", "title"]
+      }
+    }
+  },
+  "required": ["planTitle", "planSummary", "tasks"]
+}
+"""
+          .formatted(PROJECT_TYPE_VALUES, RUNTIME_SURFACE_VALUES);
 
   /**
    * v2.6.2 slice 2 — 32k breathing room. The old planner's 8192 cap truncated on multi-repo specs
@@ -132,8 +193,8 @@ public class OutlinePlannerAgent {
   /**
    * v2.6.2 slice 5b — synthesise a one-task plan for {@code SINGLE_SHOT} specs. No LLM planner call
    * (the title summarizer is LIGHTWEIGHT and only fires when the synthesised title would otherwise
-   * come from a regex fallback). Migrated from {@code PlannerAgent#synthesizeSingleShotPlan} so the
-   * legacy planner can be deleted.
+   * come from a regex fallback). Kept in this agent so every BUILD run shape uses one planner entry
+   * point.
    */
   public Plan synthesizeSingleShot(PlannerRequest req) {
     log.info(
@@ -417,68 +478,7 @@ public class OutlinePlannerAgent {
         DefaultToolDefinition.builder()
             .name("submitOutline")
             .description(description)
-            .inputSchema(
-                """
-{
-  "type": "object",
-  "properties": {
-    "planTitle": {"type": "string"},
-    "planSummary": {"type": "string"},
-    "projectType": {
-      "type": "string",
-      "description": "One of: java-spring-boot, node-backend, node-frontend, python, go, rust, cli, unknown"
-    },
-    "buildCommand": {
-      "type": "string",
-      "description": "Explicit build command, or omit to fall back to framework inference"
-    },
-    "smokeTestStrategy": {
-      "type": "string",
-      "description": "One of: BUILD, PREVIEW_HEALTH, TEST_SUITE"
-    },
-    "runtimeSurface": {
-      "type": "string",
-      "description": "How the code runs: HTTP, CLI, LIBRARY, STATIC_WEB. Default HTTP."
-    },
-    "requirements": {
-      "type": "array",
-      "description": "v2.5.11 — enumerate EVERY requirement from the spec.",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string", "description": "Short ID like R1, R2, R3"},
-          "text": {"type": "string", "description": "One-sentence requirement statement"},
-          "kind": {"type": "string", "description": "FUNCTIONAL | NON_FUNCTIONAL | TEST | CONSTRAINT"}
-        },
-        "required": ["id", "text"]
-      }
-    },
-    "tasks": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "title": {"type": "string"},
-          "description": {"type": "string", "description": "Full task description in FULL_PLAN mode; OMIT in SKELETON_ONLY mode (the expander fills it)."},
-          "complexity": {"type": "string", "description": "LOW | MEDIUM | HIGH"},
-          "type": {"type": "string", "description": "LEAF (terminal task) or EPIC (will be expanded into subtasks). Default LEAF."},
-          "touchesFiles": {"type": "array", "items": {"type": "string"}},
-          "dependsOn": {"type": "array", "items": {"type": "string"}},
-          "hardConstraints": {"type": "array", "items": {"type": "string"}},
-          "meetsRequirements": {
-            "type": "array",
-            "description": "Requirement IDs (from the top-level requirements array) this task implements. OMIT in SKELETON_ONLY mode.",
-            "items": {"type": "string"}
-          }
-        },
-        "required": ["id", "title"]
-      }
-    }
-  },
-  "required": ["planTitle", "planSummary", "tasks"]
-}
-""")
+            .inputSchema(SUBMIT_OUTLINE_SCHEMA)
             .build();
     final String callbackId = "outline-planner-" + UUID.randomUUID();
     return new ToolCallback() {

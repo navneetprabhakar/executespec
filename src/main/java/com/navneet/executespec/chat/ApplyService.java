@@ -41,9 +41,10 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Mutates the existing {@code pipeline_run.workspace_path} — no new run id
  * </ul>
  *
- * <p>Limits (2026-05-03 — Fix I): 60 iterations base cap (was 25 — too low for multi-file applies).
+ * <p>Limits (2026-06-06): 90 iterations base cap (was 60 — still too tight for
+ * non-frontier models applying multi-file suggestions in an existing workspace).
  * Project-scoped runs (workspace contains {@code repos/<name>/} subdirs) get the cap doubled to
- * 120, mirroring {@code SequentialExecutor.tierConfigFor}'s "project runs need 2× the fresh-scratch
+ * 180, mirroring {@code SequentialExecutor.tierConfigFor}'s "project runs need 2× the fresh-scratch
  * budget because every readFile/writeFile crosses a directory boundary" rule. Workspace-level
  * concurrency is the caller's responsibility — if two Applies fire on the same run, git may throw
  * dirty-index errors; that's acceptable for now since the UI only surfaces one button at a time.
@@ -65,7 +66,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ApplyService {
 
   /** Base iter cap — single-repo / scratch-workspace applies. */
-  static final int APPLY_BASE_ITER_CAP = 60;
+  static final int APPLY_BASE_ITER_CAP = 90;
 
   /** Multiplier for project-scoped applies (multi-repo / large existing codebase). */
   static final int APPLY_PROJECT_MULTIPLIER = 2;
