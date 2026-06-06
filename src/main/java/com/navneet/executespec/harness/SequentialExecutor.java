@@ -1132,7 +1132,7 @@ to boot — skip it for those.""";
    * Per-task tuning: tier-resolved model + iteration / max-token caps driven by the planner's
    * complexity tag.
    *
- * <ul>
+   * <ul>
    *   <li>LOW → LIGHTWEIGHT tier, 60 iters, 4096 max tokens
    *   <li>MEDIUM → WORKHORSE tier, 120 iters, 8192 max tokens
    *   <li>HIGH → PLANNING tier, 180 iters, 16384 max tokens

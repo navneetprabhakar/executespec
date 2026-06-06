@@ -41,13 +41,13 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Mutates the existing {@code pipeline_run.workspace_path} — no new run id
  * </ul>
  *
- * <p>Limits (2026-06-06): 90 iterations base cap (was 60 — still too tight for
- * non-frontier models applying multi-file suggestions in an existing workspace).
- * Project-scoped runs (workspace contains {@code repos/<name>/} subdirs) get the cap doubled to
- * 180, mirroring {@code SequentialExecutor.tierConfigFor}'s "project runs need 2× the fresh-scratch
- * budget because every readFile/writeFile crosses a directory boundary" rule. Workspace-level
- * concurrency is the caller's responsibility — if two Applies fire on the same run, git may throw
- * dirty-index errors; that's acceptable for now since the UI only surfaces one button at a time.
+ * <p>Limits (2026-06-06): 90 iterations base cap (was 60 — still too tight for non-frontier models
+ * applying multi-file suggestions in an existing workspace). Project-scoped runs (workspace
+ * contains {@code repos/<name>/} subdirs) get the cap doubled to 180, mirroring {@code
+ * SequentialExecutor.tierConfigFor}'s "project runs need 2× the fresh-scratch budget because every
+ * readFile/writeFile crosses a directory boundary" rule. Workspace-level concurrency is the
+ * caller's responsibility — if two Applies fire on the same run, git may throw dirty-index errors;
+ * that's acceptable for now since the UI only surfaces one button at a time.
  *
  * <p>Intentionally NOT annotated {@code @Transactional}. Callers dispatch async (see {@code
  * RunConversationController.applyExecutor}) and the inner JPA calls manage their own short tx scope
