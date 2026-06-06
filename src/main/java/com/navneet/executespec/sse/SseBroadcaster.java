@@ -140,10 +140,7 @@ public class SseBroadcaster {
           e.send(SseEmitter.event().comment("ping"));
         } catch (Throwable t) {
           dead.add(e);
-          try {
-            e.completeWithError(t);
-          } catch (Throwable ignored) {
-          }
+          completeQuietly(e);
         }
       }
       if (!dead.isEmpty()) {
@@ -247,10 +244,7 @@ public class SseBroadcaster {
         emitter.send(SseEmitter.event().id(String.valueOf(seqNum)).data(json));
       } catch (Throwable t) {
         dead.add(emitter);
-        try {
-          emitter.completeWithError(t);
-        } catch (Throwable ignored) {
-        }
+        completeQuietly(emitter);
         log.debug("SSE client disconnected for run {} ({})", runId, t.getMessage());
       }
     }
@@ -380,10 +374,7 @@ public class SseBroadcaster {
             emitter.send(SseEmitter.event().data(json));
           } catch (Throwable t) {
             dead.add(emitter);
-            try {
-              emitter.completeWithError(t);
-            } catch (Throwable ignored) {
-            }
+            completeQuietly(emitter);
           }
         }
         if (!dead.isEmpty()) {
@@ -393,6 +384,14 @@ public class SseBroadcaster {
       } catch (Exception e) {
         log.debug("[SSE] Redis listener error: {}", e.getMessage());
       }
+    }
+  }
+
+  private static void completeQuietly(SseEmitter emitter) {
+    try {
+      emitter.complete();
+    } catch (Throwable ignored) {
+      // client is already gone
     }
   }
 }

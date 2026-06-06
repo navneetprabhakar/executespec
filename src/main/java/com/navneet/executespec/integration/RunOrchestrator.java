@@ -95,11 +95,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RunOrchestrator implements RunControlPort {
 
-  /** Default V2 task classification — MEDIUM produces ≤ 4 tasks, good balance for most specs. */
   /**
-   * Fallback only — live classification flows through {@link
-   * com.navneet.executespec.agent.SpecClassifier} which picks SINGLE_SHOT / MEDIUM / MULTI_TASK
-   * from the spec itself (bug #3 fix).
+   * Back-compat classification for {@link PlannerRequest}. Live planning strategy flows through
+   * {@link com.navneet.executespec.agent.SmartClassifierAgent} and {@link PlanStrategy}; this enum
+   * remains only for legacy validation/task-cap paths that still read {@code
+   * PlannerRequest.classification}.
    */
   private static final Classification DEFAULT_CLASSIFICATION = Classification.MEDIUM;
 
@@ -1058,12 +1058,9 @@ public class RunOrchestrator implements RunControlPort {
             autoClassification,
             userRequest == null ? 0 : userRequest.length());
 
-        // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Verdict
-        // drives downstream routing in slice 2: SMALL/MEDIUM go through the
-        // OutlinePlannerAgent (32k cap, full plan in one call); SINGLE_SHOT,
-        // LARGE, LEGACY, and the null-on-failure case all stay on the legacy
-        // PlannerAgent. Cost flows through RunCostTracker so it auto-
-        // aggregates into the run total; per-phase columns get the diff.
+        // Smart classifier verdict drives downstream routing: SMALL/MEDIUM use the outline planner
+        // in full-plan mode; LARGE/LEGACY use skeleton expansion; SINGLE_SHOT is synthesized
+        // locally. Cost flows through RunCostTracker so it auto-aggregates into the run total.
         PlanStrategy planStrategy =
             planningCoordinator.runClassifierShadow(
                 runId, runRow, userRequest, projectId, selectedRepoIds, provider);
@@ -1118,7 +1115,10 @@ public class RunOrchestrator implements RunControlPort {
           try {
             String codeIntel =
                 contextComposer.buildCodeIntelContext(
-                    projectId, projectRepoService.resolveForRun(projectId, selectedRepoIds));
+                    projectId,
+                    projectRepoService.resolveForRun(projectId, selectedRepoIds),
+                    userRequest,
+                    featureFlagService.isEnabled("codeintel.tiered.enabled"));
             if (!codeIntel.isBlank()) {
               summary = summary + "\n\n" + codeIntel;
               log.info(
@@ -1202,7 +1202,7 @@ public class RunOrchestrator implements RunControlPort {
         //                    expansion → coherence pass.
         //   LEGACY         → defer to slice 4 — recursive depth-2
         //                    expansion isn't built yet, so degrade to LARGE.
-        //   SINGLE_SHOT / null / classifier failure → legacy planner.
+        //   SINGLE_SHOT / null / classifier failure → synthetic one-task plan.
         PlanStrategy effective =
             planStrategy == null
                 ? null
@@ -1247,7 +1247,7 @@ public class RunOrchestrator implements RunControlPort {
         } else if (effective == PlanStrategy.SINGLE_SHOT) {
           // v2.6.2 slice 5b — heuristic-fast-path classification.
           // No LLM planner call; synthesise a one-task plan from the
-          // spec verbatim. Migrated from the deleted PlannerAgent.
+          // spec verbatim.
           plan = outlinePlanner.synthesizeSingleShot(plannerReq);
         } else {
           // Classifier failed (effective == null) or returned an
@@ -1420,7 +1420,7 @@ public class RunOrchestrator implements RunControlPort {
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
-      // errors. Default cap is 50 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
+      // errors. Default cap is 70 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
       // gemini run 84252898 hit ITERATION_LIMIT_EXCEEDED with the build still unfixed.
       // Bumped to 80 for programbench-mode runs only — non-programbench runs unchanged.
       Integer reviewerMaxIter =
@@ -1805,7 +1805,10 @@ public class RunOrchestrator implements RunControlPort {
       try {
         String codeIntel =
             contextComposer.buildCodeIntelContext(
-                run.getProjectId(), projectRepoService.resolveForRun(run.getProjectId(), null));
+                run.getProjectId(),
+                projectRepoService.resolveForRun(run.getProjectId(), null),
+                userRequestLive,
+                featureFlagService.isEnabled("codeintel.tiered.enabled"));
         if (!codeIntel.isBlank()) {
           userRequestLive = codeIntel + "\n\n---\n\nTASK:\n" + userRequestLive;
           log.info("PATCH run={} injected code-intel ({} chars)", runId, codeIntel.length());

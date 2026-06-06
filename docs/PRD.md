@@ -200,7 +200,7 @@ Full pipeline above. Triggered by every standard `POST /api/runs` call when `run
 
 ### PATCH mode (V182)
 
-Single thin-agent loop against a failing-test spec; classifier/planner/reviewer are skipped. The per-provider iteration caps are Anthropic 150, OpenAI 100, Gemini 120 (set in `SequentialExecutor.tierConfigFor`). Patch mode is dispatched by [`RunOrchestrator.runPatchPipeline`](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) and uses [`PatchAgent`](../src/main/java/com/navneet/executespec/agent/PatchAgent.java) directly.
+Single thin-agent loop against a failing-test spec; classifier/planner/reviewer are skipped. The per-provider iteration caps are Anthropic/DeepSeek/OpenRouter 220, OpenAI 150, Gemini 180 (set in `PatchAgent.iterCapFor`). Patch mode is dispatched by [`RunOrchestrator.runPatchPipeline`](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) and uses [`PatchAgent`](../src/main/java/com/navneet/executespec/agent/PatchAgent.java) directly.
 
 Outcome → status mapping in `runPatchPipeline`:
 

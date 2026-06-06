@@ -1,12 +1,12 @@
 # Execution roadmap — prioritized
 
-> Created 2026-06-01; **re-prioritized 2026-06-03** — **founder priority: build the CLI first; only a
+> Created 2026-06-01; **re-prioritized 2026-06-03; doc refresh 2026-06-06** — **founder priority: build the CLI first; only a
 > critical bug pre-empts it.** SWE-bench eval **on hold**. Single ordered list across every active
 > track. Detailed per-item register: [`pending.md`](pending.md) (sections referenced inline).
 >
 > Tags: `[severity · impact · effort]` — effort **S**(≤1d) / **M**(days) / **L**(week+). 🔒 = security gate · ⏳ = eval-gated before default-ON.
 >
-> **Recently cleared (2026-06-03):** PR #199 merged [pending §A1–A3] · the 3 exposed keys rotated [pending §K1]. **Quick win now unblocked:** toggle `router.failover.enabled` ON [pending §C1] — 5-min SUPER_ADMIN action, fail-safe.
+> **Recently cleared:** PR #199 merged [pending §A1–A3] · the 3 exposed keys rotated [pending §K1] · operator-only Terminal-Bench first-20 harness landed [pending §J3; DeepSeek tuned to 12/20]. **Quick win now unblocked:** toggle `router.failover.enabled` ON [pending §C1] — 5-min SUPER_ADMIN action, fail-safe.
 
 ## Why this order
 Founder call (2026-06-03): **the CLI is the focus** — only a critical bug jumps ahead of it. The rest
@@ -41,13 +41,13 @@ because verifyBoot is preview-rebuild Phase 1 **and** the run-and-observe / veri
 ## P5 — Lower priority / optional / mechanical
 10. **D-residual dead-code deletions** `[low · low · S each]` — per-item dynamic-ref check first (the audit's "deletable" list was unreliable). [pending §I5 · `tech-debt.md`]
 11. **Mobile target** (Expo/EAS QR + `expo export --platform web` + device-cloud verification) `[low · med · L]` 🔒 — only once the preview rebuild is solid; never self-host iOS/Android simulators. [preview Phase 5]
-12. **Pre-existing debt** `[low · med · M]` — frontend code-splitting + frontend unit tests (`api.ts` ~2K LOC untested), `ProviderHealthTracker` circuit breaker on the V2 failover path, JAVADOC rewrite. [pending §G]
+12. **Pre-existing debt** `[low · med · M]` — frontend code-splitting + frontend unit tests (`frontend/src/lib/api/core.ts` ~2K LOC untested), `ProviderHealthTracker` circuit breaker on the V2 failover path, JAVADOC rewrite. [pending §G]
 13. **DeepSeek native-client smoke** `[low · low · S]` — validation only, on `feat/benchmark-codegen-harness`. [pending §I4]
 14. **Test the latest Qwen coding model via OpenRouter** `[low · low · S]` — founder request (2026-06-03), pick up at the end: add the newest verified Qwen coder slug to `OpenRouterModelMapper` + an `application.yml` matrix entry, then eval quality/latency/cost. [pending §L1]
 
 ## ⏸ Held (not scheduled)
 - **SWE-bench eval-improvement track** [pending §H] — on hold (2026-06-03). Resume after the CLI lands.
-- **Terminal-Bench (J3)** + **`run-core-codegen.sh` patchBytes fix (J5)** — benchmark/eval-adjacent; Terminal-Bench also depends on the CLI (#1). Held with the SWE-bench pause.
+- **`run-core-codegen.sh` patchBytes fix (J5)** — benchmark/eval-adjacent; held with the SWE-bench pause.
 - **Rebrand** [pending §F0] — founder-gated; compiler-gated mechanical pass (~1,100 files), align with the clients' repo split.
 - **`verifiedScore` weighting** [pending §F1] — #2 already de-risks this by making BUILD/TESTS deterministic; revisit the *weighting* after.
 - **Claude Code / Codex head-to-head report** [pending §F2] — handled on your setup.
@@ -60,7 +60,7 @@ P0 critical bugs (if any) ──▶ pre-empts the CLI
 
 #1 CLI (FOCUS) ── largely independent; ships first
                   └─▶ #8 drop ProgramBench (cleanest after the CLI surface settles)
-                  └─▶ (later) Terminal-Bench — held
+                  └─▶ production LOCAL-mode activation; the operator Terminal-Bench harness is already landed
 
 #2 verifyBoot (KEYSTONE) ─┬─▶ #3 latency Phase 0
                           ├─▶ #4 preview rebuild ─▶ #11 mobile

@@ -63,6 +63,16 @@ import lombok.Builder;
  *     com.navneet.executespec.harness.SequentialExecutor} from the {@code
  *     worker.salvage-force-tool-choice.enabled} flag (V224, default OFF). Null/false ⇒ today's
  *     behaviour (full tool set, {@code tool_choice="auto"}).
+ * @param terminalArtifactDeadlineAfter optional absolute iteration for Terminal-Bench style tasks.
+ *     When set, the worker injects a stronger deliverable checkpoint at that iteration even if
+ *     shell commands are still making progress. This preserves shell-as-progress while preventing
+ *     long terminal loops from spending the enlarged iteration budget without producing the
+ *     requested {@code /app} artifact.
+ * @param terminalTaskMode true for Terminal-Bench style tasks where shell commands are the normal
+ *     way to mutate the sandbox and produce deliverables under {@code /app}. In this mode
+ *     {@code shell} counts as progress for the stagnation guard, and progress nudges use
+ *     terminal-output wording instead of product code-edit wording. Null/false preserves the
+ *     product worker behaviour.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -79,7 +89,9 @@ public record WorkerTaskRequest(
     Boolean requireTestVerification,
     Boolean requireBuildVerification,
     Integer wallClockSeconds,
-    Boolean forceToolChoiceOnSalvage) {
+    Boolean forceToolChoiceOnSalvage,
+    Integer terminalArtifactDeadlineAfter,
+    Boolean terminalTaskMode) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

@@ -57,15 +57,12 @@ import lombok.extern.slf4j.Slf4j;
 public class ReviewerAgent {
 
   /**
-   * Default iteration cap per review pass. Was 30 — bumped to 50 on 2026-04-19 after reviewer
-   * REVIEW_FAILED on run 0a0201c7 (RN Calorie Tracker) where the wiring pass ran out of budget
-   * scanning a 7-file scaffold plus test suite. Reviewer does read-heavy work (readFile +
-   * searchFiles), so iter cap grows roughly with codebase size, not LLM call cost. (Historical
-   * note: original cap was 40 matching worker, trimmed to 30 because review is cheaper. Bumping to
-   * 50 — still below worker's 50/75.) Smaller than worker's HIGH=75 because review passes are
-   * fundamentally inspection + targeted edits, not generation.
+   * Default iteration cap per review pass. Raised to 70 on 2026-06-06 alongside the worker cap
+   * increase: reviewers do read-heavy wiring inspection and non-frontier models need enough turns to
+   * inspect, patch, and re-check without hitting an artificial ceiling. Still below the main worker
+   * HIGH cap because review passes are inspection + targeted edits, not generation.
    */
-  public static final int DEFAULT_MAX_ITER_PER_PASS = 50;
+  public static final int DEFAULT_MAX_ITER_PER_PASS = 70;
 
   /**
    * 2026-05-19 — Phase 2 auto-fix. Iteration cap for the third "fix-the-red-build" pass. Smaller
@@ -73,9 +70,10 @@ public class ReviewerAgent {
    * build error, the LLM only needs enough budget to read the affected file(s) and patch the
    * specific failure — not to scan the whole repo. 25 iterations ≈ 5–10 minutes on PLANNING tier,
    * which is the budget a junior engineer would need to fix a "missing import" or "wrong type"
-   * compile error.
+   * compile error. Raised to 35 on 2026-06-06 so the pass can handle small multi-file compile
+   * breakages without becoming a second full review pass.
    */
-  public static final int FIX_BUILD_PASS_MAX_ITER = 25;
+  public static final int FIX_BUILD_PASS_MAX_ITER = 35;
 
   /** Wall-clock cap on the fix-build pass — narrower scope than general/wiring. */
   public static final long FIX_BUILD_PASS_TIMEOUT_SECONDS = 360;

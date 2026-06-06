@@ -137,10 +137,7 @@ public class ModelRegistry {
     return config != null ? config.getProvider() : null;
   }
 
-  /**
-   * Returns true if the model name is known (either canonical or a legacy alias). Replaces {@code
-   * PlannerAgent.isConcreteModelName()}.
-   */
+  /** Returns true if the model name is known, either canonical or a legacy alias. */
   public boolean isKnownModel(String name) {
     if (name == null) return false;
     return lookupConfig(name) != null;

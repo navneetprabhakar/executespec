@@ -12,11 +12,11 @@
 >
 > **Legend:** 🔴 blocks / highest-priority · 🟠 should do soon · 🟡 planned / eval-gated · ⚪ optional / pre-existing · ✅ done.
 
-## Priority snapshot (2026-06-03)
+## Priority snapshot (2026-06-06)
 
 > Ordered TODO with full rationale + `[severity · impact · effort]` tags: [`ROADMAP.md`](ROADMAP.md).
 > **Founder priority (2026-06-03): build the CLI first; only a critical bug pre-empts it.** SWE-bench (§H) on hold.
-> Recently cleared: §A1–A3 (PR #199 merged) · §K1 (keys rotated). Quick win now unblocked: §C1 (toggle `router.failover` ON — 5-min SUPER_ADMIN action). Tiers:
+> Recently cleared: §A1–A3 (PR #199 merged) · §K1 (keys rotated) · §J3 (operator-only Terminal-Bench adapter; DeepSeek first-20 now 12/20 after terminal-mode tuning). Quick win now unblocked: §C1 (toggle `router.failover` ON — 5-min SUPER_ADMIN action). Tiers:
 >
 > - **P0 — pre-empts everything: critical bugs.** None currently tracked; a critical bug jumps ahead of the CLI.
 > - **P1 — CURRENT FOCUS: build the CLI** — the unified `spec` client per ADR-0001 + [`plans/cli-vscode-unified-client-execution-2026-05-30.md`](plans/cli-vscode-unified-client-execution-2026-05-30.md): §J1 (chat surface + local-hands wiring + VS Code sidebar) + §J4 (CLI-local embedder)
@@ -24,7 +24,7 @@
 > - **P3 — latency:** §D1–D3 (Phase 0, eval-gated)
 > - **P4 — rebuild + refactor:** preview rebuild core ([`plans/preview-live-environment-rebuild.md`](plans/preview-live-environment-rebuild.md)) · §I2 (batch wiring) · §E1/I1 (RunOrchestrator split) · §D4 (parallel exec) · §J2 (drop ProgramBench) · §I3 (C3 tenant ORM isolation)
 > - **P5 — optional / end:** §I5 (dead-code) · mobile · §G (frontend / circuit breaker / JAVADOC) · §I4 (DeepSeek smoke) · §L1 (test latest Qwen coder via OpenRouter)
-> - **⏸ Held:** §H (SWE-bench) · §J3 (Terminal-Bench) · §J5 (patchBytes fix) · §F0 (rebrand) · §F1 (score weighting) · §F2 (head-to-head)
+> - **⏸ Held:** §H (SWE-bench) · §J5 (patchBytes fix) · §F0 (rebrand) · §F1 (score weighting) · §F2 (head-to-head)
 
 ## Update 2026-06-01 (pass 2 — "fix all")
 Fixed everything feasible without a compiler/network (the sandbox blocks maven repos — 403):
@@ -101,7 +101,7 @@ Per founder call, defaults are NOT flipped; toggle in the SUPER_ADMIN flag conso
 ## E. Larger refactors
 
 ### E1 🟠 RunOrchestrator god-class — next break
-- **What:** continue splitting the ~4,456-LOC `RunOrchestrator` per [`plans/runorchestrator-god-class-split.md`](plans/runorchestrator-god-class-split.md) (6 by-hand increments; candidate next: the validation-report / PR-push run-end orchestration into a focused service with its own tests).
+- **What:** continue the residual split of the now-~2.6K-LOC `RunOrchestrator` per [`plans/runorchestrator-god-class-split.md`](plans/runorchestrator-god-class-split.md) (candidate next: validation-report / PR-push run-end orchestration into a focused service with its own tests).
 - **Why deferred:** the plan doc records that **automated extraction corrupted the file twice** — must be done by-hand, increment-by-increment, with the build running after each step. Not safe to attempt in a no-compile sandbox.
 - **Owner action:** execute locally, one increment + full test per commit.
 
@@ -139,7 +139,7 @@ Per founder call, defaults are NOT flipped; toggle in the SUPER_ADMIN flag conso
 
 ## H. SWE-bench eval-improvement track
 
-> **⏸ ON HOLD (founder, 2026-06-03)** — deprioritized for now; not on the active TODO. Also covers the benchmark-harness fix **J5** and gates Terminal-Bench **J3**. Resume after the P0–P1 product work lands.
+> **⏸ ON HOLD (founder, 2026-06-03)** — deprioritized for now; not on the active TODO. Also covers the benchmark-harness fix **J5**. The operator-only Terminal-Bench adapter (**J3**) landed separately on 2026-06-05 because it validates the local-hands transport without touching SWE-bench.
 >
 > Was `handoff/2026-06-01-eval-gpt-crack.md`. Durable record: **RL-2026-05-061**. Harness: `~/swebench-bench/` + GCP env `infra/benchmark/` (`EVAL-ENV-PLAN.md`).
 
@@ -173,7 +173,7 @@ Standings (post-diff-strip, verification OFF, /50): **Sonnet 23 · Gemini 22 · 
   - 🟡 **Phase 2 — CLI chat REPL (in progress).** ✅ **Slice 1 landed (2026-06-03):** `core/chat.ts` (POST-SSE consumer capturing the `event:` discriminator + `ChatSession` stateless conversation manager) + `HttpClient.stream()` + `cli/repl.ts` (readline REPL: `/help` `/provider` `/clear` `/exit`; Ctrl-C cancels the in-flight reply, exits at the idle prompt) wired so `spec` with no command on a TTY drops into chat; 5 SSE-parser tests green; parity F5 (chat) flipped CLI→shipped. ✅ **Command-surface slice landed (2026-06-03):** founder-locked the command keywords (design §4a + `capabilities.ts` F26/F27 + flips F14/F24/F25→shipped) and shipped `stats` · `doctor` · `project list|view|runs` · top-level aliases `login`/`logout`/`whoami`/`chat` · `run cost`/`run retry` (+ `cli/render.ts` shared render helpers + `api.ts` project methods); all smoke-verified live. ✅ **Link + local-state slice landed (2026-06-03):** `core/localState.ts` (`FileStateBackend` — per-dir `.executespec/project.json` link + global `state.json` defaults + `resolveProjectId` precedence explicit>link>default) + `cli` `link`/`unlink`/`project use` + `run submit` resolves the project from the dir link; parity F17/F18 flipped CLI→shipped; 3 localState unit tests + offline command smoke green (live `link --project`/`project use` validation needs a backend). **Remaining (Phase 2):** conversation persistence/resume (chats/), `token list/create/revoke` + `config` + `review pr/code` verbs, the **device-code auth flow** (headless — needs `POST /api/auth/device/{code,token}`), the Phase-2 cost gate.
   - 🟡 **Then:** Phase 3 (`RunOrchestrator` LOCAL-mode activation: register/unregister + skip-clone + skip-push), Phase 4 (VS Code sidebar webview). Backend tool-proxy + PAT auth already landed dormant.
 - 🟡 **J2 — Drop ProgramBench (cleanup).** SWE-bench (BUILD-mode `benchmark/`) + Terminal-Bench cover the slot; ProgramBench is paid-for complexity production never touches. ~1–2d, one PR. Surface: the `programbench/*` package; the `programBenchContainers != null` branch in `ShellTool`/`BuildProjectTool`/`RunTestsTool`/`ShellSandboxPolicy`; refs in `RunOrchestrator`/`SequentialExecutor`/`WorkspaceTestRunner`/`WorkerAgent`/`SmartClassifierAgent`; `RunMode`/`PipelineRun` enum values; swebench import cleanup; tests (`AsyncAllowlistTest`, `BuildProjectToolWrapTest`, `ShellSandboxPolicyTest`); optional follow-up migration `DROP TABLE program_trial` (V129). Cleanest after J1 so the action-tool surface doesn't churn under it.
-- 🟡 **J3 — Terminal-Bench via CLI.** Validates the local-hands story (vs server-side container plumbing SWE-bench already proves). **Depends on J1.** Build: `clients/cli/src/bench/terminalbench/` (task.yaml loader + `docker run`/`stop` lifecycle + `docker exec tests/run.sh` verify dispatch) + `spec bench terminal-bench --case|--set|--all` + a minimal server `terminalbench/` adapter mirroring `benchmark/` + categorized RESOLVED% scoring matching the SWE-bench score-JSON shape. ~1 focused week, separate branch. SOTA ≈ 52% (Sonnet 4.6); 40%+ on the 2.1 representative-20 slice = a real signal. Start with representative-20.
+- ✅ **J3 — Terminal-Bench ExecuteSpec adapter — DONE (RL-2026-06-004).** The local-hands proof now runs through an operator-only Harbor adapter, not the product CLI: `terminalbench/TerminalBenchController` (`POST /api/v2/test/terminal-bench/start`, `local|dev` + SUPER_ADMIN) + `TerminalBenchRunService` run the V2 `WorkerAgent` directly in REMOTE-tool mode, while `~/tbench/es_harbor_agent.py` executes tools inside Terminal-Bench containers and posts results back. Validated pump + Harbor smoke; DeepSeek first-20 baseline = **7/20 resolved (35%) for about $0.09**; 80-floor tuning and the later 100-floor/finalizer run both reached **12/20 resolved (60%)**, with the 100-run costing **$0.400126** over **47m52s** and exposing verifier/performance prompt misses as the next lever. Standing eval policy: keep Terminal-Bench 2.0 / 2.1 iterations **DeepSeek-first**, inspect failures after every run, change one harness lever at a time, and only move to Anthropic/OpenAI/Gemini once DeepSeek quality is stable enough for provider comparison. A future `spec bench terminal-bench ...` CLI wrapper remains optional productization, not a blocker for the benchmark/local-hands proof.
 - ⚪ **J4 — CLI-local embedder (T3.8).** Server-side code-chunk RAG already shipped (`search_code` / `project/rag/CodeIndexingService` / `project_code_chunk` V223). Remaining: a local-only embedder for the CLI/Plugin via `xenova/transformers` (~1d). Founder signed off.
 - ⚪ **J5 — `run-core-codegen.sh` patchBytes race fix (#91 / T4.15).** Local-only fix in `~/swebench-bench/`, never committed (the script isn't in the repo). Fold into the published copy if/when the harness is published.
 
