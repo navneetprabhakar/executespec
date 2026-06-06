@@ -181,12 +181,12 @@ class SequentialExecutorTierConfigTest {
   void low_stagnation_force_24_on_project_runs() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", true);
-    assertEquals(16, fresh.stagnationForceAfter, "fresh-scratch LOW gets a modestly looser force threshold");
+    assertEquals(
+        16, fresh.stagnationForceAfter, "fresh-scratch LOW gets a modestly looser force threshold");
     assertEquals(
         24,
         proj.stagnationForceAfter,
-        "project-run LOW gets 24 (readFile-heavy reverse-engineering needs"
-            + " more headroom)");
+        "project-run LOW gets 24 (readFile-heavy reverse-engineering needs" + " more headroom)");
   }
 
   @Test

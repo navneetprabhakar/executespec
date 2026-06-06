@@ -392,8 +392,8 @@ public class WorkerAgent {
         if (terminalTaskMode && !terminalForcedFinalizerAttempted) {
           terminalForcedFinalizerAttempted = true;
           log.warn(
-              "WorkerAgent TERMINAL_WALL_CLOCK_FINALIZER run={} task={} iter={} elapsedMs={} capMs={}"
-                  + " totalWrites={}",
+              "WorkerAgent TERMINAL_WALL_CLOCK_FINALIZER run={} task={} iter={} elapsedMs={}"
+                  + " capMs={} totalWrites={}",
               runId,
               req.context().taskId(),
               iter,
@@ -401,8 +401,7 @@ public class WorkerAgent {
               wallClockMillisCap,
               totalWriteCalls);
           WorkerResult finalized =
-              runTerminalFinalizerCall(
-                  req, history, toolsDispatched, toolLog, start, iter, false);
+              runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, false);
           if (finalized != null) return finalized;
         }
         log.warn(
@@ -859,7 +858,8 @@ public class WorkerAgent {
       }
       if (terminalTaskMode && !progressNudged && iter >= progressWarnAfter) {
         log.info(
-            "WorkerAgent TERMINAL_ARTIFACT_NUDGE run={} task={} iter={} threshold={} totalWrites={}",
+            "WorkerAgent TERMINAL_ARTIFACT_NUDGE run={} task={} iter={} threshold={}"
+                + " totalWrites={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
@@ -872,7 +872,8 @@ public class WorkerAgent {
           && !terminalArtifactDeadlineNudged
           && iter >= terminalArtifactDeadlineAfter) {
         log.info(
-            "WorkerAgent TERMINAL_ARTIFACT_DEADLINE run={} task={} iter={} threshold={} totalWrites={}",
+            "WorkerAgent TERMINAL_ARTIFACT_DEADLINE run={} task={} iter={} threshold={}"
+                + " totalWrites={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
@@ -1638,19 +1639,19 @@ public class WorkerAgent {
           + " small literal answers, or one shell command/script for computed artifacts. The"
           + " benchmark scores the actual files under /app; analysis without producing that file"
           + " scores zero.\n"
-              + "3. If /tests exists, inspect or run /tests/test.sh or the narrow failing test now."
-              + " Visible tests are the scoring contract. For expensive/performance tests, use a"
-              + " bounded smoke command first, then the official verifier when ready.\n"
-              + "4. If visible tests or failures show an exact expected literal, output path, file"
-              + " list, or directory contents, satisfy that contract exactly. Do not add extra values"
-              + " or leave helper binaries/scratch files in deliverable directories.\n"
-              + "5. For sanitizer/filter/transform tasks, preserve benign input byte-for-byte unless"
-              + " the tests require normalization. Add a detection-first no-op path: if no"
-              + " prohibited construct is present, leave/copy the file unchanged and do not run a"
-              + " parser/formatter/serializer over it.\n"
-              + "6. If a failure names a concrete symbol/API/file/pattern, grep recursively and fix all"
-              + " relevant occurrences before retesting. If it says a required file is missing,"
-              + " create that exact file before more broad exploration.\n"
+          + "3. If /tests exists, inspect or run /tests/test.sh or the narrow failing test now."
+          + " Visible tests are the scoring contract. For expensive/performance tests, use a"
+          + " bounded smoke command first, then the official verifier when ready.\n"
+          + "4. If visible tests or failures show an exact expected literal, output path, file"
+          + " list, or directory contents, satisfy that contract exactly. Do not add extra values"
+          + " or leave helper binaries/scratch files in deliverable directories.\n"
+          + "5. For sanitizer/filter/transform tasks, preserve benign input byte-for-byte unless"
+          + " the tests require normalization. Add a detection-first no-op path: if no"
+          + " prohibited construct is present, leave/copy the file unchanged and do not run a"
+          + " parser/formatter/serializer over it.\n"
+          + "6. If a failure names a concrete symbol/API/file/pattern, grep recursively and fix all"
+          + " relevant occurrences before retesting. If it says a required file is missing,"
+          + " create that exact file before more broad exploration.\n"
           + "Do not keep dumping huge files or re-reading state you already checked. If a candidate"
           + " already passes the verifier-shaped check, preserve it and complete instead of making"
           + " risky marginal changes.";
@@ -1680,27 +1681,28 @@ public class WorkerAgent {
   static String terminalArtifactDeadlineMessage() {
     return "TERMINAL DELIVERABLE DEADLINE:\n"
         + "Stop broad exploration. In the next tool call, do ONE focused action:\n"
-        + "1. If the requested /app deliverable already exists, verify it with a focused shell"
-        + " command or readFile, then call completeTask.\n"
-        + "2. If you know the requested output path and it is missing or stale, create or overwrite"
-        + " that exact path now with the best verified candidate.\n"
-        + "3. If /tests exists, run /tests/test.sh or the narrow relevant check now. For expensive"
-        + " or performance checks, use timeout/reduced iterations for smoke, then the official"
-        + " verifier once the candidate is ready.\n"
-        + "4. If visible tests assert exact literals, exact file names, or exact directory contents,"
-        + " make the /app artifact match those assertions byte-for-byte. Remove temporary binaries,"
-        + " caches, and scratch files from deliverable directories unless the tests expect them.\n"
+        + "1. If the requested /app deliverable already exists, verify it with a focused"
+        + " shell command or readFile, then call completeTask.\n"
+        + "2. If you know the requested output path and it is missing or stale, create or"
+        + " overwrite that exact path now with the best verified candidate.\n"
+        + "3. If /tests exists, run /tests/test.sh or the narrow relevant check now. For"
+        + " expensive or performance checks, use timeout/reduced iterations for smoke, then"
+        + " the official verifier once the candidate is ready.\n"
+        + "4. If visible tests assert exact literals, exact file names, or exact directory"
+        + " contents, make the /app artifact match those assertions byte-for-byte. Remove"
+        + " temporary binaries, caches, and scratch files from deliverable directories"
+        + " unless the tests expect them.\n"
         + "5. For sanitizer/filter/transform tasks, verify clean input remains byte-for-byte"
-        + " unchanged unless tests require normalization. Implement a detection-first no-op path"
-        + " for clean inputs; do not parse and reserialize clean files.\n"
-        + "6. If you still do not know the output path, re-read only the task/instruction file to"
-        + " extract the exact path and format, then create it immediately.\n"
-        + "If your current candidate already passes a verifier-shaped check, stop changing it and"
-        + " call completeTask. Do not overwrite a passing candidate with speculative"
+        + " unchanged unless tests require normalization. Implement a detection-first no-op"
+        + " path for clean inputs; do not parse and reserialize clean files.\n"
+        + "6. If you still do not know the output path, re-read only the task/instruction"
+        + " file to extract the exact path and format, then create it immediately.\n"
+        + "If your current candidate already passes a verifier-shaped check, stop changing"
+        + " it and call completeTask. Do not overwrite a passing candidate with speculative"
         + " optimizations.\n"
-        + "Do not spend another turn on package installs, directory listings, broad searches, or"
-        + " unrelated analysis unless that single command directly creates or verifies the required"
-        + " deliverable.";
+        + "Do not spend another turn on package installs, directory listings, broad"
+        + " searches, or unrelated analysis unless that single command directly creates or"
+        + " verifies the required deliverable.";
   }
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {

@@ -69,10 +69,10 @@ import lombok.Builder;
  *     long terminal loops from spending the enlarged iteration budget without producing the
  *     requested {@code /app} artifact.
  * @param terminalTaskMode true for Terminal-Bench style tasks where shell commands are the normal
- *     way to mutate the sandbox and produce deliverables under {@code /app}. In this mode
- *     {@code shell} counts as progress for the stagnation guard, and progress nudges use
- *     terminal-output wording instead of product code-edit wording. Null/false preserves the
- *     product worker behaviour.
+ *     way to mutate the sandbox and produce deliverables under {@code /app}. In this mode {@code
+ *     shell} counts as progress for the stagnation guard, and progress nudges use terminal-output
+ *     wording instead of product code-edit wording. Null/false preserves the product worker
+ *     behaviour.
  */
 @Builder
 public record WorkerTaskRequest(

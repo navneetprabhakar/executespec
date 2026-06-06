@@ -58,9 +58,9 @@ public class ReviewerAgent {
 
   /**
    * Default iteration cap per review pass. Raised to 70 on 2026-06-06 alongside the worker cap
-   * increase: reviewers do read-heavy wiring inspection and non-frontier models need enough turns to
-   * inspect, patch, and re-check without hitting an artificial ceiling. Still below the main worker
-   * HIGH cap because review passes are inspection + targeted edits, not generation.
+   * increase: reviewers do read-heavy wiring inspection and non-frontier models need enough turns
+   * to inspect, patch, and re-check without hitting an artificial ceiling. Still below the main
+   * worker HIGH cap because review passes are inspection + targeted edits, not generation.
    */
   public static final int DEFAULT_MAX_ITER_PER_PASS = 70;
 
