@@ -50,6 +50,13 @@ public class EditFileTool implements Tool {
    */
   private final ReadFileStateStore readState;
 
+  /**
+   * B1 (RL-2026-06, vix-leverage W1.1) — post-edit syntax diagnostics. Itself flag-gated (default
+   * OFF) and fail-open. Null in unit tests that construct the tool directly (null-guarded at the
+   * call site); a real bean in production.
+   */
+  private final EditDiagnosticsService editDiagnostics;
+
   @Override
   public String name() {
     return "editFile";
@@ -199,13 +206,19 @@ public class EditFileTool implements Tool {
       } catch (Exception ssee) {
         log.debug("FILE_WRITTEN SSE broadcast failed path={} runId={}", path, ctx.runId(), ssee);
       }
-      return ToolResult.ok(
+      String summary =
           "applied "
               + editsNode.size()
               + " edit(s) to "
               + path
               + ": "
-              + String.join("; ", appliedSummary));
+              + String.join("; ", appliedSummary);
+      // B1 — append fast post-edit syntax diagnostics (flag-gated, fail-open; null in unit tests).
+      String diag =
+          editDiagnostics == null
+              ? ""
+              : editDiagnostics.diagnose(ctx, path).map(d -> "\n" + d).orElse("");
+      return ToolResult.ok(summary + diag);
     } catch (SecurityException se) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
     } catch (IOException ioe) {

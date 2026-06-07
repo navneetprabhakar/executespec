@@ -629,10 +629,12 @@ A3 schemas, A4 Gemini cache, caps, cache-token recording) are **out of scope** �
 >    new tool / behavioral change is validated across Anthropic + OpenAI + Gemini + DeepSeek.
 
 **Conventions (per repo rules):** every feature is flag-gated via `FeatureFlagService.isEnabled(...)`
-seeded by a new Flyway `Vxxx` — **migration allocation (avoid collisions; corrected after V231 shipped as
-`worker.critic-pass.enabled`):** **V232** = `worker.compaction.enabled` (owned by the compaction sub-plan,
-§W2.1), **V233** = `worker.edit-diagnostics.enabled` (W1.1), **V234** = the A2 cache flag (W2.2),
-**V235/V236** = code-intel flags (W3); head is **V231**, confirm with `ls V*.sql` before creating per repo rule; ship CLAUDE.md +
+seeded by a new Flyway `Vxxx` — **migration allocation (avoid collisions):** **V232** =
+`worker.edit-diagnostics.enabled` (W1.1/B1, **SHIPPED 2026-06-07**, RL-2026-06-009 — took V232, not the
+originally-reserved V233, because the founder-gated `worker.compaction.enabled` it was reserved against did
+not land first, and Flyway forbids back-filling a lower version after a higher one applies). Remaining flags
+(compaction §W2.1, the A2 cache flag W2.2, code-intel W3) allocate to the **next free `Vxxx`** when
+implemented — head is now **V232**, confirm with `ls V*.sql` before creating per repo rule; ship CLAUDE.md +
 per-package CLAUDE.md + `docs/reason-log/2026-06.md` updates in the same commit; test locally
 (`JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q verify`) before any push; **no push without explicit
 approval**; one branch / one PR for the session, not per slice.

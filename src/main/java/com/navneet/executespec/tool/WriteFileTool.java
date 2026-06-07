@@ -43,6 +43,12 @@ public class WriteFileTool implements Tool {
    */
   private final ReadFileStateStore readState;
 
+  /**
+   * B1 (RL-2026-06, vix-leverage W1.1) — post-edit syntax diagnostics on the newly written file.
+   * Flag-gated (default OFF) + fail-open; null-guarded so unit tests need not wire it.
+   */
+  private final EditDiagnosticsService editDiagnostics;
+
   @Override
   public String name() {
     return "writeFile";
@@ -116,7 +122,13 @@ public class WriteFileTool implements Tool {
       } catch (Exception ssee) {
         log.debug("FILE_WRITTEN SSE broadcast failed path={} runId={}", path, ctx.runId(), ssee);
       }
-      return ToolResult.ok("wrote " + content.length() + " chars to " + path);
+      // B1 — fast post-edit syntax diagnostics on the new file (flag-gated, fail-open; null in
+      // tests).
+      String diag =
+          editDiagnostics == null
+              ? ""
+              : editDiagnostics.diagnose(ctx, path).map(d -> "\n" + d).orElse("");
+      return ToolResult.ok("wrote " + content.length() + " chars to " + path + diag);
     } catch (SecurityException se) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
     } catch (IOException ioe) {
