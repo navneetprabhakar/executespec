@@ -14,9 +14,35 @@ import {
 import { type ParsedArgs, flagBool, flagNum, flagStr } from '../args.js';
 import { bold, confirm, cyan, dim, errln, errorMessage, green, out, printJson, red, yellow } from '../ui.js';
 
+type OutputFormat = 'text' | 'json' | 'stream-json';
+
 interface WatchOpts {
   yes: boolean;
-  json: boolean;
+  format: OutputFormat;
+}
+
+const FORMATS: readonly string[] = ['text', 'json', 'stream-json'];
+const PROVIDERS: readonly string[] = ['ANTHROPIC', 'OPENAI', 'GEMINI', 'GOOGLE', 'OPENROUTER'];
+const EXEC_MODES: readonly string[] = ['PRODUCTION', 'PROTOTYPE'];
+const REPO_MODES: readonly string[] = ['NEW', 'EXISTING'];
+
+/** Resolve the output format: `--format` wins; else `--json` (back-compat) ⇒ json; else text. */
+export function resolveFormat(flags: ParsedArgs['flags']): OutputFormat {
+  const f = flagStr(flags, 'format');
+  if (f === 'text' || f === 'json' || f === 'stream-json') return f;
+  return flagBool(flags, 'json') ? 'json' : 'text';
+}
+
+/** True for any machine format (json / stream-json) — the single-shot read commands key off this. */
+function isMachine(f: OutputFormat): boolean {
+  return f !== 'text';
+}
+
+/** Read the whole of stdin as UTF-8 (for `run submit -`). */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const c of process.stdin) chunks.push(c as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export async function runCommand(
@@ -24,6 +50,11 @@ export async function runCommand(
   args: ParsedArgs,
   client: ClientBundle,
 ): Promise<number> {
+  const fmtRaw = flagStr(args.flags, 'format');
+  if (fmtRaw && !FORMATS.includes(fmtRaw)) {
+    errln(`Invalid --format ${fmtRaw} (${FORMATS.join(' | ')})`);
+    return 2;
+  }
   switch (sub) {
     case 'submit':
       return submit(args, client);
@@ -33,6 +64,8 @@ export async function runCommand(
       return view(args, client);
     case 'watch':
       return watch(args, client);
+    case 'attach':
+      return attach(args, client);
     case 'approve':
       return decide(args, client, true);
     case 'reject':
@@ -49,7 +82,7 @@ export async function runCommand(
       return local(args, client);
     default:
       errln(
-        'Usage: executespec run <submit|list|view|watch|approve|reject|cancel|report|cost|retry|local>',
+        'Usage: executespec run <submit|list|view|watch|attach|approve|reject|cancel|report|cost|retry|local>',
       );
       return 2;
   }
@@ -62,7 +95,7 @@ async function cost(args: ParsedArgs, client: ClientBundle): Promise<number> {
     return 2;
   }
   const c = await client.api.getCost(runId);
-  if (flagBool(args.flags, 'json')) {
+  if (isMachine(resolveFormat(args.flags))) {
     printJson(c);
     return 0;
   }
@@ -78,18 +111,43 @@ async function retry(args: ParsedArgs, client: ClientBundle): Promise<number> {
     return 2;
   }
   const res = await client.api.retryTask(runId, taskId);
-  if (flagBool(args.flags, 'json')) {
+  if (isMachine(resolveFormat(args.flags))) {
     printJson(res);
     return 0;
   }
-  out(green(`Retrying task ${taskId}.`) + dim(' Track with `run view` / `run watch`.'));
+  errln(green(`Retrying task ${taskId}.`) + dim(' Track with `run view` / `run watch`.'));
   return 0;
 }
 
 async function submit(args: ParsedArgs, client: ClientBundle): Promise<number> {
-  const spec = args.positionals[0];
+  // Spec from a positional, or from stdin when given as `-` (piping / CI).
+  let spec = args.positionals[0];
+  if (spec === '-') spec = (await readStdin()).trim();
   if (!spec) {
     errln('Usage: executespec run submit "<spec>" [--repo URL] [--project ID] [--provider P] [--watch]');
+    errln(dim('       (use `-` as the spec to read it from stdin)'));
+    return 2;
+  }
+  // Pre-flight the credential before doing any work, so an unauthenticated user gets an actionable
+  // message instead of a raw 401 from submitRun.
+  if (!(await client.tokens.get())) {
+    errln(red('Not signed in.') + ' Run ' + bold('executespec auth login') + ' first (or set $EXECUTESPEC_TOKEN).');
+    return 1;
+  }
+  // Validate enum-shaped flags up front so a typo fails fast here, not as an opaque server 4xx.
+  const provider = flagStr(args.flags, 'provider')?.toUpperCase();
+  if (provider && !PROVIDERS.includes(provider)) {
+    errln(`Invalid --provider ${provider} (${PROVIDERS.join(' | ')})`);
+    return 2;
+  }
+  const mode = flagStr(args.flags, 'mode')?.toUpperCase();
+  if (mode && !EXEC_MODES.includes(mode)) {
+    errln(`Invalid --mode ${mode} (${EXEC_MODES.join(' | ')})`);
+    return 2;
+  }
+  const repoMode = flagStr(args.flags, 'repo-mode')?.toUpperCase();
+  if (repoMode && !REPO_MODES.includes(repoMode)) {
+    errln(`Invalid --repo-mode ${repoMode} (${REPO_MODES.join(' | ')})`);
     return 2;
   }
   // Project precedence: --project flag > this directory's link > global default.
@@ -102,26 +160,29 @@ async function submit(args: ParsedArgs, client: ClientBundle): Promise<number> {
     userRequest: spec,
     source: 'REST',
     repoUrl: flagStr(args.flags, 'repo'),
-    repoMode: flagStr(args.flags, 'repo-mode')?.toUpperCase() as RunRequest['repoMode'],
+    repoMode: repoMode as RunRequest['repoMode'],
     projectId,
-    aiProvider: flagStr(args.flags, 'provider')?.toUpperCase() as RunRequest['aiProvider'],
+    aiProvider: provider as RunRequest['aiProvider'],
     modelName: flagStr(args.flags, 'model'),
-    executionMode: flagStr(args.flags, 'mode')?.toUpperCase() as RunRequest['executionMode'],
+    executionMode: mode as RunRequest['executionMode'],
     tddMode: flagBool(args.flags, 'tdd'),
     userCostCap: flagNum(args.flags, 'cost-cap'),
     skipApproval: flagBool(args.flags, 'skip-approval'),
   };
   const summary = await client.api.submitRun(req);
-  const json = flagBool(args.flags, 'json');
-  if (json && !flagBool(args.flags, 'watch')) {
-    printJson(summary);
+  const format = resolveFormat(args.flags);
+  const watching = flagBool(args.flags, 'watch');
+  if (isMachine(format) && !watching) {
+    if (format === 'stream-json') out(JSON.stringify({ type: 'submitted', ...summary }));
+    else printJson(summary);
     return 0;
   }
-  out(`${bold('Run submitted')} ${summary.runId} ${dim('(' + summary.status + ')')}`);
-  if (flagBool(args.flags, 'watch')) {
-    return watchRun(client, summary.runId, { yes: flagBool(args.flags, 'yes'), json });
+  // Progress/diagnostics go to stderr so stdout stays clean for piping.
+  errln(`${bold('Run submitted')} ${summary.runId} ${dim('(' + summary.status + ')')}`);
+  if (watching) {
+    return watchRun(client, summary.runId, { yes: flagBool(args.flags, 'yes'), format });
   }
-  out(dim('Watch it: ') + `executespec run watch ${summary.runId}`);
+  errln(dim('Watch it: ') + `executespec run watch ${summary.runId}`);
   return 0;
 }
 
@@ -131,37 +192,82 @@ async function watch(args: ParsedArgs, client: ClientBundle): Promise<number> {
     errln('Usage: executespec run watch <runId>');
     return 2;
   }
-  return watchRun(client, runId, { yes: flagBool(args.flags, 'yes'), json: flagBool(args.flags, 'json') });
+  return watchRun(client, runId, { yes: flagBool(args.flags, 'yes'), format: resolveFormat(args.flags) });
+}
+
+async function attach(args: ParsedArgs, client: ClientBundle): Promise<number> {
+  const runId = args.positionals[0];
+  if (!runId) {
+    errln('Usage: executespec run attach <runId>');
+    return 2;
+  }
+  const format = resolveFormat(args.flags);
+  // Backfill the persisted log (24h Redis) so you see the run from the start, even if you joined
+  // late or it already finished.
+  try {
+    for (const ev of await client.api.eventLog(runId)) renderEvent(ev, format);
+  } catch {
+    // backfill is best-effort — fall through to live/final
+  }
+  // If the run is already terminal, print the final result and exit (no live stream to follow).
+  const detail0 = await client.api.getRun(runId).catch(() => null);
+  if (detail0 && isTerminalStatus(detail0.status)) {
+    printFinal(detail0, format);
+    return exitForStatus(detail0.status, detail0.statusReason);
+  }
+  // Otherwise follow live from here.
+  return watchRun(client, runId, { yes: flagBool(args.flags, 'yes'), format });
 }
 
 async function watchRun(client: ClientBundle, runId: string, opts: WatchOpts): Promise<number> {
   const ac = new AbortController();
   let exit = 0;
+  let cancelling = false;
+  // Ctrl-C / SIGTERM cancels the SERVER run (DELETE /runs/{id}) before exiting, so an interrupt
+  // never orphans a still-executing (and billable) cloud run. Exit 130 = 128 + SIGINT (shell convention).
+  const onSignal = (): void => {
+    if (cancelling) return;
+    cancelling = true;
+    errln(dim(`\nCancelling run ${runId}…`));
+    ac.abort();
+    client.api
+      .cancel(runId)
+      .catch(() => {})
+      .finally(() => process.exit(130));
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
   try {
-    for await (const ev of streamRunEvents(client.api, runId, { signal: ac.signal })) {
-      renderEvent(ev, opts.json);
-      if (ev.type === RunEventType.GATE_OPENED) {
-        await handleGate(client, runId, ev, opts);
+    try {
+      for await (const ev of streamRunEvents(client.api, runId, { signal: ac.signal })) {
+        renderEvent(ev, opts.format);
+        if (ev.type === RunEventType.GATE_OPENED) {
+          await handleGate(client, runId, ev, opts);
+        }
+        if (isTerminal(ev)) {
+          ac.abort();
+          break;
+        }
       }
-      if (isTerminal(ev)) {
-        ac.abort();
-        break;
+    } catch (e) {
+      if (!ac.signal.aborted) {
+        errln(`stream error: ${errorMessage(e)}`);
+        exit = 1;
       }
     }
-  } catch (e) {
-    if (!ac.signal.aborted) {
-      errln(`stream error: ${errorMessage(e)}`);
-      exit = 1;
+    if (cancelling) return 130;
+    try {
+      const detail = await client.api.getRun(runId);
+      printFinal(detail, opts.format);
+      exit = exit || exitForStatus(detail.status, detail.statusReason);
+    } catch {
+      // best-effort final fetch
     }
+    return exit;
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
   }
-  try {
-    const detail = await client.api.getRun(runId);
-    printFinal(detail, opts.json);
-    if (detail.status === 'FAILED' || detail.status === 'CANCELLED') exit = 1;
-  } catch {
-    // best-effort final fetch
-  }
-  return exit;
 }
 
 async function handleGate(
@@ -183,20 +289,20 @@ async function handleGate(
     executionMode: 'REALTIME',
   };
   if (opts.yes) {
-    out(green('Auto-approving — ') + desc);
+    errln(green('Auto-approving — ') + desc);
     await client.api.approve(runId, approveBody);
     return;
   }
-  if (opts.json) {
-    out(dim('Gate opened (non-interactive). Approve with: ') + `executespec run approve ${runId}`);
+  if (isMachine(opts.format)) {
+    errln(dim('Gate opened (non-interactive). Approve with: ') + `executespec run approve ${runId}`);
     return;
   }
   if (await confirm(`${yellow('Approve plan?')} ${desc}`)) {
     await client.api.approve(runId, approveBody);
-    out(green('Approved.'));
+    errln(green('Approved.'));
   } else {
     await client.api.approve(runId, { approved: false });
-    out(red('Rejected.'));
+    errln(red('Rejected.'));
   }
 }
 
@@ -214,7 +320,7 @@ async function decide(args: ParsedArgs, client: ClientBundle, approved: boolean)
       }
     : { approved: false };
   await client.api.approve(runId, body);
-  out(approved ? green('Approved.') : red('Rejected.'));
+  errln(approved ? green('Approved.') : red('Rejected.'));
   return 0;
 }
 
@@ -225,7 +331,7 @@ async function cancel(args: ParsedArgs, client: ClientBundle): Promise<number> {
     return 2;
   }
   await client.api.cancel(runId);
-  out('Cancelled.');
+  errln('Cancelled.');
   return 0;
 }
 
@@ -236,7 +342,7 @@ async function list(args: ParsedArgs, client: ClientBundle): Promise<number> {
     scope: (flagStr(args.flags, 'scope') as 'mine' | 'org' | 'all') ?? 'mine',
     size: flagNum(args.flags, 'size') ?? 20,
   });
-  if (flagBool(args.flags, 'json')) {
+  if (isMachine(resolveFormat(args.flags))) {
     printJson(page);
     return 0;
   }
@@ -259,11 +365,11 @@ async function view(args: ParsedArgs, client: ClientBundle): Promise<number> {
     return 2;
   }
   const detail = await client.api.getRun(runId);
-  if (flagBool(args.flags, 'json')) {
+  if (isMachine(resolveFormat(args.flags))) {
     printJson(detail);
     return 0;
   }
-  printFinal(detail, false);
+  printFinal(detail, 'text');
   if (detail.tasks && detail.tasks.length) {
     out(bold('\nTasks'));
     for (const t of detail.tasks) {
@@ -280,7 +386,7 @@ async function report(args: ParsedArgs, client: ClientBundle): Promise<number> {
     return 2;
   }
   const rpt = await client.api.getReport(runId);
-  if (flagBool(args.flags, 'json')) {
+  if (isMachine(resolveFormat(args.flags))) {
     printJson(rpt);
     return 0;
   }
@@ -313,44 +419,50 @@ async function local(_args: ParsedArgs, _client: ClientBundle): Promise<number> 
 
 // ── rendering ─────────────────────────────────────────────────────────────
 
-function renderEvent(ev: RunEvent, json: boolean): void {
-  if (json) {
-    printJson(ev);
+function renderEvent(ev: RunEvent, format: OutputFormat): void {
+  if (format === 'stream-json') {
+    // stream-json: every event is one NDJSON line on stdout, timestamped for post-hoc timing.
+    out(JSON.stringify({ ts: ev.timestamp ?? new Date().toISOString(), ...ev }));
     return;
   }
+  // text & json: live progress → stderr (json keeps stdout for the single final result object).
   switch (ev.type) {
     case RunEventType.RUN_STATUS:
-      out(dim('• status ') + statusColor(ev.payload ?? ''));
+      errln(dim('• status ') + statusColor(ev.payload ?? ''));
       break;
     case RunEventType.TASK_STATUS:
-      out(dim(`  task ${ev.taskId ?? ''} `) + (ev.payload ?? ''));
+      errln(dim(`  task ${ev.taskId ?? ''} `) + (ev.payload ?? ''));
       break;
     case RunEventType.LOG:
-      out(dim('  … ') + (ev.payload ?? ''));
+      errln(dim('  … ') + (ev.payload ?? ''));
       break;
     case RunEventType.FILE_WRITTEN:
-      out(dim('  ✎ ') + (ev.payload ?? ''));
+      errln(dim('  ✎ ') + (ev.payload ?? ''));
       break;
     case RunEventType.COST_UPDATE:
-      out(dim('  $ ') + (ev.payload ?? ''));
+      errln(dim('  $ ') + (ev.payload ?? ''));
       break;
     case RunEventType.TOOL_CALL:
-      out(dim('  ⚙ tool ') + toolName(ev.payload));
+      errln(dim('  ⚙ tool ') + toolName(ev.payload));
       break;
     case 'REVIEW_COMPLETE':
-      out(cyan('  review ') + (ev.payload ?? ''));
+      errln(cyan('  review ') + (ev.payload ?? ''));
       break;
     case RunEventType.COMPLETE:
-      out(bold('• complete ') + (ev.payload ?? ''));
+      errln(bold('• complete ') + (ev.payload ?? ''));
       break;
     default:
       break; // keep the stream quiet for the noisier event types
   }
 }
 
-function printFinal(d: RunDetail, json: boolean): void {
-  if (json) {
-    printJson(d);
+function printFinal(d: RunDetail, format: OutputFormat): void {
+  if (format === 'json') {
+    printJson(resultEnvelope(d));
+    return;
+  }
+  if (format === 'stream-json') {
+    out(JSON.stringify(resultEnvelope(d)));
     return;
   }
   out(`\n${bold(d.runId)}  ${statusColor(d.status)}`);
@@ -360,6 +472,36 @@ function printFinal(d: RunDetail, json: boolean): void {
   }
   const pr = d.scmPrUrl ?? d.githubPrUrl;
   if (pr) out(`PR: ${cyan(pr)}`);
+}
+
+/** Stable, parseable terminal summary for json / stream-json modes (W5.1 #6). */
+export function resultEnvelope(d: RunDetail): {
+  type: 'result';
+  runId: string;
+  status: string;
+  statusReason: string | null;
+  isError: boolean;
+  exitCode: number;
+  verifiedScore: number | null;
+  testsPassed: number | null;
+  testsTotal: number | null;
+  reviewerVerdict: string | null;
+  prUrl: string | null;
+} {
+  const exitCode = exitForStatus(d.status, d.statusReason);
+  return {
+    type: 'result',
+    runId: d.runId,
+    status: d.status,
+    statusReason: d.statusReason ?? null,
+    isError: exitCode !== 0,
+    exitCode,
+    verifiedScore: d.verifiedScore ?? null,
+    testsPassed: d.testsPassed ?? null,
+    testsTotal: d.testsTotal ?? null,
+    reviewerVerdict: d.reviewerVerdict ?? null,
+    prUrl: d.scmPrUrl ?? d.githubPrUrl ?? null,
+  };
 }
 
 function statusColor(status: string): string {
@@ -384,6 +526,33 @@ function isTerminal(ev: RunEvent): boolean {
     return s === 'COMPLETE' || s === 'FAILED' || s === 'PARTIAL' || s === 'CANCELLED';
   }
   return false;
+}
+
+/**
+ * Map a terminal run status to a process exit code so CI/automation can branch:
+ *   0  COMPLETE, or a PARTIAL that finished cleanly (no functional failure)
+ *   1  FAILED / CANCELLED
+ *   3  a *degraded* PARTIAL — produced output but build/tests/reviewer failed (statusReason says so)
+ * An empty / unknown PARTIAL reason stays 0 to avoid false CI failures.
+ */
+export function exitForStatus(status: string, statusReason?: string | null): number {
+  const s = (status || '').split('|')[0];
+  if (s === 'FAILED' || s === 'CANCELLED') return 1;
+  if (s === 'PARTIAL') {
+    const r = statusReason ?? '';
+    const clean =
+      r === '' ||
+      r === 'CLEAN_COMPLETION' ||
+      r === 'CLEAN_WITH_INTERMEDIATE_WARNINGS' ||
+      r === 'LEGACY_UNKNOWN';
+    return clean ? 0 : 3;
+  }
+  return 0;
+}
+
+function isTerminalStatus(status: string): boolean {
+  const s = (status || '').split('|')[0];
+  return s === 'COMPLETE' || s === 'FAILED' || s === 'PARTIAL' || s === 'CANCELLED';
 }
 
 function toolName(payload: string | null | undefined): string {

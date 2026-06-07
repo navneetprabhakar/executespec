@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { HttpClient } from './http.js';
 import type {
   ApprovalRequest,
@@ -9,6 +11,7 @@ import type {
   Project,
   RunCost,
   RunDetail,
+  RunEvent,
   RunListQuery,
   RunRequest,
   RunSummary,
@@ -40,12 +43,28 @@ export class ExecuteSpecApi {
   }
 
   // ── Runs ──────────────────────────────────────────────────────────────────
+  /**
+   * Submit a run. Carries a stable `Idempotency-Key` generated once here and reused across http.ts's
+   * internal retries, so a transient 5xx returned *after* the server already created the run can't
+   * spawn a duplicate. NOTE: this is the client half — the server must dedupe on this header for the
+   * guarantee to hold (backend follow-up; harmless until then).
+   */
   submitRun(req: RunRequest): Promise<RunSummary> {
-    return this.http.post<RunSummary>('/runs', req);
+    return this.http.post<RunSummary>('/runs', req, {
+      headers: { 'Idempotency-Key': randomUUID() },
+    });
   }
 
   getRun(runId: string): Promise<RunDetail> {
     return this.http.get<RunDetail>(`/runs/${encodeURIComponent(runId)}`);
+  }
+
+  /**
+   * The persisted run-event replay (24h Redis-backed) — same shape as the live SSE stream. Used by
+   * `attach`/backfill so a client joining mid-run (or after it) can see history from the start.
+   */
+  eventLog(runId: string): Promise<RunEvent[]> {
+    return this.http.get<RunEvent[]>(`/runs/${encodeURIComponent(runId)}/event-log`);
   }
 
   listRuns(query?: RunListQuery): Promise<Page<RunSummary>> {

@@ -11,11 +11,11 @@
 | --- | --- | --- |
 | `package.json` | 27 | `@executespec/cli@0.1.0`. Bins **`executespec`** + **`es`** → `dist/index.js`. Single runtime dep `@executespec/core` (workspace). Node ≥ 18, ESM (`"type":"module"`). `build`=`tsc`, `typecheck`=`tsc --noEmit`. |
 | `tsconfig.json` | 21 | NodeNext ESM, target ES2022, `strict` + `noUncheckedIndexedAccess`. Emits `dist/` from `src/`, sourcemaps on. |
-| `src/index.ts` | 76 | **Entry point** (carries the `#!/usr/bin/env node` shebang). Parses `argv`, handles `--version`/`--help`, builds the core client (`createClient({host})` — host from `--host` or `$EXECUTESPEC_HOST`), and dispatches the first positional to the `auth` or `run` command group. Top-level rejection → stderr + `process.exit(1)`. |
+| `src/index.ts` | ~95 | **Entry point** (`#!/usr/bin/env node`). Parses `argv`, handles `--version` (**read from `package.json`** so it never drifts)/`--help`, builds the core client (`createClient({host})` — host from `--host` or `$EXECUTESPEC_HOST`), dispatches the first positional to the `auth`/`run`/`project`/… group. **`uncaughtException` + `unhandledRejection` handlers** plus a top-level rejection catch → clean stderr + non-zero exit. |
 | `src/args.ts` | 65 | Zero-dependency argv parser. Splits positionals vs `--flag` / `--flag=value`; `--` ends flag parsing (passthrough). `BOOLEAN_FLAGS` (`watch`/`yes`/`json`/`tdd`/`local`/`help`/`version`/`skip-approval`) never consume the next token, so `--yes "spec"` keeps the positional. Accessors `flagStr` / `flagBool` / `flagNum`. |
 | `src/ui.ts` | 51 | Terminal I/O. ANSI color helpers (`bold`/`dim`/`red`/`green`/`yellow`/`cyan`, gated on `stdout.isTTY` + `NO_COLOR`); `out` / `errln` / `printJson`; `prompt` / `confirm` over `node:readline/promises`; `errorMessage` (unwraps `ApiError` to `msg (HTTP nnn)`). |
 | `src/commands/auth.ts` | 90 | `auth login` — **gcloud-style browser sign-in** by default (`core.loopbackLogin`); `--token` pastes a PAT, `--no-browser` prompts for a paste. Stores via the core `TokenStore` + verifies `/auth/me` (clears on failure). `auth status [--json]`, `auth logout`. |
-| `src/commands/run.ts` | 385 | The run surface: `submit` / `watch` / `list` / `view` / `approve` / `reject` / `cancel` / `report` + experimental **`local`**. Owns the watch loop (consumes `streamRunEvents`, renders each event, prompts `[y/N]` on `GATE_OPENED`, breaks on terminal), the `RunRequest` assembly from flags, the final run-detail print, and the local-hands driver (`LocalExecutionSession` + `ToolRuntime` with a per-command permission prompt). |
+| `src/commands/run.ts` | ~480 | The run surface: `submit` / `watch` / **`attach`** / `list` / `view` / `approve` / `reject` / `cancel` / `report` / `cost` / `retry` + experimental **`local`**. Owns the watch loop (`streamRunEvents`; **progress→stderr, result→stdout**; `[y/N]` on `GATE_OPENED`; breaks on terminal; **traps SIGINT/SIGTERM → server `cancel` → exit 130**), the **output-format model** (`text`/`json`/`stream-json` NDJSON via `resolveFormat`), **PAT pre-flight + enum-flag validation** + **stdin spec** (`run submit -`) before submit, the **structured result envelope** (`resultEnvelope`) + **exit-code contract** (`exitForStatus`: 0/1/3), the `RunRequest` assembly, and the local-hands driver. `attach` backfills `api.eventLog` then follows live. |
 
 ## Module graph
 
@@ -35,7 +35,8 @@ Only runtime dependency is `@executespec/core`. No other npm runtime deps (dev: 
 | --- | --- |
 | `auth login/status` | `loopbackLogin` (browser) · `tokens.set/get` · `api.me()` |
 | `run submit` | `api.submitRun(RunRequest)` (+ `streamRunEvents` if `--watch`) |
-| `run watch` | `streamRunEvents` (+ `api.approve` on gate) |
+| `run watch` | `streamRunEvents` (+ `api.approve` on gate) · SIGINT → `api.cancel` |
+| `run attach` | `api.eventLog` (backfill) → `api.getRun` (terminal?) → `streamRunEvents` (live) |
 | `run list` / `view` / `report` | `api.listRuns` / `getRun` / `getReport` |
 | `run approve` / `reject` | `api.approve(runId, {approved})` |
 | `run cancel` | `api.cancel(runId)` |
