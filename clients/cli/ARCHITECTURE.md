@@ -131,11 +131,20 @@ npm link -w @executespec/cli                           # `executespec` + `es` on
 # later: npm publish (own repo) — core is the one shared dependency to publish/vendor alongside.
 ```
 
-## 8. Roadmap (Shape B)
+## 8. Chat-first surface (Shape B — shipped)
 
-Per `ADR-0001`, the CLI evolves into a **chat-first** client: `spec` with no args drops into a chat
-REPL where an LLM interprets intent and calls *action tools* (`submit_run`/`approve_plan`/…), while
-the deterministic verbs above are **retained** for scripting/CI. The chat surface adds
-`core/chat.ts` (SSE over `POST /api/spec/chat`) + `repl.ts` + `render.ts`; the backend endpoint
-(`SpecChatController`) exists in skeleton form. Feature parity with the VS Code client is the
-invariant: every capability ships to both.
+Per `ADR-0001`, the CLI is **chat-first**: bare `executespec` on a TTY drops into a chat where an LLM
+interprets intent and calls *action tools* (`submit_run`/`approve_plan`/…), while the deterministic
+verbs above are **retained** for scripting/CI.
+
+- **Default: a rich Ink TUI** (`src/tui/chat.tsx`, `runChatTui`) — React-for-CLIs (the Claude Code /
+  Codex / Gemini-CLI stack): a `<Static>` scrollback, a live region that streams the assistant turn +
+  its tool calls, a status line (host · provider · cost), and an `ink-text-input` box. Ctrl-C cancels
+  the in-flight turn or exits at idle (`exitOnCtrlC:false`).
+- **Fallback: the readline REPL** (`src/repl.ts`) on `--plain` or a non-TTY/pipe.
+- Both drive `core/chat.ts` (`ChatSession.send` → `ChatTurnEvent` over `POST /api/spec/chat`); the
+  backend loop is gated by `spec.chat.enabled` (V229) — OFF returns a "not enabled" note the UI shows.
+
+**Remaining (Shape B):** markdown/syntax in the transcript · streaming a *submitted run* inline (the
+run-event stream is a different shape) · `gh`-style auto-login on first run (the onboarding half).
+Feature parity with the VS Code client stays the invariant: every capability ships to both.

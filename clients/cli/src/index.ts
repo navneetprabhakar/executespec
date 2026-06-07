@@ -13,6 +13,7 @@ import { projectCommand } from './commands/project.js';
 import { runCommand } from './commands/run.js';
 import { statsCommand } from './commands/stats.js';
 import { chatRepl } from './repl.js';
+import { runChatTui } from './tui/chat.js';
 import { errln, errorMessage, out } from './ui.js';
 
 // Single source of truth: read the version from package.json (dist/index.js → ../package.json),
@@ -79,10 +80,12 @@ async function main(): Promise<number> {
     // No command: interactive chat on a TTY; otherwise print help (scripts use the verbs).
     if (process.stdin.isTTY) {
       const client = createClient({ host: flagStr(flags, 'host') });
-      return chatRepl(client, {
+      const chatOpts = {
         projectId: flagStr(flags, 'project'),
         provider: flagStr(flags, 'provider'),
-      });
+      };
+      // Rich Ink TUI by default; `--plain` falls back to the basic readline REPL.
+      return flagBool(flags, 'plain') ? chatRepl(client, chatOpts) : runChatTui(client, chatOpts);
     }
     out(HELP);
     return 1;
@@ -115,11 +118,15 @@ async function main(): Promise<number> {
       return statsCommand(cmdArgs, client);
     case 'doctor':
       return doctorCommand(client);
-    case 'chat':
-      return chatRepl(client, {
+    case 'chat': {
+      const chatOpts = {
         projectId: flagStr(flags, 'project'),
         provider: flagStr(flags, 'provider'),
-      });
+      };
+      return process.stdin.isTTY && !flagBool(flags, 'plain')
+        ? runChatTui(client, chatOpts)
+        : chatRepl(client, chatOpts);
+    }
     default:
       errln(`Unknown command: ${group}\n`);
       out(HELP);
