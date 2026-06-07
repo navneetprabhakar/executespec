@@ -3,7 +3,11 @@ package com.navneet.executespec.terminalbench;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
@@ -61,6 +65,45 @@ public class TerminalBenchRunService {
   private static final int TB_STAGNATION_WARN_AFTER = 16;
   private static final int TB_STAGNATION_FORCE_AFTER = 64;
   private static final int TB_ARTIFACT_DEADLINE_AFTER = 32;
+
+  /**
+   * RL-2026-06 — terminal-mode enforced-verify gate (see {@code
+   * WorkerTaskRequest#terminalVerifyGate}). Forces ONE verify nudge before the first {@code
+   * completeTask} so the worker exercises its deliverable against the task's own stated
+   * example/criterion instead of completing after a shallow smoke. Default ON; set {@code
+   * ES_TB_VERIFY_GATE=false} (and restart) to A/B the lever off against the base-20 slice without a
+   * rebuild. Read once at class load — operator-only bench path, no hot-reload needed.
+   */
+  private static final boolean TB_VERIFY_GATE_ENABLED =
+      !"false".equalsIgnoreCase(System.getenv("ES_TB_VERIFY_GATE"));
+
+  /**
+   * RL-2026-06 — deterministic deliverable gate (#2). Default ON; set {@code
+   * ES_TB_DELIVERABLE_GATE=false} (and restart) to A/B it off. The exact required output paths are
+   * extracted from the instruction and handed to the worker, which deterministically checks they
+   * exist in the container before allowing completeTask (fail-open, bounded refusals).
+   */
+  private static final boolean TB_DELIVERABLE_GATE_ENABLED =
+      !"false".equalsIgnoreCase(System.getenv("ES_TB_DELIVERABLE_GATE"));
+
+  /**
+   * RL-2026-06 — terminal critic/reviewer pass (#1). Default ON; set {@code ES_TB_CRITIC=false}
+   * (and restart) to A/B it off. One fresh-context acceptance review before the first completeTask;
+   * see {@code WorkerTaskRequest#criticPass}.
+   */
+  private static final boolean TB_CRITIC_ENABLED =
+      !"false".equalsIgnoreCase(System.getenv("ES_TB_CRITIC"));
+
+  /**
+   * Required-deliverable path extractor. Terminal-Bench deliverables live under {@code /app/} with
+   * a file extension (e.g. {@code /app/run.py}, {@code /app/ssl/server.key}, {@code
+   * /app/jump_analyzer.py}). Conservative by design: the gate only ever refuses on a MISSING path,
+   * so over-extraction is safe (an input file the task references already exists → never refused);
+   * under-extraction just means the gate doesn't help that task. Extension-less executables are not
+   * matched (rare; no harm).
+   */
+  private static final Pattern DELIVERABLE_PATH =
+      Pattern.compile("/app/[A-Za-z0-9_][A-Za-z0-9._/-]*\\.[A-Za-z0-9]+");
 
   /**
    * Standalone worker system prompt for arbitrary terminal goals. The product worker base prompt
@@ -216,6 +259,9 @@ iterating needlessly.
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)
+                  .terminalVerifyGate(TB_VERIFY_GATE_ENABLED)
+                  .requiredDeliverablePaths(extractDeliverablePaths(instruction))
+                  .criticPass(TB_CRITIC_ENABLED)
                   .build());
       boolean ok =
           result.outcome() == WorkerResult.Outcome.COMPLETED
@@ -243,6 +289,25 @@ iterating needlessly.
   private static int normalizeMaxIterations(Integer requested) {
     if (requested == null || requested <= 0) return TB_DEFAULT_MAX_ITERATIONS;
     return Math.max(requested, TB_DEFAULT_MAX_ITERATIONS);
+  }
+
+  /**
+   * RL-2026-06 — extract the exact required deliverable path(s) the worker's deterministic gate
+   * (#2) will check. Package-private + static for unit testing. Returns at most 8 distinct {@code
+   * /app/} paths with a file extension, in first-seen order; empty when the gate is disabled or no
+   * path is named (→ the gate is inert). Conservative on purpose — the gate only refuses on a
+   * MISSING path, so this can safely over-match (an existing input file is never refused).
+   */
+  static List<String> extractDeliverablePaths(String instruction) {
+    if (instruction == null || instruction.isBlank() || !TB_DELIVERABLE_GATE_ENABLED) {
+      return List.of();
+    }
+    LinkedHashSet<String> paths = new LinkedHashSet<>();
+    Matcher m = DELIVERABLE_PATH.matcher(instruction);
+    while (m.find() && paths.size() < 8) {
+      paths.add(m.group());
+    }
+    return List.copyOf(paths);
   }
 
   private void finalizeTerminal(String runId, String status, String reason) {

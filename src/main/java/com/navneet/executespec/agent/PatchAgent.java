@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 
 import jakarta.annotation.PostConstruct;
 
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -111,6 +112,14 @@ public class PatchAgent {
   /** Reads the run's {@code source} to scope the test-verification gate (see {@link #run}). */
   private final PipelineRunRepository runRepo;
 
+  /**
+   * RL-2026-06 — gates the common critic/reviewer pass (#1) for PATCH runs (SWE-bench + the autofix
+   * surfaces) behind {@code worker.critic-pass.enabled} (V231, default OFF) so production is
+   * byte-identical until an eval justifies flipping it. The critic itself lives in the shared
+   * {@link WorkerAgent}; PATCH reads the worker's {@code git diff} as the deliverable under review.
+   */
+  private final FeatureFlagService featureFlagService;
+
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
   public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
 
@@ -150,6 +159,11 @@ public class PatchAgent {
             // 2026-05-08 strengthened: gate now requires tests to PASS (failed:[] +
             // errored:[] + exit_code:0) not just be run — see WorkerAgent line ~470.
             .requireTestVerification(requireTV)
+            // RL-2026-06 — common critic/reviewer pass (#1), flag-gated default OFF (V231) so PATCH
+            // is byte-identical until eval. When on, the FIRST completeTask gets one fresh-context
+            // acceptance review over the worker's git diff. Validated on Terminal-Bench
+            // (4/13→8/13).
+            .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
             .build();
 
     WorkerResult result = workerAgent.run(req);

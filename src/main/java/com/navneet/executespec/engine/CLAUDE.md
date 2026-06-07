@@ -35,6 +35,18 @@ rollout, each phase shippable + green:
 | `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
 | `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags). |
 
+## Common harness stages on the worker (RL-2026-06)
+
+Three completeTask-time stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is **one-shot + fail-open** (can never loop or false-block) and reads the deliverable via `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.
+
+| Stage | Field | What it does | Consumers |
+|-------|-------|--------------|-----------|
+| **#1 Critic pass** | `criticPass` (Boolean) | Before the FIRST completeTask, ONE fresh-context, no-tool `LlmRouter` acceptance review over the task + the deliverable — **git diff** for a local product run, **/app** files for a remote TB run; concrete gaps fed back once (`runCriticPass`/`criticMessage`/`CRITIC_SYSTEM_PROMPT`). Subsumes the verify nudge when on. | TB (`ES_TB_CRITIC`), PATCH (`worker.critic-pass.enabled`, V231, default OFF). BUILD has `ReviewerAgent`. |
+| **#2 Deliverable gate** | `requiredDeliverablePaths` (List) | At completeTask, ONE deterministic `shell` existence check for the required paths; missing ⇒ refuse (bounded to `DELIVERABLE_GATE_MAX_REFUSALS=2` then YIELD). Activates on a non-empty list — only TB supplies one today (`TerminalBenchRunService.extractDeliverablePaths`). | TB (`ES_TB_DELIVERABLE_GATE`). |
+| **#3 Verify gate** | `terminalVerifyGate` (Boolean) | Terminal refinement of the generic `!gateOn` verify nudge: fires even after a shallow shell smoke (which defeats the generic `lastEditIter > lastVerifyIter` trigger). | TB (`ES_TB_VERIFY_GATE`). |
+
+Validated on Terminal-Bench (DeepSeek): #2+#1 took a 13-task near-miss slice **4/13 → 8/13 (pass@2)**, 0 regressions; the critic demonstrably refuses premature completions then permits the fixed candidate.
+
 ## Invariants
 
 - **Nothing implements or calls `CodeGenEngine` yet** — Phase 1 is contract-only, so every production
