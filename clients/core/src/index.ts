@@ -21,6 +21,9 @@ export {
   ToolRuntime,
   type ToolPermissions,
   type ToolRuntimeOptions,
+  type CommandDecision,
+  createInteractivePermissions,
+  allowAllPermissions,
 } from './tools/runtime.js';
 export { LocalExecutionSession, type LocalSessionOptions } from './session.js';
 
