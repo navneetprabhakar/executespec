@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { makeClient } from './client';
 import { RunsTreeProvider } from './runsTree';
 import { errorMessage } from './util';
-import { submitSpec, watchRunInteractive } from './watch';
+import { cancelRunInteractive, submitSpec, watchRunInteractive } from './watch';
 
 /** One-shot coordination between {@link signIn} and the `vscode://…/auth` redirect handler. */
 let pendingAuth: { state: string; resolve: (token: string | null) => void } | null = null;
@@ -29,6 +29,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('executespec.watchRun', (item?: { runId?: string }) =>
       watchRunInteractive(context, output, item?.runId, runs),
+    ),
+    vscode.commands.registerCommand('executespec.cancelRun', (item?: { runId?: string }) =>
+      cancelRunInteractive(context, item?.runId, runs),
     ),
     // Catches the browser redirect from the web /cli-login page:
     // vscode://executespec.executespec-vscode/auth?token=…&state=…

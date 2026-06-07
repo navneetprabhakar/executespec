@@ -24,7 +24,7 @@ This is a **native MVP**: TreeView + OutputChannel + modals. The richer chat sid
 activate(context)                         (extension.ts)
   ├─ OutputChannel "ExecuteSpec"          (live run stream)
   ├─ RunsTreeProvider  → Explorer view "ExecuteSpec Runs"
-  └─ registerCommand × 5: signIn · signOut · submitSpec · refreshRuns · watchRun
+  └─ registerCommand × 6: signIn · signOut · submitSpec · refreshRuns · watchRun · cancelRun
         │
         ├─ client.ts  makeClient(context) ── secretTokenStore.ts (SecretStorage PAT)
         ├─ runsTree.ts  list runs (api.listRuns)
@@ -67,6 +67,11 @@ watchRun =GET /runs/{id}/events (SSE)═▶
 ```
 `streamRunEvents` (in core) mints a fresh 5-min scoped SSE token per connection and reconnects with
 `Last-Event-ID`, so a long run survives token expiry transparently.
+
+The watch runs inside a **cancellable progress notification** — cancelling stops watching (the cloud
+run keeps going and is re-watchable). **Cancel Run** (`api.cancel(runId)` → `DELETE /runs/{id}`, from
+the Runs-view inline action or the palette, behind a confirm modal) stops a run **server-side** — the
+in-editor equivalent of the CLI's Ctrl-C→cancel.
 
 **Local-hands** (future, shared with the CLI): the extension would drive the same `ToolRuntime` /
 `LocalExecutionSession` from core against the open workspace folder. The server-side activation

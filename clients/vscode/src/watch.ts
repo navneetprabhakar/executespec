@@ -69,22 +69,37 @@ async function watchRun(
   output: vscode.OutputChannel,
   provider: RunsTreeProvider,
 ): Promise<void> {
-  const ac = new AbortController();
-  try {
-    for await (const ev of streamRunEvents(client.api, runId, { signal: ac.signal })) {
-      const line = renderEvent(ev);
-      if (line) output.appendLine(line);
-      if (ev.type === RunEventType.GATE_OPENED) {
-        await handleGate(client, runId, ev, output);
+  // Cancellable progress: cancelling STOPS WATCHING — the cloud run keeps going and can be
+  // re-watched, or stopped with "Cancel Run". (Mirrors the CLI's stream-vs-cancel split.)
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `ExecuteSpec: watching ${runId}`,
+      cancellable: true,
+    },
+    async (progress, token) => {
+      const ac = new AbortController();
+      token.onCancellationRequested(() => ac.abort());
+      try {
+        for await (const ev of streamRunEvents(client.api, runId, { signal: ac.signal })) {
+          const line = renderEvent(ev);
+          if (line) {
+            output.appendLine(line);
+            progress.report({ message: line.replace(/^[•\s]+/, '').slice(0, 80) });
+          }
+          if (ev.type === RunEventType.GATE_OPENED) {
+            await handleGate(client, runId, ev, output);
+          }
+          if (isTerminal(ev)) {
+            ac.abort();
+            break;
+          }
+        }
+      } catch (e) {
+        if (!ac.signal.aborted) output.appendLine(`stream error: ${errorMessage(e)}`);
       }
-      if (isTerminal(ev)) {
-        ac.abort();
-        break;
-      }
-    }
-  } catch (e) {
-    if (!ac.signal.aborted) output.appendLine(`stream error: ${errorMessage(e)}`);
-  }
+    },
+  );
   provider.refresh();
   try {
     const d = await client.api.getRun(runId);
@@ -130,6 +145,32 @@ async function handleGate(
     output.appendLine('Rejected.');
   }
   // Dismissed → leave the gate open; the user can approve later from the Runs view.
+}
+
+/** Cancel a run server-side (DELETE /runs/{id}) — from the Runs view's inline action or the palette. */
+export async function cancelRunInteractive(
+  context: vscode.ExtensionContext,
+  runId: string | undefined,
+  provider: RunsTreeProvider,
+): Promise<void> {
+  const client = makeClient(context);
+  const id =
+    runId ??
+    (await vscode.window.showInputBox({ prompt: 'Run ID to cancel', ignoreFocusOut: true }));
+  if (!id) return;
+  const choice = await vscode.window.showWarningMessage(
+    `Cancel run ${id}? This stops it server-side.`,
+    { modal: true },
+    'Cancel Run',
+  );
+  if (choice !== 'Cancel Run') return;
+  try {
+    await client.api.cancel(id);
+    vscode.window.showInformationMessage(`ExecuteSpec: cancelled ${id}.`);
+  } catch (e) {
+    vscode.window.showErrorMessage(`ExecuteSpec cancel failed: ${errorMessage(e)}`);
+  }
+  provider.refresh();
 }
 
 async function getSpec(): Promise<string | undefined> {
