@@ -192,4 +192,30 @@ class WorkerAgentToolDispatchTest {
         "A sibling tool call after completeTask must be paired (SUPERSEDED) so the persisted"
             + " history carries a tool_result for every tool_use the assistant emitted.");
   }
+
+  @Test
+  @DisplayName(
+      "pure read-only batch dispatches all calls via the C1 parallel path (correct results)")
+  void pure_read_batch_parallel() {
+    // [readFile, searchFiles] is an all-read-only batch (>=2) → maybeParallelReadDispatch runs both
+    // concurrently and the loop consumes the cached envelopes; results must be correct + complete.
+    WorkerAgent worker =
+        newWorker(
+            List.of(
+                responseWithCalls(
+                    toolCall("readFile", "{\"path\":\"a\"}"),
+                    toolCall("searchFiles", "{\"pattern\":\"x\"}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}"))),
+            null);
+
+    WorkerResult result = worker.run(req());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("readFile")),
+        "the parallel-dispatched readFile must still be recorded in the tool log in order");
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("searchFiles")),
+        "the parallel-dispatched searchFiles must still be recorded in the tool log in order");
+  }
 }

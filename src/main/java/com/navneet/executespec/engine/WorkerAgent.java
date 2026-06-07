@@ -670,6 +670,12 @@ public class WorkerAgent {
       // WorkerAgent test failures reproduce on the unmodified HEAD code with the same
       // for-each).
       final int lastIdx = calls.size() - 1;
+      // W4.1 (C1, vix-leverage) — read-only-batch parallelism: a pure read/explore turn (every call
+      // is a read-only tool) pre-executes its tool bodies concurrently on virtual threads; the loop
+      // below then consumes the cached envelopes in deterministic original order, so every per-call
+      // state mutation (metrics / SSE / toolResponses ordering / gate-tracking) is unchanged. Empty
+      // for any batch with a write/build/shell/completeTask call (or a remote run) → sequential.
+      java.util.Map<String, String> parallelReads = maybeParallelReadDispatch(calls, req);
       for (int callIdx = 0; callIdx < calls.size(); callIdx++) {
         AssistantMessage.ToolCall tc = calls.get(callIdx);
         final boolean isImmediatelyPriorToolCall = (callIdx == lastIdx);
@@ -904,7 +910,11 @@ public class WorkerAgent {
               .build();
         }
         metrics.recordToolCall(tc.name());
-        String envelope = dispatchOne(tc, req, isImmediatelyPriorToolCall);
+        // C1 — use the pre-computed concurrent result for a read-only batch; else dispatch now.
+        String envelope =
+            parallelReads.containsKey(safeId(tc.id()))
+                ? parallelReads.get(safeId(tc.id()))
+                : dispatchOne(tc, req, isImmediatelyPriorToolCall);
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
         // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
@@ -1492,6 +1502,64 @@ public class WorkerAgent {
   private void recordTerminal(WorkerResult.Outcome outcome, WorkerTaskRequest req, int iterations) {
     metrics.recordWorkerOutcome(outcome.name(), req.provider(), req.model());
     metrics.recordWorkerIterations(outcome.name(), req.provider(), req.model(), iterations);
+  }
+
+  /**
+   * C1 (vix-leverage W4.1) — tools with no ordering-sensitive side effects, safe to run
+   * concurrently.
+   */
+  private static final java.util.Set<String> READ_ONLY_PARALLEL_TOOLS =
+      java.util.Set.of("readFile", "searchFiles", "listFiles", "gitStatus", "gitDiff");
+
+  /**
+   * W4.1 (C1) — when a single assistant turn emits ONLY read-only tool calls (&ge;2, non-remote),
+   * execute their bodies concurrently on virtual threads and return a {@code {callId -> envelope}}
+   * map the sequential dispatch loop consumes verbatim. Returns empty (&rarr; sequential dispatch)
+   * for any batch that contains a write/build/shell/completeTask call, a remote run, or fewer than
+   * 2 calls — this avoids read-after-write / write-after-read ordering hazards. The read set is
+   * pure: {@code readFile} only touches the thread-safe read-ledger, the rest have no shared
+   * mutable state, and {@code RunCostTracker} (reached via {@code maybeCompact}) is concurrent.
+   * Fail-safe: a timeout or a partially-filled result falls back to sequential (re-runs are
+   * idempotent reads). The win is the read-heavy early exploration phase of a task.
+   */
+  private java.util.Map<String, String> maybeParallelReadDispatch(
+      java.util.List<AssistantMessage.ToolCall> calls, WorkerTaskRequest req) {
+    if (calls.size() < 2 || toolRegistry.isRemoteRun(req.context())) {
+      return java.util.Map.of();
+    }
+    for (AssistantMessage.ToolCall c : calls) {
+      if (!READ_ONLY_PARALLEL_TOOLS.contains(c.name())) {
+        return java.util.Map.of();
+      }
+    }
+    final int last = calls.size() - 1;
+    java.util.Map<String, String> out = new java.util.concurrent.ConcurrentHashMap<>();
+    var exec = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+    try {
+      for (int i = 0; i < calls.size(); i++) {
+        AssistantMessage.ToolCall tc = calls.get(i);
+        boolean isLast = (i == last);
+        exec.submit(() -> out.put(safeId(tc.id()), dispatchOne(tc, req, isLast)));
+      }
+      exec.shutdown();
+      if (!exec.awaitTermination(120, java.util.concurrent.TimeUnit.SECONDS)) {
+        exec.shutdownNow();
+        return java.util.Map.of(); // timed out → sequential fallback
+      }
+    } catch (InterruptedException ie) {
+      exec.shutdownNow();
+      Thread.currentThread().interrupt();
+      return java.util.Map.of();
+    } catch (Exception e) {
+      exec.shutdownNow();
+      log.warn(
+          "C1 parallel read-dispatch failed run={} — falling back to sequential: {}",
+          req.context().runId(),
+          e.toString());
+      return java.util.Map.of();
+    }
+    // Belt-and-suspenders: any missing entry (a task that didn't complete) → sequential.
+    return out.size() == calls.size() ? out : java.util.Map.of();
   }
 
   private String dispatchOne(
