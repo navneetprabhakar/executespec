@@ -25,7 +25,12 @@
         "title": "ExecuteSpec: Refresh Runs",
         "icon": "$(refresh)"
       },
-      { "command": "executespec.watchRun", "title": "ExecuteSpec: Watch Run" }
+      { "command": "executespec.watchRun", "title": "ExecuteSpec: Watch Run" },
+      {
+        "command": "executespec.cancelRun",
+        "title": "ExecuteSpec: Cancel Run",
+        "icon": "$(stop-circle)"
+      }
     ],
     "views": {
       "explorer": [{ "id": "executespecRuns", "name": "ExecuteSpec Runs" }]
@@ -41,6 +46,13 @@
           "command": "executespec.refreshRuns",
           "when": "view == executespecRuns",
           "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "executespec.cancelRun",
+          "when": "view == executespecRuns && viewItem == executespecRun",
+          "group": "inline"
         }
       ]
     },
