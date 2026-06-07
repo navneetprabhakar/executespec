@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class BackgroundJobTool implements Tool {
+public class BackgroundJobTool implements Tool, FlagGatedTool {
 
   public static final String FLAG = "worker.background-jobs.enabled"; // V233, default OFF
 
@@ -37,9 +37,7 @@ public class BackgroundJobTool implements Tool {
   private final JobRegistry jobs;
   private final ShellSandboxPolicy sandboxPolicy;
 
-  /**
-   * Whether this tool is bound into the worker/agent schema (consulted by {@link ToolRegistry}).
-   */
+  @Override
   public boolean enabled() {
     return flags.isEnabled(FLAG);
   }
