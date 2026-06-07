@@ -14,6 +14,7 @@ const BOOLEAN_FLAGS = new Set([
   'version',
   'skip-approval',
   'no-browser',
+  'plain',
 ]);
 
 export function parseArgs(argv: string[]): ParsedArgs {

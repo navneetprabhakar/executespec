@@ -9,13 +9,15 @@
 
 | File | LOC | Role |
 | --- | --- | --- |
-| `package.json` | 27 | `@executespec/cli@0.1.0`. Bins **`executespec`** + **`es`** → `dist/index.js`. Single runtime dep `@executespec/core` (workspace). Node ≥ 18, ESM (`"type":"module"`). `build`=`tsc`, `typecheck`=`tsc --noEmit`. |
-| `tsconfig.json` | 21 | NodeNext ESM, target ES2022, `strict` + `noUncheckedIndexedAccess`. Emits `dist/` from `src/`, sourcemaps on. |
-| `src/index.ts` | ~95 | **Entry point** (`#!/usr/bin/env node`). Parses `argv`, handles `--version` (**read from `package.json`** so it never drifts)/`--help`, builds the core client (`createClient({host})` — host from `--host` or `$EXECUTESPEC_HOST`), dispatches the first positional to the `auth`/`run`/`project`/… group. **`uncaughtException` + `unhandledRejection` handlers** plus a top-level rejection catch → clean stderr + non-zero exit. |
-| `src/args.ts` | 65 | Zero-dependency argv parser. Splits positionals vs `--flag` / `--flag=value`; `--` ends flag parsing (passthrough). `BOOLEAN_FLAGS` (`watch`/`yes`/`json`/`tdd`/`local`/`help`/`version`/`skip-approval`) never consume the next token, so `--yes "spec"` keeps the positional. Accessors `flagStr` / `flagBool` / `flagNum`. |
+| `package.json` | ~33 | `@executespec/cli@0.1.0`. Bins **`executespec`** + **`es`** → `dist/index.js`. Runtime deps: `@executespec/core` + **`ink`/`react`/`ink-text-input`** (the chat TUI). Node ≥ 18, ESM. `build`=`tsc`, `typecheck`=`tsc --noEmit`. |
+| `tsconfig.json` | 22 | NodeNext ESM, target ES2022, `strict` + `noUncheckedIndexedAccess`, **`jsx: react-jsx`** + `.tsx` include (for the Ink UI). Emits `dist/` from `src/`, sourcemaps on. |
+| `src/index.ts` | ~95 | **Entry point** (`#!/usr/bin/env node`). Parses `argv`, handles `--version` (**read from `package.json`** so it never drifts)/`--help`, builds the core client (`createClient({host})` — host from `--host` or `$EXECUTESPEC_HOST`), dispatches the first positional to the `auth`/`run`/`project`/… group; **bare `executespec` on a TTY launches the Ink chat TUI** (`--plain` → readline REPL; non-TTY → help). **`uncaughtException` + `unhandledRejection` handlers** plus a top-level rejection catch → clean stderr + non-zero exit. |
+| `src/args.ts` | 66 | Zero-dependency argv parser. Splits positionals vs `--flag` / `--flag=value`; `--` ends flag parsing (passthrough). `BOOLEAN_FLAGS` (`watch`/`yes`/`json`/`tdd`/`local`/`help`/`version`/`skip-approval`/`plain`) never consume the next token, so `--yes "spec"` keeps the positional. Accessors `flagStr` / `flagBool` / `flagNum`. |
 | `src/ui.ts` | 51 | Terminal I/O. ANSI color helpers (`bold`/`dim`/`red`/`green`/`yellow`/`cyan`, gated on `stdout.isTTY` + `NO_COLOR`); `out` / `errln` / `printJson`; `prompt` / `confirm` over `node:readline/promises`; `errorMessage` (unwraps `ApiError` to `msg (HTTP nnn)`). |
 | `src/commands/auth.ts` | 90 | `auth login` — **gcloud-style browser sign-in** by default (`core.loopbackLogin`); `--token` pastes a PAT, `--no-browser` prompts for a paste. Stores via the core `TokenStore` + verifies `/auth/me` (clears on failure). `auth status [--json]`, `auth logout`. |
 | `src/commands/run.ts` | ~480 | The run surface: `submit` / `watch` / **`attach`** / `list` / `view` / `approve` / `reject` / `cancel` / `report` / `cost` / `retry` + experimental **`local`**. Owns the watch loop (`streamRunEvents`; **progress→stderr, result→stdout**; `[y/N]` on `GATE_OPENED`; breaks on terminal; **traps SIGINT/SIGTERM → server `cancel` → exit 130**), the **output-format model** (`text`/`json`/`stream-json` NDJSON via `resolveFormat`), **PAT pre-flight + enum-flag validation** + **stdin spec** (`run submit -`) before submit, the **structured result envelope** (`resultEnvelope`) + **exit-code contract** (`exitForStatus`: 0/1/3), the `RunRequest` assembly, and the local-hands driver. `attach` backfills `api.eventLog` then follows live. |
+| `src/repl.ts` | ~215 | Plain **readline** chat REPL — the `--plain` / non-TTY fallback — over `core.ChatSession`; slash-commands + the exported `looksLikeShellCommand` guard. |
+| `src/tui/chat.tsx` | ~290 | **Rich Ink chat TUI** (default on a TTY). `<ChatApp>`: `<Static>` transcript + a live streaming region (assistant tokens + tool calls) + status line + `ink-text-input` box; slash-commands, the shell-guard, **Ctrl-C cancels the turn / exits**. Drives the same `core.ChatSession`; `runChatTui()` mounts it (`exitOnCtrlC:false`). |
 
 ## Module graph
 
@@ -23,11 +25,13 @@
 index.ts ─┬─ args.ts            (parse argv)
           ├─ ui.ts              (render/prompt)
           ├─ commands/auth.ts ─┐
-          └─ commands/run.ts ──┴─→ @executespec/core
-                                     (ExecuteSpecApi · streamRunEvents ·
+          ├─ commands/run.ts ──┤
+          ├─ tui/chat.tsx ─────┤   (TTY → rich Ink chat UI)   ──→ ink · react · ink-text-input
+          └─ repl.ts ──────────┴─→ @executespec/core
+                                     (ExecuteSpecApi · streamRunEvents · ChatSession ·
                                       TokenStore · ToolRuntime · LocalExecutionSession)
 ```
-Only runtime dependency is `@executespec/core`. No other npm runtime deps (dev: `typescript`, `@types/node`).
+Runtime deps: `@executespec/core` + `ink` / `react` / `ink-text-input` (the TUI). Dev: `typescript`, `@types/node`, `@types/react`, `ink-testing-library`.
 
 ## Command → core call map
 
