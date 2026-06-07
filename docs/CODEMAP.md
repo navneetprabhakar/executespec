@@ -720,6 +720,4 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | DB migrations | `src/main/resources/db/migration/V*.sql` (head V230 in the current worktree) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api/` (`core.ts` + domain modules) |
-| CLI client | `clients/cli/` — [`CODEMAP`](../clients/cli/CODEMAP.md) + [`ARCHITECTURE`](../clients/cli/ARCHITECTURE.md) (thin terminal client; slated to split to its own repo) |
-| VS Code extension | `clients/vscode/` — [`CODEMAP`](../clients/vscode/CODEMAP.md) + [`ARCHITECTURE`](../clients/vscode/ARCHITECTURE.md) (native MVP; slated to split to its own repo) |
-| Shared client core | `clients/core/` — typed REST/SSE client + PAT `TokenStore` + local `ToolRuntime` (the logic both clients render over) |
+| CLI + VS Code clients | **Moved out 2026-06-07 → the standalone `executespec-cli` repo** (RL-2026-06-014). Was `clients/` (`@executespec/core` + `cli` + `vscode`, an npm workspace). Only the server-side OAuth device-login fix + the API endpoints they consume remain in this repo. |
