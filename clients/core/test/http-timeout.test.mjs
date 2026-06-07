@@ -14,6 +14,11 @@ test('a hung request aborts at the timeout instead of hanging forever', async ()
   const cfg = resolveConfig({ host: 'http://127.0.0.1:0' });
   const http = new HttpClient(cfg, new MemoryTokenStore('es_pat_test'));
   const orig = globalThis.fetch;
+  // A real fetch keeps the event loop alive via its socket until the (unref'd) AbortSignal.timeout
+  // fires; this mock does no I/O, so hold the loop open ourselves — otherwise node can drain the
+  // loop before the 30ms timer fires and the promise never settles ("event loop has already
+  // resolved", seen on the CI node-20 runner). Cleared in finally once the request rejects.
+  const keepAlive = setTimeout(() => {}, 5000);
   // Never resolves on its own; only settles when the timeout aborts the request signal.
   globalThis.fetch = (_url, init) =>
     new Promise((_resolve, reject) => {
@@ -30,6 +35,7 @@ test('a hung request aborts at the timeout instead of hanging forever', async ()
     );
     assert.ok(Date.now() - started < 2000, 'should abort promptly, not hang');
   } finally {
+    clearTimeout(keepAlive);
     globalThis.fetch = orig;
   }
 });
