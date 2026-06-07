@@ -87,6 +87,9 @@ public class RunController {
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
+  /** P3 local-hands (RL-2026-06-014) — per-run LOCAL-execution marker. */
+  private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
+
   /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
   private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
 
@@ -212,6 +215,13 @@ public class RunController {
     // call, default behaviour (auto-push) resumes naturally.
     if (Boolean.TRUE.equals(req.skipAutoPush())) {
       runSkipPushFlag.mark(run.getRunId());
+    }
+
+    // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
+    // RunOrchestrator
+    // consumes it once at pipeline start (gated by worker.local-hands.enabled, default OFF).
+    if (Boolean.TRUE.equals(req.localExecution())) {
+      runLocalExecutionFlag.mark(run.getRunId());
     }
 
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));

@@ -196,6 +196,14 @@ public class RunOrchestrator implements RunControlPort {
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
+  /**
+   * P3 local-hands (RL-2026-06-014) — per-run LOCAL marker + the remote-tool transport it
+   * activates.
+   */
+  private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
+
+  private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -828,6 +836,11 @@ public class RunOrchestrator implements RunControlPort {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
+    // P3 local-hands (RL-2026-06-014) — declared before the try so the finally can unregister the
+    // remote-tool session on every terminal/cancel path. Assigned once below (after the workspace
+    // exists); stays false unless worker.local-hands.enabled AND the submit requested LOCAL
+    // execution.
+    boolean localRun = false;
     try {
       // V165 BYOK fix — resolve the run owner's configured keys ONCE
       // at run-start and stash them in RunKeyContextStore. LlmRouter
@@ -945,11 +958,20 @@ public class RunOrchestrator implements RunControlPort {
       // V2 runs: the endpoint assumes the workspace already has git history.
       workspaceInit.ensureRunWorkspace(runId);
 
+      // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. When on, the
+      // worker's tool calls are proxied to the caller's machine (clone / smoke / reviewer / push
+      // are
+      // all skipped below). Flag OFF ⇒ false ⇒ every branch below is inert and prod is
+      // byte-identical.
+      localRun =
+          featureFlagService.isEnabled("worker.local-hands.enabled")
+              && runLocalExecutionFlag.consume(runId);
+
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
       // fails we log and continue so the run can at least try to plan against what
-      // was fetched.
-      if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+      // was fetched. (Skipped entirely for LOCAL runs — the working tree is the client's.)
+      if (!localRun && projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
         try {
           List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
           List<WorkspaceInitService.RepoToClone> toClone =
@@ -986,6 +1008,20 @@ public class RunOrchestrator implements RunControlPort {
           runPatchPipeline(runId, provider, modeProbe, userRequest, rootCtx, startedAt);
           return;
         }
+      }
+
+      // P3 local-hands: for a LOCAL build-mode run, register the remote-tool session so the
+      // worker's
+      // existing dispatch (ToolRegistry.isRemoteRun ← RemoteToolDispatcher) proxies every tool call
+      // to
+      // the caller's machine. Mirrors TerminalBenchRunService; unregistered in the runPipeline
+      // finally.
+      if (localRun) {
+        remoteToolDispatcher.register(runId);
+        log.info(
+            "RunOrchestrator run={} LOCAL-hands mode: tool calls proxied to client;"
+                + " clone/smoke/push skipped",
+            runId);
       }
 
       // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
@@ -1341,7 +1377,7 @@ public class RunOrchestrator implements RunControlPort {
                     .model(model)
                     .runContext(rootCtx)
                     .maxIterationsPerTask(null) // per-complexity caps applied in SequentialExecutor
-                    .enableSmokeTests(true)
+                    .enableSmokeTests(!localRun)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -1388,6 +1424,29 @@ public class RunOrchestrator implements RunControlPort {
                 runId, null, "Code generation complete — code-gen-only mode (reviewer skipped)"));
         terminate(
             runId, "COMPLETE", "CODEGEN_ONLY", "code-gen complete; reviewer skipped", startedAt);
+        return;
+      }
+
+      // P3 local-hands (RL-2026-06-014) — LOCAL runs STOP HERE too, right after the worker (like
+      // the
+      // code-gen-only stop above). The worker's edits/tests already ran on the CALLER's machine
+      // (tool
+      // calls were proxied); everything below — lint, reviewer, standards, validation, commit,
+      // auto-push — operates on the empty SERVER workspace and would be meaningless. Nothing is
+      // published; the diff lives in the client's working tree. Gated OFF by default ⇒ never taken
+      // for
+      // a normal run.
+      if (localRun) {
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId, null, "Local-hands run complete — changes are in your working tree"));
+        terminate(
+            runId,
+            "COMPLETE",
+            "LOCAL_EXECUTION",
+            "local-hands run; diff in the client working tree (server-side steps skipped)",
+            startedAt);
         return;
       }
 
@@ -1698,6 +1757,16 @@ public class RunOrchestrator implements RunControlPort {
         keyContextStore.evict(runId);
       } catch (Exception ignore) {
         /* best-effort */
+      }
+      // P3 local-hands: drop the remote-tool session on EVERY terminal/exception/cancel path. This
+      // finally is the single guaranteed unwind point (cancel interrupts the pipeline thread and
+      // unwinds through here). No-op for non-LOCAL runs.
+      if (localRun) {
+        try {
+          remoteToolDispatcher.unregister(runId);
+        } catch (Exception ignore) {
+          /* best-effort */
+        }
       }
       // Workspace retained for code-view / download endpoints (Phase 11.C).
       if (workspace != null) {
