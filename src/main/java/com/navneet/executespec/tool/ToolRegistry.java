@@ -75,14 +75,14 @@ public class ToolRegistry {
   }
 
   /**
-   * Flag-gated tool binding (W4.2) — a tool that is OFF for this run is NOT bound at all (absent
-   * from the model's tool schema), not bound-but-inert, per the RL-2026-05-061 lesson that a tool
-   * merely <i>present</i> in the schema can cause reasoning-only stalls on schema-sensitive
-   * providers (DeepSeek). Currently only {@link BackgroundJobTool} opts in; every other tool is
-   * always bound.
+   * Flag-gated tool binding (W4.2/W3.1) — a {@link FlagGatedTool} that is OFF for this run is NOT
+   * bound at all (absent from the model's tool schema), not bound-but-inert, per the RL-2026-05-061
+   * lesson that a tool merely <i>present</i> in the schema can cause reasoning-only stalls on
+   * schema-sensitive providers (DeepSeek). Opted in: {@link BackgroundJobTool}, {@link
+   * ReadCodeOutlineTool}; every non-{@code FlagGatedTool} is always bound.
    */
   private boolean isToolBound(Tool t) {
-    return !(t instanceof BackgroundJobTool bjt) || bjt.enabled();
+    return !(t instanceof FlagGatedTool fg) || fg.enabled();
   }
 
   /**
