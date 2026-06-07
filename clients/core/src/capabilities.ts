@@ -85,7 +85,7 @@ export const CAPABILITIES: readonly Capability[] = [
     { mutating: true, needsWorkspace: false, interactive: true, scriptable: true }),
   cap('F11', 'Reject plan gate', shipped('run reject'), planned('executespec.reject'),
     { mutating: true, needsWorkspace: false, interactive: true, scriptable: true }),
-  cap('F12', 'Cancel run', shipped('run cancel'), planned('executespec.cancel'),
+  cap('F12', 'Cancel run', shipped('run cancel'), shipped('executespec.cancelRun'),
     { mutating: true, needsWorkspace: false, interactive: false, scriptable: true }),
   cap('F13', 'Run report (score)', shipped('run report'), planned('executespec.report'),
     { mutating: false, needsWorkspace: false, interactive: false, scriptable: true }),
