@@ -147,6 +147,13 @@ public class RunCostTracker {
     // key; Anthropic + OpenAI don't have an equivalent, so the read returns 0.
     int thinkingTok = readMetaInt(response, "thinking_tokens");
     if (thinkingTok > 0) outTok += thinkingTok;
+    // W0 (vix-leverage telemetry) — capture reasoning tokens as a first-class metric (previously
+    // thinking_tokens was folded into outTok for pricing and lost as a separate signal). Gemini
+    // surfaces `thinking_tokens` (separate from completion, added to outTok above); OpenAI o-series
+    // /
+    // DeepSeek reasoner surface `reasoning_tokens` (a SUBSET of completion — NOT re-added to
+    // outTok).
+    int reasoningTok = thinkingTok > 0 ? thinkingTok : readMetaInt(response, "reasoning_tokens");
 
     double callCost = priceCall(provider, model, inTok, outTok, cacheWrite, cacheRead);
 
@@ -157,6 +164,7 @@ public class RunCostTracker {
     acc.cacheReadTokens.addAndGet(cacheRead);
     acc.costMicros.addAndGet((long) Math.round(callCost * 1_000_000d));
     acc.calls.incrementAndGet();
+    acc.reasoningTokens.addAndGet(reasoningTok);
 
     if (taskId != null && !taskId.isBlank()) {
       Accumulator taskAcc = byRunTask.computeIfAbsent(runId + "|" + taskId, k -> new Accumulator());
@@ -166,6 +174,7 @@ public class RunCostTracker {
       taskAcc.cacheReadTokens.addAndGet(cacheRead);
       taskAcc.costMicros.addAndGet((long) Math.round(callCost * 1_000_000d));
       taskAcc.calls.incrementAndGet();
+      taskAcc.reasoningTokens.addAndGet(reasoningTok);
     }
 
     // Per-call diagnostic so we can tell at-a-glance whether a provider is
@@ -770,6 +779,7 @@ public class RunCostTracker {
     final AtomicLong cacheReadTokens = new AtomicLong();
     final AtomicLong costMicros = new AtomicLong();
     final AtomicLong calls = new AtomicLong();
+    final AtomicLong reasoningTokens = new AtomicLong(); // W0 — reasoning/thinking tokens
 
     Snapshot toSnapshot() {
       return new Snapshot(
@@ -778,7 +788,8 @@ public class RunCostTracker {
           (int) cacheWriteTokens.get(),
           (int) cacheReadTokens.get(),
           costMicros.get() / 1_000_000.0,
-          (int) calls.get());
+          (int) calls.get(),
+          (int) reasoningTokens.get());
     }
   }
 
@@ -788,5 +799,21 @@ public class RunCostTracker {
       int cacheWriteTokens,
       int cacheReadTokens,
       double costUsd,
-      int calls) {}
+      int calls,
+      int reasoningTokens) {
+    /**
+     * W0 (vix-leverage telemetry) — backward-compatible 6-arg constructor (reasoningTokens=0) so
+     * the many existing call sites that predate the reasoning-token field keep compiling unchanged.
+     * Only {@link Accumulator#toSnapshot()} populates the reasoning field.
+     */
+    public Snapshot(
+        int inputTokens,
+        int outputTokens,
+        int cacheWriteTokens,
+        int cacheReadTokens,
+        double costUsd,
+        int calls) {
+      this(inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, costUsd, calls, 0);
+    }
+  }
 }
