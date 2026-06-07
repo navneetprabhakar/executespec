@@ -309,6 +309,8 @@ Pre-dispatch arg validation (RL-2026-06-008, vix-leverage W1.3): `tool/ToolArgVa
 
 Post-edit diagnostics (RL-2026-06-009, vix-leverage W1.1 = "B1", flag `worker.edit-diagnostics.enabled` V232, default OFF): `tool/EditDiagnosticsService` — after a successful `editFile`/`writeFile` on a `.py` file, runs `python3 -m py_compile` (in the run's SWE-bench/ProgramBench container when registered, else host) and appends the first syntax error to the tool result, closing the edit→"what you broke" loop for the SWE-bench wrong-half-fix class. Java deferred (single-file `javac` is classpath-noisy). Null-guarded into both write tools; bounded (15s/6 lines) + fail-open. Not a worker tool.
 
+Background command jobs (RL-2026-06-012, vix-leverage W4.2 = P6, flag `worker.background-jobs.enabled` V233, default OFF): `tool/BackgroundJobTool` (worker tool, `action=start|status|logs|kill`) + `tool/JobRegistry` (engine: start→jobId, status/tail/kill process-tree, `cleanup(runId)` run-end hygiene; sandbox-validated, env-sanitized, combined stdout+stderr to a temp log). Lets a worker run a server / slow build without blocking a foreground `shell` (300s cap). **Conditionally bound** — `ToolRegistry.isToolBound` keeps it ABSENT from the model schema when OFF (not bound-but-inert), so a schema-sensitive provider (DeepSeek) is unaffected (RL-2026-05-061). Host-side first cut; pre-flip TODOs: run-end `JobRegistry.cleanup` wiring + container/remote routing.
+
 ---
 
 ## 5. JPA entities
