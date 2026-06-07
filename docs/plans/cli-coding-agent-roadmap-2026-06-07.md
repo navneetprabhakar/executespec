@@ -20,7 +20,7 @@ local execution layer — not a reimplementation of Claude Code.
 | **P1** | Auto-login on first run (gh-style) | ✅ shipped (RL-2026-06-014), CLI 14/14 |
 | **P2** | Inline run streaming in the chat TUI (plan/tasks/files/score + inline gate) | ✅ shipped (RL-2026-06-014) |
 | **—** | OAuth device-login fix (Google/GitHub onboarding) + welcome screen | ✅ shipped (RL-2026-06-014) |
-| **P3** | Local-hands activation — the agent edits YOUR working tree | ⏸ **held for review** (touches core pipeline) |
+| **P3** | Local-hands activation — the agent edits YOUR working tree | 🟡 **backend landed, flag-OFF** (RL-2026-06-015); client `run local` glue + e2e pump test owed before flip |
 | **P4** | Rich rendering — markdown + syntax-highlighted diffs, `@file` mentions | ⏳ deferred |
 
 ## P3 — Local-hands activation (the keystone)
