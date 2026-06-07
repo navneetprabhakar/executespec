@@ -307,6 +307,8 @@ Tool-output post-processing (RL-2026-05-052 Phase 5+6, default OFF behind `worke
 
 Pre-dispatch arg validation (RL-2026-06-008, vix-leverage W1.3): `tool/ToolArgValidator` — a static, conservative, fail-open, **absent-only** validator run before `tool.execute` at both dispatch sites (`WorkerAgent.dispatchOne` + `ToolRegistry.ContextBoundToolCallback`); rejects a call omitting a schema-declared `required` field with `INVALID_ARGS`. Not a worker tool. Also (W1.5/B5) `ShellSandboxPolicy.BLOCKED_PATTERNS` now blocks in-place stream edits (`sed -i` / `sed --in-place` / `awk -i inplace`) that bypassed `EditFileTool`'s read-before-edit gate.
 
+Post-edit diagnostics (RL-2026-06-009, vix-leverage W1.1 = "B1", flag `worker.edit-diagnostics.enabled` V232, default OFF): `tool/EditDiagnosticsService` — after a successful `editFile`/`writeFile` on a `.py` file, runs `python3 -m py_compile` (in the run's SWE-bench/ProgramBench container when registered, else host) and appends the first syntax error to the tool result, closing the edit→"what you broke" loop for the SWE-bench wrong-half-fix class. Java deferred (single-file `javac` is classpath-noisy). Null-guarded into both write tools; bounded (15s/6 lines) + fail-open. Not a worker tool.
+
 ---
 
 ## 5. JPA entities
