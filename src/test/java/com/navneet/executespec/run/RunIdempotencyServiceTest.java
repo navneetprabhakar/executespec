@@ -16,7 +16,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
-/** Pins the fail-open + user/key-scoping contract of {@link RunIdempotencyService} (RL-2026-06-005). */
+/**
+ * Pins the fail-open + user/key-scoping contract of {@link RunIdempotencyService} (RL-2026-06-005).
+ */
 @ExtendWith(MockitoExtension.class)
 class RunIdempotencyServiceTest {
 
