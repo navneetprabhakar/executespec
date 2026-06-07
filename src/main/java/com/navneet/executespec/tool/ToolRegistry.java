@@ -183,6 +183,12 @@ public class ToolRegistry {
             ToolResult.ErrorKind.INVALID_ARGS,
             "tool input is not valid JSON: " + parseEx.getMessage());
       }
+      // B4 (RL-2026-06, vix-leverage W1.3) — same conservative required-field check as the manual
+      // worker dispatch path (WorkerAgent.dispatchOne), centralized in ToolArgValidator.
+      var argErr = ToolArgValidator.validate(tool.inputSchema(), args);
+      if (argErr.isPresent()) {
+        return errorEnvelope(ToolResult.ErrorKind.INVALID_ARGS, argErr.get());
+      }
       try {
         ToolResult result = tool.execute(args, ctx);
         return switch (result) {

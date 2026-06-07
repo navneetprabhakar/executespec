@@ -871,6 +871,22 @@ public class WorkerAgent {
               new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
           toolLog.add(tc.name() + " → COMPLETED");
           log.info("WorkerAgent completeTask received: {}", completionSummary);
+          // C2 (RL-2026-06, vix-leverage W1.4) — completeTask short-circuits this batch with a
+          // return, so any sibling tool calls AFTER it in the same assistant turn never dispatch.
+          // Their tool_use blocks would then have no matching tool_result in the persisted/replayed
+          // history, violating the Anthropic pairing invariant (a dangling tool_use is a 400 on
+          // re-send). Pair each un-run trailing sibling with a synthetic placeholder result so the
+          // ToolResponseMessage covers every tool_use the assistant emitted this turn.
+          for (int siblingIdx = callIdx + 1; siblingIdx <= lastIdx; siblingIdx++) {
+            AssistantMessage.ToolCall superseded = calls.get(siblingIdx);
+            toolResponses.add(
+                new ToolResponseMessage.ToolResponse(
+                    safeId(superseded.id()),
+                    superseded.name(),
+                    errEnvelope(
+                        "SUPERSEDED", "not executed — completeTask ended the task this turn")));
+            toolLog.add(superseded.name() + " → SUPERSEDED (after completeTask)");
+          }
           // Append the tool response so the conversation is well-formed
           // (matters for any post-hoc inspection / persistence).
           history.add(ToolResponseMessage.builder().responses(toolResponses).build());
@@ -1513,6 +1529,15 @@ public class WorkerAgent {
               : objectMapper.readTree(tc.arguments());
     } catch (Exception e) {
       return errEnvelope("INVALID_ARGS", "tool args not valid JSON: " + e.getMessage());
+    }
+    // B4 (RL-2026-06, vix-leverage W1.3) — centralized, conservative pre-dispatch validation:
+    // reject a call that omits a field the tool's OWN schema declares `required`, naming the field,
+    // instead of letting a silently-absent arg reach the handler as null/garbage. Fail-open
+    // (unparseable schema / no required list → no-op) + absent-only, so a schema-compliant call is
+    // never blocked. Same check runs on the Spring-AI path (ToolRegistry.ContextBoundToolCallback).
+    var argErr = com.navneet.executespec.tool.ToolArgValidator.validate(tool.inputSchema(), args);
+    if (argErr.isPresent()) {
+      return errEnvelope("INVALID_ARGS", argErr.get());
     }
     try {
       ToolResult result = tool.execute(args, req.context());

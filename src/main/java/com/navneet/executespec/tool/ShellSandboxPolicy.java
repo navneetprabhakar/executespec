@@ -216,7 +216,20 @@ public class ShellSandboxPolicy {
           // scratch dirs. The remaining dirs are kernel + system + boot critical with no
           // legitimate workspace overlap.
           Pattern.compile(
-              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"));
+              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"),
+
+          // 2026-06 (RL-2026-06, vix-leverage W1.5) — in-place stream edits bypass the
+          // read-before-edit gate (EditFileTool's SHA-staleness check), mutating tracked source
+          // with
+          // no reviewable editFile diff. Force in-place mutation through editFile; read-only
+          // sed/awk
+          // (no in-place flag) stay allowed for inspection. Scope is the SAME segment ([^|;&] stops
+          // at a chain/pipe operator) so a downstream `... | grep -i` or `| sort` is NOT
+          // mis-flagged.
+          // `perl -i` needs no entry — perl is not in ALLOWED_PREFIXES, so it is already blocked.
+          Pattern.compile("\\bsed\\b[^|;&\\n]*\\s-i"), // sed -i / sed -i.bak (in-place)
+          Pattern.compile("\\bsed\\b[^|;&\\n]*--in-place"), // sed --in-place
+          Pattern.compile("\\bawk\\b[^|;&\\n]*-i\\s+inplace")); // gawk -i inplace
 
   // Docker subcommands that are safe — all others are blocked
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =
