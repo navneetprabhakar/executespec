@@ -114,7 +114,7 @@ Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures �
 
 ### Observability
 
-Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP). `executespec.v2.*` custom metrics for `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. Dump endpoint `/api/v2/test/metrics`. Actuator at `/actuator/prometheus`.
+Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP). `executespec.v2.*` custom metrics for `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. Dump endpoint `/api/v2/test/metrics`. Actuator at `/actuator/prometheus`. **W0 telemetry (RL-2026-06-011, vix-leverage):** `RunCostTracker` now also tracks **reasoning tokens** per run + per task (`Snapshot.reasoningTokens` — Gemini `thinking_tokens` / OpenAI-DeepSeek `reasoning_tokens`), the first slice of the typed execution/telemetry contract; per-role/step attribution + typed `RunEvent` `tool_call`/`tool_result`/`step` events + SSE/DTO/report surfacing are the follow-up phases.
 
 5 published SLOs in [`docs/operations/slos.md`](docs/operations/slos.md): run terminal in 15min ≥95% / verified-score correctness ≥90% / cost estimate within 30% on ≥80% / webhook in 60s ≥99% / hot-path 5xx <0.5%.
 
