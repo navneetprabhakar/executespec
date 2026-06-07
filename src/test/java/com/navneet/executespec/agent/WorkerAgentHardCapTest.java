@@ -128,6 +128,8 @@ class WorkerAgentHardCapTest {
             null,
             // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
             // disabled.
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
     return new Fixture(worker);
   }

@@ -610,6 +610,15 @@ to boot — skip it for those.""";
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
+            // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
+            // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked
+            // by a later task's not-yet-implemented tests. Decoupled from V217 (runner called
+            // directly), no model-visible schema change. Byte-identical until the flag flips.
+            .verifyBeforeComplete(
+                isFinalTask
+                    && featureFlagService != null
+                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots

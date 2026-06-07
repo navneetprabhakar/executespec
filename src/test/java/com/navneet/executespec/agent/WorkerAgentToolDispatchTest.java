@@ -115,6 +115,8 @@ class WorkerAgentToolDispatchTest {
         runRepo,
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         null,
+        null,
+        // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
         null);
   }
 

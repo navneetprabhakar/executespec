@@ -164,6 +164,12 @@ public class PatchAgent {
             // acceptance review over the worker's git diff. Validated on Terminal-Bench
             // (4/13→8/13).
             .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
+            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
+            // project's tests at completeTask and refuse if red. Decoupled from V217 (calls the
+            // runner directly), no model-visible schema change. Byte-identical until the flag
+            // flips.
+            .verifyBeforeComplete(
+                featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
             .build();
 
     WorkerResult result = workerAgent.run(req);

@@ -128,6 +128,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             null,
             // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
             // disabled.
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
     return new Fixture(worker, router);
   }
@@ -401,6 +403,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             null,
             // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
             // disabled.
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
 
     long t0 = System.currentTimeMillis();
@@ -487,6 +491,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             runRepo,
             mock(com.navneet.executespec.sse.SseBroadcaster.class),
             null,
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
 
     WorkerResult result =

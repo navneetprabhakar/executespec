@@ -2,6 +2,7 @@ package com.navneet.executespec.engine;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,6 +11,8 @@ import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.smoketest.WorkspaceTestRunner;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
@@ -118,6 +121,21 @@ public class WorkerAgent {
    */
   private final WorkerHistoryCompactor workerHistoryCompactor;
 
+  /**
+   * VBC verify-before-complete (RL-2026-06-…) — server-runs the project's own test suite at the
+   * {@code completeTask} boundary when {@link WorkerTaskRequest#verifyBeforeComplete()} is set
+   * (flag {@code worker.verify-before-complete.enabled}, V235, default OFF). Unlike the
+   * model-dependent {@code requireTestVerification}/{@code requireBuildVerification} soft gates
+   * (which only check whether the MODEL recently called runTests/buildProject), this RUNS the tests
+   * itself, server-side — so a worker that never verifies is still caught. Called DIRECTLY (not via
+   * the flag-gated {@code runWorkspaceTests} TOOL) so VBC is decoupled from {@code
+   * worker.build-tdd.enabled} (V217) and carries no model-visible schema change (sidesteps the
+   * RL-2026-05-061 schema-stall class). Null-guarded — legacy {@code new WorkerAgent(...)} test
+   * call sites pass null and the gate fail-opens. Last in the {@code @RequiredArgsConstructor}
+   * order so those call sites only append one trailing arg.
+   */
+  private final WorkspaceTestRunner workspaceTestRunner;
+
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
@@ -181,6 +199,16 @@ public class WorkerAgent {
    * {@link WorkerTaskRequest#requiredDeliverablePaths()}.
    */
   public static final int DELIVERABLE_GATE_MAX_REFUSALS = 2;
+
+  /**
+   * VBC verify-before-complete gate — how many times the server-run test gate may refuse {@code
+   * completeTask} (tests red) before it YIELDS and lets the run complete anyway. Bounded +
+   * fail-open (mirrors {@link #DELIVERABLE_GATE_MAX_REFUSALS}): the gate can nudge the worker to
+   * fix failing tests for a few rounds but can NEVER permanently block a legitimately-complete run.
+   * 3 (vs the deliverable gate's 2) gives an extra round because fixing a real test failure usually
+   * needs one read + one edit + one re-verify.
+   */
+  public static final int VBC_GATE_MAX_REFUSALS = 3;
 
   /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
@@ -302,6 +330,11 @@ public class WorkerAgent {
     // RL-2026-06 — critic/reviewer pass (#1), COMMON to all consumers (not terminal-gated). See
     // WorkerTaskRequest#criticPass. Workspace-agnostic: reads git diff (local) or /app (remote).
     final boolean criticOn = Boolean.TRUE.equals(req.criticPass());
+    // VBC (RL-2026-06-…) — verify-before-complete: at the FIRST completeTask, SERVER-RUN the
+    // project's own tests and refuse if red. Decoupled from V217 (calls WorkspaceTestRunner
+    // directly, not the flag-gated runWorkspaceTests tool). See
+    // WorkerTaskRequest#verifyBeforeComplete.
+    final boolean vbcOn = Boolean.TRUE.equals(req.verifyBeforeComplete());
     final int terminalArtifactDeadlineAfter =
         req.terminalArtifactDeadlineAfter() != null && req.terminalArtifactDeadlineAfter() > 0
             ? req.terminalArtifactDeadlineAfter()
@@ -356,6 +389,11 @@ public class WorkerAgent {
     final List<String> requiredDeliverables =
         req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
     int deliverableRefusals = 0;
+    // VBC verify-before-complete — bounded refusal counter (fail-open after VBC_GATE_MAX_REFUSALS).
+    // Re-runs the tests on each completeTask attempt (the worker fixes between attempts), unlike
+    // the
+    // one-shot critic; the counter caps how many times red tests can defer completion.
+    int vbcRefusals = 0;
 
     // RL-2026-06 — terminal-mode critic pass (#1). One-shot fresh-context acceptance review before
     // the first completeTask. criticNudged ⇒ can never loop.
@@ -805,6 +843,39 @@ public class WorkerAgent {
               continue;
             }
           }
+          // #VBC verify-before-complete (RL-2026-06-…, worker.verify-before-complete.enabled,
+          // V235).
+          // SERVER-RUNS the project's own tests here (vs the soft test/build gates above, which
+          // only
+          // check whether the MODEL ran them) — so a worker that calls completeTask without ever
+          // verifying is still caught. Bounded to VBC_GATE_MAX_REFUSALS, then YIELDS; fail-open
+          // when
+          // no runner resolves / a remote run / any error (the gate can nudge a fix for a few
+          // rounds
+          // but can NEVER false-FAIL a complete run). Runs the runner DIRECTLY (not the flag-gated
+          // runWorkspaceTests tool) so it is independent of worker.build-tdd.enabled (V217) and
+          // adds
+          // no model-visible schema change (RL-2026-05-061 schema-stall class avoided). Ordered
+          // before the LLM critic so a red suite refuses without paying for an acceptance-review
+          // call.
+          if (vbcOn && vbcRefusals < VBC_GATE_MAX_REFUSALS) {
+            String vbcFailure = verifyBeforeCompleteFailure(req.context());
+            if (vbcFailure != null) {
+              vbcRefusals++;
+              String refused =
+                  errEnvelope("VERIFY_FAILED", verifyBeforeCompleteMessage(vbcFailure));
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (verify-before-complete: " + vbcFailure + ")");
+              log.info(
+                  "WorkerAgent completeTask VBC-GATED run={} task={} iter={} detail={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  vbcFailure);
+              continue;
+            }
+          }
           // #1 critic/reviewer pass (RL-2026-06) — COMMON to all consumers, not a TB fork. One
           // fresh-context acceptance review before the FIRST completeTask: a no-tool LlmRouter call
           // that sees ONLY the task + the candidate's deliverable (git diff for a local product
@@ -848,6 +919,7 @@ public class WorkerAgent {
           if (!gateOn
               && !verifyNudged
               && !criticOn
+              && !vbcOn
               && totalWriteCalls > 0
               && (lastEditIter > lastVerifyIter || terminalVerifyGateOn)) {
             verifyNudged = true;
@@ -2006,6 +2078,49 @@ public class WorkerAgent {
           "deliverable gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
       return List.of();
     }
+  }
+
+  /**
+   * VBC verify-before-complete (RL-2026-06-…) — server-runs the project's own test suite via {@link
+   * WorkspaceTestRunner} and returns a short failure detail when tests are RED, or {@code null} on
+   * pass / fail-open. Fail-open (returns null, letting completeTask proceed) when: the runner is
+   * not wired (legacy test call sites pass null), the run is remote (the host-side runner can't
+   * reach a container — Tier-1 scope is local BUILD/PATCH), no recognized runner resolves / output
+   * is unparseable ({@code Optional.empty()}), zero tests ran, or any exception. So the gate can
+   * nudge the worker to fix failing tests but can NEVER convert a legitimately-complete run into a
+   * false FAIL. Called DIRECTLY (not via the flag-gated runWorkspaceTests tool) so VBC is
+   * independent of {@code worker.build-tdd.enabled} (V217).
+   */
+  private String verifyBeforeCompleteFailure(ExecutionContext ctx) {
+    if (workspaceTestRunner == null) return null; // not wired → fail-open
+    if (toolRegistry.isRemoteRun(ctx)) return null; // remote/TB: Tier-1 inert → fail-open
+    try {
+      Optional<TestExecutionSummary> opt =
+          workspaceTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());
+      if (opt.isEmpty()) return null; // no runner / unparseable → fail-open
+      TestExecutionSummary s = opt.get();
+      if (s.getTotalTests() == 0) return null; // nothing ran → fail-open
+      if (s.getFailed() == 0 && s.getErrors() == 0) return null; // green
+      return s.getFailed()
+          + " failed / "
+          + s.getErrors()
+          + " errored of "
+          + s.getTotalTests()
+          + " tests";
+    } catch (Exception e) {
+      log.debug("VBC gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return null; // fail-open
+    }
+  }
+
+  /** VBC verify-before-complete — the refusal message naming what failed and what to do. */
+  static String verifyBeforeCompleteMessage(String detail) {
+    return "completeTask refused — the project's own tests do not pass ("
+        + detail
+        + "). The platform ran your test suite and it is RED. Fix the failing test(s) — or the code"
+        + " they exercise — then call completeTask again. A run that completes with failing tests"
+        + " ships a broken deliverable. If a failure is genuinely pre-existing and unrelated to"
+        + " your change, note that in completionNotes; the gate yields after a few attempts.";
   }
 
   /** RL-2026-06 — the deliverable-gate refusal message naming the missing required path(s). */
