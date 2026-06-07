@@ -906,7 +906,8 @@ money/automation-safety holes**. So this is "harden the behavior layer," not "bu
 - ✅ **#7 PAT pre-flight** — `run submit` checks `client.tokens.get()` before submitting → actionable message instead of a raw 401.
 - ✅ **#10 crash capture** — `cli/index.ts` adds `uncaughtException`/`unhandledRejection` handlers (clean message + non-zero exit).
 - ✅ **#9b default per-request HTTP timeout** (`core/http.ts`, 60s, `AbortSignal.any`+`timeout`); **#5 `--format text|json|stream-json`** (NDJSON, timestamped); **#8 `run submit -` stdin**; **#6 structured result envelope** (`resultEnvelope`); **#4 `run attach` + `eventLog(runId)`** backfill; **enum-flag validation**; **`--version` from `package.json`**.
-- ⏳ **Remaining (backend / cross-cutting):** server-side `Idempotency-Key` **dedupe** (the client half is in place); the `run local` arbitrary-shell **permission gate** (`core/tools/runtime.ts` `allowCommand` defaults to allow); **W0-fed per-step cache/usage** in the result envelope (usage fields land with W0).
+- ✅ **Server-side `Idempotency-Key` dedupe LANDED** — `run/RunIdempotencyService` (Redis, 24h, user-scoped, fail-open) + `RunController.submit` reads the header and returns the original run on a repeat, **before** the quota/usage increment so a retry never double-charges. Unit-tested.
+- ⏳ **Remaining:** the `run local` arbitrary-shell **permission gate** (`core/tools/runtime.ts` `allowCommand` defaults to allow); **W0-fed per-step cache/usage** in the result envelope (lands with W0).
 
 **W5.2 — VS Code extension** (external P10) — rich client over the same contract: run-timeline view, task
 tree, tool-event inspector, diff view, background-job panel, **per-provider** cache/cost panel, artifact
