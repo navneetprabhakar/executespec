@@ -408,6 +408,10 @@ async function local(_args: ParsedArgs, _client: ClientBundle): Promise<number> 
   // ToolRuntime. Until then this would silently submit a normal SERVER-side run (which may even
   // auto-push) — the opposite of "local" — so it is gated off rather than mislead (design §10 #3).
   // The core LocalExecutionSession + ToolRuntime stay exported, ready for Phase 3 to re-wire here.
+  // SECURITY: ToolRuntime is now fail-closed — shell/buildProject/runTests/gitCommit are DENIED
+  // unless an explicit policy approves them. When this re-wires, pass
+  // `createInteractivePermissions(ask)` (a y/N/a prompt over `ui.prompt`) so every local command is
+  // user-approved; `allowAllPermissions()` exists only for trusted/non-interactive contexts.
   // Tracked: docs/pending.md §J1.
   errln(
     red('run local: LOCAL-hands mode is not available yet.') +

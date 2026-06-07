@@ -99,9 +99,15 @@ CLI ◀≈≈ TOOL_CALL {readFile/writeFile/shell/…} ≈≈   server agent wan
 CLI ─POST /runs/{id}/tool-results─▶  server agent continues
 CLI ◀≈≈ COMPLETE ≈≈
 ```
+The local `ToolRuntime` is **fail-closed**: `shell` / `buildProject` / `runTests` / `gitCommit` are
+**denied** unless an explicit permission policy approves them — `createInteractivePermissions(ask)`
+for a per-command y/N/a prompt (with session memory), or `allowAllPermissions()` for trusted /
+non-interactive contexts. Path-confined file tools stay open (`safeResolve` keeps them inside the
+workspace). So local-hands can never run an arbitrary command silently.
+
 The server-side activation wiring for this path is **not yet shipped**, so `run local` is inert
 today (the `localExecution` flag is dropped by older backends). It is wired client-side and ready
-for when the server local-mode lands.
+for when the server local-mode lands — activation must pass an interactive permission policy.
 
 ## 5. Governance
 
