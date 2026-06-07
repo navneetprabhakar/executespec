@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { createClient } from '@executespec/core';
 
 import { parseArgs, flagBool, flagStr } from './args.js';
@@ -11,7 +15,16 @@ import { statsCommand } from './commands/stats.js';
 import { chatRepl } from './repl.js';
 import { errln, errorMessage, out } from './ui.js';
 
-const VERSION = '0.1.0';
+// Single source of truth: read the version from package.json (dist/index.js → ../package.json),
+// so `--version` never drifts from the published package.
+const VERSION: string = (() => {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    return (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 const HELP = `executespec — spec-driven coding from your terminal (thin client; the agent loop stays server-side)
 
@@ -26,8 +39,10 @@ Auth
   logout                                forget the stored token
 
 Runs
-  run submit "<spec>" [flags] [--watch] submit a run (server clones + opens a PR)
-  run list [--status S --scope mine|org]  |  run view <id>  |  run watch <id>
+  run submit "<spec>" [flags] [--watch] submit a run ('-' as the spec reads it from stdin)
+  run list [--status S --scope mine|org]  |  run view <id>
+  run watch <id>                        follow a run live
+  run attach <id>                       replay history from the start, then follow live
   run approve <id> [--credits N]  |  run reject <id>  |  run cancel <id>
   run report <id>  |  run cost <id>  |  run retry <id> <taskId>
   run local "<spec>"                    local-hands — not available yet (Phase 3)
@@ -42,7 +57,8 @@ Account
 
 Common flags
   --host <url>        backend (default https://executespec.ai or $EXECUTESPEC_HOST)
-  --json              machine-readable output
+  --json              machine-readable output (alias for --format json)
+  --format <fmt>      text | json | stream-json (NDJSON of every event, timestamped)
   --watch / --yes     stream after submit / auto-approve the plan gate
   --repo, --project, --provider, --model, --mode, --tdd, --cost-cap   (run submit)
 
@@ -110,6 +126,17 @@ async function main(): Promise<number> {
       return 2;
   }
 }
+
+// Last-resort handlers: a stray async error/rejection escaping the main() chain prints cleanly and
+// exits non-zero, instead of crashing with a raw Node stack trace.
+process.on('uncaughtException', (e) => {
+  errln(errorMessage(e));
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  errln(errorMessage(e));
+  process.exit(1);
+});
 
 main()
   .then((code) => process.exit(code))

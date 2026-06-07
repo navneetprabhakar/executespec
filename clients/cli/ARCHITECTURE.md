@@ -54,7 +54,11 @@ local `ToolRuntime`). The CLI is one renderer over that core; the VS Code extens
 
 ## 4. Data flow (how it talks to the backend)
 
-The CLI uses **REST for actions** and **SSE for live streams** — no WebSocket.
+The CLI uses **REST for actions** and **SSE for live streams** — no WebSocket. REST calls (core
+`http.ts`) retry transient 5xx/429 with backoff, carry a **default per-request timeout** (so a
+half-open socket can't hang a scripted invocation), and `submitRun` sends a stable **`Idempotency-Key`**
+reused across retries so a retried submit can't duplicate a run (server-side dedupe on the header is a
+pending backend follow-up).
 
 **Deterministic command** (`run list`, `view`, `approve`, …):
 ```
@@ -70,8 +74,21 @@ CLI ◀≈≈ RUN_STATUS / TASK_STATUS / FILE_WRITTEN / COST_UPDATE ≈≈
 CLI ◀≈≈ GATE_OPENED ≈≈  →  [human: y/N]  ─POST /runs/{id}/approve──▶
 CLI ◀≈≈ COMPLETE ≈≈      ─GET /runs/{id}/report──▶  score + PR URL
 ```
-The watch loop (`run.ts`) consumes `streamRunEvents` (which mints a fresh 5-min scoped SSE token per
-connection and reconnects with `Last-Event-ID`), renders each event, and ends on a terminal event.
+The watch loop (`run.ts`) consumes `streamRunEvents` (fresh 5-min scoped SSE token per connection,
+reconnect with `Last-Event-ID`), renders **progress to stderr and the final result to stdout**, ends
+on a terminal event, and **traps SIGINT/SIGTERM to cancel the server run (`DELETE /runs/{id}`) before
+exiting 130** so Ctrl-C never orphans a billed run. `run attach <id>` backfills the persisted event
+log (`GET /runs/{id}/event-log`) so you see the run from the start, then follows live.
+
+**Output & exit-code contract (for scripting / CI):**
+- `--format text | json | stream-json` (`--json` = `json`). **text** → human, progress on **stderr**,
+  result on **stdout** (so `… | jq` is clean); **json** → one structured `{type:"result",…}` envelope
+  on stdout; **stream-json** → NDJSON of every event (timestamped) followed by the result envelope.
+- **Exit codes:** `0` success / clean PARTIAL · `1` FAILED/CANCELLED · `3` degraded PARTIAL
+  (build/tests/reviewer failed) · `2` usage error · `130` SIGINT.
+- `run submit -` reads the spec from stdin; the **PAT is pre-flighted** and enum flags
+  (`--provider`/`--mode`/`--repo-mode`) validated **before** submit, so failures are actionable, not an
+  opaque server 4xx.
 
 **Local-hands run** (`run local`, **experimental**) — code stays on the machine:
 ```

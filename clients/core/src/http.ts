@@ -8,9 +8,22 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Max retries on 429 / transient network error (default 4). */
   maxRetries?: number;
+  /**
+   * Extra request headers (e.g. an `Idempotency-Key`). Carried verbatim through the internal retry
+   * loop, so a value generated once by the caller stays stable across every retry of this request.
+   * Cannot override `Authorization` (the PAT bearer is always applied last).
+   */
+  headers?: Record<string, string>;
+  /**
+   * Per-attempt deadline in ms (default 60s; `0` disables). A half-open socket on a unary call would
+   * otherwise hang forever — the retry loop never fires because a stalled `fetch` never rejects.
+   * Not used by {@link HttpClient.stream} (a long-lived stream manages its own lifetime).
+   */
+  timeoutMs?: number;
 }
 
 const TRANSIENT_STATUS = new Set([502, 503, 504]);
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
  * Thin fetch wrapper: attaches the PAT as `Authorization: Bearer`, parses the server's error
@@ -78,6 +91,7 @@ export class HttpClient {
   ): Promise<T> {
     const url = this.buildUrl(pathname, opts?.query);
     const maxRetries = opts?.maxRetries ?? 4;
+    const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     for (let attempt = 0; ; attempt++) {
       let res: Response;
@@ -87,13 +101,16 @@ export class HttpClient {
           headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',
+            ...opts?.headers,
             ...(await this.authHeader()),
           },
           body: body === undefined ? undefined : JSON.stringify(body),
-          signal: opts?.signal,
+          signal: withTimeout(opts?.signal, timeoutMs),
         });
       } catch (e) {
-        // Network/DNS failure (status 0). Retry a few times, then give up.
+        // Caller-initiated abort → propagate; never retry a cancellation.
+        if (opts?.signal?.aborted) throw e;
+        // Timeout or network/DNS blip (status 0). Retry a few times, then give up.
         if (attempt < maxRetries) {
           await sleep(backoffMs(attempt));
           continue;
@@ -143,6 +160,15 @@ export class HttpClient {
     const qs = params.toString();
     return qs ? `${base}?${qs}` : base;
   }
+}
+
+/** Compose the caller's signal (if any) with a fresh per-attempt timeout. */
+function withTimeout(caller: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
+  const signals: AbortSignal[] = [];
+  if (caller) signals.push(caller);
+  if (timeoutMs > 0) signals.push(AbortSignal.timeout(timeoutMs));
+  if (signals.length === 0) return undefined;
+  return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 }
 
 function backoffMs(attempt: number): number {
