@@ -47,6 +47,13 @@ Three completeTask-time stages live IN the shared `WorkerAgent` as **flag/data-a
 
 Validated on Terminal-Bench (DeepSeek): #2+#1 took a 13-task near-miss slice **4/13 → 8/13 (pass@2)**, 0 regressions; the critic demonstrably refuses premature completions then permits the fixed candidate.
 
+## Dispatch-layer robustness (RL-2026-06-008, vix-leverage W1)
+
+Two provider-neutral hardening borrows on the worker dispatch path (both default-on, no flag):
+
+- **Sibling pairing after `completeTask` (C2).** `completeTask` short-circuits its batch with a `return`; any tool call AFTER it in the same assistant turn is now paired with a synthetic `SUPERSEDED` `tool_result`, so the persisted/replayed history never carries a dangling `tool_use` (Anthropic pairing invariant).
+- **Pre-dispatch arg validation (B4).** `dispatchOne` (and the Spring-AI `ToolRegistry.ContextBoundToolCallback.call`) run `tool/ToolArgValidator` before `tool.execute` — a conservative, fail-open, **absent-only** check that rejects a call omitting a schema-declared `required` field with an `INVALID_ARGS` the model recovers from. No model-visible schema change (sidesteps the RL-2026-05-061 schema-sensitivity class).
+
 ## Invariants
 
 - **Nothing implements or calls `CodeGenEngine` yet** — Phase 1 is contract-only, so every production

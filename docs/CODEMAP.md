@@ -305,6 +305,8 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 Tool-output post-processing (RL-2026-05-052 Phase 5+6, default OFF behind `worker.tool-compactor.enabled` V216): `tool/ToolOutputCompactor` — LIGHTWEIGHT-tier (Haiku / Flash) service that summarises bulky tool output (>3 KB; not in `{writeFile, editFile, gitCommit, completeTask, gitDiff, gitStatus}`; not the most-recent call in the batch) before WorkerAgent appends to the worker's history. Fail-safe (any LLM error → raw). Not a worker tool itself — wraps tool output post-execute. Mirrors Anthropic's Claude Code CLI internal pattern.
 
+Pre-dispatch arg validation (RL-2026-06-008, vix-leverage W1.3): `tool/ToolArgValidator` — a static, conservative, fail-open, **absent-only** validator run before `tool.execute` at both dispatch sites (`WorkerAgent.dispatchOne` + `ToolRegistry.ContextBoundToolCallback`); rejects a call omitting a schema-declared `required` field with `INVALID_ARGS`. Not a worker tool. Also (W1.5/B5) `ShellSandboxPolicy.BLOCKED_PATTERNS` now blocks in-place stream edits (`sed -i` / `sed --in-place` / `awk -i inplace`) that bypassed `EditFileTool`'s read-before-edit gate.
+
 ---
 
 ## 5. JPA entities
