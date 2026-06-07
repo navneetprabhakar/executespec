@@ -60,13 +60,14 @@ test('streams a turn: user line, assistant text, tool result, cost', async () =>
     h(ChatApp, { client: { http: { host: 'http://localhost:8080' } }, session: fakeSession(), host: 'http://localhost:8080' }),
   );
   try {
-    await delay(30); // let Ink mount + the controlled TextInput take focus
+    await delay(60); // let Ink mount + the controlled TextInput take focus
     ui.stdin.write('build a thing'); // type into the input box (one chunk → one onChange)
-    await delay(40); // let React flush onChange→setState→re-render so the value prop is current
+    await delay(150); // generous flush window for onChange→setState→re-render (slow CI node-20)
     ui.stdin.write('\r'); // Enter → submit (now sees the typed value, not '')
     const f = await waitFor(
       () => ui.lastFrame(),
       (frame) => /Hello there/.test(frame) && /run-42/.test(frame),
+      4000,
     );
     assert.match(f, /build a thing/); // the user message landed in the transcript
     assert.match(f, /Hello there/); // streamed assistant text
