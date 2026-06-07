@@ -11,6 +11,7 @@ import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.CompleteTaskTool;
+import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -172,6 +173,16 @@ public class WorkerAgent {
   public static final int BUILD_VERIFICATION_RECENCY_ITERS = 5;
 
   /**
+   * RL-2026-06 — terminal-mode deterministic deliverable gate (harness stage #2). How many times
+   * may the gate refuse {@code completeTask} for a missing required path before it YIELDS and lets
+   * the run complete anyway. Bounded + fail-open: the gate can only nudge the worker toward
+   * producing a missing file for a couple of iterations; it can NEVER permanently block a run, so
+   * an imperfect path extraction can't turn a legitimately-complete run into a false FAIL. See
+   * {@link WorkerTaskRequest#requiredDeliverablePaths()}.
+   */
+  public static final int DELIVERABLE_GATE_MAX_REFUSALS = 2;
+
+  /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
    * shell don't reset the counter — only file mutations and explicit build attempts.
    *
@@ -285,6 +296,12 @@ public class WorkerAgent {
             ? req.stagnationForceAfter()
             : Math.max(STAGNATION_FORCE_AFTER_N, progressWarnAfter + 4);
     final boolean terminalTaskMode = Boolean.TRUE.equals(req.terminalTaskMode());
+    // RL-2026-06 — terminal-mode enforced-verify gate. See WorkerTaskRequest#terminalVerifyGate.
+    final boolean terminalVerifyGateOn =
+        terminalTaskMode && Boolean.TRUE.equals(req.terminalVerifyGate());
+    // RL-2026-06 — critic/reviewer pass (#1), COMMON to all consumers (not terminal-gated). See
+    // WorkerTaskRequest#criticPass. Workspace-agnostic: reads git diff (local) or /app (remote).
+    final boolean criticOn = Boolean.TRUE.equals(req.criticPass());
     final int terminalArtifactDeadlineAfter =
         req.terminalArtifactDeadlineAfter() != null && req.terminalArtifactDeadlineAfter() > 0
             ? req.terminalArtifactDeadlineAfter()
@@ -331,6 +348,18 @@ public class WorkerAgent {
     int lastEditIter = -1; // last writeFile/editFile
     int lastVerifyIter = -1; // last shell or buildProject (the worker ran something to check)
     boolean verifyNudged = false;
+
+    // RL-2026-06 — terminal-mode deterministic deliverable gate (#2). The exact paths the task
+    // requires to exist (extracted at run start), and a bounded refusal counter. Active only in
+    // terminal + remote mode with a non-empty path list; fail-open after
+    // DELIVERABLE_GATE_MAX_REFUSALS.
+    final List<String> requiredDeliverables =
+        req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
+    int deliverableRefusals = 0;
+
+    // RL-2026-06 — terminal-mode critic pass (#1). One-shot fresh-context acceptance review before
+    // the first completeTask. criticNudged ⇒ can never loop.
+    boolean criticNudged = false;
 
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
@@ -732,25 +761,108 @@ public class WorkerAgent {
               continue;
             }
           }
-          // #3 verify-before-done soft nudge (BUILD/blind; PATCH uses the hard gateOn above). If
+          // #2 deterministic deliverable gate (RL-2026-06, terminal + remote mode). The hidden TB
+          // tests often assert a file exists at an EXACT path (test_*_exists); the dominant such
+          // miss
+          // is the worker producing the deliverable at the WRONG path or not at all. Before
+          // allowing
+          // completeTask, dispatch ONE container-side existence check for the task's required
+          // paths;
+          // any missing path refuses with the specific path(s) named — bounded to
+          // DELIVERABLE_GATE_MAX_REFUSALS, then YIELDS (fail-open: a stale/over-eager extraction
+          // can
+          // cost a couple of iterations but can NEVER false-FAIL a complete run). COMMON to all
+          // consumers: the existence check runs via the workspace-agnostic dispatch (local shell on
+          // the VM workspace, or remote shell in the TB container). Activates on a non-empty
+          // required
+          // path list — only TB supplies one today, so it is inert (not forked) for BUILD/PATCH.
+          if (!requiredDeliverables.isEmpty()
+              && deliverableRefusals < DELIVERABLE_GATE_MAX_REFUSALS) {
+            List<String> missing = missingDeliverables(req.context(), requiredDeliverables);
+            if (!missing.isEmpty()) {
+              deliverableRefusals++;
+              String refused =
+                  errEnvelope("DELIVERABLE_MISSING", terminalDeliverableMessage(missing));
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(
+                  tc.name()
+                      + " → REFUSED (missing deliverable: "
+                      + String.join(",", missing)
+                      + ")");
+              log.info(
+                  "WorkerAgent completeTask DELIVERABLE-GATED run={} task={} iter={} missing={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  missing);
+              continue;
+            }
+          }
+          // #1 critic/reviewer pass (RL-2026-06) — COMMON to all consumers, not a TB fork. One
+          // fresh-context acceptance review before the FIRST completeTask: a no-tool LlmRouter call
+          // that sees ONLY the task + the candidate's deliverable (git diff for a local product
+          // run,
+          // /app files for a remote TB run) and lists every requirement it fails — independent of
           // the
-          // worker edited but ran nothing since its last edit, refuse this completeTask ONCE and
-          // ask
-          // it to verify. One-shot (verifyNudged) → can never loop; worst case is one round-trip.
-          if (!gateOn && !verifyNudged && totalWriteCalls > 0 && lastEditIter > lastVerifyIter) {
+          // worker's own anchored reasoning. Catches the dominant premature-completion class
+          // (structural/smoke pass, the one real requirement fails). One-shot (criticNudged) +
+          // fail-open (a PASS verdict OR any critic error permits completion) so it can neither
+          // loop
+          // nor false-block. When on it subsumes the lighter verify nudge below.
+          if (criticOn && !criticNudged) {
+            criticNudged = true;
+            String gaps = runCriticPass(req, requiredDeliverables);
+            if (gaps != null) {
+              String refused = errEnvelope("ACCEPTANCE_REVIEW", criticMessage(gaps));
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → CRITIC (acceptance-review gaps)");
+              log.info(
+                  "WorkerAgent completeTask CRITIC-GATED run={} task={} iter={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter);
+              continue;
+            }
+          }
+          // #3 verify-before-done soft nudge (BUILD/blind; PATCH uses the hard gateOn above).
+          // Two one-shot triggers (verifyNudged → can never loop; worst case one round-trip):
+          //   (a) GENERIC: the worker edited but ran NOTHING since its last edit
+          //       (lastEditIter > lastVerifyIter). Refuse once and ask it to verify.
+          //   (b) TERMINAL (RL-2026-06, terminalVerifyGate): trigger (a) is silently defeated when
+          //       the worker runs a TRIVIAL shell smoke after editing (e.g. `python -c "import
+          //       run"`) — that bumps lastVerifyIter so lastEditIter <= lastVerifyIter and the
+          //       nudge never fires, yet the hidden Terminal-Bench tests check the task's EXACT
+          //       stated behaviour/edge/example. So in terminal-verify mode, fire ONE nudge before
+          //       the first completeTask whenever the worker has written something, regardless of a
+          //       shallow smoke, pointing it at the task's own concrete example/criterion. The
+          //       message protects already-correct solutions (complete now if output already
+          //       matches) so it can't push a passing candidate into risky rework.
+          if (!gateOn
+              && !verifyNudged
+              && !criticOn
+              && totalWriteCalls > 0
+              && (lastEditIter > lastVerifyIter || terminalVerifyGateOn)) {
             verifyNudged = true;
             String reason =
                 errEnvelope(
                     "VERIFY",
-                    "completeTask deferred — you've edited files but haven't run anything since"
-                        + " your last edit. Verify the fix actually works: run your reproduction or"
-                        + " the relevant tests via the shell tool (or buildProject) and confirm the"
-                        + " expected behaviour, then call completeTask again. If the change is"
-                        + " genuinely unverifiable, say why in completionNotes and call"
-                        + " completeTask again now.");
+                    terminalVerifyGateOn
+                        ? terminalVerifyMessage()
+                        : "completeTask deferred — you've edited files but haven't run anything"
+                            + " since your last edit. Verify the fix actually works: run your"
+                            + " reproduction or the relevant tests via the shell tool (or"
+                            + " buildProject) and confirm the expected behaviour, then call"
+                            + " completeTask again. If the change is genuinely unverifiable, say"
+                            + " why in completionNotes and call completeTask again now.");
             toolResponses.add(
                 new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), reason));
-            toolLog.add(tc.name() + " → NUDGED (verify before complete)");
+            toolLog.add(
+                tc.name()
+                    + (terminalVerifyGateOn
+                        ? " → NUDGED (terminal verify before complete)"
+                        : " → NUDGED (verify before complete)"));
             continue;
           }
           completionSummary = extractSummary(tc.arguments());
@@ -1421,6 +1533,35 @@ public class WorkerAgent {
   }
 
   /**
+   * RL-2026-06 — workspace-agnostic tool dispatch for the harness STAGES (deliverable gate, critic
+   * pass). Routes local-or-remote exactly like {@link #dispatchOne} (remote ⇒ the connected
+   * container; local ⇒ {@code tool.execute()} on the VM workspace), minus the per-iteration
+   * compaction. Lets the verify/critic stages read the deliverable the same way whether the run is
+   * a local product run (BUILD/PATCH workspace) or a remote Terminal-Bench run — so the stages live
+   * in common space, not a TB fork. Returns the same {@code {ok,content}} envelope shape.
+   */
+  private String dispatchToolDirect(ExecutionContext ctx, String toolName, String argsJson) {
+    if (toolRegistry.isRemoteRun(ctx)) {
+      return toolRegistry.dispatchRemote(ctx, toolName, argsJson);
+    }
+    Tool tool = toolRegistry.find(toolName);
+    if (tool == null) return errEnvelope("INVALID_ARGS", "unknown tool: " + toolName);
+    try {
+      JsonNode args =
+          (argsJson == null || argsJson.isBlank())
+              ? objectMapper.createObjectNode()
+              : objectMapper.readTree(argsJson);
+      ToolResult result = tool.execute(args, ctx);
+      return switch (result) {
+        case ToolResult.Ok ok -> okEnvelope(ok.content());
+        case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
+      };
+    } catch (Exception e) {
+      return errEnvelope("INTERNAL", e.getClass().getSimpleName() + ": " + e.getMessage());
+    }
+  }
+
+  /**
    * RL-2026-05-052 Phase 5+6 — route bulky tool output through the LIGHTWEIGHT-tier {@link
    * ToolOutputCompactor} before it lands in the worker's history. Default OFF behind the
    * compactor's feature flag; with the flag off this is a no-op pass-through. The worker NEVER
@@ -1703,6 +1844,206 @@ public class WorkerAgent {
         + "Do not spend another turn on package installs, directory listings, broad"
         + " searches, or unrelated analysis unless that single command directly creates or"
         + " verifies the required deliverable.";
+  }
+
+  /**
+   * RL-2026-06 — the terminal-mode enforced-verify message (terminalVerifyGate). Fired ONCE before
+   * the first {@code completeTask}. Unlike {@link #terminalArtifactDeadlineMessage()} (which pushes
+   * a stalling worker to PRODUCE the artifact), this pushes an EAGER worker to EXERCISE its
+   * already-written deliverable against the task's own concrete criterion before claiming done —
+   * the dominant Terminal-Bench miss (structural/smoke pass, the one real assertion fails). It is
+   * action-forcing ("run it and paste the real output", not "reason about correctness") and
+   * explicitly protects a passing candidate from speculative rework.
+   */
+  static String terminalVerifyMessage() {
+    return "VERIFY BEFORE COMPLETING (one-time check):\n"
+        + "The hidden tests you cannot see check the task's EXACT stated behaviour — its"
+        + " trickiest requirement, the edge case the prose calls out, and any concrete"
+        + " example the task gives. A solution that merely looks complete, or only passes a"
+        + " trivial import/smoke, scores ZERO if that one real check fails. Do ONE focused"
+        + " verification now, then decide:\n"
+        + "1. Re-read the task and name its hardest concrete criterion — the exact"
+        + " input→output pair it states (e.g. `sim 208` → `377`), the example file it ships"
+        + " (e.g. /app/example_*), or the literal condition it names (\"no overfull hbox"
+        + " warnings\", \"cleanup still runs on SIGINT\", a specific numeric/string"
+        + " result).\n"
+        + "2. Actually exercise your deliverable against THAT criterion via the shell: run"
+        + " it on the stated example input and print the real output, compile and grep for"
+        + " the named condition, or construct the exact edge case the task describes and run"
+        + " it. Paste the real output — do not assume it works.\n"
+        + "3. Confirm the required file exists at the EXACT path, is non-empty, and its"
+        + " output matches what the task specifies byte-for-byte.\n"
+        + "If everything already matches, call completeTask now — do NOT make speculative"
+        + " changes to a working solution. If the output is wrong, the edge case fails, or"
+        + " the file is missing/misplaced, fix exactly that and then call completeTask.";
+  }
+
+  /**
+   * RL-2026-06 — deterministic deliverable gate (#2) check. Dispatches ONE container-side {@code
+   * shell} existence test for the required paths and returns the subset that does NOT exist.
+   * Fail-open: any dispatch/parse error, a non-ok shell envelope, or no safe paths returns an empty
+   * list (→ the gate permits completion). Only checks safe absolute paths ({@code
+   * /[A-Za-z0-9._/-]+}) — a shell-injection guard that also drops the occasional non-path the
+   * extractor returns. A bracketed {@code ESMISS[<path>]} marker is used so a path that is a prefix
+   * of another can't false-match.
+   */
+  private List<String> missingDeliverables(ExecutionContext ctx, List<String> paths) {
+    List<String> safe =
+        paths.stream()
+            .filter(p -> p != null && p.matches("/[A-Za-z0-9._/-]+"))
+            .distinct()
+            .limit(8)
+            .toList();
+    if (safe.isEmpty()) return List.of();
+    StringBuilder cmd = new StringBuilder();
+    for (String p : safe) {
+      cmd.append("[ -e '").append(p).append("' ] || printf 'ESMISS[").append(p).append("]\\n'; ");
+    }
+    try {
+      ObjectNode args = objectMapper.createObjectNode();
+      args.put("command", cmd.toString());
+      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      if (envelope == null) return List.of();
+      JsonNode env = objectMapper.readTree(envelope);
+      if (!env.path("ok").asBoolean(false)) return List.of();
+      String content = env.path("content").asText("");
+      return safe.stream().filter(p -> content.contains("ESMISS[" + p + "]")).toList();
+    } catch (Exception e) {
+      log.debug(
+          "deliverable gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return List.of();
+    }
+  }
+
+  /** RL-2026-06 — the deliverable-gate refusal message naming the missing required path(s). */
+  static String terminalDeliverableMessage(List<String> missing) {
+    boolean one = missing.size() == 1;
+    return "completeTask refused — the task requires "
+        + (one ? "this exact deliverable path" : "these exact deliverable paths")
+        + " which "
+        + (one ? "does" : "do")
+        + " not exist yet: "
+        + String.join(", ", missing)
+        + ". Create "
+        + (one ? "it" : "each")
+        + " at the EXACT path the task names, then call completeTask again. A correct answer at the"
+        + " wrong path or filename scores zero — match the task's stated path byte-for-byte.";
+  }
+
+  /**
+   * RL-2026-06 — system prompt for the terminal critic pass (#1). Strict, conservative, fail-PASS.
+   */
+  private static final String CRITIC_SYSTEM_PROMPT =
+      """
+You are a STRICT acceptance reviewer. You are shown a task and a candidate's deliverable (the \
+candidate's current files or code change). The candidate believes the task is complete. Hidden \
+automated tests will score it on the task's EXACT stated behaviour — including the trickiest \
+requirement, any edge case the prose calls out, the exact output format/paths, and any concrete \
+example the task gives.
+
+Your job: find every requirement the deliverable FAILS to meet. Be specific and concrete — name the \
+exact requirement and why the deliverable fails it. Focus on real, checkable failures:
+- a stated edge case the code does not handle,
+- a concrete example (input->output) the deliverable would get wrong,
+- a required file/path/format that is missing or incorrect,
+- a requirement in the task prose that the deliverable ignores.
+
+Do NOT invent gaps, restyle working code, or demand things the task did not ask for. If the \
+deliverable genuinely satisfies EVERY requirement, respond with exactly the single word PASS on its \
+own line and nothing else. Otherwise list ONLY the real gaps, most important first.""";
+
+  /**
+   * RL-2026-06 — the terminal critic pass (#1). Runs ONE fresh-context, no-tool {@link LlmRouter}
+   * acceptance review over the task + the candidate's deliverable (read from the container).
+   * Returns {@code null} when the verdict is PASS (or on ANY error — fail-open), otherwise the
+   * concrete gaps to feed back to the worker. Independent of the worker's own anchored history.
+   */
+  private String runCriticPass(WorkerTaskRequest req, List<String> paths) {
+    try {
+      String deliverable = readDeliverableContext(req.context(), paths);
+      String userMsg = "TASK:\n" + req.userPrompt() + "\n\nCANDIDATE DELIVERABLE:\n" + deliverable;
+      ChatResponse resp =
+          router.call(
+              LlmRequest.builder()
+                  .provider(req.provider())
+                  .model(req.model())
+                  .messages(
+                      List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg)))
+                  .context(req.context())
+                  .temperature(0.0)
+                  .maxTokens(1500)
+                  .toolsOverride(List.of()) // no tools — a plain completion
+                  .build());
+      String verdict = resp.getResult().getOutput().getText();
+      if (verdict == null) return null;
+      String trimmed = verdict.strip();
+      // PASS verdict (first line, letters only, == PASS) → no gaps. Imperfect PASS detection is
+      // safe:
+      // the critic is one-shot, so a false gap-round costs at most one extra iteration.
+      String firstLineLetters = trimmed.lines().findFirst().orElse("").replaceAll("[^A-Za-z]", "");
+      if (trimmed.isEmpty() || firstLineLetters.equalsIgnoreCase("PASS")) return null;
+      return trimmed;
+    } catch (Exception e) {
+      log.debug("critic pass failed (fail-open) run={}: {}", req.context().runId(), e.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * RL-2026-06 — reads the candidate deliverable for the critic, workspace-agnostically via ONE
+   * {@code shell} dispatch (local or remote). For a remote TB run: an {@code /app} file listing +
+   * the (truncated) contents of the required paths. For a local product run (BUILD/PATCH): the
+   * worker's {@code git diff} (stat + patch) — the actual change set under review. Fail-soft:
+   * returns a placeholder string on any error so the critic still runs on the task text alone.
+   */
+  private String readDeliverableContext(ExecutionContext ctx, List<String> paths) {
+    boolean remote = toolRegistry.isRemoteRun(ctx);
+    List<String> safe =
+        paths.stream()
+            .filter(p -> p != null && p.matches("/[A-Za-z0-9._/-]+"))
+            .distinct()
+            .limit(8)
+            .toList();
+    StringBuilder cmd = new StringBuilder();
+    if (remote) {
+      cmd.append(
+          "echo '=== /app files ==='; find /app -maxdepth 3 -type f 2>/dev/null | head -40; ");
+    } else {
+      // Local product run: the deliverable is the worker's change set.
+      cmd.append("echo '=== git diff (stat) ==='; git diff --stat 2>/dev/null | head -40; ");
+      cmd.append("echo '=== git diff ==='; git diff 2>/dev/null | head -c 12000; echo; ");
+    }
+    for (String p : safe) {
+      cmd.append("echo '=== ")
+          .append(p)
+          .append(" ==='; cat '")
+          .append(p)
+          .append("' 2>/dev/null | head -c 4000; echo; ");
+    }
+    try {
+      ObjectNode args = objectMapper.createObjectNode();
+      args.put("command", cmd.toString());
+      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      if (envelope == null) return "(deliverable unavailable)";
+      JsonNode env = objectMapper.readTree(envelope);
+      String content = env.path("content").asText("");
+      if (content.length() > 12000) content = content.substring(0, 12000) + "\n…(truncated)";
+      return content.isEmpty() ? "(no deliverable found)" : content;
+    } catch (Exception e) {
+      return "(deliverable unavailable: " + e.getMessage() + ")";
+    }
+  }
+
+  /**
+   * RL-2026-06 — wraps the critic's gap list as actionable, push-back-allowed completion feedback.
+   */
+  static String criticMessage(String gaps) {
+    return "completeTask deferred — an independent acceptance review found these gaps between your"
+        + " deliverable and the task's requirements:\n\n"
+        + gaps
+        + "\n\nFix each REAL gap (re-run the task's own example/criteria to confirm), then call"
+        + " completeTask. If a point is mistaken and your deliverable already satisfies it, you may"
+        + " call completeTask now — this review will not run again.";
   }
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {

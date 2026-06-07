@@ -1,5 +1,7 @@
 package com.navneet.executespec.engine;
 
+import java.util.List;
+
 import com.navneet.executespec.tool.ExecutionContext;
 
 import lombok.Builder;
@@ -73,6 +75,44 @@ import lombok.Builder;
  *     shell} counts as progress for the stagnation guard, and progress nudges use terminal-output
  *     wording instead of product code-edit wording. Null/false preserves the product worker
  *     behaviour.
+ * @param terminalVerifyGate RL-2026-06 — terminal-mode enforced-verify gate. The generic
+ *     verify-before-done nudge (the {@code !gateOn} soft nudge) only fires when the worker edited
+ *     but ran NOTHING since its last edit ({@code lastEditIter > lastVerifyIter}); a TRIVIAL shell
+ *     smoke (e.g. {@code python -c "import run"}) bumps {@code lastVerifyIter} and silently defeats
+ *     it. The dominant Terminal-Bench miss is exactly this: a premature {@code completeTask} after
+ *     a shallow check, failing only the task's stated edge/example that the hidden tests assert
+ *     (full-89 DeepSeek: {@code cancel-async-tasks} completed in 6 tools, failed only the
+ *     SIGINT-cleanup edge the prose calls out). When true (and {@code terminalTaskMode}), the
+ *     worker fires ONE verify nudge before the FIRST {@code completeTask} whenever it has written
+ *     something — regardless of whether a shallow smoke ran — pointing it at the task's own
+ *     concrete example/criterion. One-shot ({@code verifyNudged}) so it can never loop; the message
+ *     protects already-correct solutions by telling the model to complete immediately if its output
+ *     already matches. Null/false ⇒ today's behaviour (generic nudge only). Operator-set by {@link
+ *     com.navneet.executespec.terminalbench.TerminalBenchRunService} ({@code ES_TB_VERIFY_GATE},
+ *     default on) so the lever can be A/B'd on the base-20 slice without a rebuild.
+ * @param requiredDeliverablePaths RL-2026-06 — terminal-mode deterministic deliverable gate
+ *     (harness stage #2). The exact absolute path(s) the task REQUIRES to exist when complete,
+ *     extracted from the instruction once at run start ({@code
+ *     TerminalBenchRunService.extractDeliverablePaths}). At {@code completeTask} (terminal + remote
+ *     mode) the worker dispatches ONE deterministic {@code shell} existence check in the container;
+ *     any missing path refuses completion with the specific path(s) named, bounded to {@link
+ *     WorkerAgent#DELIVERABLE_GATE_MAX_REFUSALS} refusals then YIELDS (never permanently blocks —
+ *     fail-open, so an imperfect extraction can only cost a couple of iterations, never a false
+ *     FAIL). Targets the {@code test_*_exists} miss class where the worker put the deliverable at
+ *     the wrong path or never produced it. Null/empty ⇒ inert.
+ * @param criticPass RL-2026-06 — critic/reviewer pass (harness stage #1), COMMON to every worker
+ *     consumer (BUILD / PATCH / TB), not a Terminal-Bench fork. When true, the FIRST {@code
+ *     completeTask} triggers ONE fresh-context acceptance review: a no-tool {@link LlmRouter} call
+ *     that sees ONLY the task + the candidate's deliverable and lists every requirement it fails —
+ *     independent of the worker's own (anchored) reasoning. The deliverable is read workspace-
+ *     agnostically: a {@code git diff} of the local workspace for product runs, or the {@code /app}
+ *     files in the container for a remote TB run. Concrete gaps are injected back and the worker
+ *     fixes them before completing; a {@code PASS} verdict or any critic error permits completion
+ *     (fail-open). One-shot ({@code criticNudged}) so it can't loop. Catches the dominant
+ *     premature-completion class (structural/smoke pass, the one real requirement fails). When on
+ *     it subsumes + suppresses the lighter {@code terminalVerifyGate} nudge. Set by {@code
+ *     TerminalBenchRunService} (TB) and {@code PatchAgent} (PATCH, behind {@code
+ *     worker.critic-pass.enabled}, default OFF). Null/false ⇒ no critic pass (byte-identical).
  */
 @Builder
 public record WorkerTaskRequest(
@@ -91,7 +131,10 @@ public record WorkerTaskRequest(
     Integer wallClockSeconds,
     Boolean forceToolChoiceOnSalvage,
     Integer terminalArtifactDeadlineAfter,
-    Boolean terminalTaskMode) {
+    Boolean terminalTaskMode,
+    Boolean terminalVerifyGate,
+    List<String> requiredDeliverablePaths,
+    Boolean criticPass) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

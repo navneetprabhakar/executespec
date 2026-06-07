@@ -25,7 +25,11 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 | File | Purpose |
 |------|---------|
 | `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
-| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. |
+| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. |
+
+## Harness stages are COMMON, not a TB fork (RL-2026-06)
+
+The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) are **NOT** Terminal-Bench code — they live in the shared `engine/WorkerAgent` as flag/data-activated, workspace-agnostic capabilities (see `engine/CLAUDE.md`). TB is just one **consumer** (it sets the flags via `ES_TB_CRITIC` / `ES_TB_DELIVERABLE_GATE` / `ES_TB_VERIFY_GATE`); `PatchAgent` is another (critic behind `worker.critic-pass.enabled`, V231, default OFF). So the "no reviewer" framing above is now "no *pipeline* reviewer (`ReviewerAgent`)" — TB gets the lightweight common critic instead, reading the `/app` files (remote) the way PATCH reads its `git diff` (local). Empirically the #2+#1 combo lifted a 13-task near-miss slice 4/13 → 8/13 (pass@2), 0 regressions.
 
 ## The keystone mechanism (and the fix that made it work)
 
