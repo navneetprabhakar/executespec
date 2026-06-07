@@ -113,6 +113,19 @@ import lombok.Builder;
  *     it subsumes + suppresses the lighter {@code terminalVerifyGate} nudge. Set by {@code
  *     TerminalBenchRunService} (TB) and {@code PatchAgent} (PATCH, behind {@code
  *     worker.critic-pass.enabled}, default OFF). Null/false ⇒ no critic pass (byte-identical).
+ * @param verifyBeforeComplete VBC verify-before-complete (RL-2026-06-…, flag {@code
+ *     worker.verify-before-complete.enabled}, V235, default OFF). When true, the worker SERVER-RUNS
+ *     the project's own test suite at the FIRST {@code completeTask} — distinct from the {@code
+ *     requireTestVerification}/{@code requireBuildVerification} soft gates, which only check
+ *     whether the MODEL recently ran tests/build. A worker that calls completeTask without ever
+ *     verifying is therefore still caught. Tests run via {@link
+ *     com.navneet.executespec.smoketest.WorkspaceTestRunner} DIRECTLY (not the flag-gated {@code
+ *     runWorkspaceTests} tool), so VBC is independent of {@code worker.build-tdd.enabled} (V217)
+ *     and carries no model-visible schema change (sidesteps the RL-2026-05-061 schema-stall class).
+ *     Real test failures refuse completion (bounded to {@link WorkerAgent#VBC_GATE_MAX_REFUSALS},
+ *     then YIELD); no resolvable runner / a remote run / any error ⇒ fail-open (never false-FAILs a
+ *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
+ *     {@link PatchAgent} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
  */
 @Builder
 public record WorkerTaskRequest(
@@ -134,7 +147,8 @@ public record WorkerTaskRequest(
     Boolean terminalTaskMode,
     Boolean terminalVerifyGate,
     List<String> requiredDeliverablePaths,
-    Boolean criticPass) {
+    Boolean criticPass,
+    Boolean verifyBeforeComplete) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

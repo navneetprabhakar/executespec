@@ -118,6 +118,8 @@ class WorkerAgentTerminalVerifyGateTest {
             runRepo,
             org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class),
             null,
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
     return new Fixture(worker, router, registry);
   }
