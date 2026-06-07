@@ -106,6 +106,26 @@ public class TerminalBenchRunService {
       Pattern.compile("/app/[A-Za-z0-9_][A-Za-z0-9._/-]*\\.[A-Za-z0-9]+");
 
   /**
+   * RL-2026-06 — also catch a deliverable named RELATIVELY right after an output verb (e.g. "Write
+   * me {@code data.comp}", "create {@code output.json}"), which the absolute {@code /app/} pattern
+   * misses. The dominant write-compressor miss: the instruction said "Write me data.comp", so the
+   * gate extracted only the {@code /app/} INPUTS (decomp.c, data.txt — which exist → pass) and
+   * never the un-prefixed OUTPUT, so completion was never gated on producing it. Conservative: the
+   * bare filename must follow an output verb in the SAME clause ({@code [^./\n]} between them, so
+   * the match can't reach across a period into the next sentence NOR across a {@code /} into an
+   * absolute path like {@code /app/ssl/server.key}), must be a bare name (not preceded by {@code /
+   * . word} — so it never re-captures the tail of an absolute path), and needs a letter-led
+   * extension (so prose abbreviations like {@code e.g.}/{@code i.e.} don't match). Captured names
+   * are prepended with {@code /app/} (the TB working dir). Safe like the absolute matcher: the gate
+   * only refuses on a MISSING path + is bounded/fail-open, so a stray match costs at most a couple
+   * of iterations, never a false FAIL.
+   */
+  private static final Pattern RELATIVE_DELIVERABLE =
+      Pattern.compile(
+          "(?i)\\b(?:write|create|produce|generate|save|output|emit|store|build)\\b[^./\\n"
+              + "]{0,40}?(?<![/\\w.])([A-Za-z][A-Za-z0-9_-]*\\.[A-Za-z][A-Za-z0-9]{0,5})\\b");
+
+  /**
    * Standalone worker system prompt for arbitrary terminal goals. The product worker base prompt
    * ({@code SequentialExecutor.SYSTEM_PROMPT_BASE}) is code-gen-tuned and is NOT used on this
    * direct path, so we supply a terminal-task-oriented prompt here. Refined further under task #22
@@ -315,6 +335,12 @@ iterating needlessly.
     Matcher m = DELIVERABLE_PATH.matcher(instruction);
     while (m.find() && paths.size() < 8) {
       paths.add(m.group());
+    }
+    // RL-2026-06 — append relatively-named outputs introduced by an output verb ("Write me
+    // data.comp"), prepended with /app/. Deduped against the absolute matches by the LinkedHashSet.
+    Matcher r = RELATIVE_DELIVERABLE.matcher(instruction);
+    while (r.find() && paths.size() < 8) {
+      paths.add("/app/" + r.group(1));
     }
     return List.copyOf(paths);
   }
