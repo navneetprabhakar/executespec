@@ -125,6 +125,8 @@ export function LoginPage() {
   const redirectParam = new URLSearchParams(location.search).get('redirect');
   const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
   const target = safeRedirect || fromState || '/home';
+  // Carry the device-auth return path through the OAuth round-trip too (the email path uses `target`).
+  const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
 
   // Pick up OAuth failure bounces — the backend lands us at /login?error=…
   // when the OAuth dance can't complete (no email, email conflict, etc.).
@@ -164,10 +166,10 @@ export function LoginPage() {
 
         <ErrorBanner msg={err} />
 
-        <OAuthBtn href='/api/auth/oauth2/authorize/google'>
+        <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
           <GoogleIcon /> Continue with Google
         </OAuthBtn>
-        <OAuthBtn href='/api/auth/oauth2/authorize/github'>
+        <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
           <GitHubIcon /> Continue with GitHub
         </OAuthBtn>
 
@@ -223,7 +225,7 @@ export function LoginPage() {
         </form>
 
         <div className='footer-link'>
-          New here? <Link to='/signup'>Create an account</Link>
+          New here? <Link to={`/signup${oauthQS}`}>Create an account</Link>
         </div>
       </div>
     </AuthLayout>
@@ -232,6 +234,11 @@ export function LoginPage() {
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const redirectParam = new URLSearchParams(location.search).get('redirect');
+  const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
+  // Carry the CLI / VS Code device-auth return path through the OAuth round-trip (see LoginPage).
+  const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
@@ -280,10 +287,10 @@ export function SignupPage() {
 
         <ErrorBanner msg={err} />
 
-        <OAuthBtn href='/api/auth/oauth2/authorize/google'>
+        <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
           <GoogleIcon /> Continue with Google
         </OAuthBtn>
-        <OAuthBtn href='/api/auth/oauth2/authorize/github'>
+        <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
           <GitHubIcon /> Continue with GitHub
         </OAuthBtn>
 

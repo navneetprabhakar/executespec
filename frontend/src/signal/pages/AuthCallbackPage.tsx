@@ -58,14 +58,20 @@ export default function AuthCallbackPage() {
     // survives the OAuth bounce; query params on the marketing-site
     // OAuth-init URL flow through to the backend's OAuth init endpoint
     // and back here as part of the state param (per OAuthInitController).
+    // `?redirect=` carries an internal return path across the OAuth round-trip — used by the
+    // CLI / VS Code `/cli-login` device-authorization flow (the backend OAuthSuccessHandler appends
+    // it from the short-lived es_oauth_redirect cookie). Path-only + same-origin nav, so safe.
+    const redirectParam = searchParams.get('redirect');
+    const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
     const stashedSpec = searchParams.get('spec');
-    const homeUrl = stashedSpec ? `/home?spec=${encodeURIComponent(stashedSpec)}` : '/home';
+    const fallbackUrl = stashedSpec ? `/home?spec=${encodeURIComponent(stashedSpec)}` : '/home';
+    const target = safeRedirect ?? fallbackUrl;
     loadMe()
       .then(() => {
-        navigate(homeUrl, {replace: true});
+        navigate(target, {replace: true});
       })
       .catch(() => {
-        navigate(homeUrl, {replace: true});
+        navigate(target, {replace: true});
       });
   }, [searchParams, navigate, loadMe]);
 
