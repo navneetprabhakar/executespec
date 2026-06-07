@@ -144,7 +144,18 @@ verbs above are **retained** for scripting/CI.
 - **Fallback: the readline REPL** (`src/repl.ts`) on `--plain` or a non-TTY/pipe.
 - Both drive `core/chat.ts` (`ChatSession.send` → `ChatTurnEvent` over `POST /api/spec/chat`); the
   backend loop is gated by `spec.chat.enabled` (V229) — OFF returns a "not enabled" note the UI shows.
+- **Welcome screen** (RL-2026-06-014): a gradient `spec` banner + "✓ Signed in as … (TIER)" + tips +
+  bordered input + a footer bar (cwd · mode · provider · host) — the Gemini/Claude-Code first screen.
+  Zero new deps (hand-rolled truecolor gradient); `runChatTui` resolves `/auth/me` on launch.
+- **Auto-login on first run** (`interactiveChat` in `src/index.ts`, RL-2026-06-014): on a TTY with no
+  token, bare `executespec`/`chat` auto-runs the browser sign-in then drops into chat (gh-style);
+  non-TTY/`--plain` skip the browser.
+- **Inline run streaming** (RL-2026-06-014): when a chat turn submits a run (tool result with a
+  `runId`), the TUI subscribes to `core.streamRunEvents` and renders progress inline (status · tasks ·
+  files · cost), shows the plan gate as an inline `[y/N]`, and commits a terminal summary
+  (status · score · tests · PR). The remote pipeline *shows its work* in the terminal.
 
-**Remaining (Shape B):** markdown/syntax in the transcript · streaming a *submitted run* inline (the
-run-event stream is a different shape) · `gh`-style auto-login on first run (the onboarding half).
-Feature parity with the VS Code client stays the invariant: every capability ships to both.
+**Remaining (Shape B):** markdown/syntax-highlighted diffs in the transcript (P4) · **local-hands
+activation** so the agent edits your working tree (P3 — see
+`docs/plans/cli-coding-agent-roadmap-2026-06-07.md`). Feature parity with the VS Code client stays the
+invariant: every capability ships to both.

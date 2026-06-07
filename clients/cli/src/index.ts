@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createClient } from '@executespec/core';
+import { createClient, type ClientBundle } from '@executespec/core';
 
-import { parseArgs, flagBool, flagStr } from './args.js';
+import { parseArgs, flagBool, flagStr, type ParsedArgs } from './args.js';
 import { authCommand } from './commands/auth.js';
 import { doctorCommand } from './commands/doctor.js';
 import { linkCommand, unlinkCommand } from './commands/link.js';
@@ -14,7 +14,7 @@ import { runCommand } from './commands/run.js';
 import { statsCommand } from './commands/stats.js';
 import { chatRepl } from './repl.js';
 import { runChatTui } from './tui/chat.js';
-import { errln, errorMessage, out } from './ui.js';
+import { dim, errln, errorMessage, out } from './ui.js';
 
 // Single source of truth: read the version from package.json (dist/index.js → ../package.json),
 // so `--version` never drifts from the published package.
@@ -63,7 +63,28 @@ Common flags
   --watch / --yes     stream after submit / auto-approve the plan gate
   --repo, --project, --provider, --model, --mode, --tdd, --cost-cap   (run submit)
 
-Auth: pass --token, set $EXECUTESPEC_TOKEN, or run \`auth login\`.`;
+Auth: first run opens your browser to sign in automatically — or pass --token, set $EXECUTESPEC_TOKEN, or run \`auth login\`.`;
+
+/**
+ * The interactive chat entry (bare `executespec` or `executespec chat`). gh-style auto-login on first
+ * run: on a TTY with no stored token, kick off the browser sign-in automatically, then drop straight
+ * into the chat — so a brand-new user never has to run `auth login` as a separate step. `--plain` /
+ * non-TTY fall back to the readline REPL and skip the browser (scripts/pipes still fail closed).
+ */
+async function interactiveChat(client: ClientBundle, flags: ParsedArgs['flags']): Promise<number> {
+  if (!(await client.tokens.get()) && process.stdin.isTTY) {
+    out(dim('Welcome to ExecuteSpec. Signing you in — your browser will open…'));
+    const code = await authCommand('login', { positionals: [], flags }, client);
+    if (code !== 0) return code; // sign-in failed or was declined
+  }
+  const chatOpts = {
+    projectId: flagStr(flags, 'project'),
+    provider: flagStr(flags, 'provider'),
+  };
+  return process.stdin.isTTY && !flagBool(flags, 'plain')
+    ? runChatTui(client, chatOpts)
+    : chatRepl(client, chatOpts);
+}
 
 async function main(): Promise<number> {
   const { positionals, flags } = parseArgs(process.argv.slice(2));
@@ -77,15 +98,9 @@ async function main(): Promise<number> {
     return 0;
   }
   if (positionals.length === 0) {
-    // No command: interactive chat on a TTY; otherwise print help (scripts use the verbs).
+    // No command: interactive chat on a TTY (auto-login on first run); else help (scripts use verbs).
     if (process.stdin.isTTY) {
-      const client = createClient({ host: flagStr(flags, 'host') });
-      const chatOpts = {
-        projectId: flagStr(flags, 'project'),
-        provider: flagStr(flags, 'provider'),
-      };
-      // Rich Ink TUI by default; `--plain` falls back to the basic readline REPL.
-      return flagBool(flags, 'plain') ? chatRepl(client, chatOpts) : runChatTui(client, chatOpts);
+      return interactiveChat(createClient({ host: flagStr(flags, 'host') }), flags);
     }
     out(HELP);
     return 1;
@@ -118,15 +133,8 @@ async function main(): Promise<number> {
       return statsCommand(cmdArgs, client);
     case 'doctor':
       return doctorCommand(client);
-    case 'chat': {
-      const chatOpts = {
-        projectId: flagStr(flags, 'project'),
-        provider: flagStr(flags, 'provider'),
-      };
-      return process.stdin.isTTY && !flagBool(flags, 'plain')
-        ? runChatTui(client, chatOpts)
-        : chatRepl(client, chatOpts);
-    }
+    case 'chat':
+      return interactiveChat(client, flags);
     default:
       errln(`Unknown command: ${group}\n`);
       out(HELP);

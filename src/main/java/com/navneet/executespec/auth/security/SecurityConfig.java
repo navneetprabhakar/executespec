@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.security;
 
 import java.util.List;
 
+import com.navneet.executespec.auth.oauth.OAuthRedirectCookieFilter;
 import com.navneet.executespec.auth.oauth.OAuthSuccessHandler;
 import com.navneet.executespec.config.SecurityProperties;
 
@@ -19,6 +20,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -271,6 +273,10 @@ public class SecurityConfig {
                         log.error("OAuth2 login failed: {}", ex.getMessage(), ex);
                         res.sendRedirect(dashboardUrl + "/login?error=oauth_failed");
                       }));
+      // Preserve the CLI / VS Code /cli-login device-auth return URL across the OAuth round-trip:
+      // stash ?redirect=/cli-login?... in a short-lived cookie that OAuthSuccessHandler reads back.
+      http.addFilterBefore(
+          new OAuthRedirectCookieFilter(), OAuth2AuthorizationRequestRedirectFilter.class);
     }
 
     return http.build();
