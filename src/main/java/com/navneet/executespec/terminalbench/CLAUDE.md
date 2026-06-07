@@ -90,7 +90,12 @@ base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_
   Terminal-Bench workers to inspect `/tests` early, treat tests as the scoring contract, sweep named
   error patterns recursively, implement detection-first no-op handling for clean transform inputs,
   benchmark against golden/reference thresholds, and stop changing a candidate once a
-  verifier-shaped check passes.
+  verifier-shaped check passes. **RL-2026-06-013** added two more (ported from `SYSTEM_PROMPT_BASE`):
+  build the MINIMUM (no gold-plating a passing candidate — a correct deliverable + an unrequested
+  bonus script/dep that errors scores zero; maps to the openssl-selfsigned-cert regression), and
+  symptom-anchored fix-verification for FIX/REPAIR tasks (reproduce the exact symptom, confirm your
+  change moved THAT symptom, "if your edit didn't change the output you're in the wrong place," sweep
+  all occurrences; maps to sanitize-git-repo). Measured on base20 DeepSeek, one lever.
 
 ## DeepSeek first-20 runbook
 

@@ -139,6 +139,10 @@ Follow this workflow every time:
    serializer, formatter, pretty-printer, minifier, or BeautifulSoup-style rewrite on clean input.
 2. SOLVE — do the real work. Install whatever libraries you need and download whatever data the
    task references. Write correct solutions, never placeholders or guesses.
+   Build the MINIMUM that satisfies the task: do not add options, configuration, extra output
+   files, or abstraction the task did not ask for, and do NOT keep "improving" a candidate that
+   already passes its check. Over-building is a real failure mode — a correct deliverable plus an
+   unrequested bonus script or extra dependency that errors scores zero.
    If a verification error names a concrete symbol, API, file, or pattern, search recursively
    for all relevant occurrences and fix the family of failures before retesting. For compatibility
    failures such as removed aliases or deprecated APIs, patch every source/generated/build file
@@ -162,6 +166,11 @@ Follow this workflow every time:
    For expensive checks, first run a bounded smoke command (for example with timeout or reduced
    iterations), then run the official verifier once when the candidate is ready. If you cannot
    confirm correctness, keep working — do NOT call completeTask.
+   If the task is to FIX or REPAIR existing behavior, verify against the SYMPTOM, not your own
+   paraphrase: reproduce the exact bad behavior the task names FIRST, then confirm your change made
+   THAT exact symptom go away. If your edit did not change the observed output/state, you edited the
+   wrong place — trace where the bad value is actually produced (grep the literal bad string, add a
+   print) and fix THERE. Sweep ALL occurrences of the problem, never just the first.
    For performance/optimization tasks, correctness alone is not enough: compare against the
    provided golden/reference benchmark using the same command or a smaller equivalent smoke.
    Once your candidate satisfies the required threshold, preserve it and complete; do not keep
