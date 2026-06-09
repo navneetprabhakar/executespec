@@ -1,0 +1,152 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# ExecuteSpec — Benchmark profile (ephemeral GCE benchmark cluster)
+# ══════════════════════════════════════════════════════════════════════════════
+# Activate with: --spring.profiles.active=benchmark   (startup.sh writes <env>,gcp).
+# Modeled on the dev profile (proven to boot on a GCE VM).
+#
+# WHY THIS FILE EXISTS: the base application.yml defaults spring.datasource.url to
+# localhost:5432. The per-env Cloud SQL mapping lives in application-{dev,prod}.yml.
+# Without a benchmark profile the VM ran SPRING_PROFILES_ACTIVE=benchmark,gcp → no
+# datasource override → Flyway dialed localhost → crash-loop. This maps the env vars
+# startup.sh writes (POSTGRES_*, REDIS_*) and wires Google/GitHub OAuth for the
+# benchmark.executespec.ai origin.
+#
+# ⚠️ OAuth: register https://benchmark.executespec.ai/api/auth/oauth2/callback/google
+#    (and /github) on the OAuth client's Authorized-redirect-URIs, else Google
+#    returns redirect_uri_mismatch.
+
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  flyway:
+    out-of-order: true
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:}
+    openrouter:
+      base-url: https://openrouter.ai/api
+      api-key: ${OPENROUTER_API_KEY:}
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: ${DEEPSEEK_API_KEY:}
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+            scope: openid, email, profile
+            redirect-uri: https://benchmark.executespec.ai/api/auth/oauth2/callback/{registrationId}
+          github:
+            client-id: ${GITHUB_OAUTH_CLIENT_ID:Ov23lijrPPx9fhPemczg}
+            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+            scope: user:email, read:user
+            redirect-uri: https://benchmark.executespec.ai/api/auth/oauth2/callback/{registrationId}
+        provider:
+          github:
+            user-name-attribute: login
+
+# ── Server (LB terminates TLS, forwards X-Forwarded-Proto) ───────────────────
+server:
+  forward-headers-strategy: framework
+
+# ── Agent & GitHub ────────────────────────────────────────────────────────────
+agent:
+  github:
+    default-owner: ${GITHUB_OWNER:}
+  deployment:
+    gcp-project: ${GCP_PROJECT:executespecv1}
+    gcp-region: ${GCP_REGION:us-east4}
+    artifact-registry:
+      repository: ${AR_REPOSITORY:executespec-benchmark-docker}
+      host: ${AR_HOST:us-east4-docker.pkg.dev}
+    workspace:
+      gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-benchmark-workspaces}
+  integrations:
+    jira:
+      webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+      dashboard-url: ${DASHBOARD_URL:https://benchmark.executespec.ai}
+    confluence:
+      dashboard-url: ${DASHBOARD_URL:https://benchmark.executespec.ai}
+    slack:
+      client-id: ${SLACK_CLIENT_ID:}
+      client-secret: ${SLACK_CLIENT_SECRET:}
+      signing-secret: ${SLACK_SIGNING_SECRET:}
+      redirect-uri: ${SLACK_REDIRECT_URI:https://benchmark.executespec.ai/api/integrations/slack/oauth/callback}
+      dashboard-url: ${DASHBOARD_URL:https://benchmark.executespec.ai}
+  recovery:
+    enabled: true
+    auto-resume-on-startup: false
+
+# ── Preview (disabled for an ephemeral benchmark env) ─────────────────────────
+preview:
+  mode: ${PREVIEW_MODE:docker}
+  preview-ttl-minutes: 15
+  fallback-host: ${PREVIEW_FALLBACK_HOST:https://benchmark.executespec.ai}
+  proxy:
+    enabled: ${PREVIEW_PROXY_ENABLED:false}
+  engine:
+    route-via: ${PREVIEW_ENGINE_ROUTE_VIA:false}
+    base-url: ${PREVIEW_ENGINE_URL:https://preview-engine.executespec.ai}
+    registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:us-east4-docker.pkg.dev/executespecv1/executespec-benchmark-docker}
+    api-key: ${PREVIEW_ENGINE_API_KEY:}
+    timeout-seconds: 300
+  vm:
+    enabled: false
+
+# ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
+app:
+  mail:
+    base-url: https://benchmark.executespec.ai
+    smtp:
+      password: ${SMTP_PASSWORD:}
+  jwt:
+    secret: ${JWT_SECRET:executespec-benchmark-secret-key-must-be-at-least-256-bits-long-for-HS256}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://benchmark.executespec.ai}
+
+# ── Auth (HTTPS behind the LB → Secure cookie) ───────────────────────────────
+auth:
+  refresh-cookie:
+    secure: true
+
+# ── Crypto (encrypt credentials at rest via Secret Manager key from gcp profile) ─
+executespec:
+  crypto:
+    enabled: true
+
+# ── Billing (defaults; benchmark env doesn't take payments) ──────────────────
+razorpay:
+  key-id: ${RAZORPAY_KEY_ID:}
+  key-secret: ${RAZORPAY_KEY_SECRET:}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  webhook-url: ${RAZORPAY_WEBHOOK_URL:https://benchmark.executespec.ai/api/webhooks/razorpay}
+
+# ── Observability (no OTLP collector on the bench VM) ─────────────────────────
+management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    enabled: false
+    sampling:
+      probability: 0
+  metrics:
+    tags:
+      environment: benchmark
