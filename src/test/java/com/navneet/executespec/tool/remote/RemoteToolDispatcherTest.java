@@ -42,7 +42,7 @@ class RemoteToolDispatcherTest {
   @BeforeEach
   void setUp() {
     broadcaster = mock(SseBroadcaster.class);
-    dispatcher = new RemoteToolDispatcher(broadcaster, om);
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, 120_000L);
   }
 
   @Test

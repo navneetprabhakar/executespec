@@ -5,7 +5,7 @@
 > **Owner:** RL-2026-05-052 (client track)
 > **Deciders:** founder (re-confirmation required on the three revised Shape B decisions — see §6)
 > **Amends:** [`docs/design/cli-plugin-spec-shape-b-2026-05-28.md`](../design/cli-plugin-spec-shape-b-2026-05-28.md)
-> **Implemented by:** [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) (design) + [`docs/plans/cli-vscode-unified-client-execution-2026-05-30.md`](../plans/cli-vscode-unified-client-execution-2026-05-30.md) (execution)
+> **Implemented by:** [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) (design); execution tracked in [`docs/pending.md`](../pending.md) §J1 (the standalone execution plan was removed 2026-06-09 with the `executespec-cli` split)
 
 > **ADR convention (first entry):** This is the repo's first Architecture Decision Record. ADRs live under `docs/adr/`, numbered `ADR-NNNN-slug.md`, and capture a single significant, hard-to-reverse decision: its context, the decision, and its consequences (good and bad). They are immutable once **Accepted** — a later ADR supersedes an earlier one rather than editing it. Design docs (`docs/design/`) and execution plans (`docs/plans/`) carry the detail; the ADR carries the *why*.
 
@@ -106,8 +106,7 @@ Shape B locked five decisions (founder, 2026-05-28). This ADR's stance on each:
 ## 9. References
 
 - [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) — full technical design + Feature Matrix.
-- [`docs/plans/cli-vscode-unified-client-execution-2026-05-30.md`](../plans/cli-vscode-unified-client-execution-2026-05-30.md) — phased execution plan, scenarios, test plan, rollout.
 - [`docs/design/cli-plugin-spec-shape-b-2026-05-28.md`](../design/cli-plugin-spec-shape-b-2026-05-28.md) — the amended Shape B lock.
-- [`docs/plans/cli-and-terminal-bench-handoff-2026-05-29.md`](../plans/cli-and-terminal-bench-handoff-2026-05-29.md) — prior handoff + Terminal-Bench dependency.
+- [`docs/pending.md`](../pending.md) §J — open CLI/VS Code + Terminal-Bench work (folded in from the prior CLI/Terminal-Bench handoff, deleted 2026-06-03).
 - [`docs/competitive-analysis/COMPARISON.md`](../competitive-analysis/COMPARISON.md) — Claude Code / opencode shape analysis.
 - RL-2026-05-043 (CLI/VS Code + PAT), RL-2026-05-052 (Shape B) in [`docs/reason-log/2026-05.md`](../reason-log/2026-05.md).

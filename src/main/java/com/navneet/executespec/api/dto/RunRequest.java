@@ -124,4 +124,17 @@ public record RunRequest(
      * the skip-push intent and the run resumes its default auto-push behaviour. That's intentional
      * for v1 — staging is a per-submit decision, not a project-wide setting.
      */
-    Boolean skipAutoPush) {}
+    Boolean skipAutoPush,
+    /**
+     * P3 local-hands (RL-2026-06-014) — when true AND the {@code worker.local-hands.enabled} flag
+     * is on, the run executes in LOCAL mode: the server-side brain (classifier → planner → worker)
+     * runs as normal, but every worker tool call is proxied to the caller's machine (the CLI's
+     * {@code ToolRuntime}) and run against their working tree. The server skips the repo clone, the
+     * post-task smoke build, the reviewer, and the auto-push — nothing is published; the diff lives
+     * in the client's tree.
+     *
+     * <p>Transient like {@link #skipAutoPush}: carried per-submit via a Redis key, not persisted.
+     * The shipped CLI sends this on {@code run local}; older backends drop it (default false →
+     * today's remote execution). Inert unless the feature flag is on.
+     */
+    Boolean localExecution) {}

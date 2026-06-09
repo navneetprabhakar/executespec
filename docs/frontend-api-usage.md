@@ -4,14 +4,14 @@ This document is the single reference for **how the React frontend talks to the 
 
 - Where the bearer token comes from on every request.
 - What a 4xx error envelope looks like and how the frontend maps it to user-visible copy.
-- Which `api.*` function calls which controller, and which Signal page consumes it.
+- Which `api.*` function calls which controller, and which frontend surface consumes it.
 - How SSE event streams are authenticated and reconnected.
 - Where polling intervals live (live cost, run status, file refresh, etc.).
 - The minimum checklist for adding a new endpoint without drift.
 
-Scope: all REST calls from `frontend/src/`. The authoritative client is `frontend/src/lib/api.ts` (~3,620 lines); namespaced sub-clients live alongside it (`execution-api.ts`, `billing-api.ts`, `invoice-api.ts`). Pages under `frontend/src/signal/pages/` and components under `frontend/src/signal/components/` consume those exports.
+Scope: all REST calls from `frontend/src/`. The authoritative client is now split under `frontend/src/lib/api/`: `core.ts` owns `BASE`, auth headers, `ApiError`, error parsing, `req<T>`, `reqText`, and shared DTOs; domain modules (`runs.ts`, `projects.ts`, `billing.ts`, `org.ts`, etc.) export the endpoint helpers through the barrel `frontend/src/lib/api/index.ts`. Legacy side clients still live at `frontend/src/lib/{execution-api,billing-api,invoice-api}.ts`. IDE, Console, and surviving public Signal surfaces consume those exports.
 
-Last meaningful refresh: 2026-05-16.
+Last meaningful refresh: 2026-06-06 for client shape/auth/error handling. The endpoint catalog below is a May 2026 snapshot and should be refreshed against `frontend/src/lib/api/*` + `ApiContractTest` before being used as an exhaustive contract.
 
 ---
 
@@ -21,7 +21,7 @@ Every authenticated REST call carries `Authorization: Bearer <jwt>` where `<jwt>
 
 ### How it works
 
-In `frontend/src/lib/api.ts`:
+In `frontend/src/lib/api/core.ts`:
 
 ```
 const BASE = '/api';
@@ -123,7 +123,7 @@ Field semantics:
 
 ### Frontend mapping: `parseErrorMessage` + `STATUS_MESSAGES`
 
-In `frontend/src/lib/api.ts`:
+In `frontend/src/lib/api/core.ts`:
 
 ```
 const STATUS_MESSAGES: Record<number, string> = {
@@ -169,11 +169,11 @@ The exported helper `isRetryableError(e: unknown): boolean` returns `true` when 
 
 ## 3. Endpoint catalog
 
-Every function exported from `frontend/src/lib/api.ts` (plus the namespaced clients in `lib/execution-api.ts`, `lib/billing-api.ts`, `lib/invoice-api.ts`) is listed below, grouped by domain. For each function:
+The catalog below was originally generated from the former monolithic `frontend/src/lib/api.ts`. The current source of truth is the split `frontend/src/lib/api/*` client plus the namespaced clients in `lib/execution-api.ts`, `lib/billing-api.ts`, and `lib/invoice-api.ts`. Before relying on an individual row, check the matching domain module.
 
 - **Function name** as exported.
 - **HTTP verb** + URL (prefixed with `/api` by the `req<T>` helper — written without the prefix below to match how it looks at the call site).
-- **Consumed by** — the Signal pages or components that call it. Helper components rarely call the API directly; most consumption happens at page level.
+- **Consumed by** — the frontend surface that called it at the time of the snapshot. Many protected surfaces have since moved IDE-native.
 
 ### 3.1 Run lifecycle
 
@@ -835,7 +835,7 @@ The minimum checklist for landing a new endpoint without breaking either side:
    - Boot locally (`mvn spring-boot:run` + `npm --prefix frontend run dev`), hit the new endpoint from the page, verify the JWT goes out and the response shows up.
    - Watch the network panel — make sure the response is JSON, the status is what you expected, and a forced 4xx renders the canonical error envelope rather than a stack trace.
 
-If you're touching `lib/api.ts` and not landing the matching backend change in the same PR, document that explicitly so a reviewer can flag it (the frontend will 404 silently otherwise).
+If you're touching `frontend/src/lib/api/*` and not landing the matching backend change in the same PR, document that explicitly so a reviewer can flag it (the frontend will 404 silently otherwise).
 
 ---
 
@@ -843,7 +843,9 @@ If you're touching `lib/api.ts` and not landing the matching backend change in t
 
 Frontend:
 
-- `frontend/src/lib/api.ts` — the canonical client, 3,620 lines.
+- `frontend/src/lib/api/core.ts` — shared HTTP client, auth/error handling, shared DTOs.
+- `frontend/src/lib/api/index.ts` — barrel export for the domain API modules.
+- `frontend/src/lib/api/{runs,projects,auth,org,billing,reviews,integrations,admin,misc,...}.ts` — domain endpoint helpers.
 - `frontend/src/lib/execution-api.ts` — V3 execution-run client.
 - `frontend/src/lib/billing-api.ts` — billing + subscription client.
 - `frontend/src/lib/invoice-api.ts` — invoice + accounting client.

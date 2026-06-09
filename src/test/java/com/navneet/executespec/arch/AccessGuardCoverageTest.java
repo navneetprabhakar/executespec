@@ -117,7 +117,11 @@ class AccessGuardCoverageTest {
           // their {slug} surfaces forces a guard on resolve / instantiate / dry-run / apply, the
           // cross-org-IDOR cluster the path-id-only matcher previously missed.
           "/library/{",
-          "/migrations/{");
+          "/migrations/{",
+          // RL-2026-05-052 (design §10 defect #5) — pin the CLI/Plugin chat surface so any future
+          // /api/spec endpoint that binds a run/project id is held to the same guard-coverage bar.
+          // The two current methods (chat / getAudit) bind no path id and are allowlisted below.
+          "/spec/");
 
   /**
    * Allowlisted methods (FQCN#methodName) — controllers that legitimately don't need a tenant
@@ -160,7 +164,15 @@ class AccessGuardCoverageTest {
               // Public solution/recipe reads keyed by a non-tenant {slug} — no project / run id
               // bind; tier-gating is per-row in the response body. C2 — audit 2026-05-29.
               "com.navneet.executespec.readymade.controller.ReadymadeController#detail",
-              "com.navneet.executespec.migration.controller.MigrationController#detail"));
+              "com.navneet.executespec.migration.controller.MigrationController#detail",
+              // RL-2026-05-052 (design §10 defect #5) — CLI/Plugin chat surface. `chat` is a
+              // PAT/JWT-authenticated SSE endpoint that binds no run/project id from the URL; the
+              // per-run WRITE authz for the governance actions (approve/reject/cancel) is enforced
+              // inside ProjectChatActionTools via requireRunWriteAccess. `getAudit` reads a
+              // per-user audit row gated by an inline caller-userId equality check (no tenant-id
+              // bind). They are in scope only because the surface is now pinned above.
+              "com.navneet.executespec.specchat.SpecChatController#chat",
+              "com.navneet.executespec.specchat.SpecChatController#getAudit"));
 
   /**
    * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit Risk

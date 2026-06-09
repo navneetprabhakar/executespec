@@ -4,11 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
@@ -118,5 +121,39 @@ class ToolRegistryWorkerBindTest {
         ToolRegistry.WORKER_DENY_TOOLS.contains("gitCommit"),
         "WORKER_DENY_TOOLS must keep gitCommit. If you're intentionally re-allowing"
             + " gitCommit for the worker, update this test with the rationale.");
+  }
+
+  // W4.2 (P6) — a flag-gated tool (backgroundJob) must be ABSENT from the model's schema when OFF,
+  // not bound-but-inert: a tool merely present in the schema can stall schema-sensitive providers
+  // (DeepSeek, RL-2026-05-061). The instanceof gate in ToolRegistry.isToolBound enforces this.
+
+  private static BackgroundJobTool backgroundJob(boolean enabled) {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(BackgroundJobTool.FLAG)).thenReturn(enabled);
+    return new BackgroundJobTool(flags, mock(JobRegistry.class), new ShellSandboxPolicy());
+  }
+
+  @Test
+  void bindForWorker_excludes_backgroundJob_when_flag_off() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), backgroundJob(false)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertFalse(
+        names.contains("backgroundJob"),
+        "backgroundJob must be ABSENT from the worker schema when its flag is OFF (DeepSeek"
+            + " schema-safety), not merely inert.");
+    assertTrue(names.contains("readFile"), "other tools stay bound");
+  }
+
+  @Test
+  void bindForWorker_includes_backgroundJob_when_flag_on() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), backgroundJob(true)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertTrue(names.contains("backgroundJob"), "backgroundJob must be bound when its flag is ON");
   }
 }

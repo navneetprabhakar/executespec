@@ -128,7 +128,11 @@ public class ProjectChatActionTools {
                   String.valueOf(ctx.userDetails().getUser().getId()),
                   ctx.orgId(),
                   ctx.projectId(),
-                  "REMOTE"); // Phase 1 step 2 = REMOTE only; LOCAL mode lands in step 3
+                  // executionMode expects PRODUCTION|PROTOTYPE. Chat runs ALWAYS hit the plan gate
+                  // (skipApproval=false above), so PRODUCTION. Run LOCALITY (REMOTE/LOCAL) is a
+                  // separate axis that moves to PipelineRun.executionLocality in Phase 3 — it must
+                  // not be passed in the executionMode slot (design §10 defect #2).
+                  "PRODUCTION");
 
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
@@ -167,7 +171,9 @@ public class ProjectChatActionTools {
         args -> {
           String runId = textOrNull(args, "runId");
           if (runId == null) return errorEnvelope("runId is required");
-          PipelineRun run = runAccessGuard.requireRunAccess(runId, ctx.userDetails());
+          // Write/governance action — must use the WRITE guard, not the read guard (design §10
+          // defect #1): a cross-org read-only member must not be able to approve another's gate.
+          PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
           gateStore.setPlanGate(runId, true);
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
@@ -201,7 +207,8 @@ public class ProjectChatActionTools {
         args -> {
           String runId = textOrNull(args, "runId");
           if (runId == null) return errorEnvelope("runId is required");
-          PipelineRun run = runAccessGuard.requireRunAccess(runId, ctx.userDetails());
+          // Write/governance action — WRITE guard (design §10 defect #1).
+          PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
           // Same path as cancel — signals the plan gate to fail, persists CANCELLED.
           boolean cancelled = runLifecycleService.cancel(runId);
           ObjectNode out = json.createObjectNode();
@@ -240,7 +247,8 @@ public class ProjectChatActionTools {
         args -> {
           String runId = textOrNull(args, "runId");
           if (runId == null) return errorEnvelope("runId is required");
-          PipelineRun run = runAccessGuard.requireRunAccess(runId, ctx.userDetails());
+          // Write/governance action — WRITE guard (design §10 defect #1).
+          PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
           boolean cancelled = runLifecycleService.cancel(runId);
           ObjectNode out = json.createObjectNode();
           out.put("ok", cancelled);

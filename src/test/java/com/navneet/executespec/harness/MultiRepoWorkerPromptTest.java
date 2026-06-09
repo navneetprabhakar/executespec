@@ -153,4 +153,24 @@ class MultiRepoWorkerPromptTest {
         prompt.contains("repos/api-server/src/checkout.ts"),
         "touchesFiles hint must still appear.");
   }
+
+  @Test
+  void java_spring_boot_project_type_loads_spring_boot_scaffold() {
+    String prompt = newExecutor().composeSystemPrompt(task(), null, null, "java-spring-boot", null);
+
+    assertTrue(
+        prompt.contains("SPRING_BOOT"),
+        "Planner projectType=java-spring-boot must resolve to prompts/scaffolds/spring-boot.md.");
+    assertTrue(
+        prompt.contains("@SpringBootApplication"),
+        "Spring Boot scaffold guidance must include the mandatory application entry point.");
+  }
+
+  @Test
+  void scaffold_key_normalizes_java_spring_boot_alias() {
+    assertTrue(
+        "spring-boot".equals(SequentialExecutor.scaffoldKeyForProjectType("java-spring-boot")),
+        "java-spring-boot is the planner-facing projectType; spring-boot is the scaffold file"
+            + " key.");
+  }
 }

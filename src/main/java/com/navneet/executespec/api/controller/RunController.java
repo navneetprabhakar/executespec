@@ -87,6 +87,12 @@ public class RunController {
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
+  /** P3 local-hands (RL-2026-06-014) — per-run LOCAL-execution marker. */
+  private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
+
+  /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
+  private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
+
   /**
    * Wave 2.1 — activation funnel (SPEC_SUBMITTED fired here on run submit, PLAN_APPROVED here on
    * approval).
@@ -98,7 +104,12 @@ public class RunController {
    */
   @PostMapping
   public ResponseEntity<RunSummary> submit(
-      @AuthenticationPrincipal AppUserDetails userDetails, @Valid @RequestBody RunRequest req) {
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @Valid @RequestBody RunRequest req,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "Idempotency-Key",
+              required = false)
+          String idempotencyKey) {
     guard.requireAuthenticated(userDetails);
     log.info("POST /api/runs — goal: {}", req.userRequest());
 
@@ -110,6 +121,25 @@ public class RunController {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
           "Run submissions are temporarily paused for maintenance. Please try again later.");
+    }
+
+    // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same
+    // Idempotency-Key returns the ORIGINAL run instead of creating a duplicate. Checked BEFORE the
+    // quota/usage increments below, so a client retry (after a transient 5xx whose response was
+    // lost) never double-charges the user's monthly quota. Scoped + ownership-checked so a key can
+    // only ever resolve to the caller's own run; fail-open if Redis is down.
+    final String userId = userDetails.getUser().getId();
+    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+      java.util.Optional<String> priorRunId = runIdempotencyService.lookup(userId, idempotencyKey);
+      if (priorRunId.isPresent()) {
+        java.util.Optional<PipelineRun> prior = stateStore.findRun(priorRunId.get());
+        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
+          log.info(
+              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
+              prior.get().getRunId());
+          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
+        }
+      }
     }
 
     // SDET 2026-05-16 (BUG-006) — increment monthly counter at submit-time. The previous
@@ -158,6 +188,13 @@ public class RunController {
             req.branch(),
             req.prReviewComments());
 
+    // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
+    // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
+    // present when the client's backoff retry arrives; best-effort (no-op if Redis is down).
+    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+      runIdempotencyService.record(userId, idempotencyKey, run.getRunId());
+    }
+
     // Run count incremented atomically inside `assertAndIncrementRunCount` above. The
     // usageTrackingService increment below tracks the BILLING surface (not the quota counter),
     // which is independent and used by `assertWithinLimits` for the plan-tier billing limits.
@@ -178,6 +215,13 @@ public class RunController {
     // call, default behaviour (auto-push) resumes naturally.
     if (Boolean.TRUE.equals(req.skipAutoPush())) {
       runSkipPushFlag.mark(run.getRunId());
+    }
+
+    // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
+    // RunOrchestrator
+    // consumes it once at pipeline start (gated by worker.local-hands.enabled, default OFF).
+    if (Boolean.TRUE.equals(req.localExecution())) {
+      runLocalExecutionFlag.mark(run.getRunId());
     }
 
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));

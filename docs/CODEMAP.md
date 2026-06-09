@@ -4,13 +4,13 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V231** in the current worktree (V231 seeds `worker.critic-pass.enabled`, default OFF — the common critic/reviewer pass for PATCH; RL-2026-06). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
 ## 1. Top-level package table
 
-72 top-level packages under `src/main/java/com/navneet/executespec/`. Counts are approximate (file-count proxies; an entity in a sub-package counts under its parent).
+75 Java package roots / major package groups under `src/main/java/com/navneet/executespec/` in the current worktree. Counts are approximate (file-count proxies; an entity in a sub-package counts under its parent).
 
 | Package | Ctrl | Svc | Agent | Tool | Purpose |
 | --- | --- | --- | --- | --- | --- |
@@ -80,6 +80,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `state` | - | 2 | - | - | StateStore + InboxService — central persistence facade |
 | `swebench` | 1 | 4 | - | - | SWE-bench Lite adapter (cleanroom container) |
 | `tenant` | - | 2 | - | - | TenantContext + TenantFilter (multi-tenancy plumbing) |
+| `terminalbench` | 1 | 1 | - | - | Operator-only Terminal-Bench 2.0 adapter: runs ExecuteSpec's own `WorkerAgent` in remote-brain/local-hands mode via Harbor; DeepSeek first-20 moved 7/20 -> 12/20 with 80-floor tuning and held 12/20 on the 100-floor/finalizer run, so current policy adds `/tests`/golden-benchmark prompt guidance plus detection-first clean-input no-op handling on top of the 120-iter floor, artifact nudges, restricted finalizers at iteration 64 / wall-clock, and a 900s server wall with buffer under Harbor's 1350s agent timeout (RL-2026-06-004) |
 | `test` | 9 | - | - | - | Test-only `/api/v2/test/**` controllers (probe endpoints) |
 | `testgen` | 2 | 13 | 3 | - | Test generation pipeline (planner + worker + executor + report) |
 | `tool` | - | - | - | 11 | V2 tool layer (readFile/writeFile/editFile/listFiles/searchFiles/shell/git/build/runTests/completeTask) + GuardrailLevelResolver |
@@ -91,7 +92,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 
 ## 2. REST controllers
 
-98 controllers total. Grouped by domain.
+106 controller classes in the current worktree. Grouped by domain.
 
 ### Runs / pipeline (V2)
 
@@ -204,6 +205,7 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | --- | --- | --- |
 | `benchmark/BenchmarkController` | `/api/admin/benchmark` | Clean blind SWE-bench harness — `/run` (async via submitRun) + `/generate` (lean synchronous code-gen); the supported path (the oracle `swebench/SwebenchController` was removed, RL-2026-05-062) |
 | `programbench/ProgramBenchController` | `/api/admin/programbench` | ProgramBench bench-mode submission |
+| `terminalbench/TerminalBenchController` | `/api/v2/test/terminal-bench` | Operator-only Terminal-Bench Harbor adapter launcher; `local|dev` profile + SUPER_ADMIN; starts remote-tool `WorkerAgent` runs and returns `{runId,sseToken}` (RL-2026-06-004) |
 | `eval/EvalController` | `/api/admin/eval` | Model evaluation runs (legacy text-quality benchmark) |
 | `eval/v2/TierEvalController` | `/api/admin/eval/v2` | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params) |
 
@@ -234,9 +236,9 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `testgen/TestGenController` | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta) |
 | `testgen/TestResultController` | `/api/runs/{id}/test-report` | Test report fetch |
 
-### Test-only `/api/v2/test/**` (permitAll, flagged temporary)
+### Test-only `/api/v2/test/**` (SUPER_ADMIN-gated)
 
-`ContextStoreTestController`, `ToolRegistryTestController`, `ExecutorTestController`, `PlannerTestController`, `ReviewerTestController`, `MetricsTestController`, `NativeToolsTestController`, `RouterTestController`, `WorkerTestController` — under `test/` package.
+`ContextStoreTestController`, `ToolRegistryTestController`, `ExecutorTestController`, `PlannerTestController`, `ReviewerTestController`, `MetricsTestController`, `NativeToolsTestController`, `RouterTestController`, `WorkerTestController` — under `test/` package. These were formerly `permitAll`; RL-2026-05-027 locked `/api/v2/test/**` to SUPER_ADMIN. `terminalbench/TerminalBenchController` also lives under that path but is in the `terminalbench` package and is additionally `local|dev` profile-gated.
 
 ---
 
@@ -250,8 +252,8 @@ Migration head: **V223**. Frontend chrome: the VS Code-style **IDE workspace** (
 | `OutlinePlannerAgent` | `agent` | PLANNING | Phase-1 planner — emits `Plan` via `submitOutline` tool call; FULL_PLAN (32k) or SKELETON_ONLY (8k) |
 | `TaskExpanderAgent` | `agent` | WORKHORSE | Phase-2 — fills body of one skeleton task; parallel for LARGE/LEGACY |
 | `CoherencePlannerAgent` | `agent` | LIGHTWEIGHT | Phase-3 — emits zero-or-more `patchPlan` minimal-delta patches |
-| `WorkerAgent` | `engine` | WORKHORSE | V2 sequential worker — one task, one ExecutionContext; per-complexity caps; one progress signal + Lever B salvage; build/test verification gates. Relocated `agent/`→`engine/` in Phase 4 (RL-2026-05-052). |
-| `PatchAgent` | `agent` | WORKHORSE | PATCH-mode entry — SWE-bench / autofix; raised iter cap (Anthropic 150 / OpenAI 100 / Gemini 120) |
+| `WorkerAgent` | `engine` | WORKHORSE | V2 sequential worker — one task, one ExecutionContext; per-complexity caps; one progress signal + Lever B salvage; build/test verification gates. Relocated `agent/`→`engine/` in Phase 4 (RL-2026-05-052). The manual dispatch path now honors remote-tool sessions for Terminal-Bench/local-hands runs (RL-2026-06-004). |
+| `PatchAgent` | `agent` | WORKHORSE | PATCH-mode entry — SWE-bench / autofix; raised iter cap (Anthropic/DeepSeek/OpenRouter 220 / OpenAI 150 / Gemini 180) |
 | `ConversationAgent` | `agent` | LIGHTWEIGHT | Post-run chat agent — generates ≤6-task suggestion plans |
 | `RunTitleSummarizer` | `agent` | LIGHTWEIGHT | Distils user request into 5-9 word imperative title |
 | `ReviewerAgent` | `reviewer` | PLANNING | General + wiring review passes; emits VERDICT: CLEAN / FIXED_ISSUES / UNRESOLVED |
@@ -303,11 +305,21 @@ Legacy V1-style facades coexist: `FileSystemTool` (Spring-AI `@Tool`-annotated, 
 
 Tool-output post-processing (RL-2026-05-052 Phase 5+6, default OFF behind `worker.tool-compactor.enabled` V216): `tool/ToolOutputCompactor` — LIGHTWEIGHT-tier (Haiku / Flash) service that summarises bulky tool output (>3 KB; not in `{writeFile, editFile, gitCommit, completeTask, gitDiff, gitStatus}`; not the most-recent call in the batch) before WorkerAgent appends to the worker's history. Fail-safe (any LLM error → raw). Not a worker tool itself — wraps tool output post-execute. Mirrors Anthropic's Claude Code CLI internal pattern.
 
+Pre-dispatch arg validation (RL-2026-06-008, vix-leverage W1.3): `tool/ToolArgValidator` — a static, conservative, fail-open, **absent-only** validator run before `tool.execute` at both dispatch sites (`WorkerAgent.dispatchOne` + `ToolRegistry.ContextBoundToolCallback`); rejects a call omitting a schema-declared `required` field with `INVALID_ARGS`. Not a worker tool. Also (W1.5/B5) `ShellSandboxPolicy.BLOCKED_PATTERNS` now blocks in-place stream edits (`sed -i` / `sed --in-place` / `awk -i inplace`) that bypassed `EditFileTool`'s read-before-edit gate.
+
+Post-edit diagnostics (RL-2026-06-009, vix-leverage W1.1 = "B1", flag `worker.edit-diagnostics.enabled` V232, default OFF): `tool/EditDiagnosticsService` — after a successful `editFile`/`writeFile` on a `.py` file, runs `python3 -m py_compile` (in the run's SWE-bench/ProgramBench container when registered, else host) and appends the first syntax error to the tool result, closing the edit→"what you broke" loop for the SWE-bench wrong-half-fix class. Java deferred (single-file `javac` is classpath-noisy). Null-guarded into both write tools; bounded (15s/6 lines) + fail-open. Not a worker tool.
+
+Background command jobs (RL-2026-06-012, vix-leverage W4.2 = P6, flag `worker.background-jobs.enabled` V233, default OFF): `tool/BackgroundJobTool` (worker tool, `action=start|status|logs|kill`) + `tool/JobRegistry` (engine: start→jobId, status/tail/kill process-tree, `cleanup(runId)` run-end hygiene; sandbox-validated, env-sanitized, combined stdout+stderr to a temp log). Lets a worker run a server / slow build without blocking a foreground `shell` (300s cap). **Conditionally bound** — `ToolRegistry.isToolBound` keeps it ABSENT from the model schema when OFF (not bound-but-inert), so a schema-sensitive provider (DeepSeek) is unaffected (RL-2026-05-061). Host-side first cut; pre-flip TODOs: run-end `JobRegistry.cleanup` wiring + container/remote routing.
+
+Code outline (RL-2026-06-016, vix-leverage W3.1, flag `worker.code-outline.enabled` V234, default OFF): `tool/ReadCodeOutlineTool` (worker tool) — JavaParser structural outline of a `.java` file (package/imports/types/methods/fields + line ranges, bodies omitted) so the worker localizes a symbol in a large file then `readFile`s only that range. Read-only + fail-safe (syntax error → "readFile it directly"). **Conditionally bound** via the new `tool/FlagGatedTool` marker interface + `ToolRegistry.isToolBound` (generalized from V233) — absent from the model schema when OFF (RL-2026-05-061 schema-safety).
+
+Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete.enabled` V235, default OFF): a 4th `completeTask` stage in `engine/WorkerAgent` that SERVER-RUNS the project's test suite (`smoketest/WorkspaceTestRunner` DIRECTLY — decoupled from V217's `runWorkspaceTests` tool) and refuses if red (`WorkerTaskRequest.verifyBeforeComplete`; bounded `VBC_GATE_MAX_REFUSALS=3` + fail-open). A *server gate, not a model tool* (no schema change → immune to the RL-2026-05-061 stall); distinct from the model-dependent `requireTestVerification`/`requireBuildVerification` SOFT gates. `PatchAgent` every run; `SequentialExecutor` BUILD final-task only; remote/TB fail-open. Not a worker tool.
+
 ---
 
 ## 5. JPA entities
 
-~115 `@Table`-annotated classes. Grouped by domain.
+123 entity/table classes in the current worktree. Grouped by domain.
 
 ### Auth + RBAC (`auth/entity/`)
 
@@ -471,9 +483,9 @@ Tool-output post-processing (RL-2026-05-052 Phase 5+6, default OFF behind `worke
 
 ---
 
-## 6. Flyway migrations — V170..V208 + V215 + V216
+## 6. Flyway migrations — V170..V230
 
-Head: **V216**. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V230** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -519,6 +531,8 @@ Head: **V216**. Full chronology in `src/main/resources/db/migration/V*.sql`.
 | V208 | Widen `github_pat` VARCHAR(255) → TEXT (`app_user` + `pipeline_run`) — drop the brittle length cap ahead of longer GitHub tokens (`ghs_…` ~520 chars); metadata-only ALTER (RL-2026-05-024) |
 | V215 | Create `personal_access_token` — programmatic auth for the CLI / VS Code / CI clients (SHA-256 hash, never plaintext; RL-2026-05-043). _(V209–V214 are logged in root `CLAUDE.md` + reason-log; this index wasn't backfilled for them.)_ |
 | V216 | Seed `worker.tool-compactor.enabled = false` (DEFAULT OFF) — engine extraction Phase 5+6 prompt-cache discipline; routes bulk worker tool output (> 3 KB) through the LIGHTWEIGHT tier before appending to the WORKHORSE worker history. Mirrors Claude Code CLI pattern (RL-2026-05-052). |
+| V229 | Seed `spec.chat.enabled = false` — gates the real `/api/spec/chat` agentic loop for the unified spec client Phase 1. |
+| V230 | Seed `codeintel.tiered.enabled = false` — tiered codemap injection: T0 skeleton + spec-relevant per-file symbol blocks instead of head truncation (RL-2026-06-003). |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -641,6 +655,7 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `codeintel.inject.enabled` | **false** (V210) | Inject codemap symbol-map into planner + PATCH prompt on project runs (RL-2026-05-035) |
 | `codemap.purpose-summaries` | (cfg) | PR-N2 per-file LLM purpose summaries in codemaps |
 | `contracts.breaking-change.enabled` | **false** (V213) | Classify touched-contract breaking changes on project runs → report-only run issues (RL-2026-05-037) |
+| `codeintel.tiered.enabled` | **false** (V230) | Tiered codemap injection — T0 skeleton + spec-relevant per-file symbol blocks within the same budget instead of paths-only head truncation (RL-2026-06-003) |
 | `scoring.gaming-guards` | **true** (V214) | Anti-gaming guards on the additive verifiedScore — CODE_DELIVERED↔endpoint-intent + TESTS↔coverage-quality blend; tighten-only (RL-2026-05-042) |
 | `worker.tool-compactor.enabled` | **false** (V216) | Phase 5+6 engine extraction — summarise bulk worker tool output (>3 KB) through the LIGHTWEIGHT tier (`ToolOutputCompactor` → Haiku/Flash) before appending to the WORKHORSE worker context. Mirrors Claude Code CLI prompt-cache discipline (RL-2026-05-052) |
 | `durability.task-checkpoint.enabled` | **true** (yaml) | GCS workspace checkpoint at each task boundary for mid-run durability; no-op when GCS unconfigured (RL-2026-05-042) |
@@ -692,6 +707,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | Multi-repo push | `integration/scm/ScmPushService.java` |
 | SWE-bench adapter | `swebench/` |
 | ProgramBench adapter | `programbench/` |
+| Terminal-Bench adapter | `terminalbench/` — operator-only Harbor launcher that runs `WorkerAgent` in remote-brain/local-hands mode (`POST /api/v2/test/terminal-bench/start`) |
 | Security config | `auth/security/SecurityConfig.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Feature flags | `config/featureflag/FeatureFlagService.java` |
@@ -705,9 +721,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V216) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V230 in the current worktree) |
 | Frontend entry | `frontend/src/main.tsx` |
-| Frontend API client | `frontend/src/lib/api.ts` |
-| CLI client | `clients/cli/` — [`CODEMAP`](../clients/cli/CODEMAP.md) + [`ARCHITECTURE`](../clients/cli/ARCHITECTURE.md) (thin terminal client; slated to split to its own repo) |
-| VS Code extension | `clients/vscode/` — [`CODEMAP`](../clients/vscode/CODEMAP.md) + [`ARCHITECTURE`](../clients/vscode/ARCHITECTURE.md) (native MVP; slated to split to its own repo) |
-| Shared client core | `clients/core/` — typed REST/SSE client + PAT `TokenStore` + local `ToolRuntime` (the logic both clients render over) |
+| Frontend API client | `frontend/src/lib/api/` (`core.ts` + domain modules) |
+| CLI + VS Code clients | **Moved out 2026-06-07 → the standalone `executespec-cli` repo** (RL-2026-06-014). Was `clients/` (`@executespec/core` + `cli` + `vscode`, an npm workspace). Only the server-side OAuth device-login fix + the API endpoints they consume remain in this repo. |

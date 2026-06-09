@@ -24,8 +24,8 @@ import lombok.extern.slf4j.Slf4j;
  * Estimates pipeline cost before plan approval. Pricing is DB-backed (model_pricing table),
  * editable via UI/REST.
  *
- * <p>Iteration ranges by complexity (low/high): LOW: 5 – 15 iterations MEDIUM: 15 – 40 iterations
- * HIGH: 30 – 80 iterations
+ * <p>Iteration ranges by complexity (low/high): LOW: 8 – 25 iterations MEDIUM: 20 – 70 iterations
+ * HIGH: 40 – 120 iterations
  *
  * <p>High estimate adds 20% escalation premium (probability that stall detection promotes a
  * WORKHORSE task to the PLANNING-tier model mid-run).
@@ -57,13 +57,13 @@ public class CostEstimator {
   private static final double HIGH_ESTIMATE_MULTIPLIER = 1.50;
 
   // Iteration count ranges per complexity (low / high scenarios).
-  // Calibrated against observed P50/P95 across real runs (Apr 2026).
-  private static final int LOW_ITER_LOW = 3;
-  private static final int LOW_ITER_HIGH = 10;
-  private static final int MEDIUM_ITER_LOW = 8;
-  private static final int MEDIUM_ITER_HIGH = 25;
-  private static final int HIGH_ITER_LOW = 15;
-  private static final int HIGH_ITER_HIGH = 50;
+  // Calibrated against observed P50/P95 across real runs; updated after RL-2026-06 cap increases.
+  private static final int LOW_ITER_LOW = 8;
+  private static final int LOW_ITER_HIGH = 25;
+  private static final int MEDIUM_ITER_LOW = 20;
+  private static final int MEDIUM_ITER_HIGH = 70;
+  private static final int HIGH_ITER_LOW = 40;
+  private static final int HIGH_ITER_HIGH = 120;
 
   // Probability that stall detection promotes a WORKHORSE task to PLANNING tier mid-run.
   // Added as a premium to the high-end estimate only.
@@ -95,7 +95,7 @@ public class CostEstimator {
     }
 
     ResolvedModel workerModel = modelResolver.resolve("WorkerAgent", provider);
-    ResolvedModel plannerModel = modelResolver.resolve("PlannerAgent", provider);
+    ResolvedModel plannerModel = modelResolver.resolve("OutlinePlannerAgent", provider);
     // 2026-05-06 — was "ReviewerAgentV2" (legacy class name, not in YAML
     // agent-tier-map). The actual reviewer is ReviewerAgent which IS mapped
     // (PLANNING). Using V2 produced a "No tier mapping" warn on every cost

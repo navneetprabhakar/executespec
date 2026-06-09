@@ -85,7 +85,7 @@ docker exec executespec-pg pg_isready -U postgres        # expect: accepting con
 docker exec executespec-redis redis-cli ping             # expect: PONG
 ```
 
-Flyway will run on backend boot. Migration head is `V202`; locations are
+Flyway will run on backend boot. Migration head is `V230` in the current worktree; locations are
 `classpath:db/migration` per `application.yml`
 (`spring.flyway.locations=classpath:db/migration`). The base profile carries
 `baseline-on-migrate=true`, `baseline-version=0`, and
@@ -156,7 +156,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 ```
 
 The JVM binds to `localhost:8080`. First boot will run all Flyway migrations
-through V202, which can take ~30-60s on a cold DB.
+through the current worktree head, which can take ~30-60s on a cold DB.
 
 ### Liveness probe
 
@@ -217,7 +217,75 @@ are intentionally **not** exposed.
 
 ---
 
-## 5. Frontend boot
+## 5. Terminal-Bench first-20 DeepSeek run
+
+Terminal-Bench is an operator-only benchmark harness, not a customer flow. The server-side path is
+`terminalbench/TerminalBenchController` + `TerminalBenchRunService`; the Harbor adapter lives in
+`~/tbench`. It runs ExecuteSpec's own `WorkerAgent` as the remote brain while the adapter executes
+tools as local hands inside Terminal-Bench containers.
+
+Standing policy: test Terminal-Bench 2.0 / 2.1 with **DeepSeek first**. After each run, inspect every
+failure, classify the miss (prompt, tool protocol, context/retrieval, timeout/iteration budget,
+environment mismatch, or model capability), change one lever, and rerun the same comparable slice
+before widening. Anthropic/OpenAI/Gemini provider YAMLs stay out of scope until DeepSeek quality is
+stable enough that provider comparison would answer a model-quality question instead of hiding
+harness debt.
+
+Always check whether the backend is already up before starting it:
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN >/dev/null && echo "backend up" || echo "backend down"
+curl -s localhost:8080/actuator/health
+```
+
+If it is down, start it with the local Spring profile:
+
+```bash
+cd ~/Documents/antigravity/executespec
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.fork=false \
+  -Dspring-boot.run.profiles=local > /tmp/es-tb3.log 2>&1 &
+```
+
+Run the current comparable DeepSeek slice:
+
+```bash
+cd ~/tbench
+. ~/swebench-bench/.espec-admin.env
+export ES_ADMIN_EMAIL="$ESPEC_ADMIN_EMAIL" ES_ADMIN_PW="$ESPEC_ADMIN_PW"
+export ES_PROVIDER=deepseek
+export ES_MODEL=deepseek-v4-flash-native
+export ES_MAX_ITERS=120
+./.venv/bin/harbor run -c es-tb-base20.yaml -y
+```
+
+Current baseline from RL-2026-06-004 before terminal-mode tuning: **7/20 resolved (35%) for about
+$0.09**. The 80-floor tuning run reached **12/20 resolved (60%) for about $0.40**. The 100-floor +
+terminal-finalizer run also reached **12/20 resolved (60%)**, with **1 Harbor `AgentTimeoutError`**,
+**$0.400126** spend, and **47m52s** runtime. It flipped `openssl-selfsigned-cert` and
+`sanitize-git-repo` to pass, but regressed `largest-eigenval` and `query-optimize` on verifier /
+performance thresholds, so the next lever is scorer-facing prompt behavior rather than another blind
+cap increase.
+
+Current iteration policy uses a 120-iteration Terminal-Bench floor plus terminal artifact
+checkpoints at iter 16/32 and a restricted terminal finalizer at iter 64 even when shell calls keep
+counting as progress. The server-side worker wall clock is 900s, intentionally below Harbor's 1350s
+agent timeout with buffer for one slow in-flight tool/LLM turn plus the terminal finalizer, so
+long-running attempts return a normal ExecuteSpec terminal status instead of an `AgentTimeoutError`
+and orphaned backend work; terminal mode also gets one restricted finalizer attempt before
+wall-clock failure. Terminal mode still has a finalizer after the second text-only
+stop: DeepSeek must emit `completeTask` or write/edit the exact artifact instead of ending with a
+plain-language summary that leaves the ExecuteSpec run marked failed. Current prompt policy
+explicitly tells Terminal-Bench workers to inspect `/tests`, treat tests as the scoring contract,
+satisfy exact visible assertions byte-for-byte, implement detection-first no-op handling for clean
+transform inputs, remove helper artifacts from deliverable directories, sweep named error patterns
+recursively, benchmark performance tasks against golden/reference thresholds, use bounded smoke
+commands for expensive checks, and stop changing a candidate once a verifier-shaped check passes.
+Keep follow-up Terminal-Bench runs DeepSeek-only; move to other providers only after enough harness
+improvements land and the founder explicitly asks for the comparison run.
+
+---
+
+## 6. Frontend boot
 
 Frontend lives under `frontend/` as a standalone npm project, ESM-only,
 Vite-driven.
@@ -274,7 +342,7 @@ npm --prefix frontend run format         # prettier --write
 
 ---
 
-## 6. Backend tests
+## 7. Backend tests
 
 The Surefire profile in `pom.xml` declares
 `<excludedGroups>e2e,integration,chaos</excludedGroups>`, so the default
@@ -333,7 +401,7 @@ shell scripts in `scripts/` for harness-driven end-to-end coverage instead.
 
 ---
 
-## 7. Eval and smoke-test scripts
+## 8. Eval and smoke-test scripts
 
 All shell harnesses live under `scripts/` and read shared env (`BASE_URL`
 defaults to `http://localhost:8080`, `EMAIL`/`PASSWORD` to your local admin).
@@ -401,7 +469,7 @@ truncates. Use whichever matches the table set you actually need to reset.
 
 ---
 
-## 8. Observability stack (Prometheus + Tempo + Grafana)
+## 9. Observability stack (Prometheus + Tempo + Grafana)
 
 The `observability/docker-compose.yml` brings up a 3-container local stack:
 
@@ -468,7 +536,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 
 ---
 
-## 9. Common 500s and their root causes
+## 10. Common 500s and their root causes
 
 Pulled from the global exception advisors
 (`src/main/java/com/navneet/executespec/api/advice/`) and the validation /
@@ -490,7 +558,7 @@ optimistic-lock / billing handlers:
 
 ---
 
-## 10. Reference: ports and URLs cheat-sheet
+## 11. Reference: ports and URLs cheat-sheet
 
 | Service | URL / port | Source |
 | --- | --- | --- |

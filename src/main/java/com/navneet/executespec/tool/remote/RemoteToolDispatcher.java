@@ -13,9 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -31,17 +31,31 @@ import lombok.extern.slf4j.Slf4j;
  * ToolRegistry} is a no-op and the server-executed pipeline is byte-for-byte unchanged.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class RemoteToolDispatcher {
 
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
 
-  /** How long a server-side tool call blocks for the client to execute and reply. */
-  private static final long TOOL_TIMEOUT_MS = 120_000;
+  /**
+   * How long a server-side tool call blocks for the client to execute and reply. Configurable via
+   * {@code executespec.remote-tool.timeout-ms} (default 600_000 = 10 min). Raised from the original
+   * 120s so long-running client-side commands (e.g. Terminal-Bench builds / test suites executed in
+   * the connected client's container) don't time out mid-flight. RL-2026-06 (terminal-bench remote
+   * worker).
+   */
+  private final long toolTimeoutMs;
 
   private final Map<String, Session> sessions = new ConcurrentHashMap<>();
+
+  public RemoteToolDispatcher(
+      SseBroadcaster broadcaster,
+      ObjectMapper objectMapper,
+      @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs) {
+    this.broadcaster = broadcaster;
+    this.objectMapper = objectMapper;
+    this.toolTimeoutMs = toolTimeoutMs;
+  }
 
   private static final class Session {
     final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
@@ -86,10 +100,10 @@ public class RemoteToolDispatcher {
       broadcaster.emit(
           runId,
           RunEvent.toolCall(runId, taskId, frame(callId, runId, taskId, toolName, argsJson)));
-      return future.get(TOOL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+      return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
       return errorEnvelope(
-          "INTERNAL", "client tool '" + toolName + "' timed out after " + TOOL_TIMEOUT_MS + "ms");
+          "INTERNAL", "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return errorEnvelope("INTERNAL", "interrupted awaiting client tool '" + toolName + "'");

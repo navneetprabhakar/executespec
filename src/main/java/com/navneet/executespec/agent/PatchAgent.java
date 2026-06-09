@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 
 import jakarta.annotation.PostConstruct;
 
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -62,7 +63,7 @@ public class PatchAgent {
    * Default iteration cap. Per-provider overrides apply (see {@link #iterCapFor}). Real ceiling
    * stays the cost cap; iter cap is defense-in-depth.
    */
-  private static final int DEFAULT_MAX_ITERATIONS = 120;
+  private static final int DEFAULT_MAX_ITERATIONS = 180;
 
   /**
    * 2026-05-08 — per-provider iteration cap tuning, derived from hard-matrix output-token
@@ -70,25 +71,23 @@ public class PatchAgent {
    *
    * <ul>
    *   <li><b>Anthropic claude-sonnet-4-6</b>: rich 32-67K output tokens per run, edits efficiently,
-   *       benefits from longest runway. Cap: 150.
-   *   <li><b>OpenAI gpt-5.4</b>: thin 1-2K output tokens regardless of cap, terminates early with
-   *       wrong-fix patches. Bigger cap doesn't help; smaller cap saves cost on stuck runs without
-   *       quality loss. Cap: 100.
+   *       benefits from longest runway. Cap: 220.
+   *   <li><b>OpenAI gpt-5.4</b>: historically thin output, but still gets a meaningful larger
+   *       safety net now that cost/cache accounting is stronger. Cap: 150.
    *   <li><b>Gemini gemini-3-pro-preview</b>: medium 13-67K output, $1-4 typical spend. Default.
-   *       Cap: 120.
+   *       Cap: 180.
    * </ul>
    *
-   * Anthropic 150 unlocks long-tail "needs more time" runs; OpenAI 100 trims cost on the
-   * thin-output failure mode (a stuck OpenAI run hits cap 33% sooner = same quality + $0.50-1.00
-   * less burn). Gemini stays at 120 default — its peak was 24K output on sqlfluff-1733 fits well
-   * within 120-iter envelope.
+   * The caps are deliberately high because the dollar hard-cap and same-provider retry are now the
+   * real safety rails. Iteration limits should stop pathological loops, not truncate a productive
+   * reproduce -> edit -> verify cycle.
    */
   private static int iterCapFor(String provider) {
     if (provider == null) return DEFAULT_MAX_ITERATIONS;
     return switch (provider.toLowerCase()) {
-      case "anthropic" -> 150;
-      case "openai" -> 100;
-      case "gemini", "google" -> 120;
+      case "anthropic" -> 220;
+      case "openai" -> 150;
+      case "gemini", "google" -> 180;
         // 2026-05-28 (RL-2026-05-052, T3.12) — make the OpenRouter + native DeepSeek caps explicit
         // instead of falling through to DEFAULT_MAX_ITERATIONS=120. Empirically (2026-05-28 mixed10
         // 5-arm eval): OpenRouter-routed arms averaged 18 min/instance vs Anthropic's 8 min — the
@@ -97,7 +96,7 @@ public class PatchAgent {
         // got bumped to 150 originally); pinning them to 150 here makes intent explicit + future-
         // proofs against the OpenRouter cap silently regressing if DEFAULT changes. Honest
         // calibration awaits DB-side iter-count analysis; the explicit case is the safe step.
-      case "openrouter", "deepseek" -> 150;
+      case "openrouter", "deepseek" -> 220;
       default -> DEFAULT_MAX_ITERATIONS;
     };
   }
@@ -112,6 +111,14 @@ public class PatchAgent {
 
   /** Reads the run's {@code source} to scope the test-verification gate (see {@link #run}). */
   private final PipelineRunRepository runRepo;
+
+  /**
+   * RL-2026-06 — gates the common critic/reviewer pass (#1) for PATCH runs (SWE-bench + the autofix
+   * surfaces) behind {@code worker.critic-pass.enabled} (V231, default OFF) so production is
+   * byte-identical until an eval justifies flipping it. The critic itself lives in the shared
+   * {@link WorkerAgent}; PATCH reads the worker's {@code git diff} as the deliverable under review.
+   */
+  private final FeatureFlagService featureFlagService;
 
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
   public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
@@ -152,6 +159,17 @@ public class PatchAgent {
             // 2026-05-08 strengthened: gate now requires tests to PASS (failed:[] +
             // errored:[] + exit_code:0) not just be run — see WorkerAgent line ~470.
             .requireTestVerification(requireTV)
+            // RL-2026-06 — common critic/reviewer pass (#1), flag-gated default OFF (V231) so PATCH
+            // is byte-identical until eval. When on, the FIRST completeTask gets one fresh-context
+            // acceptance review over the worker's git diff. Validated on Terminal-Bench
+            // (4/13→8/13).
+            .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
+            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
+            // project's tests at completeTask and refuse if red. Decoupled from V217 (calls the
+            // runner directly), no model-visible schema change. Byte-identical until the flag
+            // flips.
+            .verifyBeforeComplete(
+                featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
             .build();
 
     WorkerResult result = workerAgent.run(req);
