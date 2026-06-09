@@ -95,11 +95,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RunOrchestrator implements RunControlPort {
 
-  /** Default V2 task classification — MEDIUM produces ≤ 4 tasks, good balance for most specs. */
   /**
-   * Fallback only — live classification flows through {@link
-   * com.navneet.executespec.agent.SpecClassifier} which picks SINGLE_SHOT / MEDIUM / MULTI_TASK
-   * from the spec itself (bug #3 fix).
+   * Back-compat classification for {@link PlannerRequest}. Live planning strategy flows through
+   * {@link com.navneet.executespec.agent.SmartClassifierAgent} and {@link PlanStrategy}; this enum
+   * remains only for legacy validation/task-cap paths that still read {@code
+   * PlannerRequest.classification}.
    */
   private static final Classification DEFAULT_CLASSIFICATION = Classification.MEDIUM;
 
@@ -195,6 +195,14 @@ public class RunOrchestrator implements RunControlPort {
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
+
+  /**
+   * P3 local-hands (RL-2026-06-014) — per-run LOCAL marker + the remote-tool transport it
+   * activates.
+   */
+  private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
+
+  private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
@@ -828,6 +836,11 @@ public class RunOrchestrator implements RunControlPort {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
+    // P3 local-hands (RL-2026-06-014) — declared before the try so the finally can unregister the
+    // remote-tool session on every terminal/cancel path. Assigned once below (after the workspace
+    // exists); stays false unless worker.local-hands.enabled AND the submit requested LOCAL
+    // execution.
+    boolean localRun = false;
     try {
       // V165 BYOK fix — resolve the run owner's configured keys ONCE
       // at run-start and stash them in RunKeyContextStore. LlmRouter
@@ -945,11 +958,20 @@ public class RunOrchestrator implements RunControlPort {
       // V2 runs: the endpoint assumes the workspace already has git history.
       workspaceInit.ensureRunWorkspace(runId);
 
+      // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. When on, the
+      // worker's tool calls are proxied to the caller's machine (clone / smoke / reviewer / push
+      // are
+      // all skipped below). Flag OFF ⇒ false ⇒ every branch below is inert and prod is
+      // byte-identical.
+      localRun =
+          featureFlagService.isEnabled("worker.local-hands.enabled")
+              && runLocalExecutionFlag.consume(runId);
+
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
       // fails we log and continue so the run can at least try to plan against what
-      // was fetched.
-      if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+      // was fetched. (Skipped entirely for LOCAL runs — the working tree is the client's.)
+      if (!localRun && projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
         try {
           List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
           List<WorkspaceInitService.RepoToClone> toClone =
@@ -986,6 +1008,20 @@ public class RunOrchestrator implements RunControlPort {
           runPatchPipeline(runId, provider, modeProbe, userRequest, rootCtx, startedAt);
           return;
         }
+      }
+
+      // P3 local-hands: for a LOCAL build-mode run, register the remote-tool session so the
+      // worker's
+      // existing dispatch (ToolRegistry.isRemoteRun ← RemoteToolDispatcher) proxies every tool call
+      // to
+      // the caller's machine. Mirrors TerminalBenchRunService; unregistered in the runPipeline
+      // finally.
+      if (localRun) {
+        remoteToolDispatcher.register(runId);
+        log.info(
+            "RunOrchestrator run={} LOCAL-hands mode: tool calls proxied to client;"
+                + " clone/smoke/push skipped",
+            runId);
       }
 
       // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
@@ -1058,12 +1094,9 @@ public class RunOrchestrator implements RunControlPort {
             autoClassification,
             userRequest == null ? 0 : userRequest.length());
 
-        // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Verdict
-        // drives downstream routing in slice 2: SMALL/MEDIUM go through the
-        // OutlinePlannerAgent (32k cap, full plan in one call); SINGLE_SHOT,
-        // LARGE, LEGACY, and the null-on-failure case all stay on the legacy
-        // PlannerAgent. Cost flows through RunCostTracker so it auto-
-        // aggregates into the run total; per-phase columns get the diff.
+        // Smart classifier verdict drives downstream routing: SMALL/MEDIUM use the outline planner
+        // in full-plan mode; LARGE/LEGACY use skeleton expansion; SINGLE_SHOT is synthesized
+        // locally. Cost flows through RunCostTracker so it auto-aggregates into the run total.
         PlanStrategy planStrategy =
             planningCoordinator.runClassifierShadow(
                 runId, runRow, userRequest, projectId, selectedRepoIds, provider);
@@ -1118,7 +1151,10 @@ public class RunOrchestrator implements RunControlPort {
           try {
             String codeIntel =
                 contextComposer.buildCodeIntelContext(
-                    projectId, projectRepoService.resolveForRun(projectId, selectedRepoIds));
+                    projectId,
+                    projectRepoService.resolveForRun(projectId, selectedRepoIds),
+                    userRequest,
+                    featureFlagService.isEnabled("codeintel.tiered.enabled"));
             if (!codeIntel.isBlank()) {
               summary = summary + "\n\n" + codeIntel;
               log.info(
@@ -1202,7 +1238,7 @@ public class RunOrchestrator implements RunControlPort {
         //                    expansion → coherence pass.
         //   LEGACY         → defer to slice 4 — recursive depth-2
         //                    expansion isn't built yet, so degrade to LARGE.
-        //   SINGLE_SHOT / null / classifier failure → legacy planner.
+        //   SINGLE_SHOT / null / classifier failure → synthetic one-task plan.
         PlanStrategy effective =
             planStrategy == null
                 ? null
@@ -1247,7 +1283,7 @@ public class RunOrchestrator implements RunControlPort {
         } else if (effective == PlanStrategy.SINGLE_SHOT) {
           // v2.6.2 slice 5b — heuristic-fast-path classification.
           // No LLM planner call; synthesise a one-task plan from the
-          // spec verbatim. Migrated from the deleted PlannerAgent.
+          // spec verbatim.
           plan = outlinePlanner.synthesizeSingleShot(plannerReq);
         } else {
           // Classifier failed (effective == null) or returned an
@@ -1341,7 +1377,7 @@ public class RunOrchestrator implements RunControlPort {
                     .model(model)
                     .runContext(rootCtx)
                     .maxIterationsPerTask(null) // per-complexity caps applied in SequentialExecutor
-                    .enableSmokeTests(true)
+                    .enableSmokeTests(!localRun)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -1391,6 +1427,29 @@ public class RunOrchestrator implements RunControlPort {
         return;
       }
 
+      // P3 local-hands (RL-2026-06-014) — LOCAL runs STOP HERE too, right after the worker (like
+      // the
+      // code-gen-only stop above). The worker's edits/tests already ran on the CALLER's machine
+      // (tool
+      // calls were proxied); everything below — lint, reviewer, standards, validation, commit,
+      // auto-push — operates on the empty SERVER workspace and would be meaningless. Nothing is
+      // published; the diff lives in the client's working tree. Gated OFF by default ⇒ never taken
+      // for
+      // a normal run.
+      if (localRun) {
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId, null, "Local-hands run complete — changes are in your working tree"));
+        terminate(
+            runId,
+            "COMPLETE",
+            "LOCAL_EXECUTION",
+            "local-hands run; diff in the client working tree (server-side steps skipped)",
+            startedAt);
+        return;
+      }
+
       // Run deterministic formatters against the workspace before the LLM reviewer sees it.
       // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
       // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
@@ -1420,7 +1479,7 @@ public class RunOrchestrator implements RunControlPort {
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
-      // errors. Default cap is 50 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
+      // errors. Default cap is 70 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
       // gemini run 84252898 hit ITERATION_LIMIT_EXCEEDED with the build still unfixed.
       // Bumped to 80 for programbench-mode runs only — non-programbench runs unchanged.
       Integer reviewerMaxIter =
@@ -1699,6 +1758,16 @@ public class RunOrchestrator implements RunControlPort {
       } catch (Exception ignore) {
         /* best-effort */
       }
+      // P3 local-hands: drop the remote-tool session on EVERY terminal/exception/cancel path. This
+      // finally is the single guaranteed unwind point (cancel interrupts the pipeline thread and
+      // unwinds through here). No-op for non-LOCAL runs.
+      if (localRun) {
+        try {
+          remoteToolDispatcher.unregister(runId);
+        } catch (Exception ignore) {
+          /* best-effort */
+        }
+      }
       // Workspace retained for code-view / download endpoints (Phase 11.C).
       if (workspace != null) {
         log.info("RunOrchestrator run={} workspace at {}", runId, workspace);
@@ -1805,7 +1874,10 @@ public class RunOrchestrator implements RunControlPort {
       try {
         String codeIntel =
             contextComposer.buildCodeIntelContext(
-                run.getProjectId(), projectRepoService.resolveForRun(run.getProjectId(), null));
+                run.getProjectId(),
+                projectRepoService.resolveForRun(run.getProjectId(), null),
+                userRequestLive,
+                featureFlagService.isEnabled("codeintel.tiered.enabled"));
         if (!codeIntel.isBlank()) {
           userRequestLive = codeIntel + "\n\n---\n\nTASK:\n" + userRequestLive;
           log.info("PATCH run={} injected code-intel ({} chars)", runId, codeIntel.length());

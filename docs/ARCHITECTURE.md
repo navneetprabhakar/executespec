@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head: `V202`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V230`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -20,7 +20,7 @@ single Spring Boot JAR; the frontend build is served from `static/`.
                           └────────────────────┬─────────────────────────┘
                                                │
                                   ┌────────────▼────────────┐
-                                  │   React 18 SPA (Signal) │
+                                  │ React 18 SPA (IDE-first)│
                                   │   frontend/src/App.tsx  │
                                   │   served from static/   │
                                   └────────────┬────────────┘
@@ -33,14 +33,14 @@ single Spring Boot JAR; the frontend build is served from `static/`.
        │                                                                              │
        │  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐  │
        │  │ api/controller/*   │    │   ratelimit/       │    │  api/advice/       │  │
-       │  │  98 controllers    │←──▶│  RateLimitFilter   │    │ Validation/Global/ │  │
+       │  │ 106 controllers    │←──▶│  RateLimitFilter   │    │ Validation/Global/ │  │
        │  │  REST + SSE        │    │  per-tier per-IP   │    │ OptimisticLock     │  │
        │  └─────────┬──────────┘    └────────────────────┘    └────────────────────┘  │
        │            │                                                                 │
        │            ▼                                                                 │
        │  ┌──────────────────────────┐         ┌──────────────────────────────────┐   │
        │  │ integration/             │         │  state/StateStore                │   │
-       │  │ RunOrchestrator (4654 L) │────────▶│  the single mutation API to      │   │
+       │  │ RunOrchestrator + helpers│────────▶│  the single mutation API to      │   │
        │  │ submitRun / cancel /     │         │  pipeline_run + agent_task etc.  │   │
        │  │ pause / resume / retry   │         └──────────────────────────────────┘   │
        │  └────────┬─────────────────┘                                                │
@@ -74,11 +74,11 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V202       │             │   → GitHub / Bitbucket    │
-   │ ~115 entities         │             ├───────────────────────────┤
+   │ Flyway V1..V230       │             │   → GitHub / Bitbucket    │
+   │ 123 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
-   ┌───────────────────────┐             │   SWE-bench / ProgBench   │
+   ┌───────────────────────┐             │   SWE-bench / ProgramBench│
    │  Redis (Lettuce)      │             ├───────────────────────────┤
    │  pub/sub + cache +    │             │  billing                  │
    │  ShedLock + queues    │             │   Stripe (USD)            │
@@ -97,6 +97,11 @@ Key non-obvious points:
   --network none -v <hostDir>:/workspace`. The `BuildProjectTool`, `ShellTool`, and
   `RunTestsTool` route through `ProgramBenchContainerStore` /
   `SwebenchContainerStore` when a container id is set on the run.
+- Terminal-Bench is intentionally different: ExecuteSpec runs the server-side
+  `WorkerAgent` loop as the remote brain, while the Harbor adapter executes tool
+  calls inside the Terminal-Bench container and posts tool results back. The server
+  surface is operator-only (`/api/v2/test/terminal-bench/start`), `SUPER_ADMIN`
+  gated, and active only on `local` / `dev` profiles.
 
 ---
 
@@ -288,10 +293,10 @@ iterates plan tasks. Per task:
 - `tierConfigFor(complexity, runProvider, runModel, projectRun)` returns a
   `TierConfig(provider, model, maxIter, maxTokens, stagnationWarnAfter,
   stagnationForceAfter, wallClockSeconds)`.
-  - `LOW` → LIGHTWEIGHT tier, 30 iters, 4096 tokens, stagnationForce=12, 15-min wall.
-  - `MEDIUM` → WORKHORSE, 75 iters, 8192 tokens, stagnationForce=20, 25-min wall.
-  - `HIGH` → PLANNING tier (full Sonnet/Pro/gpt-5.4), 120 iters, 16384 tokens,
-    stagnationForce=26, 45-min wall.
+  - `LOW` → LIGHTWEIGHT tier, 60 iters, 4096 tokens, stagnationForce=16, 30-min wall.
+  - `MEDIUM` → WORKHORSE, 120 iters, 8192 tokens, stagnationForce=28, 45-min wall.
+  - `HIGH` → PLANNING tier (full Sonnet/Pro/gpt-5.4), 180 iters, 16384 tokens,
+    stagnationForce=40, 75-min wall.
   - Project runs apply a ×2 multiplier to `maxIter` + `wallClockSeconds`.
 - `composeSystemPrompt(...)` injects: per-project-type scaffold from
   `prompts/scaffolds/<key>.md`, design-system block from `UiStyleResolver`, RAG
@@ -445,7 +450,7 @@ Differences from BUILD:
 - Single thin-agent loop:
   [`agent/PatchAgent.run`](../src/main/java/com/navneet/executespec/agent/PatchAgent.java)
   delegates to `WorkerAgent` with no per-task fragmentation. Per-provider iteration
-  cap: Anthropic 150, OpenAI 100, Gemini 120. Stagnation disabled.
+  cap: Anthropic/DeepSeek/OpenRouter 220, OpenAI 150, Gemini 180. Stagnation disabled.
   `requireTestVerification=true`.
 - BYOK cost-cap exemption: OWN_KEYS orgs skip the platform cap.
 - Outcome mapping: `COMPLETED` / `COMPLETED_BY_STAGNATION` /
@@ -455,25 +460,57 @@ Differences from BUILD:
   pushes via `scmPushService.push(...)` automatically on terminal status (no
   separate gate).
 
+Terminal-Bench persists runs with `runMode=PATCH` for reporting consistency, but it
+does **not** use `RunOrchestrator.runPatchPipeline`. It is a direct remote-worker
+path in [`terminalbench/TerminalBenchRunService`](../src/main/java/com/navneet/executespec/terminalbench/TerminalBenchRunService.java):
+the service registers a `RemoteToolDispatcher` session, invokes `WorkerAgent`, emits
+tool calls over SSE, and waits for the Harbor adapter to execute them in the
+Terminal-Bench container. Terminal-Bench requests below the service default are
+normalized to 120 worker iterations, with artifact checkpoints at about iterations
+16/32, a restricted terminal finalizer at iteration 64 even when shell calls keep
+counting as progress, and a 1200s server-side wall clock below Harbor's 1350s
+agent timeout. Wall-clock-exceeded terminal runs get one restricted finalizer
+attempt before failing. If a terminal-mode worker gives a second text-only
+response after the normal nudge, `WorkerAgent` runs a forced terminal finalizer
+so the model must call `completeTask` or write/edit the exact artifact.
+The latest measured DeepSeek first-20 comparable run used the earlier
+100-floor/finalizer policy and held at 12/20 resolved (60%) for $0.400126 over 47m52s: the extra headroom fixed
+some artifact/completion misses, but remaining prompt-addressable failures were
+verifier-shaped, especially `/tests` visibility, named-error sweeps,
+detection-first no-op handling for clean transform inputs, and golden/reference
+performance thresholds. The Terminal-Bench system prompt and terminal nudges now
+make those scorer-facing checks explicit.
+
 ---
 
-## 5. Frontend chrome (Signal)
+## 5. Frontend chrome (IDE-first, Console opt-in)
 
-Signal is the *only* active chrome. The legacy V2 sidebar shell and the V3 top-bar
-shell were both retired in commit 5f5e4aaa on 2026-05-15; their components have been
-deleted. The Signal namespace lives under `frontend/src/signal/`.
+The protected app is IDE-native. `App.tsx` mounts
+[`IdeWorkspace`](../frontend/src/ide/IdeWorkspace.tsx) for protected routes by
+default. A newer control-plane shell,
+[`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx), is opt-in behind
+`localStorage es:console='1'`; it renders the same protected route outlet and keeps
+the default IDE shell byte-identical when the flag is absent.
+
+`frontend/src/signal/` now holds the standalone public pages (auth, marketing, legal,
+shared links), `AdminPage` for `/admin/*`, and shared components/styles reused by
+the IDE. The legacy V2 sidebar and V3 top-bar shells were deleted; the old production
+Signal chrome was ported into IDE-native surfaces and removed in the 2026-05-23
+cleanup.
 
 ### Route table
 
 The router lives in
-[`frontend/src/App.tsx`](../frontend/src/App.tsx). The shell is
-[`frontend/src/signal/components/Shell.tsx`](../frontend/src/signal/components/Shell.tsx).
+[`frontend/src/App.tsx`](../frontend/src/App.tsx). The default protected shell is
+[`frontend/src/ide/IdeWorkspace.tsx`](../frontend/src/ide/IdeWorkspace.tsx), with
+[`frontend/src/console/ConsoleShell.tsx`](../frontend/src/console/ConsoleShell.tsx)
+available behind the localStorage flag.
 Highlights:
 
 - **Public**: `/login`, `/register`, `/welcome`, `/pricing`, `/trust`, `/terms`,
   `/privacy`, `/dpa`, `/shared/:token`, `/reports/shared/:token`, `/forgot-password`,
   `/reset-password`, `/accept-invite`, `/auth/callback`.
-- **Protected** (under `<ProtectedRoute>` + `<SignalShell>`):
+- **Protected** (under `<ProtectedRoute>` + IDE or Console shell):
   - Run loop: `/home`, `/runs`, `/compose`, `/plan/:runId`, `/live/:runId`,
     `/result/:runId`.
   - Project pages: `/projects`, `/projects/:projectId` (Compose default landing),
@@ -486,56 +523,20 @@ Highlights:
 - **Legacy redirects**: `/signal/*`, `/v3/*`, `/v4/*`, `/p/*`, `/dashboard`,
   `/exec`, `/team` etc. are absorbed by `LegacyRedirect` and rewritten.
 
-### Primitives
+### Primitives and surfaces
 
-[`frontend/src/signal/components/Primitives.tsx`](../frontend/src/signal/components/Primitives.tsx)
-exports `Feed`, `Card`, `Row`, `Chip`, `StatusPill`, `Button`, `KvList`,
-`TabsStrip`. Specialised primitives:
-
-- [`Compose.tsx`](../frontend/src/signal/components/Compose.tsx) — `LiveHero`,
-  `ScoreCard`, `StreamCard`, `PrCard`, `ComposerCard`, `TaskLine`.
-- [`Modal.tsx`](../frontend/src/signal/components/Modal.tsx) — `Modal`,
-  `ConfirmModal`, `PromptModal`. Replaces native `window.confirm` /
-  `window.prompt`. Focus-trap + ESC + body scroll-lock.
-- [`Markdown.tsx`](../frontend/src/signal/components/Markdown.tsx) — a 3KB custom
-  GFM-subset renderer replacing react-markdown (saves ~80KB bundle).
-- [`CodeView.tsx`](../frontend/src/signal/components/CodeView.tsx) —
-  per-line regex tokeniser + unified-diff renderer replacing Monaco (saves
-  ~600KB). Supports ts/tsx/js/jsx/java/python/json/yaml/sql/bash.
-- [`FileTree.tsx`](../frontend/src/signal/components/FileTree.tsx) and
-  [`FileIcon.tsx`](../frontend/src/signal/components/FileIcon.tsx) — VS Code-style
-  20-icon dispatcher.
-- [`SpecChat.tsx`](../frontend/src/signal/components/SpecChat.tsx) — collapsible
-  "Build my spec" chat panel.
-- [`CostProgressBar.tsx`](../frontend/src/signal/components/CostProgressBar.tsx),
-  [`Loaders.tsx`](../frontend/src/signal/components/Loaders.tsx),
-  [`Glossary.tsx`](../frontend/src/signal/components/Glossary.tsx),
-  [`BrandLogos.tsx`](../frontend/src/signal/components/BrandLogos.tsx).
-
-### Pages
-
-27 page files under
-[`frontend/src/signal/pages/`](../frontend/src/signal/pages/). Notable ones:
-
-- `LivePage.tsx` (410 lines) — SSE-driven event stream + 8s polling safety net via
-  `useSse(runId)` (subscribes to `/api/runs/{id}/events`). Auto-redirects to
-  `/result/{id}` on terminal status.
-- `PlanPage.tsx` (316 lines) — polls every 2s during CLASSIFYING/PLANNING, surfaces
-  Approve/Cancel once `AWAITING_APPROVAL`. Glossary tooltips for jargon
-  (`classifier`, `wiring pass`).
-- `ResultPage.tsx` (1560 lines) — 9 tabs (Overview / Tasks / Timeline / Code / Cost
-  / PR / Validation / Tests / Chat). Lazy-loads per-tab data. The largest page in
-  the codebase; refactor candidate.
-- `ProjectCodePage.tsx` (1105 lines) — 6 sub-tabs (Browse / Tech debt / Code review
-  / Health / Standards / Docs). Browse tab is a GitHub-proxied two-pane file
-  viewer.
+IDE-native components live under [`frontend/src/ide/`](../frontend/src/ide/):
+`IdeWorkspace`, `IdeSurfaces`, `IdeRunResult`, `IdePlan`, `IdeProject*`,
+`IdeSystem`, `IdeDiscovery`, `IdeBilling`, `IdeOrg`, and `IdeSettings`. The console
+reframe lives under [`frontend/src/console/`](../frontend/src/console/). Shared
+Signal-era primitives such as `Markdown`, `CodeView`, `FileTree`, review panels,
+modals, auth layout, and public-page CSS remain in `frontend/src/signal/`.
 
 ### Telemetry
 
 [`frontend/src/main.tsx`](../frontend/src/main.tsx) calls `initTelemetry()` before
 render — instruments all `fetch()` calls. Service worker (`/sw.js`) registered in
-prod only. Theme bootstrap pre-paint reads `localStorage.getItem('signal:theme')`
-and sets `<html data-signal-theme>`.
+prod only. Theme bootstrap supports the IDE/Signal token stack before React paint.
 
 Design tokens at
 [`frontend/src/tokens.css`](../frontend/src/tokens.css) — `:root` declares dark
@@ -551,7 +552,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head is `V202`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V230`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.
@@ -560,7 +561,7 @@ Connection pool: HikariCP, `maximum-pool-size=30`, `minimum-idle=5`,
 `leak-detection-threshold=90000`. `spring.jpa.open-in-view=false`. Hibernate
 `connection.handling_mode=DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION`.
 
-There are ~115 JPA entities. The hottest table is
+There are 123 entity/table classes. The hottest table is
 [`pipeline_run`](../src/main/java/com/navneet/executespec/state/entity/PipelineRun.java)
 (597-line entity covering plan/review JSON, harness version, run mode, per-agent
 token counters, cost estimates, batch state, hierarchical-planner phase costs,
@@ -856,6 +857,8 @@ Other counters:
 8. **Container hardening** — cleanroom containers (SWE-bench, ProgramBench) run
    with `--rm --network none -v <hostDir>:/workspace`. Test execution containers
    run with `--read-only --cap-drop ALL` + memory/CPU limits + env-var whitelist.
+   Terminal-Bench task containers are owned by the Harbor runner; ExecuteSpec only
+   brokers remote tool calls/results for that surface.
 
 Additional surfaces:
 
@@ -884,8 +887,7 @@ Additional surfaces:
   `GovernanceGuard` enforce tenant isolation. `AccessGuardCoverageTest`
   (ArchUnit) pins every controller method whose URL touches `/runs/{` /
   `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant
-  access guard. 10 legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators
-  fail the build.
+  access guard. `KNOWN_LEGACY_DRIFT` is now empty; new violators fail the build.
 
 ---
 

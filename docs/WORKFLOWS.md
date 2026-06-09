@@ -114,7 +114,7 @@ Goal: turn the project's accumulated `validation_report.issues_json` into one PR
 3. Service caps the prompt at 30 issues (`MAX_ISSUES_IN_PROMPT`), reads every linked repo from `ProjectRepoLinkRepository.findByProjectId`, and builds a `Finding(FindingType.TECH_DEBT, projectId|CATEGORY, projectId, selectedRepoIds, prompt, null, userId, null)`.
 4. `FindingPatchSubmitter.submit` dedupes per finding key, dispatches via `RunOrchestrator.submitRun` with `runMode=PATCH`, `source=finding:TECH_DEBT`. Multi-repo runs reuse the workspace clone fan-out from flow 3.
 5. PatchAgent runs the thin-agent loop. On terminal, `runPatchPipeline` auto-pushes via `ScmPushService.push` -> one fresh PR per repo on a new branch (one branch per category).
-6. Tier gate: PROJECT_VIEWER cannot fire this (audit B #12 -- `dispatch` should be on the write path; current code uses `assertCanRead` on the dashboard controller, flagged as drift).
+6. Tier gate: PROJECT_VIEWER cannot fire this; write handlers are covered by `AccessGuardCoverageTest`, which now fails new `/projects/{...}` write endpoints that do not use `assertCanWrite`.
 
 ---
 
@@ -339,7 +339,7 @@ Goal: invite a user from a different org to a project as PROJECT_ADMIN / PROJECT
 5. Recipient lands on `/invites/preview?token=...` which calls `GET /api/invites/preview` (no auth) -> returns `{email, projectId, projectRole, status, expiresAt}` so the UI can show what's being offered.
 6. Recipient registers / logs in if needed, then `POST /api/invites/accept?token=...` (`ProjectInviteController.accept`) -> `ProjectInviteService.accept`. Service requires the caller's email to match the invite, idempotent: re-running on ACCEPTED is a no-op. Writes a `ProjectMember` row (cross-org) with the granted role.
 7. Cross-org member now sees the project in `GET /api/projects` (filtered via `project/security/ProjectAccessGuard.assertCanRead` -- org-match OR cross-org `project_member`).
-8. PROJECT_VIEWER role is read-only: `ProjectAccessGuard.assertCanWrite` rejects them (V198). Note audit: several controllers still use `assertCanRead` as a write gate (`SpecTemplateController`, `ProjectDocumentController`, `ProjectScoresController`, etc.), see `bucket-project-research.md` for the full list.
+8. PROJECT_VIEWER role is read-only: `ProjectAccessGuard.assertCanWrite` rejects them (V198). The historical write-gate drift list is cleared; `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is empty and new regressions fail the build.
 9. Public share links (`POST /api/projects/{projectId}/share-links` -> `sharing/service/ProjectShareLinkService.createLink`) are an independent surface and NOT gated by `external_sharing_enabled`. Tier-gated via `TierConfig.shareLinkActiveCap` (-1 = unlimited). Read endpoints at `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` (`ProjectSharePublicController`) are public no-auth.
 10. Revoke: `DELETE /api/projects/{projectId}/invites/{inviteId}` flips status to REVOKED.
 
@@ -393,7 +393,7 @@ Goal: GDPR Article 15+20 -- give a user a downloadable ZIP of every record about
 
 **Async dispatch.** Long-running flows (PR Review, Code Review, Architecture regen, project chat tools) all share a pattern: a fast-path enqueue (sync controller -> 202) plus a dedicated daemon thread pool (`pr-review-dispatch`, `code-review-dispatch`, `run-apply`, `slack-notif-`, `v2-orchestrator`). Each pool is sized via `PoolSizing.coreMultiple(...)`. Virtual threads (`Thread.ofVirtual().start(...)`) wrap snapshots from `ContextSnapshotFactory.captureAll()` so traceId + RequestAttributes survive thread boundaries.
 
-**Tenant boundaries.** Every project-scoped endpoint flows through `project/security/ProjectAccessGuard.assertCanRead` or `assertCanWrite`. Every run-scoped endpoint flows through `auth/security/RunAccessGuard`. `arch/AccessGuardCoverageTest` pins every controller method touching `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant guard; ten known-legacy sites remain in `KNOWN_LEGACY_DRIFT`.
+**Tenant boundaries.** Every project-scoped endpoint flows through `project/security/ProjectAccessGuard.assertCanRead` or `assertCanWrite`. Every run-scoped endpoint flows through `auth/security/RunAccessGuard`. `arch/AccessGuardCoverageTest` pins every controller method touching `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant guard; `KNOWN_LEGACY_DRIFT` is empty.
 
 **Feature flags.** All flag checks go through `config/featureflag/FeatureFlagService.isEnabled(key)` -- never hardcode toggles. Live flags relevant to flows above: `ci.autofix.enabled` (flow 6, OFF), `codemap.purpose-summaries` (flow 8, OFF default), `v2.pause.enabled` (pause/resume, OFF default), `scoring.v2-verified` (flow 12), `lint.autofix.enabled` (run-time lint pass), `harness.v2.batch_enabled` (batch path scaffold), `security.guardrail_level` (LOW/MEDIUM/HIGH).
 

@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,6 +31,7 @@ import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -125,6 +128,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             null,
             // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
             // disabled.
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
     return new Fixture(worker, router);
   }
@@ -140,6 +145,40 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         .temperature(0.0)
         .maxTokensPerCall(4096)
         .wallClockSeconds(wallClockSeconds)
+        .build();
+  }
+
+  private static WorkerTaskRequest terminalReq(int maxIter) {
+    return WorkerTaskRequest.builder()
+        .provider("deepseek")
+        .model("deepseek-v4-flash-native")
+        .systemPrompt("system")
+        .userPrompt("create the required /app deliverable")
+        .context(new ExecutionContext("run-tb", "tb-task", Path.of("/tmp/ws-progress-tb")))
+        .maxIterations(maxIter)
+        .temperature(0.0)
+        .maxTokensPerCall(4096)
+        .terminalTaskMode(true)
+        .forceToolChoiceOnSalvage(true)
+        .build();
+  }
+
+  private static WorkerTaskRequest terminalReqWithFinalizerThresholds(
+      int maxIter, int warnAfter, int forceAfter, int artifactDeadlineAfter) {
+    return WorkerTaskRequest.builder()
+        .provider("deepseek")
+        .model("deepseek-v4-flash-native")
+        .systemPrompt("system")
+        .userPrompt("create the required /app deliverable")
+        .context(new ExecutionContext("run-tb", "tb-task", Path.of("/tmp/ws-progress-tb")))
+        .maxIterations(maxIter)
+        .temperature(0.0)
+        .maxTokensPerCall(4096)
+        .terminalTaskMode(true)
+        .forceToolChoiceOnSalvage(true)
+        .stagnationWarnAfter(warnAfter)
+        .stagnationForceAfter(forceAfter)
+        .terminalArtifactDeadlineAfter(artifactDeadlineAfter)
         .build();
   }
 
@@ -244,6 +283,62 @@ class WorkerAgentProgressNudgeAndWallClockTest {
   }
 
   @Test
+  void terminal_mode_second_text_only_stop_invokes_forced_finalizer() {
+    // Terminal-Bench tasks are scored by /app artifacts. If DeepSeek says "done" without a
+    // completeTask call after the normal nudge, force one final tool-call turn instead of marking
+    // the worker failed while the artifact may already be correct.
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithText("I have created the requested /app deliverable."));
+    seq.add(responseWithText("The task is complete and ready for evaluation."));
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified deliverable\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(terminalReq(8));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(
+        2,
+        result.iterations(),
+        "terminal finalizer runs as an extra forced call after the second text-only response");
+    assertTrue(result.completionSummary().contains("terminal finalizer"));
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    List<LlmRequest> requests = cap.getAllValues();
+    assertEquals(
+        "required",
+        requests.get(requests.size() - 1).toolChoice(),
+        "Terminal finalizer should force a tool call for DeepSeek/OpenAI-wire providers.");
+  }
+
+  @Test
+  void terminal_mode_shell_progress_still_forces_finalizer_at_threshold() {
+    // Terminal-Bench shell calls count as progress so legitimate command-line work is not
+    // stagnation-killed. The deterministic terminal finalizer must still fire at its own threshold,
+    // or shell-heavy tasks can run until wall-clock without ever committing the /app artifact.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 4; i++) {
+      seq.add(responseWithCalls(toolCall("shell", "{\"cmd\":\"echo exploring\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"deliverable ready\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(terminalReqWithFinalizerThresholds(8, 2, 4, 3));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(4, result.iterations(), "forced finalizer runs inside the threshold iteration");
+    assertTrue(result.completionSummary().contains("terminal finalizer"));
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    List<LlmRequest> requests = cap.getAllValues();
+    assertEquals(
+        "required",
+        requests.get(requests.size() - 1).toolChoice(),
+        "threshold finalizer should force a closing tool call");
+  }
+
+  @Test
   void wall_clock_cap_terminates_when_exceeded() {
     // 1-second wall-clock cap. Each LLM "call" returns instantly (mock), but we sleep on the
     // tool side to simulate slow work. After ~1.5s elapsed wall-clock the next iter check fires
@@ -308,6 +403,8 @@ class WorkerAgentProgressNudgeAndWallClockTest {
             null,
             // RL-2026-05-052 follow-up — WorkerHistoryCompactor; null = history compaction
             // disabled.
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
             null);
 
     long t0 = System.currentTimeMillis();
@@ -332,6 +429,98 @@ class WorkerAgentProgressNudgeAndWallClockTest {
         elapsed < 5000,
         "Should not run far beyond the cap (allow 1 in-flight iter tail). Ran " + elapsed);
     assertTrue(result.iterations() >= 1);
+  }
+
+  @Test
+  void terminal_mode_wall_clock_gets_forced_finalizer_before_failure() {
+    LlmRouter router = mock(LlmRouter.class);
+    ToolRegistry registry = mock(ToolRegistry.class);
+    ContextStore contextStore = mock(ContextStore.class);
+    Metrics metrics = mock(Metrics.class);
+    RunCostTracker costTracker = mock(RunCostTracker.class);
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+
+    PipelineRun runRow = new PipelineRun();
+    runRow.setHardCapUsd(null);
+    lenient().when(runRepo.findById(anyString())).thenReturn(Optional.of(runRow));
+    lenient()
+        .when(registry.find(anyString()))
+        .thenAnswer(
+            inv ->
+                new Tool() {
+                  @Override
+                  public String name() {
+                    return inv.getArgument(0);
+                  }
+
+                  @Override
+                  public String description() {
+                    return "stub";
+                  }
+
+                  @Override
+                  public String inputSchema() {
+                    return "{\"type\":\"object\",\"additionalProperties\":false}";
+                  }
+
+                  @Override
+                  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+                    try {
+                      Thread.sleep(1100);
+                    } catch (InterruptedException ignored) {
+                      Thread.currentThread().interrupt();
+                    }
+                    return new ToolResult.Ok("ok");
+                  }
+                });
+    lenient().when(registry.bindForWorker(any())).thenReturn(List.of());
+    lenient()
+        .when(router.call(any()))
+        .thenReturn(
+            responseWithCalls(toolCall("shell", "{\"cmd\":\"sleepy verifier\"}")),
+            responseWithCalls(toolCall("completeTask", "{\"summary\":\"best candidate ready\"}")));
+
+    WorkerAgent worker =
+        new WorkerAgent(
+            router,
+            registry,
+            new ObjectMapper(),
+            contextStore,
+            metrics,
+            costTracker,
+            runRepo,
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            null,
+            null,
+            // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
+            null);
+
+    WorkerResult result =
+        worker.run(
+            WorkerTaskRequest.builder()
+                .provider("deepseek")
+                .model("deepseek-v4-flash-native")
+                .systemPrompt("system")
+                .userPrompt("create the required /app deliverable")
+                .context(new ExecutionContext("run-tb-wall", "tb-task", Path.of("/tmp/ws-tb-wall")))
+                .maxIterations(50)
+                .temperature(0.0)
+                .maxTokensPerCall(4096)
+                .wallClockSeconds(1)
+                .terminalTaskMode(true)
+                .forceToolChoiceOnSalvage(true)
+                .build());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(result.completionSummary().contains("terminal finalizer"));
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(router, atLeastOnce()).call(cap.capture());
+    List<LlmRequest> requests = cap.getAllValues();
+    assertEquals(
+        "required",
+        requests.get(requests.size() - 1).toolChoice(),
+        "wall-clock terminal finalizer should force a closing tool call before failing");
   }
 
   @Test

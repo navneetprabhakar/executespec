@@ -2,7 +2,7 @@
 
 > **Date:** 2026-05-30 · **Status:** Proposed · **Owner:** RL-2026-05-052 (client track)
 > **Decision record:** [`docs/adr/ADR-0001-unified-spec-client.md`](../adr/ADR-0001-unified-spec-client.md)
-> **Execution plan:** [`docs/plans/cli-vscode-unified-client-execution-2026-05-30.md`](../plans/cli-vscode-unified-client-execution-2026-05-30.md)
+> **Execution tracking:** [`docs/pending.md`](../pending.md) §J1 — the standalone phased execution plan was removed 2026-06-09 once the client split to the `executespec-cli` repo.
 > **Amends:** [`cli-plugin-spec-shape-b-2026-05-28.md`](cli-plugin-spec-shape-b-2026-05-28.md)
 
 This document specifies *what* the unified `spec` client is and *how* it is built. The organizing constraint, from ADR-0001, is **feature parity: every capability is reachable from both the CLI and the VS Code extension, backed by one shared core.**
@@ -107,6 +107,30 @@ Every row ships to **both** surfaces. "—" is never allowed in a shipped row; a
 
 **Surface-specific presentation is allowed; surface-specific *capability* is not.** Example: F13 renders as ANSI text in the CLI and as a webview in VS Code — same capability, different render. What is forbidden is a capability existing in one surface only.
 
+## 4a. CLI command reference (locked 2026-06-03)
+
+The `spec`/`executespec` command surface, founder-locked. **✅ shipped · 🟡 planned (backend API ready) · ⚪ idea.** Machine-mirrored in `clients/core/src/capabilities.ts` (parity-enforced) and the `--help` text.
+
+Convention: `spec <noun> <verb> [args] [--flags]` (git/gcloud style); `--json` on every read; singular group nouns with plural aliases (`project`/`projects`); `EXECUTESPEC_HOST` / `--host` overrides the backend.
+
+| Group | Commands | Status |
+| --- | --- | --- |
+| **Auth & identity** | `login [--token] [--no-browser]` (alias of `auth login`) · `whoami` · `logout` | ✅ |
+| | `login --device` (GitHub-style code flow, headless) | ⚪ needs `POST /api/auth/device/{code,token}` |
+| | `token list \| create \| revoke` | 🟡 |
+| **Runs** | `run submit "<spec>" [--repo --project --provider --watch --local]` | ✅ |
+| | `run list \| view <id> \| watch <id> \| cost <id>` | ✅ · `logs <id>` 🟡 |
+| | `run approve \| reject \| cancel <id> \| retry <id> <task>` | ✅ |
+| | `run report <id>` · `run local "<spec>"` | ✅ · local 🟡 (Phase 3) |
+| **Projects** | `project list \| view <id> \| runs <id>` | ✅ |
+| | `project use <id>` (default) · `project stats <id>` | 🟡 |
+| **Account** | `stats` (your dashboard) · `doctor` (host/token/docker) | ✅ |
+| **Link** | `link [--project <id>] [--create]` · `unlink` | 🟡 (needs local state) |
+| **Chat & config** | `spec` (no command, TTY) / `chat` — agentic REPL | ✅ |
+| | `config get \| set \| list` | 🟡 |
+
+**Auth-flow decision:** loopback browser sign-in is the **default** (built, gcloud-style); a **device-code** flow (GitHub-style: print a code + URL, poll) is the headless/SSH path — it survives no-local-browser environments and is the one outstanding auth addition (one small backend endpoint pair).
+
 ## 5. What should and should NOT be provided
 
 ### 5.1 Should provide (in scope)
@@ -142,7 +166,7 @@ Every row ships to **both** surfaces. "—" is never allowed in a shipped row; a
 ### 6.2 Run lifecycle (existing REST)
 `POST /api/runs`, `GET /api/runs[/{id}]`, `POST /api/runs/{id}/approve`, `DELETE /api/runs/{id}`, `GET /api/runs/{id}/{events,sse-token,cost,report,event-log}`, `POST /api/runs/{id}/tasks/{taskId}/retry`. Consumed by `core/api.ts` (already implemented). SSE uses a 5-min scoped token minted per connection; `core/sse.ts` reconnects with `Last-Event-ID` (already implemented).
 
-### 6.3 Chat — `POST /api/spec/chat` (Phase-1 skeleton landed; loop pending)
+### 6.3 Chat — `POST /api/spec/chat` (loop landed 2026-06-03 — `SpecChatService`, flag `spec.chat.enabled`/V229 default OFF)
 PAT-authenticated SSE endpoint. Request: `{sessionId, projectId?, localContext?, conversation[], providerOverride?}`. Response SSE: `event: token {delta}`, `event: tool_call {tool,args,id}`, `event: tool_result {id, result}`, `event: done {usage, cost_usd, turn_count}`. Server is stateless for content; persists only `spec_chat_audit` (`session_id, project_id, user_id, org_id, turn_count, timestamps, model_used, ip_hash` — no bodies).
 
 **Phase-1 step 3 (the real loop) design:**
@@ -202,12 +226,14 @@ logs/<runId>.log            # local run logs
 
 ## 10. Known defects in the landed code (to fix as part of this work)
 
-1. **Write actions guarded as reads.** `ProjectChatActionTools` approve/reject/cancel use `requireRunAccess`; must be `requireRunWriteAccess`. (§8)
-2. **Locality passed into the mode slot.** `ProjectChatActionTools.submit_run` passes `"REMOTE"` as `submitRun(...)`'s `executionMode` argument, which expects `PRODUCTION|PROTOTYPE`. Locality must move to `PipelineRun.executionLocality` (Phase 3); `executionMode` must carry a valid value.
-3. **Three incompatible "local" notions.** Client `RunRequest.localExecution` (`types.ts`) + gen-1 `run local` send a field the server record lacks; Shape B locks `PipelineRun.executionLocality`. Converge on `executionLocality`; delete the dead client field + retarget `run local`.
-4. **Controller error mapping.** `SpecChatController` throws raw exceptions for validation; map to 400/401.
-5. **`/api/spec` not guard-pinned.** Add to `AccessGuardCoverageTest`.
-6. **TS never compiled.** No `clients/` lockfile, not in CI; the whole TS surface is reasoned-not-compiled. First task is `npm install && npm run typecheck` + a CI job.
+> **Status (2026-06-03): Phase 0 COMPLETE.** All six defects fixed + verified. Backend (#1/#2/#4/#5): `mvn test -Dtest=AccessGuardCoverageTest` + `spotless:check` green. Client (#3): dead `localExecution` field removed, `run local` gated until Phase 3. Tooling (#6): monorepo builds + typechecks clean; `package-lock.json` committed; `.github/workflows/clients.yml` added (build + typecheck + parity test); `core/capabilities.ts` parity registry + `core/test/parity.test.mjs` (4/4 green).
+
+1. ✅ **Write actions guarded as reads.** `ProjectChatActionTools` approve/reject/cancel use `requireRunAccess`; must be `requireRunWriteAccess`. (§8) — **Fixed:** now `requireRunWriteAccess` (get_run_report stays on the read guard).
+2. ✅ **Locality passed into the mode slot.** `ProjectChatActionTools.submit_run` passes `"REMOTE"` as `submitRun(...)`'s `executionMode` argument, which expects `PRODUCTION|PROTOTYPE`. Locality must move to `PipelineRun.executionLocality` (Phase 3); `executionMode` must carry a valid value. — **Fixed:** now `"PRODUCTION"` (chat always hits the gate); locality deferred to Phase 3.
+3. ✅ **Three incompatible "local" notions.** Client `RunRequest.localExecution` (`types.ts`) + gen-1 `run local` send a field the server record lacks; Shape B locks `PipelineRun.executionLocality`. Converge on `executionLocality`; delete the dead client field + retarget `run local`. — **Fixed:** dead `localExecution` wire field removed; `run local` gated off (it would silently submit a SERVER-side run today) until Phase 3 adds `executionLocality` + the tool-proxy activation. Core `LocalExecutionSession`/`ToolRuntime` stay exported for Phase 3.
+4. ✅ **Controller error mapping.** `SpecChatController` throws raw exceptions for validation; map to 400/401. — **Fixed:** `ResponseStatusException` 401/400/403.
+5. ✅ **`/api/spec` not guard-pinned.** Add to `AccessGuardCoverageTest`. — **Fixed:** `/spec/` pinned in `PROTECTED_SEGMENTS`; the two no-path-id methods allowlisted with justification.
+6. ✅ **TS never compiled.** No `clients/` lockfile, not in CI; the whole TS surface is reasoned-not-compiled. First task is `npm install && npm run typecheck` + a CI job. — **Fixed:** `package-lock.json` committed; `.github/workflows/clients.yml` runs `npm ci` + build + typecheck + the parity test on every PR touching `clients/`.
 
 ## 11. Open questions for the operator
 

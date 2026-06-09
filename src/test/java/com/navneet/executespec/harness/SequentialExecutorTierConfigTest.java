@@ -24,17 +24,17 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the 2026-05-10 tier-config tuning that fell out of dev run a59f9798:
+ * Pins the tier-config tuning that keeps iteration limits as a safety net, not the primary quality
+ * ceiling:
  *
  * <ul>
- *   <li>MEDIUM iter cap 50 → 75 (T12 hit project-run 100-iter cap mid-test-suite at 0.92
- *       writes/iter — genuine progress strangled by iter cap).
+ *   <li>RL-2026-06 cap ladder: LOW=60, MEDIUM=120, HIGH=180. Project runs double the cap because
+ *       they need more repo inspection before the first durable edit.
  *   <li>Per-tier wall-clock budget, loosened again by RL-2026-05-004 to cut PARTIAL: LOW=30min
- *       (+LOW iter 30→40), MEDIUM=45min, HIGH=75min. Doubled for project runs (mirrors the iter-cap
- *       multiplier).
- *   <li>Project-run LOW stagnation force 12 → 18 (T9 force-terminated at 12 reads on a LOW project
- *       task that needed to readFile a real codebase before writing the audit fix). MEDIUM 20 → 24
- *       on project runs. HIGH unchanged.
+ *       MEDIUM=45min, HIGH=75min. Doubled for project runs (mirrors the iter-cap multiplier).
+ *   <li>Stagnation thresholds are looser than the old static 8/12 guard but still much smaller than
+ *       the iteration cap, so read-only loops terminate while productive edit/verify loops keep
+ *       working.
  * </ul>
  *
  * <p>{@code tierConfigFor} is private — accessed via reflection so the public {@code execute}
@@ -111,27 +111,27 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
-  void medium_fresh_run_iter_cap_is_75() throws Exception {
+  void medium_fresh_run_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "claude-foo", false);
-    assertEquals(75, c.maxIter, "MEDIUM iter cap was bumped 50 → 75 (a59f9798/T12 fix)");
+    assertEquals(120, c.maxIter, "MEDIUM gets enough room for inspect -> edit -> verify loops");
   }
 
   @Test
-  void medium_project_run_iter_cap_is_150() throws Exception {
+  void medium_project_run_iter_cap_is_240() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "claude-foo", true);
-    assertEquals(150, c.maxIter, "project-run multiplier ×2 → 75 × 2 = 150");
+    assertEquals(240, c.maxIter, "project-run multiplier ×2 → 120 × 2 = 240");
   }
 
   @Test
-  void low_project_iter_cap_is_80() throws Exception {
+  void low_project_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "claude-foo", true);
-    assertEquals(80, c.maxIter, "LOW iter cap 30 → 40 (RL-2026-05-004); project ×2 = 80");
+    assertEquals(120, c.maxIter, "LOW iter cap 60; project ×2 = 120");
   }
 
   @Test
-  void high_project_iter_cap_unchanged() throws Exception {
+  void high_project_iter_cap_is_360() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "claude-foo", true);
-    assertEquals(240, c.maxIter, "HIGH iter cap untouched: 120 × 2 = 240");
+    assertEquals(360, c.maxIter, "HIGH iter cap 180; project ×2 = 360");
   }
 
   @Test
@@ -178,31 +178,31 @@ class SequentialExecutorTierConfigTest {
   // Stagnation thresholds (project-run bumps)
 
   @Test
-  void low_stagnation_force_18_on_project_runs() throws Exception {
+  void low_stagnation_force_24_on_project_runs() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", true);
-    assertEquals(12, fresh.stagnationForceAfter, "fresh-scratch LOW keeps the static 12");
     assertEquals(
-        18,
+        16, fresh.stagnationForceAfter, "fresh-scratch LOW gets a modestly looser force threshold");
+    assertEquals(
+        24,
         proj.stagnationForceAfter,
-        "project-run LOW gets 18 (a59f9798/T9 fix — readFile-heavy reverse-engineering needs"
-            + " more headroom)");
+        "project-run LOW gets 24 (readFile-heavy reverse-engineering needs" + " more headroom)");
   }
 
   @Test
-  void medium_stagnation_force_24_on_project_runs() throws Exception {
+  void medium_stagnation_force_36_on_project_runs() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", true);
-    assertEquals(20, fresh.stagnationForceAfter, "fresh-scratch MEDIUM keeps 20");
-    assertEquals(24, proj.stagnationForceAfter, "project-run MEDIUM bumped 20 → 24");
+    assertEquals(28, fresh.stagnationForceAfter, "fresh-scratch MEDIUM force threshold");
+    assertEquals(36, proj.stagnationForceAfter, "project-run MEDIUM gets extra read headroom");
   }
 
   @Test
   void high_stagnation_force_unchanged_on_project_runs() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", true);
-    assertEquals(26, fresh.stagnationForceAfter);
-    assertEquals(26, proj.stagnationForceAfter, "HIGH already has generous stagnation budget");
+    assertEquals(40, fresh.stagnationForceAfter);
+    assertEquals(40, proj.stagnationForceAfter, "HIGH already has generous stagnation budget");
   }
 
   @Test

@@ -85,7 +85,10 @@ Important rules:
 - The shell runs in the workspace root already. Do NOT `cd /workspace` or use
   absolute paths — use relative paths (e.g. `python3 fib.py`, not `cd /workspace && ...`).
 - Use `python3` (never bare `python`); many systems have no `python` on PATH.
-- writeFile creates NEW files only. To modify an existing file, use editFile.
+- writeFile creates NEW files only. To modify an existing file, use editFile —
+  never mutate a tracked file in place through the shell (`sed -i`, `awk -i
+  inplace`, or `>`/`>>` over an existing file); that skips the read-before-edit
+  check and leaves no reviewable diff (`sed -i`/`awk -i inplace` are blocked).
 - editFile takes an array of {oldStr, newStr} pairs; every oldStr must occur
   exactly once in the current file.
 - After making changes, you may call buildProject to verify the project still
@@ -98,6 +101,22 @@ automatically at run-end by a downstream service. You have NO gitCommit
 tool — attempts to call it return FORBIDDEN. Do not run shell commands that
 mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
 `git push`). Edit files; call completeTask. That's it.
+
+BUILD ONLY WHAT THE TASK ASKS — match complexity to the requirement (applies to
+ALL tasks, new features as well as fixes):
+  - Write the minimum implementation that satisfies the task. Do not add options,
+    config, abstraction, or "future-proofing" the task did not request.
+  - No defensive code for cases that cannot occur given how the code is called.
+  - Validate inputs only at real trust boundaries (external/untrusted input); trust
+    your own internal callers rather than re-checking between private functions.
+  - Do NOT add comments or docstrings to code you did not change. Any new comment
+    states the non-obvious WHY, never a restatement of what the code does.
+  - If code becomes unused, delete it outright — do not comment it out or rename it
+    to `_unused`. Dead code left behind is not cleanup.
+  - Prefer a few similar concrete lines over a premature abstraction; add a helper
+    only when duplication is real and repeated, not merely anticipated.
+This does NOT waive the test requirement below — tests that exercise what you build
+are part of the task, not gold-plating.
 
 FIXING A BUG IN EXISTING CODE — localize, reproduce, fix small, verify.
 When the task is to FIX a defect in code that ALREADY EXISTS (not scaffold a new
@@ -591,6 +610,15 @@ to boot — skip it for those.""";
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
+            // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
+            // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked
+            // by a later task's not-yet-implemented tests. Decoupled from V217 (runner called
+            // directly), no model-visible schema change. Byte-identical until the flag flips.
+            .verifyBeforeComplete(
+                isFinalTask
+                    && featureFlagService != null
+                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -1133,9 +1161,9 @@ to boot — skip it for those.""";
    * complexity tag.
    *
    * <ul>
-   *   <li>LOW → LIGHTWEIGHT tier, 30 iters, 4096 max tokens
-   *   <li>MEDIUM → WORKHORSE tier, 50 iters, 8192 max tokens
-   *   <li>HIGH → PLANNING tier, 75 iters, 16384 max tokens
+   *   <li>LOW → LIGHTWEIGHT tier, 60 iters, 4096 max tokens
+   *   <li>MEDIUM → WORKHORSE tier, 120 iters, 8192 max tokens
+   *   <li>HIGH → PLANNING tier, 180 iters, 16384 max tokens
    * </ul>
    *
    * <p>When {@link ModelResolver} / provider conversion fails (e.g. user-supplied provider doesn't
@@ -1148,7 +1176,7 @@ to boot — skip it for those.""";
    * fires at thresholds proportional to the task's expected exploration depth. Calibrated
    * 2026-05-08 against ProgramBench cmatrix anthropic run 9b37b099 — HIGH and MEDIUM tasks both
    * stagnated at the static 12-iter cap before the worker could write substantive source. The new
-   * HIGH cap (18 warn / 28 force) is enough for legitimate reverse-engineering patterns: read
+   * HIGH cap (24 warn / 40 force) is enough for legitimate reverse-engineering patterns: read
    * README + man page + binary --help/--version + plan + write.
    */
   private record TierConfig(
@@ -1193,13 +1221,13 @@ to boot — skip it for those.""";
         // counted the cleanroom's original binary).
       case LOW -> {
         tier = AgentTier.LIGHTWEIGHT;
-        // RL-2026-05-004: caps loosened so they're a safety net, not a frequent
-        // PARTIAL-maker. The $ budget cap is the real guard; clock/iter only catch
-        // genuinely stuck runs. 30→40 iter, 15→30 min.
-        maxIter = 40;
+        // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
+        // quality ceiling. The dollar cap and stagnation guard remain the real runaway
+        // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
+        maxIter = 60;
         maxTokens = 4096;
-        stagnationWarnAfter = 8; // matches WorkerAgent.STAGNATION_WARN_AFTER_N default
-        stagnationForceAfter = 12;
+        stagnationWarnAfter = 10;
+        stagnationForceAfter = 16;
         wallClockSeconds = 30 * 60;
       }
       case HIGH -> {
@@ -1210,16 +1238,13 @@ to boot — skip it for those.""";
         // ceiling is the per-run cost cap, not the iter cap. Extends headroom for genuine
         // long-tail HIGH tasks (multi-file Spring Boot apps with deep wiring) that
         // currently hit iter-limit at iter 75 mid-edit.
-        maxIter = 120;
+        //
+        // RL-2026-06: 120 -> 180. Non-frontier models need more iterations for the same
+        // tool-using loop. Stagnation remains <25% of the cap, so read-only loops still stop.
+        maxIter = 180;
         maxTokens = 16384;
-        // 2026-05-08 — tightened HIGH stagnation 22/32 → 18/26. With iter cap bumped to
-        // 120, we have more total runway, so we can afford to terminate stuck loops
-        // earlier without strangling legitimate work. The 22/32 calibration was for
-        // 75-iter cap when each non-write iter was a larger fraction of the total budget.
-        // Now: 18 iters of pure reading still gets a warn; 26 iters force-terminates.
-        // That's <22% of the 120-iter budget — safe headroom.
-        stagnationWarnAfter = 18;
-        stagnationForceAfter = 26;
+        stagnationWarnAfter = 24;
+        stagnationForceAfter = 40;
         // RL-2026-05-004: 45→75 min. Gemini is genuinely slow per turn; a real HIGH
         // task was being wall-clock-killed mid-work → PARTIAL. $ cap still backstops.
         wallClockSeconds = 75 * 60;
@@ -1229,12 +1254,14 @@ to boot — skip it for those.""";
         // 2026-05-10 — MEDIUM iter cap 50 → 75. Dev run a59f9798/T12 ("write unit tests for
         // 3 mobile media.service methods") wrote 92 files at 0.92 writes/iter and hit the
         // project-run 100-iter cap (50 × 2) mid-test-suite. The worker was making genuine
-        // progress; iter cap killed it. 75 × 2 = 150 gives test-heavy MEDIUM tasks ~50%
-        // more headroom; cost cap still backstops runaway.
-        maxIter = 75;
+        // progress; iter cap killed it.
+        //
+        // RL-2026-06: 75 -> 120. This is the common "real feature slice" band and the most
+        // important budget to uncap for DeepSeek-class models.
+        maxIter = 120;
         maxTokens = 8192;
-        stagnationWarnAfter = 12;
-        stagnationForceAfter = 20;
+        stagnationWarnAfter = 16;
+        stagnationForceAfter = 28;
         wallClockSeconds = 45 * 60; // RL-2026-05-004: 25→45 min (PARTIAL reduction)
       }
     }
@@ -1256,9 +1283,9 @@ to boot — skip it for those.""";
       wallClockSeconds *= 2;
       // Bump only the project-run force threshold; warn stays the same so the model still
       // gets the "PROGRESS CHECK" nudge at the same point.
-      if (complexity == PlannedTask.Complexity.LOW) stagnationForceAfter = 18;
+      if (complexity == PlannedTask.Complexity.LOW) stagnationForceAfter = 24;
       else if (complexity == null || complexity == PlannedTask.Complexity.MEDIUM)
-        stagnationForceAfter = 24;
+        stagnationForceAfter = 36;
     }
     // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
     // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
@@ -1834,11 +1861,13 @@ to boot — skip it for those.""";
    * Load the scaffold template file matching the given projectType, or "" if none applies. Mirrors
    * the loose kebab-case convention used by {@link
    * com.navneet.executespec.execution.controller.ScaffoldController} — the file at {@code
-   * prompts/scaffolds/<key>.md} wins if present.
+   * prompts/scaffolds/<key>.md} wins if present. Planner-facing aliases are normalized first; for
+   * example {@code java-spring-boot} resolves to {@code prompts/scaffolds/spring-boot.md}.
    */
   private String loadScaffoldForProjectType(String projectType) {
     if (projectType == null || projectType.isBlank()) return "";
-    String key = projectType.trim().toLowerCase().replace('_', '-');
+    String key = scaffoldKeyForProjectType(projectType);
+    if (key.isBlank()) return "";
     try {
       org.springframework.core.io.Resource r =
           new org.springframework.core.io.ClassPathResource("prompts/scaffolds/" + key + ".md");
@@ -1848,6 +1877,15 @@ to boot — skip it for those.""";
       log.debug("loadScaffoldForProjectType({}) failed: {}", projectType, e.getMessage());
       return "";
     }
+  }
+
+  static String scaffoldKeyForProjectType(String projectType) {
+    if (projectType == null || projectType.isBlank()) return "";
+    String key = projectType.trim().toLowerCase().replace('_', '-');
+    return switch (key) {
+      case "java-spring-boot", "springboot" -> "spring-boot";
+      default -> key;
+    };
   }
 
   /**
