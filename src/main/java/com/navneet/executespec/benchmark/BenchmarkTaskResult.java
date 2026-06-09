@@ -16,8 +16,9 @@ import lombok.NoArgsConstructor;
 
 /**
  * One scored attempt of one task within a {@link BenchmarkRun} ({@code reward} 1=pass / 0=fail), as
- * written by Harbor's verifier and ingested by the orchestrator. {@link #esRunId} links to the
- * {@code pipeline_run} that executed it (so execution detail + score live together). V236.
+ * written by the external verifier and ingested by {@link BenchmarkTrackingService}. {@link
+ * #esRunId} links to the {@code pipeline_run} that executed it (so execution detail + score live
+ * together). V236.
  */
 @Entity
 @Table(

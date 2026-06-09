@@ -14,9 +14,11 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * A closed-loop, in-app Terminal-Bench run (RL-2026-06). ExecuteSpec triggers + tracks it; Harbor is
- * orchestrated under the hood by {@code BenchmarkOrchestratorService} (Harbor owns the verifier +
- * official submission). Each task is also a {@code pipeline_run}, linked via {@link
+ * One tracked, in-app benchmark run (RL-2026-06) — suite-agnostic ({@link BenchmarkSuite}:
+ * Terminal-Bench first, SWE-bench / ProgramBench next). ExecuteSpec is the event <b>sink +
+ * display</b>, not an orchestrator: an external verifier/harness runs the benchmark and publishes
+ * events to {@link BenchmarkTrackingService}, which aggregates resolved% + cost here. Each scored
+ * task may link the {@code pipeline_run} that executed it via {@link
  * BenchmarkTaskResult#getEsRunId()}. Operator-only (SUPER_ADMIN + {@code @Profile}). See V236.
  */
 @Entity

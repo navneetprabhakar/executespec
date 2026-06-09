@@ -14,8 +14,8 @@ import lombok.NoArgsConstructor;
 
 /**
  * One event in a {@link BenchmarkRun}'s stream, as published by the external verifier (Harbor) and
- * ingested by {@code BenchmarkController}. Persisted for replay + audit and re-broadcast over SSE so
- * the in-login {@code /benchmark} dashboard updates live. V236.
+ * ingested by {@link BenchmarkTrackingController}. Persisted for replay + audit and re-broadcast
+ * over SSE so the in-login {@code /benchmark} dashboard updates live. V236.
  */
 @Entity
 @Table(name = "benchmark_event")
