@@ -6,7 +6,7 @@ name: Build & Deploy
 # retains a `dev` option only for the same reason.
 on:
   push:
-    branches: [ dev ]
+    branches: [ dev, benchmark ]
   workflow_dispatch:
     inputs:
       target_env:
@@ -34,7 +34,7 @@ jobs:
     environment: ${{ (inputs.target_env || github.ref_name) == 'main' && 'production' || 'development' }}
 
     env:
-      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || 'dev' }}
+      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (github.ref_name == 'benchmark' && 'benchmark' || 'dev') }}
       TARGET_SHA:    ${{ inputs.target_sha || github.sha }}
       GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
       GCP_REGION:    ${{ secrets.GCP_REGION }}
@@ -138,7 +138,7 @@ jobs:
       # ── Set static instance name (standalone VM — no MIG) ──────────────
       - name: Set instance name
         run: |
-          INSTANCE="${{ env.DEPLOY_ENV == 'prod' && 'executespec-prod-vm' || 'executespec-dev-vm' }}"
+          INSTANCE="executespec-${{ env.DEPLOY_ENV }}-vm"
           echo "GCE_INSTANCE_RESOLVED=$INSTANCE" >> $GITHUB_ENV
           echo "Target instance: $INSTANCE"
 
@@ -183,6 +183,8 @@ jobs:
         run: |
           if [ "${{ env.DEPLOY_ENV }}" = "prod" ]; then
             echo "APP_PUBLIC_URL=https://app.executespec.ai" >> $GITHUB_ENV
+          elif [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            echo "APP_PUBLIC_URL=https://benchmark.executespec.ai" >> $GITHUB_ENV
           else
             echo "APP_PUBLIC_URL=https://dev.executespec.ai" >> $GITHUB_ENV
           fi
@@ -230,7 +232,7 @@ jobs:
           }
 
           # ── App settings ──────────────────────────────────────────────
-          upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,http://localhost:5173"
+          upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,https://benchmark.executespec.ai,http://localhost:5173"
           upsert "DASHBOARD_URL=$1"
           upsert "APP_BASE_URL=$1"
           upsert "MAIL_TRANSPORT=smtp"
