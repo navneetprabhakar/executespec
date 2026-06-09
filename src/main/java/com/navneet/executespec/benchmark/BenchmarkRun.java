@@ -69,6 +69,13 @@ public class BenchmarkRun {
   @Column(name = "harbor_job_name", length = 120)
   private String harborJobName;
 
+  /** Leaderboard submission state: null / SUBMITTING / SUBMITTED / FAILED. */
+  @Column(name = "submission_status", length = 20)
+  private String submissionStatus;
+
+  @Column(name = "leaderboard_url", length = 300)
+  private String leaderboardUrl;
+
   @Column(name = "created_by_user_id", length = 64)
   private String createdByUserId;
 
