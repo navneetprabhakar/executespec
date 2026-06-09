@@ -1,70 +1,49 @@
-# Closed-loop in-app benchmark (Terminal-Bench) — design + build plan
+# In-app benchmark tracking (Terminal-Bench) — design + build plan
 
-> **Created:** 2026-06-09 · **Status:** building (Phase 1). **Goal:** trigger + track + score Terminal-Bench
-> **inside ExecuteSpec** (API + in-login dashboard), instead of operator shell scripts + an external tracker.
+> **Created:** 2026-06-09 · **Status:** building. **Goal (narrowed 2026-06-09):** TRACK a Terminal-Bench
+> run + its submission + related events **inside ExecuteSpec** (in-login dashboard). The verifier (Harbor)
+> runs **externally and publishes events**; ExecuteSpec **ingests → stores → re-broadcasts (SSE) → shows**.
 
-## The hard constraint (why this *orchestrates* Harbor, not reimplements it)
+## Scope — ExecuteSpec is the event sink + display, NOT an orchestrator
 
-Terminal-Bench's **task containers, pass/fail verifier, and `harbor upload` (official leaderboard submission)
-are Harbor's** — a third-party framework. Reimplementing the verifier would make our scores diverge from the
-official leaderboard and invalidate submission. So the closed loop **drives Harbor under the hood** (runs it as
-a subprocess on the box, captures its results) and ExecuteSpec owns the **trigger + tracking + display + submit**.
+The external Harbor run (the existing `run-tb.sh` / adapter) **publishes events** to ExecuteSpec as the
+verifier scores tasks and on submission. ExecuteSpec persists them, re-broadcasts over SSE, and renders the
+in-login `/benchmark` dashboard. **No in-app Harbor subprocess, no Harbor-on-VM** — the verifier stays where
+it is; we only receive + show what it publishes. (Harbor still owns the verifier + the official `harbor upload`.)
 
 ## Architecture
 
 ```
-POST /api/admin/benchmark/start {suite, dataset, provider, model, k, tasks?}     ← trigger (SUPER_ADMIN, @Profile {local,dev,benchmark})
-   └─ BenchmarkOrchestratorService (virtual thread)
-        1. persist benchmark_run (RUNNING, model, k, total)
-        2. generate the harbor config (agent = es_harbor_agent → localhost; this same ExecuteSpec runs the worker)
-        3. run `harbor run -c <cfg>` as a subprocess (Docker already present on the box)
-        4. poll the harbor job dir → as each <task>__*/verifier/reward.txt lands:
-              persist benchmark_task_result(task, attempt, reward, es_run_id, cost) + broadcast SSE
-        5. on done: finalize benchmark_run (resolved/total, cost, DONE) + SSE terminal event
-GET  /api/admin/benchmark            ← list runs
-GET  /api/admin/benchmark/{id}       ← run + per-task results (from DB)
-GET  /api/admin/benchmark/{id}/events← SSE live updates (reuse sse/SseBroadcaster)
-POST /api/admin/benchmark/{id}/submit← run `harbor upload <job>` → official leaderboard
-DELETE /api/admin/benchmark/{id}     ← cancel (kill the harbor subprocess)
-/benchmark  (frontend, in-login admin page) ← live grid + resolved% + cost, rendered from the DB via SSE
+external Harbor run ──POST /api/admin/benchmark/start {suite,dataset,provider,model,k,total} ─▶ {id}   (creates benchmark_run RUNNING)
+   run-tb.sh exports BENCHMARK_RUN_ID=id, then publishes events to /{id}/event:
+     ├─ TASK_SCORED   {task, attempt, reward, esRunId?, cost} ─▶ upsert benchmark_task_result + event + update resolved/cost + SSE
+     ├─ RUN_PROGRESS  {scored, total, ...}                    ─▶ event + SSE
+     ├─ RUN_DONE      {resolved, cost}                        ─▶ finalize benchmark_run DONE + SSE
+     ├─ SUBMISSION_*  {status, url}                           ─▶ benchmark_run.submission_* + event + SSE
+GET  /api/admin/benchmark             ← list
+GET  /api/admin/benchmark/{id}        ← run + task results + events (from DB)
+GET  /api/admin/benchmark/{id}/events ← SSE live (reuse sse/SseBroadcaster)
+/benchmark (frontend, in-login)       ← live grid + resolved% + cost + submission status + event log
 ```
-
-**Each TB task is still a `PipelineRun`** (the existing Layer-1 execution tracking — status/model/tokens/cost).
-`benchmark_task_result.es_run_id` links to it, so execution detail + the benchmark score live together.
+`TASK_SCORED` can carry the executing `pipeline_run` id (`esRunId`) → execution detail + score together.
 
 ## Persistence (V236)
 
-- **`benchmark_run`** — `id` (UUID), `suite`, `dataset`, `provider`, `model`, `k`, `total_tasks`,
-  `resolved_tasks`, `status`, `cost_usd`, `harbor_job_name`, `created_by_user_id`, `created_at`,
-  `started_at`, `finished_at`, `error`.
-- **`benchmark_task_result`** — `id`, `benchmark_run_id` (FK), `task_name`, `attempt`, `reward` (1/0),
-  `es_run_id`, `cost_usd`, `created_at`. Unique `(benchmark_run_id, task_name, attempt)`.
+- **`benchmark_run`** — id, suite, dataset, provider, model, k, total/resolved_tasks, status, cost_usd,
+  harbor_job_name, **submission_status**, **leaderboard_url**, created_by_user_id, created/started/finished_at, error.
+- **`benchmark_task_result`** — per-task scores (task_name, attempt, reward 1/0, es_run_id, cost). Unique (run, task, attempt).
+- **`benchmark_event`** — the event stream: seq, type, message, payload (JSON), created_at.
 
 ## Phases
 
-1. **Persistence + orchestrator core (backend)** — V236 + entities + repos + `BenchmarkOrchestratorService`
-   (harbor-config gen, subprocess, job-dir poller, result persistence) + `BenchmarkController` (start/get/list/
-   events/cancel) + SSE. SUPER_ADMIN + `@Profile({"local","dev","benchmark"})`. **Dev against `profile=local`
-   + local `~/tbench` Harbor.**
-2. **Harbor on the bench VM** — install harbor 0.13.1 + dataset + the agent on `executespec-benchmark-vm`
-   (Docker present) via `startup.sh`/a setup step, so the orchestrator runs it server-side. Config: a
-   `benchmark.harbor.*` block (harbor bin, jobs dir, dataset).
-2. **`/benchmark` frontend** — admin page: list runs + live grid (the tb-tracker dashboard, native + auth-gated)
-   + per-task drill-in (links to the run) + resolved% + cost, fed by the DB + SSE.
-4. **Submit + polish** — `POST /{id}/submit` → `harbor upload`; per-run notifications; cancel/cleanup.
+1. **Persistence** (run + task_result + event) — *done.*
+2. **Ingest + SSE** — `BenchmarkController` (`/start`, `/{id}/event`, `/{id}`, list, `/{id}/events` SSE) +
+   `BenchmarkService` (persist + aggregate + broadcast). SUPER_ADMIN + `@Profile({"local","dev","benchmark"})`.
+3. **Event hooks** — `run-tb.sh` / `tb-tracker.py` POST events as the verifier publishes (a thin curl per event).
+4. **`/benchmark` frontend** — live grid + event log + submission status, in-login, SSE-fed.
 
 ## Decisions
 
-- **Orchestrate, don't reimplement** Harbor (see constraint).
-- **Reuse, don't fork:** the worker run path (`TerminalBenchRunService` via the TB endpoint the harbor agent
-  already calls), the SSE infra (`sse/SseBroadcaster`), the cost tracker. The orchestrator is a thin
-  manager + persistence + poller around Harbor.
-- **Operator-only / `@Profile`-gated / SUPER_ADMIN** — same posture as the TB endpoint; not a customer surface.
-- **Branch:** built feature→dev→main (permanent product code); deployed to the bench env for use.
-
-## Owed before "done"
-
-- Harbor-on-VM provisioning (Phase 2) — until then the orchestrator runs Harbor wherever ExecuteSpec runs
-  (local works; the bench VM needs the install).
-- The frontend page (Phase 3).
-- The external `tb-tracker.py` / `run-tb.sh` remain valid + are the fallback until this lands.
+- **Track + display only** — ExecuteSpec receives the verifier's published events; it does not run or reimplement Harbor.
+- **Reuse** `sse/SseBroadcaster` + the persistence; each scored task can link its `pipeline_run`.
+- **Operator-only** — SUPER_ADMIN + `@Profile`. Built feature→dev→main; deployed to the bench env.
