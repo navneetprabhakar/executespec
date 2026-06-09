@@ -610,7 +610,7 @@ asks already exist:
 This is the authoritative, actionable plan. It unifies three inputs: this doc's vix-leverage items
 (§7 rationale A1–C7, §7b code-verified audit), the external research audit (§8b reconciliation, P0–P10),
 and the standalone **worker-context-compaction execution plan**
-([`worker-context-compaction-execution-plan-2026-06-06.md`](worker-context-compaction-execution-plan-2026-06-06.md)),
+([Appendix A](#appendix-a--worker-context-compaction-execution-plan-inlined)),
 which becomes workstream **W2.1** (it remains the authoritative spec for that workstream). Those sections
 are the "why"; this is the "how." Already-done items (B2/B3 edit gate+unique-match, A1 prefix stability,
 A3 schemas, A4 Gemini cache, caps, cache-token recording) are **out of scope** — do not rebuild them.
