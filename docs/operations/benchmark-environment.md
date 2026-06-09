@@ -1,6 +1,6 @@
 # Benchmark Environment — Deployment Record & Runbook
 
-> **Created:** 2026-06-09 · **Status:** standing up (first deploy in progress) · **Lifecycle:** EPHEMERAL
+> **Created:** 2026-06-09 · **Status:** ✅ **LIVE** (verified — `https://benchmark.executespec.ai/actuator/health` → `200 {"status":"UP"}`, run 27197650305) · **Lifecycle:** EPHEMERAL
 > A new, **isolated** full-stack environment (UI + backend + DB) on GCP for running benchmarks
 > (SWE-bench / Terminal-Bench / eval matrices) against **prod-grade code** without touching dev/prod data.
 > Tracks the `benchmark` git branch (cut from `main`). Stood up for a benchmarking activity, then
@@ -121,6 +121,7 @@ The first three deploys failed; each fix is now codified above. Recorded so a fu
 2. **Health check failed (`http=000 exit=7`)** — initially looked like a cold-start timing miss; it was actually the app **crash-looping**. The health window was *also* too short for the cold-DB first boot. → **Fix:** widened the window (`sleep 45` + 20 attempts) on the benchmark branch.
 3. **App crash-loop — `UnsatisfiedDependencyException` → `flywayInitializer` → `Connection to localhost:5432 refused`.** Root cause: `startup.sh` sets `SPRING_PROFILES_ACTIVE=<env>,gcp`, i.e. `benchmark,gcp` — but **no `application-benchmark.yml` existed**, so the datasource fell back to the base `application.yml` default (`localhost:5432`). The DB env (`POSTGRES_HOST=10.101.1.3`) was correct and reachable; nothing mapped it. → **Fix:** added `application-benchmark.yml` mapping `${POSTGRES_*}`/`${REDIS_*}` (modeled on the dev profile).
 4. **Commit blocked — credential leak.** The first `application-benchmark.yml` copied dev's pattern, which **hardcodes the real Google OAuth client secret** as a property default. → **Fix:** made OAuth credentials **env-only** (no secrets in the repo). This also surfaced a pre-existing leak in `application-dev.yml` (tracked separately — rotate + env-ify).
+5. **Boot fail #2 — `IllegalStateException: Client id of registration 'google' must not be empty`.** Over-correcting #4, I made the OAuth **client-id** env-only too — but a client-id is *public* (it appears in redirect URLs) and Spring rejects an empty one at startup. → **Fix:** restored the public client-id default (`application-benchmark.yml`); only the client-secret stays env-only. App booted clean after this — run `27197650305` verified `{"status":"UP"}`.
 
 **Lesson for `startup.sh`:** it assumes a per-env Spring profile file exists. Any new env needs `application-<env>.yml` (or the datasource set explicitly), or it crash-loops on localhost.
 
@@ -128,7 +129,7 @@ The first three deploys failed; each fix is now codified above. Recorded so a fu
 
 ## 7. Outstanding / owed
 
-- [ ] **Verify the current deploy** (`application-benchmark.yml` fix) — `gh run view <id> --json conclusion` + a real `/actuator/health` probe (don't trust the `watch` exit code).
+- [x] **Deploy verified LIVE** (2026-06-09, run `27197650305` = SUCCESS) — `https://benchmark.executespec.ai/actuator/health` → `200 {"status":"UP"}`; `executespec-benchmark-vm` serving SHA `b98cb672`. Both app-config bugs (datasource + OAuth client-id) fixed.
 - [ ] **Google login (user):** register the `benchmark.executespec.ai` redirect URI on the OAuth client **and** confirm `GOOGLE_OAUTH_CLIENT_ID/SECRET` are in `gs://executespec-benchmark-deploy/config/api-keys` (dev hardcoded them in YAML, so they may be absent from the bucket).
 - [ ] **Promote to `main`** — fold `benchmark.tfvars` + the `variables.tf` validation + the `deploy.yml` wiring + `application-benchmark.yml` onto `main` so the benchmark capability is permanent (not just on the ephemeral branch), and **codify the deploy-SA bucket grant** in Terraform (`google_storage_bucket_iam_member`) so re-spins self-heal.
 - [ ] **Security task (spawned):** rotate + env-ify the hardcoded Google/GitHub OAuth secrets in `application-dev.yml`.
