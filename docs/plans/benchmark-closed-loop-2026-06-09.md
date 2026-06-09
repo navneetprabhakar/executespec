@@ -1,8 +1,9 @@
 # In-app benchmark tracking (common, multi-suite) — design + build plan
 
-> **Created:** 2026-06-09 · **Status:** Phase 1 (persistence) + Phase 2 (ingest + SSE) **done** — V236 boot-validated
-> against `ddl-auto:validate`; `BenchmarkTrackingService` + `BenchmarkTrackingController` live at
-> `/api/v2/test/benchmark`. Phase 3 (event hooks) + Phase 4 (frontend) next. **Goal:** a COMMON in-app layer that TRACKS any benchmark
+> **Created:** 2026-06-09 · **Status:** Phases 1 (persistence) + 2 (ingest + SSE) + 4 (operator `/benchmark` dashboard)
+> **done** — V236 boot-validated; `BenchmarkTrackingService`/`Controller` at `/api/v2/test/benchmark`; the IDE-native
+> `ide/IdeBenchmark.tsx` dashboard verified live (desktop + mobile). **Phase 3 (the `run-tb.sh`/`tb-tracker.py` event
+> hooks that actually feed it from a live TB run) is the remaining piece to close the loop.** **Goal:** a COMMON in-app layer that TRACKS any benchmark
 > run + its submission + events **inside ExecuteSpec** (in-login dashboard) — **Terminal-Bench first**, SWE-bench
 > + ProgramBench next via the same event contract. The verifier/harness runs **externally and publishes
 > events**; ExecuteSpec **ingests → stores → re-broadcasts (SSE) → shows**.
@@ -57,8 +58,14 @@ GET  /api/v2/test/benchmark/{id}/events ← SSE live (reuse sse/SseBroadcaster)
    execution harness `BenchmarkController` (`/api/admin/benchmark`) to avoid a class/path collision — the
    tracking layer lives under the SUPER_ADMIN-gated `/api/v2/test/**` matcher (same surface as Terminal-Bench).
    Reuses `sse/SseBroadcaster` keyed by the benchmark-run id. Compiled + boot-validated locally.
-3. **Event hooks** — `run-tb.sh` / `tb-tracker.py` POST events as the verifier publishes (a thin curl per event).
-4. **`/benchmark` frontend** — live grid + event log + submission status, in-login, SSE-fed.
+3. **Event hooks** — `run-tb.sh` / `tb-tracker.py` POST events as the verifier publishes (a thin curl per event). **Next.**
+4. **`/benchmark` frontend** — *done.* Operator-only IDE-native dashboard (`ide/IdeBenchmark.tsx`, route `/benchmark`,
+   Explorer "Benchmarks" nav link under System, gated by `selectIsSuperAdmin`) + read-only API module
+   (`lib/api/benchmark.ts`). Live grid (suite · model · resolved% bar · cost · status · submission) → click → detail
+   (KV grid + per-task table + event log + leaderboard link). **Polls** (list 5s / selected detail 3s, skipped when the
+   tab is hidden) rather than SSE — browser `EventSource` can't send the bearer the SSE endpoint requires, and polling
+   is real-time enough for benchmark cadence. Verified live against the local backend (2 seeded runs) at desktop +
+   375px; tsc + eslint + prettier green.
 
 ## Decisions
 
