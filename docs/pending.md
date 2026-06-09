@@ -101,7 +101,7 @@ Per founder call, defaults are NOT flipped; toggle in the SUPER_ADMIN flag conso
 ## E. Larger refactors
 
 ### E1 🟠 RunOrchestrator god-class — next break
-- **What:** continue the residual split of the now-~2.6K-LOC `RunOrchestrator` per [`plans/runorchestrator-god-class-split.md`](plans/runorchestrator-god-class-split.md) (candidate next: validation-report / PR-push run-end orchestration into a focused service with its own tests).
+- **What:** continue the residual split of the now-~2.6K-LOC `RunOrchestrator` (candidate next: validation-report / PR-push run-end orchestration into a focused service with its own tests). *(The original 6-increment split is complete — `RunOrchestrator` 5,288→2,637 LOC, all collaborators shipped + test-pinned; its plan doc was removed 2026-06-08. The by-hand methodology is restated below.)*
 - **Why deferred:** the plan doc records that **automated extraction corrupted the file twice** — must be done by-hand, increment-by-increment, with the build running after each step. Not safe to attempt in a no-compile sandbox.
 - **Owner action:** execute locally, one increment + full test per commit.
 
@@ -157,7 +157,7 @@ Standings (post-diff-strip, verification OFF, /50): **Sonnet 23 · Gemini 22 · 
 
 > Was `plans/audit-deferred-handoff-2026-05-30.md` (index). Companion changelog kept: `audit/REMEDIATION-2026-05-29.md`.
 
-- 🟠 **I1 — RunOrchestrator god-class split.** Same item as **E1**; concrete 6-increment by-hand plan in [`plans/runorchestrator-god-class-split.md`](plans/runorchestrator-god-class-split.md) (auto-extraction corrupted the file twice — by-hand + full build per increment).
+- 🟠 **I1 — RunOrchestrator god-class split.** Same item as **E1**; the concrete 6-increment by-hand plan is **complete + its doc removed 2026-06-08** (`RunOrchestrator` 5,288→2,637 LOC). Residual reduction continues by-hand + full build per increment (auto-extraction corrupted the file twice).
 - 🟡 **I2 — B1 batch coordinator wiring (P4) + live smokes.** All 3 provider batch clients shipped + unit-tested + inert; remaining = wire `BatchCoordinator` into `RunOrchestrator` + per-provider live smokes (Gemini also needs batch-envelope shape verification) + human submit-gate. ~50% LLM-cost lever. Plan: [`plans/v2-batch-execution-plan.md`](plans/v2-batch-execution-plan.md).
 - 🟡 **I3 — C3 tenant ORM read-isolation.** High-risk Hibernate `@Filter` retrofit; C2 (app-layer guards) is the finding's hard requirement and is closed. Approach + the 5 exemption landmines + flag-gated entity-by-entity rollout: [`plans/c3-tenant-orm-isolation.md`](plans/c3-tenant-orm-isolation.md).
 - 🟡 **I4 — B3 DeepSeek native-client smoke.** Client lives on `feat/benchmark-codegen-harness` (`LlmProvider.DEEPSEEK` + `LlmRouter.callDeepSeek` + the `deepseek-v4-pro-native` matrix entry) — reasoned-not-smoked. To close: `export DEEPSEEK_API_KEY=…` → single-shot `aiProvider=deepseek modelName=deepseek-v4-pro-native` (or `scripts/tier-eval-v2.sh --providers deepseek`) → assert the call returns native (no OpenRouter hop), `RunCostTracker` records the native rate, and latency beats the OpenRouter path. Validation only — no code change expected; run it where the client lives.
