@@ -1,6 +1,8 @@
 # In-app benchmark tracking (common, multi-suite) — design + build plan
 
-> **Created:** 2026-06-09 · **Status:** building. **Goal:** a COMMON in-app layer that TRACKS any benchmark
+> **Created:** 2026-06-09 · **Status:** Phase 1 (persistence) + Phase 2 (ingest + SSE) **done** — V236 boot-validated
+> against `ddl-auto:validate`; `BenchmarkTrackingService` + `BenchmarkTrackingController` live at
+> `/api/v2/test/benchmark`. Phase 3 (event hooks) + Phase 4 (frontend) next. **Goal:** a COMMON in-app layer that TRACKS any benchmark
 > run + its submission + events **inside ExecuteSpec** (in-login dashboard) — **Terminal-Bench first**, SWE-bench
 > + ProgramBench next via the same event contract. The verifier/harness runs **externally and publishes
 > events**; ExecuteSpec **ingests → stores → re-broadcasts (SSE) → shows**.
@@ -26,15 +28,15 @@ it is; we only receive + show what it publishes. (Harbor still owns the verifier
 ## Architecture
 
 ```
-external Harbor run ──POST /api/admin/benchmark/start {suite,dataset,provider,model,k,total} ─▶ {id}   (creates benchmark_run RUNNING)
+external Harbor run ──POST /api/v2/test/benchmark/start {suite,dataset,provider,model,k,total} ─▶ {id}   (creates benchmark_run RUNNING)
    run-tb.sh exports BENCHMARK_RUN_ID=id, then publishes events to /{id}/event:
      ├─ TASK_SCORED   {task, attempt, reward, esRunId?, cost} ─▶ upsert benchmark_task_result + event + update resolved/cost + SSE
      ├─ RUN_PROGRESS  {scored, total, ...}                    ─▶ event + SSE
      ├─ RUN_DONE      {resolved, cost}                        ─▶ finalize benchmark_run DONE + SSE
      ├─ SUBMISSION_*  {status, url}                           ─▶ benchmark_run.submission_* + event + SSE
-GET  /api/admin/benchmark             ← list
-GET  /api/admin/benchmark/{id}        ← run + task results + events (from DB)
-GET  /api/admin/benchmark/{id}/events ← SSE live (reuse sse/SseBroadcaster)
+GET  /api/v2/test/benchmark             ← list
+GET  /api/v2/test/benchmark/{id}        ← run + task results + events (from DB)
+GET  /api/v2/test/benchmark/{id}/events ← SSE live (reuse sse/SseBroadcaster)
 /benchmark (frontend, in-login)       ← live grid + resolved% + cost + submission status + event log
 ```
 `TASK_SCORED` can carry the executing `pipeline_run` id (`esRunId`) → execution detail + score together.
@@ -49,8 +51,12 @@ GET  /api/admin/benchmark/{id}/events ← SSE live (reuse sse/SseBroadcaster)
 ## Phases
 
 1. **Persistence** (run + task_result + event) — *done.*
-2. **Ingest + SSE** — `BenchmarkController` (`/start`, `/{id}/event`, `/{id}`, list, `/{id}/events` SSE) +
-   `BenchmarkService` (persist + aggregate + broadcast). SUPER_ADMIN + `@Profile({"local","dev","benchmark"})`.
+2. **Ingest + SSE** — *done.* `BenchmarkTrackingController` (`/start`, `/{id}/event`, `/{id}`, list,
+   `/{id}/events` SSE) + `BenchmarkTrackingService` (persist + aggregate resolved%/cost + broadcast).
+   SUPER_ADMIN + `@Profile({"local","dev","benchmark"})`. **Named distinctly** from the existing SWE-bench
+   execution harness `BenchmarkController` (`/api/admin/benchmark`) to avoid a class/path collision — the
+   tracking layer lives under the SUPER_ADMIN-gated `/api/v2/test/**` matcher (same surface as Terminal-Bench).
+   Reuses `sse/SseBroadcaster` keyed by the benchmark-run id. Compiled + boot-validated locally.
 3. **Event hooks** — `run-tb.sh` / `tb-tracker.py` POST events as the verifier publishes (a thin curl per event).
 4. **`/benchmark` frontend** — live grid + event log + submission status, in-login, SSE-fed.
 
