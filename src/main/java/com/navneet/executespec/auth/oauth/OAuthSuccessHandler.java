@@ -1,9 +1,11 @@
 package com.navneet.executespec.auth.oauth;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -110,13 +112,20 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
           profile.email(),
           user.getId());
 
-      // Redirect to frontend callback with tokens
+      // Redirect to frontend callback with tokens. If sign-in began from the CLI / VS Code
+      // device-auth page, OAuthRedirectCookieFilter stashed its /cli-login return URL in a cookie —
+      // forward it so the browser lands back on /cli-login (the email+password path already
+      // preserves this via ?redirect=).
+      String postLoginRedirect = consumeRedirectCookie(request, response);
       String redirectUrl =
           baseRedirectUrl
               + "?token="
               + URLEncoder.encode(accessToken, StandardCharsets.UTF_8)
               + "&refresh="
               + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8);
+      if (postLoginRedirect != null) {
+        redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
+      }
       response.sendRedirect(redirectUrl);
 
     } catch (OAuthEmailConflictException e) {
@@ -132,5 +141,29 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
               + "/login?error="
               + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
     }
+  }
+
+  /**
+   * Reads and immediately clears the {@link OAuthRedirectCookieFilter#COOKIE} device-auth return
+   * cookie. Returns the decoded path only when it is a safe {@code /cli-login} path, else null.
+   */
+  private String consumeRedirectCookie(HttpServletRequest request, HttpServletResponse response) {
+    if (request.getCookies() == null) {
+      return null;
+    }
+    for (Cookie cookie : request.getCookies()) {
+      if (OAuthRedirectCookieFilter.COOKIE.equals(cookie.getName())) {
+        StringBuilder clear =
+            new StringBuilder(OAuthRedirectCookieFilter.COOKIE)
+                .append("=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+        if (request.isSecure()) {
+          clear.append("; Secure");
+        }
+        response.addHeader("Set-Cookie", clear.toString());
+        String decoded = URLDecoder.decode(cookie.getValue(), StandardCharsets.UTF_8);
+        return OAuthRedirectCookieFilter.isSafe(decoded) ? decoded : null;
+      }
+    }
+    return null;
   }
 }

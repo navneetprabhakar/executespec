@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -114,6 +115,8 @@ class WorkerAgentToolDispatchTest {
         runRepo,
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         null,
+        null,
+        // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
         null);
   }
 
@@ -166,5 +169,55 @@ class WorkerAgentToolDispatchTest {
         WorkerResult.Outcome.COMPLETED,
         result.outcome(),
         "An unknown-tool call must yield an error envelope the model recovers from, not a crash.");
+  }
+
+  @Test
+  @DisplayName("completeTask before a sibling tool call → sibling paired as SUPERSEDED (C2)")
+  void completeTask_pairs_trailing_siblings() {
+    // A single assistant turn that emits completeTask AND a trailing readFile. completeTask
+    // short-circuits the batch, so the readFile is never executed — C2 must still pair it with a
+    // synthetic tool_result so the persisted history has no dangling tool_use.
+    WorkerAgent worker =
+        newWorker(
+            List.of(
+                responseWithCalls(
+                    toolCall("completeTask", "{\"summary\":\"done\"}"),
+                    toolCall("readFile", "{\"path\":\"x\"}"))),
+            null);
+
+    WorkerResult result = worker.run(req());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("readFile") && s.contains("SUPERSEDED")),
+        "A sibling tool call after completeTask must be paired (SUPERSEDED) so the persisted"
+            + " history carries a tool_result for every tool_use the assistant emitted.");
+  }
+
+  @Test
+  @DisplayName(
+      "pure read-only batch dispatches all calls via the C1 parallel path (correct results)")
+  void pure_read_batch_parallel() {
+    // [readFile, searchFiles] is an all-read-only batch (>=2) → maybeParallelReadDispatch runs both
+    // concurrently and the loop consumes the cached envelopes; results must be correct + complete.
+    WorkerAgent worker =
+        newWorker(
+            List.of(
+                responseWithCalls(
+                    toolCall("readFile", "{\"path\":\"a\"}"),
+                    toolCall("searchFiles", "{\"pattern\":\"x\"}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}"))),
+            null);
+
+    WorkerResult result = worker.run(req());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("readFile")),
+        "the parallel-dispatched readFile must still be recorded in the tool log in order");
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("searchFiles")),
+        "the parallel-dispatched searchFiles must still be recorded in the tool log in order");
   }
 }

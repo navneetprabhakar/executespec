@@ -220,4 +220,52 @@ class ShellSandboxPolicyTest {
       assertThat(result.permitted()).isFalse();
     }
   }
+
+  @Nested
+  @DisplayName("In-place shell edits (B5 — must route through editFile, not bypass the read-gate)")
+  class InPlaceEdits {
+
+    @Test
+    @DisplayName("sed -i is blocked")
+    void sedInPlaceBlocked() {
+      assertThat(policy.validate("sed -i 's/foo/bar/' app.py", "/ws").permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("sed -i.bak (backup suffix) is blocked")
+    void sedInPlaceBackupBlocked() {
+      assertThat(policy.validate("sed -i.bak 's/foo/bar/' app.py", "/ws").permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("sed --in-place is blocked")
+    void sedLongInPlaceBlocked() {
+      assertThat(policy.validate("sed --in-place 's/foo/bar/' app.py", "/ws").permitted())
+          .isFalse();
+    }
+
+    @Test
+    @DisplayName("gawk -i inplace is blocked")
+    void awkInPlaceBlocked() {
+      assertThat(policy.validate("awk -i inplace '{print}' app.py", "/ws").permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("read-only sed (no -i) stays allowed")
+    void readOnlySedAllowed() {
+      assertThat(policy.validate("sed 's/foo/bar/' app.py", "/ws").permitted()).isTrue();
+    }
+
+    @Test
+    @DisplayName("downstream `| grep -i` is NOT mis-flagged as an in-place edit")
+    void pipedGrepCaseInsensitiveAllowed() {
+      assertThat(policy.validate("cat app.py | grep -i foo", "/ws").permitted()).isTrue();
+    }
+
+    @Test
+    @DisplayName("read-only sed piped into grep -i stays allowed (same-segment scoping)")
+    void sedThenGrepInsensitiveAllowed() {
+      assertThat(policy.validate("sed 's/a/b/' app.py | grep -i bar", "/ws").permitted()).isTrue();
+    }
+  }
 }

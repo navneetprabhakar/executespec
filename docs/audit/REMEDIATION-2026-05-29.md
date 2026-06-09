@@ -57,7 +57,7 @@ A second pass on the same branch shipped the items §2 originally deferred (all 
 - **N3 (B5) — launch-status polling → events (DONE).** `@Async @EventListener onV2Run{Completed,Failed}` in `ExecutionOrchestrator` mirror the V2 terminal through the existing `mirrorV2Terminal` sink; `pollAndMirrorV2` retained as the cross-JVM/boot-resume fallback. Verified lazy-nav-safe (scalar reads + CAS-bean scalar writes only — same profile as `pollAndMirrorV2`) and registered in `AsyncAllowlistTest`.
 - **N4 (A5 residual) — `CodeGenEngineImpl` unit test (DONE).** 11 tests: WorkerResult+cost→EngineResult mapping, the exhaustive 7-outcome map, + both fail-safe branches (workspace-realpath failure, cost-snapshot exception).
 - **God-class #1 — `frontend/src/lib/api.ts` (3.6k LOC / 472 exports) split (DONE)** into `lib/api/{core, 14 domain modules, index}` behind a byte-identical `@/lib/api` barrel; `ApiContractTest` re-pointed to the new dir.
-- **God-class #2 — `RunOrchestrator` (PLAN DONE, split deferred).** Two automated extraction attempts proved the 5.3k-LOC stateful file can't be safely auto-split (the class-close brace orphaned both times; caught at compile, reverted — zero harm). Concrete by-hand, full-test-verified, 6-increment plan written: [`docs/plans/runorchestrator-god-class-split.md`](../plans/runorchestrator-god-class-split.md). The split itself is a dedicated session (user-chosen).
+- **God-class #2 — `RunOrchestrator` (PLAN DONE, split deferred).** Two automated extraction attempts proved the 5.3k-LOC stateful file can't be safely auto-split (the class-close brace orphaned both times; caught at compile, reverted — zero harm). Concrete by-hand, full-test-verified, 6-increment plan written + since **completed (split shipped, `RunOrchestrator` 5,288→2,637 LOC) + plan doc removed 2026-06-08**. The split itself was a dedicated session (user-chosen).
 - **B1 (partial) — Anthropic Message-Batches client (`AnthropicBatchClient`).** The first concrete `BatchClient` (the package was interface-only). submit/poll/fetchResults/cancel against the documented endpoints; BYOK-aware key via runId→owner→`ApiKeyResolver` (system-key fallback). The pure JSON shaping (create-body envelope, `processing_status`→state map, JSONL results parse) is unit-tested (5 tests); the four HTTP calls are reasoned-not-smoked (no `api.anthropic.com` reach here — a live smoke is required before any flip). Registered as a bean so `BatchClientRouter` discovers it, but **inert** — `BatchCoordinator.submit` still throws, nothing calls it, the `harness.v2.batch_enabled` flag is OFF, so the production path is byte-identical. P3a/P3b (OpenAI + Gemini clients) followed the same shape; the §2 "B1" deferral below now scopes only the P4 coordinator wiring + live smokes.
 
 ## 2. Still deferred — with rationale
@@ -90,12 +90,11 @@ GCP work is committed (or in a follow-up once this branch merges).
 
 ---
 
-## 5. Handoff docs for the deferred items
+## 5. Deferred items — where they're tracked
 
-Every deferred item has a concrete handoff (created 2026-05-30) — index:
-[`docs/plans/audit-deferred-handoff-2026-05-30.md`](../plans/audit-deferred-handoff-2026-05-30.md).
+Every deferred item is tracked in [`docs/pending.md`](../pending.md) §I (the standalone 2026-05-30 index doc was folded in + deleted 2026-06-03):
 
-- **RunOrchestrator split** → [`docs/plans/runorchestrator-god-class-split.md`](../plans/runorchestrator-god-class-split.md) (6-increment by-hand plan).
+- **RunOrchestrator split** → 6-increment by-hand plan **completed + doc removed 2026-06-08** (split shipped, `RunOrchestrator` 5,288→2,637 LOC; residual reduction in [`docs/pending.md`](../pending.md) §E1/I1).
 - **B1 — coordinator wiring (P4) + live smokes** (all 3 provider clients now built) → [`docs/plans/v2-batch-execution-plan.md`](../plans/v2-batch-execution-plan.md) (P4 wiring + human gate).
 - **C3 — tenant ORM read-isolation** → [`docs/plans/c3-tenant-orm-isolation.md`](../plans/c3-tenant-orm-isolation.md) (approach + the 5 exemption landmines + flag-gated rollout).
-- **B3 — DeepSeek smoke** + **D-residual dead-code** → the index doc above (B3 §, D-residual §) + [`docs/tech-debt.md`](../tech-debt.md).
+- **B3 — DeepSeek smoke** + **D-residual dead-code** → [`docs/pending.md`](../pending.md) §I4 / §I5 + [`docs/tech-debt.md`](../tech-debt.md).

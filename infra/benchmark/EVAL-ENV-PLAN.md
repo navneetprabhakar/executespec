@@ -119,3 +119,30 @@ gsutil -m rsync -r <bucket>/<campaign>-<ts> ./eval-results # pull results to the
   delete them. To fully tear down: pull results, then `gsutil rm -r gs://…` (or set the flag true) and
   `terraform destroy`.
 - **Standing rule:** never delete the SWE-bench eval images.
+
+---
+
+## Terminal-Bench path (added 2026-06-09)
+
+Same VM module; TB layer added alongside the SWE-bench scripts.
+
+| File | Role |
+|---|---|
+| `scripts/setup-tb.sh` | one-time: uv + **harbor 0.13.1** venv in `~/tbench` + the `es_harbor_agent` from `tb/` |
+| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), harbor run, live tracker, GCS results sync |
+| `scripts/tb-tracker.py` | live **visual dashboard** (per-task grid + metrics, auto-refresh) → HTML to GCS + Telegram pings |
+| `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`) |
+
+**Why persistent jobs_dir:** the laptop runs wrote to `/tmp/es-tb-jobs` and a **reboot wiped them** (2026-06-09). `run-tb.sh` writes to `~/es-tb-jobs` + syncs to GCS so results survive reboot/stop-start/teardown.
+
+**Run (k=5, pro, compaction ON, with tracker+GCS):**
+```bash
+# on the VM, after setup-tb.sh:
+GCS_BUCKET=$(cd ~/executespec/infra/benchmark && terraform output -raw results_bucket) \
+ES_MODEL=deepseek-v4-pro-native HARBOR_MODEL=deepseek/deepseek-v4-pro K=5 CONCURRENCY=12 \
+  nohup bash ~/executespec/infra/benchmark/scripts/run-tb.sh > ~/tb.out 2>&1 &
+# watch: open  gs://<bucket>/tb-tracker.html  (auto-refresh) + Telegram pings every 5 min.
+# submit: ./.venv/bin/harbor upload <job> ; ./.venv/bin/harbor leaderboard …
+```
+
+**⚠️ Pre-flight:** the box gets code via `git pull` → it needs the **TB-extraction commit pushed** (currently held). Push the branch or scp `TerminalBenchRunService.java` first.

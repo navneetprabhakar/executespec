@@ -1,0 +1,7 @@
+provider,condition,status,verifiedScore,costUsd
+anthropic,baseline,COMPLETE,100,0.735103
+openai,baseline,COMPLETE,91,0.900336
+gemini,baseline,COMPLETE,97,0.358653
+anthropic,flagson,COMPLETE,100,0.66657
+openai,flagson,COMPLETE,97,0.633631
+gemini,flagson,COMPLETE,97,0.30603

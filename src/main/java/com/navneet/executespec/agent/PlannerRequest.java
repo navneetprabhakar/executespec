@@ -5,11 +5,11 @@ import com.navneet.executespec.tool.ExecutionContext;
 import lombok.Builder;
 
 /**
- * Input to {@link PlannerAgent#plan(PlannerRequest)}.
+ * Input to {@link OutlinePlannerAgent#plan(PlannerRequest)}.
  *
  * @param spec the user's natural-language task specification
- * @param classification SINGLE_SHOT / MEDIUM / MULTI_TASK. For Phase 4 this is supplied by the
- *     caller; Phase 5 adds auto-classification via triage.
+ * @param classification SINGLE_SHOT / SMALL / MEDIUM / LARGE / LEGACY, supplied by the classifier
+ *     before planning.
  * @param provider which LLM provider to use (ignored when classification is SINGLE_SHOT since no
  *     LLM call is made)
  * @param model which model to use (ignored for SINGLE_SHOT)

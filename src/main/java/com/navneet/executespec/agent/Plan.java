@@ -5,7 +5,7 @@ import java.util.List;
 import lombok.Builder;
 
 /**
- * The structured plan produced by {@link PlannerAgent}.
+ * The structured plan produced by {@link OutlinePlannerAgent} and the task-expansion pipeline.
  *
  * <p>New in V2 vs V1:
  *

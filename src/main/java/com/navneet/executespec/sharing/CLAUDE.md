@@ -19,7 +19,7 @@
 - `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`.
 - `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite). **RL-2026-05-066:** `createInvite` ALSO writes an in-app `Notification` (`InAppNotificationService.create`, type `PROJECT_INVITE`, link `/invites/accept?token=…`) when the invitee already has an account — best-effort, never fails the invite. The email link is `{appBaseUrl}/invites/accept?token=…`; the matching SPA route was missing (only `/accept-invite`, the org-invite path, existed) so the magic link dead-ended and the invitee never became a `ProjectMember` — fixed by adding the `/invites/accept` route in `frontend/src/App.tsx` (`AcceptInvitePage` now takes a `kind: 'org' | 'project'` prop so the two flows call their own accept endpoint: org → `/api/org/accept-invite`, project → `/api/invites/accept`).
 - `service/ProjectShareLinkService.java` — link lifecycle (create / resolve / revoke / view-counter). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited).
-- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
+- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api/projects.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected admin endpoints (create/list/revoke).
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
 
@@ -63,7 +63,7 @@ Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token i
 
 ## Outstanding follow-ups
 
-- Frontend dashboard panel for managing invites + share links (the API helpers are in `lib/api.ts`; the UI panels would be follow-up commits).
+- Frontend dashboard panel for managing invites + share links (the API helpers are in `frontend/src/lib/api/projects.ts` + `sharing.ts`; the UI panels would be follow-up commits).
 - Public share-link viewer pages at `/shared/:token` route.
 - Scheduled cleanup job that flips PENDING invites past `expires_at` to EXPIRED (today the read path checks expiry on accept; a sweeper would keep the table tidy for analytics).
 - Per-tier monthly invite cap (today: paid-tier is the only gate; structure is in place to add a count).

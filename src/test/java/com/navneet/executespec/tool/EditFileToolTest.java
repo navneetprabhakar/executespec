@@ -38,7 +38,7 @@ class EditFileToolTest {
   @BeforeEach
   void setUp() {
     readState = new ReadFileStateStore();
-    tool = new EditFileTool(new FileSandboxPolicy(), mock(SseBroadcaster.class), readState);
+    tool = new EditFileTool(new FileSandboxPolicy(), mock(SseBroadcaster.class), readState, null);
     ctx = new ExecutionContext("run-1", "T1", workspace);
   }
 
