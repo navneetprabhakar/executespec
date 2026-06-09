@@ -348,6 +348,12 @@ export default function IdeWorkspace() {
                   </span>
                   Admin
                 </NavLink>
+                <NavLink className='ide-tree-item' to='/benchmark'>
+                  <span className='ide-tree-ico'>
+                    <MonitorIcon size={15} />
+                  </span>
+                  Benchmarks
+                </NavLink>
               </>
             )}
           </div>
