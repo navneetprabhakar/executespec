@@ -1,8 +1,20 @@
-# In-app benchmark tracking (Terminal-Bench) — design + build plan
+# In-app benchmark tracking (common, multi-suite) — design + build plan
 
-> **Created:** 2026-06-09 · **Status:** building. **Goal (narrowed 2026-06-09):** TRACK a Terminal-Bench
-> run + its submission + related events **inside ExecuteSpec** (in-login dashboard). The verifier (Harbor)
-> runs **externally and publishes events**; ExecuteSpec **ingests → stores → re-broadcasts (SSE) → shows**.
+> **Created:** 2026-06-09 · **Status:** building. **Goal:** a COMMON in-app layer that TRACKS any benchmark
+> run + its submission + events **inside ExecuteSpec** (in-login dashboard) — **Terminal-Bench first**, SWE-bench
+> + ProgramBench next via the same event contract. The verifier/harness runs **externally and publishes
+> events**; ExecuteSpec **ingests → stores → re-broadcasts (SSE) → shows**.
+
+## Common / multi-suite (suite-agnostic by design)
+
+The `benchmark/` layer doesn't know about Terminal-Bench specifically — `benchmark_run.suite`
+(`BenchmarkSuite`: TERMINAL_BENCH, SWE_BENCH, PROGRAM_BENCH) discriminates, and every suite's external
+harness publishes the **same** event shapes (`TASK_SCORED {task, attempt, reward, esRunId?, cost}`,
+`RUN_PROGRESS`, `RUN_DONE`, `SUBMISSION_*`) to the **same** ingest endpoint. The `/benchmark` dashboard
+renders any of them (grid + resolved% + cost + event log + submission). TB is the first consumer
+(`tb-tracker.py`/`run-tb.sh` POST the hooks); SWE-bench + ProgramBench plug in with **no schema change** —
+their harness just POSTs the same events. Suite-specific *execution* stays in `terminalbench/` / `swebench/`
+/ `programbench/`; the **common tracking + display** is `benchmark/`.
 
 ## Scope — ExecuteSpec is the event sink + display, NOT an orchestrator
 
