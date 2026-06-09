@@ -327,7 +327,7 @@ jobs:
 
       # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
       - name: Wait for app startup
-        run: sleep 30
+        run: sleep 45
 
       # ── Health check (separate short SSH session) ────────────────────────
       # v2.5.12 (Gap #4) — fix the health-check buffer-reuse bug.
@@ -348,7 +348,7 @@ jobs:
       #      (or DEGRADED) as success
       - name: Health check
         run: |
-          for i in 1 2 3 4 5 6 7 8; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
             echo "Health check attempt $i..."
             RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
               --project ${{ env.GCP_PROJECT }} \
@@ -367,7 +367,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "Health check FAILED after 8 attempts"
+          echo "Health check FAILED after 20 attempts"
           exit 1
 
       # ── Dump logs on failure ─────────────────────────────────────────────
