@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
  * /api/v2/test/**}, which {@code SecurityConfig} locks to SUPER_ADMIN, and is dev/local-only via
  * {@code @Profile}. RL-2026-06.
  */
-@Profile({"local", "dev"})
+@Profile({"local", "dev", "benchmark"})
 @RestController
 @RequestMapping("/api/v2/test/terminal-bench")
 @RequiredArgsConstructor

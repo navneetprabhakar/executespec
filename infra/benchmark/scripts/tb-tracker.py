@@ -135,39 +135,72 @@ def main():
     ap.add_argument("job_dir")
     ap.add_argument("--name", default="Terminal-Bench")
     ap.add_argument("--total", type=int, default=89)
+    ap.add_argument("--k", type=int, default=1, help="attempts per task — ping a task once it has k results in")
     ap.add_argument("--out", default=None)
     ap.add_argument("--loop", type=int, default=0, help="seconds between cycles (0 = one-shot)")
     ap.add_argument("--telegram", action="store_true")
     ap.add_argument("--tg-script", default="/tmp/tg-send.py")
     ap.add_argument("--gcs", default=None, help="gs://bucket/path.html to sync to")
     ap.add_argument("--done-marker", default=None)
+    ap.add_argument("--baseline", default=None, help="prior best for the publish-decision hint, e.g. '12/20'")
+    ap.add_argument("--heartbeat", type=int, default=6, help="digest ping every Nth cycle (0=off) so you know it's alive")
     a = ap.parse_args()
     out = a.out or os.path.join(os.path.expanduser("~"), "tb-tracker.html")
 
+    def ping(msg):
+        if a.telegram and os.path.exists(a.tg_script):
+            subprocess.run(["python3", a.tg_script, msg], capture_output=True)
+
+    seen = set()      # tasks already pinged (k results in)
+    cyc = [0]
+
     def cycle():
+        cyc[0] += 1
         running = not (a.done_marker and os.path.exists(a.done_marker))
         rw, stats = gather(a.job_dir)
-        h = render(rw, stats, a.name, a.total, running)
-        open(out, "w").write(h)
+        open(out, "w").write(render(rw, stats, a.name, a.total, running))
         if a.gcs:
             subprocess.run(["gsutil", "-h", "Content-Type:text/html", "-h",
-                            "Cache-Control:no-cache", "cp", out, a.gcs],
-                           capture_output=True)
-        if a.telegram and os.path.exists(a.tg_script):
-            sc, pa = len(rw), sum(sum(v) for v in rw.values())
-            tr = sum(len(v) for v in rw.values())
-            msg = (f"📊 {a.name} · {time.strftime('%H:%M')}\n"
-                   f"{sc}/{a.total} scored · {pa} pass · "
-                   f"{(100*pa/tr if tr else 0):.0f}% · ${stats.get('cost_usd',0) or 0:.2f}")
-            subprocess.run(["python3", a.tg_script, msg], capture_output=True)
+                            "Cache-Control:no-cache", "cp", out, a.gcs], capture_output=True)
+        scored = len(rw)
+        resolved = sum(1 for v in rw.values() if any(v))
+        cost = stats.get("cost_usd", 0) or 0
+        # PER-TASK signal — ping the moment a task finishes its k attempts (real-time, decision-grade)
+        for t in sorted(rw):
+            if len(rw[t]) >= a.k and t not in seen:
+                seen.add(t)
+                p, n = sum(rw[t]), len(rw[t])
+                ping(f"{'✅ PASS' if p > 0 else '❌ FAIL'}  {t}  ({p}/{n})\n"
+                     f"→ {resolved}/{scored} resolved · {a.total} total · ${cost:.2f}")
+        # heartbeat digest (alive signal between completions)
+        if a.heartbeat and (cyc[0] == 1 or cyc[0] % a.heartbeat == 0):
+            ping(f"📊 {a.name} · {time.strftime('%H:%M')} · {scored}/{a.total} scored · "
+                 f"{resolved} resolved · ${cost:.2f} · {'running' if running else 'done'}")
         return running
 
     if a.loop:
         while cycle():
             time.sleep(a.loop)
-        cycle()  # final
+        cycle()  # final render
     else:
         cycle()
+
+    # FINAL publish-decision summary
+    rw, stats = gather(a.job_dir)
+    scored = len(rw)
+    resolved = sum(1 for v in rw.values() if any(v))
+    cost = stats.get("cost_usd", 0) or 0
+    pct = (100.0 * resolved / scored) if scored else 0
+    hint = ""
+    if a.baseline:
+        hint = f"\nbaseline {a.baseline}"
+        try:
+            bn = int(str(a.baseline).split("/")[0])
+            hint += " → " + ("✅ matches/beats — consider publishing"
+                             if resolved >= bn else "⚠️ below baseline — review first")
+        except Exception:
+            pass
+    ping(f"🏁 DONE — {a.name}\n{resolved}/{scored} resolved ({pct:.0f}%) · ${cost:.2f}{hint}")
     print("dashboard:", out, ("→ " + a.gcs) if a.gcs else "")
 
 
