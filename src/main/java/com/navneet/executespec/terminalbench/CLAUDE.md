@@ -24,7 +24,7 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 
 | File | Purpose |
 |------|---------|
-| `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
+| `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
 | `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. **`extractDeliverablePaths` (RL-2026-06-016)** now runs TWO matchers: the absolute `/app/…\.ext` `DELIVERABLE_PATH` + a `RELATIVE_DELIVERABLE` that catches a bare `name.ext` introduced by an output verb (write/create/produce/…) in the same clause (`[^./]` gap can't cross a `/` into an absolute path nor a `.` into the next sentence; letter-led extension avoids `e.g.`/`i.e.`), prepended `/app/`. Fixes the write-compressor miss where "Write me **data.comp**" left the un-prefixed OUTPUT unextracted (the gate saw only the inputs → passed). Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
@@ -136,7 +136,7 @@ current pass.
 
 ## Invariants
 
-- Operator-only: `@Profile({"local","dev"})` + SUPER_ADMIN via the `/api/v2/test/**` matcher. Not a
+- Operator-only: `@Profile({"local","dev","benchmark"})` + SUPER_ADMIN via the `/api/v2/test/**` matcher. Not a
   customer surface.
 - `unregister` MUST run on every terminal/exception path (it's in `finally`) — else a dangling session
   leaks + `isRemote` stays true for that runId.
