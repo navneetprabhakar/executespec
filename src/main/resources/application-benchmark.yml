@@ -48,7 +48,8 @@ spring:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+            # client-id is public (appears in OAuth redirect URLs); only the secret is sensitive → env-only.
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:1061994342941-5rrf50jalmdkg0l5rck95ucc0fenh0vr.apps.googleusercontent.com}
             client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
             scope: openid, email, profile
             redirect-uri: https://benchmark.executespec.ai/api/auth/oauth2/callback/{registrationId}
