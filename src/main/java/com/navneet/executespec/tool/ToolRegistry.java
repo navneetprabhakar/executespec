@@ -75,11 +75,23 @@ public class ToolRegistry {
   }
 
   /**
+   * Flag-gated tool binding (W4.2/W3.1) — a {@link FlagGatedTool} that is OFF for this run is NOT
+   * bound at all (absent from the model's tool schema), not bound-but-inert, per the RL-2026-05-061
+   * lesson that a tool merely <i>present</i> in the schema can cause reasoning-only stalls on
+   * schema-sensitive providers (DeepSeek). Opted in: {@link BackgroundJobTool}, {@link
+   * ReadCodeOutlineTool}; every non-{@code FlagGatedTool} is always bound.
+   */
+  private boolean isToolBound(Tool t) {
+    return !(t instanceof FlagGatedTool fg) || fg.enabled();
+  }
+
+  /**
    * Bind every registered tool to the given context, returning a list of Spring AI {@link
    * ToolCallback}s ready to pass to a {@code ChatOptions.toolCallbacks(...)} builder.
    */
   public List<ToolCallback> bind(ExecutionContext ctx) {
     return allTools.stream()
+        .filter(this::isToolBound)
         .map(
             t ->
                 (ToolCallback)
@@ -96,11 +108,35 @@ public class ToolRegistry {
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
+        .filter(this::isToolBound)
         .map(
             t ->
                 (ToolCallback)
                     new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
+  }
+
+  /**
+   * True when this run is bound to a remote tool session (local-hands/remote-brain). The V2 {@code
+   * WorkerAgent} dispatches tools MANUALLY (calls {@link Tool#execute} directly rather than through
+   * the Spring-AI {@link ContextBoundToolCallback}), so the manual-dispatch path must consult this
+   * + {@link #dispatchRemote} to honor remote mode — the remote branch inside {@code
+   * ContextBoundToolCallback.call} only covers Spring-AI internal tool execution. RL-2026-06
+   * (terminal-bench).
+   */
+  public boolean isRemoteRun(ExecutionContext ctx) {
+    return remoteToolDispatcher != null
+        && ctx != null
+        && remoteToolDispatcher.isRemote(ctx.runId());
+  }
+
+  /**
+   * Dispatch a tool call to the connected client and return its result envelope verbatim (same
+   * {@code {"ok":...}} shape the local path produces). Caller must have checked {@link
+   * #isRemoteRun}. Blocks (bounded) inside the dispatcher for the client to reply.
+   */
+  public String dispatchRemote(ExecutionContext ctx, String toolName, String argsJson) {
+    return remoteToolDispatcher.dispatch(ctx.runId(), ctx.taskId(), toolName, argsJson);
   }
 
   /**
@@ -159,6 +195,12 @@ public class ToolRegistry {
         return errorEnvelope(
             ToolResult.ErrorKind.INVALID_ARGS,
             "tool input is not valid JSON: " + parseEx.getMessage());
+      }
+      // B4 (RL-2026-06, vix-leverage W1.3) — same conservative required-field check as the manual
+      // worker dispatch path (WorkerAgent.dispatchOne), centralized in ToolArgValidator.
+      var argErr = ToolArgValidator.validate(tool.inputSchema(), args);
+      if (argErr.isPresent()) {
+        return errorEnvelope(ToolResult.ErrorKind.INVALID_ARGS, argErr.get());
       }
       try {
         ToolResult result = tool.execute(args, ctx);

@@ -16,10 +16,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * v2.6.2 slice 5b — shared parsing + validation helpers for the V2 planner pipeline. Extracted from
- * {@code PlannerAgent} so {@link OutlinePlannerAgent} (and its validation test) can use them
- * without depending on the legacy planner. The legacy class is now deleted; this is the single
- * source of truth for planner-output handling.
+ * Shared parsing + validation helpers for the V2 planner pipeline. {@link OutlinePlannerAgent},
+ * validation tests, and downstream plan repair code all use this as the single source of truth for
+ * planner-output handling.
  *
  * <p>All methods are stateless; the only injected dependency is the {@link ObjectMapper} used for
  * JSON parsing, passed per-call so callers keep their own Spring-managed mapper.

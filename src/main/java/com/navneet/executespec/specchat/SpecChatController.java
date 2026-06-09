@@ -1,5 +1,7 @@
 package com.navneet.executespec.specchat;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -11,7 +13,10 @@ import java.util.UUID;
 import jakarta.servlet.http.HttpServletRequest;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.cost.RunCostTracker;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import lombok.RequiredArgsConstructor;
@@ -37,9 +43,10 @@ import lombok.extern.slf4j.Slf4j;
  * is the one the CLI + VS Code plugin use; resolved to {@link AppUserDetails} by {@code
  * JwtAuthenticationFilter}.
  *
- * <p><b>Phase 1 scope (this commit):</b> request validation, audit-row upsert, IP-hash capture,
- * placeholder SSE-emitter response. The full chat loop (LlmRouter dispatch + tool execution) lands
- * in a follow-up commit per the design doc phase plan.
+ * <p>The controller owns request validation, the audit-row upsert, IP-hash capture, and the SSE
+ * emitter lifecycle. The actual agentic loop lives in {@link SpecChatService} and runs only when
+ * the {@code spec.chat.enabled} flag is ON (V229, default OFF); when OFF the endpoint returns an
+ * explicit not-enabled {@code done} event so the default pipeline is byte-identical.
  *
  * <p>RL-2026-05-052.
  */
@@ -50,6 +57,8 @@ import lombok.extern.slf4j.Slf4j;
 public class SpecChatController {
 
   private final SpecChatAuditRepository auditRepository;
+  private final SpecChatService specChatService;
+  private final FeatureFlagService featureFlags;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
@@ -59,13 +68,14 @@ public class SpecChatController {
       HttpServletRequest http) {
 
     if (userDetails == null) {
-      throw new IllegalStateException("auth required (JWT or PAT)");
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required (JWT or PAT)");
     }
     if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
-      throw new IllegalArgumentException("sessionId is required");
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
     }
     if (request.conversation() == null || request.conversation().isEmpty()) {
-      throw new IllegalArgumentException("conversation must contain at least the current turn");
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "conversation must contain at least the current turn");
     }
 
     String orgId =
@@ -73,7 +83,8 @@ public class SpecChatController {
             ? String.valueOf(userDetails.getOrgMember().getOrgId())
             : null;
     if (orgId == null) {
-      throw new IllegalStateException(
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
           "user is not a member of any org — CLI/Plugin chat requires an org context");
     }
 
@@ -93,29 +104,49 @@ public class SpecChatController {
         ipHash);
 
     SseEmitter emitter = new SseEmitter(0L);
+
+    // Flag OFF (default) → explicit not-enabled response; the real loop never runs, so the default
+    // pipeline is byte-identical. The audit row above is still written (an unenabled session
+    // counts).
+    if (!featureFlags.isEnabled("spec.chat.enabled")) {
+      try {
+        emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", audit.getId())));
+        emitter.send(
+            SseEmitter.event()
+                .name("done")
+                .data(
+                    Map.of(
+                        "session_id", request.sessionId(),
+                        "audit_id", audit.getId(),
+                        "turn_count", audit.getTurnCount(),
+                        "note", "spec.chat.enabled is OFF")));
+        emitter.complete();
+      } catch (Exception e) {
+        emitter.completeWithError(e);
+      }
+      return emitter;
+    }
+
+    // Flag ON → run the real agentic loop. Phase 1 runs it inline in the request thread (the
+    // feature
+    // is flag-gated); SpecChatService documents the async-before-prod requirement.
     try {
       emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", audit.getId())));
-      emitter.send(
-          SseEmitter.event()
-              .name("token")
-              .data(
-                  Map.of(
-                      "delta",
-                      "[Phase 1 skeleton — chat loop lands in follow-up commit per"
-                          + " RL-2026-05-052]")));
-      emitter.send(
-          SseEmitter.event()
-              .name("done")
-              .data(
-                  Map.of(
-                      "session_id",
-                      request.sessionId(),
-                      "audit_id",
-                      audit.getId(),
-                      "turn_count",
-                      audit.getTurnCount())));
+      specChatService.runTurn(
+          sseSink(emitter),
+          userDetails,
+          request.sessionId(),
+          request.projectId(),
+          orgId,
+          request.conversation(),
+          request.providerOverride());
       emitter.complete();
     } catch (Exception e) {
+      log.warn(
+          "spec-chat turn failed (session {}, user {}): {}",
+          request.sessionId(),
+          userId,
+          e.getMessage());
       emitter.completeWithError(e);
     }
     return emitter;
@@ -127,14 +158,14 @@ public class SpecChatController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @org.springframework.web.bind.annotation.PathVariable String sessionId) {
     if (userDetails == null) {
-      throw new IllegalStateException("auth required");
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
     }
     return auditRepository
         .findBySessionId(sessionId)
         .map(
             a -> {
               if (!String.valueOf(userDetails.getUser().getId()).equals(a.getUserId())) {
-                throw new IllegalStateException("forbidden");
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
               }
               return ResponseEntity.ok(a);
             })
@@ -167,6 +198,58 @@ public class SpecChatController {
                         .ipHash(ipHash)
                         .modelUsed(request.providerOverride())
                         .build()));
+  }
+
+  /** Adapt {@link SpecChatService.Sink} to this request's SSE emitter (null-safe data maps). */
+  private SpecChatService.Sink sseSink(SseEmitter emitter) {
+    return new SpecChatService.Sink() {
+      @Override
+      public void token(String delta) {
+        send(emitter, "token", Map.of("delta", delta == null ? "" : delta));
+      }
+
+      @Override
+      public void toolCall(String tool, String argsJson, String id) {
+        send(
+            emitter,
+            "tool_call",
+            Map.of(
+                "tool", tool == null ? "" : tool,
+                "args", argsJson == null ? "" : argsJson,
+                "id", id == null ? "" : id));
+      }
+
+      @Override
+      public void toolResult(String id, String resultJson) {
+        send(
+            emitter,
+            "tool_result",
+            Map.of("id", id == null ? "" : id, "result", resultJson == null ? "" : resultJson));
+      }
+
+      @Override
+      public void done(int turnCount, RunCostTracker.Snapshot cost) {
+        send(
+            emitter,
+            "done",
+            Map.of(
+                "turn_count", turnCount,
+                "cost_usd", cost.costUsd(),
+                "input_tokens", cost.inputTokens(),
+                "output_tokens", cost.outputTokens()));
+      }
+    };
+  }
+
+  /**
+   * Send one SSE event; a client-disconnect IOException surfaces to the caller's completeWithError.
+   */
+  private static void send(SseEmitter emitter, String event, Object data) {
+    try {
+      emitter.send(SseEmitter.event().name(event).data(data));
+    } catch (IOException io) {
+      throw new UncheckedIOException(io);
+    }
   }
 
   private static String clientIp(String forwardedFor, HttpServletRequest http) {

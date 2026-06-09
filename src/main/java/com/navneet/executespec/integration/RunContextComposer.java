@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
+import com.navneet.executespec.codeintel.TieredCodemapSelector;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.UiStyleResolver;
@@ -46,11 +47,20 @@ class RunContextComposer {
 
   // RL-2026-05-035 — code-intel injection caps (moved with buildCodeIntelContext). Per-repo +
   // total bounds so a large codemap can't blow the planner/worker cold-start budget.
-  private static final int CODEINTEL_TOTAL_CAP = 12_000;
-  private static final int CODEINTEL_PER_REPO_CAP = 6_000;
+  // RL-2026-06-004 — SHRUNK 12k/6k/8k → 3k/1.5k/0.8k. The injected codemap+arch lands in the
+  // WORKER's system prompt (SequentialExecutor → composeSystemPrompt) and is re-attended EVERY
+  // turn; for SINGLE_SHOT there is no planner to absorb it. The RCA of the project-mode regressions
+  // (DeepSeek 50-set) showed the 14k always-on prefix taxes a small model's attention → it commits
+  // 0 edits (Mech B) or jitters the exact edit (Mech A). Localization was never the bottleneck
+  // (blind already edits the right file), so the map only needs to be a TIGHT relevant-files hint,
+  // not a full dump. Pair with codeintel.tiered.enabled so the 1.5k is RELEVANT symbols, not paths.
+  private static final int CODEINTEL_TOTAL_CAP = 3_000;
+  private static final int CODEINTEL_PER_REPO_CAP = 1_500;
   // Architecture-doc injection cap (flag codeintel.inject-arch.enabled). The combined cross-repo
   // arch doc is prose (HLD/LLD narrative) — bounded so it complements, not crowds out, the codemap.
-  private static final int ARCH_INJECT_CAP = 8_000;
+  // RL-2026-06-004 — 8k → 0.8k: for a localized single-repo fix the HLD/LLD prose is mostly noise;
+  // keep just the overview-shaped head so it can't displace the worker's editing budget.
+  private static final int ARCH_INJECT_CAP = 800;
   private static final String DEFAULT_PROVIDER = "openai";
 
   private final ObjectMapper objectMapper;
@@ -212,7 +222,10 @@ class RunContextComposer {
   }
 
   String buildCodeIntelContext(
-      String projectId, java.util.List<com.navneet.executespec.project.entity.ProjectRepo> repos) {
+      String projectId,
+      java.util.List<com.navneet.executespec.project.entity.ProjectRepo> repos,
+      String specText,
+      boolean tiered) {
     if (projectId == null || repos == null || repos.isEmpty()) return "";
     StringBuilder sb = new StringBuilder();
     int budget = CODEINTEL_TOTAL_CAP;
@@ -223,7 +236,13 @@ class RunContextComposer {
         if (cm.isEmpty() || cm.get().getContent() == null || cm.get().getContent().isBlank()) {
           continue;
         }
-        String body = truncate(cm.get().getContent(), Math.min(budget, CODEINTEL_PER_REPO_CAP));
+        String content = cm.get().getContent();
+        int cap = Math.min(budget, CODEINTEL_PER_REPO_CAP);
+        // RL-2026-06-003 — tiered selection: T0 skeleton + spec-relevant symbol blocks instead of a
+        // head truncation that drops the ## Functions symbol map on large repos. Flag-gated; null
+        // from the selector (unparseable / blank spec) falls back to the original head-truncate.
+        String body = tiered ? TieredCodemapSelector.select(content, specText, cap) : null;
+        if (body == null) body = truncate(content, cap);
         sb.append("### Codemap — ")
             .append(lastPathSegment(r.getGithubRepoFullName()))
             .append("\n")

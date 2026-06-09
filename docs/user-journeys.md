@@ -424,7 +424,7 @@ External user receives email, accepts → cross-org project_member row created
 
 4. With V198 enabled, the invite form unlocks. The admin types the external person's email and picks a role (PROJECT_VIEWER read-only / PROJECT_DEVELOPER / PROJECT_ADMIN).
 
-5. The frontend POSTs `/api/projects/{id}/invites` (`ProjectMembersPage` uses raw `fetch` — research flags this as a missing typed wrapper in `frontend/src/lib/api.ts`). The endpoint applies three V198 gates:
+5. The frontend POSTs `/api/projects/{id}/invites` through the typed project API helper (`frontend/src/lib/api/projects.ts::createProjectInvite`). The endpoint applies three V198 gates:
    - caller's tier ≥ PRO,
    - caller is ORG_ADMIN of their own org OR SUPER_ADMIN (not just PROJECT_ADMIN — V198 narrowed this),
    - `org.external_sharing_enabled=true`.

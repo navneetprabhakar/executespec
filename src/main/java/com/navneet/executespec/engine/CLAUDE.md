@@ -35,6 +35,27 @@ rollout, each phase shippable + green:
 | `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
 | `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags). |
 
+## Common harness stages on the worker (RL-2026-06)
+
+Three completeTask-time stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is **one-shot + fail-open** (can never loop or false-block) and reads the deliverable via `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.
+
+| Stage | Field | What it does | Consumers |
+|-------|-------|--------------|-----------|
+| **#1 Critic pass** | `criticPass` (Boolean) | Before the FIRST completeTask, ONE fresh-context, no-tool `LlmRouter` acceptance review over the task + the deliverable — **git diff** for a local product run, **/app** files for a remote TB run; concrete gaps fed back once (`runCriticPass`/`criticMessage`/`CRITIC_SYSTEM_PROMPT`). Subsumes the verify nudge when on. | TB (`ES_TB_CRITIC`), PATCH (`worker.critic-pass.enabled`, V231, default OFF). BUILD has `ReviewerAgent`. |
+| **#2 Deliverable gate** | `requiredDeliverablePaths` (List) | At completeTask, ONE deterministic `shell` existence check for the required paths; missing ⇒ refuse (bounded to `DELIVERABLE_GATE_MAX_REFUSALS=2` then YIELD). Activates on a non-empty list — only TB supplies one today (`TerminalBenchRunService.extractDeliverablePaths`). | TB (`ES_TB_DELIVERABLE_GATE`). |
+| **#3 Verify gate** | `terminalVerifyGate` (Boolean) | Terminal refinement of the generic `!gateOn` verify nudge: fires even after a shallow shell smoke (which defeats the generic `lastEditIter > lastVerifyIter` trigger). | TB (`ES_TB_VERIFY_GATE`). |
+| **#VBC verify-before-complete** | `verifyBeforeComplete` (Boolean) | At the FIRST completeTask, **SERVER-RUNS the project's own test suite** (`smoketest/WorkspaceTestRunner` called DIRECTLY — NOT the flag-gated `runWorkspaceTests` tool, so decoupled from V217) and refuses if red (`verifyBeforeCompleteFailure`/`verifyBeforeCompleteMessage`; bounded `VBC_GATE_MAX_REFUSALS=3` then YIELD; fail-open on unwired/remote/no-runner/zero-tests/any error). Unlike the model-dependent test/build SOFT gates above, it RUNS the tests itself — a worker that never verifies is still caught. A *server gate, not a model tool* (no schema change → immune to the RL-2026-05-061 stall). Suppresses the soft `!gateOn` verify nudge when on. | PATCH (`worker.verify-before-complete.enabled`, V235, default OFF — every run), BUILD (`SequentialExecutor`, **final task only**). Remote/TB fail-open. |
+
+Validated on Terminal-Bench (DeepSeek): #2+#1 took a 13-task near-miss slice **4/13 → 8/13 (pass@2)**, 0 regressions; the critic demonstrably refuses premature completions then permits the fixed candidate.
+
+## Dispatch-layer robustness + parallelism (vix-leverage harness borrows)
+
+Three provider-neutral borrows on the worker dispatch path (all default-on, no flag):
+
+- **Sibling pairing after `completeTask` (C2).** `completeTask` short-circuits its batch with a `return`; any tool call AFTER it in the same assistant turn is now paired with a synthetic `SUPERSEDED` `tool_result`, so the persisted/replayed history never carries a dangling `tool_use` (Anthropic pairing invariant).
+- **Pre-dispatch arg validation (B4).** `dispatchOne` (and the Spring-AI `ToolRegistry.ContextBoundToolCallback.call`) run `tool/ToolArgValidator` before `tool.execute` — a conservative, fail-open, **absent-only** check that rejects a call omitting a schema-declared `required` field with an `INVALID_ARGS` the model recovers from. No model-visible schema change (sidesteps the RL-2026-05-061 schema-sensitivity class).
+- **Read-only-batch parallelism (C1, RL-2026-06-010).** When a single assistant turn emits ONLY read-only tools (`readFile`/`searchFiles`/`listFiles`/`gitStatus`/`gitDiff`, ≥2, non-remote), `maybeParallelReadDispatch` pre-executes their bodies concurrently on virtual threads; the sequential loop then consumes the cached `{callId→envelope}` map, so every per-call mutation (metrics/SSE/`toolResponses` order/gate-tracking) is byte-identical. Any batch with a write/build/shell/`completeTask` (or a remote run) stays fully sequential (no read/write ordering hazard); fail-safe (timeout/partial → sequential; reads are idempotent). Behavior-neutral + faster on read-heavy exploration turns. Safe because the read set is pure (`ReadFileStateStore` = synchronizedMap+ConcurrentHashMap; `RunCostTracker` reached via `maybeCompact` is `AtomicLong`-based).
+
 ## Invariants
 
 - **Nothing implements or calls `CodeGenEngine` yet** — Phase 1 is contract-only, so every production

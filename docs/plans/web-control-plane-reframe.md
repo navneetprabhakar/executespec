@@ -36,7 +36,7 @@ run cockpit*; the real confusion is in the *flows* — entry, chat, spec-builder
 This is **additive, not a reprioritization**: the web reframe does not slow the clients. The web app stops
 *imitating* an IDE and becomes the best possible control plane; the IDE metaphor lives where it's actually
 true (the extension). All three share the backend + `clients/core` typed REST/SSE client where applicable;
-the web app keeps using `frontend/src/lib/api.ts`.
+the web app keeps using the split `frontend/src/lib/api/` client.
 
 ## 3. The primary flows (make these unmissable)
 
