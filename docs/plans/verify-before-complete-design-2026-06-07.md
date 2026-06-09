@@ -1,6 +1,6 @@
 # Generic Verify-Before-Complete — Design Plan
 
-> **Status:** DESIGN (no code yet). Authored 2026-06-07.
+> **Status:** Tier 1 SHIPPED (V235 `worker.verify-before-complete.enabled`, default OFF — see §12); **Tiers 2-3 + the build-gate remain pending design** (why this doc is retained). Authored 2026-06-07.
 > **Branch:** `docs/handoff-cleanup-reprioritize` (held — no commits/pushes pending user coordination).
 > **Motivation source:** the DeepSeek Terminal-Bench base20 eval (12/20, flat vs the prior 12/20 best) + the 8-failure analysis below.
 > **Mandate:** provider-agnostic (Anthropic / OpenAI / Gemini / DeepSeek), product-wide (not benchmark-specific) — "improve the system, not the test."
