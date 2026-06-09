@@ -1,6 +1,17 @@
-# `benchmark/` — clean-slate blind SWE-bench harness
+# `benchmark/` — SWE-bench execution harness + common in-app tracking layer
 
 > Added 2026-05-24 (RL-2026-05-028). Branch `feature/swebench-harness` (not yet merged).
+
+> **This package now holds TWO distinct concerns** — keep them straight:
+>
+> 1. **SWE-bench _execution_ harness** (the original, below) — `BenchmarkController` (`/api/admin/benchmark`)
+>    \+ `BenchmarkRunService` / `BenchmarkGenerationService`. Actually *runs* SWE-bench instances through the
+>    real production pipeline.
+> 2. **Common in-app _tracking_ layer** (RL-2026-06, V236 — see the bottom section) — `BenchmarkTrackingController`
+>    (`/api/v2/test/benchmark`) + `BenchmarkTrackingService` + the `BenchmarkRun` / `BenchmarkTaskResult` /
+>    `BenchmarkEvent` entities + `BenchmarkSuite`. ExecuteSpec is the event **sink + display**; an external
+>    verifier (Harbor / SWE-bench / ProgramBench harness) *publishes* events here. Suite-agnostic. Does NOT run
+>    anything. **Distinct class names + path** from concern (1) to avoid a collision.
 
 Runs public SWE-bench instances through the **real production pipeline** to measure + publicly
 showcase ExecuteSpec's code-gen system. Supersedes the old `swebench/SwebenchTaskService` oracle
@@ -111,3 +122,47 @@ the local-only profile). **Oracle path removed (RL-2026-05-062):** `swebench/Swe
 to emit nothing — so no SWE-bench prompt can leak the hidden tests. `SwebenchTaskService` is retained
 (method signatures intact) for its event-listener / instance-loading surface that the blind harness
 + `AsyncAllowlistTest` reference.
+
+---
+
+## In-app benchmark tracking layer (RL-2026-06, V236) — common / multi-suite
+
+> Design: [`docs/plans/benchmark-closed-loop-2026-06-09.md`](../../../../../../../docs/plans/benchmark-closed-loop-2026-06-09.md).
+> **Concern (2)** from the top of this file — separate from the SWE-bench *execution* harness above.
+
+A COMMON, suite-agnostic layer that **tracks** any benchmark run + its submission + events **inside
+ExecuteSpec** (in-login `/benchmark` dashboard). ExecuteSpec is the event **sink + display, not an
+orchestrator**: an external verifier/harness (Harbor for Terminal-Bench; the SWE-bench / ProgramBench
+harnesses next) runs the benchmark and **publishes events** here; ExecuteSpec **ingests → stores →
+re-broadcasts (SSE) → shows**. No in-app Harbor subprocess — Harbor still owns the verifier + the official
+`harbor upload`.
+
+**Suite-agnostic by construction.** Every suite's harness POSTs the *same* event shapes (`TASK_SCORED`
+`{task, attempt, reward, esRunId?, cost}` / `RUN_PROGRESS` / `RUN_DONE` / `SUBMISSION_*`) to the *same*
+ingest endpoint; `benchmark_run.suite` (`BenchmarkSuite`: TERMINAL_BENCH / SWE_BENCH / PROGRAM_BENCH —
+stored as a String, not a JPA enum, so a new suite needs no migration) is the only discriminator. TB is the
+first consumer; SWE-bench + ProgramBench plug in with no schema change.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `BenchmarkTrackingController.java` | `@RequestMapping("/api/v2/test/benchmark")` + `@Profile({"local","dev","benchmark"})` + `@PreAuthorize("hasRole('SUPER_ADMIN')")` (the `/api/v2/test/**` matcher is also SUPER_ADMIN-gated — same operator-only surface as `terminalbench/`). `POST /start` (register a tracked run → `BenchmarkRun`), `POST /{id}/event` (ingest one published event), `GET` (list 50), `GET /{id}` (run + task results + events), `GET /{id}/events` (live SSE). DTOs are inline records. **Named distinctly from the SWE-bench `BenchmarkController`** (concern 1) to avoid a class/path collision. |
+| `BenchmarkTrackingService.java` | `start` / `ingest` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt) + recompute `resolved_tasks` (distinct tasks with ≥1 passing attempt) + `cost_usd` (sum of attempt costs); `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). Unknown types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
+| `BenchmarkRun` / `BenchmarkTaskResult` / `BenchmarkEvent` | Entities (`@Data @Builder`, app-set `String id`). See **V236**. |
+| `BenchmarkSuite` | The suite discriminator enum + `isKnown(String)`. |
+| `Benchmark{Run,TaskResult,Event}Repository` | `JpaRepository<X, String>` finders. |
+
+### Migration
+
+- **V236** `V236__benchmark_tables.sql` — creates `benchmark_run` / `benchmark_task_result`
+  (UNIQUE `uq_benchmark_task` on run+task+attempt, FK→run ON DELETE CASCADE) / `benchmark_event` (FK→run
+  ON DELETE CASCADE) + supporting indexes. **Boot-validated** against `ddl-auto:validate` (Flyway applies,
+  Hibernate validates the 3 entities; app starts clean).
+
+### Status
+
+Phases 1 (persistence) + 2 (ingest + SSE) **done** — compiled + boot-validated locally on the `benchmark`
+branch. Phase 3 (the external `run-tb.sh` / `tb-tracker.py` event hooks — a thin curl per published event) and
+Phase 4 (the in-login `/benchmark` frontend grid + event log + submission status) are next. Built feature →
+dev → main; deployed to the dedicated `benchmark` env.

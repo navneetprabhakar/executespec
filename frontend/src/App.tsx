@@ -36,6 +36,7 @@ import {
 } from '@/ide/IdeDiscovery';
 import {IdeApiKeys, IdeOrgMembers, IdeOrgSettings} from '@/ide/IdeOrg';
 import {IdeBilling, IdePlans} from '@/ide/IdeBilling';
+import IdeBenchmark from '@/ide/IdeBenchmark';
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -163,6 +164,9 @@ function protectedChildren() {
       <Route path='/more' element={<IdeMoreMenu />} />
       <Route path='/admin' element={<IdeAdmin />} />
       <Route path='/admin/*' element={<AdminPage />} />
+      {/* Operator-only benchmark tracking (SUPER_ADMIN) — RL-2026-06. */}
+      <Route path='/benchmark' element={<IdeBenchmark />} />
+      <Route path='/benchmarks' element={<Navigate to='/benchmark' replace />} />
     </>
   );
 }
