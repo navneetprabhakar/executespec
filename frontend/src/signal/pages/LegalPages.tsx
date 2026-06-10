@@ -26,8 +26,9 @@ export function TermsPage() {
       </p>
       <h3>Billing</h3>
       <p>
-        Paid plans are billed monthly or annually as selected. Credits never expire; subscription
-        cancellation stops future renewals but does not refund the current period.
+        Paid plans are billed monthly or annually as selected. Plan runs reset each billing cycle;
+        top-up credits carry the validity period shown at purchase. Subscription cancellation stops
+        future renewals but does not refund the current period.
       </p>
       <h3>Data ownership</h3>
       <p>
@@ -119,8 +120,10 @@ export function DpaPage() {
       </p>
       <h3>3. Security measures</h3>
       <p>
-        SOC 2 Type II controls (audit underway). ISO 27001 alignment. TLS 1.3 + AES-256, role-based
-        access, audit-log retention 30 days, mandatory MFA for employees.
+        TLS 1.3 in transit; AES-256 at rest (managed Cloud SQL). Role-based access control with
+        tenant-isolation guards enforced in code and pinned by automated tests. Sandboxed,
+        network-isolated code execution; per-run workspaces wiped at run end. Audit-log retention 30
+        days.
       </p>
       <h3>4. Cross-border transfers</h3>
       <p>
@@ -131,8 +134,9 @@ export function DpaPage() {
       <p>We notify affected customers within 72 hours of confirming a personal-data breach.</p>
       <h3>6. Audit + termination</h3>
       <p>
-        ENTERPRISE customers may request a SOC 2 report annually under NDA. Upon termination,
-        customer data is purged within 14 days; backups roll off within 35 days.
+        ENTERPRISE customers may request our current security documentation and questionnaire
+        responses under NDA. Upon termination, customer data is purged within 14 days; backups roll
+        off within 35 days.
       </p>
       <p>
         To request a signed copy:{' '}
@@ -1004,8 +1008,8 @@ export function OrgSettingsPage() {
         <Card>
           <KvList
             pairs={[
-              {k: 'SOC 2', v: <StatusPill kind='shipped'>Type II ready</StatusPill>},
-              {k: 'GDPR', v: <StatusPill kind='shipped'>Compliant</StatusPill>},
+              {k: 'SOC 2 Type II', v: <StatusPill kind='needs'>On the roadmap</StatusPill>},
+              {k: 'GDPR', v: <StatusPill kind='shipped'>Export + erasure built-in</StatusPill>},
               {
                 k: 'DPA',
                 v: (
