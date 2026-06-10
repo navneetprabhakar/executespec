@@ -1,7 +1,8 @@
 # C3 — tenant ORM read-isolation — handoff
 
 > **Status:** DEFERRED (user: "skip for now, go in detail later"). Audit item **C3**
-> (`docs/audit/FINDINGS-2026-05-29.md`). This doc scopes the detailed session.
+> from the consolidated 2026-05 hardening pass. The old `docs/audit` source was removed after
+> consolidation; this doc scopes the detailed session.
 > **Hard requirement already met:** C2 (app-layer access guards) is the finding's stated hard
 > requirement and it is **closed** — `AccessGuardCoverageTest` pins every tenant-scoped controller
 > method to a guard + write-handlers to `assertCanWrite`, `KNOWN_LEGACY_DRIFT` is empty (35/35). C3

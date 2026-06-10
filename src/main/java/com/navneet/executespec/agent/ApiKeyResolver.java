@@ -52,6 +52,8 @@ public class ApiKeyResolver {
     String openAi = null;
     String gemini = null;
     String openRouter = null;
+    String deepSeek = null;
+    String fireworks = null;
     String orgId = null;
     String keySourceMode = "HYBRID";
     Set<String> enabledProviders = null;
@@ -62,6 +64,8 @@ public class ApiKeyResolver {
         anthropic = blankToNull(user.getAnthropicApiKey());
         openAi = blankToNull(user.getOpenAiApiKey());
         gemini = blankToNull(user.getGeminiApiKey());
+        deepSeek = blankToNull(user.getDeepSeekApiKey());
+        fireworks = blankToNull(user.getFireworksApiKey());
         orgId = user.getOrgId();
       }
     }
@@ -81,29 +85,43 @@ public class ApiKeyResolver {
         openAi = null;
         gemini = null;
         openRouter = null;
+        deepSeek = null;
+        fireworks = null;
       } else {
         // Fill in gaps from org-level keys (OWN_KEYS and HYBRID both resolve org keys)
         if (anthropic == null) anthropic = blankToNull(org.getAnthropicApiKey());
         if (openAi == null) openAi = blankToNull(org.getOpenAiApiKey());
         if (gemini == null) gemini = blankToNull(org.getGeminiApiKey());
-        // OpenRouter is org-level only (Enterprise gateway) — no user-level key.
-        openRouter = blankToNull(org.getOpenRouterApiKey());
+        if (openRouter == null) openRouter = blankToNull(org.getOpenRouterApiKey());
+        if (deepSeek == null) deepSeek = blankToNull(org.getDeepSeekApiKey());
+        if (fireworks == null) fireworks = blankToNull(org.getFireworksApiKey());
       }
     }
 
     // Level 3: system keys (null = FallbackLlmRouter uses the system singleton bean)
     ResolvedKeys keys =
-        new ResolvedKeys(anthropic, openAi, gemini, openRouter, keySourceMode, enabledProviders);
+        new ResolvedKeys(
+            anthropic,
+            openAi,
+            gemini,
+            openRouter,
+            deepSeek,
+            fireworks,
+            keySourceMode,
+            enabledProviders);
     log.debug(
         "[ApiKeyResolver] userId={} orgId={} mode={} providers={} → anthropic={} openai={}"
-            + " gemini={}",
+            + " gemini={} openrouter={} deepseek={} fireworks={}",
         userId,
         orgId,
         keySourceMode,
         enabledProviders,
         anthropic != null,
         openAi != null,
-        gemini != null);
+        gemini != null,
+        openRouter != null,
+        deepSeek != null,
+        fireworks != null);
     return keys;
   }
 
@@ -146,6 +164,9 @@ public class ApiKeyResolver {
     if (keys.anthropicKey() != null) hasAny = true;
     if (keys.openAiKey() != null) hasAny = true;
     if (keys.geminiKey() != null) hasAny = true;
+    if (keys.openRouterKey() != null) hasAny = true;
+    if (keys.deepSeekKey() != null) hasAny = true;
+    if (keys.fireworksKey() != null) hasAny = true;
 
     if (!hasAny) {
       throw new ResponseStatusException(

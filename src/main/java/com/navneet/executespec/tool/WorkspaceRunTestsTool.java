@@ -30,10 +30,11 @@ import lombok.extern.slf4j.Slf4j;
  *       BUILD mode needs.
  * </ul>
  *
- * <p><b>Flag-gated:</b> {@code worker.build-tdd.enabled} (V217, default OFF). When off, every call
- * returns an informative Ok envelope with {@code "available": false} so the worker can learn the
- * tool isn't usable on this run rather than getting a hard error. Flip on per-run via the feature
- * flag admin endpoint to measure lift in an eval before any default change.
+ * <p><b>Flag-gated out of the schema:</b> {@code worker.build-tdd.enabled} (V217, default OFF).
+ * When off, {@link ToolRegistry#bindForWorker(ExecutionContext)} does not bind this tool at all, so
+ * schema-sensitive providers do not see an inert tool. The in-{@code execute} disabled envelope is
+ * defense-in-depth for direct callers. Flip on per-run via the feature flag admin endpoint to
+ * measure lift in an eval before any default change.
  *
  * <p><b>Why default OFF:</b> on-by-default would change worker behavior across every BUILD run,
  * potentially burning iter budget on a tool with unknown net impact. Default-OFF keeps production
@@ -45,7 +46,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-public class WorkspaceRunTestsTool implements Tool {
+public class WorkspaceRunTestsTool implements Tool, FlagGatedTool {
 
   /** Feature flag — see class javadoc. */
   public static final String FLAG_BUILD_TDD = "worker.build-tdd.enabled";
@@ -60,6 +61,11 @@ public class WorkspaceRunTestsTool implements Tool {
     this.runner = runner;
     this.featureFlagService = featureFlagService;
     this.json = json;
+  }
+
+  @Override
+  public boolean enabled() {
+    return featureFlagService == null || featureFlagService.isEnabled(FLAG_BUILD_TDD);
   }
 
   @Override

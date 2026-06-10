@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -108,7 +109,8 @@ public class LlmRouter {
   /**
    * Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose).
    */
-  private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS = Set.of("deepseek", "openrouter");
+  private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS =
+      Set.of("deepseek", "openrouter", "fireworks");
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -143,6 +145,15 @@ public class LlmRouter {
 
   @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
   private String deepSeekBaseUrl;
+
+  // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
+  // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
+  // RunKeyContext.keyFor("fireworks").
+  @Value("${spring.ai.fireworks.api-key:}")
+  private String fireworksApiKey;
+
+  @Value("${spring.ai.fireworks.base-url:https://api.fireworks.ai/inference/v1}")
+  private String fireworksBaseUrl;
 
   /**
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
@@ -392,11 +403,12 @@ public class LlmRouter {
       case "gemini" -> callGemini(request, tools, apiKey);
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
+      case "fireworks" -> callFireworks(request, tools, apiKey);
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
                   + request.provider()
-                  + " (expected anthropic|openai|gemini|openrouter)");
+                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks)");
     };
   }
 
@@ -580,6 +592,7 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
+            .extraBody(Map.of("provider", Map.of("sort", "latency")))
             .build());
   }
 
@@ -616,6 +629,32 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
+            .build());
+  }
+
+  /**
+   * Fireworks AI dispatcher (2026-06-09). OpenAI-wire-compatible US-hosted fast inference — reuses
+   * {@link OpenAiNativeToolClient} with a per-call base-URL, like DeepSeek. The matrix's short
+   * model ids map to Fireworks' {@code accounts/fireworks/models/…} slugs via {@code
+   * FireworksModelMapper}. Added to fix the OpenRouter latency on Chinese models (mimo ~30 tok/s vs
+   * Fireworks' 100+).
+   */
+  private ChatResponse callFireworks(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : fireworksApiKey;
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException(
+          "Fireworks api-key not configured (org BYOK key or spring.ai.fireworks.api-key)");
+    }
+    return openAiNativeToolClient.call(
+        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+            .model(com.navneet.executespec.router.FireworksModelMapper.toSlug(r.model()))
+            .messages(r.messages())
+            .tools(tools)
+            .temperature(r.temperature())
+            .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
+            .apiKey(key)
+            .baseUrl(fireworksBaseUrl)
             .build());
   }
 

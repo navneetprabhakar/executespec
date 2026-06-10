@@ -664,12 +664,17 @@ public class RunCostTracker {
    */
   private double priceCall(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
-    // OpenRouter is a gateway — pricing (and the Anthropic token-shape rule below) follows the
-    // underlying model's vendor, not the literal "openrouter" provider, which has no pricing rows.
-    String pricingProvider =
-        "openrouter".equalsIgnoreCase(provider) ? ownerProviderFor(model) : provider;
+    String pricingProvider = provider;
     Optional<ModelPricing> found =
         pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
+    if (found.isEmpty() && "openrouter".equalsIgnoreCase(provider)) {
+      pricingProvider = ownerProviderFor(model);
+      found = pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
+    }
+    if (found.isEmpty() && "deepseek".equalsIgnoreCase(provider) && model != null) {
+      String nativeModel = model.endsWith("-native") ? model : model + "-native";
+      found = pricingRepo.findByIdProviderAndIdModel(providerKey(provider), nativeModel);
+    }
     if (found.isEmpty()) {
       log.debug(
           "RunCostTracker: no pricing for {}/{} — recording tokens without cost", provider, model);
@@ -713,9 +718,9 @@ public class RunCostTracker {
   }
 
   /**
-   * Maps a matrix model id to its owning vendor for OpenRouter cost lookup — pricing rows are keyed
-   * by the real vendor (anthropic/openai/gemini), so an "openrouter" run reuses the underlying
-   * model's pricing. Prefix-based: every matrix model is claude-* / gpt-* / gemini-*.
+   * Maps a matrix model id to its owning vendor for legacy OpenRouter cost fallback. OpenRouter
+   * models with explicit matrix rows are priced by their literal {@code openrouter/model} row
+   * first; older OpenRouter-routed direct-provider models fall back through this owner mapping.
    */
   private static String ownerProviderFor(String model) {
     if (model == null) return "openai";

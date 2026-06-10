@@ -60,11 +60,15 @@ public class RunKeyStore {
     l1.put(runId, keys);
     writeToRedis(runId, keys);
     log.debug(
-        "[RunKeyStore] Stored keys for run {} — anthropic={}, openai={}, gemini={}",
+        "[RunKeyStore] Stored keys for run {} — anthropic={}, openai={}, gemini={}, openrouter={},"
+            + " deepseek={}, fireworks={}",
         runId,
         keys.anthropicKey() != null,
         keys.openAiKey() != null,
-        keys.geminiKey() != null);
+        keys.geminiKey() != null,
+        keys.openRouterKey() != null,
+        keys.deepSeekKey() != null,
+        keys.fireworksKey() != null);
   }
 
   /**

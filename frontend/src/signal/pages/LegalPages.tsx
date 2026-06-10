@@ -12,6 +12,8 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
+type OrgKeyProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks';
+
 export function TermsPage() {
   return (
     <LegalShell title='Terms of Service' subtitle='Last updated 1 May 2026'>
@@ -225,6 +227,8 @@ export function OrgSettingsPage() {
     openai: '',
     gemini: '',
     openrouter: '',
+    deepseek: '',
+    fireworks: '',
   });
   const [keyBusy, setKeyBusy] = useState<string | null>(null);
   // F3 — per-org model-matrix overrides. `matrix` is the server view (defaults +
@@ -391,7 +395,7 @@ export function OrgSettingsPage() {
     }
   }
 
-  async function saveOrgKey(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter') {
+  async function saveOrgKey(provider: OrgKeyProvider) {
     const value = keyInputs[provider].trim();
     if (!value) {
       setErr('Enter a key first.');
@@ -406,6 +410,8 @@ export function OrgSettingsPage() {
         provider === 'openai' ? value : '',
         provider === 'gemini' ? value : '',
         provider === 'openrouter' ? value : '',
+        provider === 'deepseek' ? value : '',
+        provider === 'fireworks' ? value : '',
       );
       setOrg(next);
       setKeyInputs((k) => ({...k, [provider]: ''}));
@@ -423,7 +429,7 @@ export function OrgSettingsPage() {
   // (the backend rejects the key with 403 otherwise).
   const isEnterprise = (org.tier || '').toUpperCase() === 'ENTERPRISE';
   const orgKeyRows: {
-    provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+    provider: OrgKeyProvider;
     label: string;
     connected: boolean;
   }[] = [
@@ -431,7 +437,11 @@ export function OrgSettingsPage() {
     {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
     {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
     ...(isEnterprise
-      ? [{provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey}]
+      ? [
+          {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},
+          {provider: 'deepseek' as const, label: 'DeepSeek', connected: !!org.hasDeepSeekKey},
+          {provider: 'fireworks' as const, label: 'Fireworks', connected: !!org.hasFireworksKey},
+        ]
       : []),
   ];
 
@@ -511,8 +521,8 @@ export function OrgSettingsPage() {
               marginBottom: 12,
             }}
           >
-            TEAM-tier orgs share a seat pool (min 2). Changing the count syncs the prorated quantity
-            to your billing gateway. You can&apos;t reduce below the current active member count.
+            TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your
+            billing gateway. You can&apos;t reduce below the current active member count.
           </div>
           <Field label='Seats'>
             <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>

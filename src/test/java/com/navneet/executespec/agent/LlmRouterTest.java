@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
@@ -27,6 +28,7 @@ import com.navneet.executespec.tool.ToolRegistry;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -191,5 +193,25 @@ class LlmRouterTest {
     assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
         .isInstanceOf(RuntimeException.class);
     verify(gemini, never()).call(any());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void openRouterRequestsLatencySortedProviderRouting() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    RunKeyContext keys =
+        new RunKeyContext(
+            null, null, null, "sk-or", null, null, null, RunKeyContext.Source.ORG, "u1", "o1");
+    when(keyStore.get(anyString())).thenReturn(keys);
+
+    assertThat(router.call(req("openrouter", "gpt-5.4"))).isNotNull();
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> captor =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai).call(captor.capture());
+    Map<String, Object> extraBody = captor.getValue().extraBody();
+    assertThat(extraBody).containsKey("provider");
+    assertThat((Map<String, Object>) extraBody.get("provider")).containsEntry("sort", "latency");
   }
 }

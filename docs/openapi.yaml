@@ -350,6 +350,10 @@ paths:
                   type: string
                 geminiApiKey:
                   type: string
+                deepSeekApiKey:
+                  type: string
+                fireworksApiKey:
+                  type: string
       responses:
         '200':
           content:
@@ -2232,6 +2236,12 @@ paths:
                   type: string
                 geminiApiKey:
                   type: string
+                openRouterApiKey:
+                  type: string
+                deepSeekApiKey:
+                  type: string
+                fireworksApiKey:
+                  type: string
       responses:
         '200':
           content:
@@ -2270,6 +2280,7 @@ paths:
                   type: string
                 aiProvider:
                   type: string
+                  enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
       responses:
         '201':
           content:
@@ -2295,6 +2306,7 @@ paths:
               properties:
                 aiProvider:
                   type: string
+                  enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
       responses:
         '200':
           content:
@@ -3057,6 +3069,10 @@ components:
           type: boolean
         hasGeminiKey:
           type: boolean
+        hasDeepSeekKey:
+          type: boolean
+        hasFireworksKey:
+          type: boolean
         hasJiraCredentials:
           type: boolean
         hasConfluenceCredentials:
@@ -3118,8 +3134,8 @@ components:
           type: string
         aiProvider:
           type: string
-          description: "v2.6.0: canonical value is GEMINI; GOOGLE still accepted as back-compat input alias (rewritten to GEMINI on persist)"
-          enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE]
+          description: "Canonical value is GEMINI; GOOGLE still accepted as back-compat input alias (rewritten to GEMINI on persist). OpenRouter, DeepSeek, and Fireworks are BYOK/aggregator routes."
+          enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
         projectId:
           type: string
           format: uuid
@@ -3346,6 +3362,18 @@ components:
           type: integer
           description: Wave 1 — current accepted-member count; readable without ORG_ADMIN for seat-adjust preflight.
           nullable: true
+        hasAnthropicKey:
+          type: boolean
+        hasOpenAiKey:
+          type: boolean
+        hasGeminiKey:
+          type: boolean
+        hasOpenRouterKey:
+          type: boolean
+        hasDeepSeekKey:
+          type: boolean
+        hasFireworksKey:
+          type: boolean
 
     TierLifecycleRow:
       type: object

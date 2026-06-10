@@ -60,6 +60,7 @@ public class RateLimitPolicy {
               Map.of(
                   "FREE", 5,
                   "PRO", 20,
+                  "TEAM", 60,
                   "ENTERPRISE", 60,
                   "DEFAULT", 5)),
           Map.entry("WEBHOOK", Map.of("DEFAULT", 100)),
@@ -68,6 +69,7 @@ public class RateLimitPolicy {
               Map.of(
                   "FREE", 300,
                   "PRO", 600,
+                  "TEAM", 2000,
                   "ENTERPRISE", 2000,
                   "DEFAULT", 300)),
           Map.entry(
@@ -75,6 +77,7 @@ public class RateLimitPolicy {
               Map.of(
                   "FREE", 60,
                   "PRO", 200,
+                  "TEAM", 1000,
                   "ENTERPRISE", 1000,
                   "DEFAULT", 60)),
           Map.entry(
@@ -82,6 +85,7 @@ public class RateLimitPolicy {
               Map.of(
                   "FREE", 30,
                   "PRO", 60,
+                  "TEAM", 200,
                   "ENTERPRISE", 200,
                   "DEFAULT", 30)),
           Map.entry(
@@ -89,6 +93,7 @@ public class RateLimitPolicy {
               Map.of(
                   "FREE", 5,
                   "PRO", 20,
+                  "TEAM", 60,
                   "ENTERPRISE", 60,
                   "DEFAULT", 5)));
 

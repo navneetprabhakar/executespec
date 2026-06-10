@@ -569,6 +569,11 @@ public class TierEnforcementService {
     // FREE tier keeps a friendlier upgrade message than the generic quota error below.
     if ("FREE".equals(tier)) {
       if (user.getPersonalRunCount() >= limit) {
+        long bonus = runTopupService.getAvailableBonus(user.getId());
+        if (bonus > 0) {
+          log.debug("FREE user {} over quota but has {} bonus runs available", user.getId(), bonus);
+          return; // allow — bonus will be consumed in incrementRunCount
+        }
         throw new ResponseStatusException(
             HttpStatus.PAYMENT_REQUIRED,
             "You've used all "

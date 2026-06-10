@@ -48,6 +48,16 @@ public interface RunTopupRepository extends JpaRepository<RunTopup, UUID> {
 
   @Modifying
   @Query(
+      "UPDATE RunTopup r SET r.gatewayPaymentId = :paymentId, r.remaining = r.quantity, "
+          + "r.status = 'ACTIVE', r.expiresAt = null, r.updatedAt = :now "
+          + "WHERE r.gatewayOrderId = :orderId AND r.status = 'PENDING'")
+  int activatePendingPurchase(
+      @Param("orderId") String orderId,
+      @Param("paymentId") String paymentId,
+      @Param("now") Instant now);
+
+  @Modifying
+  @Query(
       "UPDATE RunTopup r SET r.remaining = r.remaining - 1, r.updatedAt = :now "
           + "WHERE r.id = :id AND r.remaining > 0")
   int decrementRemaining(@Param("id") UUID id, @Param("now") Instant now);
