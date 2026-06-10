@@ -926,6 +926,24 @@ export default function IdeRunResult() {
               onDelta={(dx) => setFilesWidth((w) => Math.max(160, Math.min(520, w + dx)))}
             />
             <div className='ide-split-main'>
+              {files.length > 0 && (
+                <div className='ide-mobile-file-picker'>
+                  <select
+                    className='ide-select'
+                    value={activeFile || ''}
+                    onChange={(e) => {
+                      if (e.target.value) void openFile(e.target.value);
+                    }}
+                  >
+                    <option value=''>Select a file</option>
+                    {files.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {openFiles.length > 0 && (
                 <div className='ide-tabs'>
                   {openFiles.map((f) => (

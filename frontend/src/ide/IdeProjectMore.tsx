@@ -621,6 +621,24 @@ export function IdeProjectCode() {
                 )}
               </div>
               <div className='ide-split-main'>
+                {files?.length ? (
+                  <div className='ide-mobile-file-picker'>
+                    <select
+                      className='ide-select'
+                      value={active ?? ''}
+                      onChange={(e) => {
+                        if (e.target.value) void open(e.target.value);
+                      }}
+                    >
+                      <option value=''>Select a file</option>
+                      {files.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 {active ? (
                   <IdeCodeViewer filename={active} content={content[active] ?? '…'} />
                 ) : (
