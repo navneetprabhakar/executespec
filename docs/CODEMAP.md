@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V231** in the current worktree (V231 seeds `worker.critic-pass.enabled`, default OFF — the common critic/reviewer pass for PATCH; RL-2026-06). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 
@@ -65,7 +65,7 @@ Migration head: **V231** in the current worktree (V231 seeds `worker.critic-pass
 | `report` | 1 | 4 | - | - | ValidationReport generation + PDF + sharing |
 | `reviewer` | - | 3 | 1 | - | ReviewerAgent (general + wiring passes) + PostEditFormatter |
 | `rollout` | 1 | 1 | - | - | Rollout-canary RunRegistry |
-| `router` | - | 8 | - | - | ModelRegistry + ModelResolver + ProviderHealthTracker (LLM routing) |
+| `router` | - | 9 | - | - | ModelRegistry + ModelResolver + ProviderHealthTracker plus OpenRouter/Fireworks slug mappers (LLM model and route selection) |
 | `run` | - | 1 | - | - | RunSkipPushFlag (one-shot push override) |
 | `run/sync` | - | 1 | - | - | RunSyncService — reset workspace to current/original HEAD |
 | `saga` | - | 2 | - | - | SideEffectOutbox — retry persistence for failed async effects |
@@ -483,9 +483,9 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 
 ---
 
-## 6. Flyway migrations — V170..V230
+## 6. Flyway migrations — V170..V237
 
-Head: **V230** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V237** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -533,6 +533,8 @@ Head: **V230** in the current worktree. Full chronology in `src/main/resources/d
 | V216 | Seed `worker.tool-compactor.enabled = false` (DEFAULT OFF) — engine extraction Phase 5+6 prompt-cache discipline; routes bulk worker tool output (> 3 KB) through the LIGHTWEIGHT tier before appending to the WORKHORSE worker history. Mirrors Claude Code CLI pattern (RL-2026-05-052). |
 | V229 | Seed `spec.chat.enabled = false` — gates the real `/api/spec/chat` agentic loop for the unified spec client Phase 1. |
 | V230 | Seed `codeintel.tiered.enabled = false` — tiered codemap injection: T0 skeleton + spec-relevant per-file symbol blocks instead of head truncation (RL-2026-06-003). |
+| V236 | Create `benchmark_run`, `benchmark_task_result`, `benchmark_event` — common in-app benchmark tracking/event sink. |
+| V237 | Add `deepseek_api_key` + `fireworks_api_key` to `org` and `app_user` — provider key lanes for native DeepSeek and Fireworks BYOK. |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -721,7 +723,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V230 in the current worktree) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V237 in the current worktree) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api/` (`core.ts` + domain modules) |
 | CLI + VS Code clients | **Moved out 2026-06-07 → the standalone `executespec-cli` repo** (RL-2026-06-014). Was `clients/` (`@executespec/core` + `cli` + `vscode`, an npm workspace). Only the server-side OAuth device-login fix + the API endpoints they consume remain in this repo. |

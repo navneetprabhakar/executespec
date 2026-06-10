@@ -584,7 +584,12 @@ public class RunLifecycleService {
                 .build()
             : execResult;
     var terminal = RunOrchestrator.resolveTerminalStatus(effectiveExec, reviewResult);
-    controlPort.terminate(runId, terminal.status(), terminal.reason(), startedAt);
+    controlPort.terminate(
+        runId,
+        terminal.status(),
+        terminal.reason(),
+        "resume final status: " + terminal.reason(),
+        startedAt);
   }
 
   /**
@@ -690,7 +695,12 @@ public class RunLifecycleService {
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
 
                 var terminal = RunOrchestrator.resolveTerminalStatus(result, null);
-                controlPort.terminate(runId, terminal.status(), terminal.reason(), null);
+                controlPort.terminate(
+                    runId,
+                    terminal.status(),
+                    terminal.reason(),
+                    "retry final status: " + terminal.reason(),
+                    null);
               } catch (Exception e) {
                 log.error(
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);

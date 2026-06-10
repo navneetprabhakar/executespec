@@ -241,19 +241,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
   }
 
-  /**
-   * Extract client IP using the rightmost X-Forwarded-For entry (set by infrastructure, not the
-   * client). The leftmost entry is client-controlled and can be spoofed.
-   */
+  /** Extract client IP from X-Forwarded-For using the configured trusted proxy depth. */
   private String getClientIp(HttpServletRequest request) {
-    String xff = request.getHeader("X-Forwarded-For");
+    return extractClientIp(
+        request.getHeader("X-Forwarded-For"),
+        request.getRemoteAddr(),
+        properties.getTrustedProxyCount());
+  }
+
+  static String extractClientIp(String xff, String remoteAddr, int trustedProxyCount) {
     if (xff != null && !xff.isBlank()) {
       String[] parts = xff.split(",");
-      // Use the rightmost entry minus trusted proxy count (default: last entry = proxy-added)
-      int trustedIndex = Math.max(0, parts.length - 1);
-      return parts[trustedIndex].trim();
+      int trustedHops = Math.max(1, trustedProxyCount);
+      int clientIndex = Math.max(0, parts.length - trustedHops - 1);
+      String candidate = parts[clientIndex].trim();
+      if (!candidate.isBlank()) {
+        return candidate;
+      }
     }
-    return request.getRemoteAddr();
+    return remoteAddr;
   }
 
   /** Builds the Redis key for rate limiting: {prefix}{identifier}:{group}:{minuteBucket}. */

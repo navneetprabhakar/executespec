@@ -5,6 +5,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.standards.EffectiveStandardsResolver;
@@ -56,10 +57,16 @@ public class StandardsComplianceController {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
     // GA-readiness P4.1-followup — compliance report leaks the org's
     // engineering standards + project violation log; tenant-bound.
-    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
+    Project project = projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
+    String projectOrgId = project.getOrgId();
+    if (!projectOrgId.equals(orgId)) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN, "Requested org does not own this project");
+    }
 
     // Effective standards (project-level YAML not loaded here in v1)
-    List<EffectiveStandardsResolver.Effective> effective = resolver.resolve(orgId, projectId, null);
+    List<EffectiveStandardsResolver.Effective> effective =
+        resolver.resolve(projectOrgId, projectId, null);
     List<StandardEntry> entries = new ArrayList<>();
     for (EffectiveStandardsResolver.Effective e : effective) {
       Standard s = e.standard();
@@ -96,7 +103,7 @@ public class StandardsComplianceController {
         overrideRepo.findByProjectId(projectId).stream().map(this::toOverrideEntry).toList();
 
     return ResponseEntity.ok(
-        new ComplianceReport(projectId, orgId, sinceDays, entries, recent, overrides));
+        new ComplianceReport(projectId, projectOrgId, sinceDays, entries, recent, overrides));
   }
 
   private OverrideEntry toOverrideEntry(ProjectStandardOverride o) {

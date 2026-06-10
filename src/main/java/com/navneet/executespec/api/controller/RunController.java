@@ -537,7 +537,7 @@ public class RunController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
     // Quota + key gates applied to the FORKER, not the source.
-    tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+    tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
     usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
     apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
 

@@ -12,6 +12,8 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.deployment.preview.verify.PreviewVerifier;
+import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
@@ -133,6 +135,18 @@ class ToolRegistryWorkerBindTest {
     return new BackgroundJobTool(flags, mock(JobRegistry.class), new ShellSandboxPolicy());
   }
 
+  private static WorkspaceRunTestsTool workspaceRunTests(boolean enabled) {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(WorkspaceRunTestsTool.FLAG_BUILD_TDD)).thenReturn(enabled);
+    return new WorkspaceRunTestsTool(mock(WorkspaceTestRunner.class), flags, new ObjectMapper());
+  }
+
+  private static VerifyBootTool verifyBoot(boolean enabled) {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(VerifyBootTool.FLAG_VERIFY_BOOT)).thenReturn(enabled);
+    return new VerifyBootTool(mock(PreviewVerifier.class), flags, new ObjectMapper());
+  }
+
   @Test
   void bindForWorker_excludes_backgroundJob_when_flag_off() {
     ToolRegistry registry =
@@ -155,5 +169,51 @@ class ToolRegistryWorkerBindTest {
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertTrue(names.contains("backgroundJob"), "backgroundJob must be bound when its flag is ON");
+  }
+
+  @Test
+  void bindForWorker_excludes_runWorkspaceTests_when_flag_off() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(false)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertFalse(
+        names.contains("runWorkspaceTests"),
+        "runWorkspaceTests must be ABSENT from the worker schema when its flag is OFF.");
+    assertTrue(names.contains("readFile"), "other tools stay bound");
+  }
+
+  @Test
+  void bindForWorker_includes_runWorkspaceTests_when_flag_on() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(true)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertTrue(
+        names.contains("runWorkspaceTests"), "runWorkspaceTests must be bound when its flag is ON");
+  }
+
+  @Test
+  void bindForWorker_excludes_verifyBoot_when_flag_off() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), verifyBoot(false)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertFalse(
+        names.contains("verifyBoot"),
+        "verifyBoot must be ABSENT from the worker schema when its flag is OFF.");
+    assertTrue(names.contains("readFile"), "other tools stay bound");
+  }
+
+  @Test
+  void bindForWorker_includes_verifyBoot_when_flag_on() {
+    ToolRegistry registry =
+        new ToolRegistry(List.of(fakeTool("readFile"), verifyBoot(true)), new ObjectMapper(), null);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    assertTrue(names.contains("verifyBoot"), "verifyBoot must be bound when its flag is ON");
   }
 }

@@ -428,7 +428,9 @@ public class ProjectService {
       } catch (IllegalArgumentException e) {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
-            "Invalid AI provider: " + req.aiProvider() + ". Valid: ANTHROPIC, GEMINI, OPENAI");
+            "Invalid AI provider: "
+                + req.aiProvider()
+                + ". Valid: ANTHROPIC, GEMINI, OPENAI, DEEPSEEK, OPENROUTER, FIREWORKS");
       }
     }
 

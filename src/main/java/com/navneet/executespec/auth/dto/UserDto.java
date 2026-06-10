@@ -24,6 +24,8 @@ public record UserDto(
     boolean hasOpenAiKey,
     boolean hasAnthropicKey,
     boolean hasGeminiKey,
+    boolean hasDeepSeekKey,
+    boolean hasFireworksKey,
 
     // JIRA (non-sensitive fields exposed; token flag only)
     String jiraBaseUrl,
@@ -63,6 +65,8 @@ public record UserDto(
         present(user.getOpenAiApiKey()),
         present(user.getAnthropicApiKey()),
         present(user.getGeminiApiKey()),
+        present(user.getDeepSeekApiKey()),
+        present(user.getFireworksApiKey()),
 
         // JIRA
         user.getJiraBaseUrl(),

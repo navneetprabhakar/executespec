@@ -1,8 +1,8 @@
 # V2 batch execution — plan & handoff
 
 > **Status:** P1 scaffold + **P2 (Anthropic client) DONE**; P3a/P3b + wiring DEFERRED.
-> Audit item **B1** (`docs/audit/FINDINGS-2026-05-29.md`). This is the doc the `batch/` package
-> javadoc references (§1/§2/§3 below).
+> Originated from audit item **B1**. The old `docs/audit` source was removed after consolidation;
+> this is now the doc the `batch/` package javadoc references (§1/§2/§3 below).
 > **Why batch:** provider batch APIs price input/output at **~50% of realtime** — the single
 > biggest LLM-bill lever. Trade-off: results are asynchronous (minutes–24h), so batch only fits the
 > *first* worker turn, after which we resume realtime.

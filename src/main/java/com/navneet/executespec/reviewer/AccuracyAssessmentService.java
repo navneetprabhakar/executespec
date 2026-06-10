@@ -561,8 +561,7 @@ SCORE COMPUTATION GUIDANCE:
       int found = 0;
       for (String tok : tokens) {
         try {
-          String result =
-              fileSystemTool.searchFiles(runId, java.util.regex.Pattern.quote(tok), ".");
+          String result = fileSystemTool.searchFiles(runId, grepLiteralPattern(tok), ".");
           if (result != null
               && !result.isBlank()
               && !"(no matches)".equals(result.trim())
@@ -631,6 +630,19 @@ SCORE COMPUTATION GUIDANCE:
       if (out.size() >= 6) break;
     }
     return out;
+  }
+
+  static String grepLiteralPattern(String token) {
+    if (token == null || token.isEmpty()) return "";
+    StringBuilder escaped = new StringBuilder(token.length());
+    for (int i = 0; i < token.length(); i++) {
+      char c = token.charAt(i);
+      if (c == '\\' || c == '.' || c == '[' || c == ']' || c == '^' || c == '$' || c == '*') {
+        escaped.append('\\');
+      }
+      escaped.append(c);
+    }
+    return escaped.toString();
   }
 
   // Prompt builder

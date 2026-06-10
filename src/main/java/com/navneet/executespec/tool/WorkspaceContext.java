@@ -58,9 +58,37 @@ public final class WorkspaceContext {
     return TASK_CTX.get();
   }
 
+  static Snapshot capture() {
+    String worktreeContext = CTX.get();
+    String taskId = TASK_CTX.get();
+    if (worktreeContext == null && taskId == null) {
+      return null;
+    }
+    return new Snapshot(worktreeContext, taskId);
+  }
+
+  static void restore(Snapshot snapshot) {
+    if (snapshot == null) {
+      clear();
+      return;
+    }
+    if (snapshot.worktreeContext() == null) {
+      CTX.remove();
+    } else {
+      CTX.set(snapshot.worktreeContext());
+    }
+    if (snapshot.taskId() == null) {
+      TASK_CTX.remove();
+    } else {
+      TASK_CTX.set(snapshot.taskId());
+    }
+  }
+
   /** Clears the context for the current thread. */
   public static void clear() {
     CTX.remove();
     TASK_CTX.remove();
   }
+
+  static record Snapshot(String worktreeContext, String taskId) {}
 }
