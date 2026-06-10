@@ -97,7 +97,7 @@ public class ProjectInviteController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     // Audit 2026-05-12 review item B #9 — revoke is a mutate; needs write authority.
     accessGuard.assertCanWrite(projectId, userDetails);
-    inviteService.revoke(inviteId, userDetails.getUser());
+    inviteService.revoke(projectId, inviteId, userDetails.getUser());
     return ResponseEntity.noContent().build();
   }
 

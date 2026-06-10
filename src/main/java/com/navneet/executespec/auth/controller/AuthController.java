@@ -344,7 +344,12 @@ public class AuthController {
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
   }
 
-  record AiKeySettingsRequest(String openAiApiKey, String anthropicApiKey, String geminiApiKey) {}
+  record AiKeySettingsRequest(
+      String openAiApiKey,
+      String anthropicApiKey,
+      String geminiApiKey,
+      String deepSeekApiKey,
+      String fireworksApiKey) {}
 
   @PutMapping("/settings/ai-keys")
   public ResponseEntity<UserDto> updateAiKeySettings(
@@ -360,13 +365,18 @@ public class AuthController {
     user.setOpenAiApiKey(blankToNull(req.openAiApiKey()));
     user.setAnthropicApiKey(blankToNull(req.anthropicApiKey()));
     user.setGeminiApiKey(blankToNull(req.geminiApiKey()));
+    user.setDeepSeekApiKey(blankToNull(req.deepSeekApiKey()));
+    user.setFireworksApiKey(blankToNull(req.fireworksApiKey()));
     userRepo.save(user);
     log.info(
-        "User {} updated AI key settings — openai={}, anthropic={}, gemini={}",
+        "User {} updated AI key settings — openai={}, anthropic={}, gemini={}, deepseek={},"
+            + " fireworks={}",
         user.getId(),
         user.getOpenAiApiKey() != null,
         user.getAnthropicApiKey() != null,
-        user.getGeminiApiKey() != null);
+        user.getGeminiApiKey() != null,
+        user.getDeepSeekApiKey() != null,
+        user.getFireworksApiKey() != null);
 
     recordSettingsAudit(
         user,
@@ -377,6 +387,10 @@ public class AuthController {
             + (user.getAnthropicApiKey() != null)
             + ",\"gemini\":"
             + (user.getGeminiApiKey() != null)
+            + ",\"deepseek\":"
+            + (user.getDeepSeekApiKey() != null)
+            + ",\"fireworks\":"
+            + (user.getFireworksApiKey() != null)
             + "}");
 
     return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
@@ -514,10 +528,30 @@ public class AuthController {
               Map.of(),
               "Gemini key is valid",
               "Gemini rejected the key (status %d) — check it's an active AI Studio key");
+      case "OPENROUTER" ->
+          validateExternalConnection(
+              "https://openrouter.ai/api/v1/models",
+              Map.of("Authorization", "Bearer " + key),
+              "OpenRouter key is valid",
+              "OpenRouter rejected the key (status %d) — check it's an active sk-or-... key");
+      case "DEEPSEEK" ->
+          validateExternalConnection(
+              "https://api.deepseek.com/v1/models",
+              Map.of("Authorization", "Bearer " + key),
+              "DeepSeek key is valid",
+              "DeepSeek rejected the key (status %d) — check it's an active DeepSeek API key");
+      case "FIREWORKS" ->
+          validateExternalConnection(
+              "https://api.fireworks.ai/inference/v1/models",
+              Map.of("Authorization", "Bearer " + key),
+              "Fireworks key is valid",
+              "Fireworks rejected the key (status %d) — check it's an active Fireworks API key");
       default ->
           ResponseEntity.ok(
               new ValidationResult(
-                  false, "Unknown provider — supported: OPENAI, ANTHROPIC, GEMINI"));
+                  false,
+                  "Unknown provider — supported: OPENAI, ANTHROPIC, GEMINI, OPENROUTER, DEEPSEEK,"
+                      + " FIREWORKS"));
     };
   }
 

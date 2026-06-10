@@ -141,7 +141,7 @@ public class RunConversationController {
       @PathVariable String runId,
       @RequestBody ApplyBody body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     if (body == null || body.suggestion() == null || body.suggestion().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "suggestion is required");
     }

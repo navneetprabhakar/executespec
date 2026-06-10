@@ -136,6 +136,40 @@ class RunCostTrackerCachePricingTest {
     assertThat(cost).isEqualTo(0.0275, within(0.0001));
   }
 
+  @Test
+  void openrouterChineseModel_usesLiteralOpenRouterPricingRowBeforeOwnerFallback()
+      throws Exception {
+    seedPricing("openrouter", "deepseek-v4-flash", 0.10, 0.02, 0.20);
+    seedPricing("openai", "deepseek-v4-flash", 9.99, 9.99, 9.99);
+
+    double cost = price("openrouter", "deepseek-v4-flash", 1_000_000, 1_000_000, 0, 0);
+
+    assertThat(cost).isEqualTo(0.30, within(0.001));
+  }
+
+  @Test
+  void openrouterDirectProviderModel_fallsBackToOwnerPricingWhenLiteralRouteRowMissing()
+      throws Exception {
+    when(pricingRepo.findByIdProviderAndIdModel("openrouter", "gpt-5.4"))
+        .thenReturn(Optional.empty());
+    seedPricing("openai", "gpt-5.4", 2.50, 1.25, 15.00);
+
+    double cost = price("openrouter", "gpt-5.4", 1_000_000, 1_000_000, 0, 0);
+
+    assertThat(cost).isEqualTo(17.50, within(0.001));
+  }
+
+  @Test
+  void deepseekNativeAlias_usesNativePricingRow() throws Exception {
+    when(pricingRepo.findByIdProviderAndIdModel("deepseek", "deepseek-v4-flash"))
+        .thenReturn(Optional.empty());
+    seedPricing("deepseek", "deepseek-v4-flash-native", 0.27, 0.027, 1.10);
+
+    double cost = price("deepseek", "deepseek-v4-flash", 1_000_000, 1_000_000, 0, 0);
+
+    assertThat(cost).isEqualTo(1.37, within(0.001));
+  }
+
   // YAML cached rate missing — defensive fallback to 10% of input
 
   @Test

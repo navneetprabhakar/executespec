@@ -143,6 +143,19 @@ public class PrCommentInboxService {
             });
   }
 
+  /** User-driven dismiss scoped to the run path parameter. Idempotent and id-fuzzing safe. */
+  @Transactional
+  public Optional<PrCommentInbox> dismissForRun(Long id, String runId) {
+    return findForRun(id, runId)
+        .map(
+            c -> {
+              if (!"PENDING".equals(c.getStatus())) return c;
+              c.setStatus("DISMISSED");
+              c.setUpdatedAt(Instant.now());
+              return inboxRepo.save(c);
+            });
+  }
+
   /**
    * Phase P2 — called by {@link com.navneet.executespec.chat.ApplyService} after the apply flow has
    * pushed a fix to the PR's branch. Stamps the new run id so the UI can deep-link from the inbox

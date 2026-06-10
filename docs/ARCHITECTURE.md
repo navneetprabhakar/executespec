@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head in the current worktree: `V230`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V237`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -74,7 +74,7 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V230       │             │   → GitHub / Bitbucket    │
+   │ Flyway V1..V237       │             │   → GitHub / Bitbucket    │
    │ 123 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
@@ -552,7 +552,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head in the current worktree is `V230`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V237`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.
@@ -658,19 +658,26 @@ is the public entry. Resolution chain:
    `ModelPerformanceTracker` can substitute a provider with ≥10pp better score over
    the last 24h sliding window (5-sample minimum).
 
-Agent → tier mapping (excerpt):
+Agent → tier mapping (excerpt; `application.yml` is authoritative):
 
-| Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                             |
-| ----------- | --------------------------- | -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
-| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ValidationReportGenerator                    |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ConversationAgent                   |
+| Tier        | Anthropic                   | OpenAI         | Gemini             | DeepSeek                    | Fireworks                 | Agents                                                                                                                             |
+| ----------- | --------------------------- | -------------- | ------------------ | --------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.5-flash` | `deepseek-v4-flash-native` | `deepseek-v4-pro-fw`      | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
+| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.5-flash` | `deepseek-v4-flash-native` | `deepseek-v4-pro-fw`      | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ValidationReportGenerator                    |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3.5-flash` | `deepseek-v4-flash-native` | `deepseek-v4-flash-fw`    | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ConversationAgent                   |
+
+Direct providers are Anthropic, OpenAI, Gemini, and native DeepSeek. Aggregator
+providers are OpenRouter and Fireworks: OpenRouter can route the verified
+`OpenRouterModelMapper` allow-list and now sends `provider.sort=latency`; Fireworks
+can route the verified `FireworksModelMapper` allow-list once a Fireworks key is
+configured. `RunCostTracker` prices literal OpenRouter/Fireworks matrix rows first
+and falls back only for legacy OpenRouter-routed direct-provider models.
 
 Per-provider implicit-cache is enabled — Gemini Flash threshold 1024 tokens, Pro
 4096; Anthropic uses explicit `cache_control` blocks. `RunCostTracker` records
-`cache_read_input_tokens` on every call for all 3 providers. Reviewer routes Gemini
-to WORKHORSE (Flash) because Pro's 4096 threshold misses every implicit-cache hit on
-the reviewer's drifting system prompt.
+`cache_read_input_tokens` on every call for providers that expose it. Reviewer routes
+Gemini to WORKHORSE (Flash) because Pro's 4096 threshold misses every implicit-cache
+hit on the reviewer's drifting system prompt.
 
 Two known gaps:
 

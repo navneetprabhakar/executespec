@@ -44,6 +44,15 @@ public class AvailableProviderResolver {
   @Value("${spring.ai.google.genai.api-key:}")
   private String systemGeminiKey;
 
+  @Value("${spring.ai.openrouter.api-key:}")
+  private String systemOpenRouterKey;
+
+  @Value("${spring.ai.deepseek.api-key:}")
+  private String systemDeepSeekKey;
+
+  @Value("${spring.ai.fireworks.api-key:}")
+  private String systemFireworksKey;
+
   /**
    * Determine which providers are available for a given run. Uses the already-resolved keys from
    * {@link RunKeyStore}.
@@ -66,6 +75,9 @@ public class AvailableProviderResolver {
       if (isPresent(systemAnthropicKey)) available.add(LlmProvider.ANTHROPIC);
       if (isPresent(systemOpenAiKey)) available.add(LlmProvider.OPENAI);
       if (isPresent(systemGeminiKey)) available.add(LlmProvider.GEMINI);
+      if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
+      if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
+      if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
     }
 
     if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
@@ -76,6 +88,8 @@ public class AvailableProviderResolver {
       // OpenRouter (Enterprise gateway) — offered whenever the org key is present. Only Enterprise
       // org admins can set the key (gated at OrgController), so key-present implies Enterprise.
       if (keys.openRouterKey() != null) available.add(LlmProvider.OPENROUTER);
+      if (keys.deepSeekKey() != null) available.add(LlmProvider.DEEPSEEK);
+      if (keys.fireworksKey() != null) available.add(LlmProvider.FIREWORKS);
     }
 
     // Apply org-level enabled provider policy
@@ -101,6 +115,9 @@ public class AvailableProviderResolver {
     if (isPresent(systemAnthropicKey)) providers.add(LlmProvider.ANTHROPIC);
     if (isPresent(systemOpenAiKey)) providers.add(LlmProvider.OPENAI);
     if (isPresent(systemGeminiKey)) providers.add(LlmProvider.GEMINI);
+    if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
+    if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
+    if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
 
     if (providers.isEmpty()) {
       // Last resort: assume Anthropic is available (system default)
@@ -116,6 +133,7 @@ public class AvailableProviderResolver {
       case GEMINI -> "gemini";
       case OPENROUTER -> "openrouter";
       case DEEPSEEK -> "deepseek";
+      case FIREWORKS -> "fireworks";
     };
   }
 

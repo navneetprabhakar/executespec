@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -50,7 +49,6 @@ public class PrReviewAgent {
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
-  private final RunCostTracker costTracker;
 
   /**
    * Run the agent against the supplied diff + PR metadata. Returns the parsed agent output; caller
@@ -112,11 +110,6 @@ public class PrReviewAgent {
     } catch (Exception e) {
       throw new PrReviewAgentException("LLM dispatch failed: " + e.getMessage());
     }
-
-    // Cost attribution — record token + USD into a per-review bucket. The service reads the
-    // snapshot to populate pr_review.cost_usd / total_input_tokens / total_output_tokens.
-    String runIdForCost = "pr-review-" + req.prReviewId();
-    costTracker.record(runIdForCost, provider, resolved.getModel(), resp);
 
     // Parse the agent's submitReview tool call out of the response.
     List<AssistantMessage.ToolCall> calls = new ArrayList<>();

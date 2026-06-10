@@ -65,14 +65,10 @@ public class RunQuotaRefundListener {
     String userId = run.getCreatedByUserId();
     if (userId == null) return;
 
-    // Refund the exact number of credits that were charged for this run
-    // Batch runs charged batchCredits (discounted), not creditsCharged (real-time)
-    int credits;
-    if ("BATCH".equals(run.getApprovedExecutionMode()) && run.getBatchCredits() != null) {
-      credits = run.getBatchCredits();
-    } else {
-      credits = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
-    }
+    // The live submit/fork paths charge the monthly quota counter by exactly one run at dispatch.
+    // `creditsCharged` is only the estimated cost-credit field today; refunding it here can erase
+    // unrelated usage when an expensive failed run had creditsCharged > 1.
+    int credits = 1;
     tierEnforcementService.decrementRunCount(userId, credits);
     usageTrackingService.decrement(userId, "RUNS", credits);
 

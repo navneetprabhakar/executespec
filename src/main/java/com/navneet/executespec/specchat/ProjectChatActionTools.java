@@ -91,7 +91,7 @@ public class ProjectChatActionTools {
     },
     "provider": {
       "type": "string",
-      "enum": ["anthropic", "openai", "gemini", "openrouter", "deepseek"],
+      "enum": ["anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks"],
       "description": "Optional LLM provider override; defaults to the user/org default."
     },
     "model": {

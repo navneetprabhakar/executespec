@@ -2,6 +2,7 @@ package com.navneet.executespec.billing.service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintWriter;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.Month;
 import java.util.ArrayList;
@@ -160,11 +161,11 @@ public class AccountingService {
           nvl(inv.getBuyerName()),
           nvl(inv.getPlaceOfSupply()),
           inv.getSubtotal() / 100.0,
-          inv.getCgstRate() != null ? inv.getCgstRate() : 0,
+          inv.getCgstRate() != null ? inv.getCgstRate() : BigDecimal.ZERO,
           inv.getCgstAmount() / 100.0,
-          inv.getSgstRate() != null ? inv.getSgstRate() : 0,
+          inv.getSgstRate() != null ? inv.getSgstRate() : BigDecimal.ZERO,
           inv.getSgstAmount() / 100.0,
-          inv.getIgstRate() != null ? inv.getIgstRate() : 0,
+          inv.getIgstRate() != null ? inv.getIgstRate() : BigDecimal.ZERO,
           inv.getIgstAmount() / 100.0,
           inv.getTotalTax() / 100.0,
           inv.getTotalAmount() / 100.0,

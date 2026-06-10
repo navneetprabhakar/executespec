@@ -222,7 +222,8 @@ time-to-first-approval (the gate indicator should move both).
 - **Pure frontend.** Verified: the gate indicator reuses the existing `GET /api/runs?status=` filter — **no
   backend change**. The only backend touch is registering the `ui.console.enabled` flag (a one-row seed).
 - Every existing surface stays reachable + working through every phase — this is a re-shell. The
-  2026-05-22 backend×UI feature inventory (`docs/audit/`) is the no-regression checklist.
+  protected-route inventory in `docs/document_map.md` plus git history for the removed audit docs is
+  the no-regression checklist.
 - Flag-gated shell swap; flip default only when `npm run build` + `lint` + a live smoke of **every**
   protected route is green (+ both mobile breakpoints).
 - Keep the tokens + dark aesthetic + JetBrains Mono + ⌘K; no theming/a11y regression (WCAG-AA body text).

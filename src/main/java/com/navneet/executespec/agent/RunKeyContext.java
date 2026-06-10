@@ -24,12 +24,44 @@ public record RunKeyContext(
     String openAiKey,
     String geminiKey,
     String openRouterKey,
+    String deepSeekKey,
+    String fireworksKey,
     Source anthropicSource,
     Source openAiSource,
     Source geminiSource,
     Source openRouterSource,
+    Source deepSeekSource,
+    Source fireworksSource,
     String userId,
     String orgId) {
+
+  public RunKeyContext(
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String openRouterKey,
+      Source anthropicSource,
+      Source openAiSource,
+      Source geminiSource,
+      Source openRouterSource,
+      String userId,
+      String orgId) {
+    this(
+        anthropicKey,
+        openAiKey,
+        geminiKey,
+        openRouterKey,
+        null,
+        null,
+        anthropicSource,
+        openAiSource,
+        geminiSource,
+        openRouterSource,
+        Source.PLATFORM,
+        Source.PLATFORM,
+        userId,
+        orgId);
+  }
 
   public enum Source {
     /** User-level key (app_user.{provider}_api_key). */
@@ -51,6 +83,8 @@ public record RunKeyContext(
       case "openai" -> openAiKey;
       case "gemini" -> geminiKey;
       case "openrouter" -> openRouterKey;
+      case "deepseek" -> deepSeekKey;
+      case "fireworks" -> fireworksKey;
       default -> null;
     };
   }
@@ -63,6 +97,8 @@ public record RunKeyContext(
       case "openai" -> openAiSource != null ? openAiSource : Source.PLATFORM;
       case "gemini" -> geminiSource != null ? geminiSource : Source.PLATFORM;
       case "openrouter" -> openRouterSource != null ? openRouterSource : Source.PLATFORM;
+      case "deepseek" -> deepSeekSource != null ? deepSeekSource : Source.PLATFORM;
+      case "fireworks" -> fireworksSource != null ? fireworksSource : Source.PLATFORM;
       default -> Source.PLATFORM;
     };
   }
@@ -79,6 +115,8 @@ public record RunKeyContext(
     if (openAiSource != null && openAiSource != Source.PLATFORM) return openAiSource;
     if (geminiSource != null && geminiSource != Source.PLATFORM) return geminiSource;
     if (openRouterSource != null && openRouterSource != Source.PLATFORM) return openRouterSource;
+    if (deepSeekSource != null && deepSeekSource != Source.PLATFORM) return deepSeekSource;
+    if (fireworksSource != null && fireworksSource != Source.PLATFORM) return fireworksSource;
     return Source.PLATFORM;
   }
 }

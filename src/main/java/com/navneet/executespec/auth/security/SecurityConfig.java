@@ -230,6 +230,11 @@ public class SecurityConfig {
                     // gate integration Configure CTAs on flag state.
                     .requestMatchers(HttpMethod.GET, "/api/admin/feature-flags/public")
                     .authenticated()
+                    // Entity-scoped analytics is under /api/admin for legacy frontend routes, but
+                    // the controller has its own org/user RBAC. Keep it before the blanket
+                    // SUPER_ADMIN admin matcher so ORG_ADMIN/BILLING_ADMIN can read their own org.
+                    .requestMatchers("/api/admin/analytics/**")
+                    .authenticated()
                     // Admin endpoints — SUPER_ADMIN only
                     .requestMatchers("/api/admin/**")
                     .hasRole("SUPER_ADMIN")

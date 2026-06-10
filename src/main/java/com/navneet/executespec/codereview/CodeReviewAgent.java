@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -57,7 +56,6 @@ public class CodeReviewAgent {
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
-  private final RunCostTracker costTracker;
 
   /**
    * Invoke the agent. Throws {@link CodeReviewAgentException} on LLM dispatch failure or malformed
@@ -109,9 +107,6 @@ public class CodeReviewAgent {
     } catch (Exception e) {
       throw new CodeReviewAgentException("LLM dispatch failed: " + e.getMessage());
     }
-
-    String runIdForCost = "code-review-" + req.scanId();
-    costTracker.record(runIdForCost, provider, resolved.getModel(), resp);
 
     List<AssistantMessage.ToolCall> calls = new ArrayList<>();
     for (var gen : resp.getResults()) {

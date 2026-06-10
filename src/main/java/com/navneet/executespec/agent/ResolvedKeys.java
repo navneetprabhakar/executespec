@@ -22,6 +22,10 @@ public record ResolvedKeys(
     String geminiKey,
     /** OpenRouter API key (Enterprise gateway), or null. Org-level only. */
     String openRouterKey,
+    /** Native DeepSeek API key, or null. */
+    String deepSeekKey,
+    /** Fireworks API key, or null. */
+    String fireworksKey,
     /** Key source mode from the org: SYSTEM | OWN_KEYS | HYBRID. */
     String keySourceMode,
     /** Enabled providers (lowercase). Null = all providers allowed. */
@@ -48,7 +52,25 @@ public record ResolvedKeys(
       String geminiKey,
       String keySourceMode,
       Set<String> enabledProviders) {
-    this(anthropicKey, openAiKey, geminiKey, null, keySourceMode, enabledProviders);
+    this(anthropicKey, openAiKey, geminiKey, null, null, null, keySourceMode, enabledProviders);
+  }
+
+  public ResolvedKeys(
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String openRouterKey,
+      String keySourceMode,
+      Set<String> enabledProviders) {
+    this(
+        anthropicKey,
+        openAiKey,
+        geminiKey,
+        openRouterKey,
+        null,
+        null,
+        keySourceMode,
+        enabledProviders);
   }
 
   /** Returns true if the given provider (lowercase) is allowed by org policy. */
