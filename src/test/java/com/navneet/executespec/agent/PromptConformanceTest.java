@@ -76,6 +76,44 @@ class PromptConformanceTest {
     assertThat(reviewer).doesNotContain("Missing tests (unless a spec explicitly asked for them)");
   }
 
+  @Test
+  void runtimePromptsCarryInjectionGuards() throws IOException {
+    assertThat(prompt("prompts/outline-planner.md")).contains("{{include:security-rules:planner}}");
+    assertThat(prompt("prompts/outline-planner-skeleton.md"))
+        .contains("{{include:security-rules:planner}}");
+    assertThat(prompt("prompts/patch-agent.md")).contains("{{include:security-rules:worker}}");
+    assertThat(prompt("prompts/tool-output-compactor.md"))
+        .contains("{{include:security-rules:worker}}");
+    assertThat(prompt("prompts/worker-history-compactor.md"))
+        .contains("{{include:security-rules:worker}}");
+  }
+
+  @Test
+  void patchPromptNamesRunTestsGate() throws IOException {
+    String patch = prompt("prompts/patch-agent.md");
+
+    assertThat(patch).contains("call it before `completeTask`");
+    assertThat(patch).contains("PATCH pipeline may refuse completion until `runTests` has passed");
+  }
+
+  @Test
+  void providerFragmentsAreSplitByRunMode() throws IOException {
+    for (String provider :
+        List.of("anthropic", "deepseek", "fireworks", "gemini", "openai", "openrouter")) {
+      String build = prompt("prompts/fragments/provider/" + provider + "/build.md");
+      String patch = prompt("prompts/fragments/provider/" + provider + "/patch.md");
+
+      assertThat(build).as(provider + " build fragment").contains("PROVIDER-SPECIFIC BUILD NOTES");
+      assertThat(patch).as(provider + " patch fragment").contains("PROVIDER-SPECIFIC PATCH NOTES");
+      assertThat(build)
+          .as(provider + " build fragment should not contain patch-only guidance")
+          .doesNotContain("PROVIDER-SPECIFIC PATCH NOTES")
+          .doesNotContain("patch SOURCE ONLY")
+          .doesNotContain("scratch repro")
+          .doesNotContain("SWE-bench");
+    }
+  }
+
   private static String prompt(String classpath) throws IOException {
     return new ClassPathResource(classpath).getContentAsString(StandardCharsets.UTF_8);
   }
