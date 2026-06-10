@@ -73,4 +73,11 @@ public record RunSummary(
      * pre-split runs that never got migrated. Frontend should prefer {@code scmPrUrl} and fall back
      * to this only when the SCM field is null.
      */
-    String githubPrUrl) {}
+    String githubPrUrl,
+    /**
+     * RL-2026-06-019 UX wave — headline verified score (0-100) from the run's validation report, so
+     * list rows can lead with the product's signature metric. Null while the run is in flight or
+     * when no report exists. Batch-hydrated on the list endpoint via {@code RunMapper.toSummaries};
+     * single-run summary responses (submit/fork ACK) leave it null.
+     */
+    Integer verifiedScore) {}
