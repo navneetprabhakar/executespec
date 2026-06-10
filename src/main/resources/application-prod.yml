@@ -91,6 +91,12 @@ spring:
 # scheme. `framework` uses Spring's ForwardedHeaderFilter.
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        name: ESSESSION
+        secure: true
+        same-site: lax
 
 # ── Agent (stricter concurrency for prod) ─────────────────────────────────────
 agent:

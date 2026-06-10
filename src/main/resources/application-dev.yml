@@ -98,6 +98,12 @@ spring:
 # filter chain ordering we already have.
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        name: ESDEVSESSION
+        secure: true
+        same-site: lax
 
 # ── Agent & GitHub ────────────────────────────────────────────────────────────
 agent:
