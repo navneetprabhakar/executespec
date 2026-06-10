@@ -10,7 +10,6 @@ import {
   usePaletteHotkey,
   type PaletteCmd,
   statusKind,
-  IdeBadge,
   ResizeHandle,
 } from '@/ide/IdeKit';
 import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
@@ -386,8 +385,10 @@ export default function IdeWorkspace() {
           <BranchIcon size={13} style={{verticalAlign: -2, marginRight: 4}} />
           ExecuteSpec
         </span>
+        {/* Plain white-on-translucent chip — IdeBadge's green-on-blue here was
+            borderline unreadable (review/11 defect #4). */}
         <span className='ide-status' title={`Plan: ${tier}`}>
-          <IdeBadge kind='ok'>{tier}</IdeBadge>
+          <span className='ide-status-chip'>{tier}</span>
         </span>
         <PlanGateIndicator dir='up' />
         <span className='ide-status-spacer' />
@@ -419,9 +420,6 @@ export default function IdeWorkspace() {
         >
           Try Console ⤴
         </button>
-        <span className='ide-status' title='IDE workspace (Beta)'>
-          IDE · Beta
-        </span>
       </div>
 
       {/* mobile bottom tabs */}

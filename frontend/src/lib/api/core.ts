@@ -260,6 +260,11 @@ export interface RunSummary {
    * migrated. UI should fall back to this when scmPrUrl is null.
    */
   githubPrUrl?: string | null;
+  /**
+   * RL-2026-06-019 — headline verified score (0-100), hydrated by the list endpoint from the
+   * validation report in one batched query. Null until the run is terminal and scored.
+   */
+  verifiedScore?: number | null;
 }
 
 export interface TaskSummary {

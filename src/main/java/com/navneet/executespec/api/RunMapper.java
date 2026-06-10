@@ -1,7 +1,9 @@
 package com.navneet.executespec.api;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +39,26 @@ public class RunMapper {
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
+    return toSummary(r, null);
+  }
+
+  /**
+   * RL-2026-06-019 — batch variant for the list endpoint: hydrates each summary's verifiedScore
+   * with ONE query across the page instead of a per-row report lookup.
+   */
+  public List<RunSummary> toSummaries(List<PipelineRun> runs) {
+    if (runs.isEmpty()) return List.of();
+    List<String> ids = runs.stream().map(PipelineRun::getRunId).toList();
+    Map<String, Integer> scores = new HashMap<>();
+    for (Object[] row : validationReportRepository.findScoresByRunIds(ids)) {
+      if (row[0] != null && row[1] != null) {
+        scores.put(String.valueOf(row[0]), ((Number) row[1]).intValue());
+      }
+    }
+    return runs.stream().map(r -> toSummary(r, scores.get(r.getRunId()))).toList();
+  }
+
+  private RunSummary toSummary(PipelineRun r, Integer verifiedScore) {
     return new RunSummary(
         r.getRunId(),
         r.getStatus(),
@@ -72,7 +94,8 @@ public class RunMapper {
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
         r.getScmPrUrl(),
-        r.getGithubPrUrl());
+        r.getGithubPrUrl(),
+        verifiedScore);
   }
 
   /** Resolves a project ID to its human-readable name, or null if not found / not set. */
