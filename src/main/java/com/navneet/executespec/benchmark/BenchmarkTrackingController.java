@@ -62,6 +62,8 @@ public class BenchmarkTrackingController {
       Integer reward,
       String esRunId,
       BigDecimal costUsd,
+      Long inputTokens,
+      Long outputTokens,
       String message,
       String payload) {}
 
@@ -122,6 +124,8 @@ public class BenchmarkTrackingController {
           body.reward(),
           body.esRunId(),
           body.costUsd(),
+          body.inputTokens(),
+          body.outputTokens(),
           body.message(),
           body.payload());
     } catch (IllegalArgumentException e) {

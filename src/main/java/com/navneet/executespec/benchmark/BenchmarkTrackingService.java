@@ -106,6 +106,8 @@ public class BenchmarkTrackingService {
       Integer reward,
       String esRunId,
       BigDecimal cost,
+      Long inputTokens,
+      Long outputTokens,
       String message,
       String payloadJson) {
     BenchmarkRun run =
@@ -115,7 +117,8 @@ public class BenchmarkTrackingService {
     switch (type == null ? "" : type) {
       case "TASK_SCORED" -> {
         if (taskName != null && !taskName.isBlank()) {
-          upsertTaskResult(runId, taskName, attempt, reward, esRunId, cost);
+          upsertTaskResult(
+              runId, taskName, attempt, reward, esRunId, cost, inputTokens, outputTokens);
           recompute(run);
         }
       }
@@ -157,7 +160,9 @@ public class BenchmarkTrackingService {
       Integer attempt,
       Integer reward,
       String esRunId,
-      BigDecimal cost) {
+      BigDecimal cost,
+      Long inputTokens,
+      Long outputTokens) {
     int att = attempt == null ? 1 : attempt;
     boolean exists =
         taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(runId).stream()
@@ -174,6 +179,8 @@ public class BenchmarkTrackingService {
             .reward(reward == null ? 0 : Math.max(0, reward))
             .esRunId(esRunId)
             .costUsd(cost == null ? BigDecimal.ZERO : cost)
+            .inputTokens(inputTokens == null ? 0L : Math.max(0L, inputTokens))
+            .outputTokens(outputTokens == null ? 0L : Math.max(0L, outputTokens))
             .createdAt(Instant.now())
             .build());
   }
@@ -193,8 +200,12 @@ public class BenchmarkTrackingService {
             .map(BenchmarkTaskResult::getCostUsd)
             .filter(Objects::nonNull)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
+    long inTok = all.stream().mapToLong(BenchmarkTaskResult::getInputTokens).sum();
+    long outTok = all.stream().mapToLong(BenchmarkTaskResult::getOutputTokens).sum();
     run.setResolvedTasks((int) resolved);
     run.setCostUsd(cost);
+    run.setInputTokens(inTok);
+    run.setOutputTokens(outTok);
   }
 
   // ── Event persistence + SSE re-broadcast ────────────────────────────────
