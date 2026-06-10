@@ -110,12 +110,15 @@ public class ProjectShareLinkService {
   }
 
   @Transactional
-  public void revoke(UUID linkId, AppUser actor) {
+  public void revoke(String projectId, UUID linkId, AppUser actor) {
     ProjectShareLink link =
         linkRepo
             .findById(linkId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found"));
+    if (!link.getProjectId().equals(projectId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found");
+    }
     if (link.getRevokedAt() != null) {
       return; // idempotent
     }

@@ -45,7 +45,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Routing: same dispatch tree as {@link ShellTool} — consult the SWE-bench container store
  * first, then the ProgramBench store. If neither has a cid for this run, falls back to running
- * pytest in the host workspace via {@code /bin/sh -c}.
+ * pytest in the host workspace through a {@link ProcessBuilder} argument array.
  *
  * <p>Doubles as the gate for {@code completeTask} verification (see Layer 3 in {@code
  * WorkerAgent}). Calling {@code runTests} successfully marks the conversation as "test-verified" in
@@ -140,11 +140,9 @@ public class RunTestsTool implements Tool {
     for (JsonNode el : idsNode) {
       String id = el.asText("").trim();
       if (id.isEmpty()) continue;
-      // Defence: pytest test ids should never contain shell metachars. If the LLM tries to
-      // inject a payload, refuse the whole call. Audit 2026-05-12 review item O #77 — added
-      // missing < > ( ) \ \r and a single ASCII control-char pass to close the defence-in-depth
-      // gap. (Process is still dispatched via ProcessBuilder arg-array, not /bin/sh, so this
-      // is layered defence — not the sole protection.)
+      // Defence: pytest test ids should never contain shell metachars. If the LLM tries to inject a
+      // payload, refuse the whole call. This is layered defence on top of the ProcessBuilder
+      // argument-array dispatch below.
       if (containsShellMetachar(id)) {
         return ToolResult.err(
             ToolResult.ErrorKind.INVALID_ARGS, "test_id contains forbidden shell metachars: " + id);
@@ -184,19 +182,10 @@ public class RunTestsTool implements Tool {
       }
     }
 
-    String pytestArgs = String.join(" ", testIds);
-    String pytestCmd = "python -m pytest " + pytestArgs + " --tb=short --no-header -q";
-
     try {
-      ProcessBuilder pb;
-      if (containerId != null) {
-        String shell = useLoginShell ? "/bin/bash" : "/bin/sh";
-        String shellFlag = useLoginShell ? "-lc" : "-c";
-        pb =
-            new ProcessBuilder(
-                List.of("docker", "exec", "-w", workdir, containerId, shell, shellFlag, pytestCmd));
-      } else {
-        pb = new ProcessBuilder(List.of("/bin/sh", "-c", pytestCmd));
+      ProcessBuilder pb =
+          new ProcessBuilder(buildProcessCommand(containerId, workdir, useLoginShell, testIds));
+      if (containerId == null) {
         pb.directory(ctx.workspaceRoot().toFile());
       }
       Map<String, String> env = pb.environment();
@@ -321,6 +310,34 @@ public class RunTestsTool implements Tool {
   // Avoids unused-warning when stream/stdlib alternates compile.
   @SuppressWarnings("unused")
   private static final String UNUSED_REF = Arrays.toString(new String[0]);
+
+  static List<String> buildProcessCommand(
+      String containerId, String workdir, boolean useLoginShell, List<String> testIds) {
+    List<String> cmd = new ArrayList<>();
+    if (containerId != null) {
+      cmd.add("docker");
+      cmd.add("exec");
+      cmd.add("-w");
+      cmd.add(workdir);
+      cmd.add(containerId);
+      if (useLoginShell) {
+        cmd.add("/bin/bash");
+        cmd.add("-lc");
+        cmd.add("python -m pytest \"$@\" --tb=short --no-header -q");
+        cmd.add("_");
+        cmd.addAll(testIds);
+        return cmd;
+      }
+    }
+    cmd.add("python");
+    cmd.add("-m");
+    cmd.add("pytest");
+    cmd.addAll(testIds);
+    cmd.add("--tb=short");
+    cmd.add("--no-header");
+    cmd.add("-q");
+    return cmd;
+  }
 
   /**
    * Returns true if {@code id} contains any shell metachar that could escape pytest argument

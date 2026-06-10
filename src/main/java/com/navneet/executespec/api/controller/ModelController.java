@@ -45,9 +45,10 @@ public class ModelController {
           // 2026-05-28 (RL-2026-05-052) — register the Enterprise Beta providers' display labels so
           // the model-selector dropdown doesn't render the raw lowercase enum key. The provider
           // entries themselves auto-appear via matrixProps.getProviders() iteration above; without
-          // these labels the New Run modal would show "deepseek" / "openrouter" verbatim.
+          // these labels the New Run modal would show raw lowercase enum keys.
           "openrouter", "OpenRouter",
-          "deepseek", "DeepSeek");
+          "deepseek", "DeepSeek",
+          "fireworks", "Fireworks");
 
   @GetMapping("/available")
   public ResponseEntity<AvailableModelsResponse> available() {

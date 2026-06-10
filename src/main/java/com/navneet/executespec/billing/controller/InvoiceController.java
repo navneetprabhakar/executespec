@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.TierPermissionService;
@@ -40,6 +41,7 @@ public class InvoiceController {
   private final SellerConfigRepository sellerRepo;
   private final TierPermissionService permissionService;
   private final ActivityAuditService auditService;
+  private final AppUserRepository userRepo;
 
   @GetMapping("/api/billing/profile")
   public BillingProfile getProfile(@AuthenticationPrincipal AppUserDetails principal) {
@@ -159,6 +161,17 @@ public class InvoiceController {
       @PathVariable UUID id,
       @RequestBody CreditNoteRequest req) {
     requireCreditNoteAccess(principal);
+    if (req.amountPaise() <= 0) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Credit note amount must be > 0");
+    }
+    Invoice original =
+        invoiceService
+            .getInvoice(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+    if (req.amountPaise() > original.getTotalAmount()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Credit note amount cannot exceed invoice total");
+    }
     Invoice cn = invoiceService.generateCreditNote(id, req.amountPaise(), req.reason());
 
     auditService.record(
@@ -198,8 +211,12 @@ public class InvoiceController {
         invoiceService
             .getInvoice(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-    emailService.sendInvoice(
-        principal.getUser().getEmail(), principal.getUser().getFirstName(), invoice);
+    var invoiceOwner =
+        userRepo
+            .findById(invoice.getUserId())
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invoice owner not found"));
+    emailService.sendInvoice(invoiceOwner.getEmail(), invoiceOwner.getFirstName(), invoice);
 
     auditService.record(
         ActivityAudit.builder()

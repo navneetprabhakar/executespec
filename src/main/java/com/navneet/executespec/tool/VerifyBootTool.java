@@ -27,17 +27,17 @@ import lombok.extern.slf4j.Slf4j;
  * security (CodeAbuseScanner pre-build, {@code --network none} cleanroom, non-root, resource +
  * timeout caps, secret-free env) lives in the boot engine; this tool is the worker-facing surface.
  *
- * <p><b>Flag-gated:</b> {@code worker.verify-boot.enabled} (V227, default OFF). When off, every
- * call returns an informative Ok envelope with {@code "available": false} so the worker learns the
- * tool isn't usable on this run rather than getting a hard error — the same rollout discipline as
- * {@code worker.build-tdd.enabled} (V217). Default-ON only after the boot-pass-rate × verifiedScore
+ * <p><b>Flag-gated out of the schema:</b> {@code worker.verify-boot.enabled} (V227, default OFF).
+ * When off, {@link ToolRegistry#bindForWorker(ExecutionContext)} does not bind this tool at all, so
+ * schema-sensitive providers do not see an inert tool. The in-{@code execute} disabled envelope is
+ * defense-in-depth for direct callers. Default-ON only after the boot-pass-rate × verifiedScore
  * eval + the red-team checklist in the parent plan. Because the {@code PreviewBootEngine} bean does
  * not exist until preview Phase 0, even with the flag ON this currently fails open to {@code
  * available:true, verified:false} — never a false "healthy".
  */
 @Component
 @Slf4j
-public class VerifyBootTool implements Tool {
+public class VerifyBootTool implements Tool, FlagGatedTool {
 
   /** Feature flag — see class javadoc. */
   public static final String FLAG_VERIFY_BOOT = "worker.verify-boot.enabled";
@@ -52,6 +52,11 @@ public class VerifyBootTool implements Tool {
     this.previewVerifier = previewVerifier;
     this.featureFlagService = featureFlagService;
     this.json = json;
+  }
+
+  @Override
+  public boolean enabled() {
+    return featureFlagService == null || featureFlagService.isEnabled(FLAG_VERIFY_BOOT);
   }
 
   @Override

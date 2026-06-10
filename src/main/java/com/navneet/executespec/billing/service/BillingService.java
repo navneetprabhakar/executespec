@@ -225,45 +225,15 @@ public class BillingService {
                         + " subscription. Cancel it first to switch plans.");
               }
 
-              // Upgrade path: cancel existing subscription on the gateway and mark as UPGRADED
+              // Upgrade checkout path: keep the existing subscription active until the new checkout
+              // is paid. Successful activation retires the old subscription immediately before the
+              // replacement row is marked ACTIVE, avoiding lost entitlement if checkout is
+              // abandoned.
               log.info(
-                  "Upgrading subscription: user={}, {} → {}", userId, existingTier, plan.getTier());
-              try {
-                if (existing.getGatewaySubscriptionId() != null) {
-                  String gw = existing.getPaymentGateway();
-                  if ("STRIPE".equalsIgnoreCase(gw)) {
-                    gatewayRouter.stripe().cancelSubscription(existing.getGatewaySubscriptionId());
-                  } else {
-                    razorpayGateway.cancelImmediately(existing.getGatewaySubscriptionId());
-                  }
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "Failed to cancel old subscription on gateway (proceeding anyway): {}",
-                    e.getMessage());
-              }
-
-              // Prorated refund for unused days of current billing period
-              issueProratedRefund(existing, existingPlan, user);
-
-              existing.setStatus("UPGRADED");
-              subRepo.save(existing);
-
-              paymentAuditService.record(
-                  "USER",
+                  "Upgrade checkout started: user={}, {} → {}",
                   userId,
-                  "SUBSCRIPTION_UPGRADED",
                   existingTier,
-                  plan.getTier(),
-                  userId,
-                  "Upgrade: " + existingTier + " → " + plan.getTier(),
-                  existing.getPaymentGateway(),
-                  null,
-                  null,
-                  null,
-                  null,
-                  userId,
-                  user.getOrgId());
+                  plan.getTier());
             });
 
     // Check founder pricing availability
@@ -382,8 +352,11 @@ public class BillingService {
             .findById(sub.getBillingPlanId())
             .orElseThrow(() -> new IllegalStateException("Plan not found for subscription"));
 
-    // Deactivate any lingering FREE subscription before activating paid one
-    deactivateFreeSubscription(sub.getUserId(), sub.getId());
+    AppUser activatedUser =
+        userRepo.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+    // Retire any existing subscription only after payment has succeeded.
+    retireExistingSubscriptionForActivation(sub, plan, activatedUser);
 
     // Activate
     sub.setStatus("ACTIVE");
@@ -418,10 +391,7 @@ public class BillingService {
         sub.getOrgId());
 
     // V1.1: Notify user
-    AppUser activatedUser = userRepo.findById(userId).orElse(null);
-    if (activatedUser != null) {
-      notificationService.sendSubscriptionActivated(activatedUser.getEmail(), plan.getName());
-    }
+    notificationService.sendSubscriptionActivated(activatedUser.getEmail(), plan.getName());
 
     // V1.3: Generate invoice and email it
     try {
@@ -455,7 +425,7 @@ public class BillingService {
     if (sub.getGatewaySubscriptionId() != null) {
       String gw = sub.getPaymentGateway();
       if ("STRIPE".equalsIgnoreCase(gw)) {
-        gatewayRouter.stripe().cancelSubscription(sub.getGatewaySubscriptionId());
+        gatewayRouter.stripe().cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
       } else {
         razorpayGateway.cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
       }
@@ -498,33 +468,12 @@ public class BillingService {
     }
   }
 
-  // UPDATE SEATS (Pro tier only, takes effect next cycle)
+  // UPDATE SEATS (legacy endpoint; org seat-adjust is the gateway-synced path)
 
   public BillingStatusResponse updateSeats(String userId, int newTotalSeats) {
-    BillingSubscription sub =
-        subRepo
-            .findActiveByUserId(userId)
-            .orElseThrow(() -> new BillingException("No active subscription."));
-
-    BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElseThrow();
-
-    if (newTotalSeats < plan.getIncludedSeats()) {
-      throw new BillingException(
-          "Cannot reduce below included seats (" + plan.getIncludedSeats() + ").");
-    }
-
-    int extraSeats = newTotalSeats - plan.getIncludedSeats();
-    sub.setTotalSeats(newTotalSeats);
-    sub.setExtraSeats(extraSeats);
-    subRepo.save(sub);
-
-    log.info(
-        "Seats updated: user={}, totalSeats={}, extraSeats={} (effective next cycle)",
-        userId,
-        newTotalSeats,
-        extraSeats);
-
-    return getStatus(userId);
+    throw new BillingException(
+        "Seat changes must use the org seat-adjust workflow so the payment gateway and local"
+            + " subscription stay in sync.");
   }
 
   // GET BILLING STATUS
@@ -825,12 +774,13 @@ public class BillingService {
       return;
     }
 
-    // Credit the runs
     String paymentId = payload.path("payload").path("payment").path("entity").path("id").asText("");
-    topup.setGatewayPaymentId(paymentId);
-    topup.setRemaining(topup.getQuantity());
-    topup.setStatus("ACTIVE");
-    runTopupRepo.save(topup);
+    int activated = runTopupRepo.activatePendingPurchase(orderId, paymentId, Instant.now());
+    if (activated == 0) {
+      log.debug("Top-up webhook lost activation race: orderId={}", orderId);
+      return;
+    }
+    topup = runTopupRepo.findByGatewayOrderId(orderId).orElse(topup);
 
     log.info(
         "Top-up credited via webhook: orderId={}, quantity={}, userId={}",
@@ -936,6 +886,7 @@ public class BillingService {
   }
 
   private void handleStripeCheckoutCompleted(JsonNode session) {
+    String stripeCheckoutSessionId = session.path("id").asText("");
     String stripeSubscriptionId = session.path("subscription").asText("");
     String stripeCustomerId = session.path("customer").asText("");
     String billingEntityId = session.path("metadata").path("billing_entity_id").asText("");
@@ -994,9 +945,18 @@ public class BillingService {
     // roadmap; every org runs on the unified 'executespec' surface, so
     // there's no discriminator to set anymore.
 
-    // Find subscription by gateway subscription ID
+    // Find subscription by gateway subscription ID. During checkout creation this row stores the
+    // checkout-session id (cs_...) because Stripe has not returned the subscription id yet; the
+    // completed webhook is the bridge that rewrites it to the durable sub_... id used by invoice
+    // and cancellation webhooks.
     BillingSubscription sub =
         subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
+    if (sub == null && !stripeCheckoutSessionId.isBlank()) {
+      sub = subRepo.findByGatewaySubscriptionId(stripeCheckoutSessionId).orElse(null);
+      if (sub != null) {
+        sub.setGatewaySubscriptionId(stripeSubscriptionId);
+      }
+    }
     if (sub == null) {
       // Create subscription record if checkout was initiated outside our flow
       log.info(
@@ -1012,6 +972,15 @@ public class BillingService {
     sub.setGatewayCustomerId(stripeCustomerId);
     sub.setCurrentPeriodStart(Instant.now());
     sub.setTotalSeats(seatQuantity);
+    AppUser checkoutUser = userRepo.findById(sub.getUserId()).orElse(null);
+    if (checkoutUser != null) {
+      BillingPlan checkoutPlan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
+      if (checkoutPlan != null) {
+        retireExistingSubscriptionForActivation(sub, checkoutPlan, checkoutUser);
+      }
+    } else {
+      log.warn("Stripe checkout completed for subscription with unknown user: {}", sub.getUserId());
+    }
     subRepo.save(sub);
 
     log.info(
@@ -1045,6 +1014,12 @@ public class BillingService {
     }
 
     // Extend subscription period
+    AppUser invoiceUser = userRepo.findById(sub.getUserId()).orElse(null);
+    if (invoiceUser != null) {
+      retireExistingSubscriptionForActivation(sub, plan, invoiceUser);
+    } else {
+      log.warn("Stripe invoice.paid for subscription with unknown user: {}", sub.getUserId());
+    }
     sub.setStatus("ACTIVE");
     sub.setCurrentPeriodStart(Instant.now());
     sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
@@ -1349,6 +1324,81 @@ public class BillingService {
                 subRepo.save(existing);
                 log.info("Deactivated FREE subscription {} for user {}", existing.getId(), userId);
               }
+            });
+  }
+
+  private void retireExistingSubscriptionForActivation(
+      BillingSubscription activatingSub, BillingPlan activatingPlan, AppUser user) {
+    subRepo
+        .findActiveByUserId(activatingSub.getUserId())
+        .ifPresent(
+            existing -> {
+              if (existing.getId().equals(activatingSub.getId())) {
+                return;
+              }
+
+              if ("FREE".equals(existing.getStatus())) {
+                existing.setStatus("REPLACED");
+                subRepo.save(existing);
+                log.info(
+                    "Deactivated FREE subscription {} for user {}",
+                    existing.getId(),
+                    activatingSub.getUserId());
+                return;
+              }
+
+              BillingPlan existingPlan =
+                  planRepo.findById(existing.getBillingPlanId()).orElse(null);
+              String existingTier = existingPlan != null ? existingPlan.getTier() : "FREE";
+              if (tierRank(activatingPlan.getTier()) <= tierRank(existingTier)) {
+                throw new BillingException(
+                    "Cannot activate "
+                        + activatingPlan.getTier()
+                        + " while "
+                        + existingTier
+                        + " is still active.");
+              }
+
+              log.info(
+                  "Finalizing paid upgrade after payment: user={}, {} → {}",
+                  activatingSub.getUserId(),
+                  existingTier,
+                  activatingPlan.getTier());
+              try {
+                if (existing.getGatewaySubscriptionId() != null) {
+                  String gw = existing.getPaymentGateway();
+                  if ("STRIPE".equalsIgnoreCase(gw)) {
+                    gatewayRouter.stripe().cancelSubscription(existing.getGatewaySubscriptionId());
+                  } else {
+                    razorpayGateway.cancelImmediately(existing.getGatewaySubscriptionId());
+                  }
+                }
+              } catch (Exception e) {
+                log.warn(
+                    "Failed to cancel old subscription on gateway after upgrade payment: {}",
+                    e.getMessage());
+              }
+
+              issueProratedRefund(existing, existingPlan, user);
+
+              existing.setStatus("UPGRADED");
+              subRepo.save(existing);
+
+              paymentAuditService.record(
+                  "USER",
+                  activatingSub.getUserId(),
+                  "SUBSCRIPTION_UPGRADED",
+                  existingTier,
+                  activatingPlan.getTier(),
+                  activatingSub.getUserId(),
+                  "Upgrade: " + existingTier + " → " + activatingPlan.getTier(),
+                  existing.getPaymentGateway(),
+                  null,
+                  null,
+                  null,
+                  null,
+                  activatingSub.getUserId(),
+                  activatingSub.getOrgId());
             });
   }
 

@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.security.CodeAbuseScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -35,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 public class EditFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
+  private final CodeAbuseScanner codeAbuseScanner;
 
   /**
    * PR-C (2026-05-13) — pushes {@code FILE_WRITTEN} events to RunDetail SSE subscribers the moment
@@ -195,6 +197,17 @@ public class EditFileTool implements Tool {
                 + applied.how()
                 + ")");
         idx++;
+      }
+      CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, working);
+      if (scanResult.flagged()) {
+        log.warn(
+            "editFile blocked by CodeAbuseScanner path={} category={} detail={}",
+            path,
+            scanResult.category(),
+            scanResult.detail());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "edited content matched a " + scanResult.category() + " pattern and cannot be written");
       }
       Files.writeString(resolved, working);
       // Ledger now reflects the post-edit content, so consecutive edits to this file don't trip the

