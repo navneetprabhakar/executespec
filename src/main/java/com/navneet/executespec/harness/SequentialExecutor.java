@@ -1594,7 +1594,10 @@ to boot — skip it for those.""";
     return composeSystemPrompt(task, designBlock, refDocs, projectType, workspaceSummary, null);
   }
 
-  /** Provider-fragment flag — see prompts/fragments/provider-{name}.md (RL-2026-05-052, T3.10). */
+  /**
+   * Provider-fragment flag — see prompts/fragments/provider/{name}/build.md and
+   * prompts/fragments/provider/{name}/patch.md (RL-2026-05-052, T3.10).
+   */
   public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
 
   /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
@@ -1643,10 +1646,10 @@ to boot — skip it for those.""";
       String provider) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
 
-    // 2026-05-28 (RL-2026-05-052, T3.10) — provider-specific prompt tuning. Each provider has
-    // characteristic failure modes (Anthropic narrates, OpenAI re-reads, Gemini cache thrashes,
-    // DeepSeek invents tool names). Per-provider fragment is appended to the base prompt when
-    // the flag is on. Default OFF (V219); flip per-run during eval to measure lift.
+    // 2026-05-28 (RL-2026-05-052, T3.10) — provider-specific BUILD prompt tuning. Each provider
+    // has characteristic failure modes (Anthropic narrates, OpenAI re-reads, Gemini cache thrashes,
+    // DeepSeek invents tool names). Per-provider build fragments are intentionally wire/discipline
+    // only: PATCH/SWE-bench reproduce-first guidance lives under provider/<name>/patch.md.
     if (provider != null
         && featureFlagService != null
         && featureFlagService.isEnabled(FLAG_PROVIDER_TUNING)) {
@@ -1838,9 +1841,10 @@ to boot — skip it for those.""";
   }
 
   /**
-   * Load the provider-specific tuning fragment ({@code prompts/fragments/provider-<name>.md}). The
-   * provider string is lower-cased; missing fragments resolve to "" and are skipped. Mirrors {@link
-   * #loadScaffoldForProjectType} dispatch style.
+   * Load the provider-specific BUILD tuning fragment ({@code
+   * prompts/fragments/provider/<name>/build.md}). The provider string is lower-cased; missing
+   * fragments resolve to "" and are skipped. Mirrors {@link #loadScaffoldForProjectType} dispatch
+   * style.
    */
   String loadProviderFragment(String provider) {
     if (provider == null || provider.isBlank()) return "";
@@ -1848,7 +1852,7 @@ to boot — skip it for those.""";
     try {
       org.springframework.core.io.Resource r =
           new org.springframework.core.io.ClassPathResource(
-              "prompts/fragments/provider-" + key + ".md");
+              "prompts/fragments/provider/" + key + "/build.md");
       if (!r.exists()) return "";
       return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
     } catch (Exception e) {

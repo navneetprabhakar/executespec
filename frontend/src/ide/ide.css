@@ -792,6 +792,13 @@
 .ide-resize:hover {
   background: var(--ide-accent);
 }
+.ide-mobile-file-picker {
+  display: none;
+  flex-shrink: 0;
+  padding: 10px;
+  border-bottom: 1px solid var(--ide-border);
+  background: var(--ide-bg-sidebar);
+}
 
 /* ───────── mobile / tablet (distinct layout) ───────── */
 .ide-mobilebar,
@@ -849,6 +856,12 @@
   .ide-split-files,
   .ide-split-info {
     display: none;
+  }
+  .ide-resize {
+    display: none;
+  }
+  .ide-mobile-file-picker {
+    display: block;
   }
   .ide-tabbar {
     display: flex;

@@ -18,7 +18,7 @@ export default defineConfig({
     //   VITE_BACKEND_URL=http://localhost:8081 npm --prefix frontend run dev
     port: Number(process.env.VITE_PORT ?? 5173),
     proxy: {
-      '/api': {
+      '^/api(?:/|$)': {
         target: process.env.VITE_BACKEND_URL ?? 'http://localhost:8080',
         // changeOrigin rewrites Host header to the backend, so Spring Security's
         // OAuth2 redirect_uri + Set-Cookie state get scoped to the backend host —

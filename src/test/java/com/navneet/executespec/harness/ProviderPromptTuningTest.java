@@ -64,7 +64,7 @@ class ProviderPromptTuningTest {
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(false);
     String prompt =
         newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "anthropic");
-    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC NOTES");
+    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC BUILD NOTES");
   }
 
   @Test
@@ -74,7 +74,7 @@ class ProviderPromptTuningTest {
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt =
         newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "anthropic");
-    assertThat(prompt).contains("PROVIDER-SPECIFIC NOTES (Anthropic");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (Anthropic");
   }
 
   @Test
@@ -83,7 +83,7 @@ class ProviderPromptTuningTest {
     FeatureFlagService ffs = mock(FeatureFlagService.class);
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt = newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "openai");
-    assertThat(prompt).contains("PROVIDER-SPECIFIC NOTES (OpenAI");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (OpenAI");
   }
 
   @Test
@@ -92,7 +92,17 @@ class ProviderPromptTuningTest {
     FeatureFlagService ffs = mock(FeatureFlagService.class);
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt = newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "gemini");
-    assertThat(prompt).contains("PROVIDER-SPECIFIC NOTES (Gemini");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (Gemini");
+  }
+
+  @Test
+  @DisplayName("flag ON + fireworks: Fireworks fragment appended")
+  void flagOn_fireworks_appended() {
+    FeatureFlagService ffs = mock(FeatureFlagService.class);
+    when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
+    String prompt =
+        newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "fireworks");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (Fireworks");
   }
 
   @Test
@@ -102,7 +112,7 @@ class ProviderPromptTuningTest {
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt =
         newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "deepseek");
-    assertThat(prompt).contains("PROVIDER-SPECIFIC NOTES (DeepSeek");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (DeepSeek");
   }
 
   @Test
@@ -112,7 +122,7 @@ class ProviderPromptTuningTest {
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt =
         newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "openrouter");
-    assertThat(prompt).contains("PROVIDER-SPECIFIC NOTES (OpenRouter");
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (OpenRouter");
   }
 
   @Test
@@ -121,7 +131,7 @@ class ProviderPromptTuningTest {
     FeatureFlagService ffs = mock(FeatureFlagService.class);
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt = newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "made-up");
-    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC NOTES");
+    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC BUILD NOTES");
   }
 
   @Test
@@ -130,6 +140,21 @@ class ProviderPromptTuningTest {
     FeatureFlagService ffs = mock(FeatureFlagService.class);
     when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
     String prompt = newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null);
-    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC NOTES");
+    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC BUILD NOTES");
+  }
+
+  @Test
+  @DisplayName("flag ON: build prompt does not inherit patch-only benchmark directives")
+  void flagOn_buildPromptExcludesPatchOnlyGuidance() {
+    FeatureFlagService ffs = mock(FeatureFlagService.class);
+    when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
+    String prompt =
+        newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "anthropic");
+
+    assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (Anthropic");
+    assertThat(prompt)
+        .doesNotContain("PROVIDER-SPECIFIC PATCH NOTES")
+        .doesNotContain("patch SOURCE ONLY")
+        .doesNotContain("scratch reproduction");
   }
 }
