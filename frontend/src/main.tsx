@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import {BrowserRouter} from 'react-router-dom';
 import App from './App';
 import './index.css';
+import AppErrorBoundary from '@/signal/components/AppErrorBoundary';
 // Signal is the only design — load its tokens + component CSS globally
 // so public routes (login, pricing, trust, etc.) get the chrome too.
 import '@/signal/signal.css';
@@ -48,8 +49,10 @@ if (typeof document !== 'undefined') {
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}>
-      <App />
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}>
+        <App />
+      </BrowserRouter>
+    </AppErrorBoundary>
   </React.StrictMode>,
 );

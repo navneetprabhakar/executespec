@@ -1,16 +1,12 @@
 # Product Hunt Launch Kit — ExecuteSpec
 
-> **⚠ NEEDS REFRESH (flagged 2026-04-28).** Hero/tagline copy + tier names in
-> this kit are pre-tier-coherence-fix. The new selling-point is
-> *"AI that ships pull requests your team will actually merge"* with
-> ~80% verified score as the proof. Tier names: FREE / PRO $20/mo /
-> TEAM $39/seat (was MAX $29) / ENTERPRISE. FAQ + ad copy below should be
-> rewritten before launch — the current v3 landing is the source of truth at
-> `frontend/src/v3/pages/V3Landing.tsx` and `website/index.html`.
->
-> Launch checklist + Day -1/0/+1 cadence below still valid.
+> **Refreshed 2026-06-10** (RL-2026-06-019 truth pass). All pricing/claims in this kit now match the
+> billing DB (Free / Pro $29 / Team $39/seat / Enterprise) and the honest-claims policy
+> (`docs/enterprise-one-pager.md`: no SOC 2, no SAML-end-to-end, no benchmark numbers until the
+> rebuilt eval lands). Source of truth for live copy: `website/index.html` + the app's
+> `PublicPricingPage`.
 
-_Branch: `feature/ux-overhaul-v1` · Prepared: 2026-04-21_
+_Prepared: 2026-04-21 · refreshed 2026-06-10_
 
 Everything we need to hit "ship it" on Product Hunt. US-first framing since that's where our traffic is coming from.
 
@@ -19,81 +15,75 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 | Field | Limit | Value |
 |---|---|---|
 | **Name** | 40 | `ExecuteSpec` |
-| **Tagline** | 60 | `Specify once. Ship verified code.` (36) |
-| **Alt tagline** | 60 | `The spec-first AI coding platform that actually reviews itself.` (59) |
+| **Tagline** | 60 | `AI that ships PRs your team actually merges` (44) |
+| **Alt tagline** | 60 | `Spec in. Verified, test-backed pull request out.` (49) |
 | **Description** | 260 | See §2 |
 | **Topics** | 3 | `Developer Tools` · `Artificial Intelligence` · `Productivity` |
-| **Pricing tag** | — | `Freemium` (Free → $20 Pro → $29 Max + BYOK → Enterprise) |
+| **Pricing tag** | — | `Freemium` (Free → $29 Pro → $39/seat Team BYOK → Enterprise) |
 | **Platforms** | — | `Web` |
 | **Website** | — | `https://executespec.ai` |
-| **Demo video** | — | TODO — 60-90s Loom: plan-approval gate → sequential worker → reviewer → verified 92 score |
+| **Demo video** | — | TODO — 60-90s: spec → plan gate (with price) → live execution → verified score → real PR |
 
 ## 2 · 260-char description (paste-ready)
 
-> ExecuteSpec turns structured specs into verified, tested code. Multi-agent pipeline (planner → sequential worker → reviewer) with a 0-100 verified score derived from build + test + reviewer signals — not LLM self-rating. Multi-repo projects, BYOK, $20/mo.
+> ExecuteSpec turns a plain-English spec into a verified pull request. You approve the plan — and the price — up front; a planner→worker→reviewer pipeline codes it, runs your tests, and ships a PR with a deterministic 0–100 verified score. Not LLM self-rating.
 
-(248 chars — fits.)
+(254 chars — fits.)
 
 ## 3 · Maker's first comment (post at t+00:00)
 
 > Hey Product Hunt ✋
 >
-> I built ExecuteSpec because "AI that writes code" is everywhere but "AI that actually ships code you can trust" still isn't. Every other tool hands you a diff and shrugs. We don't.
+> I built ExecuteSpec because "AI that writes code" is everywhere but "AI you can *delegate* to" still isn't. Every other tool hands you a diff and shrugs. We don't.
 >
 > **What's different:**
-> - **Verified score, not vibes.** Every run ends with a 0-100 score derived from the actual build passing, the actual tests running, and the reviewer agent finding (or not finding) wiring issues. Not the LLM grading its own homework.
-> - **Plan gate before execution.** You see the decomposed plan + cost estimate and approve before a single credit burns. No surprise bills.
-> - **Multi-repo projects.** Architecture doc, tech-debt panel, per-repo codemaps, project chat (RAG). The workspace understands your codebase, not just the file you pasted in.
-> - **Figma URL → design-compliance score.** Paste a Figma link, get back a 0-100 design-fidelity rating alongside the code.
-> - **React Native + Expo first-class.** Generate a full mobile app + scan QR code preview.
+> - **You approve the plan — and the price — first.** The planner decomposes your spec into tasks with a cost estimate. Credits are charged only when you approve, and refunded if the run fails. No surprise PRs, no surprise bills.
+> - **Verified score, not vibes.** Every run ends with a 0–100 score computed from the actual build passing, your actual test suite running in the workspace, and the reviewer agent finding (or not finding) wiring issues. Not the LLM grading its own homework.
+> - **Real PRs on your repos.** One repo or twenty — multi-repo projects with architecture docs, per-repo codemaps, a tech-debt panel, and project chat that knows your codebase.
+> - **Autofix on-ramps.** One click turns PR review comments, tech-debt categories, or code-scan findings into their own patch runs, each with its own PR.
 >
 > **How pricing works (because this is what trips everyone up):**
-> - **$1 = 1 credit.** No token translation. No dark-pattern credit math. Same rate for subscriptions and top-ups.
-> - **Free**: 5 runs, see the whole platform including a read-only demo project.
-> - **Pro ($20/mo)**: 20 credits = ~20 LOW runs, 5 HIGH runs, or 10 Mobile runs (mix as you like). All 3 providers, managed keys.
-> - **Max ($29/mo + BYOK)**: Unlimited runs on your own Anthropic/OpenAI/Gemini keys. Zero markup.
-> - **Enterprise**: Execution View (multi-repo launches), JIRA/Confluence inbound, SSO/SAML, RBAC.
+> - **1 credit ≈ $5 of model spend.** A run costs 1–N credits based on its estimate, shown before you approve.
+> - **Free**: 15 runs/month, no card. Small specs, $3/run cap.
+> - **Pro ($29/mo or $289/yr)**: 30 runs/month on managed keys — we pay the LLM. $5/run cap; bring your own key to lift it.
+> - **Team ($39/seat/mo, from 1 seat)**: BYOK — unlimited runs on your own Anthropic/OpenAI/Gemini keys, zero per-run markup. Org spend caps + approval thresholds.
+> - **Enterprise**: custom contract + signed DPA, per-org model matrix control, per-run model pins.
 >
 > **The hard truths:**
-> - Gemini HIGH-complexity runs currently use 10× more tokens than April baseline — we're working on it. Anthropic is cheapest on LOW/MEDIUM right now.
-> - Mobile accuracy caps at 65-78 across all 3 providers — planner tuning for RN+Expo is top of backlog.
-> - We publish real cost data, not aspirational marketing numbers. See `website/pricing-analysis.md` in the repo.
+> - We're early. No SOC 2 yet (it's on the roadmap — happy to fill in your security questionnaire), and we publish only what we can measure.
+> - Runs take 5–20 minutes. This is delegation, not autocomplete — start one, go do something else, come back to a scored PR.
 >
-> Would love your feedback — what trips you up on other spec/AI coding tools? What would make you switch?
+> Would love your feedback — what would it take for you to *trust* an AI-opened PR enough to review it like a teammate's?
 
 ## 4 · FAQ (for the thread)
 
 **Q: How is this different from Cursor / Windsurf / Claude Code?**
-A: Those are IDE copilots — they help you write code inline. ExecuteSpec is a delivery pipeline: spec goes in, verified PR comes out. Different problem. If you live in your IDE, Cursor is great. If you want to hand off a spec and come back to a merged PR with a 92/100 verified score, we're built for that.
+A: Those are copilots — they help you write code inline, and you validate the result. ExecuteSpec is a delivery pipeline: spec goes in, a verified PR comes out. If you live in your IDE, Cursor is great. If you want to hand off a spec and come back to a PR with a deterministic verified score, that's us. Many devs use both.
 
 **Q: Can I use my own API keys?**
-A: Yes. Max tier ($29/mo) is BYOK with zero markup — you pay Anthropic/OpenAI/Gemini directly, we charge flat for the platform. Free + Pro use our managed keys (we pay the provider).
-
-**Q: What gets generated — full apps or just snippets?**
-A: Full working projects. Latest runs have shipped: Spring Boot backends, React + Vite frontends, Python CLIs, Go microservices, React Native + Expo Android/iOS apps (with Hermes bundle), Rust libraries. Worker iteration caps are 30/50/75 by complexity.
+A: Yes. Team ($39/seat/mo) is BYOK — you pay Anthropic/OpenAI/Google directly, zero per-run markup; the seat fee covers the platform. Pro can optionally add a key to lift its $5/run cap. Free + Pro otherwise run on our managed keys.
 
 **Q: Why should I trust the verified score?**
-A: Because it's deterministic. Final build passed (20 points) + test pass rate (20 points scaled) + reviewer verdict (CLEAN=20 / FIXED=15 / UNRESOLVED=5 / FAILED=0) + baseline 40 − 5 per unfixed critical. No LLM self-rating. Formula is public in the codebase.
+A: Because it's deterministic and additive over real signals: code delivered (30) + build passing (25) + your own test suite's pass rate (20) + reviewer verdict (20) + unfixed criticals (5), averaged over the slots that actually fired. No LLM self-rating. The formula is public.
+
+**Q: What gets generated — full apps or just snippets?**
+A: Full working changes: Spring Boot backends, React + Vite frontends, Python CLIs, multi-repo features across existing codebases. There's also a library of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, …) and modernization recipes (JS→TS, Express→Fastify, …).
 
 **Q: GDPR / data handling?**
-A: Specs go only to the LLM provider you pick. All three contract to not train on customer data. Workspace data is GCP us-east4, encrypted at rest, TLS in transit. 30-day retention Free, 90-day Pro/Max, unlimited Enterprise. Full DPA on request.
+A: Specs go only to the LLM provider you pick; nobody trains on your code. Workspaces are wiped at run end. GDPR export + erasure are built into the product; signed DPA available. We're an early-stage company — we publish what's true today, and SOC 2 Type II is on the roadmap, not claimed.
 
 **Q: What's the catch?**
-A: Two:
-1. **HIGH-complexity runs are expensive.** Real cost: $1.28-$2.65 depending on provider. We transparently charge 4 credits ($4) for these and tell you the count before you approve. No stealth billing.
-2. **Mobile is still early.** RN+Expo runs ship but accuracy sits at 65-78. Planner tuning in progress.
-
-**Q: Roadmap?**
-A: Short-term: Gemini token bloat fix, mobile accuracy pass, Execution View GA. Medium: Anthropic prompt caching (big cost win), provider-aware credit pricing (you pay less for Gemini HIGH vs Anthropic HIGH). Long: a marketplace of validated spec templates.
+A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why the plan gate shows you the estimate and charges only on approval. (2) The verified score tells you where to *start* reviewing, not to skip reviewing — "Needs review" means exactly that.
 
 ## 5 · Launch checklist
 
-- [ ] **Day -14**: Assets ready — tagline, 260-char, 6 screenshots (dashboard, run detail, project view, architecture doc, validation report, mobile preview), 60-90s demo video, GIF hero
-- [ ] **Day -14**: `og:image` fixed — see §6
+- [ ] **Day -14**: Assets ready — tagline, 260-char, 6 screenshots (press-kit has them: dashboard, run detail, project overview, architecture viewer, validation report, score trend), 60-90s demo video, GIF hero
+- [ ] **Day -14**: Truth-pass ops checklist DONE (`docs/launch-readiness-2026-06-10.md`) — prod tier ladder verified, website deployed with `app.executespec.ai` CTAs, OG unfurl tested
 - [ ] **Day -7**: Hunter identified (warm DM, not cold). Back-up hunter confirmed
-- [ ] **Day -7**: Community warm-up: 3-5 IndieHackers / Hacker News "Show HN" posts about the problem (not the product); build upvote affinity
+- [ ] **Day -7**: Community warm-up: 3-5 IndieHackers / Hacker News "Show HN" posts about the problem (not the product)
+- [ ] **Day -7**: Founder pricing live (50% off lifetime, first 100 Pro) — Stripe coupon + Razorpay offer created and test-purchased
 - [ ] **Day -3**: Final screenshots + video locked. Upload to PH as draft
-- [ ] **Day -1**: Email list warm-up (current Free users) — "we're launching tomorrow, here's your Max tier discount"
+- [ ] **Day -1**: Email list warm-up (current Free users) — "we're launching tomorrow, founder pricing for the first 100"
 - [ ] **Day 0, 00:01 PT (12:31 IST)**: Launch. Post first maker comment immediately
 - [ ] **Day 0, +30 min**: Slack + Discord + LinkedIn + Twitter push
 - [ ] **Day 0, every 2h**: Reply to every comment. Don't upvote your own.
@@ -101,82 +91,66 @@ A: Short-term: Gemini token bloat fix, mobile accuracy pass, Execution View GA. 
 - [ ] **Day +1**: Follow-up post — "yesterday's findings" with the top 3 user questions
 - [ ] **Day +7**: Email all sign-ups from PH with onboarding tips + "what's next"
 
-## 6 · Missing assets (blocking)
+## 6 · Assets status
 
-1. **`website/images/og-hero.png`** — 1200×630 OG image. Currently the `<meta property="og:image">` tag at `website/index.html:30` points to a file that doesn't exist. Social shares have no preview card.
-2. **Logo variants** — we have `website/images/logo.png` referenced but no `website/images/` directory yet. Need: logo light, logo dark, logo mark-only (square), favicon .ico.
-3. **Screenshots (6 needed)** — dashboard, run detail (showing verified score + signal breakdown chip), project overview tab (showing tech debt panel + generated docs), architecture viewer, validation report, mobile preview with QR code.
-4. **Demo video** — 60-90s Loom. Script: (a) paste spec → plan gate (5s), (b) approve + watch tasks execute via SSE (20s), (c) reviewer passes (10s), (d) verified 92 score + open PR (15s), (e) mobile app QR preview (10s).
-5. **Hunter** — someone with >500 followers who has hunted at least 3 products in the last 90 days. Ideally a dev-tools enthusiast.
+1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
+2. ✅ **Screenshots** — `website/press-kit/` has ss-01…ss-05b + score-trend. Re-capture any that show old pricing/chrome.
+3. ⬜ **Demo video** — 60-90s. Script: (a) paste spec → plan gate shows tasks + price (10s), (b) approve → watch tasks execute via live log (20s), (c) reviewer passes (10s), (d) verified score + real PR on GitHub (15s), (e) share the verified report link (5s).
+4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
+5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 
 ## 7 · Copy variants
 
-**Hero variant A (current landing):**
-`Specify once. Ship verified code.`
+**Hero (current landing):**
+`AI that ships pull requests your team actually merges.`
 
-**Hero variant B (more aggressive):**
-`AI that ships merged PRs. Not AI that writes code for you to clean up.`
+**Variant B (delegation frame):**
+`Delegate the spec. Approve the plan and the price. Merge the PR.`
 
-**Hero variant C (technical):**
-`Specs in. Verified 0-100 scored code out. Multi-agent. Multi-repo. BYOK.`
+**Variant C (technical):**
+`Spec in. Verified 0–100-scored PR out. Plan gate. Multi-repo. BYOK.`
 
 **Twitter blurb (280 chars):**
 `Most AI coding tools hand you a diff and shrug.
-ExecuteSpec runs a planner → worker → reviewer pipeline with a deterministic 0-100 verified score from build + tests + reviewer signals. $20/mo, 20 credits, no token math. Live on @ProductHunt today.
+ExecuteSpec runs planner → worker → reviewer on your spec, runs YOUR tests, and opens a PR with a deterministic 0–100 verified score. You approve the plan — and the price — first. Live on @ProductHunt today.
 https://executespec.ai`
 
-**LinkedIn post (for engineering-leader audience):**
-> If your team ships 50 PRs a week via an "AI coding" tool, how many of those PRs does your SEM actually trust without a full read?
+**LinkedIn post (engineering-leader audience):**
+> If your team ships 50 PRs a week via an "AI coding" tool, how many of those PRs do your seniors actually trust without a full read?
 >
-> ExecuteSpec is built on the premise that "trust" is a measurable output, not a vibe. Every run ends with a 0-100 verified score derived from:
-> - Final build status (binary: did `mvn package` / `npm run build` pass?)
-> - Test pass rate (fraction, scaled)
-> - Reviewer agent verdict (did the wiring pass find unresolved issues?)
+> ExecuteSpec is built on the premise that trust is a measurable output, not a vibe. Every run ends with a 0–100 verified score derived from: did the build pass, what fraction of YOUR test suite passed in the workspace, and did the reviewer agent find unresolved wiring issues. No LLM self-rating.
 >
-> No LLM self-rating. No "looks good to me" hallucinations. Just signals that map to real CI/CD gates.
+> And before any of that runs, you approve the plan — with a cost estimate — at a gate. Credits charge on approval, refund on failure.
 >
-> $20/mo for 20 credits (20 runs). $29/mo + BYOK for unlimited. Enterprise for multi-repo + SSO + RBAC.
->
-> Live on Product Hunt today: [link]
+> Free: 15 runs/mo. Pro $29/mo. Team $39/seat BYOK (your keys, zero markup). Live on Product Hunt today: [link]
 
 ## 8 · Advertising kickoff (US-targeted)
 
 **Google Ads — search campaign (start at $50/day):**
 
-Keywords:
-- `ai code review tool` (high intent)
-- `spec driven coding` (category creation)
-- `cursor alternative` (competitor steal)
-- `claude code alternative`
-- `ai pair programmer enterprise`
+Keywords: `ai code review tool` · `spec driven development tool` · `cursor alternative` · `claude code alternative` · `ai coding agent for teams`
 
 Ad group 1 — alternatives steal:
-> **Headline 1:** ExecuteSpec — Ship, Don't Just Write
-> **Headline 2:** 0-100 Verified Score on Every Run
-> **Headline 3:** The Cursor Alternative for Teams
-> **Description:** Spec-driven AI coding with deterministic scoring, multi-repo projects, BYOK. $20/mo Pro, $29/mo Max unlimited.
-> **CTA:** Start free → 5 runs, no card
+> **H1:** ExecuteSpec — Ship, Don't Just Write
+> **H2:** 0-100 Verified Score on Every Run
+> **H3:** Delegate Specs, Merge Verified PRs
+> **Description:** Plan gate with price up front. Deterministic verified score. Multi-repo, BYOK. Free 15 runs/mo; Pro $29/mo; Team $39/seat.
+> **CTA:** Start free → no card
 
 Ad group 2 — problem-aware:
-> **Headline 1:** Stop Babysitting AI Code
-> **Headline 2:** Multi-Agent Pipeline With Verification
-> **Headline 3:** Verified Code, Not Just Code
-> **Description:** Structured spec → planner → worker → reviewer → 0-100 score. Multi-repo, Figma→code, RN+Expo. Free tier available.
+> **H1:** Stop Babysitting AI Code
+> **H2:** Your Tests Decide the Score
+> **H3:** Verified Code, Not Just Code
+> **Description:** Spec → plan you approve → worker → reviewer → PR with a 0-100 verified score from build + tests + review. Free tier available.
 > **CTA:** See how it works →
 
 **Meta Ads — retargeting + lookalike (start at $30/day):**
-
-Creative: 15s screen-capture video — plan gate → live SSE log → verified 92 score banner → "Ship this" button flashing.
-
-Audience: lookalike of current Free sign-ups; exclude existing Pro/Max.
-
-Copy: `AI tools write code. ExecuteSpec ships it. 0-100 verified score on every run.`
+Creative: 15s screen-capture — plan gate with price → live log → verified score banner → real GitHub PR.
+Copy: `AI tools write code. ExecuteSpec ships it — with a verified score your team can trust.`
 
 **LinkedIn Ads — engineering leader targeting ($75/day):**
-
-Targeting: Senior Software Engineer / Engineering Manager / VP Eng at 50-500 person companies in the US + Canada + UK.
-
-Creative: carousel — slide 1 "The problem" (50% of AI-generated PRs need rework), slide 2 "Verified score", slide 3 "Multi-repo projects", slide 4 "Pricing", slide 5 "Start free".
+Targeting: Senior SWE / EM / VP Eng at 50–500-person companies, US + Canada + UK.
+Carousel: 1 "The problem" (AI PRs nobody trusts) · 2 "Plan gate with price" · 3 "Verified score from YOUR tests" · 4 "Pricing" · 5 "Start free".
 
 ## 9 · Success metrics
 
@@ -187,16 +161,15 @@ Creative: carousel — slide 1 "The problem" (50% of AI-generated PRs need rewor
 | Landing page uniques | 5k | 15k | 50k |
 | Free sign-ups | 200 | 600 | 2,000 |
 | Pro conversions | 10 (5%) | 40 | 150 |
-| Max conversions | 2 | 8 | 30 |
-| $ MRR added | $220 | $880 | $3,270 |
+| Team seats | 2 | 8 | 30 |
+| $ MRR added | $368 | $1,472 | $5,520 |
 
-_MRR model: Pro = $20 × count, Max = $29 × count. Does not include top-ups._
+_MRR model: Pro = $29 × count (founder-50 halves the first 100), Team = $39 × seats. Track via the in-app 6-stage activation funnel (SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED)._
 
 ## 10 · Post-launch follow-ups (P1)
 
-1. **Wire Stripe top-up flow** — `BillingController.purchaseTopup` currently only routes to Razorpay. Need: polymorphic `TopupOrderInitResult` (Razorpay order fields OR Stripe checkout URL), `RunTopupService.initiatePurchase(gateway, successUrl, cancelUrl)` branch, `BillingService.processStripeWebhook` `type=topup` handler, `TopupPackage.stripePriceId` column. ~4-6 files, 1 migration, billing-critical (test against Stripe test mode).
-2. **Country-aware gateway routing** — `BillingEntity.getCountry()` currently doesn't exist. Add to interface + `AppUser`/`Organization`. `PaymentGatewayRouter.resolveDefault` branch: `country == "IN"` → Razorpay, else → Stripe. Today the fallback is `defaultGateway` string.
-3. **Currency-gateway-map actually wired** — `application.yml:587-591` declared but never read. Trivial: inject `@Value("#{${billing.currency-gateway-map}}")` into the router.
-4. **Stripe refund path** — `BillingService.issueProratedRefund` has a TODO comment at line 961. Upgrades on Stripe currently skip the prorated refund silently.
-5. **`og:hero.png` + `website/images/` directory** — blocking for social shares.
-6. **Demo Loom + 6 screenshots** — blocking for Product Hunt gallery.
+1. **Stripe top-up flow** — `BillingController.purchaseTopup` routes only to Razorpay today; Stripe path needs the checkout-URL variant + webhook handler + `TopupPackage.stripePriceId`.
+2. **Country-aware gateway routing** — route `country == "IN"` → Razorpay, else Stripe (today it's the `defaultGateway` string).
+3. **Stripe refund path** — `BillingService.issueProratedRefund` TODO; upgrades on Stripe currently skip the prorated refund silently.
+4. **TEAM yearly plans** — V165 deactivated the $49-era yearly rows and no $39-based replacement landed; decide + seed if annual Team demand shows up.
+5. **Benchmark re-run** — publish the rebuilt-harness SWE-bench numbers (with the honest small-N framing) once they land; until then the proof asset is the verified-report gallery.

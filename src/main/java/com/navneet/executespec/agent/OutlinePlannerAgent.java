@@ -1,7 +1,5 @@
 package com.navneet.executespec.agent;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -25,7 +23,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -49,6 +46,7 @@ public class OutlinePlannerAgent {
   private final Metrics metrics;
   private final ModelResolver modelResolver;
   private final FeatureFlagService featureFlagService;
+  private final PromptAssembler promptAssembler;
 
   /**
    * v2.6.2 slice 5b — used by {@link #synthesizeSingleShot} to give the bypass path a sensible run
@@ -340,7 +338,7 @@ public class OutlinePlannerAgent {
             .replace("{{PROJECT_ADRS}}", req.projectAdrs() == null ? "" : req.projectAdrs())
             .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
             .replace("{{MOBILE_PREFERENCE_BLOCK}}", "")
-            .replace("{{PR_REVIEW_COMMENTS}}", "");
+            .replace("{{PR_REVIEW_COMMENTS}}", renderPrReviewCommentsBlock(req.prReviewComments()));
 
     String userMsg =
         (retryFeedback == null || retryFeedback.isBlank())
@@ -502,8 +500,9 @@ public class OutlinePlannerAgent {
 
   private String loadPrompt(String path) {
     try {
-      return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
-    } catch (IOException e) {
+      String rel = path.startsWith("prompts/") ? path.substring("prompts/".length()) : path;
+      return promptAssembler.assemble(rel);
+    } catch (Exception e) {
       throw new IllegalStateException("OutlinePlanner prompt missing at " + path, e);
     }
   }
@@ -520,6 +519,11 @@ public class OutlinePlannerAgent {
            The user requested test-first ordering. Lead with test tasks. Implementation
            tasks must declare `dependsOn` the test task IDs they implement against.
            """;
+  }
+
+  private static String renderPrReviewCommentsBlock(String prReviewComments) {
+    if (prReviewComments == null || prReviewComments.isBlank()) return "";
+    return "## PR review feedback to address\n\n" + prReviewComments.strip();
   }
 
   /** Delegates to {@link PlannerOutputUtils#resolveProviderForTitle}. */

@@ -3,14 +3,14 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
-import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 
 type Repo = Record<string, unknown>;
+// Relative timestamps everywhere (review/11 #8) — absolute locale strings were
+// ambiguous (DD/MM vs MM/DD) and inconsistent with the Console chrome.
 function fmtWhen(iso?: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+  return relTime(iso);
 }
 
 // Real IDE project workspace — replaces the Signal ProjectComposePage. Project

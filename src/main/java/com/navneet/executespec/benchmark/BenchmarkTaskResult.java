@@ -57,6 +57,16 @@ public class BenchmarkTaskResult {
   @Builder.Default
   private BigDecimal costUsd = BigDecimal.ZERO;
 
+  /** LLM input tokens for this attempt's ExecuteSpec run (V238). */
+  @Column(name = "input_tokens", nullable = false)
+  @Builder.Default
+  private long inputTokens = 0;
+
+  /** LLM output tokens for this attempt's ExecuteSpec run (V238). */
+  @Column(name = "output_tokens", nullable = false)
+  @Builder.Default
+  private long outputTokens = 0;
+
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();

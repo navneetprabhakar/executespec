@@ -16,6 +16,8 @@ uv pip install "harbor==0.13.1"
 
 # the ExecuteSpec remote-brain agent (version-controlled in the repo)
 cp "$REPO/infra/benchmark/tb/es_harbor_agent.py" "$TB_DIR/es_harbor_agent.py"
+# the in-app /benchmark bridge (run-tb.sh launches it from the repo path; copy here too)
+cp "$REPO/infra/benchmark/tb/tb-bench-bridge.py" "$TB_DIR/tb-bench-bridge.py"
 
 echo "✅ TB harness ready in $TB_DIR (harbor $(./.venv/bin/harbor --version 2>/dev/null || echo 0.13.1) + es_harbor_agent)."
 echo "   Dataset auto-caches to ~/.cache/harbor on first run (89 tasks)."

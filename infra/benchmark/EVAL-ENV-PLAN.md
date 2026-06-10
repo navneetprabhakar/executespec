@@ -128,10 +128,15 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 
 | File | Role |
 |---|---|
-| `scripts/setup-tb.sh` | one-time: uv + **harbor 0.13.1** venv in `~/tbench` + the `es_harbor_agent` from `tb/` |
-| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), harbor run, live tracker, GCS results sync |
+| `scripts/setup-tb.sh` | one-time: uv + **harbor 0.13.1** venv in `~/tbench` + the `es_harbor_agent` **and `tb-bench-bridge.py`** from `tb/` |
+| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), harbor run, live HTML tracker **+ the in-app `/benchmark` bridge** (resolved%+cost+tokens), GCS results sync |
 | `scripts/tb-tracker.py` | live **visual dashboard** (per-task grid + metrics, auto-refresh) → HTML to GCS + Telegram pings |
+| `scripts/submit-tb.sh` | submit ONE finished job to the public leaderboard (`harbor upload --public`) + post `SUBMITTED{url}` to `/benchmark` (run manually per model after validation; needs `harbor auth login`) |
 | `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`) |
+| `tb/tb-bench-bridge.py` | the in-app `/benchmark` bridge — one `TASK_SCORED` per trial (reward + esRunId + cost + **input/output tokens** from each `result.json`) → the V236/V238 tracking dashboard |
+
+**Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
+locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.
 
 **Why persistent jobs_dir:** the laptop runs wrote to `/tmp/es-tb-jobs` and a **reboot wiped them** (2026-06-09). `run-tb.sh` writes to `~/es-tb-jobs` + syncs to GCS so results survive reboot/stop-start/teardown.
 

@@ -2,7 +2,6 @@ import {
   CredentialSummary,
   DeployAnalysisResult,
   DeploymentSummary,
-  RunDetail,
   ValidationResult,
   req,
 } from './core';
