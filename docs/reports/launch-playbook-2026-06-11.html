@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ExecuteSpec — Launch Playbook · 2026-06-11</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0e1014; --bg-2: #14171d; --surface: #181c24; --surface-2: #1e2330;
+    --border: #2a3140; --fg: #e8ebf2; --fg-muted: #98a2b6; --fg-dim: #6b7488;
+    --blue: #5b8def; --blue-soft: rgba(91,141,239,0.14);
+    --mint: #46c08a; --mint-soft: rgba(70,192,138,0.14);
+    --amber: #d9a441; --amber-soft: rgba(217,164,65,0.14);
+    --red: #e5534b;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font-family:'JetBrains Mono','SF Mono','Menlo',monospace; font-size:12.5px;
+    line-height:1.55; letter-spacing:-0.1px; }
+  .page { max-width: 880px; margin: 0 auto; padding: 42px 38px 56px; }
+  header { display:flex; align-items:baseline; justify-content:space-between;
+    padding-bottom:18px; border-bottom:1px solid var(--border); }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--blue);
+    color:#fff; font-weight:700; font-size:17px; display:flex; align-items:center; justify-content:center; }
+  h1 { font-size:21px; margin:0; letter-spacing:-0.4px; }
+  .sub { color: var(--fg-muted); font-size: 11.5px; }
+  h2 { font-size:14px; margin:34px 0 10px; color:var(--blue); letter-spacing:0.3px;
+    text-transform:uppercase; }
+  h2 .n { color:var(--fg-dim); margin-right:8px; }
+  p { margin: 8px 0; color: var(--fg); }
+  .muted { color: var(--fg-muted); }
+  .dim { color: var(--fg-dim); }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:11.5px; }
+  th { text-align:left; color:var(--fg-dim); font-weight:600; text-transform:uppercase;
+    font-size:10px; letter-spacing:0.5px; padding:7px 10px; border-bottom:1px solid var(--border); }
+  td { padding:7px 10px; border-bottom:1px solid var(--bg-2); vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; margin:10px 0; }
+  .callout { background:var(--blue-soft); border:1px solid rgba(91,141,239,0.4);
+    border-radius:10px; padding:12px 16px; margin:12px 0; }
+  .chip { display:inline-block; padding:1px 9px; border-radius:999px; font-size:10px;
+    font-weight:700; letter-spacing:0.4px; }
+  .chip.ok { background:var(--mint-soft); color:var(--mint); border:1px solid var(--mint); }
+  .chip.warn { background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber); }
+  .chip.todo { background:var(--blue-soft); color:var(--blue); border:1px solid var(--blue); }
+  code { background:var(--surface-2); border-radius:5px; padding:1px 6px; font-size:11px; color:var(--fg); }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:4px 0; }
+  .big { font-size:15px; font-weight:600; }
+  .accent { color: var(--blue); }
+  .mint { color: var(--mint); }
+  .amber { color: var(--amber); }
+  .pillars { display:flex; gap:10px; margin:12px 0; }
+  .pillar { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .pillar b { color:var(--blue); display:block; margin-bottom:5px; }
+  .pagebreak { page-break-before: always; }
+  footer { margin-top:38px; padding-top:14px; border-top:1px solid var(--border);
+    color:var(--fg-dim); font-size:10.5px; display:flex; justify-content:space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="brand">
+    <div class="logo">E</div>
+    <div>
+      <h1>Launch Playbook</h1>
+      <div class="sub">ExecuteSpec · founder reference · verified against code &amp; migrations</div>
+    </div>
+  </div>
+  <div class="sub">2026-06-11 · RL-2026-06-019 / -020</div>
+</header>
+
+<h2><span class="n">01</span>Where you stand</h2>
+<p class="big">You are not lacking product — you're finishing a consistency-and-proof push.</p>
+<table>
+  <tr><th>Track</th><th>State</th></tr>
+  <tr><td>Public claims — pricing, compliance, capabilities</td><td><span class="chip ok">DONE</span> &nbsp;truthful + unified everywhere (commit <code>1be342eb</code>)</td></tr>
+  <tr><td>UX wave 1 (review/11 defects)</td><td><span class="chip ok">DONE</span> &nbsp;shipped + live-verified 375px/desktop (commit <code>26ab3f66</code>)</td></tr>
+  <tr><td>Trust-number bugs — score-on-Gradle · OpenRouter $0 cost · Stripe activation</td><td><span class="chip warn">IN FLIGHT</span> &nbsp;the only engineering launch gates</td></tr>
+  <tr><td>Benchmarks</td><td><span class="chip warn">RE-RUNNING</span> &nbsp;all public surfaces number-free until the rebuilt eval lands</td></tr>
+  <tr><td>Console-as-default chrome</td><td><span class="chip todo">YOUR CALL</span> &nbsp;preview via the “Try Console ⤴” status-bar button</td></tr>
+  <tr><td>Ops — prod URL, coupons, alerts, status page</td><td><span class="chip todo">CHECKLIST</span> &nbsp;§7</td></tr>
+</table>
+<div class="callout">The one-sentence thesis: <b>you built a trust machine; launch is the moment every surface
+says the same true thing about it.</b></div>
+
+<h2><span class="n">02</span>The story</h2>
+<p class="big accent">“AI that ships pull requests your team actually merges.”</p>
+<p class="muted">The frame: between copilots (you drive every keystroke) and full-autonomy agents (black box,
+surprise bills) sits <b class="accent">delegation with a contract</b> — approve the scope and the price up front,
+get back a PR with a receipt.</p>
+<div class="pillars">
+  <div class="pillar"><b>1 · Plan gate</b>Approve the plan and the price before a token is spent. Credits charge at approval, refund on failure.</div>
+  <div class="pillar"><b>2 · Verified score</b>Deterministic 0–100: code 30 · build 25 · your tests 20 · reviewer 20 · criticals 5. Never self-rating. <span class="mint">This is the brand.</span></div>
+  <div class="pillar"><b>3 · Your repos, your keys</b>Real PRs from your GitHub identity. BYOK with zero per-run markup.</div>
+</div>
+<p><b>Say:</b> verified score · plan gate · spec · run · receipt · merge-able PR.<br/>
+<b class="amber">Don’t say:</b> SOC 2 (until certified) · trial (none exists) · Solo (retired — it’s Pro) ·
+ExecuteSpec-bot (PRs use the caller’s PAT) · IDE jargon in marketing.</p>
+<p><b>Lead:</b> spec → plan gate → verified PR · the score · BYOK. &nbsp;<b>Support:</b> readymade library ·
+autofix · project workbench. &nbsp;<b>Hide/beta:</b> benchmark dashboards · TB/SWE adapters · CLI + VS Code
+(“beta”) · pause/resume · standards/contracts/ADRs (sell as Enterprise governance, don’t demo).</p>
+
+<h2><span class="n">03</span>Packaging — the canonical ladder (matches the DB)</h2>
+<div class="callout">The metering sentence, verbatim on every surface: <b>“A run costs credits — 1 credit ≈ $5 of
+model spend — charged only when you approve the plan, refunded if the run fails.”</b></div>
+<table>
+  <tr><th>Tier</th><th>Price</th><th>Includes</th><th>Cap</th></tr>
+  <tr><td><b>FREE</b></td><td>$0</td><td>15 runs/mo · small (1-credit) specs · 1 project · 1 repo · managed keys</td><td>$3/run</td></tr>
+  <tr><td><b>PRO</b></td><td>$29/mo · $289/yr (−17%) · ₹2,499</td><td>30 runs/mo · managed keys · PR review + code review (4 scans/mo) · 2 projects × 2 repos</td><td>$5/run — BYOK lifts it</td></tr>
+  <tr><td><b>TEAM</b></td><td>$39/seat/mo · ₹3,399 · from 1 seat · <b>monthly only</b></td><td>BYOK, zero markup · unlimited runs · 5 projects · cross-repo · sharing · unlimited reviews · autofix</td><td>none (org spend caps + approval thresholds)</td></tr>
+  <tr><td><b>ENTERPRISE</b></td><td>custom</td><td>Team + MSA + signed DPA · model-matrix override + per-run pins · OpenRouter gateway · standards/contracts/ADRs · audit trail · repo allowlists</td><td>none</td></tr>
+</table>
+<div class="card"><b>Facts that bite if forgotten:</b> Pro is LISTED (V176; V185 retired only the “Solo” name) ·
+Team yearly does not exist (V165) · top-ups expire in 90 days · no trial mechanics exist ·
+<b class="mint">founder pricing = 50% off for life, first 100 Pro</b> (V177) — dormant until the Stripe coupon +
+Razorpay offer exist and a test purchase shows the discount. Enterprise hard rules (one-pager): never claim
+SAML end-to-end, SOC 2 complete, dedicated region, hard uptime SLA.</div>
+
+<div class="pagebreak"></div>
+
+<h2><span class="n">04</span>The truth pass — what changed</h2>
+<table>
+  <tr><th>Surface</th><th>Was → Now</th></tr>
+  <tr><td><code>website/index.html</code></td><td>Catalog-soup title → hero line · SOLO→PRO with DB-true bullets · “500 credits / $25 cap / 14d trial / never-expire / ExecuteSpec-bot / SOC 2 / SSO+SCIM / 99.9% SLA” removed · <b>all CTAs dev → app.executespec.ai</b></td></tr>
+  <tr><td><code>website/llms.txt</code></td><td>Full rewrite (was $20 Pro · 5-run free · 2-seat min · “~80% score” · /v3/ routes)</td></tr>
+  <tr><td>App pricing page</td><td>3 hardcoded tiers (no Pro; fake “$31 yearly” Team) → 4 DB-true tiers + metering sentence</td></tr>
+  <tr><td>App trust page</td><td>SOC 2 “Ready” / pen-test rows → honest 8-layer story + “SOC 2 on the roadmap, ask us”</td></tr>
+  <tr><td>Legal (DPA/Terms)</td><td>SOC 2/ISO claims → true measures · “credits never expire” → cycle reset + top-up validity</td></tr>
+  <tr><td><code>frontend/index.html</code></td><td>No meta tags → full OG/twitter — shared verified reports now unfurl</td></tr>
+  <tr><td>Login panel</td><td>“BYOK bypasses the cost cap” → “Deterministic verified score on every PR”</td></tr>
+  <tr><td>SWE-bench brief</td><td>Marked <b>SUPERSEDED — do not quote</b> (old harness untracked the worker model)</td></tr>
+  <tr><td>PH kit</td><td>Rewritten current (tiers, additive score, honest hard-truths, asset status)</td></tr>
+</table>
+
+<h2><span class="n">05</span>UX</h2>
+<p><b>Verdict (review/11 + your instinct):</b> the screens are competently built — the <b>VS Code frame</b> and
+leaked internals are what feel bad. The web app’s job is mission control, not editing.</p>
+<div class="card"><b class="mint">Wave 1 shipped (26ab3f66), live-verified:</b> enums humanized · relative
+timestamps (absolute on hover) · ⌘K off touch · OpenAI/OpenRouter casing · “Recommended (default)” ·
+Production-vs-Prototype explainer · Pro cap $25→$5 · status-bar chip readable + 375px overflow fixed +
+“IDE · Beta” deleted · diff tints · first-run starter samples · PAT pre-flight · <b>verified score on the
+run-list wire</b> with 4-band badges (the score column previously read a field that never existed).</div>
+<div class="callout"><b>Pending decision — Console as default.</b> Preview both: status bar → <b>Try Console ⤴</b>
+(back: remove <code>es:console</code> from localStorage). On go: reframe Phases 2–4 — Home depth → mobile pass →
+flip default, retire the IDE shell (editor metaphor stays in run-result Code tabs + the VS Code extension).
+≈ 1 focused week.</div>
+<p><b>Wave-2 order:</b> ① Console flip · ② notification spam (auto-read + digest; fresh accounts show “9+”) ·
+③ typography split (mono = data, sans = prose) + ONE accent (kill coral-as-link) · ④ result-page action
+hierarchy + tab merge · ⑤ provider-first removal (rides the model-taxonomy rework, review docs 09/10).</p>
+
+<h2><span class="n">06</span>Proof policy (benchmarks re-running)</h2>
+<ul>
+  <li><b>Quote no benchmark numbers anywhere</b> until the rebuilt-harness run lands — 59%/52% and the 7%→67% uplift are invalidated (LOW-complexity work silently ran the LIGHTWEIGHT tier, untracked).</li>
+  <li><b>Launch proof instead:</b> 5–10 real specs on known OSS repos → publish the shared verified-report links as a gallery. The report IS the demo; OG tags now make the links unfurl.</li>
+  <li><b>When new numbers land:</b> refresh the brief + banner; optional honest line in llms.txt + PH kit (“measured blind through the production pipeline, N=…, CI=…”). “Competitive”, never “beats”.</li>
+</ul>
+
+<h2><span class="n">07</span>Ops before announcing (gates in bold)</h2>
+<ul>
+  <li><b>1 · Prod sells the right ladder</b> — <code>GET /api/billing/plans</code> on app.executespec.ai returns Free + Pro M/Y + Team M (both currencies); fix via <code>PUT /api/admin/tiers/{tier}</code>, never SQL.</li>
+  <li><b>2 · app.executespec.ai serves prod + signup works e2e</b> — all marketing CTAs point there; only then deploy <code>website/</code> (wrangler).</li>
+  <li><b>3 · The three trust-bug fixes land + re-verify</b> (fix sessions).</li>
+  <li>4 · Founder pricing live: coupon + offer + row + <b>test purchase shows 50%</b>.</li>
+  <li>5 · og-hero resolves on prod; a /shared link unfurls in Slack.</li>
+  <li>6 · Grafana alerts → Telegram bot; status page or explicit “email-only support” call.</li>
+  <li>7 · Demo video (script in PH kit §6) + report gallery.</li>
+  <li>8 · Non-blocking sweeps: pricing-analysis.md · tier-decision.md · press-kit README (pre-V176 numbers).</li>
+</ul>
+
+<h2><span class="n">08</span>The 14-day sequence</h2>
+<table>
+  <tr><th>Days</th><th>Work</th></tr>
+  <tr><td>1–2 (now)</td><td>Benchmarks re-run (you) · trust-bug fixes land (sessions) · Console decision (you — 10 min of clicking)</td></tr>
+  <tr><td>3–5</td><td>Wave-2 UX (Console flip if go) · ops §7 items 1–6 · founder pricing live</td></tr>
+  <tr><td>6–8</td><td>Demo video · OSS verified-report gallery · publish docs quickstart · deploy website</td></tr>
+  <tr><td>9–10</td><td>Soft launch: 10–20 design partners · white-glove · founder pricing · watch the funnel</td></tr>
+  <tr><td>11–14</td><td>Product Hunt / Show HN (kit is current) · reply cadence per PH kit §5</td></tr>
+</table>
+<p class="muted">Measure with the existing 6-stage funnel: SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED →
+PLAN_APPROVED → RUN_COMPLETE → PR_MERGED. The reframe’s success metric is SPEC_SUBMITTED → PLAN_APPROVED.</p>
+
+<h2><span class="n">09</span>Reference index</h2>
+<table>
+  <tr><td>Truth-pass commit</td><td><code>1be342eb</code> · RL-2026-06-019</td></tr>
+  <tr><td>UX wave-1 commit</td><td><code>26ab3f66</code> · RL-2026-06-020</td></tr>
+  <tr><td>Ops detail</td><td><code>docs/launch-readiness-2026-06-10.md</code></td></tr>
+  <tr><td>UX verdicts</td><td><code>review/11-ux-review.md</code> (local)</td></tr>
+  <tr><td>Console plan</td><td><code>docs/plans/web-control-plane-reframe.md</code> · Phases 2–4 pending</td></tr>
+  <tr><td>Enterprise claim rules</td><td><code>docs/enterprise-one-pager.md</code></td></tr>
+  <tr><td>PH kit</td><td><code>website/product-hunt-launch.md</code></td></tr>
+  <tr><td>Tier/billing truth</td><td>V165 · V176 · V177 · V185 · V200 · V206 · V207 + <code>resolveRunCostBudget</code></td></tr>
+</table>
+
+<footer>
+  <span>ExecuteSpec · Launch Playbook · 2026-06-11</span>
+  <span>md source: docs/launch-playbook-2026-06-11.md</span>
+</footer>
+
+</div>
+</body>
+</html>
