@@ -28,6 +28,14 @@ function fmtCost(c: number | string | null | undefined): string {
   return Number.isFinite(n) ? `$${n.toFixed(4)}` : '$0.0000';
 }
 
+function fmtTok(t: number | null | undefined): string {
+  const n = Number(t ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}K`;
+  return String(n);
+}
+
 function pct(resolved: number, total: number): number {
   return total > 0 ? Math.round((100 * resolved) / total) : 0;
 }
@@ -189,6 +197,9 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
         </span>
         <span style={{fontSize: 12, color: MUTED}}>k={r.k}</span>
         <span style={{fontSize: 12}}>{fmtCost(r.costUsd)}</span>
+        <span style={{fontSize: 12, color: MUTED}} title='input ↑ / output ↓ tokens'>
+          {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓ tok
+        </span>
         <span style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}>{relTime(r.createdAt)}</span>
       </div>
     </button>
@@ -218,7 +229,7 @@ function TaskTable({tasks}: {tasks: api.BenchmarkTaskResult[]}) {
       <table style={{width: '100%', borderCollapse: 'collapse'}}>
         <thead>
           <tr>
-            {['Task', 'Attempt', 'Result', 'Cost', 'Run'].map((h) => (
+            {['Task', 'Attempt', 'Result', 'Cost', 'Tokens', 'Run'].map((h) => (
               <th key={h} style={TH}>
                 {h}
               </th>
@@ -238,6 +249,9 @@ function TaskTable({tasks}: {tasks: api.BenchmarkTaskResult[]}) {
                 )}
               </td>
               <td style={TD}>{fmtCost(t.costUsd)}</td>
+              <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+                {fmtTok(t.inputTokens)}↑ {fmtTok(t.outputTokens)}↓
+              </td>
               <td style={TD}>
                 {t.esRunId ? (
                   <Link to={`/runs/${t.esRunId}`} style={{color: 'var(--ide-blue)'}}>

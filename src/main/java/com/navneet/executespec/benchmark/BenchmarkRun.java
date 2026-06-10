@@ -67,6 +67,16 @@ public class BenchmarkRun {
   @Builder.Default
   private BigDecimal costUsd = BigDecimal.ZERO;
 
+  /** Summed LLM input tokens across all scored attempts (V238). */
+  @Column(name = "input_tokens", nullable = false)
+  @Builder.Default
+  private long inputTokens = 0;
+
+  /** Summed LLM output tokens across all scored attempts (V238). */
+  @Column(name = "output_tokens", nullable = false)
+  @Builder.Default
+  private long outputTokens = 0;
+
   /** The Harbor job name (for `harbor upload` + the job dir). */
   @Column(name = "harbor_job_name", length = 120)
   private String harborJobName;
