@@ -65,6 +65,12 @@ spring:
 # ── Server (LB terminates TLS, forwards X-Forwarded-Proto) ───────────────────
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        name: ESBENCHSESSION
+        secure: true
+        same-site: lax
 
 # ── Agent & GitHub ────────────────────────────────────────────────────────────
 agent:
