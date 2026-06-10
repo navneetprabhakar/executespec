@@ -1,5 +1,7 @@
 You are compacting the EARLIER turns of a coding agent's work session into a tight progress note. The agent is mid-task and its conversation has grown too long; the oldest turns below will be REPLACED by your note, while the system prompt, the task, and the most recent turns are kept verbatim. Your note must let the agent continue without re-reading what it already learned.
 
+{{include:security-rules:worker}}
+
 The agent's task:
 {{WORKER_GOAL}}
 

@@ -225,6 +225,49 @@ export function runTitleFor(r: unknown): string {
   return 'Untitled run';
 }
 
+/**
+ * RL-2026-06-019 UX wave — proper display casing for provider enums. The raw
+ * values leaked into customer UI as "anthropic" / "Openrouter" / "Openai"
+ * (review/11 defect #6).
+ */
+const PROVIDER_LABELS: Record<string, string> = {
+  ANTHROPIC: 'Anthropic',
+  OPENAI: 'OpenAI',
+  GEMINI: 'Gemini',
+  GOOGLE: 'Gemini',
+  OPENROUTER: 'OpenRouter',
+  DEEPSEEK: 'DeepSeek',
+  FIREWORKS: 'Fireworks',
+};
+export function providerLabel(p?: string | null): string {
+  if (!p) return '';
+  const key = p.toUpperCase();
+  return PROVIDER_LABELS[key] ?? key.charAt(0) + key.slice(1).toLowerCase();
+}
+
+/**
+ * RL-2026-06-019 UX wave — humanize pipeline_run.status_reason for customer UI
+ * (the raw enum, e.g. CLEAN_COMPLETION, leaked onto the result header —
+ * review/11 defect #6). Returns '' for reasons not worth showing.
+ */
+const STATUS_REASON_LABELS: Record<string, string> = {
+  CLEAN_COMPLETION: 'Clean completion',
+  CLEAN_WITH_INTERMEDIATE_WARNINGS: 'Completed — intermediate warnings',
+  FINAL_BUILD_FAILED: 'Final build failed',
+  REVIEWER_UNRESOLVED: 'Reviewer found unresolved issues',
+  REVIEWER_FAILED: 'Reviewer pass failed',
+  ALL_TASKS_FAILED: 'All tasks failed',
+  LEGACY_UNKNOWN: '',
+};
+export function humanStatusReason(reason?: string | null): string {
+  if (!reason) return '';
+  const tests = /^TESTS_FAILED:(\d+)_OF_(\d+)$/.exec(reason);
+  if (tests) return `Tests failed (${tests[1]} of ${tests[2]})`;
+  if (reason in STATUS_REASON_LABELS) return STATUS_REASON_LABELS[reason];
+  const words = reason.replace(/_/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 // SWE-bench / harness specs embed multi-paragraph markdown (failing-test output,
 // gold-patch diff). On list views that pasted into the row title cell, making
 // rows indistinguishable. Pick the first non-blank line, strip the leading

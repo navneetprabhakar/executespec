@@ -1,14 +1,3 @@
-// Shared HTTP client + types for the api/* modules.
-import type {
-  ProjectDashboardDTO,
-  ProjectRepo,
-  ProjectRepoLink,
-  ArchitectureDoc,
-  ScoreEntry,
-  LinkRepoRequest,
-  RepoScope,
-} from '@/types/project';
-
 // Typed API client — all backend endpoints
 
 export const BASE = '/api';
@@ -82,7 +71,43 @@ export function parseErrorMessage(status: number, raw: string): string {
   return STATUS_MESSAGES[status] ?? `Request failed (${status}). Please try again.`;
 }
 
-export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
+let refreshInFlight: Promise<boolean> | null = null;
+
+function shouldAttemptRefresh(url: string): boolean {
+  return (
+    !!localStorage.getItem('access_token') &&
+    !url.startsWith('/auth/login') &&
+    !url.startsWith('/auth/register') &&
+    !url.startsWith('/auth/refresh') &&
+    !url.startsWith('/auth/logout')
+  );
+}
+
+async function refreshAccessTokenOnce(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(BASE + '/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+    })
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const text = await res.text();
+        if (!text.trim()) return false;
+        const json = JSON.parse(text) as {accessToken?: string};
+        if (!json.accessToken) return false;
+        localStorage.setItem('access_token', json.accessToken);
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
   // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
   // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
   // to fetch`. The catch site (RegisterPage / LoginPage / etc.) printed
@@ -94,10 +119,11 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   // path.
   let res: Response;
   try {
+    const headers = {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers};
     res = await fetch(BASE + url, {
-      headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
-      credentials: 'include', // send refresh_token cookie
       ...opts,
+      headers,
+      credentials: 'include', // send refresh_token cookie
     });
   } catch (e) {
     const reason = e instanceof Error ? e.message : 'unknown';
@@ -105,6 +131,29 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
       0,
       `Can't reach the server (${reason}). Check your connection and try again.`,
     );
+  }
+  return res;
+}
+
+async function fetchText(url: string): Promise<Response> {
+  try {
+    return await fetch(BASE + url, {
+      headers: {...authHeader()},
+      credentials: 'include',
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : 'unknown';
+    throw new ApiError(
+      0,
+      `Can't reach the server (${reason}). Check your connection and try again.`,
+    );
+  }
+}
+
+export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
+  let res = await fetchJson(url, opts);
+  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
+    res = await fetchJson(url, opts);
   }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
@@ -130,10 +179,10 @@ export function isRetryableError(e: unknown): boolean {
 
 /** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
 export async function reqText(url: string): Promise<string> {
-  const res = await fetch(BASE + url, {
-    headers: {...authHeader()}, // include JWT so protected endpoints return 200 not 403
-    credentials: 'include',
-  });
+  let res = await fetchText(url);
+  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
+    res = await fetchText(url);
+  }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
     throw new ApiError(res.status, parseErrorMessage(res.status, raw));
@@ -211,6 +260,11 @@ export interface RunSummary {
    * migrated. UI should fall back to this when scmPrUrl is null.
    */
   githubPrUrl?: string | null;
+  /**
+   * RL-2026-06-019 — headline verified score (0-100), hydrated by the list endpoint from the
+   * validation report in one batched query. Null until the run is terminal and scored.
+   */
+  verifiedScore?: number | null;
 }
 
 export interface TaskSummary {

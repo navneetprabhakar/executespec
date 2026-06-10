@@ -8,7 +8,7 @@
          env(safe-area-inset-*). Pairs with the safe-area rules added in
          the global stylesheet below. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>ExecuteSpec — AI that ships pull requests, plus a catalog of 28 readymade solutions + 11 modernization recipes</title>
+    <title>ExecuteSpec — AI that ships pull requests your team actually merges</title>
     
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
@@ -20,7 +20,7 @@
     </script>
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
-    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR. Plus a catalog of 28 readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions, …) and 11 modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, Class components→hooks, …). From $29/mo Solo; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
+    <meta name="description" content="Write a spec in plain English. ExecuteSpec plans it, codes it across one repo or twenty, runs your tests, reviews it, and opens a pull request with a deterministic Ready / Needs review / Failed verdict. Free 15 runs/mo · Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
     <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
@@ -62,7 +62,7 @@
     <!-- ── Open Graph / Twitter for Social Sharing + Chatbot Previews ───────── -->
     <meta property="og:site_name" content="ExecuteSpec">
     <meta property="og:title" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
-    <meta property="og:description" content="Plan, build, test, review, open a PR. We attach the verdict (Ready / Needs review / Failed) to every one of yours. Solo $29/mo · Team $39/seat BYOK · Enterprise SOC 2.">
+    <meta property="og:description" content="Plan, build, test, review, open a PR. We attach the verdict (Ready / Needs review / Failed) to every one of yours. Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://executespec.ai/">
     <meta property="og:locale" content="en_US">
@@ -76,7 +76,7 @@
     <meta name="twitter:site" content="@executespec">
     <meta name="twitter:creator" content="@executespec">
     <meta name="twitter:title" content="ExecuteSpec — AI that ships pull requests your team will merge">
-    <meta name="twitter:description" content="Plan, build, test, review, open PR. Solo $29/mo. Team $39/seat BYOK. Enterprise SOC 2 + DPA + SSO.">
+    <meta name="twitter:description" content="Plan, build, test, review, open PR. Pro $29/mo. Team $39/seat BYOK. Enterprise custom contract + DPA.">
     <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
     <meta name="twitter:image:alt" content="ExecuteSpec — AI that ships PRs your team will merge.">
 
@@ -116,8 +116,8 @@
         "Agentic code review with auto-fix (wiring + general passes)",
         "Per-org model matrix override and per-run provider + model pin (Enterprise)",
         "JIRA and Confluence integration (Enterprise)",
-        "Execution View: multi-repo, multi-solution launches (Enterprise)",
-        "SSO/SAML, RBAC, audit trail (Enterprise)"
+        "Org governance: spend caps, approval thresholds, repo allowlists (Team+)",
+        "RBAC + org audit trail (Enterprise)"
       ]
     }
     </script>
@@ -144,7 +144,7 @@
         "name": "What makes ExecuteSpec different from other AI coding tools?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Unlike standard text-to-code generators, ExecuteSpec runs every AI-generated task through a deterministic validation chain — Syntax, Type, Lint, and Unit Tests — before merging into the integration branch. The PR you receive carries a Ready / Needs review / Failed verdict from that chain, not the LLM's self-rating."
+          "text": "Unlike standard text-to-code generators, ExecuteSpec runs every AI-generated task through a deterministic validation chain — Syntax, Type, Lint, and Unit Tests — before the pull request is opened. The PR you receive carries a Ready / Needs review / Failed verdict from that chain, not the LLM's self-rating."
         }
       }, {
         "@type": "Question",
@@ -158,7 +158,7 @@
         "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited runs with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Solo tier ($29/mo) uses managed keys for solo developers — we pay the LLM costs and you get 30 managed runs per month. The Free tier (15 runs per month, no credit card) uses our system credits."
+          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited runs with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Pro tier ($29/mo) uses managed keys — we pay the LLM costs and you get 30 managed runs per month. The Free tier (15 runs per month, no credit card) uses our system credits."
         }
       }, {
         "@type": "Question",
@@ -179,14 +179,14 @@
         "name": "How does ExecuteSpec compare to Windsurf?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a DAG of atomic tasks, validates each task against Syntax/Type/Lint/Unit-Test gates, and merges deterministically. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a merged PR with a deterministic verdict."
+          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a task plan, validates the work against build + test gates, and opens a PR with a deterministic verdict. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a merged PR with a deterministic verdict."
         }
       }, {
         "@type": "Question",
         "name": "How does ExecuteSpec compare to Claude Code?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Claude Code is Anthropic's terminal-first coding agent — run locally, reads/writes files in your current workspace, pay Anthropic directly by token. ExecuteSpec is a hosted multi-agent platform with a browser UI, multi-repo project workspaces, architecture doc generation, tech-debt tracking, and team features (RBAC, SSO, audit trail). Both support BYOK for Anthropic. Claude Code is the minimalist CLI; ExecuteSpec is the workbench around it."
+          "text": "Claude Code is Anthropic's terminal-first coding agent — run locally, reads/writes files in your current workspace, pay Anthropic directly by token. ExecuteSpec is a hosted multi-agent platform with a browser UI, multi-repo project workspaces, architecture doc generation, tech-debt tracking, and team features (RBAC, org audit trail). Both support BYOK for Anthropic. Claude Code is the minimalist CLI; ExecuteSpec is the workbench around it."
         }
       }, {
         "@type": "Question",
@@ -307,7 +307,7 @@
       "@context": "https://schema.org",
       "@type": "Product",
       "name": "ExecuteSpec",
-      "description": "AI coding platform that ships pull requests your team will actually merge. Four tiers — Free (15 runs/month, no card), Solo $29/mo (30 managed runs/month), Team $39/seat (from 1 seat) (BYOK + per-seat collaboration + audit + SSO), Enterprise (SOC 2 + signed DPA + dedicated infra).",
+      "description": "AI coding platform that ships pull requests your team will actually merge. Four tiers — Free (15 runs/month, no card), Pro $29/mo (30 managed runs/month), Team $39/seat (from 1 seat, BYOK + per-seat collaboration + audit trail), Enterprise (custom contract + signed DPA).",
       "brand": { "@id": "https://executespec.ai/#organization" },
       "category": "Developer Tools",
       "image": "https://executespec.ai/images/og-hero.png",
@@ -315,7 +315,7 @@
         {
           "@type": "Offer",
           "name": "Free",
-          "description": "15 runs per month, no credit card. 1 project, 1 repo, all 3 providers (managed keys), anonymous trial — no signup required for the first preview.",
+          "description": "15 runs per month, no credit card. 1 project, 1 repo, managed keys, small (1-credit) specs, verified 0-100 score on every run.",
           "price": "0",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -330,7 +330,7 @@
         },
         {
           "@type": "Offer",
-          "name": "Solo",
+          "name": "Pro",
           "description": "30 managed runs per month for one developer. Managed keys (we pay the LLM), all providers, 2 projects, 2 repos per project, plan & review gate, priority email support.",
           "price": "29",
           "priceCurrency": "USD",
@@ -347,7 +347,7 @@
         {
           "@type": "Offer",
           "name": "Team",
-          "description": "Per-seat collaboration — from 1 seat, up to 20 seats. BYOK runs (route through your own Anthropic / OpenAI / Google keys, zero per-run markup from us), org SSO (SAML/OIDC), audit log export, activity feed, shared spec templates. $39 per seat per month.",
+          "description": "Per-seat collaboration — from 1 seat, up to 20 seats. BYOK runs (route through your own Anthropic / OpenAI / Google keys, zero per-run markup from us), org spend caps + approval thresholds, audit log export, activity feed, shared spec templates. $39 per seat per month.",
           "price": "39",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -369,7 +369,7 @@
         {
           "@type": "Offer",
           "name": "Enterprise",
-          "description": "Everything in Team plus dedicated infrastructure region, custom MSA, SOC 2 Type II evidence, signed DPA, SAML/OIDC enforced, audit-log retention 5 years, Execution View (multi-repo multi-solution launches), cross-repo handover, per-org model matrix override with per-run provider + model pin, OpenRouter gateway, JIRA + Confluence + ServiceNow + PagerDuty, dedicated Slack + custom SLA.",
+          "description": "Everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, repo allowlists + spend approval thresholds, JIRA + Confluence integration, priority support.",
           "price": "0",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -424,7 +424,7 @@
         {
           "@type": "DefinedTerm",
           "name": "Project workspace",
-          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Solo, Team, and Enterprise tiers.",
+          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Pro, Team, and Enterprise tiers.",
           "inDefinedTermSet": "https://executespec.ai/#glossary"
         },
         {
@@ -456,8 +456,8 @@
     </script>
 
     <!-- Preconnect hints for third-party origins used on this page -->
-    <link rel="preconnect" href="https://dev.executespec.ai" crossorigin>
-    <link rel="dns-prefetch" href="https://dev.executespec.ai">
+    <link rel="preconnect" href="https://app.executespec.ai" crossorigin>
+    <link rel="dns-prefetch" href="https://app.executespec.ai">
     <link rel="dns-prefetch" href="https://www.googletagmanager.com">
     <link rel="dns-prefetch" href="https://www.google-analytics.com">
 
@@ -1238,8 +1238,8 @@
             <a href='#faq'>FAQ</a>
         </nav>
         <div class='cta-row'>
-            <a class='btn-sm' href='https://dev.executespec.ai/login'>Sign in</a>
-            <a class='btn-sm primary' href='https://dev.executespec.ai/signup'>Start free</a>
+            <a class='btn-sm' href='https://app.executespec.ai/login'>Sign in</a>
+            <a class='btn-sm primary' href='https://app.executespec.ai/signup'>Start free</a>
         </div>
     </div>
 </header>
@@ -1251,17 +1251,17 @@
             Write a one-line spec. We plan it, code it across one repo or twenty, run the tests, review it, and open a pull request with a deterministic <strong>Ready / Needs review / Failed</strong> verdict attached. <strong>You merge it.</strong>
         </p>
         <div class='cta-row'>
-            <a class='btn primary' href='https://dev.executespec.ai/signup'>
+            <a class='btn primary' href='https://app.executespec.ai/signup'>
                 Start free
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
-            <a class='btn secondary' href='https://dev.executespec.ai/welcome'>Try the sandbox</a>
+            <a class='btn secondary' href='https://app.executespec.ai/welcome'>Try the sandbox</a>
             <span class='pip'>No card required · 15 runs / mo</span>
         </div>
 
         <div class='hero-stats'>
             <div class='stat'><div class='v mint'>0–100</div><div class='lbl'>Verified score, every run</div></div>
-            <div class='stat'><div class='v signal'>12 min</div><div class='lbl'>Median run time</div></div>
+            <div class='stat'><div class='v signal'>5–20 min</div><div class='lbl'>Typical run time</div></div>
             <div class='stat'><div class='v'>28 + 11</div><div class='lbl'>Solutions + Migrations</div></div>
             <div class='stat'><div class='v coral'>BYOK</div><div class='lbl'>Bypass cost cap</div></div>
         </div>
@@ -1307,7 +1307,7 @@
                 <div class='num'>04 · SHIP</div>
                 <div class='icon-bg'>🚀</div>
                 <h3>PR with a verdict</h3>
-                <p>Real PR on your repo, signed by ExecuteSpec-bot, with the verified score in the title. CI runs your gates too. You merge.</p>
+                <p>A real PR on your repo, opened from your connected GitHub account, with the verified score attached. CI runs your gates too. You merge.</p>
             </div>
         </div>
     </div>
@@ -1411,11 +1411,11 @@
         </div>
 
         <div style='margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap;'>
-            <a class='btn primary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; background:var(--ink); color:var(--bg); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/library'>
+            <a class='btn primary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; background:var(--ink); color:var(--bg); display:inline-flex; align-items:center; gap:8px;' href='https://app.executespec.ai/library'>
                 Browse 28 solutions
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
-            <a class='btn secondary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; color:var(--ink); border:1px solid var(--hairline-strong); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/migrations'>
+            <a class='btn secondary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; color:var(--ink); border:1px solid var(--hairline-strong); display:inline-flex; align-items:center; gap:8px;' href='https://app.executespec.ai/migrations'>
                 11 modernization recipes
             </a>
         </div>
@@ -1427,7 +1427,7 @@
         <div class='section-eyebrow signal'>Pricing</div>
         <h2>Simple. Start free. Scale up.</h2>
         <p class='lede'>
-            Credits never expire. BYOK bypasses the cost cap entirely. Cancel any time. Solo annual billing saves 17%.
+            Credits are charged only when you approve a plan — failed runs are refunded. BYOK removes the cost cap entirely. Cancel any time. Pro annual saves 17%.
         </p>
 
         <div class='cur-wrap'>
@@ -1444,26 +1444,26 @@
                 <div class='sub'>No card required</div>
                 <ul>
                     <li>15 runs / month</li>
-                    <li>1-credit specs only</li>
-                    <li>$3 hard cost cap</li>
-                    <li>Single repo</li>
+                    <li>Small specs (1 credit)</li>
+                    <li>$3 per-run cost cap</li>
+                    <li>1 project · 1 repo</li>
                     <li>Email support</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signup'>Start free</a>
+                <a class='btn' href='https://app.executespec.ai/signup'>Start free</a>
             </div>
             <div class='price-card'>
-                <div class='tier'>SOLO</div>
+                <div class='tier'>PRO</div>
                 <div class='price'><span class='cur usd'>$29<span class='unit'>/mo</span></span><span class='cur inr'>₹2,499<span class='unit'>/mo</span></span></div>
-                <div class='sub'>Indie devs · single workspace</div>
+                <div class='sub'>Indie devs · $289/yr (save 17%)</div>
                 <ul>
                     <li>30 runs / month</li>
-                    <li>200 credits / month</li>
-                    <li>$10 hard cost cap</li>
-                    <li>Multi-repo</li>
-                    <li>Managed keys · 3 providers</li>
+                    <li>Managed keys — Anthropic · OpenAI · Gemini</li>
+                    <li>PR review + code review (4 scans/mo)</li>
+                    <li>2 projects · 2 repos each</li>
+                    <li>$5 per-run cap · BYOK lifts it</li>
                     <li>Library + migrations</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signup'>Start 14d trial</a>
+                <a class='btn' href='https://app.executespec.ai/signup'>Get started</a>
             </div>
             <div class='price-card best'>
                 <div class='best-pip'>RECOMMENDED</div>
@@ -1471,26 +1471,26 @@
                 <div class='price'><span class='cur usd'>$39<span class='unit'>/seat/mo</span></span><span class='cur inr'>₹3,399<span class='unit'>/seat/mo</span></span></div>
                 <div class='sub'>From 1 seat · monthly</div>
                 <ul>
-                    <li>Unlimited runs</li>
-                    <li>500 credits / seat / month</li>
-                    <li>$25 hard cost cap</li>
-                    <li>BYOK · 3 providers</li>
+                    <li>Unlimited runs on your keys</li>
+                    <li>No platform cost cap · zero markup</li>
+                    <li>BYOK — Anthropic · OpenAI · Gemini</li>
+                    <li>Org spend caps + approval thresholds</li>
                     <li>Cross-repo + sharing</li>
-                    <li>All 4 autofix surfaces</li>
+                    <li>Autofix: PR review · tech debt · code scans</li>
                 </ul>
-                <a class='btn' href='https://dev.executespec.ai/signup'>Start 14d trial</a>
+                <a class='btn' href='https://app.executespec.ai/signup'>Get started</a>
             </div>
             <div class='price-card'>
                 <div class='tier'>ENTERPRISE</div>
                 <div class='price'>Custom</div>
-                <div class='sub'>SSO · SLA · CSM</div>
+                <div class='sub'>Custom contract · DPA</div>
                 <ul>
-                    <li>Unlimited credits · no cost cap</li>
+                    <li>Unlimited runs · no cost cap</li>
                     <li>BYOK + OpenRouter gateway</li>
                     <li>Model matrix override + per-run pin</li>
                     <li>Standards · Contracts · ADRs</li>
-                    <li>SSO + SCIM</li>
-                    <li>99.9% SLA · dedicated CSM</li>
+                    <li>Org governance + audit trail</li>
+                    <li>Dedicated support</li>
                 </ul>
                 <a class='btn' href='mailto:sales@executespec.ai'>Talk to sales</a>
             </div>
@@ -1514,7 +1514,7 @@
                 <div class='row-c'><span>Validation</span><span class='v good'>Built-in</span></div>
                 <div class='row-c'><span>Multi-repo</span><span class='v good'>Native</span></div>
                 <div class='row-c'><span>BYOK</span><span class='v good'>3 providers</span></div>
-                <div class='row-c'><span>SOC 2 + DPA</span><span class='v good'>Ready</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v good'>Yes</span></div>
             </div>
             <div class='compare-card'>
                 <div class='name'>Cursor / Copilot</div>
@@ -1523,7 +1523,7 @@
                 <div class='row-c'><span>Validation</span><span class='v bad'>Your CI</span></div>
                 <div class='row-c'><span>Multi-repo</span><span class='v bad'>One repo</span></div>
                 <div class='row-c'><span>BYOK</span><span class='v'>Yes</span></div>
-                <div class='row-c'><span>SOC 2 + DPA</span><span class='v'>Yes</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v'>Yes</span></div>
             </div>
             <div class='compare-card'>
                 <div class='name'>Devin / Lovable</div>
@@ -1532,7 +1532,7 @@
                 <div class='row-c'><span>Validation</span><span class='v'>Partial</span></div>
                 <div class='row-c'><span>Multi-repo</span><span class='v bad'>Limited</span></div>
                 <div class='row-c'><span>BYOK</span><span class='v bad'>No</span></div>
-                <div class='row-c'><span>SOC 2 + DPA</span><span class='v'>Some</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v'>Some</span></div>
             </div>
             <div class='compare-card'>
                 <div class='name'>v0 / Bolt</div>
@@ -1541,7 +1541,7 @@
                 <div class='row-c'><span>Validation</span><span class='v bad'>Preview only</span></div>
                 <div class='row-c'><span>Multi-repo</span><span class='v bad'>No</span></div>
                 <div class='row-c'><span>BYOK</span><span class='v bad'>No</span></div>
-                <div class='row-c'><span>SOC 2 + DPA</span><span class='v bad'>No</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v bad'>No</span></div>
             </div>
         </div>
     </div>
@@ -1562,7 +1562,7 @@
             <details class='faq-item'>
                 <summary>What does "Bring Your Own Keys (BYOK)" mean?</summary>
                 <div class='answer'>
-                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Runs against your keys bypass our cost cap entirely (we still track cache-hit rates for optimization). Your keys are KMS-wrapped at rest and rotated on a single click.
+                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Runs against your keys bypass our cost cap entirely (we still track cache-hit rates for optimization). Your keys are encrypted at rest, never logged, and can be replaced any time from org settings.
                 </div>
             </details>
             <details class='faq-item'>
@@ -1600,7 +1600,7 @@
         <div class='cta-block'>
             <h2>Stop reviewing diffs. <em>Start merging PRs.</em></h2>
             <p>15 free runs a month. No card. Five minutes to your first verified PR.</p>
-            <a class='btn-cta' href='https://dev.executespec.ai/signup'>
+            <a class='btn-cta' href='https://app.executespec.ai/signup'>
                 Start free
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
@@ -1629,7 +1629,7 @@
         <div>
             <h5>Company</h5>
             <ul>
-                <li><a href='https://dev.executespec.ai/trust'>Trust &amp; security</a></li>
+                <li><a href='https://app.executespec.ai/trust'>Trust &amp; security</a></li>
                 <li><a href='/terms'>Terms</a></li>
                 <li><a href='/privacy'>Privacy</a></li>
                 <li><a href='/dpa'>DPA</a></li>
@@ -1639,10 +1639,10 @@
         <div>
             <h5>Get started</h5>
             <ul>
-                <li><a href='https://dev.executespec.ai/signup'>Start free</a></li>
-                <li><a href='https://dev.executespec.ai/login'>Sign in</a></li>
-                <li><a href='https://dev.executespec.ai/welcome'>Try the sandbox</a></li>
-                <li><a href='https://dev.executespec.ai/library'>Browse library</a></li>
+                <li><a href='https://app.executespec.ai/signup'>Start free</a></li>
+                <li><a href='https://app.executespec.ai/login'>Sign in</a></li>
+                <li><a href='https://app.executespec.ai/welcome'>Try the sandbox</a></li>
+                <li><a href='https://app.executespec.ai/library'>Browse library</a></li>
             </ul>
         </div>
     </div>

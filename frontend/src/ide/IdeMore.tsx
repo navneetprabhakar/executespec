@@ -4,14 +4,14 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
-import {runTitleFor, relTime} from '@/signal/lib/runUtils';
+import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 
+// Relative timestamps everywhere (review/11 #8) — absolute locale strings were
+// ambiguous (DD/MM vs MM/DD + seconds noise) and inconsistent with Console.
 function fmtWhen(iso?: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  return relTime(iso);
 }
 
 const PAGE_SIZE = 30;
@@ -25,9 +25,9 @@ const LIVE_STATUSES = new Set([
   'PAUSED',
 ]);
 const isLiveStatus = (s?: string | null) => LIVE_STATUSES.has((s || '').toUpperCase());
-// verifiedScore is on RunDetail; RunSummary carries it on the wire but not in the
-// type. Read it (and the cost field) through a cast — same shape AllRunsPage uses.
-const scoreOf = (r: api.RunSummary) => (r as unknown as {verifiedScore?: number}).verifiedScore;
+// verifiedScore is hydrated by the list endpoint since RL-2026-06-019 (it was a
+// cast against a wire field that never existed — every row showed "—").
+const scoreOf = (r: api.RunSummary) => r.verifiedScore;
 const costOf = (r: api.RunSummary) =>
   r.actualCostUsd ??
   (r as unknown as {actualCost?: number}).actualCost ??
@@ -212,7 +212,7 @@ export function IdeRuns() {
                   </span>
                   {r.aiProvider && (
                     <span style={{color: 'var(--ide-fg-muted)', fontSize: 12, flexShrink: 0}}>
-                      {r.aiProvider.toLowerCase()}
+                      {providerLabel(r.aiProvider)}
                     </span>
                   )}
                   <span style={{flexShrink: 0, textAlign: 'right', minWidth: 56}}>
