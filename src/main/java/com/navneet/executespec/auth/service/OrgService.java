@@ -45,7 +45,7 @@ public class OrgService {
   private final StripePaymentGateway stripeGateway;
 
   /** TEAM tier self-serve seat range. Orgs above this go to ENTERPRISE. */
-  private static final int TEAM_MIN_SEATS = 2;
+  private static final int TEAM_MIN_SEATS = 1;
 
   private static final int TEAM_MAX_SEATS = 20;
   private final ObjectMapper mapper = new ObjectMapper();
@@ -505,6 +505,20 @@ public class OrgService {
       String geminiKey,
       String openRouterKey,
       String actorId) {
+    return updateAiKeySettings(
+        orgId, anthropicKey, openAiKey, geminiKey, openRouterKey, null, null, actorId);
+  }
+
+  @Transactional
+  public OrgDto updateAiKeySettings(
+      String orgId,
+      String anthropicKey,
+      String openAiKey,
+      String geminiKey,
+      String openRouterKey,
+      String deepSeekKey,
+      String fireworksKey,
+      String actorId) {
     Org org =
         orgRepo
             .findById(orgId)
@@ -531,14 +545,33 @@ public class OrgService {
       }
       org.setOpenRouterApiKey(openRouter);
     }
+    String deepSeek = blankToNull(deepSeekKey);
+    if (deepSeek != null) {
+      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN, "DeepSeek native keys are an Enterprise-tier feature");
+      }
+      org.setDeepSeekApiKey(deepSeek);
+    }
+    String fireworks = blankToNull(fireworksKey);
+    if (fireworks != null) {
+      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN, "Fireworks is an Enterprise-tier feature");
+      }
+      org.setFireworksApiKey(fireworks);
+    }
     org.setUpdatedAt(Instant.now());
     log.info(
-        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}, openrouter={}",
+        "Org {} updated AI key settings — anthropic={}, openai={}, gemini={}, openrouter={},"
+            + " deepseek={}, fireworks={}",
         orgId,
         org.getAnthropicApiKey() != null,
         org.getOpenAiApiKey() != null,
         org.getGeminiApiKey() != null,
-        org.getOpenRouterApiKey() != null);
+        org.getOpenRouterApiKey() != null,
+        org.getDeepSeekApiKey() != null,
+        org.getFireworksApiKey() != null);
     OrgDto result = OrgDto.from(orgRepo.save(org));
 
     auditOrgEvent(
@@ -548,7 +581,10 @@ public class OrgService {
         Map.of(
             "anthropic", org.getAnthropicApiKey() != null,
             "openai", org.getOpenAiApiKey() != null,
-            "gemini", org.getGeminiApiKey() != null));
+            "gemini", org.getGeminiApiKey() != null,
+            "openrouter", org.getOpenRouterApiKey() != null,
+            "deepseek", org.getDeepSeekApiKey() != null,
+            "fireworks", org.getFireworksApiKey() != null));
 
     return result;
   }
@@ -559,7 +595,7 @@ public class OrgService {
       java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
 
   private static final java.util.Set<String> VALID_PROVIDERS =
-      java.util.Set.of("anthropic", "openai", "gemini");
+      java.util.Set.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
 
   @Transactional
   public OrgDto updateKeySourceSettings(
@@ -584,7 +620,9 @@ public class OrgService {
         if (!VALID_PROVIDERS.contains(p.toLowerCase())) {
           throw new ResponseStatusException(
               HttpStatus.BAD_REQUEST,
-              "Invalid provider: " + p + ". Must be anthropic, openai, or google.");
+              "Invalid provider: "
+                  + p
+                  + ". Must be anthropic, openai, gemini, openrouter, deepseek, or fireworks.");
         }
       }
       if (enabledProviders.isEmpty()) {
@@ -788,7 +826,7 @@ public class OrgService {
    * <p>Validates:
    *
    * <ul>
-   *   <li>{@code newSeats ∈ [TEAM_MIN_SEATS, TEAM_MAX_SEATS]} (2-20)
+   *   <li>{@code newSeats ∈ [TEAM_MIN_SEATS, TEAM_MAX_SEATS]} (1-20)
    *   <li>New seats is not below current active member count
    *   <li>Org is on TEAM tier and has an active subscription
    * </ul>

@@ -171,6 +171,7 @@ public class RunTopupService {
             .source("PURCHASE")
             .gatewayOrderId(orderResult.orderId())
             .amountPaidInr(pkg.getAmountInr())
+            .grantReason("pkg:" + packageId)
             .status("PENDING")
             .build();
     topupRepo.save(topup);
@@ -196,18 +197,25 @@ public class RunTopupService {
             .findByGatewayOrderId(orderId)
             .orElseThrow(
                 () -> new BillingException("Top-up record not found for order: " + orderId));
+    if (!userId.equals(topup.getUserId())) {
+      throw new SecurityException("Top-up order does not belong to this user.");
+    }
 
     if (!"PENDING".equals(topup.getStatus())) {
       log.warn("Top-up already processed: orderId={}, status={}", orderId, topup.getStatus());
       return topup;
     }
 
-    topup.setGatewayPaymentId(paymentId);
-    topup.setRemaining(topup.getQuantity());
-    topup.setStatus("ACTIVE");
-    // Purchased runs never expire
-    topup.setExpiresAt(null);
-    topupRepo.save(topup);
+    int activated = topupRepo.activatePendingPurchase(orderId, paymentId, Instant.now());
+    if (activated == 0) {
+      log.warn("Top-up activation lost race: orderId={}", orderId);
+      return topupRepo.findByGatewayOrderId(orderId).orElse(topup);
+    }
+    topup =
+        topupRepo
+            .findByGatewayOrderId(orderId)
+            .orElseThrow(
+                () -> new BillingException("Top-up record not found after activation: " + orderId));
 
     auditService.record(
         ActivityAudit.builder()

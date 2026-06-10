@@ -233,7 +233,8 @@ public class SemgrepRunner {
           // semgrep uses ERROR/WARNING/INFO; we map to our 4-level severity scale.
           String severity =
               switch (semgrepSeverity) {
-                case "ERROR", "CRITICAL" -> "MAJOR";
+                case "CRITICAL" -> "CRITICAL";
+                case "ERROR" -> "MAJOR";
                 case "WARNING" -> "MINOR";
                 default -> "INFO";
               };

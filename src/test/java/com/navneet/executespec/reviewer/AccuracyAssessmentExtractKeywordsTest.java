@@ -121,4 +121,17 @@ class AccuracyAssessmentExtractKeywordsTest {
     assertTrue(tokens.contains("authentication"));
     assertTrue(tokens.contains("totp"));
   }
+
+  @Test
+  void grep_literal_pattern_uses_grep_compatible_escaping() {
+    assertEquals("plain", AccuracyAssessmentService.grepLiteralPattern("plain"));
+    assertEquals("foo\\.bar", AccuracyAssessmentService.grepLiteralPattern("foo.bar"));
+    assertEquals(
+        "price\\$\\[v1\\]\\*", AccuracyAssessmentService.grepLiteralPattern("price$[v1]*"));
+    assertEquals(
+        "path\\\\to\\\\file", AccuracyAssessmentService.grepLiteralPattern("path\\to\\file"));
+    assertFalse(
+        AccuracyAssessmentService.grepLiteralPattern("foo.bar").contains("\\Q"),
+        "grep does not understand Java Pattern.quote markers");
+  }
 }

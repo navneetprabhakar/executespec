@@ -16,6 +16,9 @@ import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/u
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal} from '@/signal/components/Modal';
 
+type UserKeyProvider = 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'FIREWORKS';
+type OrgKeyProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks';
+
 // Inline error / success banner — colours map to the IDE token set (mirrors
 // IdeProjectMore's Banner). Renders nothing when both are empty.
 function Banner({err, msg}: {err?: string; msg?: string}) {
@@ -88,11 +91,13 @@ export function IdeApiKeys() {
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
   const [geminiKey, setGeminiKey] = useState('');
+  const [deepSeekKey, setDeepSeekKey] = useState('');
+  const [fireworksKey, setFireworksKey] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState<'OPENAI' | 'ANTHROPIC' | 'GEMINI' | null>(null);
+  const [busy, setBusy] = useState<UserKeyProvider | null>(null);
 
-  async function saveProviderKey(provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', key: string) {
+  async function saveProviderKey(provider: UserKeyProvider, key: string) {
     if (!key.trim()) {
       setErr(`Enter a ${provider} key first.`);
       return;
@@ -107,11 +112,15 @@ export function IdeApiKeys() {
         provider === 'OPENAI' ? key.trim() : '',
         provider === 'ANTHROPIC' ? key.trim() : '',
         provider === 'GEMINI' ? key.trim() : '',
+        provider === 'DEEPSEEK' ? key.trim() : '',
+        provider === 'FIREWORKS' ? key.trim() : '',
       );
       setMsg(`${provider} key saved. Runs against ${provider} now bypass the platform cap.`);
       if (provider === 'OPENAI') setOpenaiKey('');
       if (provider === 'ANTHROPIC') setAnthropicKey('');
       if (provider === 'GEMINI') setGeminiKey('');
+      if (provider === 'DEEPSEEK') setDeepSeekKey('');
+      if (provider === 'FIREWORKS') setFireworksKey('');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Save failed.');
     } finally {
@@ -121,7 +130,7 @@ export function IdeApiKeys() {
 
   function ProviderRow(
     label: string,
-    provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI',
+    provider: UserKeyProvider,
     value: string,
     set: (v: string) => void,
     last: boolean,
@@ -197,7 +206,9 @@ export function IdeApiKeys() {
       <div className='ide-card' style={{padding: 0}}>
         {ProviderRow('Anthropic', 'ANTHROPIC', anthropicKey, setAnthropicKey, false)}
         {ProviderRow('OpenAI', 'OPENAI', openaiKey, setOpenaiKey, false)}
-        {ProviderRow('Gemini (Google AI)', 'GEMINI', geminiKey, setGeminiKey, true)}
+        {ProviderRow('Gemini (Google AI)', 'GEMINI', geminiKey, setGeminiKey, false)}
+        {ProviderRow('DeepSeek', 'DEEPSEEK', deepSeekKey, setDeepSeekKey, false)}
+        {ProviderRow('Fireworks', 'FIREWORKS', fireworksKey, setFireworksKey, true)}
       </div>
     </div>
   );
@@ -593,6 +604,8 @@ export function IdeOrgSettings() {
     openai: '',
     gemini: '',
     openrouter: '',
+    deepseek: '',
+    fireworks: '',
   });
   const [keyBusy, setKeyBusy] = useState<string | null>(null);
   // F3 — per-org model-matrix overrides. `matrix` is the server view (defaults +
@@ -759,7 +772,7 @@ export function IdeOrgSettings() {
     }
   }
 
-  async function saveOrgKey(provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter') {
+  async function saveOrgKey(provider: OrgKeyProvider) {
     const value = keyInputs[provider].trim();
     if (!value) {
       setErr('Enter a key first.');
@@ -774,6 +787,8 @@ export function IdeOrgSettings() {
         provider === 'openai' ? value : '',
         provider === 'gemini' ? value : '',
         provider === 'openrouter' ? value : '',
+        provider === 'deepseek' ? value : '',
+        provider === 'fireworks' ? value : '',
       );
       setOrg(next);
       setKeyInputs((k) => ({...k, [provider]: ''}));
@@ -791,7 +806,7 @@ export function IdeOrgSettings() {
   // qualifies (the backend rejects the key with 403 otherwise).
   const isEnterprise = (org.tier || '').toUpperCase() === 'ENTERPRISE';
   const orgKeyRows: {
-    provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+    provider: OrgKeyProvider;
     label: string;
     connected: boolean;
   }[] = [
@@ -799,7 +814,11 @@ export function IdeOrgSettings() {
     {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
     {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
     ...(isEnterprise
-      ? [{provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey}]
+      ? [
+          {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},
+          {provider: 'deepseek' as const, label: 'DeepSeek', connected: !!org.hasDeepSeekKey},
+          {provider: 'fireworks' as const, label: 'Fireworks', connected: !!org.hasFireworksKey},
+        ]
       : []),
   ];
 
@@ -847,8 +866,8 @@ export function IdeOrgSettings() {
         <div
           style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginBottom: 12}}
         >
-          TEAM-tier orgs share a seat pool (min 2). Changing the count syncs the prorated quantity
-          to your billing gateway. You can&apos;t reduce below the current active member count.
+          TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your
+          billing gateway. You can&apos;t reduce below the current active member count.
         </div>
         <Field label='Seats'>
           <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>

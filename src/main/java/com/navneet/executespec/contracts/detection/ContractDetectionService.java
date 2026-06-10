@@ -179,10 +179,7 @@ public class ContractDetectionService {
               .contractId(contract.getId())
               .registryVersion(contract.getCurrentRegistryVersion())
               .contentHash(dc.contentHash())
-              .inlineContent(
-                  dc.content() == null
-                      ? null
-                      : "\"" + dc.content().replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+              .inlineContent(dc.content())
               .build();
       versionRepo.save(version);
 

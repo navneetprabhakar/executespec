@@ -21,11 +21,12 @@ import org.springframework.ai.chat.prompt.Prompt;
  * the legacy {@link FallbackLlmRouter}, whose provider switch handles ONLY {@code
  * anthropic|openai|gemini}. So a project pinned to {@code DEEPSEEK} (or {@code OPENROUTER}) could
  * not generate its codemap/architecture context on the SAME provider as its worker — the docs
- * silently had to come from a different (and ~25x more expensive) model. This helper routes those
- * two native-only providers through the canonical {@link LlmRouter} (which has a {@code deepseek} /
- * {@code openrouter} dispatch case and also records cost via {@code RunCostTracker} — closing the
- * untracked-arch-gen-cost gap), while leaving the existing {@code anthropic|openai|gemini} path on
- * {@link FallbackLlmRouter} byte-identical (zero regression for current providers).
+ * silently had to come from a different (and ~25x more expensive) model. This helper routes the
+ * OpenAI-wire-compatible non-legacy providers through the canonical {@link LlmRouter} (which has
+ * {@code deepseek} / {@code openrouter} / {@code fireworks} dispatch cases and also records cost
+ * via {@code RunCostTracker} — closing the untracked-arch-gen-cost gap), while leaving the existing
+ * {@code anthropic|openai|gemini} path on {@link FallbackLlmRouter} byte-identical (zero regression
+ * for current providers).
  *
  * <p>No tools are bound ({@code toolsOverride=[]}) — arch-gen is a single prompt→text completion. A
  * synthetic {@link ExecutionContext} (workspace {@code /tmp}, never touched since no tool runs)
@@ -48,7 +49,7 @@ final class ArchLlmDispatch {
       String source,
       String label) {
     String prov = resolved.providerName() == null ? "" : resolved.providerName().toLowerCase();
-    if (prov.equals("deepseek") || prov.equals("openrouter")) {
+    if (prov.equals("deepseek") || prov.equals("openrouter") || prov.equals("fireworks")) {
       return llmRouter.call(
           LlmRequest.builder()
               .provider(resolved.providerName())
