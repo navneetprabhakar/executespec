@@ -224,3 +224,6 @@ scripts/v2-eval-results/*.md
 # Demo media — track only the embedded hero video; ignore the rest (large/regenerable)
 website/media/*
 !website/media/hero.webm
+
+# Review artifacts — kept local for now (working docs, not committed)
+/review/
