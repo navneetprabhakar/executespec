@@ -66,6 +66,23 @@ nohup python3 "$TRACKER" "$JOBS_DIR/$JOB_NAME" --name "$MODEL · TB k=$K" --tota
   --out "$JOBS_DIR/${JOB_NAME}-dashboard.html" "${GCSARG[@]}" > "$JOBS_DIR/tracker.log" 2>&1 &
 LOG "tracker live → $JOBS_DIR/${JOB_NAME}-dashboard.html ${GCS_BUCKET:+(+ $GCS_BUCKET/tb-tracker.html)}"
 
+# ── 3b. launch the IN-APP /benchmark bridge (resolved% + cost + TOKEN tracking) ─
+# Feeds the in-login /benchmark dashboard (V236/V238): one TASK_SCORED per trial,
+# carrying reward + esRunId + cost + input/output tokens from each result.json — so
+# aggregate tokens show live. Auth via the admin env already sourced above.
+if [ "${BRIDGE:-on}" = on ]; then
+  BRIDGE_PY="$REPO/infra/benchmark/tb/tb-bench-bridge.py"
+  export BR_ES_BASE="http://localhost:8080" \
+         BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+  nohup python3 "$BRIDGE_PY" --job-dir "$JOBS_DIR/$JOB_NAME" \
+    --provider "$PROVIDER" --model "$MODEL" --k "$K" --total 89 \
+    --dataset terminal-bench-2 --idle-min 30 --max-min "${BRIDGE_MAX_MIN:-1440}" \
+    > "$JOBS_DIR/${JOB_NAME}-bridge.log" 2>&1 &
+  LOG "in-app bridge live → http://localhost:8080/benchmark (run id in ${JOB_NAME}-bridge.log)"
+else
+  LOG "in-app bridge DISABLED (BRIDGE=off)"
+fi
+
 # ── 4. the run ──────────────────────────────────────────────────────────────
 cd "$TB_DIR" || exit 1
 export ES_PROVIDER="$PROVIDER" ES_MODEL="$MODEL" ES_MAX_ITERS="${ES_MAX_ITERS:-120}"

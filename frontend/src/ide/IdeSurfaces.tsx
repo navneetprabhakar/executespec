@@ -5,15 +5,17 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {CostProgressBar} from '@/signal/components/CostProgressBar';
 import {ConfirmModal} from '@/signal/components/Modal';
-import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {repoDisplayName, repoIdFor, relTime, providerLabel} from '@/signal/lib/runUtils';
+import {useIsMobile} from '@/hooks/useIsMobile';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 
+// Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
+// locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
+// the Console chrome's relative times. Hover for the absolute timestamp.
 function fmtWhen(iso?: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  return relTime(iso);
 }
 function runLabel(r: {
   runTitle?: string | null;
@@ -70,10 +72,14 @@ function phaseLabel(status?: string | null): string {
 }
 
 export function IdeWelcome() {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
   const [liveRun, setLiveRun] = useState<api.RunDetail | null>(null);
+  const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
+  const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
 
   // Surface the monthly run cap (mirrors HomePage). Permissions are loaded on
   // login; fetch lazily if the store hasn't been hydrated yet.
@@ -117,6 +123,29 @@ export function IdeWelcome() {
     };
   }, []);
 
+  // First-run onboarding (2026-06-10): the /welcome sandbox picker was only
+  // reachable by typing the URL, so brand-new users landed on an empty IDE.
+  // Surface the same starter samples inline while there are no runs yet.
+  useEffect(() => {
+    api
+      .listOnboardingSamples()
+      .then(setSamples)
+      .catch(() => setSamples([]));
+  }, []);
+
+  async function startFromSample(s: api.SampleSpecDto) {
+    setSampleBusyId(s.id);
+    try {
+      const picked = await api.pickOnboardingSample(s.id);
+      sessionStorage.setItem('signal:pending-spec', picked.spec || s.title);
+    } catch {
+      sessionStorage.setItem('signal:pending-spec', s.title);
+    } finally {
+      setSampleBusyId(null);
+    }
+    navigate('/compose');
+  }
+
   const runCap = permissions
     ? permissions.monthlyRunLimit === -1
       ? `${permissions.currentRunCount} runs this cycle`
@@ -131,7 +160,8 @@ export function IdeWelcome() {
     <div className='ide-pane'>
       <div className='ide-h1'>Workspace</div>
       <div className='ide-sub'>
-        Spec-driven runs across your repos. {runCap}. Press ⌘K to jump anywhere.
+        {/* ⌘K hint suppressed on touch layouts (review/11 #9). */}
+        Spec-driven runs across your repos. {runCap}.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
       </div>
 
       {liveRun && (
@@ -185,7 +215,38 @@ export function IdeWelcome() {
       {runs === null ? (
         <IdeLoader label='Loading runs…' />
       ) : runs.length === 0 ? (
-        <div className='ide-empty'>No runs yet — start with a new spec.</div>
+        <div className='ide-card' style={{marginBottom: 8}}>
+          <div className='ide-run-title' style={{marginBottom: 6}}>
+            Ship your first verified PR
+          </div>
+          <div className='ide-sub' style={{marginBottom: 10}}>
+            Pick a starter spec — it runs in a sandbox project, costs 1 credit, and takes a few
+            minutes. Or write your own.
+          </div>
+          {samples.length > 0 && (
+            <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10}}>
+              {samples.map((s) => (
+                <button
+                  key={s.id}
+                  className='ide-btn ghost'
+                  disabled={sampleBusyId != null}
+                  onClick={() => void startFromSample(s)}
+                  title={`${s.category} · ${s.complexity}`}
+                >
+                  {sampleBusyId === s.id ? 'Preparing…' : s.title}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+            <Link className='ide-btn' to='/compose'>
+              ＋ Write my own spec
+            </Link>
+            <Link className='ide-btn ghost' to='/integrations'>
+              ⚙ Connect GitHub for real-repo PRs
+            </Link>
+          </div>
+        </div>
       ) : (
         <div className='ide-grid'>
           {runs.map((r) => (
@@ -197,8 +258,19 @@ export function IdeWelcome() {
               <div className='ide-run-title'>{runLabel(r)}</div>
               <div className='ide-run-meta'>
                 <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
-                {r.aiProvider && <span>{r.aiProvider.toLowerCase()}</span>}
-                <span>{fmtWhen(r.startedAt)}</span>
+                {/* Lead with the verified score — the product's signature metric
+                    (review/11 §4) — instead of provider internals. */}
+                {typeof r.verifiedScore === 'number' && (
+                  <IdeBadge
+                    kind={r.verifiedScore >= 85 ? 'ok' : r.verifiedScore >= 70 ? 'warn' : 'bad'}
+                  >
+                    {r.verifiedScore}
+                  </IdeBadge>
+                )}
+                {r.aiProvider && <span>{providerLabel(r.aiProvider)}</span>}
+                <span title={r.startedAt ? new Date(r.startedAt).toLocaleString() : undefined}>
+                  {fmtWhen(r.startedAt)}
+                </span>
               </div>
             </Link>
           ))}
@@ -229,6 +301,7 @@ export function IdeCompose() {
   const navigate = useNavigate();
   const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
+  const user = useAuthStore((s) => s.user);
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
@@ -243,9 +316,10 @@ export function IdeCompose() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectRepos, setProjectRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
-  // Per-tier max hard cap (mirrors ComposePage): FREE $3, PRO/TEAM $25,
-  // ENTERPRISE effectively unlimited.
-  const tierMaxCap = tier === 'FREE' ? 3 : tier === 'ENTERPRISE' ? 1000 : 25;
+  // Per-tier max hard cap, mirroring TierEnforcementService.resolveRunCostBudget:
+  // FREE $3 · PRO $5 (BYOK lifts it server-side) · TEAM/ENTERPRISE have no platform
+  // cap, so the input there only sets a voluntary ceiling.
+  const tierMaxCap = tier === 'FREE' ? 3 : tier === 'PRO' ? 5 : tier === 'ENTERPRISE' ? 1000 : 25;
   const [costCap, setCostCap] = useState<number>(Math.min(2, tierMaxCap));
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
   const [busy, setBusy] = useState(false);
@@ -505,6 +579,27 @@ export function IdeCompose() {
         </>
       )}
 
+      {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
+          system PAT since 2026-05-23). Without one, a project run completes but
+          the PR push fails — previously discovered only on the result page. */}
+      {projectId != null && user != null && !user.hasGithubPat && (
+        <div
+          className='ide-card'
+          style={{
+            borderColor: 'var(--ide-yellow)',
+            margin: '12px 0',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          No GitHub token connected — the run will generate code, but it can't open a PR on your
+          repo until you add one.{' '}
+          <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
+            Connect GitHub →
+          </Link>
+        </div>
+      )}
+
       <div style={{display: 'flex', gap: 12, margin: '14px 0', flexWrap: 'wrap'}}>
         <div style={{flex: 1, minWidth: 180}}>
           <div className='ide-h2' style={{marginTop: 0}}>
@@ -533,7 +628,7 @@ export function IdeCompose() {
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
             >
-              <option value=''>Default (org / system matrix)</option>
+              <option value=''>Recommended (default)</option>
               {(modelsByProvider[provider.toLowerCase()] || []).map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -557,6 +652,9 @@ export function IdeCompose() {
             <option value='PRODUCTION'>Production (plan gate)</option>
             <option value='PROTOTYPE'>Prototype (auto)</option>
           </select>
+          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+            Production pauses for plan + price approval; Prototype runs straight through.
+          </div>
         </div>
         <div style={{flex: 1, minWidth: 180}}>
           <div className='ide-h2' style={{marginTop: 0}}>

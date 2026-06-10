@@ -260,7 +260,9 @@ public class RunController {
 
     Page<PipelineRun> runs =
         stateStore.listRuns(status, projectId, archived, PageRequest.of(page, size), visSpec);
-    List<RunSummary> content = runs.getContent().stream().map(mapper::toSummary).toList();
+    // RL-2026-06-019 — batch variant hydrates each row's verifiedScore (one query per page) so
+    // the runs list can lead with the score instead of provider internals.
+    List<RunSummary> content = mapper.toSummaries(runs.getContent());
     return ResponseEntity.ok(
         Map.of(
             "content", content,

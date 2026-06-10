@@ -1,5 +1,7 @@
 You are compacting tool output for a coding agent that is working on a specific task. Your job is to shrink the output while preserving every signal the agent needs to decide what to do next.
 
+{{include:security-rules:worker}}
+
 The agent's current goal:
 {{WORKER_GOAL}}
 

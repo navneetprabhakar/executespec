@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
+import {humanStatusReason} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -512,8 +513,10 @@ export default function IdeRunResult() {
                 </span>
               )}
               <span style={{flex: 1}} />
-              {run?.statusReason && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{run.statusReason}</span>
+              {run?.statusReason && humanStatusReason(run.statusReason) && (
+                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}} title={run.statusReason}>
+                  {humanStatusReason(run.statusReason)}
+                </span>
               )}
             </div>
 
@@ -926,6 +929,24 @@ export default function IdeRunResult() {
               onDelta={(dx) => setFilesWidth((w) => Math.max(160, Math.min(520, w + dx)))}
             />
             <div className='ide-split-main'>
+              {files.length > 0 && (
+                <div className='ide-mobile-file-picker'>
+                  <select
+                    className='ide-select'
+                    value={activeFile || ''}
+                    onChange={(e) => {
+                      if (e.target.value) void openFile(e.target.value);
+                    }}
+                  >
+                    <option value=''>Select a file</option>
+                    {files.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {openFiles.length > 0 && (
                 <div className='ide-tabs'>
                   {openFiles.map((f) => (

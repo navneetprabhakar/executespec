@@ -16,6 +16,8 @@ export interface BenchmarkRun {
   resolvedTasks: number;
   status: string; // PENDING | RUNNING | DONE | FAILED | CANCELLED
   costUsd: number | string;
+  inputTokens?: number;
+  outputTokens?: number;
   harborJobName?: string | null;
   submissionStatus?: string | null; // SUBMITTING | SUBMITTED | FAILED
   leaderboardUrl?: string | null;
@@ -35,6 +37,8 @@ export interface BenchmarkTaskResult {
   reward: number; // 1 = passed the verifier, 0 = failed
   esRunId?: string | null;
   costUsd: number | string;
+  inputTokens?: number;
+  outputTokens?: number;
   createdAt: string;
 }
 
