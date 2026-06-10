@@ -1,5 +1,11 @@
 # How to read the SWE-bench brief — methodology + validity (forwardable)
 
+> **⚠️ SUPERSEDED (2026-06-10) — do NOT quote these numbers, internally or externally.** The harness
+> that produced them did not pin or track the worker model: LOW-complexity tasks silently ran on the
+> LIGHTWEIGHT tier, so the 59%/52% headline is not attributable to the stated models. The eval is
+> being re-run on the rebuilt harness (which pins + captures + validates the worker model per run,
+> RL-2026-06-001); this note and the brief will be replaced when the re-run lands.
+
 > Companion to `swebench-exec-brief.{html,pdf}`. Written to answer "how do I read these numbers, and
 > how much should I trust them?" Honest about what's solid and what isn't. A Claude Code / OpenAI
 > Codex head-to-head is in progress; this note will be folded into a revised brief once that lands.

@@ -1,93 +1,77 @@
 # ExecuteSpec
 
-> AI coding platform that ships pull requests your team will actually merge. Plan, build, test, review, and open a PR — measured ~80% verified score on real runs. Plus a **catalog of 28 readymade solutions** (login-with-google, Stripe checkout, Razorpay, RAG with pgvector, Resend email, Twilio SMS, Postgres+Prisma, Redis cache, Dockerize, GitHub Actions CI, Sentry, shadcn/ui, dark-mode toggle, rate-limiting, websocket realtime, OpenAI chat, Claude chat, PostHog analytics, GrowthBook flags, newsletter signup, referral program, Expo mobile, Mapbox, Google Calendar booking, OpenAPI spec gen, …) and **11 modernization recipes** (JavaScript→TypeScript, CommonJS→ESM, Express→Fastify, Mongoose→Prisma, REST→tRPC, Pages Router→App Router, Class components→hooks, Mocha→Vitest, Webpack→Vite, Tailwind v3→v4, Vue 2→Vue 3). Four tiers: Free (5 runs / month, no credit card; 13 readymades unlocked), Pro $20/mo (unlimited managed runs solo + all 28 readymades + 10 migrations), Team $39/seat/month minimum 2 (BYOK + per-seat collaboration + audit log + SSO + all 28 + all 11), Enterprise (SOC 2 + signed DPA + dedicated infra + custom MSA + private contributions). Public anonymized 30-day demo at https://executespec.ai/exec-demo. Browse the catalogs: https://dev.executespec.ai/library and https://dev.executespec.ai/migrations.
+> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 15 runs/month, no credit card), Pro ($29/mo or $289/yr — 30 managed runs/month), Team ($39/seat/mo from 1 seat — BYOK, unlimited runs on your own keys), Enterprise (custom contract + signed DPA). App: https://app.executespec.ai
 
 ## What it is
 
-ExecuteSpec runs a multi-agent pipeline on every spec: **planner** (decomposes the spec into a structured plan with explicit requirements + per-task hard constraints) → **plan-approval gate** (production mode) → **sequential worker** (executes each task with per-task validation) → **reviewer** (general + wiring passes) → **final build + test gate** → **0-100 verified score on the resulting PR**. The verified score is derived from real signals (final-build pass, test pass rate, reviewer verdict, spec adherence) — not LLM self-rating.
+ExecuteSpec runs a multi-agent pipeline on every spec: **classifier** (sizes the work) → **planner** (decomposes the spec into a structured plan with a cost estimate) → **plan-approval gate** (production mode — you read and approve the plan and price before execution spends anything) → **sequential worker** (executes each task with a per-task build smoke test) → **reviewer** (general + wiring passes, plus a fix-the-build pass when needed) → **final build + test gate** → **0–100 verified score on the resulting PR**. The verified score is derived from real signals (build pass, real test pass rate, reviewer verdict, code delivered) — not LLM self-rating.
 
-The selling-point line: **"AI that ships pull requests your team will actually merge."** Cursor / GitHub Copilot / Devin / v0 / Bolt / Lovable / Cody all optimise for an earlier phase of the SDLC (typing, prototyping, understanding, executing). ExecuteSpec optimises for the merge.
+The selling-point line: **"AI that ships pull requests your team will actually merge."** Cursor / GitHub Copilot / Devin / v0 / Bolt / Lovable / Cody all optimise for an earlier phase of the SDLC (typing, prototyping, understanding). ExecuteSpec optimises for the merge.
 
 ## Key concepts
 
-- **Verified score (0-100)**: baseline 40 + final-build-pass 20 + test-pass-rate × 20 (scaled) + reviewer verdict (CLEAN=20 / FIXED=15 / UNRESOLVED=5 / REVIEW_FAILED=0) − 5 per unfixed critical issue. Computed automatically on every run; visible on every PR opened.
-- **Plan-approval gate (Production mode)**: planner emits a structured plan that you read + approve before any code is written. No surprise PRs. Devin runs in the dark; ExecuteSpec shows you the plan.
+- **Verified score (0–100)**: additive weighted score across five slots — code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5) — averaged over the slots that actually fired. The tests slot runs your project's own test suite in the workspace. The verdict pill (Ready / Needs review / Failed) is derived from the score.
+- **Plan-approval gate (Production mode)**: the planner emits a structured plan + cost estimate that you approve before any code is written. Credits are charged at approval and refunded if the run fails. No surprise PRs, no surprise bills.
+- **Credits**: 1 credit ≈ $5 of model spend. A run costs 1–N credits proportional to its estimated LLM cost.
 - **Project workspace**: per-project container linking one or more GitHub repos, with per-repo codemaps, a combined architecture doc, a tech-debt panel, a project memory ledger (compacted every 10 runs), and RAG-powered project chat.
-- **BYOK** (Bring Your Own Keys): on Team and Enterprise. Plug in your own Anthropic / OpenAI / Google API keys. Zero per-run markup from us — pay your LLM provider directly. The seat fee covers the platform.
-- **Anonymized public exec demo**: at /v3/exec-demo, the platform-wide last-30-days aggregate (totals + verified-rate + spend-by-project + top wins) is share-link-able without signup. Lets a CTO show their CFO real numbers before paying.
-- **Execution View**: Enterprise-only feature for multi-repo, multi-solution launches with cross-repo handover contracts and coordinated per-repo pull requests.
+- **BYOK** (Bring Your Own Keys): standard on Team and Enterprise (your own Anthropic / OpenAI / Google keys, zero per-run markup — pay your LLM provider directly); optional on Pro to lift the per-run cost cap.
+- **Autofix surfaces**: one-click patch runs from PR review comments, tech-debt categories, and code-review findings — each opens its own PR.
 
 ## Pricing (2026)
 
-- **Free** ($0/month): 5 runs per month, no credit card. 1 project, 1 repo, all 3 providers (managed keys), anonymous trial — no signup required for first preview, verified 0-100 score on every run, 30-day retention.
-- **Pro** ($20/month): Unlimited runs/month for one developer. Managed keys (we pay the LLM), all providers, unlimited projects + repos, plan & review gate, priority email support, top-ups available at $1 = 1 credit if you hit fair-use limits.
-- **Team** ($39/seat/month, minimum 2 seats, max 20): Everything in Pro + BYOK runs (route through your own Anthropic / OpenAI / Google keys, zero per-run markup from us — only the seat fee) + per-seat collaboration with shared run history + shared spec templates + org SSO (SAML / OIDC) + audit log export + activity feed across every project in the org.
-- **Enterprise** (custom): Everything in Team + dedicated infrastructure region + custom MSA + SOC 2 Type II evidence + signed DPA + SAML/OIDC enforced + audit-log retention 5 years + Execution View (multi-repo multi-solution launches) + cross-repo handover + JIRA + Confluence + ServiceNow + PagerDuty + dedicated Slack + custom SLA.
+- **Free** ($0/month): 15 runs per month, no credit card. 1 project, 1 repo, managed keys, small (1-credit) specs, $3 per-run cost cap, verified 0–100 score on every run.
+- **Pro** ($29/month or $289/year — 17% off): 30 runs/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, $5 per-run cost cap (bring your own key to lift it), readymade library + migration recipes.
+- **Team** ($39/seat/month, from 1 seat, up to 20): BYOK — unlimited runs on your own Anthropic / OpenAI / Google keys with zero per-run markup (the seat fee covers the platform). Org governance: per-project spend caps, plan-approval thresholds, repo allowlists. Cross-repo runs, sharing, unlimited code reviews, autofix surfaces, audit log, shared spec templates.
+- **Enterprise** (custom): everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, JIRA + Confluence integration, priority support.
 
 ## Why this beats each competitor
 
 - **vs Cursor** ($20/mo IDE): Cursor for the line. ExecuteSpec for the PR. Cursor wins on completion latency; ExecuteSpec wins on multi-file dispatch + multi-repo + project memory + a measurable verified score on the output.
 - **vs v0.dev** (Vercel): v0 ships an artifact. ExecuteSpec ships to your repo. v0's gallery is rich; ExecuteSpec's PRs are real.
 - **vs Bolt** (StackBlitz) and **Lovable**: Bolt builds in their sandbox. ExecuteSpec builds in your repo. Both are great for prototypes; ExecuteSpec is the production ship.
-- **vs Devin** (Cognition): Devin runs in the dark. ExecuteSpec shows you the plan and lets you approve it before it touches the repo. Same agent-autonomy story; explicit human gate.
-- **vs GitHub Copilot Workspaces**: Workspaces is a feature inside GitHub. ExecuteSpec is a workflow across providers + repos.
+- **vs Devin** (Cognition): Devin runs in the dark. ExecuteSpec shows you the plan — and the price — and lets you approve both before it touches the repo. Same agent-autonomy story; explicit human gate.
+- **vs GitHub Copilot**: Copilot is autocomplete + chat in your IDE. ExecuteSpec operates at spec altitude: plan, execute across repos, validate, ship a PR with a verdict.
 - **vs Sourcegraph Cody**: Cody knows your code. ExecuteSpec ships changes to it.
 - **vs Claude Code** (Anthropic CLI): Claude Code in your terminal. ExecuteSpec in your browser, your team's audit log, your customer's PR.
 - **vs Aider** (OSS CLI): Aider when you want to tinker. ExecuteSpec when you want it to ship.
-- **vs Continue.dev** (OSS extension): Continue is a tool. ExecuteSpec is a service.
 - **vs Replit Agent**: Replit Agent in their hosted IDE. ExecuteSpec in your existing repo.
-
-## Per-persona conversion paths
-
-- **Indie hacker** → Free → composer on landing → first run in 60s → upgrade to Pro at cap.
-- **Senior dev (already on Cursor)** → Pro $20/mo → uses ExecuteSpec for the multi-file changes Cursor can't do.
-- **Eng manager evaluating Team** → /v3/team anonymous-preview → invites teammates → Team conversion.
-- **Procurement / security** → /v3/trust → SOC 2 evidence + DPA + sub-processors → Enterprise gate-keep.
-- **Enterprise admin** → /v3/team SSO + sales conversation → Enterprise (custom MSA, dedicated infra).
-- **PgM / CFO** → /v3/exec-demo (public anonymized) → shares with CTO → influences Pro/Team/Enterprise purchase.
 
 ## Capabilities (feature list)
 
+- Real PRs with a deterministic Ready / Needs review / Failed verdict
+- Plan-approval gate with cost estimate (Production mode) + auto-approve (Prototype mode)
 - Multi-repo project workspace with architecture docs
 - Per-repo codemaps (idempotent by SHA)
-- Combined architecture doc generation (3-step pipeline)
-- Tech-debt panel with 30-day trend chart
-- Project memory with caveman-English digests + 10-run compaction
-- RAG-powered project chat over codemaps + uploaded docs
-- Verified 0-100 score + 6-dimension score trend chart
-- Figma URL → design-compliance score
-- React Native + Expo codegen (Android + iOS with Hermes bundle)
+- Tech-debt panel with category, severity, and file hotspots
+- Project memory with run digests + compaction
+- RAG-powered project chat over codemaps, source, and uploaded docs
+- Verified 0–100 score on every run
 - TDD mode (test-first task decomposition)
 - GitHub push + webhook-driven PR status
-- Plan-approval gate (Production mode) + auto-approve (Prototype mode)
-- Deterministic validation chain (Syntax, Type, Lint, Unit Tests)
-- Agentic code review with auto-fix (wiring + general passes)
-- Public anonymized exec snapshot (share-link-able)
-- Multi-gateway billing (Stripe for US/global, Razorpay for India)
+- Agentic PR review + whole-repo code review with autofix
+- Org governance: spend caps, approval thresholds, repo allowlists (Team+)
+- Per-org model matrix override + per-run model pin (Enterprise)
 - JIRA + Confluence integration (Enterprise)
-- Execution View for multi-repo launches (Enterprise)
-- SSO/SAML, RBAC, audit log export (Team + Enterprise)
+- Multi-gateway billing (Stripe for US/global, Razorpay for India)
 
 ## Technology
 
-- **Providers**: Anthropic, OpenAI, Google (user-selectable per project)
+- **Providers**: Anthropic, OpenAI, Google Gemini (user-selectable); OpenRouter gateway models on Enterprise
 - **Hosting**: Google Cloud Platform, us-east4 (Virginia)
 - **Payments**: Stripe (US/global), Razorpay (India)
-- **Security**: 8-layer defense, application-level encryption for BYOK keys, TLS 1.2+, RBAC
-- **Compliance**: SOC 2 audit-in-progress (Type II evidence on request), DPDPA 2023 (India), GDPR SCCs available for EU, audit-log retention 5 years (Enterprise)
+- **Security**: 8-layer defense-in-depth, sandboxed code execution, BYOK keys encrypted at rest and never logged, TLS 1.3, RBAC with tenant-isolation guards pinned by automated tests
+- **Compliance**: GDPR (data export + erasure built-in, SCCs for EU transfers), signed DPA available. SOC 2 Type II is on the roadmap, not yet certified — security questionnaire available on request.
 
 ## Links
 
 - Home: https://executespec.ai/
-- App (sign up): https://dev.executespec.ai
-- Public 30-day demo: https://dev.executespec.ai/exec-demo
-- Trust posture: https://dev.executespec.ai/trust
-- For teams: https://dev.executespec.ai/team
-- Pricing section: https://executespec.ai/#pricing
+- App (sign up): https://app.executespec.ai
+- Pricing: https://executespec.ai/#pricing
+- Trust & security: https://app.executespec.ai/trust
 - FAQ: https://executespec.ai/#faq
 
 ## Contact
 
-- Sales / enterprise: admin@executespec.ai
+- Sales / enterprise: sales@executespec.ai
 - Support: admin@executespec.ai
 - LinkedIn: https://www.linkedin.com/company/executespec
