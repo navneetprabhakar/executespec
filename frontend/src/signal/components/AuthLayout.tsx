@@ -143,11 +143,11 @@ export default function AuthLayout({children}: {children: ReactNode}) {
             </li>
             <li>
               <span className='dot signal' />
-              Plan-gate before any LLM tokens spend
+              You approve the plan — and the price — first
             </li>
             <li>
               <span className='dot coral' />
-              BYOK bypasses the cost cap
+              Deterministic verified score on every PR
             </li>
           </ul>
         </div>

@@ -8,11 +8,11 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -96,7 +96,7 @@ public class PatchAgent {
         // got bumped to 150 originally); pinning them to 150 here makes intent explicit + future-
         // proofs against the OpenRouter cap silently regressing if DEFAULT changes. Honest
         // calibration awaits DB-side iter-count analysis; the explicit case is the safe step.
-      case "openrouter", "deepseek" -> 220;
+      case "openrouter", "deepseek", "fireworks" -> 220;
       default -> DEFAULT_MAX_ITERATIONS;
     };
   }
@@ -119,6 +119,8 @@ public class PatchAgent {
    * {@link WorkerAgent}; PATCH reads the worker's {@code git diff} as the deliverable under review.
    */
   private final FeatureFlagService featureFlagService;
+
+  private final PromptAssembler promptAssembler;
 
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
   public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
@@ -145,7 +147,7 @@ public class PatchAgent {
         WorkerTaskRequest.builder()
             .provider(provider)
             .model(model)
-            .systemPrompt(buildSystemPrompt())
+            .systemPrompt(buildSystemPrompt(provider))
             .userPrompt(userRequest)
             .context(ctx)
             .maxIterations(maxIterations)
@@ -192,15 +194,12 @@ public class PatchAgent {
    * {@code prompts/patch-agent.md} per the CLAUDE.md MUST-pattern (prompts in external resource
    * files).
    */
-  @Value("classpath:prompts/patch-agent.md")
-  private Resource patchAgentPromptResource;
-
   private String patchAgentPrompt;
 
   @PostConstruct
   void loadPatchAgentPrompt() {
     try {
-      patchAgentPrompt = patchAgentPromptResource.getContentAsString(StandardCharsets.UTF_8);
+      patchAgentPrompt = promptAssembler.assemble("patch-agent.md");
     } catch (Exception e) {
       log.error("[PatchAgent] Failed to load classpath:prompts/patch-agent.md — using a stub", e);
       patchAgentPrompt =
@@ -212,7 +211,26 @@ public class PatchAgent {
    * Returns the loaded patch-mode system prompt. See {@code prompts/patch-agent.md} for the full
    * template.
    */
-  private String buildSystemPrompt() {
-    return patchAgentPrompt;
+  private String buildSystemPrompt(String provider) {
+    if (!featureFlagService.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)) {
+      return patchAgentPrompt;
+    }
+    String fragment = loadProviderPatchFragment(provider);
+    return fragment.isBlank() ? patchAgentPrompt : patchAgentPrompt + "\n\n" + fragment;
+  }
+
+  String loadProviderPatchFragment(String provider) {
+    if (provider == null || provider.isBlank()) return "";
+    String key = provider.trim().toLowerCase();
+    try {
+      Resource r =
+          new org.springframework.core.io.ClassPathResource(
+              "prompts/fragments/provider/" + key + "/patch.md");
+      if (!r.exists()) return "";
+      return r.getContentAsString(StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadProviderPatchFragment({}) failed: {}", provider, e.getMessage());
+      return "";
+    }
   }
 }

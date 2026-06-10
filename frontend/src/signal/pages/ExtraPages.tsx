@@ -1567,14 +1567,19 @@ function MigrationApplyModal({
 export function TrustPage() {
   return (
     <>
-      <TopBar title='Trust & security' sub='SOC 2 · DPA · GDPR' back backTo='/home' />
+      {/* 2026-06-10 launch truth pass: this page claimed SOC 2 Type II "Ready",
+          an NDA-gated SOC 2 report, a 2026 pen-test report, and SSO+SCIM — none
+          of which exist yet (docs/enterprise-one-pager.md: "Do not claim: SAML
+          is end-to-end, SOC 2 is complete"). Rewritten to the security story
+          that IS true; re-add certifications only when the reports exist. */}
+      <TopBar title='Trust & security' sub='Security · DPA · GDPR' back backTo='/login' />
       <Feed>
         <div className='signal-quick-grid'>
           {[
-            {label: 'SOC 2 Type II', v: 'Ready', tone: 'mint'},
-            {label: 'DPA available', v: 'Yes', tone: 'mint'},
-            {label: 'SSO + SCIM', v: 'TEAM+', tone: 'signal'},
-            {label: 'GDPR export', v: 'Built-in', tone: 'mint'},
+            {label: 'DPA (GDPR Art. 28)', v: 'Available', tone: 'mint'},
+            {label: 'GDPR export + erasure', v: 'Built-in', tone: 'mint'},
+            {label: 'Sandboxed execution', v: '8 layers', tone: 'signal'},
+            {label: 'Training on your code', v: 'Never', tone: 'mint'},
           ].map((b) => (
             <div key={b.label} className={`signal-quick-card ${b.tone}`}>
               <div className='icon-bg'>✓</div>
@@ -1593,9 +1598,9 @@ export function TrustPage() {
         <Card>
           <KvList
             pairs={[
-              {k: 'At rest', v: 'AES-256 (Cloud SQL)'},
+              {k: 'At rest', v: 'AES-256 (managed Cloud SQL)'},
               {k: 'In transit', v: 'TLS 1.3'},
-              {k: 'API keys (BYOK)', v: 'KMS-wrapped'},
+              {k: 'API keys (BYOK)', v: 'Encrypted at rest · never logged'},
               {k: 'Source code', v: 'Workspace-local · cleared at run end'},
               {k: 'Backups', v: 'Daily · 30d retention · encrypted'},
             ]}
@@ -1612,16 +1617,39 @@ export function TrustPage() {
           </ul>
         </Card>
 
+        <SectionHeader>How execution is isolated</SectionHeader>
+        <Card>
+          <ul style={{padding: '0 0 0 18px', margin: 0, fontSize: 14, lineHeight: 1.7}}>
+            <li>Every run gets its own workspace, wiped at run end</li>
+            <li>Shell + file access run inside a sandbox policy, not on a shared host account</li>
+            <li>Generated code is scanned for abuse patterns before execution</li>
+            <li>Test execution runs in read-only, capability-dropped containers</li>
+            <li>Tenant access guards are enforced in code and pinned by automated tests</li>
+          </ul>
+        </Card>
+
+        <SectionHeader>Where we are on certifications</SectionHeader>
+        <Card>
+          <div style={{fontSize: 14, lineHeight: 1.7, color: 'var(--signal-text-dim)'}}>
+            We're an early-stage company and we only publish what's true today. SOC 2 Type II is on
+            our roadmap, not yet certified — happy to walk through our current controls or complete
+            your security questionnaire:{' '}
+            <a href='mailto:sales@executespec.ai' className='signal-md-link'>
+              sales@executespec.ai
+            </a>
+            .
+          </div>
+        </Card>
+
         <SectionHeader>Documents</SectionHeader>
-        <Row title='SOC 2 Type II report' meta={<span>NDA required</span>} showChev />
         <Row title='Data Processing Addendum (DPA)' meta={<span>Standard MSAs</span>} showChev />
         <Row
           title='Sub-processors list'
           meta={<span>GCP · Anthropic · OpenAI · Google AI</span>}
           showChev
         />
-        <Row title='Penetration test report · 2026' meta={<span>NDA required</span>} showChev />
-        <Row title='Privacy policy' meta={<span>last updated 2026-03-14</span>} showChev />
+        <Row title='Security questionnaire' meta={<span>On request</span>} showChev />
+        <Row title='Privacy policy' meta={<span>last updated 2026-05-01</span>} showChev />
       </Feed>
     </>
   );
@@ -1735,7 +1763,20 @@ export function PublicPricingPage() {
     <>
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
-        <TabsStrip items={[{label: 'Monthly'}, {label: 'Yearly · save 20%', active: true}]} />
+        {/* 2026-06-10 launch truth pass: this page was hardcoded and disagreed with
+            the billing DB — it omitted the LISTED Pro tier ($29/mo since V176; the
+            "Solo" branding was retired by V185 but the tier stayed purchasable),
+            advertised a TEAM yearly price with no active billing_plan row (V165
+            deactivated the $49-era yearly rows; TEAM is monthly-only), and invented
+            limits ("500 credits/seat", "$25 hard cap") that contradict tier_config
+            (TEAM has NO per-run cap — resolveRunCostBudget returns -1). Numbers
+            below mirror tier_config + billing_plan; keep in sync with
+            GET /api/billing/plans. */}
+        <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
+          Runs are metered in credits — <b>1 credit ≈ $5 of model spend</b>. Credits are charged
+          only when you approve a plan, and refunded if the run fails. Pro bills monthly or yearly;
+          Team is monthly, per seat.
+        </Card>
 
         <div className='signal-grid cols-2 cols-4-xl'>
           {[
@@ -1745,38 +1786,51 @@ export function PublicPricingPage() {
               sub: 'No card required',
               features: [
                 '15 runs / month',
-                '1-credit specs only',
-                '$3 hard cost cap',
-                'Single repo',
+                'Small specs (1 credit)',
+                '$3 per-run cost cap',
+                '1 project · 1 repo',
                 'Email support',
               ],
             },
             {
-              tier: 'TEAM',
-              price: '$31',
-              unit: '/seat/mo',
-              sub: 'From 1 seat · per seat · yearly',
+              tier: 'PRO',
+              price: '$29',
+              unit: '/mo',
+              sub: 'For individuals · $289/yr (save 17%)',
               features: [
-                'Unlimited runs',
-                '500 credits / seat / month',
-                '$25 hard cap',
-                'BYOK · 3 providers',
-                'Cross-repo + sharing',
-                'All autofix surfaces',
+                '30 runs / month',
+                'Managed keys — Anthropic · OpenAI · Gemini',
+                'PR review + code review (4 scans/mo)',
+                '2 projects · 2 repos each',
+                '$5 per-run cap — add your own key to lift it',
+              ],
+            },
+            {
+              tier: 'TEAM',
+              price: '$39',
+              unit: '/seat/mo',
+              sub: 'From 1 seat · bring your own API keys',
+              features: [
+                'Unlimited runs on your keys',
+                'No platform cost cap',
+                'Org spend caps + approval thresholds',
+                '5 projects · cross-repo runs',
+                'Unlimited code reviews + sharing',
+                'Autofix: PR review · tech debt · code scans',
               ],
               best: true,
             },
             {
               tier: 'ENTERPRISE',
               price: 'Custom',
-              sub: 'SSO · SLA · dedicated CSM',
+              sub: 'Custom contract · DPA',
               features: [
-                'Unlimited credits',
-                'No cost cap',
+                'Unlimited runs · no cost cap',
+                'Model matrix override + per-run model pins',
+                'OpenRouter gateway models',
                 'Standards · Contracts · ADRs',
-                'SSO + SCIM',
-                '99.9% SLA',
-                'Dedicated CSM',
+                'Governance: audit trail · repo allowlists',
+                'Dedicated support',
               ],
             },
           ].map((p) => (
@@ -1858,7 +1912,7 @@ export function PublicPricingPage() {
                   ? 'Talk to sales'
                   : p.tier === 'FREE'
                     ? 'Start free'
-                    : 'Start trial'}
+                    : 'Get started'}
               </Button>
             </Card>
           ))}

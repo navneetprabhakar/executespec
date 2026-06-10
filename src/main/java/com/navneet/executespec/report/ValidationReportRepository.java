@@ -19,6 +19,15 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
   Optional<ValidationReport> findByShareToken(String shareToken);
 
   /**
+   * RL-2026-06-019 — batch (run_id, verified_score) pairs for the run-list endpoint so RunSummary
+   * can carry the headline score without an N+1 report lookup per row.
+   */
+  @Query(
+      value = "SELECT run_id, verified_score FROM validation_report WHERE run_id IN (:runIds)",
+      nativeQuery = true)
+  List<Object[]> findScoresByRunIds(@Param("runIds") List<String> runIds);
+
+  /**
    * Pilot R6 — score trend for a project. Joins validation_report to pipeline_run on runId and
    * filters by project. Ordered oldest → newest so the UI chart plots time in the natural
    * direction.
