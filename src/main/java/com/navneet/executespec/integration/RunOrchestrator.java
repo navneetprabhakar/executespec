@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import static com.navneet.executespec.integration.RunPipelineSupport.computeRepoCountForEstimate;
 import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
+import static com.navneet.executespec.integration.RunPipelineSupport.isTerminal;
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
@@ -46,9 +47,11 @@ import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
+import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
@@ -142,6 +145,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
   private final RunValidationKickoff validationKickoff;
+  private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
   private final PerkyMessenger perky;
   private final GateStore gateStore;
@@ -901,16 +905,13 @@ public class RunOrchestrator implements RunControlPort {
         if (enterprise && pinnedModel != null && !pinnedModel.isBlank()) {
           try {
             pinProvider = LlmProvider.valueOf(provider.toUpperCase());
-            // Validate the pin is a real model that belongs to the run's provider (lenient: if the
-            // registry can't confirm ownership we still accept it but keep it provider-scoped, so a
-            // forward-compat model id the registry doesn't yet know about isn't rejected).
             String canonical = modelRegistry.canonicalize(pinnedModel.trim());
             String owner = modelRegistry.providerFor(canonical);
-            if (owner == null || owner.equalsIgnoreCase(pinProvider.name())) {
+            if (owner == null || canRoutePinnedModel(pinProvider, canonical, owner)) {
               validatedPin = canonical;
             } else {
               log.warn(
-                  "V2 run={} per-run model pin '{}' is not a {} model — ignoring pin",
+                  "V2 run={} per-run model pin '{}' cannot be routed via {} — ignoring pin",
                   runId,
                   pinnedModel,
                   pinProvider.name());
@@ -1688,10 +1689,12 @@ public class RunOrchestrator implements RunControlPort {
               + (reviewResult != null ? "; review=" + reviewResult.overall() : "")
               + (finalReason != null ? "; reason=" + finalReason : ""),
           startedAt);
+      String persistedFinalStatus =
+          runRepo.findById(runId).map(PipelineRun::getStatus).orElse(finalStatus);
       log.info(
           "RunOrchestrator run={} {} exec={} review={} reason={}",
           runId,
-          finalStatus,
+          persistedFinalStatus,
           execResult.overall(),
           reviewResult == null ? "n/a" : reviewResult.overall(),
           finalReason);
@@ -1704,7 +1707,7 @@ public class RunOrchestrator implements RunControlPort {
       // the UI but no PR exists. Manual "Push & open PR" still works as a
       // re-push. Feature flag `project.runs.auto-push` still gates the
       // project-scoped path for back-compat; standalone runs are always on.
-      if ("COMPLETE".equals(finalStatus) || "PARTIAL".equals(finalStatus)) {
+      if ("COMPLETE".equals(persistedFinalStatus) || "PARTIAL".equals(persistedFinalStatus)) {
         boolean shouldPush;
         if (projectId != null) {
           shouldPush = featureFlagService.isEnabled("project.runs.auto-push");
@@ -1758,6 +1761,7 @@ public class RunOrchestrator implements RunControlPort {
       } catch (Exception ignore) {
         /* best-effort */
       }
+      resourceCleaner.cleanupRun(runId);
       // P3 local-hands: drop the remote-tool session on EVERY terminal/exception/cancel path. This
       // finally is the single guaranteed unwind point (cancel interrupts the pipeline thread and
       // unwinds through here). No-op for non-LOCAL runs.
@@ -1892,18 +1896,12 @@ public class RunOrchestrator implements RunControlPort {
       result = patchAgent.run(provider, model, userRequestLive, rootCtx);
     } catch (Exception e) {
       log.error("PATCH run={} dispatch threw", runId, e);
-      runRepo
-          .findById(runId)
-          .ifPresent(
-              r -> {
-                r.setStatus("FAILED");
-                r.setStatusReason("PATCH_AGENT_ERROR");
-                r.setCompletedAt(Instant.now());
-                runRepo.save(r);
-              });
-      eventPublisher.publishEvent(
-          new PipelineEvent.RunFailed(runId, "patch agent error: " + e.getClass().getSimpleName()));
-      broadcaster.emit(runId, RunEvent.complete(runId, "FAILED", "PATCH_AGENT_ERROR"));
+      terminate(
+          runId,
+          "FAILED",
+          "PATCH_AGENT_ERROR",
+          "patch agent error: " + e.getClass().getSimpleName(),
+          startedAt);
       return;
     }
 
@@ -1941,33 +1939,7 @@ public class RunOrchestrator implements RunControlPort {
       }
     }
 
-    // Snapshot cost + tokens BEFORE flipping to terminal so dashboards reflect the
-    // patch agent's actual spend. The build-mode flow attributes per-phase under
-    // persistPhaseTokens; patch mode has no phases to attribute against, so the
-    // run row reads directly from the tracker's accumulator.
     RunCostTracker.Snapshot patchCost = costTracker.snapshot(runId);
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setStatus(terminalStatus);
-              r.setStatusReason(terminalReason);
-              r.setCompletedAt(Instant.now());
-              if (patchCost.costUsd() > 0d) {
-                r.setActualCostUsd(patchCost.costUsd());
-              } else if (r.getActualCostUsd() == null) {
-                r.setActualCostUsd(0d);
-              }
-              int persistedIn = r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens();
-              int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
-              if (patchCost.inputTokens() > persistedIn) {
-                r.setTotalInputTokens(patchCost.inputTokens());
-              }
-              if (patchCost.outputTokens() > persistedOut) {
-                r.setTotalOutputTokens(patchCost.outputTokens());
-              }
-              runRepo.save(r);
-            });
 
     log.info(
         "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}"
@@ -1982,6 +1954,26 @@ public class RunOrchestrator implements RunControlPort {
         patchCost.outputTokens(),
         String.format("%.4f", patchCost.costUsd()));
 
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            "patch",
+            "Patch-mode complete: " + result.outcome() + " in " + result.iterations() + " iters"));
+    terminate(
+        runId,
+        terminalStatus,
+        terminalReason,
+        "patch outcome="
+            + result.outcome()
+            + "; iterations="
+            + result.iterations()
+            + "; toolCalls="
+            + result.toolCallsDispatched(),
+        startedAt);
+    String persistedTerminalStatus =
+        runRepo.findById(runId).map(PipelineRun::getStatus).orElse(terminalStatus);
+
     // V183 (2026-05-08) — finding-triggered patch runs are project-mode (PR review autofix,
     // tech debt fix, code review autofix, CI auto-fix). They live on a real customer
     // project + repo and want their workspace diff pushed to the remote — same way build
@@ -1989,7 +1981,7 @@ public class RunOrchestrator implements RunControlPort {
     // services capture the diff via `docker exec git diff` themselves, so we skip the
     // push for them. The discriminator is the source field the FindingPatchSubmitter
     // stamps as `finding:<TYPE>`.
-    if (("COMPLETE".equals(terminalStatus) || "PARTIAL".equals(terminalStatus))
+    if (("COMPLETE".equals(persistedTerminalStatus) || "PARTIAL".equals(persistedTerminalStatus))
         && run.getSourceType() != null
         && run.getSourceType().startsWith("finding:")) {
       // 2026-05-13 audit Fix-A — same PostEditFormatter pass the BUILD-mode reviewer
@@ -2027,19 +2019,6 @@ public class RunOrchestrator implements RunControlPort {
             runId,
             pushEx.getMessage());
       }
-    }
-    broadcaster.emit(
-        runId,
-        RunEvent.log(
-            runId,
-            "patch",
-            "Patch-mode complete: " + result.outcome() + " in " + result.iterations() + " iters"));
-    broadcaster.emit(runId, RunEvent.complete(runId, terminalStatus, terminalReason));
-
-    if ("COMPLETE".equals(terminalStatus)) {
-      eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-    } else {
-      eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, terminalReason));
     }
   }
 
@@ -2227,9 +2206,12 @@ public class RunOrchestrator implements RunControlPort {
    * the SSE complete event so the UI can show "PARTIAL because FINAL_BUILD_FAILED" instead of a
    * silent badge.
    */
-  private void terminate(
+  @Override
+  public void terminate(
       String runId, String finalStatus, String statusReason, String note, Instant startedAt) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+    String[] persistedStatus = {finalStatus};
+    String[] persistedReason = {statusReason};
     // v2.5.8 — provider attribution log: makes it easy to grep logs and confirm
     // which provider actually served a run. Critical for cross-provider evaluation
     // audits (no silent fallback under strict mode).
@@ -2249,10 +2231,16 @@ public class RunOrchestrator implements RunControlPort {
               // may call terminate(...) after cancel() has already written CANCELLED;
               // without this guard the late write clobbers the user-initiated status
               // (e.g. clinic run 6d23d5b5 showed PARTIAL despite a successful cancel).
-              if (!"CANCELLED".equals(r.getStatus())) {
+              String currentStatus = r.getStatus();
+              if (!"CANCELLED".equals(currentStatus) && !"PAUSED".equals(currentStatus)) {
                 r.setStatus(finalStatus);
+                persistedStatus[0] = finalStatus;
+              } else {
+                persistedStatus[0] = currentStatus;
               }
-              r.setCompletedAt(Instant.now());
+              if (!"PAUSED".equals(persistedStatus[0])) {
+                r.setCompletedAt(Instant.now());
+              }
               if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
                 r.setFailureReason(note);
               }
@@ -2260,9 +2248,12 @@ public class RunOrchestrator implements RunControlPort {
               // UI's status badge + tooltip can explain "PARTIAL because X".
               // Only write if non-null: legacy callers still reach here without a
               // reason and we don't want to clobber a previously-set value.
-              if (statusReason != null) {
+              if (statusReason != null
+                  && !isTerminal(currentStatus)
+                  && !"PAUSED".equals(currentStatus)) {
                 r.setStatusReason(statusReason);
               }
+              persistedReason[0] = r.getStatusReason();
               // Only overwrite actualCostUsd with a positive tracker reading; an empty
               // snapshot (e.g. tracker evicted across a deploy boundary) must not
               // clobber a previously-persisted cost.
@@ -2294,27 +2285,36 @@ public class RunOrchestrator implements RunControlPort {
               // cost estimation. Best-effort; failures swallowed inside the service.
               costHistoryService.recordOnTerminal(runId);
             });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
+    String actualStatus = persistedStatus[0];
+    String actualReason = persistedReason[0];
+    broadcaster.emit(runId, RunEvent.runStatus(runId, actualStatus));
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
-    broadcaster.emit(runId, RunEvent.complete(runId, finalStatus, statusReason));
-    broadcaster.complete(runId);
+    broadcaster.emit(runId, RunEvent.complete(runId, actualStatus, actualReason));
+    if (!"PAUSED".equals(actualStatus)) {
+      broadcaster.complete(runId);
+    }
     // V2 run-level metrics are emitted by RunService only. This orchestrator is a
     // parallel entry path — record run.outcome + run.latency here too so V1-endpoint-
     // submitted V2 runs are counted.
-    metrics.recordRunOutcome(finalStatus);
-    metrics.recordRunLatency(finalStatus, java.time.Duration.between(startedAt, Instant.now()));
+    metrics.recordRunOutcome(actualStatus);
+    Instant effectiveStartedAt =
+        startedAt != null
+            ? startedAt
+            : runRepo.findById(runId).map(PipelineRun::getStartedAt).orElse(Instant.now());
+    metrics.recordRunLatency(
+        actualStatus, java.time.Duration.between(effectiveStartedAt, Instant.now()));
     // v2.5.8 — fire Spring ApplicationEvent so RunCompletionNotifier (in-app
     // notification), RunQuotaRefundListener (refund on failure), and
     // WorkspaceGcsUploadListener (archive workspace) all get notified.
     // V1 PipelineHarness already publishes this; V2 previously did not,
     // so notifications silently never fired for any V2 run.
     try {
-      if ("COMPLETE".equalsIgnoreCase(finalStatus) || "PARTIAL".equalsIgnoreCase(finalStatus)) {
+      if ("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus)) {
         eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-      } else if ("FAILED".equalsIgnoreCase(finalStatus)
-          || "CANCELLED".equalsIgnoreCase(finalStatus)) {
+      } else if ("FAILED".equalsIgnoreCase(actualStatus)
+          || "CANCELLED".equalsIgnoreCase(actualStatus)) {
         eventPublisher.publishEvent(
-            new PipelineEvent.RunFailed(runId, note == null ? finalStatus : note));
+            new PipelineEvent.RunFailed(runId, note == null ? actualStatus : note));
       }
     } catch (Exception eventEx) {
       log.warn("V2 run={} event publish failed (non-fatal): {}", runId, eventEx.getMessage());
@@ -2324,7 +2324,7 @@ public class RunOrchestrator implements RunControlPort {
     // first run that reaches COMPLETE or PARTIAL (terminal-but-usable).
     // FAILED/CANCELLED don't count as activation signals — a user who
     // submits 3 runs that all fail hasn't hit the "my code works" moment.
-    if ("COMPLETE".equalsIgnoreCase(finalStatus) || "PARTIAL".equalsIgnoreCase(finalStatus)) {
+    if ("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus)) {
       try {
         runRepo
             .findById(runId)
@@ -2335,8 +2335,8 @@ public class RunOrchestrator implements RunControlPort {
                         r.getCreatedByUserId(),
                         com.navneet.executespec.analytics.EventName.RUN_COMPLETE,
                         java.util.Map.of(
-                            "terminalStatus", finalStatus,
-                            "statusReason", statusReason == null ? "" : statusReason,
+                            "terminalStatus", actualStatus,
+                            "statusReason", actualReason == null ? "" : actualReason,
                             "aiProvider", r.getAiProvider() == null ? "" : r.getAiProvider()));
                   }
                 });
@@ -2606,6 +2606,18 @@ public class RunOrchestrator implements RunControlPort {
               .build());
     }
     return out;
+  }
+
+  private static boolean canRoutePinnedModel(
+      LlmProvider provider, String canonicalModel, String ownerProvider) {
+    if (provider == null || canonicalModel == null) return false;
+    if (provider.name().equalsIgnoreCase(ownerProvider)) return true;
+    return switch (provider) {
+      case OPENROUTER -> OpenRouterModelMapper.isSupported(canonicalModel);
+      case FIREWORKS -> FireworksModelMapper.isSupported(canonicalModel);
+      case DEEPSEEK -> canonicalModel.startsWith("deepseek-v4-");
+      default -> false;
+    };
   }
 
   /**

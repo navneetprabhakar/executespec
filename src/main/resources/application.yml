@@ -77,6 +77,9 @@ spring:
     deepseek:
       base-url: https://api.deepseek.com
       api-key: ""
+    fireworks:
+      base-url: https://api.fireworks.ai/inference/v1
+      api-key: ""
 
 model-matrix:
   providers:
@@ -100,6 +103,10 @@ model-matrix:
       planning: deepseek-v4-flash-native
       workhorse: deepseek-v4-flash-native
       lightweight: deepseek-v4-flash-native
+    fireworks:
+      planning: deepseek-v4-pro-fw
+      workhorse: deepseek-v4-pro-fw
+      lightweight: deepseek-v4-flash-fw
 
   models:
     claude-opus-4-6:
@@ -280,6 +287,50 @@ model-matrix:
         cached-input-per-1m: 0.02
         output-per-1m: 0.20
       notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.10 in / $0.02 cached / $0.20 out per 1M."
+    deepseek-v4-pro-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 131072
+      display-label: "DeepSeek V4 Pro (Fireworks)"
+      pricing:
+        input-per-1m: 1.74
+        cached-input-per-1m: 0.14
+        output-per-1m: 3.48
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+    deepseek-v4-flash-fw:
+      provider: fireworks
+      chain-tier: UTILITY
+      context-limit: 1048576
+      max-output-tokens: 131072
+      display-label: "DeepSeek V4 Flash (Fireworks)"
+      pricing:
+        input-per-1m: 0.14
+        cached-input-per-1m: 0.03
+        output-per-1m: 0.28
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+    kimi-k2p6-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32768
+      display-label: "Kimi K2.6 (Fireworks)"
+      pricing:
+        input-per-1m: 0.95
+        cached-input-per-1m: 0.16
+        output-per-1m: 4.00
+      notes: "Fireworks accounts/fireworks/models/kimi-k2p6 Standard path — ENTERPRISE BYOK. Priority/Fast tiers are more expensive and need route-level policy before exposure."
+    glm-5.1-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 202000
+      max-output-tokens: 25344
+      display-label: "GLM 5.1 (Fireworks)"
+      pricing:
+        input-per-1m: 1.40
+        cached-input-per-1m: 0.26
+        output-per-1m: 4.40
+      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
     "[kimi-k2.6]":
       provider: openrouter
       chain-tier: CAPABLE
@@ -302,6 +353,17 @@ model-matrix:
         cached-input-per-1m: 0.07
         output-per-1m: 2.80
       notes: "OpenRouter qwen/qwen3-coder — ENTERPRISE BYOK. Code-specialized. Pricing approximate vs OpenRouter 2026-05-28 (~$0.70 in / $0.07 cached / $2.80 out per 1M) — refine post-smoke."
+    "[mimo-v2.5-pro]": # bracket-wrapped: the dotted key (v2.5) would otherwise bind as a nested path (cf. kimi-k2.6)
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "Xiaomi MiMo v2.5 Pro (OpenRouter)"
+      pricing:
+        input-per-1m: 0.435
+        cached-input-per-1m: 0.004
+        output-per-1m: 0.87
+      notes: "OpenRouter xiaomi/mimo-v2.5-pro — tools-capable, 1M ctx. Pricing verified vs OpenRouter catalogue 2026-06-09: $0.435 in / $0.004 cached / $0.87 out per 1M. Added for the TB 2.0 benchmark (RL-2026-06)."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
@@ -326,8 +388,8 @@ model-matrix:
       - { provider: openai, model: gpt-5.4 }
 
   free-tier:
-    provider: openai
-    model: gpt-5.4-mini
+    provider: deepseek
+    model: deepseek-v4-flash-native
 
   agent-tier-map:
     OutlinePlannerAgent: PLANNING

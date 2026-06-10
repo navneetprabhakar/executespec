@@ -1,6 +1,6 @@
 # `router/` — Model selection + provider routing
 
-> Last reviewed: 2026-05-12 (1.0.0-M1).
+> Last reviewed: 2026-06-10 (1.0.0-M1).
 
 User-selected provider routing with YAML as the single source of truth and a Redis-backed circuit breaker.
 
@@ -8,7 +8,7 @@ User-selected provider routing with YAML as the single source of truth and a Red
 
 | File | Purpose |
 |------|---------|
-| `LlmProvider.java` | Enum: ANTHROPIC, OPENAI, GEMINI, OPENROUTER (Enterprise BYOK aggregator), **DEEPSEEK** (RL-2026-05-052, 2026-05-28 — Enterprise BYOK, native `api.deepseek.com` route, NOT in failover chain; eliminates the ~3-4× routing overhead observed routing the same models through OpenRouter in the mixed10 eval). `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence (V120). |
+| `LlmProvider.java` | Enum: ANTHROPIC, OPENAI, GEMINI, OPENROUTER (Enterprise BYOK aggregator), DEEPSEEK (native `api.deepseek.com` route), and FIREWORKS (OpenAI-wire aggregator route for Chinese open models). OpenRouter / DeepSeek / Fireworks are deliberate BYOK routes and are NOT in the failover chain. `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence (V120). |
 | `ModelRegistry.java` | **Single source of truth** for model metadata. Reads `application.yml model-matrix.*` — `resolve(agentName, provider)` returns tier-routed model + max-output-tokens; `workhouseModelFor(provider)` returns the provider's default workhorse; `contextLimitForOrPrefixFallback(model)` returns the context window; `displayLabelFor(model)` returns the YAML `display-label`. `ModelContextWindowMap` was deleted in the 2026-05-06 consolidation. |
 | `ModelMatrixProperties.java` | `@ConfigurationProperties` binding for `model-matrix:` (providers + agent-tier-map + failover-order + model-pricing + display-label + chainTier + free-tier-locked). |
 | `AgentTier.java` | Enum: PLANNING, WORKHORSE, LIGHTWEIGHT. |
@@ -16,8 +16,9 @@ User-selected provider routing with YAML as the single source of truth and a Red
 | `ProviderHealthTracker.java` | Redis-backed circuit breaker. **10** consecutive failures → OPEN; **180s** TTL auto-recovery. Fail-open on Redis errors. (Constants `UNHEALTHY_THRESHOLD=10` + `RECOVERY_WINDOW=Duration.ofSeconds(180)` in the source.) |
 | `AvailableProviderResolver.java` | Resolves available providers per run based on org policy + API key availability. |
 | `ProviderRecommendationService.java` | Heuristic project-type → provider routing. Gated by `provider.smart-routing.enabled` flag (default OFF). |
-| `OrgModelOverrideService.java` | **F3** — per-org `(provider:tier)→model` overrides stored as JSON on `Org.model_overrides_json` (V205). Validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper` allow-list), ENTERPRISE-gated, lenient on read; short-TTL Caffeine cache. Backs `GET/PUT /api/org/me/model-matrix`. |
+| `OrgModelOverrideService.java` | **F3** — per-org `(provider:tier)→model` overrides stored as JSON on `Org.model_overrides_json` (V205). Validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper` allow-list; Fireworks via YAML rows + `FireworksModelMapper` picker allow-list), ENTERPRISE-gated, lenient on read; short-TTL Caffeine cache. Backs `GET/PUT /api/org/me/model-matrix`. |
 | `OpenRouterModelMapper.java` | Matrix-id → OpenRouter slug allow-list (explicit; unmapped id throws). `LlmRouter.dispatch` `case "openrouter"` routes via `OpenAiNativeToolClient` (OpenAI-wire-compatible). `OrgController.selectableModelsFor("openrouter")` returns the allow-list keys, so adding a model here makes it picker-selectable. **DeepSeek V4 (`deepseek-v4-pro`/`-flash`) + Kimi K2.6 (`kimi-k2.6`) added 2026-05-26 (RL-2026-05-048); Qwen3-Coder (`qwen3-coder` → `qwen/qwen3-coder`) added 2026-05-28 (RL-2026-05-052)** — OpenRouter-only routes; ENTERPRISE BYOK; also registered in `application.yml model-matrix.models` with `provider: openrouter`. **DeepSeek-V4-Pro is also reachable natively via the new `deepseek` provider (see `LlmRouter` `callDeepSeek`) — same model, ~3-4× faster, eliminates the routing hop.** |
+| `FireworksModelMapper.java` | Matrix-id → Fireworks slug allow-list (`deepseek-v4-pro-fw`, `deepseek-v4-flash-fw`, `kimi-k2p6-fw`, `glm-5.1-fw`). `LlmRouter.dispatch` `case "fireworks"` routes via `OpenAiNativeToolClient` against `spring.ai.fireworks.base-url`. YAML rows make Fireworks tier-routable; live catalog/latency smoke is still blocked until a real Fireworks key is configured. |
 | `RunModelOverrides.java` | **F3** — `ThreadLocal` holder for the run's override map. `RunOrchestrator` binds it at run start (cleared in `finally`); `ModelResolver.lookupModel` consults it so worker/planner/reviewer honour the override with no per-call-site plumbing. **Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22):** static `withRunPin(orgOverrides, provider, model)` builds the bound map by overlaying the run's chosen model onto the provider's three tier cells of a mutable copy of the org map (pin out-ranks org + YAML). `RunOrchestrator` calls it at the bind site ENTERPRISE-gated (owner-tier lookup) from the raw `RunRequest.modelName`, validated provider-scoped via `ModelRegistry`. This overlay is the authoritative routing mechanism for every role — the worker no longer ignores the pin by re-resolving the tier default. UI: the ENTERPRISE-only "Model · Beta" selector on the IDE Compose surface (`frontend/src/ide/IdeSurfaces.tsx`). |
 | `OrgModelOverrideService.java` migration | **V205** `org_model_overrides` — adds `org.model_overrides_json TEXT`. |
 
@@ -37,7 +38,7 @@ Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). User-selectab
 
 ## Provider failover
 
-Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` (ArchUnit) pins every failover-order entry to a valid `LlmProvider` enum constant. `OPENROUTER` + `DEEPSEEK` are intentionally NOT in any failover chain — they are explicit Enterprise BYOK routes that the operator opted into, and silently switching off them would defeat the cost / data-residency reason they picked them.
+Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. `OPENROUTER`, `DEEPSEEK`, and `FIREWORKS` are intentionally NOT in any failover chain — they are explicit BYOK routes that the operator/admin opted into, and silently switching off them would defeat the cost / data-residency / latency reason they picked them.
 
 `FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
 

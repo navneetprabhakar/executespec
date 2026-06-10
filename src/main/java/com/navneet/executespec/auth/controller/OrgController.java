@@ -27,6 +27,7 @@ import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.OpenRouterModelMapper;
@@ -248,7 +249,12 @@ public class OrgController {
   // Org-level AI provider key settings (ORG_ADMIN only)
 
   record OrgAiKeySettingsRequest(
-      String anthropicApiKey, String openAiApiKey, String geminiApiKey, String openRouterApiKey) {}
+      String anthropicApiKey,
+      String openAiApiKey,
+      String geminiApiKey,
+      String openRouterApiKey,
+      String deepSeekApiKey,
+      String fireworksApiKey) {}
 
   /**
    * Saves org-wide AI provider API keys. Used by all org members who have not set a personal key.
@@ -269,6 +275,8 @@ public class OrgController {
             req.openAiApiKey(),
             req.geminiApiKey(),
             req.openRouterApiKey(),
+            req.deepSeekApiKey(),
+            req.fireworksApiKey(),
             userDetails.getUser().getId()));
   }
 
@@ -350,6 +358,9 @@ public class OrgController {
   private List<String> selectableModelsFor(String provider) {
     if ("openrouter".equalsIgnoreCase(provider)) {
       return OpenRouterModelMapper.allowList().keySet().stream().sorted().toList();
+    }
+    if ("fireworks".equalsIgnoreCase(provider)) {
+      return FireworksModelMapper.allowList().keySet().stream().sorted().toList();
     }
     return modelRegistry.allModels().keySet().stream()
         .filter(id -> provider.equalsIgnoreCase(modelRegistry.providerFor(id)))

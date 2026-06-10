@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -193,6 +194,13 @@ public class OpenAiNativeToolClient {
     if (request.temperature() != null) body.put("temperature", request.temperature());
     if (request.maxCompletionTokens() != null)
       body.put("max_completion_tokens", request.maxCompletionTokens());
+    if (request.extraBody() != null && !request.extraBody().isEmpty()) {
+      for (var entry : request.extraBody().entrySet()) {
+        if (entry.getKey() != null && entry.getValue() != null) {
+          body.set(entry.getKey(), objectMapper.valueToTree(entry.getValue()));
+        }
+      }
+    }
 
     return body;
   }
@@ -354,5 +362,6 @@ public class OpenAiNativeToolClient {
       Double temperature,
       Integer maxCompletionTokens,
       String apiKey,
-      String baseUrl) {}
+      String baseUrl,
+      Map<String, Object> extraBody) {}
 }

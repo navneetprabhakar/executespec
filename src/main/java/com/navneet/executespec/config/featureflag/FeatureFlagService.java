@@ -4,7 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import jakarta.annotation.PostConstruct;
 
@@ -31,27 +32,27 @@ public class FeatureFlagService implements MessageListener {
   private final StringRedisTemplate redisTemplate;
   private final RedisMessageListenerContainer redisMessageListenerContainer;
 
-  private final Map<String, String> cache = new ConcurrentHashMap<>();
+  private final AtomicReference<Map<String, String>> cache = new AtomicReference<>(Map.of());
 
   @PostConstruct
   void init() {
     reloadAll();
     // Subscribe to Redis pub/sub for cross-instance cache invalidation
     redisMessageListenerContainer.addMessageListener(this, new ChannelTopic(REDIS_CHANNEL));
-    log.info("FeatureFlagService initialized — {} flags loaded", cache.size());
+    log.info("FeatureFlagService initialized — {} flags loaded", cache.get().size());
   }
 
   public boolean isEnabled(String key) {
-    String val = cache.get(key);
+    String val = cache.get().get(key);
     return "true".equalsIgnoreCase(val);
   }
 
   public String getString(String key, String defaultValue) {
-    return cache.getOrDefault(key, defaultValue);
+    return cache.get().getOrDefault(key, defaultValue);
   }
 
   public int getInt(String key, int defaultValue) {
-    String val = cache.get(key);
+    String val = cache.get().get(key);
     if (val == null) return defaultValue;
     try {
       return Integer.parseInt(val);
@@ -74,7 +75,7 @@ public class FeatureFlagService implements MessageListener {
     FeatureFlag saved = repository.save(flag);
 
     // Update local cache immediately
-    cache.put(key, value);
+    putCacheValue(key, value);
     // Publish to Redis so other instances pick it up
     redisTemplate.convertAndSend(REDIS_CHANNEL, key);
 
@@ -104,7 +105,7 @@ public class FeatureFlagService implements MessageListener {
     flag.setUpdatedBy(userId);
     flag.setUpdatedAt(Instant.now());
     repository.save(flag);
-    cache.put(key, value);
+    putCacheValue(key, value);
     redisTemplate.convertAndSend(REDIS_CHANNEL, key);
   }
 
@@ -117,7 +118,9 @@ public class FeatureFlagService implements MessageListener {
     String flagKey = new String(message.getBody(), StandardCharsets.UTF_8);
     log.debug("Redis feature-flag-update received for key: {}", flagKey);
     // Reload just this key from DB
-    repository.findByFlagKey(flagKey).ifPresent(f -> cache.put(f.getFlagKey(), f.getFlagValue()));
+    repository
+        .findByFlagKey(flagKey)
+        .ifPresent(f -> putCacheValue(f.getFlagKey(), f.getFlagValue()));
   }
 
   @Scheduled(fixedRate = 60_000)
@@ -128,12 +131,22 @@ public class FeatureFlagService implements MessageListener {
   private void reloadAll() {
     try {
       List<FeatureFlag> all = repository.findAll();
-      cache.clear();
-      for (FeatureFlag f : all) {
-        cache.put(f.getFlagKey(), f.getFlagValue());
-      }
+      cache.set(
+          all.stream()
+              .collect(
+                  Collectors.toUnmodifiableMap(
+                      FeatureFlag::getFlagKey, FeatureFlag::getFlagValue, (a, b) -> b)));
     } catch (Exception e) {
       log.warn("Failed to reload feature flags from DB", e);
     }
+  }
+
+  private void putCacheValue(String key, String value) {
+    cache.updateAndGet(
+        current -> {
+          java.util.Map<String, String> next = new java.util.HashMap<>(current);
+          next.put(key, value);
+          return Map.copyOf(next);
+        });
   }
 }

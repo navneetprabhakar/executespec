@@ -136,7 +136,21 @@ class ProjectShareLinkServiceTest {
     already.setRevokedAt(Instant.now().minusSeconds(60));
     when(linkRepo.findById(already.getId())).thenReturn(Optional.of(already));
     AppUser actor = userOnTier("admin", "ENTERPRISE");
-    assertDoesNotThrow(() -> service.revoke(already.getId(), actor));
+    assertDoesNotThrow(() -> service.revoke("p1", already.getId(), actor));
+  }
+
+  @Test
+  void revoke_rejects_link_from_another_project() {
+    ProjectShareLink link = newLink();
+    when(linkRepo.findById(link.getId())).thenReturn(Optional.of(link));
+    AppUser actor = userOnTier("admin", "ENTERPRISE");
+
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.revoke("other-project", link.getId(), actor));
+
+    assertEquals(404, ex.getStatusCode().value());
   }
 
   private static AppUser userOnTier(String id, String tier) {

@@ -11,7 +11,11 @@ public enum LlmProvider {
   // Same DeepSeek V4 models that OpenRouter routes to, but direct → eliminates OpenRouter's
   // routing latency (observed ~3-4× slower per instance via OpenRouter in the mixed10 eval).
   // ENTERPRISE BYOK; not in failover chain. Cheaper than Sonnet (~7×) on input rate.
-  DEEPSEEK("Cheap-fast");
+  DEEPSEEK("Cheap-fast"),
+  // 2026-06-09 — Fireworks AI (api.fireworks.ai), OpenAI-wire-compatible route for Chinese open
+  // models (DeepSeek / Kimi / GLM). Added to A/B against OpenRouter latency on Chinese models.
+  // ENTERPRISE BYOK; not in the failover chain (deliberate operator route).
+  FIREWORKS("Fast-US");
 
   private final String tag;
 

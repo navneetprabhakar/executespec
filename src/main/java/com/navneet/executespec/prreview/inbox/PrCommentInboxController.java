@@ -99,10 +99,9 @@ public class PrCommentInboxController {
       @PathVariable String runId,
       @PathVariable Long commentId,
       @AuthenticationPrincipal AppUserDetails user) {
-    runAccessGuard.requireRunAccess(runId, user);
+    runAccessGuard.requireRunWriteAccess(runId, user);
     return service
-        .dismiss(commentId)
-        .filter(c -> runId.equals(c.getRunId())) // belt-and-braces: the id must belong to this run
+        .dismissForRun(commentId, runId)
         .map(Dto::from)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.notFound().build());
@@ -120,7 +119,7 @@ public class PrCommentInboxController {
       @PathVariable String runId,
       @PathVariable Long commentId,
       @AuthenticationPrincipal AppUserDetails user) {
-    runAccessGuard.requireRunAccess(runId, user);
+    runAccessGuard.requireRunWriteAccess(runId, user);
     PrCommentInbox comment =
         service
             .findForRun(commentId, runId)

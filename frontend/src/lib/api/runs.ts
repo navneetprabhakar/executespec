@@ -237,7 +237,13 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   if (!user) return true; // anonymous → treat as FREE-equivalent
   const tier = user.tier;
   if (tier === 'ENTERPRISE' || tier === 'TEAM') return false;
-  const hasByok = !!(user.hasOpenAiKey || user.hasAnthropicKey || user.hasGeminiKey);
+  const hasByok = !!(
+    user.hasOpenAiKey ||
+    user.hasAnthropicKey ||
+    user.hasGeminiKey ||
+    user.hasDeepSeekKey ||
+    user.hasFireworksKey
+  );
   if (tier === 'PRO') return !hasByok;
   return true; // FREE
 }

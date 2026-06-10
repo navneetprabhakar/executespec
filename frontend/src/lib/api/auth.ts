@@ -48,14 +48,25 @@ export const updateAiKeySettings = (
   openAiApiKey: string,
   anthropicApiKey: string,
   geminiApiKey: string,
+  deepSeekApiKey = '',
+  fireworksApiKey = '',
 ) =>
   req<AuthUser>('/auth/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({openAiApiKey, anthropicApiKey, geminiApiKey}),
+    body: JSON.stringify({
+      openAiApiKey,
+      anthropicApiKey,
+      geminiApiKey,
+      deepSeekApiKey,
+      fireworksApiKey,
+    }),
   });
 
 /** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
-export const validateAiKey = (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', apiKey: string) =>
+export const validateAiKey = (
+  provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'OPENROUTER' | 'DEEPSEEK' | 'FIREWORKS',
+  apiKey: string,
+) =>
   req<ValidationResult>('/auth/settings/ai-keys/validate', {
     method: 'POST',
     body: JSON.stringify({provider, apiKey}),
@@ -71,10 +82,19 @@ export const updateOrgAiKeySettings = (
   openAiApiKey: string,
   geminiApiKey: string,
   openRouterApiKey = '',
+  deepSeekApiKey = '',
+  fireworksApiKey = '',
 ) =>
   req<OrgDto>('/org/me/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey, openRouterApiKey}),
+    body: JSON.stringify({
+      anthropicApiKey,
+      openAiApiKey,
+      geminiApiKey,
+      openRouterApiKey,
+      deepSeekApiKey,
+      fireworksApiKey,
+    }),
   });
 export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
   req<OrgDto>(`/admin/orgs/${id}/api-keys`, {method: 'PUT', body: JSON.stringify({provided})});

@@ -38,7 +38,10 @@ public final class OpenRouterModelMapper {
           Map.entry("kimi-k2.6", "moonshotai/kimi-k2.6"),
           // 2026-05-28 (RL-2026-05-052) — Qwen3-Coder added for the 5-provider eval cohort.
           // OpenRouter-only (no native client), ENTERPRISE BYOK. Slug per the OpenRouter catalog.
-          Map.entry("qwen3-coder", "qwen/qwen3-coder"));
+          Map.entry("qwen3-coder", "qwen/qwen3-coder"),
+          // 2026-06-09 — Xiaomi MiMo v2.5 Pro for a TB 2.0 benchmark (OpenRouter-only,
+          // tools-capable, 1M ctx). Slug verified vs the OpenRouter catalogue 2026-06-09.
+          Map.entry("mimo-v2.5-pro", "xiaomi/mimo-v2.5-pro"));
 
   /**
    * @return the OpenRouter slug for a matrix model id
