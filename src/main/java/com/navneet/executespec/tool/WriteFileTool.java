@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.security.CodeAbuseScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -27,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 public class WriteFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
+  private final CodeAbuseScanner codeAbuseScanner;
 
   /**
    * PR-C (2026-05-13) — used to push {@code FILE_WRITTEN} SSE events to subscribed RunDetail
@@ -106,6 +108,19 @@ public class WriteFileTool implements Tool {
         return ToolResult.err(
             ToolResult.ErrorKind.INVALID_ARGS,
             "file already exists: " + path + " — use editFile to modify existing files");
+      }
+      CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, content);
+      if (scanResult.flagged()) {
+        log.warn(
+            "writeFile blocked by CodeAbuseScanner path={} category={} detail={}",
+            path,
+            scanResult.category(),
+            scanResult.detail());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "generated content matched a "
+                + scanResult.category()
+                + " pattern and cannot be written");
       }
       Path parent = resolved.getParent();
       if (parent != null && !Files.exists(parent)) {

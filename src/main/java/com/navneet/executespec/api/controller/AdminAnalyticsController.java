@@ -52,8 +52,9 @@ public class AdminAnalyticsController {
       @RequestParam(defaultValue = "30") int period,
       @AuthenticationPrincipal AppUserDetails userDetails) {
 
-    assertAnalyticsAccess(entityType, entityId, userDetails, false);
-    return ResponseEntity.ok(analyticsService.getUsageMetrics(entityType, entityId, period));
+    String normalizedType = normalizeEntityType(entityType);
+    assertAnalyticsAccess(normalizedType, entityId, userDetails, false);
+    return ResponseEntity.ok(analyticsService.getUsageMetrics(normalizedType, entityId, period));
   }
 
   /** GET /api/admin/analytics/members?orgId={}&period=30 */
@@ -74,8 +75,9 @@ public class AdminAnalyticsController {
       @RequestParam String entityId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
 
-    assertAnalyticsAccess(entityType, entityId, userDetails, true);
-    return ResponseEntity.ok(analyticsService.getBillingOverview(entityType, entityId));
+    String normalizedType = normalizeEntityType(entityType);
+    assertAnalyticsAccess(normalizedType, entityId, userDetails, true);
+    return ResponseEntity.ok(analyticsService.getBillingOverview(normalizedType, entityId));
   }
 
   /**
@@ -123,13 +125,22 @@ public class AdminAnalyticsController {
       // Standalone user can view own data
       if (entityId.equals(user.getId())) return;
 
-      // ORG_ADMIN can view members in their org (handled by checking org membership)
-      if (orgMember != null && "ORG_ADMIN".equals(orgMember.getOrgRole())) return;
-
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
     }
 
     throw new ResponseStatusException(
         HttpStatus.BAD_REQUEST, "Invalid entityType: " + entityType + ". Must be USER or ORG.");
+  }
+
+  private static String normalizeEntityType(String entityType) {
+    if (entityType == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "entityType is required");
+    }
+    String normalized = entityType.trim().toUpperCase(java.util.Locale.ROOT);
+    if (!"USER".equals(normalized) && !"ORG".equals(normalized)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Invalid entityType: " + entityType + ". Must be USER or ORG.");
+    }
+    return normalized;
   }
 }

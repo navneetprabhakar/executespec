@@ -15,8 +15,8 @@
 --
 -- NOTE: this wires the *planner injection* only. The standards enforcement
 -- engine (StandardsRunner) and the breaking-change plan gate remain
--- unwired — a separate, larger change (see docs/reviews/project-features-
--- audit-2026-05-25.md).
+-- unwired — a separate, larger change tracked in docs/pending.md and
+-- docs/tech-debt.md after the old reviews tree was consolidated.
 --
 -- DEFAULT OFF: injection adds planner prompt tokens (cost) and is only
 -- useful once a project actually has contracts/ADRs defined; flip ON after

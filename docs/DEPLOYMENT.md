@@ -152,7 +152,7 @@ Two workflows under `.github/workflows/`:
 
 ### `.github/workflows/deploy.yml` -- Build & Deploy
 
-Workflow name `Build & Deploy` (v2.5.12 -- dev-only). 479 lines; single job
+Workflow name `Build & Deploy`. Single job
 `build-and-deploy` runs on `ubuntu-latest`.
 
 Triggers:
@@ -160,9 +160,7 @@ Triggers:
 - `push` on branches: `[dev]`
 - `workflow_dispatch` with inputs:
   - `target_env`: choice, required, default `dev`, options `[dev]` (prod
-    option **not currently exposed** -- the dev-only restriction was added
-    after `2152308b` deleted the file to silence prod-env failures, and it
-    was restored as v2.5.12 with the dev-only gate)
+    option **not currently exposed**)
   - `target_sha`: optional, blank = latest
 
 Top-level env: `JAVA_VERSION=21`, `DEPLOY_BUCKET_PREFIX=executespec`.
@@ -231,8 +229,8 @@ Steps (in order):
     - `systemctl restart executespec`
 20. **Wait for app startup** -- `sleep 30`.
 21. **Health check** -- 8-attempt loop with 10s sleep. SSH and
-    `curl http://localhost:8080/actuator/health`. v2.5.12 fix: `rm /tmp/health.json`
-    before each curl to avoid buffer-reuse false-positive. Gate on `http=200`
+    `curl http://localhost:8080/actuator/health`. The workflow removes
+    `/tmp/health.json` before each curl to avoid buffer-reuse false-positives. Gate on `http=200`
     substring AND JSON body containing `"status":"(UP|DEGRADED)"`. (A 2026-04-17
     V113 boot-crash previously sailed through CI as success because of the
     buffer-reuse bug.)
@@ -444,15 +442,18 @@ optionals carry sensible defaults.
 
 | Variable            | Required        | Notes                                             |
 | ------------------- | --------------- | ------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | Yes             | Bound to `spring.ai.anthropic.api-key`            |
-| `OPENAI_API_KEY`    | Yes             | Bound to `spring.ai.openai.api-key`               |
-| `GOOGLE_API_KEY`    | Optional        | Gemini; bound to `spring.ai.google.genai.api-key` |
+| `ANTHROPIC_API_KEY` | Yes for system-key routes | Bound to `spring.ai.anthropic.api-key` |
+| `OPENAI_API_KEY`    | Yes for system-key routes | Bound to `spring.ai.openai.api-key` |
+| `GOOGLE_API_KEY`    | Optional | Gemini; bound to `spring.ai.google.genai.api-key` |
+| `DEEPSEEK_API_KEY`  | Optional | Native DeepSeek route |
+| `OPENROUTER_API_KEY` | Optional | OpenRouter aggregator route |
+| `FIREWORKS_API_KEY` | Optional | Fireworks aggregator route |
 
 ### Integrations
 
 | Variable                                                                                                    | Used for                                                |
 | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `GITHUB_PAT`, `GITHUB_OWNER`                                                                                | GitHub repo creation + multi-repo push via `agent.github` |
+| User/org SCM credentials                                                                                    | GitHub/Bitbucket clone, push, PR creation. There is no system GitHub PAT. |
 | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`                                            | Slack OAuth + webhook verification                      |
 | `DASHBOARD_URL`                                                                                             | Link target embedded in Slack messages + emails         |
 
@@ -480,7 +481,8 @@ Redirect URIs in prod default to
 | `STRIPE_SECRET_KEY`                 | Stripe API key (USD + multi-currency)                                                |
 | `STRIPE_WEBHOOK_SECRET`             | `Stripe-Signature` verification for `/api/webhooks/stripe`                          |
 | `STRIPE_PUBLISHABLE_KEY`            | Frontend Checkout init                                                              |
-| `STRIPE_TEAM_MONTHLY_PRICE_ID`      | Stripe price ID for Team monthly                                                    |
+| `STRIPE_TEAM_PRICE_ID`              | Stripe price ID for Team per-seat                                                   |
+| `STRIPE_TEAM_PRICE_ID_INR`          | Stripe price ID for Team INR override                                               |
 | `STRIPE_ENTERPRISE_PRICE_ID`        | Stripe price ID for Enterprise                                                      |
 | `BILLING_DEFAULT_GATEWAY`           | `stripe` (prod default) / `razorpay` (dev default)                                  |
 | `BILLING_STRIPE_ENABLED`            | Set `true` in prod to enable Stripe handler                                          |
@@ -653,7 +655,7 @@ deps (`pom.xml`).
 
 | Setting               | Value                                |
 | --------------------- | ------------------------------------ |
-| Head migration        | **V202**                              |
+| Head migration        | **V237**                              |
 | Locations             | `classpath:db/migration`             |
 | Baseline              | `baseline-on-migrate=true`, `baseline-version=0` |
 | Ignore patterns       | `*:missing` (tolerates applied-but-missing rows; see below) |
@@ -966,7 +968,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
 | Dev profile                    | `src/main/resources/application-dev.yml`                                                                                   |
 | Prod profile                   | `src/main/resources/application-prod.yml`                                                                                  |
 | Local profile                  | `src/main/resources/application-local.yml`                                                                                 |
-| Flyway migrations              | `src/main/resources/db/migration/V*.sql` (head V202)                                                                       |
+| Flyway migrations              | `src/main/resources/db/migration/V*.sql` (head V237)                                                                       |
 | Terraform root                 | `infra/main.tf`, `infra/variables.tf`, `infra/outputs.tf`, `infra/backend.tf`                                              |
 | Terraform modules              | `infra/modules/{network,database,cache,storage,compute,compute/sa,loadbalancer,secrets}/`                                   |
 | GCE startup script             | `infra/scripts/startup.sh`                                                                                                 |

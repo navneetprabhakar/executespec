@@ -698,6 +698,8 @@ export interface AuthUser {
   hasOpenAiKey?: boolean;
   hasAnthropicKey?: boolean;
   hasGeminiKey?: boolean;
+  hasDeepSeekKey?: boolean;
+  hasFireworksKey?: boolean;
   // JIRA
   jiraBaseUrl?: string | null;
   jiraEmail?: string | null;
@@ -797,6 +799,8 @@ export interface OrgDto {
   hasGeminiKey?: boolean;
   /** Enterprise OpenRouter gateway key flag. */
   hasOpenRouterKey?: boolean;
+  hasDeepSeekKey?: boolean;
+  hasFireworksKey?: boolean;
   // Key source mode & provider restrictions
   keySourceMode?: string;
   enabledProviders?: string[] | null;

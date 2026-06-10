@@ -111,6 +111,29 @@ class OrgServiceAiKeysTest {
   }
 
   @Test
+  void deepSeekAndFireworksRejectedOnNonEnterprise() {
+    seedOrg("TEAM", null, null, null, null);
+
+    assertThatThrownBy(() -> svc.updateAiKeySettings("org-1", "", "", "", "", "sk-ds", "", "actor"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Enterprise");
+    assertThatThrownBy(
+            () -> svc.updateAiKeySettings("org-1", "", "", "", "", "", "fw-key", "actor"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Enterprise");
+  }
+
+  @Test
+  void deepSeekAndFireworksAcceptedOnEnterprise() {
+    Org org = seedOrg("ENTERPRISE", null, null, null, null);
+
+    svc.updateAiKeySettings("org-1", "", "", "", "", " sk-ds-new ", " fw-new ", "actor");
+
+    assertThat(org.getDeepSeekApiKey()).isEqualTo("sk-ds-new");
+    assertThat(org.getFireworksApiKey()).isEqualTo("fw-new");
+  }
+
+  @Test
   void keysAreTrimmedBeforePersistence() {
     Org org = seedOrg("TEAM", null, null, null, null);
 

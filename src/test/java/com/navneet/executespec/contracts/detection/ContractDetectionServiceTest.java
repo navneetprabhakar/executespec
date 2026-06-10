@@ -89,7 +89,10 @@ class ContractDetectionServiceTest {
     assertThat(savedRegistry.getValue().getCurrentRegistryVersion()).isEqualTo(1);
     assertThat(savedRegistry.getValue().detectionMethodEnum())
         .isEqualTo(ContractRegistry.DetectionMethod.AUTO_FILE);
-    verify(versionRepo).save(any(ContractVersion.class));
+    ArgumentCaptor<ContractVersion> savedVersion = ArgumentCaptor.forClass(ContractVersion.class);
+    verify(versionRepo).save(savedVersion.capture());
+    assertThat(savedVersion.getValue().getInlineContent())
+        .isEqualTo("openapi: 3.0.0\ninfo:\n  version: 1.0.0\n");
     verify(emitter)
         .emit(
             eq(projectId),

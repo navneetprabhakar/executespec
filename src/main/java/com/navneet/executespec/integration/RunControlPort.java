@@ -28,5 +28,11 @@ interface RunControlPort {
   void runPipelineForResume(RunOrchestrator.RunPipelineRequest req);
 
   /** Mark a run terminal (persists status + status_reason, emits SSE, records metrics). */
-  void terminate(String runId, String finalStatus, String note, Instant startedAt);
+  default void terminate(String runId, String finalStatus, String note, Instant startedAt) {
+    terminate(runId, finalStatus, null, note, startedAt);
+  }
+
+  /** Mark a run terminal with an explicit status reason. */
+  void terminate(
+      String runId, String finalStatus, String statusReason, String note, Instant startedAt);
 }

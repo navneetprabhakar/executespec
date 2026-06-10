@@ -79,7 +79,8 @@ public class ToolRegistry {
    * bound at all (absent from the model's tool schema), not bound-but-inert, per the RL-2026-05-061
    * lesson that a tool merely <i>present</i> in the schema can cause reasoning-only stalls on
    * schema-sensitive providers (DeepSeek). Opted in: {@link BackgroundJobTool}, {@link
-   * ReadCodeOutlineTool}; every non-{@code FlagGatedTool} is always bound.
+   * ReadCodeOutlineTool}, {@link WorkspaceRunTestsTool}, {@link VerifyBootTool}; every non-{@code
+   * FlagGatedTool} is always bound.
    */
   private boolean isToolBound(Tool t) {
     return !(t instanceof FlagGatedTool fg) || fg.enabled();

@@ -59,4 +59,13 @@ class RateLimitPolicyLevelTest {
     assertThat(policy.getLimit("WRITE", "PRO")).isEqualTo(200);
     assertThat(policy.getLimit("RUNS", "FREE")).isEqualTo(5);
   }
+
+  @Test
+  void teamTierDoesNotFallBackToFreeLimits() {
+    assertThat(policy.getLimit("RUNS", "TEAM", GuardrailLevel.LOW)).isEqualTo(60);
+    assertThat(policy.getLimit("READ", "TEAM", GuardrailLevel.LOW)).isEqualTo(2000);
+    assertThat(policy.getLimit("WRITE", "TEAM", GuardrailLevel.LOW)).isEqualTo(1000);
+    assertThat(policy.getLimit("PREVIEW", "TEAM", GuardrailLevel.LOW)).isEqualTo(200);
+    assertThat(policy.getLimit("DEPLOY", "TEAM", GuardrailLevel.LOW)).isEqualTo(60);
+  }
 }

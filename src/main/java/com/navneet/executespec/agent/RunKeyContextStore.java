@@ -64,15 +64,15 @@ public class RunKeyContextStore {
     // OpenRouter is org-level only (Enterprise gateway) — attribute to ORG when present.
     RunKeyContext.Source openRouterSrc =
         (keys.openRouterKey() != null) ? RunKeyContext.Source.ORG : RunKeyContext.Source.PLATFORM;
+    RunKeyContext.Source deepSeekSrc =
+        (keys.deepSeekKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
+    RunKeyContext.Source fireworksSrc =
+        (keys.fireworksKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
     // ApiKeyResolver merges user-level and org-level keys without
-    // distinguishing which level won. We can't tell from the
-    // ResolvedKeys output whether a non-null Anthropic key came from
-    // user.anthropic_api_key or org.anthropic_api_key — both flow
-    // through the same field. Mark them USER as the most-likely
-    // attribution for the metric/audit; if the source split matters
-    // for billing reconciliation, ApiKeyResolver itself needs to
-    // return a richer ResolvedKeys (separate user-side + org-side
-    // fields) — tracked as a follow-up to the BYOK fix.
+    // distinguishing which level won. We can't tell from the ResolvedKeys output whether a non-null
+    // user-key-capable provider came from app_user.* or org.* — both flow through the same field.
+    // Mark those USER as the most-likely attribution for the metric/audit. OpenRouter remains ORG
+    // because it has no user-level key field.
 
     // Audit 2026-05-12 review item O #75: orgId was hardcoded to null, making per-org key
     // attribution for SOC2 audit + billing reconciliation impossible. Resolve via the user's
@@ -92,10 +92,14 @@ public class RunKeyContextStore {
             keys.openAiKey(),
             keys.geminiKey(),
             keys.openRouterKey(),
+            keys.deepSeekKey(),
+            keys.fireworksKey(),
             anthropicSrc,
             openAiSrc,
             geminiSrc,
             openRouterSrc,
+            deepSeekSrc,
+            fireworksSrc,
             userId,
             orgId);
     cache.put(runId, ctx);

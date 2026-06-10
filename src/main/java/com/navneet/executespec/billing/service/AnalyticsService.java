@@ -48,6 +48,7 @@ public class AnalyticsService {
    * @param periodDays number of days to look back
    */
   public UsageMetrics getUsageMetrics(String entityType, String entityId, int periodDays) {
+    entityType = normalizeEntityType(entityType);
     Instant since = Instant.now().minus(periodDays, ChronoUnit.DAYS);
 
     // --- Aggregate run counts ---
@@ -80,7 +81,7 @@ public class AnalyticsService {
                        FILTER (WHERE status = 'COMPLETE'), 0)                    AS avg_time,
               COALESCE(SUM(actual_cost_usd), 0)                                  AS total_cost
           FROM pipeline_run
-          WHERE created_by_user_id = ? AND org_id IS NULL AND created_at > ?
+          WHERE created_by_user_id = ? AND created_at > ?
           """;
       countParams = new Object[] {entityId, Timestamp.from(since)};
     }
@@ -118,7 +119,7 @@ public class AnalyticsService {
           SELECT DATE(created_at) AS day, COUNT(*) AS total,
                  SUM(CASE WHEN status='COMPLETE' THEN 1 ELSE 0 END) AS success
           FROM pipeline_run
-          WHERE created_by_user_id = ? AND org_id IS NULL AND created_at > ?
+          WHERE created_by_user_id = ? AND created_at > ?
           GROUP BY DATE(created_at) ORDER BY day
           """;
       dailyParams = new Object[] {entityId, Timestamp.from(since)};
@@ -155,7 +156,7 @@ public class AnalyticsService {
           SELECT COALESCE(p.name, 'No Project') AS project_name, COUNT(*) AS cnt
           FROM pipeline_run r
           LEFT JOIN project p ON r.project_id = p.id
-          WHERE r.created_by_user_id = ? AND r.org_id IS NULL AND r.created_at > ?
+          WHERE r.created_by_user_id = ? AND r.created_at > ?
           GROUP BY project_name ORDER BY cnt DESC LIMIT 20
           """;
       projectParams = new Object[] {entityId, Timestamp.from(since)};
@@ -192,7 +193,7 @@ GROUP BY m.model_name ORDER BY calls DESC
 SELECT m.model_name AS model, COUNT(*) AS calls, SUM(m.duration_ms) AS total_duration_ms
 FROM model_task_metric m
 JOIN pipeline_run r ON m.run_id = r.run_id
-WHERE r.created_by_user_id = ? AND r.org_id IS NULL AND m.created_at > ?
+WHERE r.created_by_user_id = ? AND m.created_at > ?
 GROUP BY m.model_name ORDER BY calls DESC
 """;
         costParams = new Object[] {entityId, Timestamp.from(since)};
@@ -258,6 +259,7 @@ GROUP BY m.model_name ORDER BY calls DESC
   }
 
   public BillingOverview getBillingOverview(String entityType, String entityId) {
+    entityType = normalizeEntityType(entityType);
     String entityName;
     String currentPlan = "FREE";
     String subStatus = "FREE";
@@ -448,5 +450,10 @@ GROUP BY m.model_name ORDER BY calls DESC
         "byProject", byProject,
         "totalCostUsd", total,
         "periodDays", periodDays);
+  }
+
+  private static String normalizeEntityType(String entityType) {
+    if (entityType == null) return "USER";
+    return entityType.trim().toUpperCase(Locale.ROOT);
   }
 }
