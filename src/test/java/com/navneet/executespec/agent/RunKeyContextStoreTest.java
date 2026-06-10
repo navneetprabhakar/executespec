@@ -35,12 +35,17 @@ class RunKeyContextStoreTest {
   @Test
   void keyFor_returnsRightProviderKey() {
     when(resolver.resolve("u1"))
-        .thenReturn(new ResolvedKeys("sk-ant", "sk-oai", "AIza-gem", "HYBRID", null));
+        .thenReturn(
+            new ResolvedKeys(
+                "sk-ant", "sk-oai", "AIza-gem", "sk-or", "sk-ds", "fw-key", "HYBRID", null));
     RunKeyContext ctx = store.resolveAndPut("run-multi", "u1");
 
     assertThat(ctx.keyFor("anthropic")).isEqualTo("sk-ant");
     assertThat(ctx.keyFor("openai")).isEqualTo("sk-oai");
     assertThat(ctx.keyFor("gemini")).isEqualTo("AIza-gem");
+    assertThat(ctx.keyFor("openrouter")).isEqualTo("sk-or");
+    assertThat(ctx.keyFor("deepseek")).isEqualTo("sk-ds");
+    assertThat(ctx.keyFor("fireworks")).isEqualTo("fw-key");
     assertThat(ctx.keyFor("UNKNOWN")).isNull();
     assertThat(ctx.keyFor(null)).isNull();
   }

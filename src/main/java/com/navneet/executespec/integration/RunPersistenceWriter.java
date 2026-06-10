@@ -1,5 +1,6 @@
 package com.navneet.executespec.integration;
 
+import static com.navneet.executespec.integration.RunPipelineSupport.isTerminal;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStatusToV1;
 import static com.navneet.executespec.integration.RunPipelineSupport.shortMsg;
 
@@ -247,14 +248,27 @@ class RunPersistenceWriter {
   }
 
   void updateStatus(String runId, String newStatus) {
+    boolean[] changed = {false};
     runRepo
         .findById(runId)
         .ifPresent(
             r -> {
+              String current = r.getStatus();
+              if (isTerminal(current) || "PAUSED".equals(current)) {
+                log.info(
+                    "RunOrchestrator run={} status update {} ignored; current status is {}",
+                    runId,
+                    newStatus,
+                    current);
+                return;
+              }
               r.setStatus(newStatus);
               runRepo.save(r);
+              changed[0] = true;
             });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
+    if (changed[0]) {
+      broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
+    }
   }
 
   void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {

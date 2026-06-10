@@ -107,7 +107,16 @@ public class DeploymentController {
     }
     // Listing all deployments requires org admin
     guard.requireOrgAdmin(userDetails);
-    return deploymentRepo.findAll().stream().map(DeploymentSummary::from).toList();
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return deploymentRepo.findAll().stream().map(DeploymentSummary::from).toList();
+    }
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null || orgId.isBlank()) {
+      return List.of();
+    }
+    return deploymentRepo.findByOrgIdOrderByCreatedAtDesc(orgId).stream()
+        .map(DeploymentSummary::from)
+        .toList();
   }
 
   @GetMapping("/{id}")
@@ -171,7 +180,18 @@ public class DeploymentController {
   @GetMapping("/live")
   public List<DeploymentSummary> live(@AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
-    return deploymentRepo.findByStatus(Deployment.DeployStatus.LIVE).stream()
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return deploymentRepo.findByStatus(Deployment.DeployStatus.LIVE).stream()
+          .map(DeploymentSummary::from)
+          .toList();
+    }
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null || orgId.isBlank()) {
+      return List.of();
+    }
+    return deploymentRepo
+        .findByStatusAndOrgIdOrderByCreatedAtDesc(Deployment.DeployStatus.LIVE, orgId)
+        .stream()
         .map(DeploymentSummary::from)
         .toList();
   }

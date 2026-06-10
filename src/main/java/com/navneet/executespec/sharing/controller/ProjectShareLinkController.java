@@ -83,7 +83,7 @@ public class ProjectShareLinkController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     // Audit 2026-05-12 review item B #10 — revoke is also a write.
     accessGuard.assertCanWrite(projectId, userDetails);
-    linkService.revoke(linkId, userDetails.getUser());
+    linkService.revoke(projectId, linkId, userDetails.getUser());
     return ResponseEntity.noContent().build();
   }
 

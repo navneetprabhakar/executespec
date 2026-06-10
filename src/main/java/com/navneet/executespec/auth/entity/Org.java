@@ -96,6 +96,14 @@ public class Org {
   @Column(name = "open_router_api_key")
   private String openRouterApiKey;
 
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "deepseek_api_key")
+  private String deepSeekApiKey;
+
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "fireworks_api_key")
+  private String fireworksApiKey;
+
   // Key source mode & provider restrictions
   // Controls how API keys are resolved for runs created by this org's members.
   // SYSTEM = always use platform keys; OWN_KEYS = only user/org keys (no fallback);

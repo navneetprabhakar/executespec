@@ -8,7 +8,8 @@ package com.navneet.executespec.tool;
  * can cause reasoning-only stalls on schema-sensitive providers (DeepSeek). A default-OFF
  * flag-gated tool therefore keeps the worker tool set byte-identical until its flag is flipped.
  *
- * <p>Implementors: {@link BackgroundJobTool} (W4.2), {@link ReadCodeOutlineTool} (W3.1).
+ * <p>Implementors: {@link BackgroundJobTool} (W4.2), {@link ReadCodeOutlineTool} (W3.1), {@link
+ * WorkspaceRunTestsTool} (V217), {@link VerifyBootTool} (V227).
  */
 public interface FlagGatedTool {
 

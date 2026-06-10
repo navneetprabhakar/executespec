@@ -8,7 +8,6 @@ import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.ModelResolver;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,11 +32,7 @@ class CodeReviewAgentParseTest {
   @BeforeEach
   void setUp() {
     agent =
-        new CodeReviewAgent(
-            mock(LlmRouter.class),
-            mock(ModelResolver.class),
-            new ObjectMapper(),
-            mock(RunCostTracker.class));
+        new CodeReviewAgent(mock(LlmRouter.class), mock(ModelResolver.class), new ObjectMapper());
   }
 
   @Test

@@ -23,6 +23,17 @@ public interface DeploymentRepository extends JpaRepository<Deployment, String> 
 
   List<Deployment> findByStatus(DeployStatus status);
 
+  @Query(
+      "SELECT d FROM Deployment d JOIN PipelineRun r ON d.runId = r.runId WHERE r.orgId = :orgId"
+          + " ORDER BY d.createdAt DESC")
+  List<Deployment> findByOrgIdOrderByCreatedAtDesc(@Param("orgId") String orgId);
+
+  @Query(
+      "SELECT d FROM Deployment d JOIN PipelineRun r ON d.runId = r.runId WHERE d.status = :status"
+          + " AND r.orgId = :orgId ORDER BY d.createdAt DESC")
+  List<Deployment> findByStatusAndOrgIdOrderByCreatedAtDesc(
+      @Param("status") DeployStatus status, @Param("orgId") String orgId);
+
   List<Deployment> findByStatusAndTtlExpiresAtBefore(DeployStatus status, String isoTimestamp);
 
   Optional<Deployment> findTopByRunIdOrderByCreatedAtDesc(String runId);

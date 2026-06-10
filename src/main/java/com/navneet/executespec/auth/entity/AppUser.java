@@ -145,6 +145,14 @@ public class AppUser {
   @Column(name = "gemini_api_key")
   private String geminiApiKey;
 
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "deepseek_api_key")
+  private String deepSeekApiKey;
+
+  @Convert(converter = EncryptedValueConverter.class)
+  @Column(name = "fireworks_api_key")
+  private String fireworksApiKey;
+
   @Column(name = "jira_base_url")
   private String jiraBaseUrl;
 

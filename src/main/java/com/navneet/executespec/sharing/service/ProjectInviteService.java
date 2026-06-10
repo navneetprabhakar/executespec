@@ -310,12 +310,15 @@ public class ProjectInviteService {
   }
 
   @Transactional
-  public void revoke(UUID inviteId, AppUser actor) {
+  public void revoke(String projectId, UUID inviteId, AppUser actor) {
     ProjectInvite invite =
         inviteRepo
             .findById(inviteId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invite not found"));
+    if (!invite.getProjectId().equals(projectId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Invite not found");
+    }
     if (!"PENDING".equals(invite.getStatus())) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Invite is not pending");
     }

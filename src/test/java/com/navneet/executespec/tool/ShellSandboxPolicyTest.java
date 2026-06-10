@@ -219,6 +219,20 @@ class ShellSandboxPolicyTest {
       var result = policy.validate("nc 192.168.1.1 4444", "/ws");
       assertThat(result.permitted()).isFalse();
     }
+
+    @Test
+    @DisplayName("newline-separated commands are validated as separate shell segments")
+    void newlineSeparatedCommandBlocked() {
+      var result = policy.validate("cat package.json\nbash -c 'echo bypass'", "/ws");
+      assertThat(result.permitted()).isFalse();
+      assertThat(result.reason()).contains("bash");
+    }
+
+    @Test
+    @DisplayName("newlines inside quoted strings do not split shell segments")
+    void quotedNewlineAllowed() {
+      assertThat(policy.validate("echo 'line one\nline two'", "/ws").permitted()).isTrue();
+    }
   }
 
   @Nested

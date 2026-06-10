@@ -17,7 +17,7 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
 
   @Query(
       "SELECT s FROM BillingSubscription s WHERE s.userId = :userId AND s.status IN ('FREE',"
-          + " 'ACTIVE', 'PAST_DUE')")
+          + " 'ACTIVE', 'PAST_DUE', 'CANCELLING_AT_PERIOD_END')")
   Optional<BillingSubscription> findActiveByUserId(@Param("userId") String userId);
 
   /**
@@ -26,7 +26,9 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
    * took the cron above the lock window. The cron now loads every active subscription in one SELECT
    * and matches in memory.
    */
-  @Query("SELECT s FROM BillingSubscription s WHERE s.status IN ('FREE', 'ACTIVE', 'PAST_DUE')")
+  @Query(
+      "SELECT s FROM BillingSubscription s WHERE s.status IN ('FREE', 'ACTIVE', 'PAST_DUE',"
+          + " 'CANCELLING_AT_PERIOD_END')")
   List<BillingSubscription> findAllActiveOrPastDue();
 
   Optional<BillingSubscription> findByGatewaySubscriptionId(String gatewaySubscriptionId);
@@ -54,8 +56,8 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
    * Find cancelled subscriptions whose grace period has ended (currentPeriodEnd is in the past).
    */
   @Query(
-      "SELECT s FROM BillingSubscription s WHERE s.status = 'CANCELLED' AND s.currentPeriodEnd <"
-          + " :now")
+      "SELECT s FROM BillingSubscription s WHERE s.status IN ('CANCELLED',"
+          + " 'CANCELLING_AT_PERIOD_END') AND s.currentPeriodEnd < :now")
   List<BillingSubscription> findCancelledPastPeriodEnd(@Param("now") Instant now);
 
   /**
@@ -64,7 +66,8 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
    * renewal queued for cancel-at-period-end when a tier transitions to SUNSETTING.
    */
   @Query(
-      "SELECT s FROM BillingSubscription s WHERE s.status IN ('ACTIVE', 'PAST_DUE') "
+      "SELECT s FROM BillingSubscription s WHERE s.status IN ('ACTIVE', 'PAST_DUE',"
+          + " 'CANCELLING_AT_PERIOD_END') "
           + "AND s.billingPlanId IN (SELECT p.id FROM BillingPlan p WHERE p.tier = :tier)")
   List<BillingSubscription> findActiveByTier(@Param("tier") String tier);
 
@@ -76,6 +79,6 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
    */
   @Query(
       "SELECT s FROM BillingSubscription s WHERE s.orgId = :orgId AND s.status IN ('FREE',"
-          + " 'ACTIVE', 'PAST_DUE')")
+          + " 'ACTIVE', 'PAST_DUE', 'CANCELLING_AT_PERIOD_END')")
   List<BillingSubscription> findActiveByOrgId(@Param("orgId") String orgId);
 }
