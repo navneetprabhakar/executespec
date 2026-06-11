@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 
@@ -26,9 +27,14 @@ def _req(base, path, token, method="GET", body=None, timeout=30):
     r.add_header("Content-Type", "application/json")
     if token:
         r.add_header("Authorization", "Bearer " + token)
-    with urllib.request.urlopen(r, timeout=timeout) as resp:
-        t = resp.read().decode()
-        return json.loads(t) if t.strip() else {}
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            t = resp.read().decode()
+            return json.loads(t) if t.strip() else {}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        print(f"bridge: HTTP {e.code} {method} {path}: {body[:500]}", flush=True)
+        raise
 
 
 def _login(base, email, pw):
@@ -116,6 +122,7 @@ def main():
                 "model": a.model,
                 "k": a.k,
                 "totalTasks": a.total,
+                "harborJobName": os.path.basename(os.path.abspath(a.job_dir)),
             },
         )
         rid = run["id"]

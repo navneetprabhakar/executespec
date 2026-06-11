@@ -389,11 +389,22 @@ jobs:
             --strict-host-key-checking=no \
             --command="
               set -e
-              mkdir -p \"\$HOME/tbench\"
-              mv /tmp/es_harbor_agent.py \"\$HOME/tbench/es_harbor_agent.py\"
-              mv /tmp/tb-bench-bridge.py \"\$HOME/tbench/tb-bench-bridge.py\"
-              python3 -m py_compile \"\$HOME/tbench/es_harbor_agent.py\" \"\$HOME/tbench/tb-bench-bridge.py\"
-              echo 'Terminal-Bench harness synced to ~/tbench'
+              RUN_HOME=''
+              for home in \"\$HOME\" /home/*; do
+                [ -d \"\$home\" ] || continue
+                if [ -x \"\$home/tbench/.venv/bin/harbor\" ] && [ -f \"\$home/swebench-bench/.espec-admin.env\" ]; then
+                  RUN_HOME=\"\$home\"
+                  break
+                fi
+              done
+              [ -n \"\$RUN_HOME\" ] || RUN_HOME=\"\$HOME\"
+              RUN_USER=\$(stat -c %U \"\$RUN_HOME\" 2>/dev/null || whoami)
+              sudo mkdir -p \"\$RUN_HOME/tbench\"
+              sudo cp /tmp/es_harbor_agent.py \"\$RUN_HOME/tbench/es_harbor_agent.py\"
+              sudo cp /tmp/tb-bench-bridge.py \"\$RUN_HOME/tbench/tb-bench-bridge.py\"
+              sudo chown \"\$RUN_USER:\$RUN_USER\" \"\$RUN_HOME/tbench/es_harbor_agent.py\" \"\$RUN_HOME/tbench/tb-bench-bridge.py\" || true
+              sudo -H -u \"\$RUN_USER\" python3 -m py_compile \"\$RUN_HOME/tbench/es_harbor_agent.py\" \"\$RUN_HOME/tbench/tb-bench-bridge.py\"
+              echo \"Terminal-Bench harness synced to \$RUN_HOME/tbench\"
             "
 
       # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
@@ -448,6 +459,28 @@ jobs:
           #!/bin/bash
           set -euo pipefail
 
+          if [ "${ES_TB_AS_OPERATOR:-0}" != "1" ]; then
+            RUN_HOME=""
+            for home in "$HOME" /home/*; do
+              [ -d "$home" ] || continue
+              if [ -x "$home/tbench/.venv/bin/harbor" ] && [ -f "$home/swebench-bench/.espec-admin.env" ]; then
+                RUN_HOME="$home"
+                break
+              fi
+            done
+            if [ -z "$RUN_HOME" ]; then
+              echo "No Terminal-Bench operator home found with tbench/.venv/bin/harbor and swebench-bench/.espec-admin.env"
+              exit 1
+            fi
+            RUN_USER="$(stat -c %U "$RUN_HOME" 2>/dev/null || echo "")"
+            if [ -z "$RUN_USER" ]; then
+              echo "Could not resolve owner for $RUN_HOME"
+              exit 1
+            fi
+            echo "Using Terminal-Bench operator home: $RUN_HOME (user=$RUN_USER)"
+            exec sudo -H -u "$RUN_USER" env ES_TB_AS_OPERATOR=1 HOME="$RUN_HOME" bash "$0"
+          fi
+
           TB_DIR="$HOME/tbench"
           JOBS_DIR="$HOME/es-tb-jobs"
           ADMIN_ENV="$HOME/swebench-bench/.espec-admin.env"
@@ -455,6 +488,8 @@ jobs:
           CFG="$TB_DIR/es-tb-runtb-${JOB}.yaml"
 
           mkdir -p "$JOBS_DIR"
+          [ -x "$TB_DIR/.venv/bin/harbor" ] || { echo "Harbor missing: $TB_DIR/.venv/bin/harbor"; exit 1; }
+          [ -f "$ADMIN_ENV" ] || { echo "Admin env missing: $ADMIN_ENV"; exit 1; }
           if pgrep -af '/harbor .*run|harbor run' >/tmp/tb-active.txt 2>/dev/null; then
             echo "Refusing to start TB 2.1 focused pilot because Harbor is already active:"
             cat /tmp/tb-active.txt

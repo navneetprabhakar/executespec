@@ -137,6 +137,9 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 
 Benchmark deploys also sync the version-controlled `tb/` harness files into `~/tbench` and run
 `python3 -m py_compile` on the VM, so app deploys and Harbor adapter fixes stay in lockstep.
+The sync/start path discovers the operator home that has both `tbench/.venv/bin/harbor` and
+`swebench-bench/.espec-admin.env`, then runs the pilot as that user; the GitHub Actions SSH user
+does not have the Terminal-Bench venv or admin env.
 For post-fix mechanics checks, a benchmark push whose commit message contains `[tb21-pilot]` starts
 only the focused TB 2.1 Flash pilot (`gcode-to-text`, `polyglot-rust-c`, `train-fasttext`,
 `build-pmars`) after health is green; full model runs remain manual/gated.
