@@ -140,6 +140,10 @@ Benchmark deploys also sync the version-controlled `tb/` harness files into `~/t
 For post-fix mechanics checks, a benchmark push whose commit message contains `[tb21-pilot]` starts
 only the focused TB 2.1 Flash pilot (`gcode-to-text`, `polyglot-rust-c`, `train-fasttext`,
 `build-pmars`) after health is green; full model runs remain manual/gated.
+For read-only monitoring when local `gcloud` auth is unavailable, run the manual GitHub Actions
+workflow **Benchmark VM Monitor**. It SSHes through IAP using Workload Identity and prints the
+current job's Harbor/bridge process state, trial counts, reward/esRunId linkage, bridge
+`benchmark_run id`, app tracking row, and recent logs without deploying or mutating the VM.
 
 **Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
 locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.
