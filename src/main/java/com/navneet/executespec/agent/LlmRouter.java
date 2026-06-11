@@ -567,6 +567,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(apiKey)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -593,6 +594,7 @@ public class LlmRouter {
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
             .extraBody(Map.of("provider", Map.of("sort", "latency")))
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -629,6 +631,7 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -655,6 +658,7 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(fireworksBaseUrl)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
