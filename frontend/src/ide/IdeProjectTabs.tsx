@@ -1,6 +1,8 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import Crumbs from '@/ide/Crumbs';
+import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -43,6 +45,10 @@ const costOf = (r: unknown) =>
   (r as {actualCostUsd?: number; actualCost?: number; totalCost?: number}).actualCostUsd ??
   (r as {actualCost?: number}).actualCost ??
   (r as {totalCost?: number}).totalCost;
+// C5 — canonical verdict bands for the row score badge (≥85 shippable / ≥70
+// needs review / <70 failed), matching VerdictPill / ScoreRing.
+const scoreBand = (sc: number): 'ok' | 'warn' | 'bad' =>
+  sc >= 85 ? 'ok' : sc >= 70 ? 'warn' : 'bad';
 
 // Workbench tab strip — shown on every project sub-route. `count` keys a tab
 // to the live-count map below; tabs without a key stay label-only.
@@ -68,6 +74,8 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   // list (dashboard carries no repo count) and Code from the tech-debt total
   // (dashboard carries no findings count) — matching what each tab surfaces.
   const [counts, setCounts] = useState<TabCounts>({});
+  // C2/C3 — project name for the browser-tab title + the breadcrumb trail.
+  const [projectName, setProjectName] = useState<string | null>(null);
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -76,8 +84,10 @@ export function ProjectTabs({projectId}: {projectId: string}) {
       api.getProjectRepos(projectId),
       api.getProjectMembers(projectId),
       api.getTechDebt(projectId),
-    ]).then(([dash, repos, members, debt]) => {
+      api.getProject(projectId),
+    ]).then(([dash, repos, members, debt, proj]) => {
       if (cancelled) return;
+      if (proj.status === 'fulfilled') setProjectName(proj.value.name || null);
       const d = dash.status === 'fulfilled' ? dash.value : null;
       const repoArr = repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value : [];
       const memberArr =
@@ -102,24 +112,35 @@ export function ProjectTabs({projectId}: {projectId: string}) {
     };
   }, [projectId]);
 
+  // C2 — "<project> · ExecuteSpec" on every project sub-route (no-op until the
+  // name loads, so there's no placeholder flash).
+  useDocumentTitle(projectName);
+
   return (
-    <div className='ide-rtabs' style={{marginBottom: 16}}>
-      {T.map((t) => {
-        const to = `/projects/${projectId}${t.seg}`;
-        const active = t.seg === '' ? pathname === to : pathname.startsWith(to);
-        const n = t.count ? counts[t.count] : undefined;
-        return (
-          <Link
-            key={t.label}
-            to={to}
-            className={`ide-rtab${active ? ' active' : ''}`}
-            style={{textDecoration: 'none'}}
-          >
-            {n != null ? `${t.label} · ${n}` : t.label}
-          </Link>
-        );
-      })}
-    </div>
+    <>
+      {/* C3 — one breadcrumb trail above the strip; every sub-tab inherits it. */}
+      <Crumbs items={[{label: 'Projects', to: '/projects'}, {label: projectName ?? '…'}]} />
+      <div className='ide-rtabs' style={{marginBottom: 16}}>
+        {T.map((t) => {
+          const to = `/projects/${projectId}${t.seg}`;
+          const active = t.seg === '' ? pathname === to : pathname.startsWith(to);
+          const n = t.count ? counts[t.count] : undefined;
+          return (
+            <Link
+              key={t.label}
+              to={to}
+              // §3.4 — Compose-tab clicks carry explicit intent so IdeProject's
+              // landing→Pulse redirect doesn't bounce them straight back.
+              state={t.seg === '' ? {compose: true} : undefined}
+              className={`ide-rtab${active ? ' active' : ''}`}
+              style={{textDecoration: 'none'}}
+            >
+              {n != null ? `${t.label} · ${n}` : t.label}
+            </Link>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -222,6 +243,18 @@ export function IdeProjectPulse() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div className='ide-h1'>Pulse</div>
+      {/* §3.4 — the project landing redirects here once runs exist; keep the
+          composer one click away. {compose:true} skips the redirect. */}
+      <div style={{margin: '4px 0 12px'}}>
+        <Link
+          to={`/projects/${projectId}`}
+          state={{compose: true}}
+          className='ide-btn ghost'
+          style={{textDecoration: 'none', display: 'inline-block'}}
+        >
+          ＋ New spec in this project
+        </Link>
+      </div>
       {!dash ? (
         <IdeLoader label='Loading pulse…' />
       ) : (
@@ -374,10 +407,15 @@ export function IdeProjectPulse() {
                     >
                       {runTitleFor(r)}
                     </span>
-                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
-                      {sc != null ? `${Math.round(sc)}%` : live ? 'live' : '—'}
-                    </span>
-                    {cost != null && (
+                    {/* C5 — score badge (verdict-banded) + muted cost, null-guarded. */}
+                    {typeof sc === 'number' ? (
+                      <IdeBadge kind={scoreBand(sc)}>{Math.round(sc)}</IdeBadge>
+                    ) : (
+                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
+                        {live ? 'live' : '—'}
+                      </span>
+                    )}
+                    {typeof cost === 'number' && cost > 0 && (
                       <span
                         className='ide-mono'
                         style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
@@ -536,6 +574,8 @@ export function IdeProjectRuns() {
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
   const [prBusy, setPrBusy] = useState<string | null>(null);
+  // C8 — credit-spending dispatch awaiting confirmation (PR-card "Autofix review").
+  const [autofixFor, setAutofixFor] = useState<{prNumber: number; repo: string} | null>(null);
   const [reviewOpen, setReviewOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -722,6 +762,8 @@ export function IdeProjectRuns() {
             <div className='ide-empty'>No runs match this filter.</div>
           ) : (
             <div
+              // C9.3 — stacks to one column under 600px (ide-stack-mobile in ide.css).
+              className='ide-stack-mobile'
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(280px, 1fr) minmax(0, 1.2fr)',
@@ -775,10 +817,25 @@ export function IdeProjectRuns() {
                           R-{r.runId.slice(0, 6)} · {relTime(r.startedAt)}
                         </span>
                       </span>
-                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
-                        {sc != null ? `${Math.round(sc)}%` : live ? 'live' : ''}
-                        {cost != null && (
-                          <span className='ide-mono' style={{display: 'block', textAlign: 'right'}}>
+                      {/* C5 — score badge (verdict-banded) + muted cost, null-guarded. */}
+                      <span
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-end',
+                          gap: 2,
+                          fontSize: 12,
+                          color: 'var(--ide-fg-muted)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {typeof sc === 'number' ? (
+                          <IdeBadge kind={scoreBand(sc)}>{Math.round(sc)}</IdeBadge>
+                        ) : live ? (
+                          <span>live</span>
+                        ) : null}
+                        {typeof cost === 'number' && cost > 0 && (
+                          <span className='ide-mono' style={{fontSize: 11}}>
                             ${cost.toFixed(2)}
                           </span>
                         )}
@@ -916,7 +973,8 @@ export function IdeProjectRuns() {
                         className='ide-btn ghost'
                         style={{padding: '4px 10px'}}
                         disabled={prBusy === key}
-                        onClick={() => autofix(num, repo)}
+                        // C8 — credit-spending dispatch goes through a confirm modal.
+                        onClick={() => setAutofixFor({prNumber: num, repo})}
                       >
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </button>
@@ -936,6 +994,21 @@ export function IdeProjectRuns() {
           )}
         </>
       )}
+
+      {/* C8 — confirm before the paid autofix dispatch; the existing success
+          message + run link flow inside autofix() is untouched. */}
+      <ConfirmModal
+        open={!!autofixFor}
+        title='Dispatch autofix run'
+        body='This dispatches a new run to fix the review comments. It consumes credits and opens a commit on the PR branch. Continue?'
+        confirmLabel='Dispatch run'
+        busy={!!autofixFor && prBusy === `${autofixFor.repo}#${autofixFor.prNumber}`}
+        onConfirm={async () => {
+          const a = autofixFor;
+          if (a) await autofix(a.prNumber, a.repo);
+        }}
+        onClose={() => setAutofixFor(null)}
+      />
     </div>
   );
 }
@@ -1215,6 +1288,7 @@ export function IdeProjectRepos() {
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
                       disabled={busy === `wh${id}`}
+                      title='Installs a pull_request webhook so PR status + CI results update automatically'
                       onClick={() =>
                         act(`wh${id}`, () => api.installRepoWebhook(id), 'Webhook installed.')
                       }
