@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useState, type CSSProperties} from 'react';
 import {useNavigate, useSearchParams} from 'react-router-dom';
+import {Button} from '@/signal/components/Primitives';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {createPat} from '@/lib/api';
 
@@ -44,7 +45,7 @@ export default function CliLoginPage() {
     if (!valid) {
       setStatus('error');
       setMessage(
-        'This sign-in link is malformed or expired — re-run the command in your terminal.',
+        'Your CLI/extension sent an invalid sign-in request. Return to your terminal and run `executespec login` again.',
       );
       return;
     }
@@ -78,29 +79,32 @@ export default function CliLoginPage() {
             : `Grant the CLI on this machine (loopback port ${port ?? '—'}) access to your account.`}
         </p>
 
-        {status === 'error' && <p style={errStyle}>{message}</p>}
+        {status === 'error' && (
+          <p role='alert' aria-live='polite' style={errStyle}>
+            {message}
+          </p>
+        )}
 
         {status === 'done' ? (
-          <p style={{color: '#16a34a', fontSize: 14, margin: 0}}>
+          <p
+            role='status'
+            style={{color: 'var(--signal-mint-text-on-light)', fontSize: 14, margin: 0}}
+          >
             ✓ Authorized — return to your {isVscode ? 'editor' : 'terminal'}. You can close this
             tab.
           </p>
         ) : (
           <div style={{display: 'flex', gap: 12, justifyContent: 'center'}}>
-            <button
-              style={primaryBtn}
-              disabled={!valid || status === 'working'}
-              onClick={authorize}
-            >
+            <Button kind='primary' disabled={!valid || status === 'working'} onClick={authorize}>
               {status === 'working' ? 'Authorizing…' : 'Authorize'}
-            </button>
-            <button
-              style={ghostBtn}
+            </Button>
+            <Button
+              kind='secondary'
               disabled={status === 'working'}
               onClick={() => navigate('/home', {replace: true})}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         )}
 
@@ -128,24 +132,11 @@ const card: CSSProperties = {
   borderRadius: 12,
   padding: 32,
 };
-const errStyle: CSSProperties = {color: '#dc2626', fontSize: 14, marginBottom: 12};
-const primaryBtn: CSSProperties = {
-  background: 'var(--signal-coral, #5b8def)',
-  color: '#ffffff',
-  border: 'none',
-  borderRadius: 8,
-  padding: '10px 20px',
+// Token note: the *-text variants are the readable text-on-surface forms of
+// mint/coral (plain --signal-mint/--signal-coral are pale accent/border hues,
+// ~1.5:1 as text on a light card) — same tokens ErrorBanner/FormSuccess use.
+const errStyle: CSSProperties = {
+  color: 'var(--signal-coral-text)',
   fontSize: 14,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
-const ghostBtn: CSSProperties = {
-  background: 'transparent',
-  color: 'var(--signal-text)',
-  border: '1px solid var(--signal-hairline)',
-  borderRadius: 8,
-  padding: '10px 20px',
-  fontSize: 14,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
+  marginBottom: 12,
 };

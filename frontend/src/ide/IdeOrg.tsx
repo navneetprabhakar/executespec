@@ -13,10 +13,21 @@ import {useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal} from '@/signal/components/Modal';
 
 type UserKeyProvider = 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'FIREWORKS';
+
+// TIER-3 — per-provider key-format examples for the input placeholders (the
+// old copy showed "(sk-…)" for every provider, wrong for 3 of the 5).
+const KEY_PLACEHOLDER: Record<UserKeyProvider, string> = {
+  ANTHROPIC: 'sk-ant-…',
+  OPENAI: 'sk-…',
+  GEMINI: 'AIza…',
+  DEEPSEEK: 'sk-…',
+  FIREWORKS: 'fw_…',
+};
 type OrgKeyProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks';
 
 // Inline error / success banner — colours map to the IDE token set (mirrors
@@ -81,12 +92,24 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
 
 // API keys (BYOK) — /api-keys
 export function IdeApiKeys() {
+  useDocumentTitle('API keys');
   const tier = useAuthStore(selectNormalizedTier);
+  const user = useAuthStore((s) => s.user);
   // Gate strictly by tier (FREE only is blocked). Some running JVMs return
   // `canManageAiKeys=false` on PRO/TEAM (RJ-01 quirk) which would show the wrong
   // CTA to paying users. Tier is the contractual surface, so we ignore the
   // advisory `permissions.canManageAiKeys` hint here — same as the Signal page.
   const canManage = tier !== 'FREE';
+
+  // Per-provider "key already saved" flags (raw keys are never returned) —
+  // drives the "Leave blank to keep your current key" hint under each row.
+  const connectedByProvider: Record<UserKeyProvider, boolean> = {
+    ANTHROPIC: !!user?.hasAnthropicKey,
+    OPENAI: !!user?.hasOpenAiKey,
+    GEMINI: !!user?.hasGeminiKey,
+    DEEPSEEK: !!user?.hasDeepSeekKey,
+    FIREWORKS: !!user?.hasFireworksKey,
+  };
 
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
@@ -135,6 +158,7 @@ export function IdeApiKeys() {
     set: (v: string) => void,
     last: boolean,
   ) {
+    const connected = connectedByProvider[provider];
     return (
       <div
         key={provider}
@@ -148,12 +172,14 @@ export function IdeApiKeys() {
         >
           {label}
         </div>
+        {/* TIER-3 — when the tier gate is closed (FREE) the whole row renders
+            disabled; the upgrade banner above is the single CTA. */}
         <div style={{display: 'flex', gap: 8}}>
           <input
             className='ide-input ide-mono'
             type='password'
             autoComplete='off'
-            placeholder={`Paste your ${provider.toLowerCase()} key (sk-…)`}
+            placeholder={`Paste your ${provider.toLowerCase()} key (${KEY_PLACEHOLDER[provider]})`}
             value={value}
             onChange={(e) => set(e.target.value)}
             disabled={!canManage}
@@ -168,6 +194,11 @@ export function IdeApiKeys() {
             {busy === provider ? 'Validating…' : 'Save & validate'}
           </button>
         </div>
+        {canManage && connected && (
+          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+            Leave blank to keep your current key
+          </div>
+        )}
       </div>
     );
   }
@@ -216,6 +247,7 @@ export function IdeApiKeys() {
 
 // Org members — /org-members
 export function IdeOrgMembers() {
+  useDocumentTitle('Org members');
   const user = useAuthStore((s) => s.user);
   const tier = useAuthStore(selectNormalizedTier);
   const [org, setOrg] = useState<api.OrgDto | null>(null);
@@ -576,6 +608,7 @@ export function IdeOrgMembers() {
 
 // Org settings — /org/settings
 export function IdeOrgSettings() {
+  useDocumentTitle('Org settings');
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const canEdit = isSuperAdmin || user?.orgRole === 'ORG_ADMIN';
@@ -613,6 +646,9 @@ export function IdeOrgSettings() {
   const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
   const [matrixOverrides, setMatrixOverrides] = useState<Record<string, string>>({});
   const [matrixBusy, setMatrixBusy] = useState(false);
+  // TIER-4 — matrix saves affect every run the org submits, so the Save button
+  // routes through a ConfirmModal.
+  const [confirmMatrixSave, setConfirmMatrixSave] = useState(false);
   // Seat adjustment (TEAM tier) — current value seeded from the org seat count.
   const [seats, setSeats] = useState(1);
   const [seatBusy, setSeatBusy] = useState(false);
@@ -897,30 +933,42 @@ export function IdeOrgSettings() {
 
       {/* ── Single sign-on ── */}
       <div className='ide-h2'>Single sign-on (SSO)</div>
+      {/* TIER-5 — SAML login enforcement is not implemented yet (config storage
+          only, per docs/sso-saml-wiring.md), so the copy + the SAML chips say
+          so instead of promising enforcement. */}
       <InfoCard>
-        Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Members signing in with
-        another method are blocked once SSO is enforced.
+        Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Once SAML enforcement is
+        enabled for your org (contact us), members signing in with another method will be blocked.
       </InfoCard>
       <div className='ide-card'>
         <Field label='Provider'>
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
-            {(['GOOGLE_OIDC', 'OKTA_SAML', 'AZURE_AD_SAML'] as api.SsoProvider[]).map((p) => (
-              <button
-                key={p}
-                type='button'
-                onClick={canEdit ? () => setSsoProvider(p) : undefined}
-                disabled={!canEdit}
-                className='ide-badge'
-                style={{
-                  padding: '5px 11px',
-                  cursor: canEdit ? 'pointer' : 'default',
-                  borderColor: ssoProvider === p ? 'var(--ide-accent)' : undefined,
-                  color: ssoProvider === p ? 'var(--ide-accent)' : undefined,
-                }}
-              >
-                {p.replace(/_/g, ' ')}
-              </button>
-            ))}
+            {(['GOOGLE_OIDC', 'OKTA_SAML', 'AZURE_AD_SAML'] as api.SsoProvider[]).map((p) => {
+              const samlConfigOnly = p === 'OKTA_SAML' || p === 'AZURE_AD_SAML';
+              return (
+                <button
+                  key={p}
+                  type='button'
+                  onClick={canEdit ? () => setSsoProvider(p) : undefined}
+                  disabled={!canEdit}
+                  className='ide-badge'
+                  title={
+                    samlConfigOnly
+                      ? 'SAML sign-in is not yet enforced — configuration is stored; contact us to enable login enforcement.'
+                      : undefined
+                  }
+                  style={{
+                    padding: '5px 11px',
+                    cursor: canEdit ? 'pointer' : 'default',
+                    borderColor: ssoProvider === p ? 'var(--ide-accent)' : undefined,
+                    color: ssoProvider === p ? 'var(--ide-accent)' : undefined,
+                  }}
+                >
+                  {p.replace(/_/g, ' ')}
+                  {samlConfigOnly ? ' · config only' : ''}
+                </button>
+              );
+            })}
           </div>
         </Field>
         <Field label='Metadata URL'>
@@ -1037,10 +1085,20 @@ export function IdeOrgSettings() {
 
       {/* ── Model matrix (F3) ── */}
       <div className='ide-h2'>Model matrix</div>
+      {/* TIER-4 — legend directly above the first tier card: what the tiers
+          mean, what "Default · <model>" resolves from, and who can edit. The
+          non-ENTERPRISE upgrade note sits here too — above the grid. */}
       <InfoCard>
-        Pin which model each agent tier uses, per provider. Cells left on <em>Default</em> follow
-        the platform matrix; an override applies to every run your org submits on that provider.{' '}
-        {matrix && !matrix.editable && <strong>Overrides are an Enterprise-tier feature.</strong>}
+        Tiers: <strong>Planning</strong> (complex reasoning) · <strong>Workhorse</strong> (default)
+        · <strong>Lightweight</strong> (cheap/fast). &lsquo;Default · &lt;model&gt;&rsquo; follows
+        the platform matrix; pick a model to override it for this org&apos;s runs. Editable on
+        ENTERPRISE.
+        {matrix && !matrix.editable && (
+          <>
+            {' '}
+            <strong>Your org&apos;s grid is read-only — upgrade to override models.</strong>
+          </>
+        )}
       </InfoCard>
       {matrix &&
         matrix.tiers.map((t) => (
@@ -1114,7 +1172,7 @@ export function IdeOrgSettings() {
           className='ide-btn'
           style={{width: '100%'}}
           disabled={matrixBusy}
-          onClick={saveMatrix}
+          onClick={() => setConfirmMatrixSave(true)}
         >
           {matrixBusy ? 'Saving…' : 'Save model matrix'}
         </button>
@@ -1355,6 +1413,17 @@ export function IdeOrgSettings() {
         busy={clearSsoBusy}
         onClose={() => setConfirmClearSso(false)}
         onConfirm={performClearSso}
+      />
+
+      {/* TIER-4 — confirm before applying org-wide model overrides. */}
+      <ConfirmModal
+        open={confirmMatrixSave}
+        title='Update model matrix'
+        body='These overrides apply to every run submitted by members of this org.'
+        confirmLabel='Save'
+        busy={matrixBusy}
+        onClose={() => setConfirmMatrixSave(false)}
+        onConfirm={saveMatrix}
       />
     </div>
   );
