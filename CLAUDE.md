@@ -164,7 +164,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 2. **Per-package `CLAUDE.md`** (e.g. `agent/CLAUDE.md`, `state/CLAUDE.md`) when entities, repository methods, agents, or migrations change in that package.
 3. **`docs/CODEMAP.md`** when new top-level packages, entities, agents, or DB migrations are added.
 4. **`docs/document_map.md`** when a doc is added or removed under `docs/`.
-5. **`docs/reason-log/2026-05.md`** (the in-flight tracker since `docs/plans/pending.md` was retired) when an in-flight item changes status or a new decision is recorded.
+5. **`docs/reason-log/2026-06.md`** (the current month's file of the in-flight tracker since `docs/plans/pending.md` was retired — rotate monthly per `docs/reason-log/README.md`) when an in-flight item changes status or a new decision is recorded.
 6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`docs/design/*`** when tokens / theming / a11y commitments change.
 7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
 
