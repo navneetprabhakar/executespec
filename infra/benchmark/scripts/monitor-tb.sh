@@ -1,10 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-JOBS_DIR="$HOME/es-tb-jobs"
-ADMIN_ENV="$HOME/swebench-bench/.espec-admin.env"
 JOB="${JOB_NAME:-}"
+PROCESS_LINES="$(pgrep -af '/harbor .*run|harbor run|tb-bench-bridge.py|es_harbor_agent.py' || true)"
+ACTIVE_JOB_DIR="$(printf '%s\n' "$PROCESS_LINES" | sed -nE 's#.*--job-dir ([^ ]+).*#\1#p' | tail -1)"
 
+JOBS_DIR="${ACTIVE_JOB_DIR%/*}"
+if [ "$JOBS_DIR" = "$ACTIVE_JOB_DIR" ]; then
+  JOBS_DIR=""
+fi
+if [ -z "${JOBS_DIR:-}" ]; then
+  JOBS_DIR="$HOME/es-tb-jobs"
+fi
+
+if [ -z "$JOB" ] && [ -n "$ACTIVE_JOB_DIR" ]; then
+  JOB="$(basename "$ACTIVE_JOB_DIR")"
+fi
 if [ -z "$JOB" ] && [ -f "$JOBS_DIR/tb21-focused-current.txt" ]; then
   JOB="$(cat "$JOBS_DIR/tb21-focused-current.txt")"
 fi
@@ -12,11 +23,30 @@ if [ -z "$JOB" ] && [ -f "$JOBS_DIR/tb21-current.txt" ]; then
   JOB="$(cat "$JOBS_DIR/tb21-current.txt")"
 fi
 if [ -z "$JOB" ]; then
-  JOB="$(ls -1t "$JOBS_DIR"/*-run.log 2>/dev/null | head -1 | sed -E 's#.*/(.*)-run\.log#\1#')"
+  LATEST_MARKER="$(ls -1t /home/*/es-tb-jobs/tb21-focused-current.txt /home/*/es-tb-jobs/tb21-current.txt 2>/dev/null | head -1 || true)"
+  if [ -n "$LATEST_MARKER" ]; then
+    JOB="$(cat "$LATEST_MARKER")"
+    JOBS_DIR="$(dirname "$LATEST_MARKER")"
+  fi
 fi
+if [ -z "$JOB" ]; then
+  LATEST_RUN_LOG="$(ls -1t /home/*/es-tb-jobs/*-run.log "$JOBS_DIR"/*-run.log 2>/dev/null | head -1 || true)"
+  if [ -n "$LATEST_RUN_LOG" ]; then
+    JOB="$(basename "$LATEST_RUN_LOG" | sed -E 's#(.*)-run\.log#\1#')"
+    JOBS_DIR="$(dirname "$LATEST_RUN_LOG")"
+  fi
+fi
+
+HOME_FOR_JOB="$(printf '%s\n' "$JOBS_DIR" | sed -nE 's#^(/home/[^/]+)/es-tb-jobs$#\1#p')"
+if [ -z "$HOME_FOR_JOB" ]; then
+  HOME_FOR_JOB="$HOME"
+fi
+ADMIN_ENV="$HOME_FOR_JOB/swebench-bench/.espec-admin.env"
 
 echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "job=${JOB:-<none>}"
+echo "jobs_dir=$JOBS_DIR"
+echo "job_home=$HOME_FOR_JOB"
 echo
 
 echo "== app health =="
@@ -24,7 +54,7 @@ curl -fsS http://localhost:8080/actuator/health || true
 echo
 
 echo "== processes =="
-pgrep -af '/harbor .*run|harbor run|tb-bench-bridge.py|es_harbor_agent.py' || true
+printf '%s\n' "$PROCESS_LINES"
 echo
 
 if [ -z "$JOB" ]; then
