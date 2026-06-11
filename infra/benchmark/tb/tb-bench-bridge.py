@@ -51,7 +51,9 @@ def _scan(job_dir):
         vr = d.get("verifier_result") or {}
         rew = (vr.get("rewards") or {}).get("reward", 0)
         try:
-            rew = int(float(rew))
+            # Binarize: ANY positive reward counts as a pass. int(float(x)) would TRUNCATE a
+            # fractional reward (0.5 -> 0) and undercount resolved tasks on the dashboard.
+            rew = 1 if float(rew) > 0 else 0
         except Exception:  # noqa: BLE001
             rew = 0
         meta = ar.get("metadata") or {}
@@ -78,31 +80,36 @@ def main():
     ap.add_argument("--poll", type=int, default=15)
     ap.add_argument("--max-min", type=int, default=600)
     ap.add_argument("--idle-min", type=int, default=25)  # finalize if no new trial for this long
+    ap.add_argument("--run-id", default=None, help="attach to an existing benchmark_run (recovery) instead of starting a new one")
     a = ap.parse_args()
 
     base = os.environ["BR_ES_BASE"]
-    token = os.environ.get("BR_TOKEN") or _login(
-        base, os.environ["BR_ADMIN_EMAIL"], os.environ["BR_ADMIN_PW"]
-    )
+    _email = os.environ.get("BR_ADMIN_EMAIL")
+    _pw = os.environ.get("BR_ADMIN_PW")
+    token = os.environ.get("BR_TOKEN") or _login(base, _email, _pw)
+    _last_login = time.time()
     if not token:
         print("bridge: login failed")
         return 1
 
-    run = _req(
-        base,
-        "/api/v2/test/benchmark/start",
-        token,
-        "POST",
-        {
-            "suite": a.suite,
-            "dataset": a.dataset,
-            "provider": a.provider,
-            "model": a.model,
-            "k": a.k,
-            "totalTasks": a.total,
-        },
-    )
-    rid = run["id"]
+    if a.run_id:
+        rid = a.run_id
+    else:
+        run = _req(
+            base,
+            "/api/v2/test/benchmark/start",
+            token,
+            "POST",
+            {
+                "suite": a.suite,
+                "dataset": a.dataset,
+                "provider": a.provider,
+                "model": a.model,
+                "k": a.k,
+                "totalTasks": a.total,
+            },
+        )
+        rid = run["id"]
     print("bridge: benchmark_run id =", rid, flush=True)
     print("bridge: dashboard =", base.rstrip("/") + "/benchmark", flush=True)
 
@@ -113,6 +120,14 @@ def main():
     last_change = time.time()
     idle_limit = a.idle_min * 60
     while time.time() < deadline:
+        # Refresh the JWT before its ~1h TTL expires — the bridge runs for hours,
+        # and a stale token 401s every post (which previously froze the dashboard).
+        if _email and _pw and time.time() - _last_login > 1800:
+            try:
+                token = _login(base, _email, _pw)
+                _last_login = time.time()
+            except Exception:  # noqa: BLE001
+                pass
         trials = _scan(a.job_dir)
         for trial, info in sorted(trials.items()):
             if trial in posted:

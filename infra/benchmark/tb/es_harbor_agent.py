@@ -25,8 +25,10 @@ Config (env vars):
 """
 import asyncio
 import base64
+import glob
 import json
 import os
+import re
 import shlex
 
 import httpx
@@ -36,6 +38,62 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 READ_LIMIT, SHELL_LIMIT, DIFF_LIMIT = 8000, 6000, 5000
+
+# Per-task wall clock (RL-2026-06, TB 2.0 full-89 autopsy): Harbor kills the agent phase at the
+# TASK'S OWN [agent] timeout_sec (900s for most TB2 tasks, up to 3600s for heavy ones like
+# regex-chess) — NOT a flat 1350s. A flat 900s server cap raced Harbor's kill on 900s tasks (the
+# salvage finalizer fired exactly when Harbor killed the trial) and surrendered 75% of the budget
+# on 3600s tasks. We resolve the task's timeout from the local harbor cache by matching the
+# instruction text to the task package's instruction.md, then pass a derived wallClockSeconds so
+# the ExecuteSpec worker (and its artifact-writing finalizer) finishes BEFORE Harbor's kill.
+TASKS_ROOT = os.environ.get(
+    "ES_TB_TASKS_ROOT",
+    os.path.expanduser("~/.cache/harbor/tasks/packages/terminal-bench"),
+)
+_TASK_TIMEOUT_INDEX = None  # lazily built: normalized-instruction -> [agent] timeout_sec
+
+
+def _norm_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _build_timeout_index() -> dict:
+    idx = {}
+    for toml_path in glob.glob(os.path.join(TASKS_ROOT, "*", "*", "task.toml")):
+        inst_path = os.path.join(os.path.dirname(toml_path), "instruction.md")
+        if not os.path.exists(inst_path):
+            continue
+        try:
+            inst = _norm_text(open(inst_path, errors="replace").read())
+            raw = open(toml_path, errors="replace").read()
+            m = re.search(r"(?ms)^\[agent\][^\[]*?^\s*timeout_sec\s*=\s*([0-9.]+)", raw)
+            if m and inst:
+                idx[inst] = float(m.group(1))
+        except Exception:  # noqa: BLE001 — best-effort index; misses fall back to server default
+            continue
+    return idx
+
+
+def _wall_clock_for(instruction: str):
+    """Derived wallClockSeconds for this task, or None (→ server default 900s).
+
+    ES_TB_WALL_CLOCK forces a value. Otherwise: harbor [agent] timeout − 200s (one slow in-flight
+    LLM turn at the 240s read-timeout ceiling + the terminal finalizer must land the artifact
+    BEFORE harbor's kill), floored at 300s, capped at 3300s.
+    """
+    forced = os.environ.get("ES_TB_WALL_CLOCK")
+    if forced:
+        try:
+            return int(forced)
+        except ValueError:
+            pass
+    global _TASK_TIMEOUT_INDEX
+    if _TASK_TIMEOUT_INDEX is None:
+        _TASK_TIMEOUT_INDEX = _build_timeout_index()
+    t = _TASK_TIMEOUT_INDEX.get(_norm_text(instruction))
+    if not t:
+        return None
+    return int(min(max(t - 200, 300), 3300))
 
 
 def _trunc(s: str, n: int) -> str:
@@ -83,13 +141,21 @@ class ExecuteSpecAgent(BaseAgent):
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
             token = await self._auth(client)
+            wall = _wall_clock_for(instruction)
+            # Scale the iteration cap with the per-task clock (a 3300s task supports far more
+            # turns than the 120 floor); the server keeps its own floor for small values.
+            iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
+            payload = {"instruction": instruction, "provider": self.provider,
+                       "model": self.model, "maxIterations": iters}
+            if wall is not None:
+                payload["wallClockSeconds"] = wall
             started = await self._post(
-                client, "/api/v2/test/terminal-bench/start", token,
-                {"instruction": instruction, "provider": self.provider,
-                 "model": self.model, "maxIterations": self.max_iters},
+                client, "/api/v2/test/terminal-bench/start", token, payload,
             )
             run_id, sse_token = started["runId"], started["sseToken"]
-            self.logger.info(f"[es] run={run_id} provider={self.provider} model={self.model}")
+            self.logger.info(
+                f"[es] run={run_id} provider={self.provider} model={self.model}"
+                f" wall={wall or 'default'} iters={iters}")
 
             tools = 0
             final = None
