@@ -127,13 +127,29 @@ for path in sorted(result_files):
         rows.append((os.path.relpath(path, job_dir), "parse_error", "", str(e)[:120]))
         continue
     task = d.get("task_id") or d.get("task_name") or d.get("name") or os.path.dirname(os.path.relpath(path, job_dir))
+    if isinstance(task, dict):
+        task = task.get("name") or task.get("task_name") or str(task)
     reward = d.get("reward")
-    meta = d.get("metadata") or {}
+    verifier = d.get("verifier_result") or {}
+    verifier_rewards = verifier.get("rewards") or {}
+    if reward is None:
+        reward = verifier_rewards.get("reward")
+    agent = d.get("agent_result") or {}
+    meta = d.get("metadata") or agent.get("metadata") or {}
     es_run = meta.get("es_run_id") or meta.get("run_id") or ""
-    status = d.get("status") or d.get("error") or ""
+    status = (
+        d.get("status")
+        or d.get("error")
+        or agent.get("status")
+        or agent.get("error")
+        or agent.get("exception")
+        or ""
+    )
+    if not status and agent.get("failure_mode"):
+        status = agent.get("failure_mode")
     rows.append((task, reward, es_run, status))
 
-resolved = sum(1 for _, r, *_ in rows if r == 1 or r == 1.0)
+resolved = sum(1 for _, r, *_ in rows if isinstance(r, (int, float)) and float(r) > 0)
 rewards = [r for _, r, *_ in rows if isinstance(r, (int, float))]
 avg = (sum(rewards) / len(rewards)) if rewards else 0
 print(f"trial_results={len(rows)} resolved={resolved} avg_reward={avg:.3f}")
