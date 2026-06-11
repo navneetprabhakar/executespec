@@ -135,6 +135,9 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 | `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`) |
 | `tb/tb-bench-bridge.py` | the in-app `/benchmark` bridge — one `TASK_SCORED` per trial (reward + esRunId + cost + **input/output tokens** from each `result.json`) → the V236/V238 tracking dashboard |
 
+Benchmark deploys also sync the version-controlled `tb/` harness files into `~/tbench` and run
+`python3 -m py_compile` on the VM, so app deploys and Harbor adapter fixes stay in lockstep.
+
 **Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
 locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.
 

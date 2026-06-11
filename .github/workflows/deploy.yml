@@ -325,6 +325,32 @@ jobs:
               echo 'Deploy done — service restarting'
             "
 
+      - name: Sync Terminal-Bench harness to benchmark VM
+        if: env.DEPLOY_ENV == 'benchmark'
+        run: |
+          gcloud compute scp \
+            infra/benchmark/tb/es_harbor_agent.py \
+            infra/benchmark/tb/tb-bench-bridge.py \
+            ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/ \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="
+              set -e
+              mkdir -p \"\$HOME/tbench\"
+              mv /tmp/es_harbor_agent.py \"\$HOME/tbench/es_harbor_agent.py\"
+              mv /tmp/tb-bench-bridge.py \"\$HOME/tbench/tb-bench-bridge.py\"
+              python3 -m py_compile \"\$HOME/tbench/es_harbor_agent.py\" \"\$HOME/tbench/tb-bench-bridge.py\"
+              echo 'Terminal-Bench harness synced to ~/tbench'
+            "
+
       # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
       - name: Wait for app startup
         run: sleep 45
