@@ -43,6 +43,13 @@ if [ -z "$HOME_FOR_JOB" ]; then
 fi
 ADMIN_ENV="$HOME_FOR_JOB/swebench-bench/.espec-admin.env"
 
+if [ "${ES_TB_MONITOR_AS_OPERATOR:-0}" != "1" ] && [ "$HOME_FOR_JOB" != "$HOME" ]; then
+  RUN_USER="$(stat -c %U "$HOME_FOR_JOB" 2>/dev/null || echo "")"
+  if [ -n "$RUN_USER" ] && [ "$RUN_USER" != "$(id -un)" ]; then
+    exec sudo -H -u "$RUN_USER" env ES_TB_MONITOR_AS_OPERATOR=1 HOME="$HOME_FOR_JOB" JOB_NAME="$JOB" bash "$0"
+  fi
+fi
+
 echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "job=${JOB:-<none>}"
 echo "jobs_dir=$JOBS_DIR"
