@@ -137,6 +137,9 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 
 Benchmark deploys also sync the version-controlled `tb/` harness files into `~/tbench` and run
 `python3 -m py_compile` on the VM, so app deploys and Harbor adapter fixes stay in lockstep.
+For post-fix mechanics checks, a benchmark push whose commit message contains `[tb21-pilot]` starts
+only the focused TB 2.1 Flash pilot (`gcode-to-text`, `polyglot-rust-c`, `train-fasttext`,
+`build-pmars`) after health is green; full model runs remain manual/gated.
 
 **Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
 locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.

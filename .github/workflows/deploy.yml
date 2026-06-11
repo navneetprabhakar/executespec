@@ -396,6 +396,98 @@ jobs:
           echo "Health check FAILED after 20 attempts"
           exit 1
 
+      - name: Start TB 2.1 focused Flash pilot
+        if: env.DEPLOY_ENV == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb21-pilot]')
+        run: |
+          cat > /tmp/tb21-focused-pilot.sh << 'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+
+          TB_DIR="$HOME/tbench"
+          JOBS_DIR="$HOME/es-tb-jobs"
+          ADMIN_ENV="$HOME/swebench-bench/.espec-admin.env"
+          JOB="es-tb-21-focused-flash-$(date +%Y%m%d-%H%M%S)"
+          CFG="$TB_DIR/es-tb-runtb-${JOB}.yaml"
+
+          mkdir -p "$JOBS_DIR"
+          if pgrep -af '/harbor .*run|harbor run' >/tmp/tb-active.txt 2>/dev/null; then
+            echo "Refusing to start TB 2.1 focused pilot because Harbor is already active:"
+            cat /tmp/tb-active.txt
+            exit 1
+          fi
+
+          curl -fsS http://localhost:8080/actuator/health >/dev/null
+          python3 -m py_compile "$TB_DIR/es_harbor_agent.py" "$TB_DIR/tb-bench-bridge.py"
+
+          cat > "$CFG" <<EOF
+          job_name: $JOB
+          jobs_dir: $JOBS_DIR
+          n_concurrent_trials: 4
+          n_attempts: 1
+          agents:
+            - import_path: es_harbor_agent:ExecuteSpecAgent
+              model_name: deepseek/deepseek-v4-flash-native
+          datasets:
+            - name: terminal-bench/terminal-bench-2-1
+              task_names:
+                - gcode-to-text
+                - polyglot-rust-c
+                - train-fasttext
+                - build-pmars
+          EOF
+
+          [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
+          export ES_PROVIDER=deepseek \
+                 ES_MODEL=deepseek-v4-flash-native \
+                 ES_MAX_ITERS=120 \
+                 ES_BASE=http://localhost:8080 \
+                 ES_TOOL_TIMEOUT=300 \
+                 ES_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 ES_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+
+          export BR_ES_BASE=http://localhost:8080 \
+                 BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+          nohup python3 "$TB_DIR/tb-bench-bridge.py" \
+            --job-dir "$JOBS_DIR/$JOB" \
+            --provider deepseek \
+            --model deepseek-v4-flash-native \
+            --k 1 \
+            --total 4 \
+            --dataset terminal-bench-2-1 \
+            --idle-min 30 \
+            --max-min 360 \
+            > "$JOBS_DIR/${JOB}-bridge.log" 2>&1 &
+          BRIDGE_PID=$!
+
+          cd "$TB_DIR"
+          nohup ./.venv/bin/harbor run -c "$CFG" -y > "$JOBS_DIR/${JOB}-run.log" 2>&1 &
+          HARBOR_PID=$!
+
+          echo "$JOB" > "$JOBS_DIR/tb21-focused-current.txt"
+          echo "bridge_pid=$BRIDGE_PID harbor_pid=$HARBOR_PID" > "$JOBS_DIR/${JOB}-pids.txt"
+          if [ -f "$TB_DIR/tg-send.py" ]; then
+            python3 "$TB_DIR/tg-send.py" "TB 2.1 focused Flash pilot started: $JOB. Scope: 4 harness-risk tasks (gcode-to-text, polyglot-rust-c, train-fasttext, build-pmars), k=1, concurrency=4. Purpose: validate linkage/timeout/cancel/bridge hygiene before full Flash." || true
+          fi
+          echo "Started TB 2.1 focused Flash pilot: $JOB"
+          echo "Run log: $JOBS_DIR/${JOB}-run.log"
+          echo "Bridge log: $JOBS_DIR/${JOB}-bridge.log"
+          SCRIPT
+          chmod +x /tmp/tb21-focused-pilot.sh
+
+          gcloud compute scp /tmp/tb21-focused-pilot.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/tb21-focused-pilot.sh \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="bash /tmp/tb21-focused-pilot.sh"
+
       # ── Dump logs on failure ─────────────────────────────────────────────
       - name: Dump app logs (on failure)
         if: failure()
