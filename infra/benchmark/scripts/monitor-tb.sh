@@ -255,11 +255,51 @@ if rid:
                         print("  es_event=" + line)
                 except Exception as e:
                     print(f"  es_event_log_failed={es_run_id} {e!r}")
+                try:
+                    messages = req(f"/api/runs/{es_run_id}/messages", token)
+                    for msg in messages[-8:]:
+                        print("  es_message=" + json.dumps(msg, sort_keys=True)[:1000])
+                except Exception as e:
+                    print(f"  es_messages_failed={es_run_id} {e!r}")
             except Exception as e:
                 print(f"  es_run_detail_failed={es_run_id} {e!r}")
 PY
 else
   echo "admin env missing"
+fi
+echo
+
+echo "== app log excerpts =="
+RUN_IDS="$(python3 - "$JOB_DIR" <<'PY'
+import glob, json, os, sys
+
+job_dir = sys.argv[1]
+ids = []
+for path in glob.glob(os.path.join(job_dir, "**", "result.json"), recursive=True):
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except Exception:
+        continue
+    agent = d.get("agent_result") or {}
+    meta = d.get("metadata") or agent.get("metadata") or {}
+    rid = meta.get("es_run_id") or meta.get("run_id")
+    if rid and rid not in ids:
+        ids.append(rid)
+print(" ".join(ids))
+PY
+)"
+if [ -z "$RUN_IDS" ]; then
+  echo "no linked run ids yet"
+elif ! sudo -n true 2>/dev/null; then
+  echo "sudo unavailable; skipping journalctl"
+else
+  for rid in $RUN_IDS; do
+    echo "-- logs for $rid --"
+    sudo -n journalctl -u executespec --since "3 hours ago" --no-pager 2>/dev/null \
+      | grep -F -C 8 "$rid" \
+      | tail -120 || true
+  done
 fi
 echo
 
