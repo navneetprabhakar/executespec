@@ -241,6 +241,20 @@ if rid:
                     f"workerOutcome={es.get('workerOutcome')} "
                     f"error={str(es.get('errorMessage') or es.get('error') or '')[:180]}"
                 )
+                try:
+                    log_events = req(f"/api/runs/{es_run_id}/event-log", token)
+                    interesting = []
+                    for event in log_events:
+                        text = json.dumps(event, sort_keys=True)
+                        low = text.lower()
+                        if any(word in low for word in ("error", "failed", "exception", "timeout")):
+                            interesting.append(text[:260])
+                    if not interesting:
+                        interesting = [json.dumps(e, sort_keys=True)[:260] for e in log_events[-3:]]
+                    for line in interesting[-5:]:
+                        print("  es_event=" + line)
+                except Exception as e:
+                    print(f"  es_event_log_failed={es_run_id} {e!r}")
             except Exception as e:
                 print(f"  es_run_detail_failed={es_run_id} {e!r}")
 PY
