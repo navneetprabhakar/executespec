@@ -1,14 +1,10 @@
 # Files in website/ that should NOT be uploaded to the deployed site.
-# Internal planning docs only — index.html, robots.txt, sitemap.xml, llms.txt,
-# site.webmanifest, BingSiteAuth.xml, and images/ all ship.
+# Deploy-control files + the (not yet public) press kit only — everything
+# else in this folder ships. Internal strategy docs live in docs/marketing/.
 wrangler.toml
 .assetsignore
 .wrangler/
 .wrangler/**
-tier-decision.md
-pricing-analysis.md
-product-hunt-launch.md
-ux-review.md
 press-kit/
 press-kit/**
 .DS_Store

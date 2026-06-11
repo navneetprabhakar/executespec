@@ -79,7 +79,7 @@ The 7 screenshots are from the pre-v3 visual identity. They show v2 dashboard, v
 - **Surface**: `#14171C` / `#1B1F26` / `#242A33` (v3 surface ladder)
 - **Text**: primary `#ECEEF2`, secondary `#C9D1DB`, muted `#8A94A6`
 - **Typography**: `Geist` (body + UI), `Geist Mono` / `JetBrains Mono` (code), `Instrument Serif` italic for brand-accent words
-- **Tone**: direct, technical, honest about tradeoffs. No hype, no rocket emojis. We cite real cost data, including when it's unflattering to us (see `website/pricing-analysis.md`).
+- **Tone**: direct, technical, honest about tradeoffs. No hype, no rocket emojis. We cite real cost data, including when it's unflattering to us (see `docs/marketing/pricing-analysis.md`).
 
 > Note: the website orange/amber palette and the v3-app blue/teal palette currently live as two distinct visual systems. A unified color-codes spec is being prepared — once locked, all six "Primary / Brand gradient / Success / Warn / Error / Background" tokens above converge to one source-of-truth.
 

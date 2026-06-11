@@ -1,0 +1,18 @@
+# Cloudflare Workers static-assets headers (website refactor 2026-06-11, §4).
+#
+# NOTE on /assets/*: the §4 starter suggests max-age=31536000, immutable, but
+# that assumes content-hashed filenames. This site is zero-build and the asset
+# names (site.css / site.js / benchmarks.js) are stable, so we take §4's stated
+# fallback of max-age=3600. If assets ever get versioned suffixes (site.v2.css),
+# bump this to: Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=3600
+
+/data/*
+  Cache-Control: public, max-age=300
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
