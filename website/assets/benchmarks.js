@@ -79,7 +79,7 @@
     return c;
   }
 
-  fetch('/data/benchmarks.json')
+  fetch('../data/benchmarks.json')
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function (data) {
       var suites = (data && data.suites) || [];

@@ -110,7 +110,16 @@ a { color: inherit; text-decoration: none; }
     margin-left: 24px;
     font-size: 14px; color: var(--text-dim);
 }
-@media (min-width: 720px) { .nav .links { display: flex; } }
+/* Links never wrap internally ("How it works" was breaking onto 3 lines once
+   the Benchmarks item landed); tighten gaps before wide instead. */
+.nav .links a { white-space: nowrap; }
+/* 900px (was 720): the Benchmarks item pushed the full link row past the
+   720-900 budget (70px horizontal overflow at 800). Below 900 the nav is the
+   compact logo + CTA layout that already served <720. */
+@media (min-width: 900px) { .nav .links { display: flex; flex-wrap: nowrap; } }
+@media (min-width: 900px) and (max-width: 1080px) {
+    .nav .links { gap: 14px; margin-left: 16px; font-size: 13px; }
+}
 .nav .links a:hover { color: var(--ink); }
 .nav .cta-row {
     margin-left: auto;
