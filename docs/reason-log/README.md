@@ -43,4 +43,5 @@ keeps a one-line pointer.
 
 ## Index
 
-- [2026-05.md](2026-05.md) — current
+- [2026-06.md](2026-06.md) — current
+- [2026-05.md](2026-05.md) — archive
