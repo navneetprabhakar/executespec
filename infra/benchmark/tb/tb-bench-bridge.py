@@ -78,6 +78,39 @@ def _root_result_exists(job_dir):
     return os.path.exists(os.path.join(job_dir, "result.json"))
 
 
+def _harbor_pid(job_dir):
+    pids = os.path.join(
+        os.path.dirname(os.path.abspath(job_dir)),
+        os.path.basename(os.path.abspath(job_dir)) + "-pids.txt",
+    )
+    if not os.path.exists(pids):
+        return None
+    try:
+        raw = open(pids, errors="replace").read()
+    except Exception:  # noqa: BLE001
+        return None
+    m = re.search(r"\bharbor_pid=([0-9]+)\b", raw)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def _pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _harbor_alive(job_dir):
+    return _pid_alive(_harbor_pid(job_dir))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-dir", required=True)
@@ -182,12 +215,24 @@ def main():
         if len(posted) >= expected_trials:
             break
         if posted and (time.time() - last_change) > idle_limit:
-            if _root_result_exists(a.job_dir):
+            root_exists = _root_result_exists(a.job_dir)
+            harbor_alive = _harbor_alive(a.job_dir)
+            if root_exists and not harbor_alive:
                 print(
-                    f"bridge: root result exists after {a.idle_min}m idle — finalizing",
+                    f"bridge: root result exists and Harbor is stopped after "
+                    f"{a.idle_min}m idle — finalizing",
                     flush=True,
                 )
                 break
+            if root_exists and harbor_alive:
+                print(
+                    f"bridge: root result exists after {a.idle_min}m idle, but Harbor "
+                    "is still alive; continuing so RUN_DONE does not race a long trial",
+                    flush=True,
+                )
+                last_change = time.time()
+                time.sleep(a.poll)
+                continue
             print(
                 f"bridge: no new trial for {a.idle_min}m, but root result is absent; "
                 "continuing so RUN_DONE does not race Harbor",
@@ -227,6 +272,13 @@ def main():
         except Exception as e:  # noqa: BLE001
             print("bridge: final post failed", trial, e, flush=True)
     resolved = len({final[t]["task"] for t in posted if t in final and final[t]["reward"] > 0})
+    if len(posted) < expected_trials and _harbor_alive(a.job_dir):
+        print(
+            f"bridge: max wait reached with Harbor still alive and only "
+            f"{len(posted)}/{expected_trials} trials; NOT posting RUN_DONE",
+            flush=True,
+        )
+        return 2
     try:
         _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", {"type": "RUN_DONE"})
     except Exception as e:  # noqa: BLE001
