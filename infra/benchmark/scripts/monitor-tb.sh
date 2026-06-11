@@ -45,6 +45,20 @@ echo "== files =="
 [ -f "$BRIDGE_LOG" ] && echo "bridge_log=$BRIDGE_LOG"
 echo
 
+echo "== harness homes =="
+for home in "$HOME" /home/*; do
+  [ -d "$home" ] || continue
+  user="$(stat -c %U "$home" 2>/dev/null || echo unknown)"
+  harbor="no"
+  admin_env="no"
+  [ -x "$home/tbench/.venv/bin/harbor" ] && harbor="yes"
+  [ -f "$home/swebench-bench/.espec-admin.env" ] && admin_env="yes"
+  if [ -d "$home/tbench" ] || [ -d "$home/swebench-bench" ] || [ "$harbor" = "yes" ] || [ "$admin_env" = "yes" ]; then
+    echo "home=$home user=$user tbench=$([ -d "$home/tbench" ] && echo yes || echo no) harbor=$harbor admin_env=$admin_env"
+  fi
+done
+echo
+
 echo "== bridge markers =="
 if [ -f "$BRIDGE_LOG" ]; then
   grep -E 'benchmark_run id|RUN_DONE|TASK_SCORED|error|failed|Traceback' "$BRIDGE_LOG" | tail -80 || true
