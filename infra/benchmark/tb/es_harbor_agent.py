@@ -22,6 +22,8 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
+    ES_TB_LLM_READ_TIMEOUT_SECONDS  backend per-call LLM read timeout (default 120)
+    ES_TB_LLM_RETRY_ATTEMPTS        backend transient retry attempts (default 2)
 """
 import asyncio
 import base64
@@ -78,8 +80,8 @@ def _wall_clock_for(instruction: str):
     """Derived wallClockSeconds for this task, or None (→ server default 900s).
 
     ES_TB_WALL_CLOCK forces a value. Otherwise: harbor [agent] timeout − 200s (one slow in-flight
-    LLM turn at the 240s read-timeout ceiling + the terminal finalizer must land the artifact
-    BEFORE harbor's kill), floored at 300s, capped at 3300s.
+    LLM/tool tail plus the terminal finalizer must land the artifact BEFORE Harbor's kill),
+    floored at 300s, capped at 3420s.
     """
     forced = os.environ.get("ES_TB_WALL_CLOCK")
     if forced:
@@ -93,7 +95,7 @@ def _wall_clock_for(instruction: str):
     t = _TASK_TIMEOUT_INDEX.get(_norm_text(instruction))
     if not t:
         return None
-    return int(min(max(t - 200, 300), 3300))
+    return int(min(max(t - 80, 300), 3420))
 
 
 def _trunc(s: str, n: int) -> str:
@@ -131,6 +133,8 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
+        self.llm_read_timeout = int(os.environ.get("ES_TB_LLM_READ_TIMEOUT_SECONDS", "120"))
+        self.llm_retry_attempts = int(os.environ.get("ES_TB_LLM_RETRY_ATTEMPTS", "2"))
         if not self.provider or not self.model:
             raise ValueError("ES_PROVIDER and ES_MODEL env vars are required")
 
@@ -149,8 +153,14 @@ class ExecuteSpecAgent(BaseAgent):
                 # Scale the iteration cap with the per-task clock (a 3300s task supports far more
                 # turns than the 120 floor); the server keeps its own floor for small values.
                 iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
-                payload = {"instruction": instruction, "provider": self.provider,
-                           "model": self.model, "maxIterations": iters}
+                payload = {
+                    "instruction": instruction,
+                    "provider": self.provider,
+                    "model": self.model,
+                    "maxIterations": iters,
+                    "llmReadTimeoutSeconds": self.llm_read_timeout,
+                    "transientRetryMaxAttempts": self.llm_retry_attempts,
+                }
                 if wall is not None:
                     payload["wallClockSeconds"] = wall
                 started = await self._post(
@@ -223,7 +233,10 @@ class ExecuteSpecAgent(BaseAgent):
                 cmd = args.get("command")
                 if not cmd:
                     return _err("INVALID_ARGS", f"{name}: no command")
-                r = await env.exec(cmd, timeout_sec=self.tool_timeout)
+                r = await asyncio.wait_for(
+                    env.exec(cmd, timeout_sec=self.tool_timeout),
+                    timeout=self.tool_timeout + 15,
+                )
                 out = (r.stdout or "") + (r.stderr or "")
                 body = _trunc(out, SHELL_LIMIT)
                 return _ok(body + (f"\n[exit code {r.return_code}]" if r.return_code else ""))
@@ -272,6 +285,8 @@ class ExecuteSpecAgent(BaseAgent):
             if name == "completeTask":
                 return _ok(args.get("summary", "task marked complete"))
             return _err("INVALID_ARGS", f"unknown tool: {name}")
+        except asyncio.TimeoutError:
+            return _err("TIMEOUT", f"{name}: command timed out after {self.tool_timeout}s")
         except Exception as e:
             return _err("INTERNAL", f"{type(e).__name__}: {e}")
 
@@ -316,7 +331,10 @@ class ExecuteSpecAgent(BaseAgent):
 
     async def _cancel_backend_run(self, client, token, run_id, reason) -> None:
         try:
-            await self._delete(client, f"/api/runs/{run_id}", token)
+            try:
+                await self._delete(client, f"/api/v2/test/terminal-bench/{run_id}", token)
+            except Exception:
+                await self._delete(client, f"/api/runs/{run_id}", token)
             self.logger.warning(f"[es] run={run_id} cancelled after adapter interruption: {reason}")
         except Exception as e:
             self.logger.warning(f"[es] run={run_id} cancel failed after {reason}: {e}")

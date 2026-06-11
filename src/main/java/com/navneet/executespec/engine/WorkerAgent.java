@@ -587,7 +587,8 @@ public class WorkerAgent {
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
                     // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
                     // their HTTP timeouts).
-                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                    .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                    .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                     .build());
       } catch (Exception e) {
         log.error("WorkerAgent router failure at iter={}", iter, e);
@@ -1319,7 +1320,8 @@ public class WorkerAgent {
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                  .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                   .build());
     } catch (Exception e) {
       log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
@@ -1492,7 +1494,8 @@ public class WorkerAgent {
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                  .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                   .build());
     } catch (Exception e) {
       log.warn(
@@ -2365,5 +2368,11 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
     return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && "shell".equals(toolName));
+  }
+
+  private static int workerReadTimeoutSeconds(WorkerTaskRequest req) {
+    return req.llmReadTimeoutSeconds() != null && req.llmReadTimeoutSeconds() > 0
+        ? req.llmReadTimeoutSeconds()
+        : WORKER_HTTP_READ_TIMEOUT_SECONDS;
   }
 }

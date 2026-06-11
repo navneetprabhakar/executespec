@@ -3,8 +3,8 @@
 
 Runs ALONGSIDE a `harbor run`: POSTs a benchmark_run `start`, polls the job dir for each
 trial's `result.json` (written when a trial finishes), POSTs one `TASK_SCORED` per *trial*
-(= per attempt — so k>1 aggregates correctly), and `RUN_DONE` when all trials are in or no new
-trial appears for --idle-min (Harbor done/stuck). Each TASK_SCORED carries the trial's
+(= per attempt — so k>1 aggregates correctly), and `RUN_DONE` when all trials are in or Harbor's
+root `result.json` exists. Each TASK_SCORED carries the trial's
 reward + esRunId + cost + input/output tokens (from `agent_result` in result.json), so the
 dashboard shows resolved% + cost + aggregate tokens live.
 
@@ -68,6 +68,10 @@ def _scan(job_dir):
     return out
 
 
+def _root_result_exists(job_dir):
+    return os.path.exists(os.path.join(job_dir, "result.json"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-dir", required=True)
@@ -79,7 +83,12 @@ def main():
     ap.add_argument("--total", type=int, required=True)  # number of TASKS (not trials)
     ap.add_argument("--poll", type=int, default=15)
     ap.add_argument("--max-min", type=int, default=600)
-    ap.add_argument("--idle-min", type=int, default=25)  # finalize if no new trial for this long
+    ap.add_argument(
+        "--idle-min",
+        type=int,
+        default=25,
+        help="warn after this many idle minutes; RUN_DONE waits for root result.json or max-min",
+    )
     ap.add_argument("--run-id", default=None, help="attach to an existing benchmark_run (recovery) instead of starting a new one")
     a = ap.parse_args()
 
@@ -166,11 +175,50 @@ def main():
         if len(posted) >= expected_trials:
             break
         if posted and (time.time() - last_change) > idle_limit:
-            print(f"bridge: no new trial for {a.idle_min}m — finalizing", flush=True)
-            break
+            if _root_result_exists(a.job_dir):
+                print(
+                    f"bridge: root result exists after {a.idle_min}m idle — finalizing",
+                    flush=True,
+                )
+                break
+            print(
+                f"bridge: no new trial for {a.idle_min}m, but root result is absent; "
+                "continuing so RUN_DONE does not race Harbor",
+                flush=True,
+            )
+            last_change = time.time()
         time.sleep(a.poll)
 
     final = _scan(a.job_dir)
+    for trial, info in sorted(final.items()):
+        if trial in posted:
+            continue
+        task = info["task"]
+        attempts[task] = attempts.get(task, 0) + 1
+        body = {
+            "type": "TASK_SCORED",
+            "taskName": task,
+            "attempt": attempts[task],
+            "reward": info["reward"],
+        }
+        if info["esRunId"]:
+            body["esRunId"] = info["esRunId"]
+        if info["cost"] is not None:
+            body["costUsd"] = info["cost"]
+        if info["in_tok"] is not None:
+            body["inputTokens"] = int(info["in_tok"])
+        if info["out_tok"] is not None:
+            body["outputTokens"] = int(info["out_tok"])
+        try:
+            _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", body)
+            posted.add(trial)
+            print(
+                f"bridge: final-post {task} att={attempts[task]} reward={info['reward']} "
+                f"in={info['in_tok']} out={info['out_tok']}",
+                flush=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            print("bridge: final post failed", trial, e, flush=True)
     resolved = len({final[t]["task"] for t in posted if t in final and final[t]["reward"] > 0})
     try:
         _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", {"type": "RUN_DONE"})

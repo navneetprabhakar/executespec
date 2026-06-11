@@ -126,6 +126,11 @@ import lombok.Builder;
  *     then YIELD); no resolvable runner / a remote run / any error ⇒ fail-open (never false-FAILs a
  *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
  *     {@link PatchAgent} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
+ * @param llmReadTimeoutSeconds optional per-call LLM read-timeout override. Terminal-Bench uses
+ *     this to keep a provider stall inside Harbor's agent timeout.
+ * @param transientRetryMaxAttempts optional same-provider transient retry cap. Terminal-Bench uses
+ *     this to avoid spending several full read-timeout windows before the worker can return a
+ *     terminal result.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -148,7 +153,9 @@ public record WorkerTaskRequest(
     Boolean terminalVerifyGate,
     List<String> requiredDeliverablePaths,
     Boolean criticPass,
-    Boolean verifyBeforeComplete) {
+    Boolean verifyBeforeComplete,
+    Integer llmReadTimeoutSeconds,
+    Integer transientRetryMaxAttempts) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
