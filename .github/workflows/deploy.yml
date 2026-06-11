@@ -492,6 +492,59 @@ jobs:
           [ -f "$ADMIN_ENV" ] || { echo "Admin env missing: $ADMIN_ENV"; exit 1; }
           [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
 
+          cleanup_invalid_focused_harbor() {
+            local active_file="$1"
+            local cleaned=0
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              local pid cfg cfg_base job pids_file bridge_pid harbor_pid bridge_log run_log bridge_alive invalid reason
+              pid="$(printf '%s\n' "$line" | awk '{print $1}')"
+              cfg="$(printf '%s\n' "$line" | sed -nE 's#.* -c ([^ ]*es-tb-runtb-es-tb-21-focused-flash-[^ ]+\.ya?ml).*#\1#p')"
+              [ -n "$pid" ] && [ -n "$cfg" ] || continue
+              cfg_base="$(basename "$cfg")"
+              job="${cfg_base#es-tb-runtb-}"
+              job="${job%.yaml}"
+              job="${job%.yml}"
+              case "$job" in
+                es-tb-21-focused-flash-*) ;;
+                *) continue ;;
+              esac
+              pids_file="$JOBS_DIR/${job}-pids.txt"
+              bridge_pid=""
+              harbor_pid=""
+              if [ -f "$pids_file" ]; then
+                bridge_pid="$(sed -nE 's/.*bridge_pid=([0-9]+).*/\1/p' "$pids_file" | tail -1)"
+                harbor_pid="$(sed -nE 's/.*harbor_pid=([0-9]+).*/\1/p' "$pids_file" | tail -1)"
+              fi
+              if [ -n "$harbor_pid" ] && [ "$harbor_pid" != "$pid" ]; then
+                continue
+              fi
+              bridge_log="$JOBS_DIR/${job}-bridge.log"
+              run_log="$JOBS_DIR/${job}-run.log"
+              bridge_alive=0
+              if [ -n "$bridge_pid" ] && kill -0 "$bridge_pid" 2>/dev/null; then
+                bridge_alive=1
+              fi
+              invalid=0
+              reason=""
+              if [ "$bridge_alive" != "1" ] && [ -f "$bridge_log" ] && grep -q 'RUN_DONE' "$bridge_log"; then
+                invalid=1
+                reason="bridge already posted RUN_DONE while Harbor is still alive"
+              elif [ "$bridge_alive" != "1" ] && [ -f "$run_log" ] && grep -q 'cancelled after adapter interruption' "$run_log"; then
+                invalid=1
+                reason="agent adapter cancelled after bridge interruption"
+              fi
+              if [ "$invalid" = "1" ]; then
+                echo "Cleaning invalid focused-pilot Harbor pid=$pid job=$job: $reason"
+                kill "$pid" || true
+                sleep 3
+                kill -0 "$pid" 2>/dev/null && kill -9 "$pid" || true
+                cleaned=1
+              fi
+            done < "$active_file"
+            return "$cleaned"
+          }
+
           if ! pgrep -af '/harbor .*run|harbor run' >/dev/null 2>&1; then
             STALE_BRIDGES="$(pgrep -af 'tb-bench-bridge.py .*es-tb-21-focused-flash' || true)"
             if [ -n "$STALE_BRIDGES" ]; then
@@ -553,6 +606,9 @@ jobs:
           fi
 
           TB_ACTIVE="$JOBS_DIR/${JOB}-active-harbor.txt"
+          if pgrep -af '/harbor .*run|harbor run' >"$TB_ACTIVE" 2>/dev/null; then
+            cleanup_invalid_focused_harbor "$TB_ACTIVE" || true
+          fi
           if pgrep -af '/harbor .*run|harbor run' >"$TB_ACTIVE" 2>/dev/null; then
             echo "Refusing to start TB 2.1 focused pilot because Harbor is already active:"
             cat "$TB_ACTIVE"
