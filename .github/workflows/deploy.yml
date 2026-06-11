@@ -72,7 +72,7 @@ jobs:
 
   build-and-deploy:
     name: Build → Deploy (${{ inputs.target_env || (github.ref_name == 'main' && 'prod' || 'dev') }})
-    if: !(github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]'))
+    if: ${{ !(github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]')) }}
     runs-on: ubuntu-latest
 
     # ── Environment ───────────────────
