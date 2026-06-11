@@ -490,6 +490,68 @@ jobs:
           mkdir -p "$JOBS_DIR"
           [ -x "$TB_DIR/.venv/bin/harbor" ] || { echo "Harbor missing: $TB_DIR/.venv/bin/harbor"; exit 1; }
           [ -f "$ADMIN_ENV" ] || { echo "Admin env missing: $ADMIN_ENV"; exit 1; }
+          [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
+
+          if ! pgrep -af '/harbor .*run|harbor run' >/dev/null 2>&1; then
+            STALE_BRIDGES="$(pgrep -af 'tb-bench-bridge.py .*es-tb-21-focused-flash' || true)"
+            if [ -n "$STALE_BRIDGES" ]; then
+              echo "Cleaning stale focused-pilot bridge processes before relaunch:"
+              echo "$STALE_BRIDGES"
+              STALE_JOBS="$(printf '%s\n' "$STALE_BRIDGES" | sed -nE 's#.*--job-dir ([^ ]+).*#\1#p' | xargs -r -n1 basename | tr '\n' ' ')"
+              export BR_ES_BASE=http://localhost:8080 \
+                     BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                     BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+              python3 - "$JOBS_DIR" $STALE_JOBS <<'PY' || true
+          import json, os, re, sys, urllib.request
+
+          jobs_dir = sys.argv[1]
+          jobs = sys.argv[2:]
+          base = os.environ.get("BR_ES_BASE", "http://localhost:8080")
+          email = os.environ.get("BR_ADMIN_EMAIL", "")
+          pw = os.environ.get("BR_ADMIN_PW", "")
+
+          def req(path, token=None, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Authorization"] = "Bearer " + token
+              request = urllib.request.Request(
+                  base.rstrip("/") + path,
+                  data=data,
+                  headers=headers,
+                  method="POST" if body is not None else "GET",
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read().decode()
+              return json.loads(raw) if raw.strip() else {}
+
+          if not email or not pw:
+              print("stale-bridge cleanup: admin credentials missing")
+              raise SystemExit
+          token = req("/api/auth/login", body={"email": email, "password": pw})["accessToken"]
+          for job in jobs:
+              log = os.path.join(jobs_dir, f"{job}-bridge.log")
+              if not os.path.exists(log):
+                  continue
+              text = open(log, errors="ignore").read()
+              matches = re.findall(r"benchmark_run id = ([a-f0-9-]+)", text)
+              if not matches:
+                  continue
+              run_id = matches[-1]
+              req(
+                  f"/api/v2/test/benchmark/{run_id}/event",
+                  token,
+                  body={
+                      "type": "RUN_FAILED",
+                      "error": "Harbor failed before creating a job directory; launcher cleaned stale bridge",
+                  },
+              )
+              print(f"stale-bridge cleanup: marked {run_id} failed for {job}")
+          PY
+              printf '%s\n' "$STALE_BRIDGES" | awk '{print $1}' | xargs -r kill || true
+            fi
+          fi
+
           TB_ACTIVE="$JOBS_DIR/${JOB}-active-harbor.txt"
           if pgrep -af '/harbor .*run|harbor run' >"$TB_ACTIVE" 2>/dev/null; then
             echo "Refusing to start TB 2.1 focused pilot because Harbor is already active:"
@@ -511,13 +573,12 @@ jobs:
           datasets:
             - name: terminal-bench/terminal-bench-2-1
               task_names:
-                - gcode-to-text
-                - polyglot-rust-c
-                - train-fasttext
-                - build-pmars
+                - terminal-bench/gcode-to-text
+                - terminal-bench/polyglot-rust-c
+                - terminal-bench/train-fasttext
+                - terminal-bench/build-pmars
           EOF
 
-          [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
           export ES_PROVIDER=deepseek \
                  ES_MODEL=deepseek-v4-flash-native \
                  ES_MAX_ITERS=120 \
