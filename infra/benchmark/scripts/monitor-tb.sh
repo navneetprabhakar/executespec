@@ -230,6 +230,19 @@ if rid:
     print(f"detail_run={rid} job={run.get('harborJobName')} status={run.get('status')} resolved={run.get('resolvedTasks')}/{run.get('totalTasks')} cost={run.get('costUsd')} events={len(events)} tasks={len(tasks)}")
     for t in tasks:
         print(f"task={t.get('taskName')} attempt={t.get('attempt')} reward={t.get('reward')} esRunId={t.get('esRunId')} cost={t.get('costUsd')}")
+        es_run_id = t.get("esRunId")
+        if es_run_id:
+            try:
+                es = req(f"/api/runs/{es_run_id}", token)
+                print(
+                    "  es_run_detail="
+                    f"{es_run_id} status={es.get('status')} "
+                    f"statusReason={es.get('statusReason')} "
+                    f"workerOutcome={es.get('workerOutcome')} "
+                    f"error={str(es.get('errorMessage') or es.get('error') or '')[:180]}"
+                )
+            except Exception as e:
+                print(f"  es_run_detail_failed={es_run_id} {e!r}")
 PY
 else
   echo "admin env missing"
