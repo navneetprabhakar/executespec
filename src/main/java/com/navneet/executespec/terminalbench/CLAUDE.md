@@ -82,6 +82,17 @@ base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_
   backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
   runs the forced terminal finalizer so the model must emit `completeTask` or write/edit the exact
   `/app` artifact instead of failing the ExecuteSpec run while the artifact may already be correct.
+- TB 2.1 pilot autopsy tightened the required-deliverable path: if the artifact deadline fires and
+  extracted required paths are still missing, the worker forces a terminal finalizer immediately.
+  The finalizer may no longer complete a run just because a shell/write/edit call returned an OK
+  envelope, and it may no longer accept `completeTask` while required paths are missing. It returns
+  to the main loop, where the bounded deliverable gate owns fail-open. This targets the
+  `gcode-to-text` class: shell-heavy exploration produced no `/app/out.txt` but was previously
+  allowed to terminate as complete.
+- The Harbor adapter now stamps `context.metadata.es_run_id` immediately after `/start` succeeds and
+  best-effort cancels the backend run on adapter interruption/timeout. Harbor timeout result JSONs
+  therefore keep the ExecuteSpec run linkage, and server-side work is not left orphaned after the
+  agent phase is killed.
 - Latest comparable first-20 run (`/tmp/es-tb-jobs/es-deepseek-base20-iter100-finalizer-20260606-095500`):
   **12/20 resolved (60%)**, **1 Harbor `AgentTimeoutError`**, **$0.400126**, **47m52s**. The
   100-floor + finalizer run fixed `openssl-selfsigned-cert` and `sanitize-git-repo` versus the

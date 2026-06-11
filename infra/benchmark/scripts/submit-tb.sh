@@ -12,6 +12,8 @@
 #   (RUN_ID optional — if omitted, read from the bridge log "benchmark_run id = …".)
 #
 # Env overrides: JOBS_DIR TB_DIR REPO ES_BASE ADMIN_ENV HARBOR HARBOR_UPLOAD_ARGS DRY_RUN
+# REQUIRE_RUN_ID=1 makes UI linkage mandatory: if RUN_ID cannot be resolved from env or the
+# bridge log, the script exits before uploading instead of creating an unlinked Harbor submission.
 set -uo pipefail
 
 JOB_NAME="${JOB_NAME:?set JOB_NAME (the harbor job_name)}"
@@ -41,6 +43,10 @@ if [ -z "$RUN_ID" ] && [ -f "$JOBS_DIR/${JOB_NAME}-bridge.log" ]; then
   RUN_ID=$(grep -oE 'benchmark_run id = [a-f0-9-]+' "$JOBS_DIR/${JOB_NAME}-bridge.log" | tail -1 | awk '{print $NF}')
 fi
 [ -n "$RUN_ID" ] && LOG "in-app benchmark_run = $RUN_ID" || LOG "no RUN_ID — dashboard submission state will be skipped"
+if [ "${REQUIRE_RUN_ID:-0}" = "1" ] && [ -z "$RUN_ID" ]; then
+  LOG "FATAL: RUN_ID is required but was not provided and could not be read from $JOBS_DIR/${JOB_NAME}-bridge.log"
+  exit 2
+fi
 
 post_event(){ # $1=json-body  (best-effort; needs TK + RUN_ID)
   [ -z "$RUN_ID" ] || [ -z "$TK" ] && return 0

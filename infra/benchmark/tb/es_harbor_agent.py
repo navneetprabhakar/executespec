@@ -141,64 +141,80 @@ class ExecuteSpecAgent(BaseAgent):
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
             token = await self._auth(client)
-            wall = _wall_clock_for(instruction)
-            # Scale the iteration cap with the per-task clock (a 3300s task supports far more
-            # turns than the 120 floor); the server keeps its own floor for small values.
-            iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
-            payload = {"instruction": instruction, "provider": self.provider,
-                       "model": self.model, "maxIterations": iters}
-            if wall is not None:
-                payload["wallClockSeconds"] = wall
-            started = await self._post(
-                client, "/api/v2/test/terminal-bench/start", token, payload,
-            )
-            run_id, sse_token = started["runId"], started["sseToken"]
-            self.logger.info(
-                f"[es] run={run_id} provider={self.provider} model={self.model}"
-                f" wall={wall or 'default'} iters={iters}")
-
+            run_id = None
             tools = 0
             final = None
-            url = f"{self.base}/api/runs/{run_id}/events?token={sse_token}"
-            headers = {"Accept": "text/event-stream", "Last-Event-ID": "0"}
-            async with client.stream("GET", url, headers=headers, timeout=None) as resp:
-                buf = []
-                async for line in resp.aiter_lines():
-                    if line == "":  # frame boundary
-                        ev = self._parse_frame(buf)
-                        buf = []
-                        if not ev:
-                            continue
-                        etype = ev.get("type")
-                        if etype == "TOOL_CALL":
-                            frame = json.loads(ev["payload"])
-                            call_id, tname = frame["callId"], frame["name"]
-                            targs = frame.get("args", {})
-                            if isinstance(targs, str):
-                                try:
-                                    targs = json.loads(targs)
-                                except Exception:
-                                    targs = {}
-                            tools += 1
-                            env_result = await self._exec_tool(tname, targs, environment)
-                            await self._post(client, f"/api/runs/{run_id}/tool-results", token,
-                                             {"callId": call_id, "result": env_result})
-                        elif etype == "COMPLETE":
-                            final = ev.get("payload")
-                            break
-                    else:
-                        buf.append(line)
-
-            self.logger.info(f"[es] run={run_id} terminal={final} tools={tools}")
-            # populate context cost/tokens from the run cost snapshot
+            wall = _wall_clock_for(instruction)
             try:
-                cost = await self._get(client, f"/api/runs/{run_id}/cost", token)
-                context.n_input_tokens = cost.get("inputTokens") or cost.get("totalInputTokens")
-                context.n_output_tokens = cost.get("outputTokens") or cost.get("totalOutputTokens")
-                context.cost_usd = cost.get("costUsd") or cost.get("actualCostUsd")
-                context.metadata = {"es_run_id": run_id, "es_terminal": final, "tools": tools}
-            except Exception as e:
-                self.logger.warning(f"[es] cost fetch failed: {e}")
+                # Scale the iteration cap with the per-task clock (a 3300s task supports far more
+                # turns than the 120 floor); the server keeps its own floor for small values.
+                iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
+                payload = {"instruction": instruction, "provider": self.provider,
+                           "model": self.model, "maxIterations": iters}
+                if wall is not None:
+                    payload["wallClockSeconds"] = wall
+                started = await self._post(
+                    client, "/api/v2/test/terminal-bench/start", token, payload,
+                )
+                run_id, sse_token = started["runId"], started["sseToken"]
+                context.metadata = {"es_run_id": run_id, "es_terminal": "RUNNING", "tools": 0}
+                self.logger.info(
+                    f"[es] run={run_id} provider={self.provider} model={self.model}"
+                    f" wall={wall or 'default'} iters={iters}")
+
+                url = f"{self.base}/api/runs/{run_id}/events?token={sse_token}"
+                headers = {"Accept": "text/event-stream", "Last-Event-ID": "0"}
+                async with client.stream("GET", url, headers=headers, timeout=None) as resp:
+                    buf = []
+                    async for line in resp.aiter_lines():
+                        if line == "":  # frame boundary
+                            ev = self._parse_frame(buf)
+                            buf = []
+                            if not ev:
+                                continue
+                            etype = ev.get("type")
+                            if etype == "TOOL_CALL":
+                                frame = json.loads(ev["payload"])
+                                call_id, tname = frame["callId"], frame["name"]
+                                targs = frame.get("args", {})
+                                if isinstance(targs, str):
+                                    try:
+                                        targs = json.loads(targs)
+                                    except Exception:
+                                        targs = {}
+                                tools += 1
+                                env_result = await self._exec_tool(tname, targs, environment)
+                                await self._post(client, f"/api/runs/{run_id}/tool-results", token,
+                                                 {"callId": call_id, "result": env_result})
+                            elif etype == "COMPLETE":
+                                final = ev.get("payload")
+                                break
+                        else:
+                            buf.append(line)
+
+                if final is None:
+                    raise RuntimeError(f"ExecuteSpec run {run_id} ended SSE without COMPLETE")
+
+                self.logger.info(f"[es] run={run_id} terminal={final} tools={tools}")
+                # populate context cost/tokens from the run cost snapshot
+                try:
+                    cost = await self._get(client, f"/api/runs/{run_id}/cost", token)
+                    context.n_input_tokens = cost.get("inputTokens") or cost.get("totalInputTokens")
+                    context.n_output_tokens = cost.get("outputTokens") or cost.get("totalOutputTokens")
+                    context.cost_usd = cost.get("costUsd") or cost.get("actualCostUsd")
+                    context.metadata = {"es_run_id": run_id, "es_terminal": final, "tools": tools}
+                except Exception as e:
+                    self.logger.warning(f"[es] cost fetch failed: {e}")
+            except BaseException as e:
+                if run_id:
+                    context.metadata = {
+                        "es_run_id": run_id,
+                        "es_terminal": final or "INTERRUPTED",
+                        "tools": tools,
+                        "error": type(e).__name__,
+                    }
+                    await self._cancel_backend_run(client, token, run_id, type(e).__name__)
+                raise
 
     # ---------------- tool execution in the TB container ----------------
     async def _exec_tool(self, name: str, args: dict, env: BaseEnvironment) -> dict:
@@ -292,6 +308,18 @@ class ExecuteSpecAgent(BaseAgent):
         r = await client.get(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
         r.raise_for_status()
         return r.json() if r.content else {}
+
+    async def _delete(self, client, path, token) -> dict:
+        r = await client.delete(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    async def _cancel_backend_run(self, client, token, run_id, reason) -> None:
+        try:
+            await self._delete(client, f"/api/runs/{run_id}", token)
+            self.logger.warning(f"[es] run={run_id} cancelled after adapter interruption: {reason}")
+        except Exception as e:
+            self.logger.warning(f"[es] run={run_id} cancel failed after {reason}: {e}")
 
     @staticmethod
     def _parse_frame(lines):
