@@ -4,6 +4,21 @@ set -euo pipefail
 JOB="${JOB_NAME:-}"
 PROCESS_LINES="$(pgrep -af '/harbor .*run|harbor run|tb-bench-bridge.py|es_harbor_agent.py' || true)"
 ACTIVE_JOB_DIR="$(printf '%s\n' "$PROCESS_LINES" | sed -nE 's#.*--job-dir ([^ ]+).*#\1#p' | tail -1)"
+if [ -z "$ACTIVE_JOB_DIR" ]; then
+  ACTIVE_JOB_FROM_HARBOR="$(
+    printf '%s\n' "$PROCESS_LINES" \
+      | sed -nE 's#.*es-tb-runtb-([^ /]+)\.yaml.*#\1#p' \
+      | tail -1
+  )"
+  if [ -n "$ACTIVE_JOB_FROM_HARBOR" ]; then
+    for candidate in /home/*/es-tb-jobs/"$ACTIVE_JOB_FROM_HARBOR"; do
+      if [ -d "$candidate" ]; then
+        ACTIVE_JOB_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+fi
 
 JOBS_DIR="${ACTIVE_JOB_DIR%/*}"
 if [ "$JOBS_DIR" = "$ACTIVE_JOB_DIR" ]; then
