@@ -26,11 +26,21 @@ function rowStyle(last: boolean): React.CSSProperties {
   };
 }
 
-// Shared inline error card (red foreground) — same shape IdeRuns uses.
-function ErrCard({msg}: {msg: string}) {
+// Shared inline error card (red foreground) — same shape IdeRuns uses. C7:
+// pass `onRetry` to render a ghost Retry button next to the message.
+function ErrCard({msg, onRetry}: {msg: string; onRetry?: () => void}) {
   return (
     <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
       {msg}
+      {onRetry && (
+        <button
+          className='ide-btn ghost'
+          style={{padding: '2px 10px', marginLeft: 8}}
+          onClick={onRetry}
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
@@ -38,11 +48,14 @@ function ErrCard({msg}: {msg: string}) {
 type NotifFilter = 'all' | 'run' | 'team' | 'billing' | 'system';
 
 export default function IdeNotifications() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<api.NotificationItem[] | null>(null);
   const [filter, setFilter] = useState<NotifFilter>('all');
+  const [markBusy, setMarkBusy] = useState(false);
   const [err, setErr] = useState('');
 
   async function refresh() {
+    setErr('');
     try {
       const page = await api.getNotifications(0, 50);
       setItems((page as unknown as {content?: api.NotificationItem[]}).content ?? []);
@@ -95,11 +108,14 @@ export default function IdeNotifications() {
   }
 
   async function readAll() {
+    setMarkBusy(true);
     try {
       await api.markAllNotificationsRead();
       setItems((prev) => prev?.map((n) => ({...n, read: true})) || prev);
     } catch {
       /* ignore */
+    } finally {
+      setMarkBusy(false);
     }
   }
 
@@ -134,14 +150,14 @@ export default function IdeNotifications() {
         <button
           className='ide-btn ghost'
           style={{flexShrink: 0}}
-          disabled={unreadCount === 0}
+          disabled={unreadCount === 0 || markBusy}
           onClick={readAll}
         >
-          Mark all read
+          {markBusy ? 'Marking…' : 'Mark all read'}
         </button>
       </div>
 
-      {err && <ErrCard msg={err} />}
+      {err && <ErrCard msg={err} onRetry={() => void refresh()} />}
 
       {items === null ? (
         <IdeLoader label='Loading notifications…' />
@@ -190,13 +206,13 @@ export default function IdeNotifications() {
                 key={nAny.id || i}
                 onClick={() => {
                   if (nAny.id) void readOne(nAny.id);
-                  // Absolute backend links → full navigation; otherwise SPA-navigate
-                  // via history.pushState so React Router catches it.
+                  // C11 — absolute backend links open in a new tab; in-app
+                  // targets go through the router (was a hand-rolled
+                  // pushState + PopStateEvent that broke on malformed targets).
                   if (linkTarget.startsWith('http')) {
-                    window.location.href = linkTarget;
+                    window.open(linkTarget, '_blank', 'noopener,noreferrer');
                   } else {
-                    window.history.pushState({}, '', linkTarget);
-                    window.dispatchEvent(new PopStateEvent('popstate'));
+                    navigate(linkTarget);
                   }
                 }}
                 style={{...rowStyle(i >= filtered.length - 1), cursor: 'pointer'}}
@@ -459,7 +475,9 @@ export function IdeSearch() {
             {hits.length} result{hits.length === 1 ? '' : 's'} for “{q}”
           </div>
           {hits.length === 0 ? (
-            <div className='ide-empty'>No matches. Try a different query.</div>
+            <div className='ide-empty'>
+              No matches for “{q.trim()}”. Try a run id (R-abc123), a project name, or a page name.
+            </div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {hits.map((h, i) => (

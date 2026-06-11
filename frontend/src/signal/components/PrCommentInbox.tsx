@@ -113,7 +113,7 @@ export function PrCommentInbox({runId, variant}: {runId: string; variant: 'signa
         border: '1px solid var(--signal-hairline)',
         borderRadius: 12,
         padding: 14,
-        background: 'var(--signal-surface)',
+        background: 'var(--signal-card-bg)',
       }}
     >
       <div

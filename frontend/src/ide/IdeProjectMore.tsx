@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {useNavigate, useParams} from 'react-router-dom';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
@@ -231,10 +231,20 @@ export function IdeProjectChat() {
           memory: {memRuns} {memRuns === 1 ? 'run' : 'runs'}
         </span>
         <span style={{flex: 1}} />
-        <button className='ide-btn ghost' onClick={compile} disabled={busy || gated}>
-          ⌁ Compile to spec
+        <button
+          className='ide-btn ghost'
+          onClick={compile}
+          disabled={busy || gated}
+          title='Turns this conversation into a run-ready spec in the composer'
+        >
+          Generate spec from chat
         </button>
-        <button className='ide-btn ghost' onClick={compact} disabled={gated}>
+        <button
+          className='ide-btn ghost'
+          onClick={compact}
+          disabled={gated}
+          title='Summarize older messages to free up the chat token budget (keeps recent messages verbatim)'
+        >
           Compact
         </button>
         <button
@@ -408,6 +418,11 @@ export function IdeProjectChat() {
 // Code (Browse · Tech debt · Code review · Health · Standards · Docs)
 type CodeSub = 'browse' | 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
+// Change-detection stamp for a generated doc — the row carries no status
+// field, so a fresh generation is detected by version/generatedAt moving.
+const docStamp = (row: api.GeneratedDocRow | null | undefined): string =>
+  row ? `${row.version}·${row.generatedAt}` : '';
+
 export function IdeProjectCode() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
@@ -416,12 +431,21 @@ export function IdeProjectCode() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  // C8 — tech-debt autofix dispatch awaiting confirmation.
+  const [fixFor, setFixFor] = useState<{category: string; count: number} | null>(null);
+  // §3.4 Docs (P1) — doc generation in flight; drives the 3s poll below.
+  const [genPending, setGenPending] = useState<{
+    type: api.GeneratedDocType;
+    baseline: string;
+  } | null>(null);
 
   // Browse state
   const [repoId, setRepoId] = useState('');
   const [files, setFiles] = useState<string[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState<Record<string, string>>({});
+  // C9 — mobile file picker search query (replaces the flat <select>).
+  const [fileQuery, setFileQuery] = useState('');
 
   // Other tabs
   const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
@@ -515,8 +539,12 @@ export function IdeProjectCode() {
     setErr('');
     setMsg('');
     try {
+      // Stamp the current row BEFORE dispatch so the poll below can detect the
+      // fresh generation landing (the row has no status field).
+      const baseline = docStamp((docs || []).find((d) => d.docType === t));
       await api.generateProjectDoc(projectId, t);
       setMsg(`${t.toLowerCase()} doc regeneration started.`);
+      setGenPending({type: t, baseline});
       const [e, s] = await Promise.all([
         api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
         api.getProjectDoc(projectId, 'SETUP').catch(() => null),
@@ -528,6 +556,37 @@ export function IdeProjectCode() {
       setBusy('');
     }
   }
+
+  // §3.4 Docs (P1) — generation is async and previously never polled, so
+  // "regeneration started" could sit forever. Poll the doc every 3s (max 60)
+  // until a fresh version lands; skipped while the tab is hidden, cleared on
+  // terminal/unmount.
+  useEffect(() => {
+    if (!genPending || !projectId) return;
+    let polls = 0;
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      polls += 1;
+      if (polls > 60) {
+        setGenPending(null);
+        setMsg('Doc generation is taking longer than expected — check back shortly.');
+        return;
+      }
+      void api
+        .getProjectDoc(projectId, genPending.type)
+        .then((row) => {
+          if (row && docStamp(row) !== genPending.baseline) {
+            setDocs((prev) => [...(prev ?? []).filter((d) => d.docType !== genPending.type), row]);
+            setGenPending(null);
+            setMsg(`${genPending.type} doc generated.`);
+          }
+        })
+        .catch(() => {
+          // Transient poll failure — keep polling until the cap.
+        });
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [genPending, projectId]);
 
   async function dlDoc(t: api.GeneratedDocType) {
     setBusy(`dl-${t}`);
@@ -622,21 +681,68 @@ export function IdeProjectCode() {
               </div>
               <div className='ide-split-main'>
                 {files?.length ? (
+                  // C9 — searchable picker (a flat <select> over 100+ paths was
+                  // unusable on phones). List shows until a file is opened;
+                  // typing filters case-insensitively and reopens it.
                   <div className='ide-mobile-file-picker'>
-                    <select
-                      className='ide-select'
-                      value={active ?? ''}
-                      onChange={(e) => {
-                        if (e.target.value) void open(e.target.value);
-                      }}
-                    >
-                      <option value=''>Select a file</option>
-                      {files.map((f) => (
-                        <option key={f} value={f}>
-                          {f}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      className='ide-input'
+                      type='search'
+                      placeholder='Search files…'
+                      value={fileQuery}
+                      onChange={(e) => setFileQuery(e.target.value)}
+                    />
+                    {(fileQuery.trim() !== '' || !active) && (
+                      <div style={{maxHeight: 200, overflowY: 'auto', marginTop: 6}}>
+                        {(() => {
+                          const q = fileQuery.trim().toLowerCase();
+                          const matches = (
+                            q ? files.filter((f) => f.toLowerCase().includes(q)) : files
+                          ).slice(0, 200);
+                          if (matches.length === 0) {
+                            return (
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  color: 'var(--ide-fg-muted)',
+                                  padding: '6px 2px',
+                                }}
+                              >
+                                No files match “{fileQuery.trim()}”.
+                              </div>
+                            );
+                          }
+                          return matches.map((f) => (
+                            <button
+                              key={f}
+                              type='button'
+                              className='ide-mono'
+                              onClick={() => {
+                                void open(f);
+                                setFileQuery('');
+                              }}
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '5px 8px',
+                                background: f === active ? 'var(--ide-bg-sidebar)' : 'transparent',
+                                border: 'none',
+                                borderRadius: 4,
+                                color: 'var(--ide-fg)',
+                                cursor: 'pointer',
+                                fontSize: 12.5,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {f}
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 {active ? (
@@ -670,7 +776,8 @@ export function IdeProjectCode() {
                     className='ide-btn'
                     style={{padding: '4px 10px'}}
                     disabled={busy === `fix-${c.name}`}
-                    onClick={() => autofixCategory(c.name)}
+                    // C8 — credit-spending dispatch goes through a confirm modal.
+                    onClick={() => setFixFor({category: c.name, count: c.count})}
                   >
                     {busy === `fix-${c.name}` ? 'Dispatching…' : `Autofix ${c.count} →`}
                   </button>
@@ -726,6 +833,17 @@ export function IdeProjectCode() {
                       </div>
                     </div>
                     <IdeBadge kind={drift ? 'warn' : 'ok'}>{drift ? 'Drift' : 'Healthy'}</IdeBadge>
+                    {drift && (
+                      // §3.4 — codemap-stale recovery CTA: Sync/Regenerate live on Repos.
+                      <Link
+                        to={`/projects/${projectId}/repos`}
+                        className='ide-btn ghost'
+                        style={{padding: '3px 10px', fontSize: 12, textDecoration: 'none'}}
+                        title='Open Repos to sync metadata or regenerate the codemap + architecture'
+                      >
+                        Sync / Regenerate →
+                      </Link>
+                    )}
                   </div>
                   <div
                     style={{
@@ -827,11 +945,13 @@ export function IdeProjectCode() {
                           {v.summary?.slice(0, 80)}
                         </div>
                       </div>
-                      <IdeBadge
-                        kind={sev === 'BLOCKING' ? 'bad' : sev === 'WARNING' ? 'warn' : 'ok'}
-                      >
-                        {sev}
-                      </IdeBadge>
+                      <span title='BLOCKING = fails the run · WARNING = reported · INFO = advisory'>
+                        <IdeBadge
+                          kind={sev === 'BLOCKING' ? 'bad' : sev === 'WARNING' ? 'warn' : 'ok'}
+                        >
+                          {sev}
+                        </IdeBadge>
+                      </span>
                     </div>
                   );
                 });
@@ -872,10 +992,10 @@ export function IdeProjectCode() {
                 <button
                   className='ide-btn ghost'
                   style={{padding: '4px 10px'}}
-                  disabled={busy === `gen-${d.docType}`}
+                  disabled={busy === `gen-${d.docType}` || genPending?.type === d.docType}
                   onClick={() => genDoc(d.docType)}
                 >
-                  Regen
+                  {genPending?.type === d.docType ? 'Generating…' : 'Regen'}
                 </button>
               </div>
             ))
@@ -883,21 +1003,44 @@ export function IdeProjectCode() {
           <div style={{display: 'flex', gap: 8, marginTop: 8}}>
             <button
               className='ide-btn ghost'
-              disabled={busy === 'gen-EXPLANATION'}
+              disabled={busy === 'gen-EXPLANATION' || genPending?.type === 'EXPLANATION'}
               onClick={() => genDoc('EXPLANATION')}
             >
-              {busy === 'gen-EXPLANATION' ? 'Generating…' : 'Generate EXPLANATION.md'}
+              {busy === 'gen-EXPLANATION' || genPending?.type === 'EXPLANATION'
+                ? 'Generating…'
+                : 'Generate EXPLANATION.md'}
             </button>
             <button
               className='ide-btn ghost'
-              disabled={busy === 'gen-SETUP'}
+              disabled={busy === 'gen-SETUP' || genPending?.type === 'SETUP'}
               onClick={() => genDoc('SETUP')}
             >
-              {busy === 'gen-SETUP' ? 'Generating…' : 'Generate SETUP.md'}
+              {busy === 'gen-SETUP' || genPending?.type === 'SETUP'
+                ? 'Generating…'
+                : 'Generate SETUP.md'}
             </button>
           </div>
         </div>
       )}
+
+      {/* C8 — confirm before the paid tech-debt autofix dispatch; the existing
+          success message + run id inside autofixCategory() is untouched. */}
+      <ConfirmModal
+        open={!!fixFor}
+        title='Dispatch autofix run'
+        body={
+          fixFor
+            ? `This dispatches a new run targeting '${fixFor.category}' issues (${fixFor.count} finding${fixFor.count === 1 ? '' : 's'}). It consumes credits and opens a new PR. Continue?`
+            : ''
+        }
+        confirmLabel='Dispatch run'
+        busy={!!fixFor && busy === `fix-${fixFor.category}`}
+        onConfirm={async () => {
+          const f = fixFor;
+          if (f) await autofixCategory(f.category);
+        }}
+        onClose={() => setFixFor(null)}
+      />
     </div>
   );
 }
@@ -1253,7 +1396,9 @@ export function IdeProjectArchitecture() {
                 </IdeBadge>
               </div>
               {docMd ? (
-                <div style={{maxHeight: '70vh', overflow: 'auto'}}>
+                // C9 — cap the scroll container so it can't swallow a phone
+                // viewport (70vh of one card at 375×812).
+                <div style={{maxHeight: 'min(70vh, 520px)', overflow: 'auto'}}>
                   <ArchDocView key={`v${arch?.version ?? 0}`} md={docMd} />
                 </div>
               ) : (
@@ -1607,10 +1752,12 @@ export function IdeProjectArchitecture() {
       <PromptModal
         open={!!dismissFor}
         title='Dismiss drift'
+        body='Why dismiss this drift? e.g. "intentional API expansion", "interface being deprecated". Minimum 10 characters.'
         fields={[
           {
             name: 'rationale',
-            label: 'Why dismiss this drift? (≥10 chars)',
+            label: 'Why dismiss this drift?',
+            placeholder: 'e.g. intentional API expansion (minimum 10 characters)',
             multiline: true,
             required: true,
           },
@@ -1799,7 +1946,8 @@ export function IdeProjectMembers() {
             <div className='ide-h2'>Invite teammate</div>
             <div className='ide-card'>
               <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-                Any email works — the recipient gets a magic link.
+                Invite by email — recipients get a magic link to join this project (no existing
+                account needed).
               </div>
               <input
                 className='ide-input'
@@ -1851,8 +1999,12 @@ export function IdeProjectMembers() {
               >
                 External sharing is off
               </div>
+              {/* This branch only renders for canManage (ORG_ADMIN / SUPER_ADMIN),
+                  so the settings link is already admin-gated — the copy now
+                  addresses the admin instead of pointing them at themselves. */}
               <div style={{fontSize: 13, lineHeight: 1.55}}>
-                Your org admin has not enabled inviting people from outside the org. Enable it in{' '}
+                External sharing is disabled for your org, so people outside it can&apos;t be
+                invited. Enable it in{' '}
                 <a href='/org/settings' style={{color: 'var(--ide-accent)'}}>
                   Org settings → External sharing
                 </a>
@@ -1992,6 +2144,8 @@ export function IdeProjectActivity() {
               key={i}
               style={{
                 display: 'flex',
+                // C9 — let the 3 segments wrap instead of crushing at 375px.
+                flexWrap: 'wrap',
                 gap: 10,
                 padding: '10px 16px',
                 borderBottom: i < feed.length - 1 ? '1px solid var(--ide-border)' : 'none',
@@ -2001,7 +2155,9 @@ export function IdeProjectActivity() {
               <span style={{color: 'var(--ide-accent)', fontSize: 11, width: 110, flexShrink: 0}}>
                 {String(e.eventType || e.type || 'event')}
               </span>
-              <span style={{flex: 1}}>{String(e.summary || e.description || e.message || '')}</span>
+              <span style={{flex: 1, minWidth: 180}}>
+                {String(e.summary || e.description || e.message || '')}
+              </span>
               <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>
                 {String(e.actorName || e.actor || '')}
               </span>
@@ -2074,6 +2230,31 @@ export function IdeProjectSettings() {
       .then(setDocs)
       .catch(() => setDocs([]));
   }
+
+  // §3.4 Docs (P1) — RAG indexing (UPLOADED → EXTRACTING → EMBEDDING) showed a
+  // frozen status badge. Poll every 3s while any doc is in flight (max 60
+  // polls), skipped while the tab is hidden; stops on terminal/unmount.
+  const indexing = (docs ?? []).some((d) =>
+    ['UPLOADED', 'EXTRACTING', 'EMBEDDING'].includes((d.status || '').toUpperCase()),
+  );
+  const docPollsRef = useRef(0);
+  useEffect(() => {
+    if (!indexing) {
+      docPollsRef.current = 0;
+      return;
+    }
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      docPollsRef.current += 1;
+      if (docPollsRef.current > 60) {
+        window.clearInterval(id);
+        return;
+      }
+      refreshDocs();
+    }, 3000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indexing]);
 
   async function saveSettings() {
     setBusy('save');
@@ -2214,6 +2395,9 @@ export function IdeProjectSettings() {
                   />
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                     Variables: {'{slug}'}, {'{date}'}, {'{runId}'}
+                    <br />
+                    Example: execspec/{'{slug}'}-{'{date}'} →
+                    execspec/add-health-endpoint-2026-06-11
                   </div>
                 </Field>
                 <Field label='Default GitHub owner'>

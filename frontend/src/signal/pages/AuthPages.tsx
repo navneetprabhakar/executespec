@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useLocation} from 'react-router-dom';
 import {Button} from '@/signal/components/Primitives';
+import {Spinner} from '@/signal/components/Loaders';
 import AuthLayout from '@/signal/components/AuthLayout';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
@@ -18,7 +19,7 @@ function GoogleIcon() {
   // Google's official 4-colour "G" mark. Matches dev branch's LoginPage and
   // the brand-asset published at developers.google.com/identity/branding.
   return (
-    <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} aria-hidden>
+    <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} aria-hidden='true'>
       <path
         d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z'
         fill='#4285F4'
@@ -40,7 +41,7 @@ function GoogleIcon() {
 }
 function GitHubIcon() {
   return (
-    <svg viewBox='0 0 24 24' style={{width: 18, height: 18}}>
+    <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} aria-hidden='true'>
       <path
         fill='currentColor'
         d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z'
@@ -95,6 +96,8 @@ function ErrorBanner({msg}: {msg: string}) {
   if (!msg) return null;
   return (
     <div
+      role='alert'
+      aria-live='polite'
       style={{
         background: 'var(--signal-coral-soft)',
         color: 'var(--signal-coral-text)',
@@ -106,6 +109,87 @@ function ErrorBanner({msg}: {msg: string}) {
       }}
     >
       {msg}
+    </div>
+  );
+}
+
+function EyeIcon({off}: {off?: boolean}) {
+  return (
+    <svg
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      style={{width: 18, height: 18}}
+      aria-hidden='true'
+    >
+      <path d='M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z' />
+      <circle cx='12' cy='12' r='3' />
+      {off && <line x1='4' y1='4' x2='20' y2='20' />}
+    </svg>
+  );
+}
+
+// Password input with an inline show/hide toggle (AUTH-2). Private to this
+// file by design — ExtraPages.tsx carries its own copy for the reset flow.
+// The toggle button deliberately sets no `outline` style so the browser's
+// default :focus-visible ring stays intact.
+function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  placeholder,
+  minLength,
+  describedBy,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+  placeholder?: string;
+  minLength?: number;
+  describedBy?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{position: 'relative'}}>
+      <input
+        type={show ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        minLength={minLength}
+        aria-describedby={describedBy}
+        required
+        style={{paddingRight: 46}}
+      />
+      <button
+        type='button'
+        onClick={() => setShow((s) => !s)}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        aria-pressed={show}
+        title={show ? 'Hide password' : 'Show password'}
+        style={{
+          position: 'absolute',
+          top: '50%',
+          right: 8,
+          transform: 'translateY(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 6,
+          borderRadius: 8,
+          border: 0,
+          background: 'transparent',
+          color: 'var(--signal-text-dim)',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <EyeIcon off={show} />
+      </button>
     </div>
   );
 }
@@ -205,13 +289,11 @@ export function LoginPage() {
           </div>
           <div className='signal-field'>
             <label>Password</label>
-            <input
-              type='password'
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
               autoComplete='current-password'
               placeholder='••••••••'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
             />
             <div className='hint' style={{textAlign: 'right'}}>
               <Link to='/forgot-password' style={{color: 'var(--signal-coral)'}}>
@@ -243,6 +325,7 @@ export function SignupPage() {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const pwRuleOk = password.length >= 12;
 
   // Derive a first/last name from the email local-part so the user
   // doesn't have to fill them in. They can edit later in Account.
@@ -326,16 +409,26 @@ export function SignupPage() {
           </div>
           <div className='signal-field'>
             <label>Password</label>
-            <input
-              type='password'
+            {/* AUTH-1 — visible rule line above the field with a live ✓/✗ as the
+                user types; linked to the input via aria-describedby. */}
+            <div
+              id='signup-pw-rule'
+              style={{
+                fontSize: 12,
+                color: pwRuleOk ? 'var(--signal-mint-text-on-light)' : 'var(--signal-text-dim)',
+                marginBottom: 6,
+              }}
+            >
+              {pwRuleOk ? '✓' : '✗'} 12+ characters
+            </div>
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
               autoComplete='new-password'
               placeholder='At least 12 characters'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               minLength={12}
-              required
+              describedBy='signup-pw-rule'
             />
-            <div className='hint'>12+ characters.</div>
           </div>
           <Button kind='primary' block type='submit' disabled={busy}>
             {busy ? 'Creating…' : 'Create account'}
@@ -379,11 +472,14 @@ export function VerifyPage() {
   const navigate = useNavigate();
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const errorCode = params.get('error');
+    let timer: number | undefined;
 
     if (errorCode) {
       setErr(decodeOAuthError(errorCode));
@@ -391,18 +487,27 @@ export function VerifyPage() {
     }
 
     if (token) {
+      setVerifying(true);
       setMsg('Verifying your email…');
       api
         .authVerifyEmail(token)
         .then(() => {
-          setMsg('Verified! Redirecting to sign-in…');
-          setTimeout(() => navigate('/login', {replace: true}), 800);
+          setVerifying(false);
+          setVerified(true);
+          setMsg('Your email is verified. Taking you to sign-in…');
+          // Hold the success message long enough to read (3s); the button
+          // below lets the user continue immediately.
+          timer = window.setTimeout(() => navigate('/login', {replace: true}), 3000);
         })
         .catch((e: unknown) => {
+          setVerifying(false);
           const m = e instanceof Error ? e.message : 'Verification failed.';
           setErr(m);
         });
     }
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [navigate]);
 
   return (
@@ -433,7 +538,15 @@ export function VerifyPage() {
             <polyline points='22,6 12,13 2,6' />
           </svg>
         </div>
-        <h1>{err ? 'Something went wrong.' : msg ? 'One sec…' : 'Check your inbox.'}</h1>
+        <h1>
+          {err
+            ? 'Something went wrong.'
+            : verified
+              ? 'Email verified.'
+              : verifying
+                ? 'One sec…'
+                : 'Check your inbox.'}
+        </h1>
         <p className='lede'>
           {err
             ? err
@@ -441,6 +554,24 @@ export function VerifyPage() {
               ? msg
               : `We've sent a verification link to your inbox. Tap the link to finish setting up your account.`}
         </p>
+        {verifying && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              marginBottom: 16,
+            }}
+          >
+            <Spinner size={18} />
+          </div>
+        )}
+        {verified && (
+          <Button kind='primary' block to='/login'>
+            Continue to sign-in
+          </Button>
+        )}
         {!err && !msg && (
           <Button kind='primary' block to='/login'>
             I've verified — sign in

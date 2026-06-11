@@ -2,19 +2,23 @@
  *   - IdeBilling ← signal/pages/account/BillingPage.tsx (/billing)
  *   - IdePlans   ← signal/pages/account/PlansPage.tsx   (/plans)
  *
- * Data/API/actions mirror the Signal originals EXACTLY — same endpoints
- * (getAnalyticsBilling / getAnalyticsUsage / raw payment-history fetch /
- * getPricing / raw billing/subscribe fetch), same plan-grouping + fallbacks,
- * same subscribe → gateway-redirect flow, same FEATURES + pricing copy. Only
- * the presentation is re-rendered in the IDE visual language. Pricing numbers
- * ($3 cap / $39 TEAM / etc.) are intentionally left verbatim — they're a
- * product/pricing decision owned by the founder, not a UI-port concern.
+ * IdeBilling mirrors the Signal original's endpoints (getAnalyticsBilling /
+ * getAnalyticsUsage / raw payment-history fetch) re-rendered in the IDE visual
+ * language. IdePlans was rewritten for TIER-1 (UI/UX review 2026-06-11, P0):
+ * tier cards now render from GET /api/billing/plans (the DB-driven endpoint,
+ * same source of truth as the public /pricing page) instead of a hardcoded
+ * array that contradicted the DB ladder (no PRO card; phantom yearly-TEAM
+ * pricing under a default-on toggle; invented "500 credits / seat" and
+ * "$25 hard cost cap" limits). The subscribe → gateway-redirect flow is
+ * unchanged.
  */
 
 import {useEffect, useMemo, useState} from 'react';
-import {Link} from 'react-router-dom';
+import {Link, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {fetchPlans, type BillingPlan} from '@/lib/billing-api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 
 function SectionTitle({children}: {children: React.ReactNode}) {
@@ -64,6 +68,7 @@ interface PaymentRowLite {
 }
 
 export function IdeBilling() {
+  useDocumentTitle('Billing');
   const user = useAuthStore((s) => s.user);
   const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
@@ -195,10 +200,12 @@ export function IdeBilling() {
                 Change plan
               </Link>
             </div>
+            {/* C9 — auto-fit grid so the stats wrap cleanly at 375px instead of
+                squeezing three fixed columns. */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
                 gap: 12,
                 paddingTop: 12,
                 borderTop: '1px solid var(--ide-border)',
@@ -217,7 +224,9 @@ export function IdeBilling() {
             </div>
           </div>
 
-          {/* FREE → BYOK upsell (copy verbatim from Signal) */}
+          {/* FREE → BYOK upsell (TIER-2) — targets TEAM (the BYOK tier that is
+              actually purchasable on /plans) and names all five key lanes
+              (V237 added DeepSeek + Fireworks). Deep-links the TEAM card. */}
           {tier === 'FREE' && (
             <div className='ide-card' style={{marginTop: 12}}>
               <div
@@ -236,16 +245,16 @@ export function IdeBilling() {
                     Bring your own keys, bypass the $3 cap.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
-                    PRO uses your Anthropic / OpenAI / Gemini keys directly. You pay the LLM bill,
-                    not us — no platform cost cap, no surprise overage.
+                    Upgrade to TEAM and run on your own Anthropic / OpenAI / Gemini / DeepSeek /
+                    Fireworks keys — you pay the LLM bill directly, no platform cap.
                   </span>
                 </div>
                 <Link
                   className='ide-btn ghost'
-                  to='/plans'
+                  to='/plans?highlight=TEAM'
                   style={{flexShrink: 0, textDecoration: 'none'}}
                 >
-                  See PRO
+                  See TEAM
                 </Link>
               </div>
             </div>
@@ -312,15 +321,23 @@ export function IdeBilling() {
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
               <span>Successful runs (30d)</span>
-              <span>{usage?.successfulRuns ?? '—'}</span>
+              {/* TIER-6 — a real 0 renders as 0; '—' only when the metric is
+                  genuinely unknown (usage endpoint unavailable). */}
+              <span>{typeof usage?.successfulRuns === 'number' ? usage.successfulRuns : '—'}</span>
             </div>
           </div>
 
           {/* Invoices */}
           <SectionTitle>Invoices</SectionTitle>
           {payments.length === 0 ? (
-            <div className='ide-card' style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>
-              No invoices yet. Your first invoice will appear here after billing closes.
+            <div className='ide-card' style={{fontSize: 13}}>
+              <div style={{fontWeight: 700, color: 'var(--ide-fg-bright)', marginBottom: 4}}>
+                Invoices
+              </div>
+              <div style={{color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
+                Invoices appear at the end of each billing cycle. Your subscription status is shown
+                above.
+              </div>
             </div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
@@ -389,53 +406,93 @@ export function IdeBilling() {
 
 // Plans — /plans
 
-type CycleTab = 'monthly' | 'yearly';
+/* TIER-1 (P0) — cards render from GET /api/billing/plans (active + LISTED
+ * billing_plan rows). Prices/cadence/yearly availability are the API's call;
+ * the maps below carry only product truths (caps, seats, feature bullets),
+ * which mirror tier_config + the truth-passed public /pricing page. */
 
-// Feature copy by tier — display strings shown alongside pricing. The backend's
-// pricing endpoint is the source of truth for price + currency; this map is the
-// source for the bullet list. Verbatim from the Signal PlansPage.
+// Feature bullets by tier. ✓ = included, ○ = constraint (rendered muted).
 const FEATURES: Record<string, string[]> = {
   FREE: [
     '✓ 15 runs / month',
-    '✓ 1-credit specs only',
-    '✓ $3 hard cost cap',
-    '○ Single repo only',
-    '○ No team invites',
+    '✓ Small specs (1 credit)',
+    '✓ Email support',
+    '○ $3 per-run cost cap',
+    '○ 1 project · 1 repo',
   ],
   PRO: [
-    '✓ Unlimited runs',
-    '✓ Multi-repo + BYOK',
-    '✓ Project memory & chat',
-    '✓ All 4 autofix surfaces',
-    '○ HIDDEN — grandfathered',
+    '✓ 30 runs / month on managed keys',
+    '✓ Anthropic · OpenAI · Gemini',
+    '✓ PR review + code review (4 scans/mo)',
+    '✓ 2 projects · 2 repos each',
+    '○ $5 per-run cap — BYOK lifts it',
   ],
   TEAM: [
-    '✓ Unlimited runs',
-    '✓ 500 credits / seat',
-    '✓ 1–20 seats (start solo)',
-    '✓ $25 hard cost cap',
-    '✓ Multi-repo + BYOK',
-    '✓ Project sharing + audit',
-    '✓ All 4 autofix surfaces',
+    '✓ Unlimited runs on your keys',
+    '✓ No platform cost cap',
+    '✓ Org spend caps + approval thresholds',
+    '✓ 5 projects · cross-repo runs',
+    '✓ Unlimited code reviews + sharing',
+    '✓ Autofix: PR review · tech debt · code scans',
   ],
   ENTERPRISE: [
-    '✓ Everything in TEAM',
-    '✓ Unlimited credits + no cap',
-    '✓ Cross-org sharing',
-    '✓ Contracts, Standards, ADRs',
-    '✓ SSO + SCIM',
-    '✓ 99.9% SLA + dedicated CSM',
+    '✓ Unlimited runs · no cost cap',
+    '✓ Model matrix override + per-run model pins',
+    '✓ OpenRouter gateway models',
+    '✓ Standards · Contracts · ADRs',
+    '✓ Governance: audit trail · repo allowlists',
+    '✓ Dedicated support',
   ],
 };
 
-interface PlanRow {
+// Card sub-copy — product truths (runs/caps/seats), not prices.
+const SUBCOPY: Record<string, string> = {
+  FREE: 'For solo developers · 15 runs/month · $3/run cap',
+  PRO: 'For individuals · 30 runs/month on our keys · $5/run cap · BYOK lifts the cap',
+  TEAM: 'Unlimited runs on your own keys · 1–20 seats · no per-run cap',
+  ENTERPRISE: 'SSO · SLA · custom models · dedicated support',
+};
+
+interface PlanCard {
   tier: string;
+  /** Monthly price in display units (dollars / rupees); null ⇒ "Custom". */
   monthly: number | null;
+  /** Yearly total in display units; null ⇒ the tier has no yearly plan row. */
   yearly: number | null;
+  /** Discount % for the yearly line (shown only when > 0). */
+  yearlySavePct: number | null;
   currency: string;
   perSeat: boolean;
   recommended?: boolean;
 }
+
+const TIER_ORDER = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+
+// Used ONLY when GET /api/billing/plans fails or returns nothing. Mirrors the
+// live DB ladder — PRO $29/mo + $289/yr at 17% off (V176/V177), TEAM $39/seat
+// monthly-only (V165/V206) — so even the degraded page can't resurrect the old
+// invented pricing.
+const FALLBACK_CARDS: PlanCard[] = [
+  {tier: 'FREE', monthly: 0, yearly: null, yearlySavePct: null, currency: 'USD', perSeat: false},
+  {tier: 'PRO', monthly: 29, yearly: 289, yearlySavePct: 17, currency: 'USD', perSeat: false},
+  {
+    tier: 'TEAM',
+    monthly: 39,
+    yearly: null,
+    yearlySavePct: null,
+    currency: 'USD',
+    perSeat: true,
+    recommended: true,
+  },
+  {
+    tier: 'ENTERPRISE',
+    monthly: null,
+    yearly: null,
+    yearlySavePct: null,
+    currency: 'USD',
+    perSeat: false,
+  },
+];
 
 function fmtMoney(amount: number | null, currency: string): string {
   if (amount == null) return 'Custom';
@@ -444,95 +501,159 @@ function fmtMoney(amount: number | null, currency: string): string {
   return `${symbol}${amount}`;
 }
 
+/**
+ * Group raw /api/billing/plans rows (one row per tier × period × currency —
+ * USD amounts in cents, INR in paise; the other currency's columns are 0)
+ * into one card per tier. USD rows win when both currencies exist. FREE +
+ * ENTERPRISE render even without a row (nothing to buy — $0 / talk to sales);
+ * PRO / TEAM presence is deliberately API-driven so lifecycle changes in the
+ * DB (LISTED/HIDDEN) flow straight through.
+ */
+function planCardsFrom(rows: BillingPlan[]): PlanCard[] {
+  interface Bucket {
+    monthly: number | null;
+    yearly: number | null;
+    savePct: number | null;
+    monthlyPerSeat: boolean | null;
+    yearlyPerSeat: boolean | null;
+  }
+  const buckets = new Map<string, Bucket>();
+  const apiTierOrder: string[] = [];
+
+  for (const row of rows) {
+    if (!row || row.active === false) continue;
+    const tier = (row.tier || '').toUpperCase();
+    if (!tier) continue;
+    const seatUsd = row.perSeatUsd ?? 0;
+    const baseUsd = row.baseAmountUsd ?? 0;
+    const seatInr = row.perSeatInr ?? 0;
+    const baseInr = row.baseAmountInr ?? 0;
+    let currency: 'USD' | 'INR';
+    let perSeat: boolean;
+    let amount: number;
+    if (seatUsd > 0 || baseUsd > 0) {
+      currency = 'USD';
+      perSeat = seatUsd > 0;
+      amount = (perSeat ? seatUsd : baseUsd) / 100;
+    } else if (seatInr > 0 || baseInr > 0) {
+      currency = 'INR';
+      perSeat = seatInr > 0;
+      amount = (perSeat ? seatInr : baseInr) / 100;
+    } else {
+      continue; // zero-amount row (e.g. a FREE placeholder) — synthesized below
+    }
+    const period = (row.period || '').toUpperCase();
+    const isYearly = period === 'YEARLY' || period === 'ANNUAL';
+    if (!isYearly && period !== 'MONTHLY') continue;
+    const key = `${tier}:${currency}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = {monthly: null, yearly: null, savePct: null, monthlyPerSeat: null, yearlyPerSeat: null};
+      buckets.set(key, b);
+    }
+    // First row per slot wins — V207 guarantees one canonical active plan per
+    // tier/period/currency, so dupes here mean stale rows we shouldn't prefer.
+    if (isYearly) {
+      if (b.yearly == null) {
+        b.yearly = amount;
+        b.yearlyPerSeat = perSeat;
+        const pct = row.annualDiscountPct ?? 0;
+        if (pct > 0) b.savePct = pct;
+      }
+    } else if (b.monthly == null) {
+      b.monthly = amount;
+      b.monthlyPerSeat = perSeat;
+    }
+    if (!apiTierOrder.includes(tier)) apiTierOrder.push(tier);
+  }
+
+  const tiers = [...TIER_ORDER, ...apiTierOrder.filter((t) => !TIER_ORDER.includes(t))];
+  const cards: PlanCard[] = [];
+  for (const tier of tiers) {
+    const usd = buckets.get(`${tier}:USD`);
+    const b = usd ?? buckets.get(`${tier}:INR`);
+    if (b) {
+      let savePct = b.savePct;
+      if (savePct == null && b.monthly != null && b.monthly > 0 && b.yearly != null) {
+        const computed = Math.round((1 - b.yearly / (b.monthly * 12)) * 100);
+        if (computed > 0) savePct = computed;
+      }
+      cards.push({
+        tier,
+        monthly: b.monthly,
+        yearly: b.yearly,
+        yearlySavePct: savePct,
+        currency: usd ? 'USD' : 'INR',
+        perSeat: b.monthlyPerSeat ?? b.yearlyPerSeat ?? false,
+        recommended: tier === 'TEAM',
+      });
+    } else if (tier === 'FREE') {
+      cards.push({
+        tier,
+        monthly: 0,
+        yearly: null,
+        yearlySavePct: null,
+        currency: 'USD',
+        perSeat: false,
+      });
+    } else if (tier === 'ENTERPRISE') {
+      cards.push({
+        tier,
+        monthly: null,
+        yearly: null,
+        yearlySavePct: null,
+        currency: 'USD',
+        perSeat: false,
+      });
+    }
+  }
+  return cards;
+}
+
 export function IdePlans() {
+  useDocumentTitle('Plans');
   const tier = useAuthStore(selectNormalizedTier);
-  const [cycle, setCycle] = useState<CycleTab>('yearly');
-  const [pricing, setPricing] = useState<api.PricingRow[] | null>(null);
+  // TIER-2 deep link (/plans?highlight=TEAM) — the named card gets the accent
+  // treatment so the upsell lands on a visibly emphasized tier.
+  const [searchParams] = useSearchParams();
+  const highlightTier = (searchParams.get('highlight') || '').toUpperCase();
+  const [planRows, setPlanRows] = useState<BillingPlan[] | null>(null);
+  const [plansFailed, setPlansFailed] = useState(false);
   const [err, setErr] = useState('');
   const [busyTier, setBusyTier] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getPricing()
+    fetchPlans()
       .then((rows) => {
-        if (!cancelled) setPricing(rows);
+        if (!cancelled) setPlanRows(Array.isArray(rows) ? rows : []);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load plans.');
+        if (cancelled) return;
+        setPlansFailed(true);
+        setErr(e instanceof Error ? e.message : 'Failed to load plans.');
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Group raw pricing rows by tier so we render one card per tier — identical
-  // logic + fallbacks to the Signal PlansPage.
-  const plans: PlanRow[] = useMemo(() => {
-    if (!pricing) {
-      return [
-        {tier: 'FREE', monthly: 0, yearly: 0, currency: 'USD', perSeat: false},
-        {tier: 'TEAM', monthly: 39, yearly: 31, currency: 'USD', perSeat: true, recommended: true},
-        {tier: 'ENTERPRISE', monthly: null, yearly: null, currency: 'USD', perSeat: false},
-      ];
-    }
-    const byTier = new Map<string, PlanRow>();
-    for (const row of pricing) {
-      const t =
-        (row as unknown as {tier?: string}).tier ||
-        (row as unknown as {planTier?: string}).planTier ||
-        (row as unknown as {chainTier?: string}).chainTier ||
-        'TEAM';
-      const cur = (row as unknown as {currency?: string}).currency || 'USD';
-      const monthly =
-        (row as unknown as {monthlyPrice?: number}).monthlyPrice ??
-        (row as unknown as {monthly?: number}).monthly ??
-        null;
-      const yearly =
-        (row as unknown as {yearlyPrice?: number}).yearlyPrice ??
-        (row as unknown as {yearly?: number}).yearly ??
-        null;
-      const perSeat = (row as unknown as {perSeat?: boolean}).perSeat ?? t === 'TEAM';
-      if (!byTier.has(t.toUpperCase())) {
-        byTier.set(t.toUpperCase(), {
-          tier: t.toUpperCase(),
-          monthly,
-          yearly,
-          currency: cur,
-          perSeat,
-          recommended: t.toUpperCase() === 'TEAM',
-        });
-      }
-    }
-    if (!byTier.has('FREE'))
-      byTier.set('FREE', {tier: 'FREE', monthly: 0, yearly: 0, currency: 'USD', perSeat: false});
-    if (!byTier.has('TEAM'))
-      byTier.set('TEAM', {
-        tier: 'TEAM',
-        monthly: 39,
-        yearly: 31,
-        currency: 'USD',
-        perSeat: true,
-        recommended: true,
-      });
-    if (!byTier.has('ENTERPRISE'))
-      byTier.set('ENTERPRISE', {
-        tier: 'ENTERPRISE',
-        monthly: null,
-        yearly: null,
-        currency: 'USD',
-        perSeat: false,
-      });
-    const order = ['FREE', 'TEAM', 'ENTERPRISE'];
-    return order.flatMap((k) => {
-      const row = byTier.get(k);
-      return row ? [row] : [];
-    });
-  }, [pricing]);
+  const plans: PlanCard[] = useMemo(() => {
+    if (plansFailed) return FALLBACK_CARDS;
+    if (planRows === null) return []; // still loading
+    // An empty 200 is indistinguishable from a misconfigured plan table —
+    // degrade to the known ladder rather than selling nothing.
+    if (planRows.length === 0) return FALLBACK_CARDS;
+    return planCardsFrom(planRows);
+  }, [planRows, plansFailed]);
 
-  // Subscribe → gateway hosted checkout. Verbatim flow from the Signal page:
-  // ENTERPRISE → sales mailto, FREE → no-op, else POST /api/billing/subscribe
-  // and redirect to the returned checkout URL.
+  const loading = planRows === null && !plansFailed;
+
+  // Subscribe → gateway hosted checkout. Flow unchanged by TIER-1 (same
+  // endpoint + redirect handling): ENTERPRISE → sales mailto, FREE → no-op,
+  // else POST /api/billing/subscribe and redirect to the returned checkout
+  // URL. The button always buys the headline (monthly) cadence now that the
+  // global cycle toggle is gone.
   async function subscribe(t: string) {
     if (t === 'ENTERPRISE') {
       window.location.href = 'mailto:sales@executespec.ai?subject=Enterprise%20plan';
@@ -548,7 +669,7 @@ export function IdePlans() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`,
         },
-        body: JSON.stringify({tier: t, cycle: cycle.toUpperCase()}),
+        body: JSON.stringify({tier: t, cycle: 'MONTHLY'}),
       });
       if (!resp.ok) throw new Error(`Subscribe failed (${resp.status}).`);
       const data = (await resp.json()) as {redirectUrl?: string; checkoutUrl?: string};
@@ -580,163 +701,177 @@ export function IdePlans() {
         </div>
       )}
 
-      {tier === 'PRO' && (
-        <InfoCard>
-          <strong style={{color: 'var(--ide-fg-bright)'}}>You’re on PRO (grandfathered).</strong>{' '}
-          The PRO plan is no longer offered to new customers — you keep all of its perks at your
-          current rate. Switch to TEAM for project sharing, audit log, and external invites.
-        </InfoCard>
-      )}
-
-      {/* Billing-cycle toggle */}
-      <div style={{display: 'flex', gap: 6, marginBottom: 14}}>
-        {(
-          [
-            ['monthly', 'Monthly'],
-            ['yearly', 'Yearly · save 20%'],
-          ] as [CycleTab, string][]
-        ).map(([c, label]) => (
-          <button
-            key={c}
-            type='button'
-            className='ide-badge'
-            onClick={() => setCycle(c)}
-            style={{
-              padding: '6px 13px',
-              cursor: 'pointer',
-              borderColor: cycle === c ? 'var(--ide-accent)' : undefined,
-              color: cycle === c ? 'var(--ide-accent)' : undefined,
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-          gap: 12,
-          alignItems: 'start',
-        }}
-      >
-        {plans.map((p) => {
-          const price = cycle === 'monthly' ? p.monthly : p.yearly;
-          const features = FEATURES[p.tier] || ['—'];
-          const isCurrent = p.tier === tier;
-          return (
-            <div
-              className='ide-card'
-              key={p.tier}
-              style={{
-                position: 'relative',
-                borderColor: isCurrent
-                  ? 'var(--ide-green)'
-                  : p.recommended
-                    ? 'var(--ide-accent)'
-                    : undefined,
-              }}
-            >
-              {(p.recommended && !isCurrent) || isCurrent ? (
+      {loading ? (
+        <IdeLoader label='Loading plans…' />
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: 12,
+            alignItems: 'start',
+          }}
+        >
+          {plans.map((p) => {
+            const features = FEATURES[p.tier] || ['—'];
+            const isCurrent = p.tier === tier;
+            const isHighlight = p.tier === highlightTier && !isCurrent;
+            const monthlyKnown = p.monthly != null;
+            // Headline = monthly price; a yearly-only tier (no monthly row)
+            // degrades to its yearly price; no rows at all ⇒ "Custom".
+            const headlineAmount = monthlyKnown ? p.monthly : p.yearly;
+            const headlineUnit =
+              monthlyKnown && p.monthly != null && p.monthly > 0
+                ? p.perSeat
+                  ? '/seat/mo'
+                  : '/mo'
+                : !monthlyKnown && p.yearly != null && p.yearly > 0
+                  ? p.perSeat
+                    ? '/seat/yr'
+                    : '/yr'
+                  : '';
+            const showYearlyLine = monthlyKnown && p.yearly != null && p.yearly > 0;
+            return (
+              <div
+                className='ide-card'
+                key={p.tier}
+                style={{
+                  position: 'relative',
+                  borderColor: isCurrent
+                    ? 'var(--ide-green)'
+                    : isHighlight || p.recommended
+                      ? 'var(--ide-accent)'
+                      : undefined,
+                  boxShadow: isHighlight ? '0 0 0 1px var(--ide-accent)' : undefined,
+                }}
+              >
+                {(p.recommended && !isCurrent) || isCurrent ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: -9,
+                      right: 14,
+                      background: isCurrent ? 'var(--ide-green)' : 'var(--ide-accent)',
+                      color: 'var(--ide-accent-fg)',
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      padding: '3px 9px',
+                      borderRadius: 999,
+                      letterSpacing: '0.06em',
+                    }}
+                  >
+                    {isCurrent ? 'CURRENT' : 'RECOMMENDED'}
+                  </div>
+                ) : null}
                 <div
                   style={{
-                    position: 'absolute',
-                    top: -9,
-                    right: 14,
-                    background: isCurrent ? 'var(--ide-green)' : 'var(--ide-accent)',
-                    color: 'var(--ide-accent-fg)',
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    padding: '3px 9px',
-                    borderRadius: 999,
-                    letterSpacing: '0.06em',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    marginBottom: 6,
                   }}
                 >
-                  {isCurrent ? 'CURRENT' : 'RECOMMENDED'}
-                </div>
-              ) : null}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'baseline',
-                  marginBottom: 6,
-                }}
-              >
-                <div style={{fontSize: 16, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
-                  {p.tier}
-                </div>
-                <div>
-                  <span
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      letterSpacing: '-0.02em',
-                      color: 'var(--ide-fg-bright)',
-                    }}
-                  >
-                    {fmtMoney(price, p.currency)}
-                  </span>
-                  {price != null && price > 0 && p.perSeat && (
-                    <span style={{fontSize: 13, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
-                      /seat/mo
+                  <div style={{fontSize: 16, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
+                    {p.tier}
+                  </div>
+                  <div>
+                    <span
+                      style={{
+                        fontSize: 22,
+                        fontWeight: 700,
+                        letterSpacing: '-0.02em',
+                        color: 'var(--ide-fg-bright)',
+                      }}
+                    >
+                      {fmtMoney(headlineAmount, p.currency)}
                     </span>
-                  )}
+                    {headlineUnit && (
+                      <span style={{fontSize: 13, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
+                        {headlineUnit}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 14}}>
-                {p.tier === 'FREE'
-                  ? 'Try ExecuteSpec without a card'
-                  : p.tier === 'TEAM'
-                    ? 'Start with one seat — add up to 20 as you grow. Annual billing.'
-                    : p.tier === 'ENTERPRISE'
-                      ? 'SSO, SLA, dedicated support'
-                      : 'Hidden plan — grandfathered users only'}
-              </div>
-              <ul
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: 0,
-                  display: 'grid',
-                  gap: 8,
-                  fontSize: 13,
-                }}
-              >
-                {features.map((f) => (
-                  <li
-                    key={f}
+                {/* Per-card yearly line — only when the API has a yearly row
+                    for this tier (TEAM is monthly-only per V165). */}
+                {showYearlyLine && (
+                  <div
                     style={{
-                      color: f.startsWith('○') ? 'var(--ide-fg-muted)' : 'var(--ide-fg)',
+                      fontSize: 11.5,
+                      color: 'var(--ide-fg-muted)',
+                      textAlign: 'right',
+                      marginBottom: 6,
                     }}
                   >
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <button
-                className='ide-btn'
-                style={{width: '100%', marginTop: 14}}
-                onClick={() => subscribe(p.tier)}
-                disabled={isCurrent || p.tier === 'PRO' || busyTier === p.tier}
-              >
-                {busyTier === p.tier
-                  ? 'Redirecting…'
-                  : isCurrent
-                    ? 'Current plan'
-                    : p.tier === 'ENTERPRISE'
-                      ? 'Talk to sales'
-                      : p.tier === 'PRO'
-                        ? 'Hidden plan'
+                    or {fmtMoney(p.yearly, p.currency)}/yr
+                    {p.yearlySavePct != null && p.yearlySavePct > 0
+                      ? ` · save ${p.yearlySavePct}%`
+                      : ''}
+                  </div>
+                )}
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--ide-fg-muted)',
+                    marginBottom: p.recommended ? 4 : 14,
+                  }}
+                >
+                  {SUBCOPY[p.tier] || ''}
+                </div>
+                {p.recommended && (
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      color: 'var(--ide-accent)',
+                      marginBottom: 14,
+                    }}
+                  >
+                    Most popular — bring your own keys
+                  </div>
+                )}
+                <ul
+                  style={{
+                    listStyle: 'none',
+                    padding: 0,
+                    margin: 0,
+                    display: 'grid',
+                    gap: 8,
+                    fontSize: 13,
+                  }}
+                >
+                  {features.map((f) => (
+                    <li
+                      key={f}
+                      style={{
+                        color: f.startsWith('○') ? 'var(--ide-fg-muted)' : 'var(--ide-fg)',
+                      }}
+                    >
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  className='ide-btn'
+                  style={{width: '100%', marginTop: 14}}
+                  onClick={() => subscribe(p.tier)}
+                  disabled={isCurrent || busyTier === p.tier}
+                >
+                  {busyTier === p.tier
+                    ? 'Redirecting…'
+                    : isCurrent
+                      ? 'Current plan'
+                      : p.tier === 'ENTERPRISE'
+                        ? 'Talk to sales'
                         : p.tier === 'FREE'
                           ? 'Start free'
                           : 'Upgrade'}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

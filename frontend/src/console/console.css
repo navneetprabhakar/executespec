@@ -390,3 +390,46 @@
     display: inline-flex;
   }
 }
+
+/* ============================================================
+   UI/UX review 2026-06-11 additions (C1)
+   ============================================================ */
+
+/* Account dropdown (top bar). */
+.con-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 180px;
+  background: var(--ide-bg-widget);
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px var(--ide-shadow);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.con-menu-item {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--ide-fg);
+  text-decoration: none;
+  font-size: 13px;
+}
+.con-menu-item:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+
+/* "New run" collapses to icon-only on narrow phones — the two-line wrap at
+   375px read as broken. */
+@media (max-width: 480px) {
+  .con-newrun .con-newrun-label {
+    display: none;
+  }
+  .con-newrun {
+    padding: 8px 10px;
+  }
+}

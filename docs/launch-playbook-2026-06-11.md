@@ -4,7 +4,7 @@
 > against code, migrations, or a live walk on 2026-06-10/11 (RL-2026-06-019 + RL-2026-06-020).
 > Companions: [`launch-readiness-2026-06-10.md`](launch-readiness-2026-06-10.md) (ops checklist
 > detail) · `review/07` + `review/11` (positioning + UX verdicts, local) ·
-> [`website/product-hunt-launch.md`](../website/product-hunt-launch.md) (PH kit, refreshed).
+> [`docs/marketing/product-hunt-launch.md`](marketing/product-hunt-launch.md) (PH kit, refreshed).
 > A styled PDF of this doc lives at `docs/reports/launch-playbook-2026-06-11.pdf`.
 
 ---
@@ -94,7 +94,7 @@ SOC 2 complete, dedicated region, or hard uptime SLAs.
 | App SEO/sharing | `frontend/index.html` | Zero meta tags → full description + OG + twitter (shared verified reports now unfurl) |
 | Login panel | `AuthLayout.tsx` | "BYOK bypasses the cost cap" insider bullet → "Deterministic verified score on every PR" |
 | Proof | `docs/reports/swebench-brief-*` | Marked **SUPERSEDED — do not quote** (worker model untracked on the old harness) |
-| GTM kit | `website/product-hunt-launch.md` | Rewritten current (tiers, score formula, honest "hard truths", asset status) |
+| GTM kit | `docs/marketing/product-hunt-launch.md` | Rewritten current (tiers, score formula, honest "hard truths", asset status) |
 
 ---
 
@@ -155,7 +155,7 @@ hierarchy (10 equal buttons → primary Push/PR + overflow; Delete away from pri
 6. Minimal ops story: Grafana alert destinations → your Telegram bot; hosted status page or an
    explicit "support email only" decision.
 7. Demo video (60–90s, script in PH kit §6) + the verified-report gallery.
-8. Secondary copy sweeps (non-blocking): `website/pricing-analysis.md`, `tier-decision.md`,
+8. Secondary copy sweeps (non-blocking): `docs/marketing/pricing-analysis.md`, `tier-decision.md`,
    `press-kit/README.md` still carry pre-V176 numbers.
 
 ---
@@ -183,9 +183,9 @@ SPEC_SUBMITTED → PLAN_APPROVED conversion.
 | Truth-pass commit | `1be342eb` (RL-2026-06-019) |
 | UX wave-1 commit | `26ab3f66` (RL-2026-06-020) |
 | Ops checklist detail | [`docs/launch-readiness-2026-06-10.md`](launch-readiness-2026-06-10.md) |
-| Reason log | [`docs/reason-log/2026-05.md`](reason-log/2026-05.md) — RL-2026-06-019/-020 at the top |
+| Reason log | [`docs/reason-log/2026-06.md`](reason-log/2026-06.md) — RL-2026-06-019/-020 at the top |
 | UX verdicts + defects | `review/11-ux-review.md` (local, gitignored) |
 | Console reframe plan | [`docs/plans/web-control-plane-reframe.md`](plans/web-control-plane-reframe.md) — Phases 2–4 pending |
 | Enterprise claim rules | [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) |
-| PH launch kit | [`website/product-hunt-launch.md`](../website/product-hunt-launch.md) |
+| PH launch kit | [`docs/marketing/product-hunt-launch.md`](marketing/product-hunt-launch.md) |
 | Tier/billing truth | migrations V165 · V176 · V177 · V185 · V200 · V206 · V207 + `TierEnforcementService.resolveRunCostBudget` |

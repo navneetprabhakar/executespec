@@ -99,13 +99,45 @@ function resolveSystemTheme(): 'dark' | 'light' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+/**
+ * T1 (UI/UX review 2026-06-11) — single theme owner. The app historically ran
+ * TWO theme systems: this store wrote `data-theme` (tokens.css/ide.css/console.css)
+ * while main.tsx + the now-deleted useSignalTheme wrote `data-signal-theme`
+ * (every `.signal-*` component style). They desynced — public pages could render
+ * dark cards on a light page. Every apply now writes BOTH attributes with the
+ * same resolved value; `signal.css` keeps its selector until the follow-up
+ * migrates it to `[data-theme]`.
+ */
+function applyThemeAttrs(resolved: 'dark' | 'light') {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.setAttribute('data-signal-theme', resolved);
+}
+
 function initTheme(): Theme {
-  const saved = localStorage.getItem('es:theme') as Theme | null;
-  const theme: Theme = saved === 'light' || saved === 'system' ? saved : 'dark';
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = theme === 'system' ? resolveSystemTheme() : theme;
+  let saved = localStorage.getItem('es:theme') as Theme | null;
+  // One-time migration from the legacy Signal-only key so existing visitors
+  // keep their pick. es:theme wins when both exist.
+  if (!saved) {
+    const legacy = localStorage.getItem('signal:theme');
+    if (legacy === 'light' || legacy === 'dark') {
+      saved = legacy;
+      try {
+        localStorage.setItem('es:theme', legacy);
+      } catch {}
+    }
   }
+  const theme: Theme = saved === 'light' || saved === 'system' ? saved : 'dark';
+  applyThemeAttrs(theme === 'system' ? resolveSystemTheme() : theme);
   return theme;
+}
+
+// Re-resolve on OS preference change while in 'system' mode (module-level —
+// the store is a singleton, so one listener for the app's lifetime is correct).
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (useUiStore.getState().theme === 'system') applyThemeAttrs(resolveSystemTheme());
+  });
 }
 
 // UI chrome — applied to <html data-ui> pre-paint so the chrome renders without
@@ -182,9 +214,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = t === 'system' ? resolveSystemTheme() : t;
-    }
+    applyThemeAttrs(t === 'system' ? resolveSystemTheme() : t);
     set({theme: t});
   },
   toggleTheme: () => {
@@ -195,9 +225,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
     const cur = get().theme;
     const next: Theme = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
     localStorage.setItem('es:theme', next);
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = next === 'system' ? resolveSystemTheme() : next;
-    }
+    applyThemeAttrs(next === 'system' ? resolveSystemTheme() : next);
     set({theme: next});
   },
   setUiMode: (m) => {

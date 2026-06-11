@@ -30,20 +30,13 @@ if (
   });
 }
 
-// Signal is the only design — apply the .signal-app token scope to <html>
-// + restore the saved theme before first paint so there's no FOUC.
+// Signal is the only design — apply the .signal-app token scope to <html>.
+// Theme attributes (`data-theme` + `data-signal-theme`) are applied pre-paint
+// by useUiStore's module-time initTheme() — the single theme owner since the
+// T1 unification (UI/UX review 2026-06-11); it migrates the legacy
+// `signal:theme` key on first load. Do NOT write theme attributes here.
 if (typeof document !== 'undefined') {
   document.documentElement.classList.add('signal-app');
-  try {
-    const saved = localStorage.getItem('signal:theme');
-    const sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute(
-      'data-signal-theme',
-      saved || (sysDark ? 'dark' : 'light'),
-    );
-  } catch {
-    /* ignore */
-  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion

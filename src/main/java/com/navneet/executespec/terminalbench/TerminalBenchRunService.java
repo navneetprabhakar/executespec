@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
@@ -55,11 +56,21 @@ public class TerminalBenchRunService {
   private final JwtUtil jwtUtil;
 
   /**
-   * Per-task wall-clock safety net. Harbor's agent phase currently times out at 1350s. The worker
-   * only checks wall-clock at iteration boundaries and does not interrupt an in-flight LLM/tool
-   * call, so keep a conservative buffer for one slow turn plus the terminal finalizer.
+   * Fallback wall-clock when the client doesn't pass a per-task value. NOTE (TB 2.0 full-89
+   * autopsy, RL-2026-06): Harbor kills the agent phase at the TASK'S OWN {@code [agent]}
+   * timeout_sec from task.toml — 900s for most TB2 tasks (NOT the previously-believed 1350s), up to
+   * 3600s for heavy ones. A flat 900s server cap therefore raced Harbor's kill on 900s tasks (the
+   * salvage finalizer fired exactly when Harbor killed the trial — 54 trials died at 900.0s) and
+   * surrendered 75% of the budget on 3600s tasks. The adapter now derives a per-task {@code
+   * wallClockSeconds} (see {@code es_harbor_agent.py}) and passes it on {@code /start}; this
+   * constant only covers clients that don't.
    */
   private static final int DEFAULT_WALL_CLOCK_SECONDS = 900;
+
+  /** Bounds for a client-supplied per-task wall clock (seconds). */
+  private static final int MIN_WALL_CLOCK_SECONDS = 120;
+
+  private static final int MAX_WALL_CLOCK_SECONDS = 3300;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
@@ -126,6 +137,22 @@ public class TerminalBenchRunService {
               + "]{0,40}?(?<![/\\w.])([A-Za-z][A-Za-z0-9_-]*\\.[A-Za-z][A-Za-z0-9]{0,5})\\b");
 
   /**
+   * RL-2026-06 (TB 2.0 autopsy) — also catch an EXTENSION-LESS absolute deliverable introduced by
+   * an output verb in the same clause (e.g. "produce a single executable at {@code /app/polyglot}"
+   * — the polyglot-rust-c miss: the extension-requiring {@code DELIVERABLE_PATH} never extracted
+   * it, so the gate was inert and 4/5 trials completed artifact-less). Path segments here exclude
+   * dots entirely (a dotted path is the absolute matcher's job) and the trailing lookahead rejects
+   * a partial match of a dotted path ({@code /app/model} inside {@code /app/model.bin}). Same
+   * safety story as the other matchers: the gate only refuses on a MISSING path, bounded +
+   * fail-open.
+   */
+  private static final Pattern EXTENSIONLESS_DELIVERABLE =
+      Pattern.compile(
+          "(?i)\\b(?:write|create|produce|generate|save|output|emit|store|build|compile|place|put)\\b[^./\\n"
+              + "]{0,60}?(/app/[A-Za-z0-9_][A-Za-z0-9_-]*(?:/[A-Za-z0-9_][A-Za-z0-9_-]*)*)"
+              + "(?![\\w/-]|\\.[A-Za-z0-9])");
+
+  /**
    * Standalone worker system prompt for arbitrary terminal goals. The product worker base prompt
    * ({@code SequentialExecutor.SYSTEM_PROMPT_BASE}) is code-gen-tuned and is NOT used on this
    * direct path, so we supply a terminal-task-oriented prompt here. Refined further under task #22
@@ -179,7 +206,10 @@ Follow this workflow every time:
    By the middle of the run, stop broad exploration and create the best verified candidate
    deliverable. Extra analysis without a /app artifact is worse than an imperfect artifact.
 4. VERIFY before finishing (mandatory) — re-read the task's success criteria and confirm your
-   output satisfies EVERY requirement. If the task warns about edge cases (tricky inputs,
+   output satisfies EVERY requirement. If the task prescribes HOW to achieve the result (build
+   from source, use a named tool/library/language, follow a specific procedure), the hidden tests
+   usually verify the METHOD too — satisfy the stated how, not just the end state. If the task
+   warns about edge cases (tricky inputs,
    boundary conditions, false matches), construct inputs covering them and confirm your
    solution handles them. Re-read the output file / re-run the command and confirm it is
    byte-exact. If /tests exists, run /tests/test.sh or a targeted subset before finishing.
@@ -214,7 +244,8 @@ iterating needlessly.
       String instruction,
       String provider,
       String model,
-      Integer maxIterations) {
+      Integer maxIterations,
+      Integer wallClockSeconds) {
     String runId = UUID.randomUUID().toString();
     String userId = String.valueOf(userDetails.getUser().getId());
     String orgId = userDetails.getUser().getOrgId();
@@ -255,41 +286,66 @@ iterating needlessly.
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()
         .name("tb-run-" + runId)
-        .start(snapshot.wrap(() -> runWorker(runId, instruction, provider, model, maxIterations)));
+        .start(
+            snapshot.wrap(
+                () ->
+                    runWorker(
+                        runId, instruction, provider, model, maxIterations, wallClockSeconds)));
 
     String sseToken = jwtUtil.generateSseToken(userId, runId);
     return new StartResult(runId, sseToken);
   }
 
   private void runWorker(
-      String runId, String instruction, String provider, String model, Integer maxIterations) {
+      String runId,
+      String instruction,
+      String provider,
+      String model,
+      Integer maxIterations,
+      Integer wallClockSeconds) {
     Path workspace = null;
     String finalStatus = "FAILED";
     String reason = null;
     try {
       int effectiveMaxIterations = normalizeMaxIterations(maxIterations);
+      int effectiveWallClock =
+          (wallClockSeconds == null || wallClockSeconds <= 0)
+              ? DEFAULT_WALL_CLOCK_SECONDS
+              : Math.min(
+                  Math.max(wallClockSeconds, MIN_WALL_CLOCK_SECONDS), MAX_WALL_CLOCK_SECONDS);
       // Remote mode never touches this dir (tools dispatch before tool.execute), but
       // ExecutionContext requires an absolute path.
       workspace = Files.createTempDirectory("tb-remote-");
       ExecutionContext ctx = new ExecutionContext(runId, "tb-task", workspace.toRealPath());
+      List<String> deliverables = extractDeliverablePaths(instruction);
+      // RL-2026-06 (TB 2.0 autopsy) — echo the extracted deliverable contract deterministically
+      // into the worker prompt. The instruction names the paths, but on long runs the model loses
+      // them in exploration noise; the persisted run row keeps the ORIGINAL instruction.
+      String workerPrompt =
+          deliverables.isEmpty()
+              ? instruction
+              : instruction
+                  + "\n\n"
+                  + "REQUIRED DELIVERABLES — these exact paths must exist before completeTask:\n"
+                  + deliverables.stream().map(p -> "- " + p).collect(Collectors.joining("\n"));
       WorkerResult result =
           worker.run(
               WorkerTaskRequest.builder()
                   .provider(provider)
                   .model(model)
                   .systemPrompt(TB_SYSTEM_PROMPT)
-                  .userPrompt(instruction)
+                  .userPrompt(workerPrompt)
                   .context(ctx)
                   .maxIterations(effectiveMaxIterations)
                   .stagnationWarnAfter(TB_STAGNATION_WARN_AFTER)
                   .stagnationForceAfter(TB_STAGNATION_FORCE_AFTER)
                   .temperature(0.0)
-                  .wallClockSeconds(DEFAULT_WALL_CLOCK_SECONDS)
+                  .wallClockSeconds(effectiveWallClock)
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)
                   .terminalVerifyGate(TB_VERIFY_GATE_ENABLED)
-                  .requiredDeliverablePaths(extractDeliverablePaths(instruction))
+                  .requiredDeliverablePaths(deliverables)
                   .criticPass(TB_CRITIC_ENABLED)
                   .build());
       boolean ok =
@@ -341,6 +397,12 @@ iterating needlessly.
     Matcher r = RELATIVE_DELIVERABLE.matcher(instruction);
     while (r.find() && paths.size() < 8) {
       paths.add("/app/" + r.group(1));
+    }
+    // RL-2026-06 (TB 2.0 autopsy) — extension-less absolute outputs after an output verb
+    // ("produce ... /app/polyglot"). Dotted paths are rejected by the lookahead → no overlap.
+    Matcher x = EXTENSIONLESS_DELIVERABLE.matcher(instruction);
+    while (x.find() && paths.size() < 8) {
+      paths.add(x.group(1));
     }
     return List.copyOf(paths);
   }

@@ -1,8 +1,9 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {NavLink, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import './ide.css';
 import '@/signal/signal.css';
 import * as api from '@/lib/api';
+import {routeTitle} from '@/hooks/useDocumentTitle';
 import {useUiStore} from '@/stores/useUiStore';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import {
@@ -111,16 +112,81 @@ export default function IdeWorkspace() {
     refreshUnread();
   }, [location.pathname, refreshRuns, refreshUnread]);
 
+  // C2 — route-derived tab title default (detail surfaces override via
+  // useDocumentTitle once their data loads).
+  useEffect(() => {
+    document.title = `${routeTitle(location.pathname)} · ExecuteSpec`;
+  }, [location.pathname]);
+
+  // C4 — move focus into the content region on navigation so keyboard/screen-
+  // reader users land in the new surface instead of on the nav button they
+  // clicked (WCAG 2.4.3). tabIndex={-1} makes the div programmatically
+  // focusable without joining the tab order.
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    mainRef.current?.focus({preventScroll: true});
+  }, [location.pathname]);
+
+  // C10 — lightweight keyboard layer beyond ⌘K: `c` = compose, `g r` = runs,
+  // `g p` = projects, `g h` = home. Skipped while typing or while the palette
+  // is open.
+  const gPrefix = useRef(0);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (paletteOpen || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const now = Date.now();
+      if (e.key === 'g') {
+        gPrefix.current = now;
+        return;
+      }
+      const inG = now - gPrefix.current < 1500;
+      if (inG && e.key === 'r') navigate('/runs');
+      else if (inG && e.key === 'p') navigate('/projects');
+      else if (inG && e.key === 'h') navigate('/home');
+      else if (e.key === 'c') navigate('/compose');
+      else return;
+      gPrefix.current = 0;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate, paletteOpen]);
+
   const path = location.pathname;
   const actActive = (p: string) =>
     p === '/home' ? path === '/' || path.startsWith('/home') : path.startsWith(p);
 
+  // C1.4 / C11 — the palette registers EVERY route (it was 6 commands; most of
+  // the app was unreachable from the keyboard). Admin/benchmark stay gated.
   const commands: PaletteCmd[] = [
     {id: 'home', label: 'Go: Workspace', hint: 'Home', run: () => navigate('/home')},
     {id: 'compose', label: 'New spec', hint: '＋', run: () => navigate('/compose')},
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
-    {id: 'runs', label: 'Go: All runs', run: () => navigate('/runs')},
-    {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
+    {id: 'runs', label: 'Go: All runs', hint: 'g r', run: () => navigate('/runs')},
+    {id: 'projects', label: 'Go: Projects', hint: 'g p', run: () => navigate('/projects')},
+    {id: 'search', label: 'Go: Search', run: () => navigate('/search')},
+    {id: 'notifications', label: 'Go: Notifications', run: () => navigate('/notifications')},
+    {id: 'account', label: 'Go: Account', run: () => navigate('/account')},
+    {id: 'billing', label: 'Go: Billing', run: () => navigate('/billing')},
+    {id: 'plans', label: 'Go: Plans', run: () => navigate('/plans')},
+    {id: 'api-keys', label: 'Go: API keys (BYOK)', run: () => navigate('/api-keys')},
+    {id: 'org-members', label: 'Go: Org members', run: () => navigate('/org-members')},
+    {id: 'org-settings', label: 'Go: Org settings', run: () => navigate('/org/settings')},
+    {id: 'integrations', label: 'Go: Integrations', run: () => navigate('/integrations')},
+    {id: 'deployments', label: 'Go: Deployments', run: () => navigate('/deployments')},
+    {id: 'insights', label: 'Go: Insights', run: () => navigate('/insights')},
+    {id: 'library', label: 'Go: Library', run: () => navigate('/library')},
+    {id: 'migrations', label: 'Go: Migrations', run: () => navigate('/migrations')},
+    {id: 'templates', label: 'Go: Spec templates', run: () => navigate('/templates')},
+    {id: 'audit', label: 'Go: Audit log', run: () => navigate('/audit')},
+    ...(isSuperAdmin
+      ? [
+          {id: 'admin', label: 'Go: Admin', run: () => navigate('/admin')},
+          {id: 'benchmark', label: 'Go: Benchmarks', run: () => navigate('/benchmark')},
+        ]
+      : []),
     {id: 'theme', label: 'Toggle theme', run: toggleTheme},
     ...runs.map((r) => ({
       id: r.runId,
@@ -159,7 +225,7 @@ export default function IdeWorkspace() {
                 padding: '0 3px',
                 borderRadius: 7,
                 background: 'var(--ide-red)',
-                color: '#fff',
+                color: 'var(--ide-accent-fg)',
                 fontSize: 9,
                 fontWeight: 700,
                 lineHeight: '13px',
@@ -215,7 +281,7 @@ export default function IdeWorkspace() {
                   padding: '0 3px',
                   borderRadius: 7,
                   background: 'var(--ide-red)',
-                  color: '#fff',
+                  color: 'var(--ide-accent-fg)',
                   fontSize: 9,
                   fontWeight: 700,
                   lineHeight: '14px',
@@ -296,6 +362,11 @@ export default function IdeWorkspace() {
                     <StatusDot kind={statusKind(r.status)} size={8} />
                   </span>
                   {runLabel(r)}
+                  {/* C5 — the verified score is the product's headline metric;
+                      surface it on every run row. */}
+                  {r.verifiedScore != null && (
+                    <span className='ide-tree-sub'>{r.verifiedScore}</span>
+                  )}
                 </NavLink>
               ))
             )}
@@ -371,7 +442,13 @@ export default function IdeWorkspace() {
 
         {/* editor area — the active surface renders here */}
         <div className='ide-editor'>
-          <div className='ide-editor-body'>
+          <div
+            className='ide-editor-body'
+            ref={mainRef}
+            tabIndex={-1}
+            role='main'
+            style={{outline: 'none'}}
+          >
             <Outlet />
           </div>
         </div>

@@ -55,6 +55,18 @@ const NON_TERMINAL = new Set([
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
 }
+// C6 (review/11) — quota subtitle segment shared by IdeWelcome + IdeCompose.
+// Never emits a leading separator; unlimited tiers say so in words instead of
+// the "0 / ∞ runs" jargon, and "this cycle" became "this month".
+function quotaSubtitle(
+  tier: string,
+  permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
+): string {
+  if (!permissions) return tier;
+  return permissions.monthlyRunLimit === -1
+    ? `${tier} · no run limit`
+    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this month · ${tier}`;
+}
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
   const s = (status || '').toUpperCase();
@@ -74,6 +86,7 @@ function phaseLabel(status?: string | null): string {
 export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
@@ -146,11 +159,7 @@ export function IdeWelcome() {
     navigate('/compose');
   }
 
-  const runCap = permissions
-    ? permissions.monthlyRunLimit === -1
-      ? `${permissions.currentRunCount} runs this cycle`
-      : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this cycle`
-    : '— runs this cycle';
+  const runCap = quotaSubtitle(tier, permissions);
 
   const liveTasks = liveRun?.tasks ?? [];
   const liveDone = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
@@ -220,8 +229,8 @@ export function IdeWelcome() {
             Ship your first verified PR
           </div>
           <div className='ide-sub' style={{marginBottom: 10}}>
-            Pick a starter spec — it runs in a sandbox project, costs 1 credit, and takes a few
-            minutes. Or write your own.
+            Pick a starter spec — it takes a few minutes — or write your own. Starter specs run in a
+            sandbox project · 1 credit (≈$5 of model spend) · no card needed.
           </div>
           {samples.length > 0 && (
             <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10}}>
@@ -266,6 +275,11 @@ export function IdeWelcome() {
                   >
                     {r.verifiedScore}
                   </IdeBadge>
+                )}
+                {typeof r.actualCostUsd === 'number' && (
+                  <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
+                    ${r.actualCostUsd.toFixed(2)}
+                  </span>
                 )}
                 {r.aiProvider && <span>{providerLabel(r.aiProvider)}</span>}
                 <span title={r.startedAt ? new Date(r.startedAt).toLocaleString() : undefined}>
@@ -314,6 +328,10 @@ export function IdeCompose() {
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  // RUN-1 (review/11) — searchable project picker. The chip wall rendered every
+  // project; with ~50 projects the Run button landed screens below the fold.
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectQuery, setProjectQuery] = useState('');
   const [projectRepos, setProjectRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
   // Per-tier max hard cap, mirroring TierEnforcementService.resolveRunCostBudget:
@@ -322,6 +340,10 @@ export function IdeCompose() {
   const tierMaxCap = tier === 'FREE' ? 3 : tier === 'PRO' ? 5 : tier === 'ENTERPRISE' ? 1000 : 25;
   const [costCap, setCostCap] = useState<number>(Math.min(2, tierMaxCap));
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
+  // RUN-7 (review/11) — estimate freshness: timestamp of the last fetch + a
+  // "stale" flag that flips after 60s and surfaces a refresh link-button.
+  const [estimateAt, setEstimateAt] = useState<number | null>(null);
+  const [estimateStale, setEstimateStale] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
@@ -417,16 +439,75 @@ export function IdeCompose() {
   useEffect(() => {
     if (!projectId || spec.trim().length < 12) {
       setEstimate(null);
+      setEstimateAt(null);
       return;
     }
     const t = setTimeout(() => {
       api
         .estimateRun(projectId, spec.trim())
-        .then(setEstimate)
-        .catch(() => setEstimate(null));
+        .then((e) => {
+          setEstimate(e);
+          setEstimateAt(Date.now());
+        })
+        .catch(() => {
+          setEstimate(null);
+          setEstimateAt(null);
+        });
     }, 600);
     return () => clearTimeout(t);
   }, [projectId, spec]);
+
+  // RUN-7 — flip the estimate card's freshness line to a refresh affordance
+  // 60s after the last fetch.
+  useEffect(() => {
+    setEstimateStale(false);
+    if (estimateAt == null) return;
+    const t = window.setTimeout(() => setEstimateStale(true), 60_000);
+    return () => clearTimeout(t);
+  }, [estimateAt]);
+
+  // RUN-7 — manual refresh re-runs the existing estimate fetch immediately.
+  function refreshEstimate() {
+    if (!projectId || spec.trim().length < 12) return;
+    api
+      .estimateRun(projectId, spec.trim())
+      .then((e) => {
+        setEstimate(e);
+        setEstimateAt(Date.now());
+      })
+      .catch(() => {
+        /* keep the last estimate on a failed refresh */
+      });
+  }
+
+  // RUN-1 — picker derivations: Sandbox + the 4 most recently created projects
+  // stay visible as chips; everything else lives behind the searchable panel.
+  // A selected project outside the top-4 is appended so it stays visible.
+  const recentProjects = useMemo(
+    () =>
+      [...projects]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 4),
+    [projects],
+  );
+  const chipProjects = useMemo(() => {
+    const selected = projectId ? projects.find((p) => p.id === projectId) : null;
+    if (selected && !recentProjects.some((p) => p.id === selected.id)) {
+      return [...recentProjects, selected];
+    }
+    return recentProjects;
+  }, [projects, projectId, recentProjects]);
+  const filteredProjects = useMemo(() => {
+    const needle = projectQuery.trim().toLowerCase();
+    if (!needle) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(needle));
+  }, [projects, projectQuery]);
+
+  function pickProject(id: string | null) {
+    setProjectId(id);
+    setProjectPickerOpen(false);
+    setProjectQuery('');
+  }
 
   function toggleRepo(repoId: string) {
     setSelectedRepoIds((prev) =>
@@ -438,9 +519,6 @@ export function IdeCompose() {
     permissions != null &&
     permissions.monthlyRunLimit !== -1 &&
     permissions.currentRunCount >= permissions.monthlyRunLimit;
-  const runsUsed = permissions
-    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
-    : '— / —';
 
   async function submit() {
     if (!spec.trim()) {
@@ -476,8 +554,8 @@ export function IdeCompose() {
       <div className='ide-h1'>New spec</div>
       <div className='ide-sub'>
         Describe the change in plain language. The pipeline plans it, writes the code across your
-        repos, builds + tests, and opens a PR with a verified score. · {runsUsed} runs this cycle ·{' '}
-        {tier} tier
+        repos, builds + tests, and opens a PR with a verified score.{' '}
+        {quotaSubtitle(tier, permissions)}
       </div>
 
       {isAtCap && (
@@ -536,21 +614,83 @@ export function IdeCompose() {
       <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
         <button
           className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
-          onClick={() => setProjectId(null)}
+          onClick={() => pickProject(null)}
         >
           {projectId == null ? '✓ ' : ''}Sandbox (no repo)
         </button>
-        {projects.map((p) => (
+        {chipProjects.map((p) => (
           <button
             key={p.id}
             className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
-            onClick={() => setProjectId(p.id)}
+            onClick={() => pickProject(p.id)}
           >
             {projectId === p.id ? '✓ ' : ''}
             {p.name}
           </button>
         ))}
+        {projects.length > 4 && (
+          <button
+            className='ide-btn ghost'
+            aria-expanded={projectPickerOpen}
+            onClick={() => {
+              setProjectPickerOpen((v) => !v);
+              setProjectQuery('');
+            }}
+          >
+            All projects… ({projects.length})
+          </button>
+        )}
       </div>
+      {projectPickerOpen && (
+        <div
+          className='ide-card'
+          style={{marginBottom: 8, padding: 10}}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setProjectPickerOpen(false);
+          }}
+        >
+          <input
+            className='ide-input'
+            autoFocus
+            placeholder='Search projects…'
+            value={projectQuery}
+            onChange={(e) => setProjectQuery(e.target.value)}
+            aria-label='Search projects'
+            style={{marginBottom: 8}}
+          />
+          <div style={{maxHeight: 240, overflowY: 'auto'}}>
+            {filteredProjects.length === 0 ? (
+              <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
+                No projects match “{projectQuery.trim()}”.
+              </div>
+            ) : (
+              filteredProjects.map((p, i) => (
+                <button
+                  key={p.id}
+                  type='button'
+                  onClick={() => pickProject(p.id)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom:
+                      i < filteredProjects.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                    padding: '8px 6px',
+                    fontSize: 13,
+                    color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {projectId === p.id ? '✓ ' : ''}
+                  {p.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
       <div className='ide-sub' style={{marginTop: 0}}>
         {projectId
           ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
@@ -600,9 +740,19 @@ export function IdeCompose() {
         </div>
       )}
 
-      <div style={{display: 'flex', gap: 12, margin: '14px 0', flexWrap: 'wrap'}}>
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
+      {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
+          .ide-stack-mobile collapses to one column under 600px. */}
+      <div
+        className='ide-stack-mobile'
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${tier === 'ENTERPRISE' ? 4 : 3}, minmax(0, 1fr))`,
+          gap: 12,
+          margin: '14px 0',
+        }}
+      >
+        <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
+          <div className='ide-h2' id='compose-provider-label' style={{marginTop: 0}}>
             Provider
           </div>
           <select
@@ -619,8 +769,8 @@ export function IdeCompose() {
         {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
             default matrix for this run only. '' = Default → no modelName sent. */}
         {tier === 'ENTERPRISE' && (
-          <div style={{flex: 1, minWidth: 180}}>
-            <div className='ide-h2' style={{marginTop: 0}}>
+          <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-model-label' style={{marginTop: 0}}>
               Model · Beta
             </div>
             <select
@@ -640,8 +790,8 @@ export function IdeCompose() {
             </div>
           </div>
         )}
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
+        <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
+          <div className='ide-h2' id='compose-mode-label' style={{marginTop: 0}}>
             Mode
           </div>
           <select
@@ -656,8 +806,8 @@ export function IdeCompose() {
             Production pauses for plan + price approval; Prototype runs straight through.
           </div>
         </div>
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
+        <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
+          <div className='ide-h2' id='compose-cap-label' style={{marginTop: 0}}>
             Spending cap
           </div>
           <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
@@ -668,13 +818,17 @@ export function IdeCompose() {
               min='0.5'
               max={tierMaxCap}
               value={costCap}
+              aria-labelledby='compose-cap-label'
               onChange={(e) =>
                 setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
               }
               style={{width: 90}}
             />
             <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              USD · max ${tierMaxCap === 1000 ? '∞' : tierMaxCap}
+              {/* RUN-6 — say "no platform cap" in words instead of "$∞". */}
+              {tierMaxCap === 1000
+                ? 'USD · no platform cap on your plan'
+                : `USD · max $${tierMaxCap}`}
             </span>
           </div>
         </div>
@@ -690,10 +844,17 @@ export function IdeCompose() {
           TDD mode — write tests first
         </label>
         <div style={{flex: 1, minWidth: 220}}>
+          <label
+            htmlFor='compose-figma-url'
+            style={{display: 'block', fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+          >
+            Figma URL (optional)
+          </label>
           <input
+            id='compose-figma-url'
             className='ide-input'
             type='url'
-            placeholder='Optional Figma URL (passed to the planner)'
+            placeholder='https://figma.com/… (passed to the planner)'
             value={figmaUrl}
             onChange={(e) => setFigmaUrl(e.target.value)}
             style={{width: '100%'}}
@@ -705,6 +866,27 @@ export function IdeCompose() {
         <div className='ide-card' style={{marginBottom: 12}}>
           <div className='ide-h2' style={{marginTop: 0}}>
             Estimate from project history
+          </div>
+          {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
+          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+            {estimateStale ? (
+              <button
+                type='button'
+                onClick={refreshEstimate}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  color: 'var(--ide-accent)',
+                  cursor: 'pointer',
+                }}
+              >
+                · refresh
+              </button>
+            ) : (
+              '· refreshed just now'
+            )}
           </div>
           <div className='ide-kv'>
             <span>Tasks</span>
@@ -753,6 +935,15 @@ function taskIsDone(s?: string | null): boolean {
 function taskIsRunning(s?: string | null): boolean {
   const u = (s || '').toUpperCase();
   return u === 'WORKING' || u === 'RUNNING' || u === 'EXECUTING';
+}
+// Friendly live-log type labels (review/11 IdeLive) — raw enums like TOOL_CALL
+// read as plumbing. Colors keep the same keying in the renderer below.
+function logTypeLabel(type?: string): string {
+  const t = (type || 'log').toLowerCase();
+  if (t.includes('tool')) return '🔧 tool';
+  if (t.includes('llm') || t.includes('completion')) return '🧠 model';
+  if (t.includes('warn')) return '⚠ warning';
+  return t;
 }
 
 export function IdeLive() {
@@ -853,13 +1044,17 @@ export function IdeLive() {
   // Prefer SSE entries (real-time); they're the only live source here.
   const logList = sseEntries.slice(-100) as LiveEntry[];
   const sseConnected = sseStatus === 'CONNECTED';
+  // Transport jargon → plain status (review/11 IdeLive copy).
   const sseLabel = sseConnected
-    ? 'live · streaming'
+    ? 'Live'
     : sseStatus === 'CONNECTING'
-      ? 'connecting…'
+      ? 'Connecting…'
       : sseStatus === 'RECONNECTING'
-        ? 'reconnecting…'
-        : 'polling';
+        ? 'Reconnecting — brief delay…'
+        : 'Live (5s refresh)';
+  // Mobile hides the task list via CSS — keep a one-line summary visible at
+  // all widths (subtle enough to be harmless on desktop too).
+  const currentTaskTitle = tasks.find((t) => taskIsRunning(t.status))?.title;
 
   return (
     <div className='ide-pane' style={{maxWidth: 860}}>
@@ -887,6 +1082,7 @@ export function IdeLive() {
         {!terminal && (
           <button
             className='ide-btn ghost'
+            style={{color: 'var(--ide-red)'}}
             onClick={() => setConfirmCancel(true)}
             disabled={cancelBusy}
           >
@@ -1007,9 +1203,15 @@ export function IdeLive() {
               · {sseLabel}
             </span>
           </div>
+          {tasks.length > 0 && (
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '0 0 6px'}}>
+              ▶ {completed}/{tasks.length} tasks
+              {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+            </div>
+          )}
           {logList.length === 0 ? (
             <div className='ide-card'>
-              <IdeLoader label='Waiting for the first tool call… the agent is warming up.' />
+              <IdeLoader label='Waiting for the first tool call… the agent is warming up. Usually 30–60s.' />
             </div>
           ) : (
             <div
@@ -1042,11 +1244,8 @@ export function IdeLive() {
                       lineHeight: 1.5,
                     }}
                   >
-                    <span
-                      className='ide-mono'
-                      style={{color, marginRight: 8, textTransform: 'uppercase', fontSize: 10}}
-                    >
-                      {ev.type || 'log'}
+                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
+                      {logTypeLabel(ev.type)}
                     </span>
                     {ev.timestamp && (
                       <span
