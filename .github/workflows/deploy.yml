@@ -26,8 +26,53 @@ env:
   DEPLOY_BUCKET_PREFIX: executespec    # Bucket: executespec-{env}-deploy
 
 jobs:
+  benchmark-monitor:
+    name: Benchmark VM monitor
+    if: github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]')
+    runs-on: ubuntu-latest
+
+    environment: development
+
+    env:
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+      GCE_ZONE: ${{ secrets.GCE_ZONE }}
+      GCE_INSTANCE: executespec-benchmark-vm
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Read-only TB status
+        run: |
+          gcloud compute scp infra/benchmark/scripts/monitor-tb.sh ${{ env.GCE_INSTANCE }}:/tmp/monitor-tb.sh \
+            --project "${{ env.GCP_PROJECT }}" \
+            --zone "${{ env.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --project "${{ env.GCP_PROJECT }}" \
+            --zone "${{ env.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="JOB_NAME='' bash /tmp/monitor-tb.sh"
+
   build-and-deploy:
     name: Build → Deploy (${{ inputs.target_env || (github.ref_name == 'main' && 'prod' || 'dev') }})
+    if: !(github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]'))
     runs-on: ubuntu-latest
 
     # ── Environment ───────────────────
