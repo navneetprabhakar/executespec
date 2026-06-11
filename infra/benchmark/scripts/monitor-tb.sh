@@ -248,9 +248,9 @@ if rid:
                         text = json.dumps(event, sort_keys=True)
                         low = text.lower()
                         if any(word in low for word in ("error", "failed", "exception", "timeout")):
-                            interesting.append(text[:260])
+                            interesting.append(text[:1000])
                     if not interesting:
-                        interesting = [json.dumps(e, sort_keys=True)[:260] for e in log_events[-3:]]
+                        interesting = [json.dumps(e, sort_keys=True)[:1000] for e in log_events[-3:]]
                     for line in interesting[-5:]:
                         print("  es_event=" + line)
                 except Exception as e:
