@@ -310,3 +310,15 @@
     color-scheme: light;
   }
 }
+
+/* T7 (UI/UX review 2026-06-11) — z-index scale. New code uses these instead
+   of magic numbers; existing coherent values migrate opportunistically.
+   Ladder: sticky chrome < fixed tabs < drawers < backdrops < modals < toasts. */
+:root {
+  --z-sticky: 20;
+  --z-tabs: 30;
+  --z-drawer: 50;
+  --z-backdrop: 60;
+  --z-modal: 100;
+  --z-toast: 120;
+}

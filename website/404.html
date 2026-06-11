@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>404 — page not found · ExecuteSpec</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#0B0D10">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon" type="image/png" href="/images/logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/site.css">
+    <style>
+        /* Page-specific layout only — palette/typography come from site.css. */
+        .nf-wrap {
+            min-height: calc(100vh - 120px);
+            display: grid; place-items: center;
+            padding: 48px 24px;
+            text-align: center;
+        }
+        .nf-code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+            background: var(--coral-soft); color: var(--coral-text);
+            padding: 6px 14px; border-radius: 999px;
+            display: inline-block; margin-bottom: 18px;
+        }
+        .nf-wrap h1 {
+            font-size: clamp(32px, 6vw, 56px);
+            font-weight: 600; letter-spacing: -0.03em; line-height: 1.02;
+            margin: 0 0 14px;
+        }
+        .nf-wrap p { color: var(--text-dim); font-size: 16px; max-width: 36em; margin: 0 auto 30px; }
+        .nf-links { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        .nf-links .btn {
+            padding: 13px 22px; border-radius: 999px;
+            font-size: 14px; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 8px;
+        }
+        .nf-links .btn.primary { background: var(--ink); color: var(--bg); font-weight: 700; }
+        .nf-links .btn.secondary { border: 1px solid var(--hairline-strong); color: var(--ink); }
+        .nf-links .btn.secondary:hover { background: var(--card-elev); }
+    </style>
+</head>
+<body>
+
+<header class='nav'>
+    <div class='nav-inner'>
+        <a class='logo' href='/'>
+            <span class='glyph'>E</span> ExecuteSpec
+        </a>
+        <div class='cta-row'>
+            <a class='btn-sm' href='https://app.executespec.ai/login'>Sign in</a>
+            <a class='btn-sm primary' href='https://app.executespec.ai/signup'>Start free</a>
+        </div>
+    </div>
+</header>
+
+<main class='nf-wrap'>
+    <div>
+        <div class='nf-code'>HTTP 404 · NOT FOUND</div>
+        <h1>This page didn't pass the build.</h1>
+        <p>The URL you followed doesn't exist (any more). Everything that does is one click away.</p>
+        <div class='nf-links'>
+            <a class='btn primary' href='/'>Back to home</a>
+            <a class='btn secondary' href='/benchmarks/'>Benchmarks</a>
+            <a class='btn secondary' href='https://app.executespec.ai/login'>App sign-in</a>
+        </div>
+    </div>
+</main>
+
+</body>
+</html>

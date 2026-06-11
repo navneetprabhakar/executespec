@@ -46,6 +46,7 @@
   --signal-mint-text-on-light: #1d6543;
   --signal-lavender: #c4b8e0;
   --signal-lavender-soft: #e8e2f3;
+  --signal-lavender-text: #5443a8;
   --signal-ocean: #5c9ddb;
 
   /* radii + shadow */
@@ -87,6 +88,7 @@
   --signal-mint-soft: rgba(124, 227, 180, 0.18);
   --signal-mint-text-on-light: #7ce3b4;
   --signal-lavender-soft: rgba(196, 184, 224, 0.16);
+  --signal-lavender-text: #c4b8e0;
 }
 
 /* Page bounce / rubber-band fix — kill BOTH the elastic overscroll AND the
@@ -148,7 +150,11 @@ body {
  * bubbles. Light, compact, tracks Signal token palette. */
 .signal-md {
   font-size: 13.5px;
-  line-height: 1.55;
+  /* T6 (UI/UX review 2026-06-11) — JetBrains Mono stays the single typeface
+     (brand decision); long-form prose compensates with taller leading and a
+     bounded measure instead of a second face. */
+  line-height: 1.65;
+  max-width: 76ch;
   color: inherit;
 }
 .signal-md > * {
@@ -538,7 +544,7 @@ body {
   letter-spacing: 0.06em;
   border-radius: 4px;
   background: var(--signal-lavender-soft);
-  color: var(--signal-lavender-text, #5443a8);
+  color: var(--signal-lavender-text);
   flex-shrink: 0;
 }
 .signal-app .nav-link.active .nav-badge {

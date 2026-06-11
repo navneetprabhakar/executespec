@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import {Button, Card, StatusPill} from '@/signal/components/Primitives';
 import {IdeBadge} from '@/ide/IdeKit';
 import {Markdown} from '@/signal/components/Markdown';
+import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
 
 /**
@@ -63,8 +64,12 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [autofixing, setAutofixing] = useState(false);
+  // C8 — the paid autofix dispatch waits behind a confirm modal.
+  const [confirmAutofix, setConfirmAutofix] = useState(false);
   const [err, setErr] = useState('');
   const [gated, setGated] = useState(false);
+  // C7 — bump to re-run the initial load (Retry button next to the error).
+  const [reloadKey, setReloadKey] = useState(0);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reviewIdRef = useRef<string | null>(null);
 
@@ -141,7 +146,7 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
       off = true;
       clearPoll();
     };
-  }, [repoFullName, prNumber, poll, clearPoll]);
+  }, [repoFullName, prNumber, poll, clearPoll, reloadKey]);
 
   async function submit() {
     setSubmitting(true);
@@ -192,6 +197,26 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
           ? 'Comment'
           : '—';
 
+  // C8 — shared by both chrome variants: confirm before the paid dispatch.
+  // On confirm the existing autofix() runs (navigates to /result/{runId}).
+  const confirmModal = (
+    <ConfirmModal
+      open={confirmAutofix}
+      title='Dispatch autofix run'
+      body='This dispatches a new run to fix the review comments. It consumes credits and opens a commit on the PR branch. Continue?'
+      confirmLabel='Dispatch run'
+      busy={autofixing}
+      onConfirm={autofix}
+      onClose={() => setConfirmAutofix(false)}
+    />
+  );
+
+  // C7 — Retry re-runs the initial load (latest review + poll resume).
+  const retry = () => {
+    setErr('');
+    setReloadKey((k) => k + 1);
+  };
+
   if (variant === 'ide') {
     const verdictKind: 'ok' | 'warn' | 'bad' =
       verdict === 'APPROVE' ? 'ok' : verdict === 'REQUEST_CHANGES' ? 'bad' : 'warn';
@@ -209,9 +234,20 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
         {err && (
           <div
             className='ide-card'
-            style={{margin: '0 0 8px', color: 'var(--ide-red)', fontSize: 12.5}}
+            style={{
+              margin: '0 0 8px',
+              color: 'var(--ide-red)',
+              fontSize: 12.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
           >
-            {err}
+            <span style={{flex: 1, minWidth: 160}}>{err}</span>
+            <button className='ide-btn ghost' style={{padding: '2px 10px'}} onClick={retry}>
+              Retry
+            </button>
           </div>
         )}
 
@@ -289,7 +325,12 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
             )}
             <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
               {canAutofix && (
-                <button className='ide-btn' disabled={autofixing} onClick={autofix}>
+                <button
+                  className='ide-btn'
+                  disabled={autofixing}
+                  // C8 — credit-spending dispatch goes through a confirm modal.
+                  onClick={() => setConfirmAutofix(true)}
+                >
                   {autofixing
                     ? 'Dispatching…'
                     : `Autofix ${fixableCount} comment${fixableCount === 1 ? '' : 's'}`}
@@ -301,6 +342,7 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
             </div>
           </>
         )}
+        {confirmModal}
       </div>
     );
   }
@@ -337,9 +379,16 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
             padding: '8px 12px',
             marginBottom: 10,
             fontSize: 12.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
           }}
         >
-          {err}
+          <span style={{flex: 1, minWidth: 160}}>{err}</span>
+          <Button kind='ghost' sm onClick={retry}>
+            Retry
+          </Button>
         </div>
       )}
 
@@ -431,7 +480,13 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
           )}
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             {canAutofix && (
-              <Button kind='primary' sm disabled={autofixing} onClick={autofix}>
+              <Button
+                kind='primary'
+                sm
+                disabled={autofixing}
+                // C8 — credit-spending dispatch goes through a confirm modal.
+                onClick={() => setConfirmAutofix(true)}
+              >
                 {autofixing
                   ? 'Dispatching…'
                   : `Autofix ${fixableCount} comment${fixableCount === 1 ? '' : 's'}`}
@@ -443,6 +498,7 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
           </div>
         </>
       )}
+      {confirmModal}
     </Card>
   );
 }

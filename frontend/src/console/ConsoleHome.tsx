@@ -16,6 +16,12 @@ const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PART
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
 const isFailed = (s?: string | null) => ['FAILED', 'ERROR'].includes((s || '').toUpperCase());
 
+// C5 — the verified score (the product's headline metric) + cost render on
+// every run row; "no project" reads as "Sandbox" (§5 copy).
+function scoreKind(s: number): 'ok' | 'warn' | 'bad' {
+  return s >= 85 ? 'ok' : s >= 70 ? 'warn' : 'bad';
+}
+
 function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string}) {
   const navigate = useNavigate();
   return (
@@ -24,9 +30,15 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
       <span className='con-runrow-main'>
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
         <span className='con-runrow-meta'>
-          {(r.projectName || 'no project') + ' · ' + relTime(r.startedAt)}
+          {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
+          {r.actualCostUsd != null && r.actualCostUsd > 0
+            ? ` · $${r.actualCostUsd.toFixed(2)}`
+            : ''}
         </span>
       </span>
+      {r.verifiedScore != null && (
+        <IdeBadge kind={scoreKind(r.verifiedScore)}>{r.verifiedScore}</IdeBadge>
+      )}
       {action ? (
         <span className='con-runrow-action'>{action}</span>
       ) : (
@@ -42,11 +54,32 @@ export default function ConsoleHome() {
   const [gate, setGate] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [loading, setLoading] = useState(true);
+  // C1.2 (reframe §7 item 3) — PRs with inbound review comments belong in
+  // "Needs your attention". The API is per-run only, so this is bounded:
+  // pending-counts for the ≤8 recent runs that actually have a PR, fetched
+  // once per load (not on the 12s poll).
+  const [prPending, setPrPending] = useState<Record<string, number>>({});
 
   const load = useCallback(() => {
     api
       .getRuns({size: 25})
-      .then((r) => setRuns(r.content ?? []))
+      .then((r) => {
+        const list = r.content ?? [];
+        setRuns(list);
+        const withPr = list.filter((x) => x.scmPrUrl || x.githubPrUrl).slice(0, 8);
+        Promise.all(
+          withPr.map((x) =>
+            api
+              .getPrCommentPendingCount(x.runId)
+              .then((c) => [x.runId, c.count ?? 0] as const)
+              .catch(() => [x.runId, 0] as const),
+          ),
+        ).then((pairs) => {
+          const next: Record<string, number> = {};
+          for (const [id, n] of pairs) if (n > 0) next[id] = n;
+          setPrPending(next);
+        });
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
     api
@@ -93,14 +126,24 @@ export default function ConsoleHome() {
         </button>
       </div>
 
-      {(gate.length > 0 || failed.length > 0) && (
+      {(gate.length > 0 || failed.length > 0 || Object.keys(prPending).length > 0) && (
         <section className='con-section'>
           <div className='con-section-title attn'>Needs your attention</div>
           {gate.map((r) => (
             <RunRow key={r.runId} r={r} to={`/plan/${r.runId}`} action='Approve →' />
           ))}
+          {runs
+            .filter((r) => prPending[r.runId] && !gate.some((g) => g.runId === r.runId))
+            .map((r) => (
+              <RunRow
+                key={`pr-${r.runId}`}
+                r={r}
+                to={`/result/${r.runId}`}
+                action={`${prPending[r.runId]} review comment${prPending[r.runId] === 1 ? '' : 's'} →`}
+              />
+            ))}
           {failed
-            .filter((f) => !gate.some((g) => g.runId === f.runId))
+            .filter((f) => !gate.some((g) => g.runId === f.runId) && !prPending[f.runId])
             .map((r) => (
               <RunRow key={r.runId} r={r} to={`/result/${r.runId}`} />
             ))}

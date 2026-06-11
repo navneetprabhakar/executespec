@@ -37,7 +37,7 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
           }}
         >
           <h1 style={{fontSize: 18, margin: '0 0 8px'}}>Something broke</h1>
-          <p style={{fontSize: 14, color: 'var(--signal-muted)', margin: '0 0 16px'}}>
+          <p style={{fontSize: 14, color: 'var(--signal-text-mute)', margin: '0 0 16px'}}>
             Reload the page. If it happens again, send the current URL to support.
           </p>
           <button

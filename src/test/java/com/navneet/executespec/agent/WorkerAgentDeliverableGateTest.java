@@ -134,10 +134,11 @@ class WorkerAgentDeliverableGateTest {
   @Test
   void refuses_while_missing_then_yields_after_bounded_refusals() {
     // iter1 shell (creates nothing in this stub), iters 2.. completeTask. Gate reports MISSING
-    // every time → refuses twice (iters 2,3) then YIELDS on iter 4 (refusals == MAX) → COMPLETED.
+    // every time → refuses DELIVERABLE_GATE_MAX_REFUSALS times (iters 2..5) then YIELDS on the
+    // next completeTask → COMPLETED. (Bound raised 2→4 after the TB 2.0 full-89 autopsy.)
     List<ChatResponse> seq = new ArrayList<>();
     seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"echo x > /app/answer.txt\"}")));
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < WorkerAgent.DELIVERABLE_GATE_MAX_REFUSALS + 3; i++) {
       seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
     }
     Fixture f = newWorker(seq, true, false);
@@ -150,9 +151,9 @@ class WorkerAgentDeliverableGateTest {
         "gate must refuse a missing deliverable but eventually YIELD (fail-open). Saw: "
             + result.outcome());
     assertEquals(
-        4,
+        2 + WorkerAgent.DELIVERABLE_GATE_MAX_REFUSALS,
         result.iterations(),
-        "refused on iters 2 and 3 (2 refusals == MAX), then yields and completes on iter 4.");
+        "refused on iters 2..(1+MAX), then yields and completes on the next iteration.");
   }
 
   @Test

@@ -962,7 +962,7 @@ function IdeSwitch({
           width: 16,
           height: 16,
           borderRadius: '50%',
-          background: '#fff',
+          background: 'var(--ide-accent-fg)',
           transition: 'left 0.15s',
         }}
       />

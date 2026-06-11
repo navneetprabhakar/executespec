@@ -2,7 +2,7 @@
    Public pricing, Forgot/Reset password, Accept invite, Audit, Deployments,
    Spec templates. Bundled here because each is small. */
 
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Link, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {
@@ -1926,6 +1926,8 @@ function FormError({msg}: {msg: string}) {
   if (!msg) return null;
   return (
     <div
+      role='alert'
+      aria-live='polite'
       style={{
         background: 'var(--signal-coral-soft)',
         color: 'var(--signal-coral-text)',
@@ -1944,6 +1946,8 @@ function FormSuccess({msg}: {msg: string}) {
   if (!msg) return null;
   return (
     <div
+      role='status'
+      aria-live='polite'
       style={{
         background: 'var(--signal-mint-soft)',
         color: 'var(--signal-mint-text-on-light)',
@@ -1955,6 +1959,87 @@ function FormSuccess({msg}: {msg: string}) {
       }}
     >
       {msg}
+    </div>
+  );
+}
+
+function EyeIcon({off}: {off?: boolean}) {
+  return (
+    <svg
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={2}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      style={{width: 18, height: 18}}
+      aria-hidden='true'
+    >
+      <path d='M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z' />
+      <circle cx='12' cy='12' r='3' />
+      {off && <line x1='4' y1='4' x2='20' y2='20' />}
+    </svg>
+  );
+}
+
+// Password input with an inline show/hide toggle (AUTH-2). Local copy of the
+// private helper in AuthPages.tsx (neither is exported by design). The toggle
+// button deliberately sets no `outline` style so the browser's default
+// :focus-visible ring stays intact.
+function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  placeholder,
+  minLength,
+  describedBy,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+  placeholder?: string;
+  minLength?: number;
+  describedBy?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{position: 'relative'}}>
+      <input
+        type={show ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        minLength={minLength}
+        aria-describedby={describedBy}
+        required
+        style={{paddingRight: 46}}
+      />
+      <button
+        type='button'
+        onClick={() => setShow((s) => !s)}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        aria-pressed={show}
+        title={show ? 'Hide password' : 'Show password'}
+        style={{
+          position: 'absolute',
+          top: '50%',
+          right: 8,
+          transform: 'translateY(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 6,
+          borderRadius: 8,
+          border: 0,
+          background: 'transparent',
+          color: 'var(--signal-text-dim)',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <EyeIcon off={show} />
+      </button>
     </div>
   );
 }
@@ -2010,6 +2095,11 @@ export function ForgotPasswordPage() {
             {busy ? 'Sending…' : 'Send reset link'}
           </Button>
         </form>
+        {ok && (
+          <Button kind='secondary' block to='/login' style={{marginTop: 10}}>
+            Continue to sign-in
+          </Button>
+        )}
         <div className='footer-link'>
           Remembered it? <Link to='/login'>Sign in</Link>
         </div>
@@ -2026,6 +2116,15 @@ export function ResetPasswordPage() {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const pwRuleOk = pw.length >= 12;
+  const redirectTimer = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (redirectTimer.current !== undefined) window.clearTimeout(redirectTimer.current);
+    },
+    [],
+  );
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr('');
@@ -2044,7 +2143,13 @@ export function ResetPasswordPage() {
     setBusy(true);
     try {
       await api.authResetPassword(token, pw);
-      navigate('/login?reset=1', {replace: true});
+      // Hold the success message long enough to read (3s); the button below
+      // lets the user continue immediately.
+      setOk('Password reset. Taking you to sign-in…');
+      redirectTimer.current = window.setTimeout(
+        () => navigate('/login?reset=1', {replace: true}),
+        3000,
+      );
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Reset failed. Request a fresh link.');
     } finally {
@@ -2063,34 +2168,50 @@ export function ResetPasswordPage() {
         </h1>
         <p className='lede'>12+ characters. One number, one symbol. Anything else goes.</p>
         <FormError msg={err} />
-        <form onSubmit={onSubmit}>
-          <div className='signal-field'>
-            <label>New password</label>
-            <input
-              type='password'
-              autoComplete='new-password'
-              placeholder='••••••••'
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              minLength={12}
-              required
-            />
-          </div>
-          <div className='signal-field'>
-            <label>Confirm</label>
-            <input
-              type='password'
-              autoComplete='new-password'
-              placeholder='••••••••'
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-            />
-          </div>
-          <Button kind='primary' block type='submit' disabled={busy}>
-            {busy ? 'Resetting…' : 'Reset password'}
+        <FormSuccess msg={ok} />
+        {ok ? (
+          <Button kind='primary' block to='/login?reset=1'>
+            Continue to sign-in
           </Button>
-        </form>
+        ) : (
+          <form onSubmit={onSubmit}>
+            <div className='signal-field'>
+              <label>New password</label>
+              {/* AUTH-1 — visible rule line above the field with a live ✓/✗ as
+                  the user types; linked to the input via aria-describedby. */}
+              <div
+                id='reset-pw-rule'
+                style={{
+                  fontSize: 12,
+                  color: pwRuleOk ? 'var(--signal-mint-text-on-light)' : 'var(--signal-text-dim)',
+                  marginBottom: 6,
+                }}
+              >
+                {pwRuleOk ? '✓' : '✗'} 12+ characters
+              </div>
+              <PasswordInput
+                value={pw}
+                onChange={setPw}
+                autoComplete='new-password'
+                placeholder='••••••••'
+                minLength={12}
+                describedBy='reset-pw-rule'
+              />
+            </div>
+            <div className='signal-field'>
+              <label>Confirm</label>
+              <PasswordInput
+                value={confirm}
+                onChange={setConfirm}
+                autoComplete='new-password'
+                placeholder='••••••••'
+              />
+            </div>
+            <Button kind='primary' block type='submit' disabled={busy}>
+              {busy ? 'Resetting…' : 'Reset password'}
+            </Button>
+          </form>
+        )}
       </div>
     </AuthLayout>
   );
@@ -2170,8 +2291,9 @@ export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'})
         <Button kind='mint' block onClick={accept} disabled={busy || !token}>
           {busy ? 'Accepting…' : kind === 'org' ? 'Accept & continue' : 'Accept & open project'}
         </Button>
-        <Button kind='ghost' block to='/home' style={{color: 'var(--signal-coral-text)'}}>
-          Decline invite
+        {/* Secondary exit — pure navigation, no API call. */}
+        <Button kind='ghost' block to='/'>
+          Not now
         </Button>
       </div>
     </AuthLayout>

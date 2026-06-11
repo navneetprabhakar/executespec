@@ -22,6 +22,7 @@ const LIVE_STATUSES = new Set([
   'AWAITING_APPROVAL',
   'RUNNING',
   'PROVIDER_SWITCHING',
+  'REVIEWING',
   'PAUSED',
 ]);
 const isLiveStatus = (s?: string | null) => LIVE_STATUSES.has((s || '').toUpperCase());
@@ -33,7 +34,22 @@ const costOf = (r: api.RunSummary) =>
   (r as unknown as {actualCost?: number}).actualCost ??
   (r as unknown as {totalCost?: number}).totalCost;
 
-type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'failed';
+type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'done' | 'failed';
+
+// C6 (review/11) — every run lands in exactly ONE bucket, so the filter chips
+// sum to All by construction. "Done" = terminal success without a verified
+// score (PATCH/bench/legacy runs); "Failed" is the terminal catch-all
+// (FAILED / ERROR / CANCELLED / unknown).
+function bucketOf(r: api.RunSummary): Exclude<RunFilter, 'all'> {
+  const s = (r.status || '').toUpperCase();
+  if (isLiveStatus(s)) return 'live';
+  const score = scoreOf(r);
+  const success = s === 'COMPLETED' || s === 'COMPLETE';
+  if (success && score != null && score >= 85) return 'shipped';
+  if (s === 'PARTIAL' || (success && score != null && score < 85)) return 'needs';
+  if (success) return 'done';
+  return 'failed';
+}
 
 // Score → IDE band colour (≥85 shippable / 70-84 needs review / <70 failed).
 function scoreColor(score?: number | null): string {
@@ -47,29 +63,30 @@ function scoreColor(score?: number | null): string {
 export function IdeRuns() {
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
+  const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
+  function loadFirst() {
+    setErr('');
     api
       .getRuns({page: 0, size: PAGE_SIZE})
       .then((p) => {
-        if (cancelled) return;
         setRuns(p.content ?? []);
         setMore(p.hasNext);
         setPage(0);
       })
       .catch((e: unknown) => {
-        if (cancelled) return;
         setRuns([]);
         setErr(e instanceof Error ? e.message : 'Failed to load runs.');
       });
-    return () => {
-      cancelled = true;
-    };
+  }
+
+  useEffect(() => {
+    loadFirst();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadMore() {
@@ -87,44 +104,39 @@ export function IdeRuns() {
     }
   }
 
-  // Bucket each loaded run once; drive both the strip counts and the filtered list.
-  const counts = useMemo(() => {
+  // Text filter first (title / userRequest / R-id substring), then bucket the
+  // surviving runs ONCE — counts and the visible list come from the same pass,
+  // so Live + Shipped + Needs review + Done + Failed always sums to All.
+  const searched = useMemo(() => {
     const list = runs ?? [];
-    let live = 0,
-      shipped = 0,
-      needs = 0,
-      failed = 0;
-    for (const r of list) {
-      const s = (r.status || '').toUpperCase();
-      const score = scoreOf(r);
-      if (isLiveStatus(s)) live++;
-      else if (s === 'COMPLETED' && (score == null || score >= 85)) shipped++;
-      else if (s === 'PARTIAL' || (s === 'COMPLETED' && score != null && score < 85)) needs++;
-      else if (s === 'FAILED' || s === 'CANCELLED') failed++;
-    }
-    return {all: list.length, live, shipped, needs, failed};
-  }, [runs]);
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    const idNeedle = needle.startsWith('r-') ? needle.slice(2) : needle;
+    return list.filter(
+      (r) =>
+        (r.runTitle || '').toLowerCase().includes(needle) ||
+        (r.userRequest || '').toLowerCase().includes(needle) ||
+        r.runId.toLowerCase().includes(idNeedle),
+    );
+  }, [runs, q]);
 
-  const filtered = useMemo(() => {
-    const list = runs ?? [];
-    if (filter === 'all') return list;
-    return list.filter((r) => {
-      const s = (r.status || '').toUpperCase();
-      const score = scoreOf(r);
-      if (filter === 'live') return isLiveStatus(s);
-      if (filter === 'shipped') return s === 'COMPLETED' && (score == null || score >= 85);
-      if (filter === 'needs')
-        return s === 'PARTIAL' || (s === 'COMPLETED' && score != null && score < 85);
-      if (filter === 'failed') return s === 'FAILED' || s === 'CANCELLED';
-      return true;
-    });
-  }, [runs, filter]);
+  const counts = useMemo(() => {
+    const c = {all: searched.length, live: 0, shipped: 0, needs: 0, done: 0, failed: 0};
+    for (const r of searched) c[bucketOf(r)]++;
+    return c;
+  }, [searched]);
+
+  const filtered = useMemo(
+    () => (filter === 'all' ? searched : searched.filter((r) => bucketOf(r) === filter)),
+    [searched, filter],
+  );
 
   const TABS: Array<{key: RunFilter; label: string; n: number}> = [
     {key: 'all', label: 'All', n: counts.all},
     {key: 'live', label: 'Live', n: counts.live},
     {key: 'shipped', label: 'Shipped', n: counts.shipped},
     {key: 'needs', label: 'Needs review', n: counts.needs},
+    {key: 'done', label: 'Done', n: counts.done},
     {key: 'failed', label: 'Failed', n: counts.failed},
   ];
 
@@ -137,35 +149,60 @@ export function IdeRuns() {
           : `${counts.all} loaded · ${counts.live} live`}
       </div>
 
-      <div className='ide-rtabs' style={{marginBottom: 12}}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`ide-rtab${filter === t.key ? ' active' : ''}`}
-            onClick={() => setFilter(t.key)}
-          >
-            {t.label} <span className='ide-rtab-badge'>{t.n}</span>
-          </button>
-        ))}
+      <div
+        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12}}
+      >
+        <div className='ide-rtabs' style={{flex: '1 1 auto', marginBottom: 0}}>
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              className={`ide-rtab${filter === t.key ? ' active' : ''}`}
+              onClick={() => setFilter(t.key)}
+            >
+              {t.label} <span className='ide-rtab-badge'>{t.n}</span>
+            </button>
+          ))}
+        </div>
+        <input
+          className='ide-input'
+          type='search'
+          placeholder='Filter by title or R-id…'
+          aria-label='Filter runs by title or run id'
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{width: 230, flex: '0 1 230px'}}
+        />
       </div>
 
       {err && (
         <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
-          {err}
+          {err}{' '}
+          {(runs?.length ?? 0) === 0 && (
+            <button
+              className='ide-btn ghost'
+              style={{padding: '2px 10px', marginLeft: 6}}
+              onClick={loadFirst}
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
       {runs === null ? (
         <IdeLoader label='Loading runs…' />
-      ) : counts.all === 0 ? (
+      ) : runs.length === 0 ? (
         <div className='ide-empty'>No runs yet — start with a new spec.</div>
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>
-          No runs match this filter.{' '}
+          No runs match{q.trim() ? ` “${q.trim()}”` : ' this filter'}.{' '}
           <button
             className='ide-btn ghost'
             style={{padding: '2px 8px', marginLeft: 4}}
-            onClick={() => setFilter('all')}
+            onClick={() => {
+              setFilter('all');
+              setQ('');
+            }}
           >
             Show all
           </button>
@@ -244,6 +281,33 @@ export function IdeRuns() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// Linked-row list card shared by the Account management groups (review/11 —
+// the flat "Manage" list became three labeled groups).
+function LinkRows({rows}: {rows: Array<{to: string; label: string; sub: string}>}) {
+  return (
+    <div className='ide-card' style={{padding: 0}}>
+      {rows.map((row, i, arr) => (
+        <Link
+          key={row.to}
+          to={row.to}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 16px',
+            textDecoration: 'none',
+            color: 'var(--ide-fg)',
+            borderBottom: i < arr.length - 1 ? '1px solid var(--ide-border)' : 'none',
+          }}
+        >
+          <span>{row.label}</span>
+          <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{row.sub} ›</span>
+        </Link>
+      ))}
     </div>
   );
 }
@@ -572,36 +636,28 @@ export function IdeAccount() {
         </div>
       )}
 
-      <div className='ide-h2'>Manage</div>
-      <div className='ide-card' style={{padding: 0}}>
-        {[
+      <div className='ide-h2'>Plan &amp; billing</div>
+      <LinkRows
+        rows={[
           {to: '/billing', label: 'Billing & invoices', sub: `${tier} tier`},
           {to: '/plans', label: 'Compare plans', sub: ''},
-          {to: '/api-keys', label: 'API keys (BYOK)', sub: ''},
-          {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
-          {to: '/deployments', label: 'Deployments', sub: 'Cloud Run'},
+        ]}
+      />
+
+      <div className='ide-h2'>Organization</div>
+      <LinkRows
+        rows={[
+          {to: '/org-members', label: 'Org members', sub: 'Invite teammates'},
           ...(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
-        ].map((row, i, arr) => (
-          <Link
-            key={row.to}
-            to={row.to}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '12px 16px',
-              textDecoration: 'none',
-              color: 'var(--ide-fg)',
-              borderBottom: i < arr.length - 1 ? '1px solid var(--ide-border)' : 'none',
-            }}
-          >
-            <span>{row.label}</span>
-            <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{row.sub} ›</span>
-          </Link>
-        ))}
-      </div>
+          {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
+          {to: '/api-keys', label: 'API keys (BYOK)', sub: ''},
+        ]}
+      />
+
+      <div className='ide-h2'>Developer</div>
+      <LinkRows rows={[{to: '/deployments', label: 'Deployments', sub: 'Cloud Run'}]} />
 
       <div className='ide-h2'>Plan limits</div>
       <div className='ide-card'>
@@ -678,8 +734,8 @@ export function IdeAccount() {
                     borderRadius: 999,
                     border: '1px solid var(--ide-border)',
                     background: row.enabled ? 'var(--ide-accent)' : 'var(--ide-bg-tab-inactive)',
-                    cursor: notifBusy === key ? 'default' : 'pointer',
-                    opacity: notifBusy === key ? 0.6 : 1,
+                    cursor: notifBusy === key ? 'not-allowed' : 'pointer',
+                    opacity: notifBusy === key ? 0.5 : 1,
                     transition: 'background 0.15s',
                   }}
                 >

@@ -85,9 +85,15 @@ fi
 
 # ── 4. the run ──────────────────────────────────────────────────────────────
 cd "$TB_DIR" || exit 1
-export ES_PROVIDER="$PROVIDER" ES_MODEL="$MODEL" ES_MAX_ITERS="${ES_MAX_ITERS:-120}"
+# Agent auth: es_harbor_agent reads ES_ADMIN_EMAIL/ES_ADMIN_PW (or ES_PAT) + ES_BASE — map from the
+# admin env sourced above (ESPEC_ADMIN_*) so the in-container worker submission authenticates.
+export ES_PROVIDER="$PROVIDER" ES_MODEL="$MODEL" ES_MAX_ITERS="${ES_MAX_ITERS:-120}" \
+       ES_BASE="${ES_BASE:-http://localhost:8080}" \
+       ES_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" ES_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
 LOG "harbor run starting (provider=$PROVIDER model=$MODEL)…"
-caffeinate -dimsu ./.venv/bin/harbor run -c "$CFG" -y 2>&1 | tee "$JOBS_DIR/${JOB_NAME}-run.log"
+# caffeinate is macOS-only; on Linux (the benchmark VM) run harbor directly.
+CAFF=$(command -v caffeinate >/dev/null 2>&1 && echo "caffeinate -dimsu" || true)
+$CAFF ./.venv/bin/harbor run -c "$CFG" -y 2>&1 | tee "$JOBS_DIR/${JOB_NAME}-run.log"
 
 # ── 5. done: marker, final tracker tick, GCS results sync, ping ─────────────
 touch "$DONE"; sleep 6   # let the tracker write its final cycle

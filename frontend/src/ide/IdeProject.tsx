@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Link, useNavigate, useParams} from 'react-router-dom';
+import {Link, Navigate, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
@@ -18,10 +18,16 @@ function fmtWhen(iso?: string | null): string {
 export default function IdeProject() {
   const {projectId} = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // §3.4 — explicit compose intent (the Compose tab + Pulse's "New spec" card
+  // pass {compose:true} via Link state) skips the landing→Pulse redirect below,
+  // so the composer stays reachable on projects with run history.
+  const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
+  const [runsLoaded, setRunsLoaded] = useState(false);
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
@@ -43,7 +49,8 @@ export default function IdeProject() {
     api
       .getRuns({projectId, size: 6})
       .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]));
+      .catch(() => setRuns([]))
+      .finally(() => setRunsLoaded(true));
     if (project?.aiProvider) setProvider(project.aiProvider.toUpperCase());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -71,7 +78,9 @@ export default function IdeProject() {
     }
   }
 
-  if (loading) {
+  // Hold the loader until the run list settles too (unless compose was asked
+  // for explicitly) so the composer doesn't flash before the redirect.
+  if (loading || (!composeIntent && !runsLoaded)) {
     return (
       <div className='ide-pane'>
         <IdeLoader label='Loading project…' />
@@ -79,21 +88,24 @@ export default function IdeProject() {
     );
   }
 
+  // §3.4 (P1 IA) — most arrivals at /projects/:id are status checks: land on
+  // Pulse once the project has run history. Brand-new projects (0 runs) keep
+  // the compose-first landing.
+  if (!composeIntent && runs.length > 0) {
+    return <Navigate to={`/projects/${projectId}/pulse`} replace />;
+  }
+
   return (
     <div className='ide-pane'>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4}}>
-        <button className='ide-btn ghost' onClick={() => navigate('/projects')} title='Back'>
-          ←
-        </button>
-        <div className='ide-h1' style={{margin: 0}}>
-          {project?.name || 'Project'}
-        </div>
+      {/* C3 — ProjectTabs renders the Projects › {name} crumbs; the old "←"
+          back button is redundant with the crumb trail. */}
+      <ProjectTabs projectId={projectId || ''} />
+      <div className='ide-h1' style={{marginBottom: 4}}>
+        {project?.name || 'Project'}
       </div>
       <div className='ide-sub'>
         {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
       </div>
-
-      <ProjectTabs projectId={projectId || ''} />
 
       <div className='ide-h2'>New spec in this project</div>
       <textarea

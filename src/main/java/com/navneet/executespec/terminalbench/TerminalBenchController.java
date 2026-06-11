@@ -30,10 +30,17 @@ public class TerminalBenchController {
 
   /**
    * Request to launch a remote-tool worker run. {@code maxIterations} null or below the
-   * Terminal-Bench floor uses the service's benchmark default.
+   * Terminal-Bench floor uses the service's benchmark default. {@code wallClockSeconds} is the
+   * per-task wall clock the adapter derives from the Harbor task's own {@code [agent]} timeout
+   * (RL-2026-06 — see {@code TerminalBenchRunService.DEFAULT_WALL_CLOCK_SECONDS}); null falls back
+   * to the service default, and the service clamps supplied values.
    */
   public record StartRequest(
-      String instruction, String provider, String model, Integer maxIterations) {}
+      String instruction,
+      String provider,
+      String model,
+      Integer maxIterations,
+      Integer wallClockSeconds) {}
 
   @PostMapping("/start")
   public StartResult start(
@@ -51,6 +58,11 @@ public class TerminalBenchController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model required");
     }
     return service.start(
-        userDetails, body.instruction(), body.provider(), body.model(), body.maxIterations());
+        userDetails,
+        body.instruction(),
+        body.provider(),
+        body.model(),
+        body.maxIterations(),
+        body.wallClockSeconds());
   }
 }

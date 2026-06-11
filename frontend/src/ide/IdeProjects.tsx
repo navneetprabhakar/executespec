@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 
 type Dash = Record<string, unknown>;
@@ -15,6 +16,8 @@ const debtTotal = (r: api.TechDebtReport): number =>
   Object.values(r.issuesBySeverity || {}).reduce((a, b) => a + (b || 0), 0);
 
 export default function IdeProjects() {
+  // C2 — browser-tab title for the list surface.
+  useDocumentTitle('Projects');
   const navigate = useNavigate();
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
   const [stats, setStats] = useState<Record<string, Dash>>({});

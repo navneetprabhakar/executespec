@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Benchmarks — blind runs of the production pipeline · ExecuteSpec</title>
+
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-Y6JSSQ2Y83');
+    </script>
+
+    <!-- ── Core SEO meta ─────────────────────────────────────────────────── -->
+    <meta name="description" content="ExecuteSpec benchmark results. Every published number comes from a blind run of the production pipeline — issue-only specs, hidden tests applied externally at scoring, the same code path customers run. Oracle-mode results are discarded, never published.">
+    <meta name="author" content="ExecuteSpec">
+    <meta name="publisher" content="ExecuteSpec">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#0B0D10">
+    <meta name="color-scheme" content="dark">
+    <meta name="application-name" content="ExecuteSpec">
+    <link rel="icon" type="image/png" href="/images/logo.png">
+    <link rel="apple-touch-icon" href="/images/logo.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="canonical" href="https://executespec.ai/benchmarks/">
+    <link rel="alternate" hreflang="en" href="https://executespec.ai/benchmarks/">
+    <link rel="alternate" hreflang="x-default" href="https://executespec.ai/benchmarks/">
+
+    <!-- ── Open Graph / Twitter ──────────────────────────────────────────── -->
+    <meta property="og:site_name" content="ExecuteSpec">
+    <meta property="og:title" content="ExecuteSpec Benchmarks — blind runs of the production pipeline">
+    <meta property="og:description" content="Every published number is from a blind run of the production pipeline customers use — mode, slice, model, and run date on every result. No naked percentages.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://executespec.ai/benchmarks/">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:image" content="https://executespec.ai/images/og-hero.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@executespec">
+    <meta name="twitter:title" content="ExecuteSpec Benchmarks — blind runs of the production pipeline">
+    <meta name="twitter:description" content="Blind production-pipeline benchmark results — mode, slice, model, and run date on every number.">
+    <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
+
+    <!-- Dataset schema — the JSON file is the citable distribution -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Dataset",
+      "name": "ExecuteSpec benchmark results",
+      "description": "Blind benchmark results from ExecuteSpec's production pipeline (Terminal-Bench, SWE-bench, ProgramBench as they are published). Issue-only specs; hidden tests applied externally at scoring; oracle-mode results discarded. Keep dateModified in sync with the `updated` field in the JSON distribution.",
+      "url": "https://executespec.ai/benchmarks/",
+      "dateModified": "2026-06-11",
+      "license": "https://creativecommons.org/licenses/by/4.0/",
+      "creator": { "@id": "https://executespec.ai/#organization" },
+      "distribution": {
+        "@type": "DataDownload",
+        "encodingFormat": "application/json",
+        "contentUrl": "https://executespec.ai/data/benchmarks.json"
+      }
+    }
+    </script>
+
+    <!-- WebPage + BreadcrumbList for /benchmarks/ (kept on this page, not index) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "@id": "https://executespec.ai/benchmarks/#webpage",
+      "url": "https://executespec.ai/benchmarks/",
+      "name": "ExecuteSpec Benchmarks",
+      "description": "Blind production-pipeline benchmark results with mode, slice, model, and run date on every number.",
+      "isPartOf": { "@id": "https://executespec.ai/#website" },
+      "dateModified": "2026-06-11",
+      "inLanguage": "en-US"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://executespec.ai/" },
+        { "@type": "ListItem", "position": 2, "name": "Benchmarks", "item": "https://executespec.ai/benchmarks/" }
+      ]
+    }
+    </script>
+
+    <!-- Google Fonts (same families as index) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../assets/site.css">
+    <style>
+        /* Page-specific styles only — everything shared lives in /assets/site.css. */
+        .bench-updated {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; color: var(--text-mute);
+            margin-top: 10px;
+        }
+        .bench-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+        @media (min-width: 860px) { .bench-grid { grid-template-columns: repeat(2, 1fr); } }
+        .bench-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 24px;
+        }
+        .bench-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .bench-name { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+        .bench-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+            background: var(--mint-soft); color: var(--mint-text-on-light);
+            padding: 4px 10px; border-radius: 999px;
+            flex-shrink: 0;
+        }
+        .bench-score { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
+        .bench-bar { height: 6px; border-radius: 3px; background: var(--card-elev); border: 1px solid var(--hairline); overflow: hidden; margin-bottom: 16px; }
+        .bench-bar-fill { height: 100%; background: linear-gradient(90deg, var(--signal-y), var(--mint)); }
+        .bench-meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0 0 14px; font-size: 13px; }
+        .bench-meta dt { color: var(--text-dim); }
+        .bench-meta dd { margin: 0; font-size: 12.5px; }
+        .bench-baseline {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; color: var(--mint-text-on-light);
+            background: var(--mint-soft);
+            border-radius: var(--r-sm);
+            padding: 8px 12px; margin: 0 0 10px;
+        }
+        .bench-notes { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 8px; }
+        .bench-link { font-size: 13px; color: var(--coral); margin-right: 16px; }
+        .bench-empty { font-size: 14.5px; color: var(--text-dim); line-height: 1.6; max-width: 56ch; }
+        .bench-pending-title { font-size: 15px; font-weight: 600; margin: 28px 0 10px; }
+        .bench-pending { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+        .bench-pending li {
+            background: var(--card-bg);
+            border: 1px dashed var(--hairline-strong);
+            border-radius: var(--r-md);
+            padding: 12px 16px;
+            font-size: 13.5px; color: var(--text-dim);
+        }
+        .honesty {
+            background: var(--card-elev);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 24px;
+        }
+        .honesty ul { margin: 0; padding-left: 18px; display: grid; gap: 10px; font-size: 14px; color: var(--text-dim); line-height: 1.55; }
+        .honesty strong { color: var(--ink); }
+        .method-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; max-width: 64ch; }
+        .method-list li { font-size: 14.5px; color: var(--text-dim); line-height: 1.6; }
+        .method-list li strong { color: var(--ink); }
+    </style>
+</head>
+<body>
+
+<header class='nav'>
+    <div class='nav-inner'>
+        <a class='logo' href='/'>
+            <span class='glyph'>E</span> ExecuteSpec
+        </a>
+        <nav class='links'>
+            <a href='/#how'>How it works</a>
+            <a href='/#workspace'>Workspace</a>
+            <a href='/#library'>Library</a>
+            <a href='/#pricing'>Pricing</a>
+            <a href='/#compare'>Compare</a>
+            <a href='/benchmarks/' aria-current='page'>Benchmarks</a>
+        </nav>
+        <div class='cta-row'>
+            <a class='btn-sm' href='https://app.executespec.ai/login'>Sign in</a>
+            <a class='btn-sm primary' href='https://app.executespec.ai/signup'>Start free</a>
+        </div>
+    </div>
+</header>
+
+<section class='hero' style='padding-bottom: 24px;'>
+    <div class='wrap'>
+        <div class='eyebrow'>BENCHMARKS · BLIND RUNS ONLY</div>
+        <h1>Numbers from the <em>production pipeline</em>, not a demo rig.</h1>
+        <p class='lede'>
+            Every number below is from a <strong>blind run of our production pipeline</strong> — the same code path customers run. Issue-only specs in, hidden tests applied externally at scoring, and a mode / slice / model / run-date label on every result. No naked percentages.
+        </p>
+        <div class='bench-updated' data-benchmarks-updated></div>
+    </div>
+</section>
+
+<section class='section' id='results' style='border-top: 0; padding-top: 32px;'>
+    <div class='wrap'>
+        <main data-benchmarks>
+            <p class='bench-empty'>Loading results from <a href='/data/benchmarks.json'>/data/benchmarks.json</a>…</p>
+        </main>
+        <noscript>
+            <p class='bench-empty'>This page renders results from the raw data file with JavaScript. Without it, read the numbers directly at <a href='/data/benchmarks.json'>/data/benchmarks.json</a> — only entries with <span class='mono'>"publishable": true</span> and <span class='mono'>"mode": "blind"</span> are published results.</p>
+        </noscript>
+    </div>
+</section>
+
+<section class='section' id='methodology'>
+    <div class='wrap'>
+        <div class='section-eyebrow mint'>Methodology</div>
+        <h2>What "blind" means here.</h2>
+        <ul class='method-list'>
+            <li><strong>Issue-only spec.</strong> The pipeline sees the task description — the same natural-language spec a customer would submit. It never sees the benchmark's test suite, the expected patch, or any oracle hint.</li>
+            <li><strong>Hidden tests, applied externally at scoring.</strong> The benchmark harness scores the produced change against tests the pipeline never saw, after the run is over. The agent can't train to the test.</li>
+            <li><strong>The production pipeline, unmodified.</strong> Runs execute the same planner / worker / reviewer code path, the same tools, and the same prompts that customer runs use — no task-specific prompts, no benchmark-only branches in the agent.</li>
+            <li><strong>Derived numbers are computed, not typed.</strong> Resolved % and cost-per-resolved are calculated by this page from the raw counts in <a href='/data/benchmarks.json' style='color: var(--coral);'>the published data file</a>, so a number can't drift from its source.</li>
+        </ul>
+    </div>
+</section>
+
+<section class='section' id='what-we-dont-publish'>
+    <div class='wrap'>
+        <div class='section-eyebrow coral'>Honesty policy</div>
+        <h2>What we don't publish.</h2>
+        <div class='honesty'>
+            <ul>
+                <li><strong>Oracle-mode results are discarded.</strong> If a run ever saw the benchmark's tests in its prompt (test-in-prompt), its numbers are thrown away — they measure prompt leakage, not capability. We have discarded our own earlier oracle-mode SWE-bench numbers under this rule.</li>
+                <li><strong>Suites in re-measurement are listed as <em>pending</em>, not estimated.</strong> A name-only row, no projected numbers.</li>
+                <li><strong>No naked percentages.</strong> A result is only publishable with its mode, slice, model, and run date attached — "12/20 on the first-20 slice" is a claim we can defend; "60%" alone is not.</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class='section'>
+    <div class='wrap'>
+        <div class='cta-block'>
+            <h2>Run it on <em>your own repo</em>.</h2>
+            <p>The pipeline behind these numbers is the product. 15 free runs a month, no card — write a spec, approve the plan, get a verified PR.</p>
+            <a class='btn-cta' href='https://app.executespec.ai/signup'>
+                Start free
+                <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
+            </a>
+            <p style='margin-top: 18px; margin-bottom: 0; font-size: 14px;'><a href='#methodology' style='color: var(--signal-y);'>Read the methodology ↑</a></p>
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class='grid'>
+        <div class='colophon'>
+            <div class='brand-mini'>
+                <span class='glyph'>E</span> ExecuteSpec
+            </div>
+            <p>AI that ships pull requests your team actually merges. Built in India, used worldwide. v1.0.0-M1.</p>
+        </div>
+        <div>
+            <h5>Product</h5>
+            <ul>
+                <li><a href='/#how'>How it works</a></li>
+                <li><a href='/#pricing'>Pricing</a></li>
+                <li><a href='/#compare'>Compare</a></li>
+                <li><a href='/benchmarks/'>Benchmarks</a></li>
+            </ul>
+        </div>
+        <div>
+            <h5>Company</h5>
+            <ul>
+                <li><a href='https://app.executespec.ai/trust'>Trust &amp; security</a></li>
+                <li><a href='/terms'>Terms</a></li>
+                <li><a href='/privacy'>Privacy</a></li>
+                <li><a href='mailto:hello@executespec.ai'>Contact</a></li>
+            </ul>
+        </div>
+        <div>
+            <h5>Get started</h5>
+            <ul>
+                <li><a href='https://app.executespec.ai/signup'>Start free</a></li>
+                <li><a href='https://app.executespec.ai/login'>Sign in</a></li>
+                <li><a href='/data/benchmarks.json'>Raw results (JSON)</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class='legal'>
+        <span>© 2026 ExecuteSpec</span>
+        <span class='pip'>·</span>
+        <span>Made with care in Bangalore</span>
+        <span class='pip'>·</span>
+        <a href='/terms'>Terms</a>
+        <span class='pip'>·</span>
+        <a href='/privacy'>Privacy</a>
+    </div>
+</footer>
+
+<script src="../assets/benchmarks.js" defer></script>
+
+</body>
+</html>

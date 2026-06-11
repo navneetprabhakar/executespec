@@ -17,7 +17,7 @@
 | `frontend/index.html` | `<title>ExecuteSpec</title>` only — shared verified-report links unfurled blank | Meta description + full OG/twitter tags (og-hero.png) |
 | Onboarding | `/welcome` sandbox picker unreachable post-signup; GitHub-PAT gap discovered at PR-push time; compose cap said PRO max $25 (backend: $5) | `IdeWelcome` empty state carries starter samples inline; PAT pre-flight warning on compose; cap mirrors `resolveRunCostBudget` |
 | Proof assets | SWE-bench brief presented as canonical (59%/52%) | Marked **SUPERSEDED** — numbers invalid (untracked LIGHTWEIGHT-tier worker routing); do not quote until the rebuilt-harness re-run lands |
-| PH launch kit | Apr-21 vintage ($20 Pro / $29 MAX, 5-run free, old score formula) | Rewritten current (`website/product-hunt-launch.md`) |
+| PH launch kit | Apr-21 vintage ($20 Pro / $29 MAX, 5-run free, old score formula) | Rewritten current (`docs/marketing/product-hunt-launch.md`) |
 
 ## Ops checklist (cannot be done from the repo)
 
@@ -45,7 +45,7 @@
 7. **Proof assets for the announcement:** record the 60–90s demo video (script in the PH kit §6);
    run 5–10 real specs against known OSS repos and publish the shared verified reports as a small
    gallery — this replaces the retired SWE-bench numbers as launch proof.
-8. **Secondary copy sweeps (non-blocking):** `website/pricing-analysis.md` + `website/tier-decision.md`
+8. **Secondary copy sweeps (non-blocking):** `docs/marketing/pricing-analysis.md` + `docs/marketing/tier-decision.md`
    + `website/press-kit/README.md` still carry pre-V176 numbers; refresh or mark historical.
 9. **Do not quote any SWE-bench number** (59%/52% or the 7%→67% uplift) anywhere until the
    rebuilt-harness re-run lands (RL-2026-06-001 / `eval_methodology_rebuild`).
