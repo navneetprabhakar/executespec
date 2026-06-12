@@ -52,8 +52,27 @@ const NON_TERMINAL = new Set([
   'REVIEWING',
   'PAUSED',
 ]);
+const FALLBACK_PROVIDER_OPTIONS: api.ProviderEntry[] = [
+  {id: 'ANTHROPIC', label: 'Anthropic', models: []},
+  {id: 'OPENAI', label: 'OpenAI', models: []},
+  {id: 'GEMINI', label: 'Gemini', models: []},
+  {id: 'DEEPSEEK', label: 'DeepSeek', models: []},
+];
+const ENTERPRISE_PROVIDER_IDS = new Set(['OPENROUTER', 'FIREWORKS']);
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
+}
+// C6 (review/11) — quota subtitle segment shared by IdeWelcome + IdeCompose.
+// Never emits a leading separator; unlimited tiers say so in words instead of
+// the "0 / ∞ runs" jargon, and "this cycle" became "this month".
+function quotaSubtitle(
+  tier: string,
+  permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
+): string {
+  if (!permissions) return tier;
+  return permissions.monthlyRunLimit === -1
+    ? `${tier} · no run limit`
+    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this month · ${tier}`;
 }
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
@@ -74,6 +93,7 @@ function phaseLabel(status?: string | null): string {
 export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
@@ -146,11 +166,7 @@ export function IdeWelcome() {
     navigate('/compose');
   }
 
-  const runCap = permissions
-    ? permissions.monthlyRunLimit === -1
-      ? `${permissions.currentRunCount} runs this cycle`
-      : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this cycle`
-    : '— runs this cycle';
+  const runCap = quotaSubtitle(tier, permissions);
 
   const liveTasks = liveRun?.tasks ?? [];
   const liveDone = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
@@ -204,24 +220,24 @@ export function IdeWelcome() {
 
       <div style={{display: 'flex', gap: 10, marginBottom: 8}}>
         <Link className='ide-btn' to='/compose'>
-          ＋ New spec
+          ＋ New work
         </Link>
         <Link className='ide-btn ghost' to='/runs'>
-          ◎ All runs
+          ◎ Work
         </Link>
       </div>
 
-      <div className='ide-h2'>Recent runs</div>
+      <div className='ide-h2'>Recent work</div>
       {runs === null ? (
-        <IdeLoader label='Loading runs…' />
+        <IdeLoader label='Loading work…' />
       ) : runs.length === 0 ? (
         <div className='ide-card' style={{marginBottom: 8}}>
           <div className='ide-run-title' style={{marginBottom: 6}}>
             Ship your first verified PR
           </div>
           <div className='ide-sub' style={{marginBottom: 10}}>
-            Pick a starter spec — it runs in a sandbox project, costs 1 credit, and takes a few
-            minutes. Or write your own.
+            Pick a starter work request — it takes a few minutes — or write your own. Starters run
+            in a sandbox project · 1 credit (≈$5 of model spend) · no card needed.
           </div>
           {samples.length > 0 && (
             <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10}}>
@@ -267,6 +283,11 @@ export function IdeWelcome() {
                     {r.verifiedScore}
                   </IdeBadge>
                 )}
+                {typeof r.actualCostUsd === 'number' && (
+                  <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
+                    ${r.actualCostUsd.toFixed(2)}
+                  </span>
+                )}
                 {r.aiProvider && <span>{providerLabel(r.aiProvider)}</span>}
                 <span title={r.startedAt ? new Date(r.startedAt).toLocaleString() : undefined}>
                   {fmtWhen(r.startedAt)}
@@ -308,12 +329,18 @@ export function IdeCompose() {
   // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). '' = Default (org/system
   // matrix), i.e. send no modelName. modelsByProvider keys are lowercase provider names.
   const [modelName, setModelName] = useState('');
+  const [providerOptions, setProviderOptions] = useState<api.ProviderEntry[]>([]);
+  const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  // RUN-1 (review/11) — searchable project picker. The chip wall rendered every
+  // project; with ~50 projects the Run button landed screens below the fold.
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectQuery, setProjectQuery] = useState('');
   const [projectRepos, setProjectRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
   // Per-tier max hard cap, mirroring TierEnforcementService.resolveRunCostBudget:
@@ -322,10 +349,15 @@ export function IdeCompose() {
   const tierMaxCap = tier === 'FREE' ? 3 : tier === 'PRO' ? 5 : tier === 'ENTERPRISE' ? 1000 : 25;
   const [costCap, setCostCap] = useState<number>(Math.min(2, tierMaxCap));
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
+  // RUN-7 (review/11) — estimate freshness: timestamp of the last fetch + a
+  // "stale" flag that flips after 60s and surfaces a refresh link-button.
+  const [estimateAt, setEstimateAt] = useState<number | null>(null);
+  const [estimateStale, setEstimateStale] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
+  const [mobileStep, setMobileStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Compose handoff — a discovery surface (library / templates / chat compile)
   // may stash a pre-filled spec under `signal:pending-spec` before navigating
@@ -352,6 +384,13 @@ export function IdeCompose() {
       .catch(() => {});
   }, [permissions]);
 
+  useEffect(() => {
+    api
+      .getAvailableModels()
+      .then((m) => setProviderOptions(m.providers || []))
+      .catch(() => setProviderOptions([]));
+  }, []);
+
   // Onboarding sample specs — a quick "start from a sample" row.
   useEffect(() => {
     api
@@ -364,11 +403,22 @@ export function IdeCompose() {
   // per provider so the ENTERPRISE-only model selector can offer them. modelsByProvider keys are
   // lowercase provider names (e.g. 'anthropic'). Best-effort — selector just hides if it fails.
   useEffect(() => {
-    if (tier !== 'ENTERPRISE') return;
+    if (tier !== 'ENTERPRISE') {
+      setModelsByProvider({});
+      setModelLabels({});
+      setModelName('');
+      return;
+    }
     api
       .getOrgModelMatrix()
-      .then((m) => setModelsByProvider(m.modelsByProvider || {}))
-      .catch(() => setModelsByProvider({}));
+      .then((m) => {
+        setModelsByProvider(m.modelsByProvider || {});
+        setModelLabels(m.modelLabels || {});
+      })
+      .catch(() => {
+        setModelsByProvider({});
+        setModelLabels({});
+      });
   }, [tier]);
 
   // Reset the per-run model pin to "Default" whenever the provider changes — a model is only valid
@@ -383,7 +433,7 @@ export function IdeCompose() {
     try {
       const picked = await api.pickOnboardingSample(sample.id);
       setSpec(picked.spec || sample.title);
-      if (picked.preferredProvider) setProvider(picked.preferredProvider);
+      if (picked.preferredProvider) setProvider(picked.preferredProvider.toUpperCase());
     } catch {
       // Backend tracking is best-effort; still let the user start from the title.
       setSpec(sample.title);
@@ -417,16 +467,94 @@ export function IdeCompose() {
   useEffect(() => {
     if (!projectId || spec.trim().length < 12) {
       setEstimate(null);
+      setEstimateAt(null);
       return;
     }
     const t = setTimeout(() => {
       api
         .estimateRun(projectId, spec.trim())
-        .then(setEstimate)
-        .catch(() => setEstimate(null));
+        .then((e) => {
+          setEstimate(e);
+          setEstimateAt(Date.now());
+        })
+        .catch(() => {
+          setEstimate(null);
+          setEstimateAt(null);
+        });
     }, 600);
     return () => clearTimeout(t);
   }, [projectId, spec]);
+
+  // RUN-7 — flip the estimate card's freshness line to a refresh affordance
+  // 60s after the last fetch.
+  useEffect(() => {
+    setEstimateStale(false);
+    if (estimateAt == null) return;
+    const t = window.setTimeout(() => setEstimateStale(true), 60_000);
+    return () => clearTimeout(t);
+  }, [estimateAt]);
+
+  // RUN-7 — manual refresh re-runs the existing estimate fetch immediately.
+  function refreshEstimate() {
+    if (!projectId || spec.trim().length < 12) return;
+    api
+      .estimateRun(projectId, spec.trim())
+      .then((e) => {
+        setEstimate(e);
+        setEstimateAt(Date.now());
+      })
+      .catch(() => {
+        /* keep the last estimate on a failed refresh */
+      });
+  }
+
+  // RUN-1 — picker derivations: Sandbox + the 4 most recently created projects
+  // stay visible as chips; everything else lives behind the searchable panel.
+  // A selected project outside the top-4 is appended so it stays visible.
+  const recentProjects = useMemo(
+    () =>
+      [...projects]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 4),
+    [projects],
+  );
+  const chipProjects = useMemo(() => {
+    const selected = projectId ? projects.find((p) => p.id === projectId) : null;
+    if (selected && !recentProjects.some((p) => p.id === selected.id)) {
+      return [...recentProjects, selected];
+    }
+    return recentProjects;
+  }, [projects, projectId, recentProjects]);
+  const filteredProjects = useMemo(() => {
+    const needle = projectQuery.trim().toLowerCase();
+    if (!needle) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(needle));
+  }, [projects, projectQuery]);
+
+  const selectableProviders = useMemo(() => {
+    const options = providerOptions.length > 0 ? providerOptions : FALLBACK_PROVIDER_OPTIONS;
+    return options
+      .filter((p) => tier === 'ENTERPRISE' || !ENTERPRISE_PROVIDER_IDS.has(p.id.toUpperCase()))
+      .map((p) => ({...p, id: p.id.toUpperCase()}));
+  }, [providerOptions, tier]);
+
+  const modelLabelById = useMemo(() => {
+    const labels: Record<string, string> = {...modelLabels};
+    for (const p of providerOptions) {
+      for (const m of p.models || []) {
+        if (m.label) labels[m.id] = m.label;
+      }
+    }
+    return labels;
+  }, [modelLabels, providerOptions]);
+
+  const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+
+  function pickProject(id: string | null) {
+    setProjectId(id);
+    setProjectPickerOpen(false);
+    setProjectQuery('');
+  }
 
   function toggleRepo(repoId: string) {
     setSelectedRepoIds((prev) =>
@@ -438,9 +566,6 @@ export function IdeCompose() {
     permissions != null &&
     permissions.monthlyRunLimit !== -1 &&
     permissions.currentRunCount >= permissions.monthlyRunLimit;
-  const runsUsed = permissions
-    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
-    : '— / —';
 
   async function submit() {
     if (!spec.trim()) {
@@ -471,13 +596,37 @@ export function IdeCompose() {
     }
   }
 
+  const selectedProjectName = projectId
+    ? projects.find((p) => p.id === projectId)?.name || 'Selected project'
+    : 'Sandbox';
+  const mobileCanAdvanceFromSpec = spec.trim().length > 0;
+
   return (
-    <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>New spec</div>
+    <div className='ide-pane ide-compose' style={{maxWidth: 820}}>
+      <div className='ide-h1'>New work</div>
       <div className='ide-sub'>
-        Describe the change in plain language. The pipeline plans it, writes the code across your
-        repos, builds + tests, and opens a PR with a verified score. · {runsUsed} runs this cycle ·{' '}
-        {tier} tier
+        Describe the change in plain language. ExecuteSpec plans the work, writes the code across
+        your repos, verifies it, and returns a scored pull request.{' '}
+        {quotaSubtitle(tier, permissions)}
+      </div>
+
+      <div className='ide-compose-steps' aria-label='New work steps'>
+        {[
+          [1, 'Describe'],
+          [2, 'Context'],
+          [3, 'Controls'],
+          [4, 'Submit'],
+        ].map(([step, label]) => (
+          <button
+            key={step}
+            type='button'
+            className={mobileStep === step ? 'active' : ''}
+            onClick={() => setMobileStep(step as 1 | 2 | 3 | 4)}
+          >
+            <span>{step}</span>
+            {label}
+          </button>
+        ))}
       </div>
 
       {isAtCap && (
@@ -502,235 +651,417 @@ export function IdeCompose() {
         </div>
       )}
 
-      <textarea
-        className='ide-textarea'
-        rows={12}
-        placeholder='e.g. Add a /health endpoint that returns build SHA + uptime, with a unit test…'
-        value={spec}
-        onChange={(e) => setSpec(e.target.value)}
-      />
-      <div style={{marginTop: 10}}>
-        <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
-      </div>
+      <section className={`ide-compose-section${mobileStep === 1 ? ' active' : ''}`}>
+        <textarea
+          className='ide-textarea ide-compose-textarea'
+          rows={12}
+          placeholder='e.g. Add a /health endpoint that returns build SHA + uptime, with a unit test…'
+          value={spec}
+          onChange={(e) => setSpec(e.target.value)}
+        />
+        <div style={{marginTop: 10}}>
+          <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
+        </div>
 
-      {samples.length > 0 && (
-        <>
-          <div className='ide-h2'>Start from a sample</div>
-          <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-            {samples.map((s) => (
-              <button
-                key={s.id}
-                className='ide-btn ghost'
-                disabled={sampleBusyId != null}
-                onClick={() => void applySample(s)}
-                title={`${s.category} · ${s.complexity}`}
-              >
-                {sampleBusyId === s.id ? '…' : s.title}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <div className='ide-h2'>Project</div>
-      <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
-        <button
-          className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
-          onClick={() => setProjectId(null)}
-        >
-          {projectId == null ? '✓ ' : ''}Sandbox (no repo)
-        </button>
-        {projects.map((p) => (
-          <button
-            key={p.id}
-            className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
-            onClick={() => setProjectId(p.id)}
-          >
-            {projectId === p.id ? '✓ ' : ''}
-            {p.name}
-          </button>
-        ))}
-      </div>
-      <div className='ide-sub' style={{marginTop: 0}}>
-        {projectId
-          ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-          : 'Sandbox mode: a temporary project is created. Pick a real project to run against your codebase.'}
-      </div>
-
-      {projectId && projectRepos.length > 0 && (
-        <>
-          <div className='ide-h2'>Repos the agent may touch</div>
-          <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-            {projectRepos.map((r) => {
-              const rId = repoIdFor(r);
-              const selected = selectedRepoIds.includes(rId);
-              return (
+        {samples.length > 0 && (
+          <>
+            <div className='ide-h2'>Start from a sample</div>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+              {samples.map((s) => (
                 <button
-                  key={rId}
-                  className={selected ? 'ide-btn' : 'ide-btn ghost'}
-                  onClick={() => toggleRepo(rId)}
+                  key={s.id}
+                  className='ide-btn ghost'
+                  disabled={sampleBusyId != null}
+                  onClick={() => void applySample(s)}
+                  title={`${s.category} · ${s.complexity}`}
                 >
-                  {selected ? '✓ ' : ''}
-                  {repoDisplayName(r)}
+                  {sampleBusyId === s.id ? '…' : s.title}
                 </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
-          system PAT since 2026-05-23). Without one, a project run completes but
-          the PR push fails — previously discovered only on the result page. */}
-      {projectId != null && user != null && !user.hasGithubPat && (
-        <div
-          className='ide-card'
-          style={{
-            borderColor: 'var(--ide-yellow)',
-            margin: '12px 0',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          No GitHub token connected — the run will generate code, but it can't open a PR on your
-          repo until you add one.{' '}
-          <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            Connect GitHub →
-          </Link>
-        </div>
-      )}
-
-      <div style={{display: 'flex', gap: 12, margin: '14px 0', flexWrap: 'wrap'}}>
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Provider
-          </div>
-          <select
-            className='ide-select'
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            <option value='ANTHROPIC'>Anthropic</option>
-            <option value='OPENAI'>OpenAI</option>
-            <option value='GEMINI'>Gemini</option>
-            {tier === 'ENTERPRISE' && <option value='OPENROUTER'>OpenRouter</option>}
-          </select>
-        </div>
-        {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
-            default matrix for this run only. '' = Default → no modelName sent. */}
-        {tier === 'ENTERPRISE' && (
-          <div style={{flex: 1, minWidth: 180}}>
-            <div className='ide-h2' style={{marginTop: 0}}>
-              Model · Beta
-            </div>
-            <select
-              className='ide-select'
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-            >
-              <option value=''>Recommended (default)</option>
-              {(modelsByProvider[provider.toLowerCase()] || []).map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
               ))}
-            </select>
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-              Overrides org &amp; default matrix for this run
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className={`ide-compose-section${mobileStep === 2 ? ' active' : ''}`}>
+        <div className='ide-h2'>Context</div>
+        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
+          <button
+            className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
+            onClick={() => pickProject(null)}
+          >
+            {projectId == null ? '✓ ' : ''}Sandbox (no repo)
+          </button>
+          {chipProjects.map((p) => (
+            <button
+              key={p.id}
+              className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
+              onClick={() => pickProject(p.id)}
+            >
+              {projectId === p.id ? '✓ ' : ''}
+              {p.name}
+            </button>
+          ))}
+          {projects.length > 4 && (
+            <button
+              className='ide-btn ghost'
+              aria-expanded={projectPickerOpen}
+              onClick={() => {
+                setProjectPickerOpen((v) => !v);
+                setProjectQuery('');
+              }}
+            >
+              All projects… ({projects.length})
+            </button>
+          )}
+        </div>
+        {projectPickerOpen && (
+          <div
+            className='ide-card'
+            style={{marginBottom: 8, padding: 10}}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setProjectPickerOpen(false);
+            }}
+          >
+            <input
+              className='ide-input'
+              autoFocus
+              placeholder='Search projects…'
+              value={projectQuery}
+              onChange={(e) => setProjectQuery(e.target.value)}
+              aria-label='Search projects'
+              style={{marginBottom: 8}}
+            />
+            <div style={{maxHeight: 240, overflowY: 'auto'}}>
+              {filteredProjects.length === 0 ? (
+                <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
+                  No projects match “{projectQuery.trim()}”.
+                </div>
+              ) : (
+                filteredProjects.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type='button'
+                    onClick={() => pickProject(p.id)}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom:
+                        i < filteredProjects.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      padding: '8px 6px',
+                      fontSize: 13,
+                      color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {projectId === p.id ? '✓ ' : ''}
+                    {p.name}
+                  </button>
+                ))
+              )}
             </div>
           </div>
         )}
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Mode
-          </div>
-          <select
-            className='ide-select'
-            value={mode}
-            onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
+        <div className='ide-sub' style={{marginTop: 0}}>
+          {projectId
+            ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
+            : 'Sandbox mode: a temporary context is created. Pick a project to work against your codebase.'}
+        </div>
+
+        {projectId && projectRepos.length > 0 && (
+          <>
+            <div className='ide-h2'>Repos the agent may touch</div>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+              {projectRepos.map((r) => {
+                const rId = repoIdFor(r);
+                const selected = selectedRepoIds.includes(rId);
+                return (
+                  <button
+                    key={rId}
+                    className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                    onClick={() => toggleRepo(rId)}
+                  >
+                    {selected ? '✓ ' : ''}
+                    {repoDisplayName(r)}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
+          system PAT since 2026-05-23). Without one, a project run completes but
+          the PR push fails — previously discovered only on the result page. */}
+        {projectId != null && user != null && !user.hasGithubPat && (
+          <div
+            className='ide-card'
+            style={{
+              borderColor: 'var(--ide-yellow)',
+              margin: '12px 0',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
           >
-            <option value='PRODUCTION'>Production (plan gate)</option>
-            <option value='PROTOTYPE'>Prototype (auto)</option>
-          </select>
-          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-            Production pauses for plan + price approval; Prototype runs straight through.
+            No GitHub token connected — the run will generate code, but it can't open a PR on your
+            repo until you add one.{' '}
+            <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
+              Connect GitHub →
+            </Link>
           </div>
-        </div>
-        <div style={{flex: 1, minWidth: 180}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Spending cap
-          </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-            <input
-              className='ide-input'
-              type='number'
-              step='0.5'
-              min='0.5'
-              max={tierMaxCap}
-              value={costCap}
-              onChange={(e) =>
-                setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
-              }
-              style={{width: 90}}
-            />
-            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              USD · max ${tierMaxCap === 1000 ? '∞' : tierMaxCap}
-            </span>
-          </div>
-        </div>
-      </div>
+        )}
+      </section>
 
-      <div
-        style={{display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12}}
-      >
-        <label
-          style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
+      {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
+          .ide-stack-mobile collapses to one column under 600px. */}
+      <section className={`ide-compose-section${mobileStep === 3 ? ' active' : ''}`}>
+        <div
+          className='ide-stack-mobile'
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${tier === 'ENTERPRISE' ? 4 : 3}, minmax(0, 1fr))`,
+            gap: 12,
+            margin: '14px 0',
+          }}
         >
-          <input type='checkbox' checked={tddMode} onChange={(e) => setTddMode(e.target.checked)} />
-          TDD mode — write tests first
-        </label>
-        <div style={{flex: 1, minWidth: 220}}>
-          <input
-            className='ide-input'
-            type='url'
-            placeholder='Optional Figma URL (passed to the planner)'
-            value={figmaUrl}
-            onChange={(e) => setFigmaUrl(e.target.value)}
-            style={{width: '100%'}}
-          />
-        </div>
-      </div>
-
-      {estimate && (
-        <div className='ide-card' style={{marginBottom: 12}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Estimate from project history
+          <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-provider-label' style={{marginTop: 0}}>
+              Provider
+            </div>
+            <select
+              className='ide-select'
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              {selectableProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label || providerLabel(p.id)}
+                  {p.tag ? ` · ${p.tag}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className='ide-kv'>
-            <span>Tasks</span>
-            <span>
-              {estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh}
-            </span>
-          </div>
-          <div className='ide-kv'>
-            <span>Cost</span>
-            <span>
-              ${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
-            </span>
-          </div>
-          {estimate.basis && (
-            <div className='ide-sub' style={{marginTop: 6}}>
-              {estimate.basis}
+          {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
+            default matrix for this run only. '' = Default → no modelName sent. */}
+          {tier === 'ENTERPRISE' && (
+            <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
+              <div className='ide-h2' id='compose-model-label' style={{marginTop: 0}}>
+                Model · Beta
+              </div>
+              <select
+                className='ide-select'
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+              >
+                <option value=''>Recommended (default)</option>
+                {providerModels.map((m) => (
+                  <option key={m} value={m}>
+                    {modelLabelById[m] || m}
+                  </option>
+                ))}
+              </select>
+              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                Overrides org &amp; default matrix for this run
+              </div>
             </div>
           )}
+          <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-mode-label' style={{marginTop: 0}}>
+              Approval
+            </div>
+            <select
+              className='ide-select'
+              value={mode}
+              onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
+            >
+              <option value='PRODUCTION'>Ask before coding</option>
+              <option value='PROTOTYPE'>Start automatically</option>
+            </select>
+            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+              Recommended: review the plan and price before code changes begin.
+            </div>
+          </div>
+          <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-cap-label' style={{marginTop: 0}}>
+              Spending cap
+            </div>
+            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+              <input
+                className='ide-input'
+                type='number'
+                step='0.5'
+                min='0.5'
+                max={tierMaxCap}
+                value={costCap}
+                aria-labelledby='compose-cap-label'
+                onChange={(e) =>
+                  setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
+                }
+                style={{width: 90}}
+              />
+              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                {/* RUN-6 — say "no platform cap" in words instead of "$∞". */}
+                {tierMaxCap === 1000
+                  ? 'USD · no platform cap on your plan'
+                  : `USD · max $${tierMaxCap}`}
+              </span>
+            </div>
+          </div>
         </div>
-      )}
 
-      {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <div className='ide-run-action'>
-        <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-          {busy ? 'Submitting…' : '▷ Run spec'}
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            marginBottom: 12,
+          }}
+        >
+          <label
+            style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
+          >
+            <input
+              type='checkbox'
+              checked={tddMode}
+              onChange={(e) => setTddMode(e.target.checked)}
+            />
+            TDD mode — write tests first
+          </label>
+          <div style={{flex: 1, minWidth: 220}}>
+            <label
+              htmlFor='compose-figma-url'
+              style={{
+                display: 'block',
+                fontSize: 12,
+                color: 'var(--ide-fg-muted)',
+                marginBottom: 4,
+              }}
+            >
+              Figma URL (optional)
+            </label>
+            <input
+              id='compose-figma-url'
+              className='ide-input'
+              type='url'
+              placeholder='https://figma.com/… (passed to the planner)'
+              value={figmaUrl}
+              onChange={(e) => setFigmaUrl(e.target.value)}
+              style={{width: '100%'}}
+            />
+          </div>
+        </div>
+
+        {estimate && (
+          <div className='ide-card' style={{marginBottom: 12}}>
+            <div className='ide-h2' style={{marginTop: 0}}>
+              Estimate from project history
+            </div>
+            {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
+            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+              {estimateStale ? (
+                <button
+                  type='button'
+                  onClick={refreshEstimate}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    font: 'inherit',
+                    color: 'var(--ide-accent)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  · refresh
+                </button>
+              ) : (
+                '· refreshed just now'
+              )}
+            </div>
+            <div className='ide-kv'>
+              <span>Estimated steps</span>
+              <span>
+                {estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh}
+              </span>
+            </div>
+            <div className='ide-kv'>
+              <span>Cost</span>
+              <span>
+                ${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
+              </span>
+            </div>
+            {estimate.basis && (
+              <div className='ide-sub' style={{marginTop: 6}}>
+                {estimate.basis}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className={`ide-compose-section${mobileStep === 4 ? ' active' : ''}`}>
+        <div className='ide-card ide-compose-review'>
+          <div className='ide-h2' style={{marginTop: 0}}>
+            Review request
+          </div>
+          <div className='ide-kv'>
+            <span>Change</span>
+            <span>
+              {spec.trim()
+                ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '…' : ''}`
+                : 'Not described'}
+            </span>
+          </div>
+          <div className='ide-kv'>
+            <span>Context</span>
+            <span>{selectedProjectName}</span>
+          </div>
+          <div className='ide-kv'>
+            <span>Provider</span>
+            <span>{providerLabel(provider)}</span>
+          </div>
+          <div className='ide-kv'>
+            <span>Approval</span>
+            <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
+          </div>
+          <div className='ide-kv'>
+            <span>Cap</span>
+            <span>${costCap.toFixed(2)}</span>
+          </div>
+        </div>
+        {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
+        <div className='ide-run-action'>
+          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+            {busy ? 'Submitting…' : 'Create plan'}
+          </button>
+        </div>
+      </section>
+      <div className='ide-compose-mobile-actions'>
+        <button
+          type='button'
+          className='ide-btn ghost'
+          onClick={() => setMobileStep(Math.max(1, mobileStep - 1) as 1 | 2 | 3 | 4)}
+          disabled={mobileStep === 1}
+        >
+          Back
         </button>
+        {mobileStep < 4 ? (
+          <button
+            type='button'
+            className='ide-btn'
+            onClick={() => setMobileStep(Math.min(4, mobileStep + 1) as 1 | 2 | 3 | 4)}
+            disabled={mobileStep === 1 && !mobileCanAdvanceFromSpec}
+          >
+            Next
+          </button>
+        ) : (
+          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+            {busy ? 'Submitting…' : 'Create plan'}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -753,6 +1084,15 @@ function taskIsDone(s?: string | null): boolean {
 function taskIsRunning(s?: string | null): boolean {
   const u = (s || '').toUpperCase();
   return u === 'WORKING' || u === 'RUNNING' || u === 'EXECUTING';
+}
+// Friendly live-log type labels (review/11 IdeLive) — raw enums like TOOL_CALL
+// read as plumbing. Colors keep the same keying in the renderer below.
+function logTypeLabel(type?: string): string {
+  const t = (type || 'log').toLowerCase();
+  if (t.includes('tool')) return '🔧 tool';
+  if (t.includes('llm') || t.includes('completion')) return '🧠 model';
+  if (t.includes('warn')) return '⚠ warning';
+  return t;
 }
 
 export function IdeLive() {
@@ -853,13 +1193,17 @@ export function IdeLive() {
   // Prefer SSE entries (real-time); they're the only live source here.
   const logList = sseEntries.slice(-100) as LiveEntry[];
   const sseConnected = sseStatus === 'CONNECTED';
+  // Transport jargon → plain status (review/11 IdeLive copy).
   const sseLabel = sseConnected
-    ? 'live · streaming'
+    ? 'Live'
     : sseStatus === 'CONNECTING'
-      ? 'connecting…'
+      ? 'Connecting…'
       : sseStatus === 'RECONNECTING'
-        ? 'reconnecting…'
-        : 'polling';
+        ? 'Reconnecting — brief delay…'
+        : 'Live (5s refresh)';
+  // Mobile hides the task list via CSS — keep a one-line summary visible at
+  // all widths (subtle enough to be harmless on desktop too).
+  const currentTaskTitle = tasks.find((t) => taskIsRunning(t.status))?.title;
 
   return (
     <div className='ide-pane' style={{maxWidth: 860}}>
@@ -874,11 +1218,11 @@ export function IdeLive() {
       >
         <div>
           <div className='ide-h1' style={{marginBottom: 2}}>
-            Live · {shortRunId(runId)}
+            Work in progress · {shortRunId(runId)}
           </div>
           <div className='ide-sub ide-mono' style={{marginTop: 0}}>
             {tasks.length
-              ? `${completed}/${tasks.length} tasks`
+              ? `${completed}/${tasks.length} steps`
               : (run?.status || '').toLowerCase() || 'running'}{' '}
             · {elapsed} · ${spent.toFixed(2)}
             {tokIn + tokOut > 0 && ` · ${(tokIn + tokOut).toLocaleString()} tok`}
@@ -887,19 +1231,20 @@ export function IdeLive() {
         {!terminal && (
           <button
             className='ide-btn ghost'
+            style={{color: 'var(--ide-red)'}}
             onClick={() => setConfirmCancel(true)}
             disabled={cancelBusy}
           >
-            {cancelBusy ? 'Cancelling…' : '✕ Cancel run'}
+            {cancelBusy ? 'Cancelling…' : 'Cancel work'}
           </button>
         )}
       </div>
 
       <ConfirmModal
         open={confirmCancel}
-        title='Cancel run'
-        body='Cancel this run? The agent is interrupted immediately; completed tasks are kept, in-flight changes are discarded.'
-        confirmLabel='Cancel run'
+        title='Cancel work'
+        body='Cancel this work? The agent is interrupted immediately; completed steps are kept, in-flight changes are discarded.'
+        confirmLabel='Cancel work'
         cancelLabel='Keep running'
         danger
         busy={cancelBusy}
@@ -910,7 +1255,7 @@ export function IdeLive() {
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '8px 0'}}>{err}</div>}
 
       {!run ? (
-        <IdeLoader label='Connecting to run…' />
+        <IdeLoader label='Connecting to work…' />
       ) : (
         <>
           <div className='ide-card'>
@@ -966,7 +1311,7 @@ export function IdeLive() {
 
           {tasks.length > 0 && (
             <>
-              <div className='ide-h2'>Tasks</div>
+              <div className='ide-h2'>Steps</div>
               <div className='ide-card'>
                 {tasks.map((t, i) => {
                   const u = (t.status || '').toUpperCase();
@@ -988,7 +1333,7 @@ export function IdeLive() {
                     <div key={t.taskId || i} className='ide-kv' style={{alignItems: 'center'}}>
                       <span style={{display: 'flex', alignItems: 'center', gap: 8}}>
                         <span style={{color}}>{icon}</span>
-                        {t.title || `Task ${i + 1}`}
+                        {t.title || `Step ${i + 1}`}
                       </span>
                       <IdeBadge kind={statusKind(t.status)}>{t.status}</IdeBadge>
                     </div>
@@ -999,7 +1344,7 @@ export function IdeLive() {
           )}
 
           <div className='ide-h2'>
-            Live log{logList.length ? ` · ${logList.length}` : ''}{' '}
+            Activity log{logList.length ? ` · ${logList.length}` : ''}{' '}
             <span
               className='ide-mono'
               style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
@@ -1007,9 +1352,15 @@ export function IdeLive() {
               · {sseLabel}
             </span>
           </div>
+          {tasks.length > 0 && (
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '0 0 6px'}}>
+              ▶ {completed}/{tasks.length} steps
+              {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+            </div>
+          )}
           {logList.length === 0 ? (
             <div className='ide-card'>
-              <IdeLoader label='Waiting for the first tool call… the agent is warming up.' />
+              <IdeLoader label='Waiting for the first tool call… the agent is warming up. Usually 30–60s.' />
             </div>
           ) : (
             <div
@@ -1042,11 +1393,8 @@ export function IdeLive() {
                       lineHeight: 1.5,
                     }}
                   >
-                    <span
-                      className='ide-mono'
-                      style={{color, marginRight: 8, textTransform: 'uppercase', fontSize: 10}}
-                    >
-                      {ev.type || 'log'}
+                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
+                      {logTypeLabel(ev.type)}
                     </span>
                     {ev.timestamp && (
                       <span
