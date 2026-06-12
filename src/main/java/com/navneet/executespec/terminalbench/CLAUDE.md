@@ -24,8 +24,8 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 
 | File | Purpose |
 |------|---------|
-| `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?, wallClockSeconds?, llmReadTimeoutSeconds?, transientRetryMaxAttempts?}` → `{runId, sseToken}`; `DELETE /api/v2/test/terminal-bench/{runId}` cancels a TB worker thread directly. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
-| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Active TB worker threads are tracked separately from `RunOrchestrator`; adapter interruption calls the TB DELETE endpoint so Harbor cancellation interrupts/unregisters/finalizes the TB run instead of leaking spend. Holds the terminal-task `TB_SYSTEM_PROMPT` (now incl. the method-compliance line — "the hidden tests verify the METHOD too", from the TB 2.0 autopsy's built-from-source miss class). Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. **Per-task wall clock (RL-2026-06, TB 2.0 full-89 autopsy):** `start`/`runWorker` accept an optional `wallClockSeconds` (clamped 120–3420; null → the 900s default). Harbor kills the agent phase at the TASK'S OWN `[agent] timeout_sec` (900s for most TB2 tasks — NOT the previously-believed 1350s — up to 3600s for heavy ones), so the flat 900s cap raced Harbor's kill on 900s tasks (54 trials died at exactly 900.0s, finalizer dead-on-arrival) and surrendered 75% of the budget on 3600s tasks (regex-chess / mteb-leaderboard). The adapter derives the value from the cached task package's task.toml and now passes TB-only LLM read-timeout/retry caps so provider stalls return terminally within Harbor's budget. **`extractDeliverablePaths`** now runs THREE matchers: the absolute `/app/…\.ext` `DELIVERABLE_PATH` + the `RELATIVE_DELIVERABLE` bare-`name.ext`-after-output-verb (write-compressor's "Write me **data.comp**") + an **`EXTENSIONLESS_DELIVERABLE`** verb-scoped absolute matcher (polyglot-rust-c's extension-less `/app/polyglot`, which the dotted matcher never extracted → gate inert → 4/5 trials artifact-less); the extracted contract is also **echoed deterministically into the worker prompt** ("REQUIRED DELIVERABLES — …"). Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
+| `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
+| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. **`extractDeliverablePaths` (RL-2026-06-016)** now runs TWO matchers: the absolute `/app/…\.ext` `DELIVERABLE_PATH` + a `RELATIVE_DELIVERABLE` that catches a bare `name.ext` introduced by an output verb (write/create/produce/…) in the same clause (`[^./]` gap can't cross a `/` into an absolute path nor a `.` into the next sentence; letter-led extension avoids `e.g.`/`i.e.`), prepended `/app/`. Fixes the write-compressor miss where "Write me **data.comp**" left the un-prefixed OUTPUT unextracted (the gate saw only the inputs → passed). Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
 
@@ -56,7 +56,6 @@ es_harbor_agent:ExecuteSpecAgent -m deepseek/deepseek-v4-flash`. The adapter run
 server only needs to be reachable at `localhost` (no in-container networking). Tool execution maps the
 12 worker tools onto `environment.exec` (shell/build/test/git, cat for readFile, grep for searchFiles,
 base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_BASE`, `ES_MAX_ITERS`,
-`ES_TOOL_TIMEOUT`, `ES_TB_LLM_READ_TIMEOUT_SECONDS`, `ES_TB_LLM_RETRY_ATTEMPTS`,
 `ES_PAT` or `ES_ADMIN_EMAIL`/`ES_ADMIN_PW`. Populates Harbor's `AgentContext` cost/tokens from
 `GET /api/runs/{id}/cost`.
 
@@ -83,17 +82,6 @@ base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_
   backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
   runs the forced terminal finalizer so the model must emit `completeTask` or write/edit the exact
   `/app` artifact instead of failing the ExecuteSpec run while the artifact may already be correct.
-- TB 2.1 pilot autopsy tightened the required-deliverable path: if the artifact deadline fires and
-  extracted required paths are still missing, the worker forces a terminal finalizer immediately.
-  The finalizer may no longer complete a run just because a shell/write/edit call returned an OK
-  envelope, and it may no longer accept `completeTask` while required paths are missing. It returns
-  to the main loop, where the bounded deliverable gate owns fail-open. This targets the
-  `gcode-to-text` class: shell-heavy exploration produced no `/app/out.txt` but was previously
-  allowed to terminate as complete.
-- The Harbor adapter now stamps `context.metadata.es_run_id` immediately after `/start` succeeds and
-  best-effort cancels the backend run on adapter interruption/timeout. Harbor timeout result JSONs
-  therefore keep the ExecuteSpec run linkage, and server-side work is not left orphaned after the
-  agent phase is killed.
 - Latest comparable first-20 run (`/tmp/es-tb-jobs/es-deepseek-base20-iter100-finalizer-20260606-095500`):
   **12/20 resolved (60%)**, **1 Harbor `AgentTimeoutError`**, **$0.400126**, **47m52s**. The
   100-floor + finalizer run fixed `openssl-selfsigned-cert` and `sanitize-git-repo` versus the

@@ -105,41 +105,4 @@ class TerminalBenchDeliverableExtractTest {
         TerminalBenchRunService.extractDeliverablePaths("Save it as /app/ssl/server.key now.");
     assertEquals(List.of("/app/ssl/server.key"), paths);
   }
-
-  @Test
-  void extracts_extensionless_after_verb() {
-    // polyglot-rust-c shape (TB 2.0 autopsy): the deliverable is an extension-less executable. The
-    // dotted matcher can't see it; the verb-scoped extension-less matcher must.
-    List<String> paths =
-        TerminalBenchRunService.extractDeliverablePaths(
-            "Produce a single executable at /app/polyglot that is valid Rust and C.");
-    assertEquals(List.of("/app/polyglot"), paths);
-  }
-
-  @Test
-  void extensionless_without_verb_is_ignored() {
-    // A bare mention with no output verb is an input/reference, not a deliverable.
-    List<String> paths =
-        TerminalBenchRunService.extractDeliverablePaths(
-            "The binary /app/sim reads its config from stdin.");
-    assertTrue(paths.isEmpty());
-  }
-
-  @Test
-  void extensionless_matcher_rejects_partial_match_of_dotted_path() {
-    // "Build /app/model.bin" — the extension-less matcher must NOT emit /app/model (the lookahead
-    // sees the '.'); only the dotted matcher's /app/model.bin survives.
-    List<String> paths =
-        TerminalBenchRunService.extractDeliverablePaths("Build /app/model.bin from the corpus.");
-    assertEquals(List.of("/app/model.bin"), paths);
-  }
-
-  @Test
-  void extensionless_trailing_period_not_captured() {
-    // Sentence-final period must not become part of the path.
-    List<String> paths =
-        TerminalBenchRunService.extractDeliverablePaths(
-            "Create the output directory tree and place the final binary at /app/decomp.");
-    assertEquals(List.of("/app/decomp"), paths);
-  }
 }

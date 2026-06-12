@@ -783,7 +783,7 @@ export function OrgSettingsPage() {
                         <option value=''>Default · {def}</option>
                         {(matrix.modelsByProvider[p] ?? []).map((mdl) => (
                           <option key={mdl} value={mdl}>
-                            {mdl}
+                            {matrix.modelLabels?.[mdl] || mdl}
                           </option>
                         ))}
                       </select>

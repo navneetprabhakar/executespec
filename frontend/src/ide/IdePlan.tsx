@@ -21,7 +21,7 @@ function planStatusPhrase(s: string): string {
   return 'in progress';
 }
 
-// Plan-approval gate. Polls the run; auto-routes to Live (executing) or Result
+// Plan-approval gate. Polls the work item; auto-routes to Live (executing) or Result
 // (terminal). When AWAITING_APPROVAL, shows the plan + credits/cap + Approve.
 export default function IdePlan() {
   const {runId = ''} = useParams();
@@ -100,21 +100,21 @@ export default function IdePlan() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>Plan</div>
-      <div className='ide-sub ide-mono'>{runId}</div>
+      <div className='ide-h1'>Review plan</div>
+      <div className='ide-sub ide-mono'>Work {runId}</div>
 
       {!run ? (
         <IdeLoader label='Loading plan…' />
       ) : !awaiting ? (
         <div className='ide-card'>
           <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-            This run is {planStatusPhrase(status)} — this page updates automatically.
+            This work is {planStatusPhrase(status)} — this page updates automatically.
           </div>
           <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
             <IdeBadge kind={statusKind(run.status)}>{run.status}</IdeBadge>
             {planStatusPhrase(status) === 'being planned' && (
               <span style={{color: 'var(--ide-fg-muted)'}}>
-                Planning — classifying + outlining your spec…
+                Planning — classifying + outlining your request…
               </span>
             )}
           </div>
@@ -128,15 +128,15 @@ export default function IdePlan() {
           )}
           <div className='ide-card'>
             <div className='ide-kv'>
-              <span>Strategy</span>
+              <span>Plan shape</span>
               <span>{run.planStrategy || '—'}</span>
             </div>
             <div className='ide-kv'>
-              <span>Tasks</span>
+              <span>Steps</span>
               <span>{tasks.length}</span>
             </div>
             <div className='ide-kv'>
-              <span>Credits to charge</span>
+              <span>Credits on approval</span>
               <span>{run.creditsCharged ?? '—'}</span>
             </div>
             <div className='ide-kv'>
@@ -148,7 +148,7 @@ export default function IdePlan() {
               </span>
             </div>
             <div className='ide-kv'>
-              <span>Hard cap</span>
+              <span>Spend cap</span>
               <span>{usd(run.hardCapUsd)}</span>
             </div>
             <div
@@ -162,14 +162,14 @@ export default function IdePlan() {
               }}
             >
               1 credit ≈ $5 of model spend. Charged when you approve.{' '}
-              <strong style={{color: 'var(--ide-fg)'}}>Fully refunded if the run fails</strong>{' '}
-              (build broken or run errored). Cancelling before completion refunds unspent credit.
-              Spend never exceeds the hard cap.
+              <strong style={{color: 'var(--ide-fg)'}}>Fully refunded if the work fails</strong>{' '}
+              (build broken or execution errored). Cancelling before completion refunds unspent
+              credit. Spend never exceeds the hard cap.
             </div>
           </div>
 
           <div className='ide-h2'>
-            Plan · {tasks.length} step{tasks.length === 1 ? '' : 's'}
+            Work plan · {tasks.length} step{tasks.length === 1 ? '' : 's'}
           </div>
           <div className='ide-card'>
             <RunTimeline tasks={tasks} />
@@ -202,7 +202,7 @@ export default function IdePlan() {
                   disabled={busy === 'e' || !feedback.trim()}
                   onClick={revise}
                 >
-                  {busy === 'e' ? 'Revising…' : '↻ Submit revision'}
+                  {busy === 'e' ? 'Revising…' : 'Submit requested changes'}
                 </button>
                 <button className='ide-btn ghost' onClick={() => setEditing(false)}>
                   Cancel
@@ -226,7 +226,7 @@ export default function IdePlan() {
             <button className='ide-btn' disabled={busy === 'a'} onClick={approve}>
               {busy === 'a'
                 ? 'Approving…'
-                : `✓ Approve · charge ${run.creditsCharged ?? 1} credit(s)`}
+                : `Approve and start work · ${run.creditsCharged ?? 1} credit(s)`}
             </button>
             <button
               className='ide-btn ghost'

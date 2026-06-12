@@ -6,11 +6,9 @@ import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {PlusIcon, StatusDot} from '@/ide/IdeIcons';
 
 /**
- * ConsoleHome — the control-plane dashboard (RL-2026-05-052, web reframe). Replaces
- * the IDE "welcome" with mission control: a Start-a-run hero, a Needs-your-attention
- * block (plan gates + failures), Active runs (live), Recent runs, and Projects.
- * Rendered at /home only when the console flag is on (App.tsx). Reuses the existing
- * api + the --ide-* themed card styles.
+ * ConsoleHome — product cockpit. It avoids implementation nouns on the first
+ * screen: users see what needs attention, how to start work, what finished, and
+ * which project contexts exist.
  */
 const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'];
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
@@ -46,6 +44,21 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
       )}
     </button>
   );
+}
+
+function nextAction(r: api.RunSummary, pendingPr = 0): {label: string; to: string} {
+  const status = (r.status || '').toUpperCase();
+  if (status === 'AWAITING_APPROVAL') return {label: 'Approve plan', to: `/plan/${r.runId}`};
+  if (pendingPr > 0) {
+    return {
+      label: `Review ${pendingPr} PR comment${pendingPr === 1 ? '' : 's'}`,
+      to: `/result/${r.runId}`,
+    };
+  }
+  if (!isTerminal(r.status)) return {label: 'Watch progress', to: `/live/${r.runId}`};
+  if (isFailed(r.status)) return {label: 'Fix failure', to: `/result/${r.runId}`};
+  if (r.githubPrUrl || r.scmPrUrl) return {label: 'Open result', to: `/result/${r.runId}`};
+  return {label: 'Review result', to: `/result/${r.runId}`};
 }
 
 export default function ConsoleHome() {
@@ -99,6 +112,15 @@ export default function ConsoleHome() {
   const active = runs.filter((r) => !isTerminal(r.status));
   const recent = runs.filter((r) => isTerminal(r.status)).slice(0, 8);
   const failed = runs.filter((r) => isFailed(r.status)).slice(0, 5);
+  const reviewRuns = runs.filter(
+    (r) => prPending[r.runId] && !gate.some((g) => g.runId === r.runId),
+  );
+  const attention = [
+    ...gate,
+    ...reviewRuns,
+    ...failed.filter((f) => !gate.some((g) => g.runId === f.runId) && !prPending[f.runId]),
+    ...active.filter((a) => !gate.some((g) => g.runId === a.runId)),
+  ].slice(0, 8);
 
   // Live refresh while anything is in flight (gate waiting or a run active).
   const liveCount = active.length + gate.length;
@@ -112,94 +134,105 @@ export default function ConsoleHome() {
 
   return (
     <div className='con-home'>
-      <div className='con-hero'>
-        <div>
-          <div className='con-hero-title'>Ship a change from a spec</div>
-          <div className='con-hero-sub'>
-            Describe what you want. ExecuteSpec plans it, you approve the plan, then it codes,
-            tests, and opens a pull request with a verified score.
+      <div className='con-cockpit'>
+        <div className='con-hero'>
+          <div>
+            <div className='con-hero-kicker'>Mission control</div>
+            <div className='con-hero-title'>What needs attention?</div>
+            <div className='con-hero-sub'>
+              Review approvals, watch live work, and start the next code change from one console.
+            </div>
           </div>
-        </div>
-        <button className='con-newrun lg' onClick={() => navigate('/compose')}>
-          <PlusIcon size={16} />
-          Start a new run
-        </button>
-      </div>
-
-      {(gate.length > 0 || failed.length > 0 || Object.keys(prPending).length > 0) && (
-        <section className='con-section'>
-          <div className='con-section-title attn'>Needs your attention</div>
-          {gate.map((r) => (
-            <RunRow key={r.runId} r={r} to={`/plan/${r.runId}`} action='Approve →' />
-          ))}
-          {runs
-            .filter((r) => prPending[r.runId] && !gate.some((g) => g.runId === r.runId))
-            .map((r) => (
-              <RunRow
-                key={`pr-${r.runId}`}
-                r={r}
-                to={`/result/${r.runId}`}
-                action={`${prPending[r.runId]} review comment${prPending[r.runId] === 1 ? '' : 's'} →`}
-              />
-            ))}
-          {failed
-            .filter((f) => !gate.some((g) => g.runId === f.runId) && !prPending[f.runId])
-            .map((r) => (
-              <RunRow key={r.runId} r={r} to={`/result/${r.runId}`} />
-            ))}
-        </section>
-      )}
-
-      {active.length > 0 && (
-        <section className='con-section'>
-          <div className='con-section-title'>Active runs</div>
-          {active.map((r) => (
-            <RunRow key={r.runId} r={r} to={`/live/${r.runId}`} />
-          ))}
-        </section>
-      )}
-
-      <section className='con-section'>
-        <div className='con-section-title'>Recent runs</div>
-        {loading ? (
-          <div className='con-empty'>Loading…</div>
-        ) : recent.length === 0 ? (
-          <div className='con-empty'>No runs yet — start your first one above.</div>
-        ) : (
-          recent.map((r) => <RunRow key={r.runId} r={r} to={`/result/${r.runId}`} />)
-        )}
-      </section>
-
-      <section className='con-section'>
-        <div className='con-section-title'>
-          Projects
-          <button className='con-section-link' onClick={() => navigate('/projects')}>
-            View all
+          <button className='con-newrun lg' onClick={() => navigate('/compose')}>
+            <PlusIcon size={16} />
+            New work
           </button>
         </div>
-        {projects.length === 0 ? (
-          <div className='con-empty'>
-            No projects yet —{' '}
-            <button className='con-inline-link' onClick={() => navigate('/projects')}>
-              create one
-            </button>{' '}
-            to group runs by repo.
-          </div>
+        <div className='con-cockpit-metrics'>
+          <button className='con-metric-card' onClick={() => navigate('/decisions')}>
+            <span className='con-metric-label'>Awaiting decisions</span>
+            <strong>{gate.length}</strong>
+          </button>
+          <button className='con-metric-card' onClick={() => navigate('/runs')}>
+            <span className='con-metric-label'>Live work</span>
+            <strong>{active.length}</strong>
+          </button>
+          <button className='con-metric-card' onClick={() => navigate('/projects')}>
+            <span className='con-metric-label'>Project contexts</span>
+            <strong>{projects.length}</strong>
+          </button>
+        </div>
+      </div>
+
+      <section className='con-section con-section-priority'>
+        <div className='con-section-title attn'>
+          Attention queue
+          <button className='con-section-link' onClick={() => navigate('/decisions')}>
+            View decisions
+          </button>
+        </div>
+        {loading ? (
+          <div className='con-empty'>Loading work…</div>
+        ) : attention.length === 0 ? (
+          <div className='con-empty'>No blockers. Start new work or inspect project health.</div>
         ) : (
-          <div className='con-proj-grid'>
-            {projects.slice(0, 8).map((p) => (
-              <button
-                key={p.id}
-                className='con-proj-card'
-                onClick={() => navigate(`/projects/${p.id}`)}
-              >
-                <span className='con-proj-name'>{p.name}</span>
-                {p.description ? <span className='con-proj-desc'>{p.description}</span> : null}
-              </button>
-            ))}
-          </div>
+          attention.map((r) => {
+            const action = nextAction(r, prPending[r.runId] || 0);
+            return (
+              <RunRow key={`attention-${r.runId}`} r={r} to={action.to} action={action.label} />
+            );
+          })
         )}
       </section>
+
+      <div className='con-home-grid'>
+        <section className='con-section'>
+          <div className='con-section-title'>Recent outcomes</div>
+          {loading ? (
+            <div className='con-empty'>Loading…</div>
+          ) : recent.length === 0 ? (
+            <div className='con-empty'>No completed work yet.</div>
+          ) : (
+            recent.slice(0, 6).map((r) => {
+              const action = nextAction(r);
+              return <RunRow key={r.runId} r={r} to={action.to} action={action.label} />;
+            })
+          )}
+        </section>
+
+        <section className='con-section'>
+          <div className='con-section-title'>
+            Project health
+            <button className='con-section-link' onClick={() => navigate('/projects')}>
+              View all
+            </button>
+          </div>
+          {projects.length === 0 ? (
+            <div className='con-empty'>
+              No project contexts yet —{' '}
+              <button className='con-inline-link' onClick={() => navigate('/projects')}>
+                create one
+              </button>{' '}
+              to connect repos, architecture, memory, and chat.
+            </div>
+          ) : (
+            <div className='con-proj-grid compact'>
+              {projects.slice(0, 6).map((p) => (
+                <button
+                  key={p.id}
+                  className='con-proj-card'
+                  onClick={() => navigate(`/projects/${p.id}`)}
+                >
+                  <span className='con-proj-name'>{p.name}</span>
+                  <span className='con-proj-desc'>
+                    {p.description || `${p.status || 'ACTIVE'} · open project`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

@@ -2447,7 +2447,7 @@ body {
   .signal-app .signal-auth-layout .auth-brand-col {
     display: flex;
     flex: 1 1 50%;
-    background: linear-gradient(135deg, var(--signal-hero-bg-1), var(--signal-hero-bg-2));
+    background: #11120f;
     color: var(--signal-hero-text);
     align-items: center;
     justify-content: center;
@@ -2455,26 +2455,11 @@ body {
     position: relative;
     overflow: hidden;
   }
-  /* Decorative signal-yellow glow */
   .signal-app .signal-auth-layout .auth-brand-col::before {
-    content: '';
-    position: absolute;
-    top: -120px;
-    right: -120px;
-    width: 480px;
-    height: 480px;
-    background: radial-gradient(circle, var(--signal-hero-glow), transparent 60%);
-    pointer-events: none;
+    content: none;
   }
   .signal-app .signal-auth-layout .auth-brand-col::after {
-    content: '';
-    position: absolute;
-    bottom: -200px;
-    left: -120px;
-    width: 400px;
-    height: 400px;
-    background: radial-gradient(circle, rgba(124, 227, 180, 0.1), transparent 60%);
-    pointer-events: none;
+    content: none;
   }
 }
 
@@ -2506,6 +2491,10 @@ body {
   font-weight: 600;
   color: var(--signal-hero-text);
 }
+.signal-app .auth-brand-top .brand-line .word {
+  color: var(--signal-hero-text);
+  opacity: 1;
+}
 .signal-app .auth-brand-top .brand-line .logo {
   width: 36px;
   height: 36px;
@@ -2521,7 +2510,7 @@ body {
   font-family: inherit;
   font-size: clamp(28px, 3vw, 38px);
   font-weight: 600;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   line-height: 1.1;
   margin: 0 0 14px;
   color: var(--signal-hero-text);

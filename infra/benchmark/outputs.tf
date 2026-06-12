@@ -7,9 +7,9 @@ output "zone" {
   value = google_compute_instance.benchmark.zone
 }
 
-output "internal_ip" {
-  description = "Internal IP (no public IP — egress via Cloud NAT, inbound via IAP-SSH)"
-  value       = google_compute_instance.benchmark.network_interface[0].network_ip
+output "external_ip" {
+  description = "Ephemeral public IP (egress; inbound is IAP-SSH only)"
+  value       = google_compute_instance.benchmark.network_interface[0].access_config[0].nat_ip
 }
 
 output "ssh_command" {
