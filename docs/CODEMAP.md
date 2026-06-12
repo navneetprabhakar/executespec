@@ -473,7 +473,7 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 | `ReadymadeSlot` | `readymade_slot` | Per-solution slot definition |
 | `ReadymadeDependency` | `readymade_dependency` | Solution→solution dependency |
 | `ReadymadeFavourite` | `readymade_favourite` | Per-user favourite |
-| `ValidationReport` | `validation_report` | Per-run report + V194 rubric_score |
+| `ValidationReport` | `validation_report` | Per-run report + V194 rubric_score; report DTO also exposes `verificationLedger[]` so deterministic checks, LLM assessments, and internal score summaries are distinguishable |
 | `TestPlan` | `test_plan` | Test generation plan |
 | `TestTask` | `test_task` | Per-test task |
 | `TestResult` | `test_result` | Per-test result |
@@ -667,7 +667,7 @@ Flags read via `FeatureFlagService.isEnabled(key)` (DB-backed `feature_flag` tab
 | `lint.autofix.enabled` | true (V180) | Phase L1 deterministic auto-formatter pass between executor and reviewer |
 | `reviewer.third-pass.enabled` | **true** (V202) | Fix-the-red-build reviewer third pass (25-iter, 360s) when final build red after general+wiring |
 | `routing.adaptive-routing.enabled` | (cfg) | Adaptive provider selection |
-| `scoring.additive-v2` | **true** (V201) | Additive verifiedScore (CODE_DELIVERED+BUILD+TESTS+REVIEWER+CRITICALS); off ⇒ legacy multiplicative |
+| `scoring.additive-v2` | **true** (V201) | Additive verifiedScore (CODE_DELIVERED+BUILD+TESTS+REVIEWER+CRITICALS), plus RL-2026-06 trust caps in code; off ⇒ legacy multiplicative |
 | `scoring.real-test-exec` | **true** (V203) | BUILD mode runs worker tests in workspace → real passed/total into TESTS slot; off ⇒ LLM-coverage fallback (RL-2026-05-001) |
 | `scoring.v2-verified` | (cfg) | Enables verifiedScore (vs legacy accuracyScore fallback) |
 | `security.guardrail_level` | MEDIUM | LOW / MEDIUM / HIGH guardrail policy |

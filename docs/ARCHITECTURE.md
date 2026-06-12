@@ -363,20 +363,36 @@ synthesises `WorkerReports`/`ReviewReport`, runs
   (flag `scoring.additive-v2`, seeded by V201; `computeVerifiedScoreAdditive`):
   ```
   verifiedScore = clamp(0, 100, round( Σ(weight × slotScore) / Σ(weight) ))   // over fired slots
-  CODE_DELIVERED(30)  filesGenerated>0 ⇒ 100 else 0 (hard 0-floor on the headline)
+  CODE_DELIVERED(30)  delivery + endpoint coverage, hard 0-floor when filesGenerated == 0
   BUILD(25)           PASSING 100 / FAILING 0; skipped when finalBuildPassed null
-  TESTS(20)           passed/total ×100 if tests ran; else damped LLM grade (G/C=70, P=40, N=10)
+  TESTS(20)           real passed/total blended with coverage quality, else damped LLM grade
   REVIEWER(20)        CLEAN 100 / FIXED 85 / UNRESOLVED 40 / FAILED 10
   CRITICALS(5)        100 − 20×unfixedCriticalCount, floored 0
   ```
   Unmeasured signals drop from both numerator and denominator (no implicit
-  ×1.0). `endpointFactor` and the two old trust-gate floors are retired — the
-  reviewer's wiring pass already covers the bug class they guarded. The legacy
+  ×1.0). `scoring.gaming-guards` keeps the slot scores honest by linking code
+  delivery to endpoint coverage and capping test credit when coverage quality is
+  missing or partial. After the weighted score is computed, RL-2026-06-026 trust
+  caps limit the headline when the reviewer failed, unresolved issues remain, the
+  final build failed, concrete tests failed, or test coverage is missing/none.
+  This keeps the number useful for routing while preventing a high headline from
+  implying independent proof. `endpointFactor` and the two old trust-gate floors
+  are retired — the reviewer's wiring pass already covers the bug class they
+  guarded. The legacy
   multiplicative formula (`buildFactor × testFactor × reviewerFactor ×
   endpointFactor × criticalDamper`, multiplicative since 264cca58) survives
   behind `scoring.additive-v2=false`.
+- Exposes `verificationLedger[]` on the report DTO. Each row labels the claim,
+  source (`DETERMINISTIC`, `LLM_REVIEWER`, `LLM_ASSESSMENT`,
+  `LLM_ASSISTED_COUNT`, or `INTERNAL_FORMULA`), confidence, observed/total
+  values, and artifact reference. This is the public explanation layer behind
+  `verifiedScore`; the score itself remains an internal formula summary.
 - Computes `rubricScore` (additive 25/20/20/15/10/10 dimension breakdown, PR-E
   Phase A, 2026-05-13 / V194). Spec-aware via `rubricTestPointsFromCoverageLevel`.
+- SUPER_ADMINs can run `POST /api/admin/validation-reports/backfill-verified-score`
+  to recompute `verifiedScore` and `rubricScore` for existing reports. The
+  endpoint accepts optional `{runId, limit, dryRun}`; use `dryRun=true` before a
+  broad pass.
 - Reroutes provider OPENAI → ANTHROPIC for the report LLM call to dodge Spring AI
   1.1.4 OpenAI `extra_body` bug. Flagged as a billing-attribution hazard
   (audit E #37); a proper fix is to surface an explicit provider override on
