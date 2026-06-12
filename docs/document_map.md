@@ -123,7 +123,7 @@ Two YAML/Markdown catalogue schemas that ship with the product. Both are loaded 
 
 ## 7. Frontend
 
-The frontend has its own conventions because the IDE-first protected app, the opt-in Console shell, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
+The frontend has its own conventions because the Console protected shell, the IDE route-level surfaces, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
 
 | Doc | Path | What | When to read |
 | --- | --- | --- | --- |

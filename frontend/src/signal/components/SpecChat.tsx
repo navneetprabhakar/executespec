@@ -219,11 +219,11 @@ export function SpecChat({
         style={{display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 8}}
       >
         <SparkleIcon size={14} color='var(--signal-coral)' />
-        Build my spec
+        Draft with agent
       </Button>
       <Modal
         open={open}
-        title={`Build my spec${projectId ? ' · project-scoped' : ''}`}
+        title={`Draft work with agent${projectId ? ' · project-scoped' : ''}`}
         onClose={() => setOpen(false)}
         size='lg'
       >
@@ -239,8 +239,9 @@ export function SpecChat({
         >
           {messages.length === 0 && !busy && (
             <p style={{fontSize: 13, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-              Describe what you want to build below and I&apos;ll propose a concrete spec — sensible
-              assumptions first, then you tell me what to change. No forms, no 20 questions.
+              Describe what you want changed and I&apos;ll turn it into a concrete work request —
+              sensible assumptions first, then you tell me what to change. No forms, no 20
+              questions.
               {projectId ? ' This project-scoped chat also draws on your codebase memory.' : ''}
             </p>
           )}
@@ -323,7 +324,7 @@ export function SpecChat({
                 void send();
               }
             }}
-            placeholder="Describe what you want — I'll propose a spec, then you refine."
+            placeholder="Describe what you want changed — I'll draft the work request, then you refine."
             rows={2}
             disabled={busy}
             style={{
@@ -357,7 +358,7 @@ export function SpecChat({
                 onClick={() => void applyAsSpec()}
                 style={{flex: '1 1 0', minWidth: 130}}
               >
-                Use as spec
+                Use as request
               </Button>
             )}
             <Button

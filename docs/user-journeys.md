@@ -6,7 +6,7 @@
 
 1. User signs up through the public auth page.
 2. Backend creates the user, personal org, and free subscription state.
-3. User lands in the protected IDE workspace.
+3. User lands in the protected Console control plane.
 4. User opens Compose and submits a spec.
 5. Backend creates a run and opens the plan gate.
 6. User approves.

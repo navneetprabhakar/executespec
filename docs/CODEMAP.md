@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
 
 ---
 
@@ -605,7 +605,7 @@ Total: ~88 prompt files. Prompt-resource verification at boot (`PromptResourceVe
 
 ## 8. Frontend — chrome + pages
 
-The **VS Code-style IDE workspace** (`frontend/src/ide/`) is the only chrome since the 2026-05-22 IDE-only switch; `App.tsx` mounts `IdeWorkspace` for every protected route. **The live protected surfaces are all IDE-native** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md) for the full `ide/` map: `IdeWorkspace` · `IdeSurfaces` (Welcome / Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, 10 sub-tabs) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + ⌘K palette + tokenizer).
+The **Console shell** (`frontend/src/console/`) is the only protected web chrome since 2026-06-12; `App.tsx` mounts `ConsoleShell` for every protected route and `IdeWorkspace` is deleted. **The live protected surfaces remain route-level React modules** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md): `ConsoleShell` / `ConsoleHome` / `ConsoleDecisions`; `IdeSurfaces` (Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, 10 sub-tabs) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + tokenizer).
 
 The **2026-05-23 cleanup deleted 22 orphaned `signal/pages` files** (run-loop + `project/` + `account/`, incl. Billing/Plans) plus the dead `Shell.tsx`. The only `signal/pages/` that survive are the **standalone public pages + admin**, routed directly with no IDE chrome (by design):
 

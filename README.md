@@ -73,7 +73,8 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │       ├── main.tsx              React entry, OTel init, service-worker registration (prod only)
 │       ├── tokens.css            Graphite + Signal design tokens (:root dark default, [data-theme='light'] overrides)
 │       ├── index.css             Global stylesheet (Tailwind v4, mobile/iOS Safari fixes, component utilities)
-│       ├── ide/                  VS Code-style IDE workspace — the ONLY chrome (IdeWorkspace + every protected surface)
+│       ├── console/              Protected web control-plane shell (ConsoleShell + ConsoleHome + ConsoleDecisions)
+│       ├── ide/                  Route-level protected surfaces for runs/projects/org/billing/benchmark
 │       ├── signal/               Public pages (auth/marketing/legal/shared) + AdminPage + shared components reused by the IDE
 │       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
 │       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
@@ -82,7 +83,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 └── docs/                         All project docs (see "Where to go next")
 ```
 
-Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. The VS Code-style **IDE workspace** (`ide/`) is the only chrome since the 2026-05-22 IDE-only switch; the retired Signal chrome's pages were ported IDE-native then deleted in the 2026-05-23 cleanup, leaving `signal/` with the public pages (auth/marketing/legal/shared), `AdminPage`, and the shared components the IDE reuses. `App.tsx` keeps a `LegacyRedirect` to absorb bookmarks of the old paths.
+Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. The protected web chrome is now the **Console** control plane (`console/`); `App.tsx` mounts `ConsoleShell` for every protected route. The old `ide/IdeWorkspace` shell and `localStorage es:console` opt-in path are gone, while `ide/` remains the route-level implementation layer for runs, projects, org settings, billing, benchmark tracking, and related surfaces. The retired Signal chrome's pages were ported then deleted in the 2026-05-23 cleanup, leaving `signal/` with the public pages (auth/marketing/legal/shared), `AdminPage`, and shared components reused by protected surfaces. `App.tsx` keeps a `LegacyRedirect` to absorb bookmarks of the old paths.
 
 ## Run it locally
 
