@@ -90,7 +90,7 @@ public class WorkspaceTestRunner {
       String c = swebenchContainers.get(runId);
       if (c != null) {
         containerId = c;
-        workdir = SwebenchContainerStore.WORKDIR;
+        workdir = swebenchContainers.getWorkdir(runId);
       }
     }
     if (containerId == null && programBenchContainers != null) {

@@ -14,6 +14,7 @@ These should stay separate. The app should not pretend to be the official scorer
 | Surface | Status | Code |
 | --- | --- | --- |
 | SWE-bench PATCH harness | Exists | `swebench/`, `benchmark/BenchmarkController` |
+| SWE-bench Pro PATCH harness | Added for benchmark branch | `benchmark/`, `swebench/SwebenchInstanceLoader`, `swebench/SwebenchContainerStore` |
 | ProgramBench adapter | Exists | `programbench/` |
 | Terminal-Bench remote-worker adapter | Exists for local/dev operator use | `terminalbench/`, `tool/remote/`, `engine/WorkerAgent` remote dispatch |
 | Common benchmark tracking DB | Added V236 | `benchmark_run`, `benchmark_task_result`, `benchmark_event` |
@@ -29,6 +30,18 @@ These should stay separate. The app should not pretend to be the official scorer
 - Rebroadcasts updates to the operator UI.
 - Lets external harnesses remain the source of truth for scoring.
 
+## SWE-bench Pro Harness Notes
+
+- Configure with `swebench.suite=swe-bench-pro`.
+- Dataset rows are expected to come from `ScaleAI/SWE-bench_Pro` and include `dockerhub_tag`,
+  lowercase `fail_to_pass` / `pass_to_pass`, `repo_language`, and `interface`.
+- Images resolve as `jefzda/sweap-images:<dockerhub_tag>` by default.
+- The cleanroom workdir is `/app`; classic SWE-bench remains `/testbed`.
+- Both benchmark execution paths now write classic `submission.patch` / `preds.json`; SWE-bench Pro
+  also writes `swebench_pro_patches.json` in the official list-shaped patch format.
+- Local smoke is intentionally non-spend: `BenchmarkControllerSmokeTest` validates `/instances` and
+  `/preview/{id}` resolution without starting a generation run.
+
 ## What It Does Not Do
 
 - It does not replace official benchmark scoring.
@@ -41,6 +54,8 @@ These should stay separate. The app should not pretend to be the official scorer
 - VM-side campaign runner and artifact layout.
 - Cleanroom setup failure must abort rather than score false negatives.
 - Diff capture must consistently exclude build/test/repro pollution where required.
+- SWE-bench Pro must be smoke-tested on the benchmark VM against a real prebuilt image before any
+  mini run is started.
 - Model-route latency A/B must run from the benchmark VM, not only from local.
 
 ## Recommended Next Shape

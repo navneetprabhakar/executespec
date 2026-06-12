@@ -58,17 +58,19 @@ GITHUB_* / REST) runs the full pipeline incl. reviewer, byte-identical.
 
 | File | Purpose |
 |------|---------|
-| `BenchmarkRunService.java` | The harness. `submit()` → `orchestrator.submitRun(source="swebench-codegen", repoMode="NONE", repoUrl=null, runMode=BUILD, executionMode=PROTOTYPE, skipApproval=true)` — the real classifier→planner→worker path, stopped after the worker by the orchestrator code-gen-only gate (RL-2026-05-050). A synchronous `@EventListener onRunStarted` does `docker pull` → `docker cp /testbed/.` into the host workspace → `docker run -d --rm --network none -v <workspace>:/testbed` → registers the container id in `SwebenchContainerStore` (so `ShellTool`/`BuildProjectTool`/`RunTestsTool` dispatch via `docker exec`). On setup failure it marks the run FAILED (status_reason `BENCH_SETUP_FAILED`) so a bad container can't poison benchmark stats. `captureOnTerminalAsync` polls to terminal then writes `submission.patch` + SWE-bench `preds.json` (the `git diff <baseCommit>` with run-infra + **diff-strip** excludes (RL-2026-05-059): `.agent-context`, `Dockerfile`, `.dockerignore`, `README.md`, `__pycache__`, `.pytest_cache`, `*.egg-info`, **plus build-config (`pyproject.toml`/`setup.py`/`setup.cfg`/`tox.ini`/`requirements*.txt`/`.github`), test files (`tests/`, `test_*.py`, `*_test.py`, `conftest.py`), and `repro`/`tmp_`/`scratch` scratch scripts — submit the SOURCE diff only. ~38-47% of every provider's unresolved diffs were correct source fixes killed by this pollution (e.g. astropy-12907's gold-identical fix + a stray `pyproject.toml` edit); stripping = +2-4 resolved/provider, 0 regressions**). `synthesizeBlindSpec` builds the issue-only spec with an "existing repo at /testbed, fix don't scaffold, don't modify tests, pin down EXACT expected behavior + match codebase conventions" framing. |
-| `BenchmarkGenerationService.java` | **Lean, synchronous code-gen API** (RL-2026-05-028 follow-up). `generate()` reuses the code-gen components **directly** — sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls `patchAgent.run(...)` **synchronously**, captures the diff → `submission.patch` + `preds.json`, returns `{runId, outcome, patchBytes, costUsd, …}`. **No `submitRun`** → no async pipeline, no event listeners (email/preview/report), no credits, no harvesting. Workspace under the (non-Documents) output base by design. This is the going-forward benchmark path: one instance = one call → score. |
+| `BenchmarkRunService.java` | The harness. `submit()` → `orchestrator.submitRun(source="swebench-codegen", repoMode="NONE", repoUrl=null, runMode=BUILD, executionMode=PROTOTYPE, skipApproval=true)` — the real classifier→planner→worker path, stopped after the worker by the orchestrator code-gen-only gate (RL-2026-05-050). A synchronous `@EventListener onRunStarted` does `docker pull` → `docker cp <workdir>/.` into the host workspace → `docker run -d --rm --network none -v <workspace>:<workdir> -w <workdir>` → registers the container id + workdir in `SwebenchContainerStore` (classic SWE-bench `/testbed`; SWE-bench Pro `/app`). On setup failure it marks the run FAILED (status_reason `BENCH_SETUP_FAILED`) so a bad container can't poison benchmark stats. `captureOnTerminalAsync` polls to terminal then writes `submission.patch` + classic SWE-bench `preds.json`; for SWE-bench Pro it also writes `swebench_pro_patches.json` in the official list-shaped `{instance_id, patch, prefix}` format. Diff capture keeps the existing run-infra/build/test/repro excludes so the submitted patch is source-only. `synthesizeBlindSpec` builds the issue-only spec with an "existing repo at <workdir>, fix don't scaffold, don't modify tests, pin down EXACT expected behavior + match codebase conventions" framing. |
+| `BenchmarkGenerationService.java` | **Lean, synchronous code-gen API** (RL-2026-05-028 follow-up). `generate()` reuses the code-gen components **directly** — sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the code-gen engine **synchronously**, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. **No `submitRun`** → no async pipeline, no event listeners (email/preview/report), no credits, no harvesting. Workspace under the (non-Documents) output base by design. This is the going-forward benchmark path: one instance = one call → score. |
 | `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` (async, via `submitRun` — `BenchmarkRunService`), **`POST /generate` (synchronous lean code-gen — `BenchmarkGenerationService`; preferred)**, `GET /preview/{id}` (resolved image/repo/baseCommit), `GET /instances` (loaded id count). |
 
 ## Reused from `swebench/` (sandbox layer — sound, not the problem)
 
 - `SwebenchProperties` — `enabled` flag (default OFF), `outputBase`, `instancesFile`,
   `imageTemplate`, `benchProjectId`/`benchUserId`/`benchOrgId`, `taskWallTimeoutMinutes`,
-  `defaultProvider`. Set in `application-local.yml` (gitignored; never committed).
-- `SwebenchInstanceLoader` — `findById`, `imageNameFor`, `allInstanceIds`.
-- `SwebenchContainerStore` — per-run container registry consulted by the worker's tools.
+  `defaultProvider`, plus `suite`, `proImageRepository`, and `predictionPrefix` for SWE-bench Pro.
+  Set in `application-local.yml` locally and env-driven in `application-benchmark.yml`.
+- `SwebenchInstanceLoader` — `findById`, `imageNameFor`, `allInstanceIds`; parses both classic
+  `FAIL_TO_PASS`/`PASS_TO_PASS` JSON-string fields and SWE-bench Pro lowercase array fields.
+- `SwebenchContainerStore` — per-run container registry + workdir consulted by the worker's tools.
 
 ## Gate scoping (lives in `agent/PatchAgent.java`)
 
@@ -109,7 +111,11 @@ Validated locally on SWE-bench **Lite** (iteration surface) + **Live** (publish 
 three providers, blind. **First blind Live run (2026-05-24, Anthropic Sonnet): 5/11 = 45% resolved**
 before stopping — full result + miss-analysis was in `docs/benchmarks/swebench-live-2026-05-24.md`
 (cleared 2026-05-26 — archived in git history; the canonical SWE-bench record is now
-`docs/reports/swebench-exec-brief.{html,pdf}`).
+`docs/reports/swebench-exec-brief.{html,pdf}`). **2026-06-12:** SWE-bench Pro manifest/image
+resolution smoke is local-green for the non-spend read-only path (`BenchmarkControllerSmokeTest`,
+`SwebenchInstanceLoaderTest`, `RunTestsToolTest`): Pro rows resolve `dockerhub_tag` to
+`jefzda/sweap-images:<tag>`, expose `/app`, and emit the official `swebench_pro_patches.json`
+shape. Full Pro generation still needs the benchmark VM smoke against real Docker images.
 Dominant miss mode: **under-scoping multi-file changes** (the actionable scaffold lever). Run stopped
 at 11/50 because the local arm64/Rosetta environment kept stalling (a credible full run belongs on
 native x86_64 infra). `BenchmarkGenerationService` (`POST /generate`) is **compile-verified but not
