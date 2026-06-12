@@ -1721,13 +1721,14 @@ paths:
       tags: [Validation Report]
       summary: Get validation report
       description: >
-        v2.5.10 — response includes `verifiedScore` (deterministic from
-        build + tests + reviewer verdict) + `accuracyScore` (LLM-inferred,
-        secondary). When the `scoring.v2-verified` feature flag is on,
-        `verifiedScore` is the primary UI badge; `accuracyScore` is
-        demoted to "Est. requirement coverage". Also exposes the 5
-        underlying signals (`finalBuildPassed`, `testsPassed`, `testsTotal`,
-        `reviewerVerdict`) so the frontend can render the SignalBreakdown chip.
+        Response includes `verifiedScore` (additive score over delivered code,
+        build, tests, reviewer, and critical-issue signals, with trust caps for
+        failed review/build/test evidence) plus `accuracyScore` (LLM-inferred,
+        secondary). `verifiedScore` is the primary UI badge; `accuracyScore` is
+        "Est. requirement coverage". The response also exposes the underlying
+        signal fields and `verificationLedger[]` so the frontend can show which
+        claims are deterministic, LLM-assessed, LLM-assisted counts, or internal
+        score summaries.
       parameters:
         - $ref: '#/components/parameters/runId'
       responses:
@@ -1782,9 +1783,58 @@ paths:
                     type: integer
                     nullable: true
                     description: >
-                      v2.5.10 (V106) — 0-100 deterministic score derived from
-                      base(40) + build(20) + round(20*pass/total) + verdict(20/15/5/0)
-                      − 5*unfixedCritical. Primary display when scoring.v2-verified flag is on.
+                      0-100 additive verified score. Computed from CODE_DELIVERED,
+                      BUILD, TESTS, REVIEWER, and CRITICALS slots over measured
+                      signals, then capped when failed review/build/test/coverage
+                      evidence makes a higher headline indefensible.
+                  rubricScore:
+                    type: integer
+                    nullable: true
+                    description: "Additive multi-dimension rubric score, nullable for older reports."
+                  verificationLedger:
+                    type: array
+                    description: "Auditable evidence rows behind the headline verifiedScore."
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: tests
+                        label:
+                          type: string
+                          example: Test execution
+                        category:
+                          type: string
+                          example: TESTS
+                        status:
+                          type: string
+                          enum: [PASS, WARN, FAIL, UNKNOWN]
+                        source:
+                          type: string
+                          enum:
+                            [
+                              DETERMINISTIC,
+                              LLM_REVIEWER,
+                              LLM_ASSESSMENT,
+                              LLM_ASSISTED_COUNT,
+                              INTERNAL_FORMULA,
+                            ]
+                        confidence:
+                          type: string
+                          enum: [HIGH, MEDIUM, LOW]
+                        claim:
+                          type: string
+                        summary:
+                          type: string
+                        artifact:
+                          type: string
+                          nullable: true
+                        observed:
+                          type: integer
+                          nullable: true
+                        total:
+                          type: integer
+                          nullable: true
 
   /runs/{runId}/report/share:
     post:
@@ -2631,6 +2681,55 @@ paths:
   # ──────────────────────────────────────────────────
   # FEATURE FLAGS
   # ──────────────────────────────────────────────────
+  /admin/validation-reports/backfill-verified-score:
+    post:
+      tags: [Admin]
+      summary: Backfill verified scores on existing validation reports (SUPER_ADMIN)
+      description: >
+        Recomputes historical `validation_report.verified_score` and `rubric_score`
+        rows with the current scoring logic. The operation is idempotent; use
+        `dryRun=true` before a broad pass.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                runId:
+                  type: string
+                  description: Optional single run id to backfill.
+                limit:
+                  type: integer
+                  minimum: 1
+                  description: Optional maximum number of reports to process.
+                dryRun:
+                  type: boolean
+                  description: When true, compute changes without saving rows.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalRows:
+                    type: integer
+                  processedRows:
+                    type: integer
+                  updatedRows:
+                    type: integer
+                  skippedRows:
+                    type: integer
+                  failedRows:
+                    type: integer
+                  dryRun:
+                    type: boolean
+                  samples:
+                    type: array
+                    items:
+                      type: object
+
   /admin/feature-flags:
     get:
       tags: [Admin]
