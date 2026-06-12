@@ -46,10 +46,15 @@ Run result should answer:
 - Did build/tests pass?
 - What did reviewer find or fix?
 - What verified score was assigned?
+- Which evidence backs that score, and which parts are deterministic vs LLM-
+  assessed?
 - Was a PR opened?
 - What did the run cost?
 
 The Logs tab reads persisted run-event replay where available; it is not only the ephemeral live SSE stream.
+The validation report includes a verification ledger; treat `verifiedScore` as a
+summary of measured signals, not a substitute for spot-reading the diff and
+output examples before external publication.
 
 ## Project Workbench
 

@@ -54,7 +54,8 @@ For exhaustive class discovery use:
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
 | `ModelRegistry` / `ModelResolver` | YAML model matrix and tier lookup. |
 | `RunCostTracker` | Token/cost accounting and pricing lookup. |
-| `ValidationReportService` | Additive score and report assembly. |
+| `ValidationReportService` | Additive verifiedScore, trust caps, verification ledger, and report assembly. |
+| `VerifiedScoreBackfillService` | SUPER_ADMIN one-shot recomputation of historical report scores. |
 | `ProjectAccessGuard` / `RunAccessGuard` | Tenant access checks. |
 | `BillingService` / `RunTopupService` | Subscription/top-up operations. |
 
