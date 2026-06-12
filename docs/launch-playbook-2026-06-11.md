@@ -19,7 +19,7 @@ You are **not lacking product** — you're finishing a consistency-and-proof pus
 | UX wave 1 (review/11 defects) | ✅ Shipped + live-verified at 375px/desktop (commit `26ab3f66`) |
 | Trust-number bugs (score degradation on Gradle, OpenRouter $0 cost, Stripe checkout) | 🔶 In flight in the review-fix sessions — **the only engineering launch gates** |
 | Benchmarks | 🔶 Re-running on the rebuilt harness (2 days); ALL public surfaces are number-free until then |
-| Console-as-default chrome | ⏳ **Your decision** — preview via the "Try Console ⤴" status-bar button |
+| Console-as-default chrome | ✅ Implemented on the cleanup branch; protected routes mount `ConsoleShell` directly |
 | Ops (prod URL check, coupons, alerts, status page) | ⏳ Checklist in §7 |
 
 **The one-sentence thesis:** you built a trust machine; launch is the moment every surface says
@@ -112,13 +112,13 @@ Production-vs-Prototype explainer · Pro cap constant $25→$5 · status-bar tie
 on the empty workspace · GitHub-PAT pre-flight at compose · **verified score now on the run-list
 wire** (was reading a field that never existed) with 4-band badges on run cards.
 
-**The pending decision — Console as default.** Preview both yourself: status bar → **Try Console ⤴**
-(or `localStorage es:console='1'`; remove the key to go back). If you say go, wave 2 executes
-reframe Phases 2–4: Home depth ("needs your attention", onboarding) → mobile pass → flip default +
-retire the IDE shell (keep the editor metaphor only inside run-result Code tabs and the VS Code
-extension). ~1 focused week.
+**Console default — implemented on the cleanup branch.** The protected web app now mounts
+`ConsoleShell` directly; the old `localStorage es:console='1'` preview path and `IdeWorkspace`
+shell are removed. The route-level `ide/` surfaces still own runs, projects, billing, org
+settings, benchmark tracking, and code/result views; the editor metaphor is reserved for
+run-result code tabs and the VS Code extension.
 
-**Wave 2 priority order:** ① Console flip · ② notification spam (auto-read on view + digest — a
+**Next UX priority order:** ① notification spam (auto-read on view + digest — a
 fresh account shows "9+" unread) · ③ typography split (mono for data, humanist sans for prose) +
 ONE accent (kill coral-as-link; it collides with the score scale's red) · ④ result-page action
 hierarchy (10 equal buttons → primary Push/PR + overflow; Delete away from primary) + tab merge ·

@@ -297,7 +297,8 @@ public class OrgController {
       List<String> tiers,
       Map<String, String> defaults,
       Map<String, String> overrides,
-      Map<String, List<String>> modelsByProvider) {}
+      Map<String, List<String>> modelsByProvider,
+      Map<String, String> modelLabels) {}
 
   @GetMapping("/me/model-matrix")
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
@@ -336,7 +337,14 @@ public class OrgController {
     }
 
     Map<String, List<String>> modelsByProvider = new LinkedHashMap<>();
-    for (String p : providers) modelsByProvider.put(p, selectableModelsFor(p));
+    Map<String, String> modelLabels = new LinkedHashMap<>();
+    for (String p : providers) {
+      List<String> selectable = selectableModelsFor(p);
+      modelsByProvider.put(p, selectable);
+      for (String model : selectable) {
+        modelLabels.putIfAbsent(model, modelRegistry.displayLabelFor(model));
+      }
+    }
 
     return new ModelMatrixView(
         tier,
@@ -345,7 +353,8 @@ public class OrgController {
         tiers,
         defaults,
         orgModelOverrideService.currentOverrides(orgId),
-        modelsByProvider);
+        modelsByProvider,
+        modelLabels);
   }
 
   private static void putIfPresent(Map<String, String> m, String k, String v) {

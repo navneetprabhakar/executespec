@@ -48,7 +48,12 @@ The core promise is not "chat with code." The core promise is: **turn a spec int
 ### R3. Code To Verified Result
 
 - Run reviewer passes and final build/test checks where available.
-- Compute `verifiedScore` through the additive scoring model.
+- Compute `verifiedScore` through the additive scoring model, then apply trust
+  caps when build, tests, reviewer, coverage, or critical-issue evidence makes a
+  high headline indefensible.
+- Expose a `verificationLedger[]` on validation reports so users can distinguish
+  deterministic checks, LLM reviewer/assessment signals, LLM-assisted counts,
+  and internal score summaries.
 - Persist validation report and issues.
 - Show cost, tokens, events, tasks, files, and PR status in run detail.
 
@@ -100,3 +105,5 @@ The product works at compile/test/local-smoke level, but the following still nee
 - Real payment gateway ordering and abandonment flows.
 - Real SCM auto-push PATCH run after cancellation/terminal-state hardening.
 - Full benchmark event hooks from live harness runs into the tracking dashboard.
+- Qualitative spot checks for externally published HIGH-5 or product claims; the
+  verified score is a platform trust signal, not an external human audit.

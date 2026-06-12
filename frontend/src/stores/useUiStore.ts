@@ -29,15 +29,10 @@ type ViewMode = 'pro' | 'project';
 type Theme = 'dark' | 'light' | 'system';
 
 /**
- * UI chrome mode. 'ide' = the VS Code-style workspace (the only live chrome);
- * 'signal' = the retired classic chrome. As of the 2026-05-22 IDE-only switch
- * the chrome is no longer user-switchable — `App.tsx` hard-codes `const ide =
- * true`, so every route renders its IDE surface. The value is still applied to
- * `<html data-ui>` (always 'ide') for CSS. `uiMode` + `setUiMode` are retained
- * only because the undeleted Signal `AccountPage` fallback still references the
- * old Interface toggle; nothing in the live IDE tree reads them.
+ * UI chrome mode. Console is the protected app shell; the older values survive
+ * only so stale persisted state and retired call sites do not break.
  */
-type UiMode = 'signal' | 'ide';
+type UiMode = 'signal' | 'ide' | 'console';
 
 interface UiStore {
   sidebarExpanded: boolean;
@@ -59,7 +54,7 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
-  /** UI chrome mode (always 'ide' since the 2026-05-22 IDE-only switch). */
+  /** UI chrome mode for the protected shell. */
   uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
@@ -99,26 +94,52 @@ function resolveSystemTheme(): 'dark' | 'light' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+/**
+ * T1 (UI/UX review 2026-06-11) — single theme owner. The app historically ran
+ * TWO theme systems: this store wrote `data-theme` (tokens.css/ide.css/console.css)
+ * while main.tsx + the now-deleted useSignalTheme wrote `data-signal-theme`
+ * (every `.signal-*` component style). They desynced — public pages could render
+ * dark cards on a light page. Every apply now writes BOTH attributes with the
+ * same resolved value; `signal.css` keeps its selector until the follow-up
+ * migrates it to `[data-theme]`.
+ */
+function applyThemeAttrs(resolved: 'dark' | 'light') {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.setAttribute('data-signal-theme', resolved);
+}
+
 function initTheme(): Theme {
-  const saved = localStorage.getItem('es:theme') as Theme | null;
-  const theme: Theme = saved === 'light' || saved === 'system' ? saved : 'dark';
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = theme === 'system' ? resolveSystemTheme() : theme;
+  let saved = localStorage.getItem('es:theme') as Theme | null;
+  // One-time migration from the legacy Signal-only key so existing visitors
+  // keep their pick. es:theme wins when both exist.
+  if (!saved) {
+    const legacy = localStorage.getItem('signal:theme');
+    if (legacy === 'light' || legacy === 'dark') {
+      saved = legacy;
+      try {
+        localStorage.setItem('es:theme', legacy);
+      } catch {}
+    }
   }
+  const theme: Theme = saved === 'light' || saved === 'system' ? saved : 'dark';
+  applyThemeAttrs(theme === 'system' ? resolveSystemTheme() : theme);
   return theme;
 }
 
-// UI chrome — applied to <html data-ui> pre-paint so the chrome renders without
-// a flash. 2026-05-22: the Signal chrome was retired as a user-facing option;
-// the VS Code-style IDE workspace is now the ONLY chrome and the A/B toggle was
-// removed. We force 'ide' regardless of any previously-persisted es:uiMode.
-// (`setUiMode` survives only because the undeleted Signal `AccountPage` fallback
-// still references the old Interface toggle; the live IDE tree never calls it.)
+// Re-resolve on OS preference change while in 'system' mode (module-level —
+// the store is a singleton, so one listener for the app's lifetime is correct).
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    if (useUiStore.getState().theme === 'system') applyThemeAttrs(resolveSystemTheme());
+  });
+}
+
+// UI chrome — Console is now the protected shell. Ignore stale local chrome
+// persistence from earlier builds so /home and protected routes start together.
 function initUiMode(): UiMode {
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.ui = 'ide';
-  }
-  return 'ide';
+  if (typeof document !== 'undefined') document.documentElement.dataset.ui = 'console';
+  return 'console';
 }
 
 // M-026 (Wave 1) — first-time users land with sidebar expanded so they can
@@ -182,9 +203,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = t === 'system' ? resolveSystemTheme() : t;
-    }
+    applyThemeAttrs(t === 'system' ? resolveSystemTheme() : t);
     set({theme: t});
   },
   toggleTheme: () => {
@@ -195,9 +214,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
     const cur = get().theme;
     const next: Theme = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
     localStorage.setItem('es:theme', next);
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = next === 'system' ? resolveSystemTheme() : next;
-    }
+    applyThemeAttrs(next === 'system' ? resolveSystemTheme() : next);
     set({theme: next});
   },
   setUiMode: (m) => {
