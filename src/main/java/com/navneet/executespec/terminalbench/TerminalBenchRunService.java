@@ -5,7 +5,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -54,6 +57,7 @@ public class TerminalBenchRunService {
   private final RunCostTracker costTracker;
   private final SseBroadcaster broadcaster;
   private final JwtUtil jwtUtil;
+  private final Map<String, Thread> activeRuns = new ConcurrentHashMap<>();
 
   /**
    * Fallback wall-clock when the client doesn't pass a per-task value. NOTE (TB 2.0 full-89
@@ -70,7 +74,7 @@ public class TerminalBenchRunService {
   /** Bounds for a client-supplied per-task wall clock (seconds). */
   private static final int MIN_WALL_CLOCK_SECONDS = 120;
 
-  private static final int MAX_WALL_CLOCK_SECONDS = 3300;
+  private static final int MAX_WALL_CLOCK_SECONDS = 3420;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
@@ -245,7 +249,9 @@ iterating needlessly.
       String provider,
       String model,
       Integer maxIterations,
-      Integer wallClockSeconds) {
+      Integer wallClockSeconds,
+      Integer llmReadTimeoutSeconds,
+      Integer transientRetryMaxAttempts) {
     String runId = UUID.randomUUID().toString();
     String userId = String.valueOf(userDetails.getUser().getId());
     String orgId = userDetails.getUser().getOrgId();
@@ -284,13 +290,23 @@ iterating needlessly.
     // 3) Launch the worker on a context-propagated virtual thread (traceId + RequestAttributes
     //    survive the boundary per the CLAUDE.md async rule).
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
-    Thread.ofVirtual()
-        .name("tb-run-" + runId)
-        .start(
-            snapshot.wrap(
-                () ->
-                    runWorker(
-                        runId, instruction, provider, model, maxIterations, wallClockSeconds)));
+    Thread workerThread =
+        Thread.ofVirtual()
+            .name("tb-run-" + runId)
+            .unstarted(
+                snapshot.wrap(
+                    () ->
+                        runWorker(
+                            runId,
+                            instruction,
+                            provider,
+                            model,
+                            maxIterations,
+                            wallClockSeconds,
+                            positiveOrNull(llmReadTimeoutSeconds),
+                            positiveOrNull(transientRetryMaxAttempts))));
+    activeRuns.put(runId, workerThread);
+    workerThread.start();
 
     String sseToken = jwtUtil.generateSseToken(userId, runId);
     return new StartResult(runId, sseToken);
@@ -302,7 +318,9 @@ iterating needlessly.
       String provider,
       String model,
       Integer maxIterations,
-      Integer wallClockSeconds) {
+      Integer wallClockSeconds,
+      Integer llmReadTimeoutSeconds,
+      Integer transientRetryMaxAttempts) {
     Path workspace = null;
     String finalStatus = "FAILED";
     String reason = null;
@@ -347,6 +365,8 @@ iterating needlessly.
                   .terminalVerifyGate(TB_VERIFY_GATE_ENABLED)
                   .requiredDeliverablePaths(deliverables)
                   .criticPass(TB_CRITIC_ENABLED)
+                  .llmReadTimeoutSeconds(llmReadTimeoutSeconds)
+                  .transientRetryMaxAttempts(transientRetryMaxAttempts)
                   .build());
       boolean ok =
           result.outcome() == WorkerResult.Outcome.COMPLETED
@@ -366,9 +386,22 @@ iterating needlessly.
       reason = "TB_WORKER_ERROR: " + e.getClass().getSimpleName();
     } finally {
       finalizeTerminal(runId, finalStatus, reason);
+      activeRuns.remove(runId);
       remoteToolDispatcher.unregister(runId); // ALWAYS — unblocks any in-flight client tool call
       deleteTree(workspace);
     }
+  }
+
+  public boolean cancel(String runId, String reason) {
+    Thread workerThread = activeRuns.remove(runId);
+    remoteToolDispatcher.unregister(runId);
+    if (workerThread != null) {
+      workerThread.interrupt();
+    }
+    boolean updated = finalizeTerminal(runId, "CANCELLED", reason);
+    log.info(
+        "[TB] cancel run={} threadKnown={} rowUpdated={}", runId, workerThread != null, updated);
+    return workerThread != null || updated;
   }
 
   private static int normalizeMaxIterations(Integer requested) {
@@ -407,12 +440,21 @@ iterating needlessly.
     return List.copyOf(paths);
   }
 
-  private void finalizeTerminal(String runId, String status, String reason) {
+  private boolean finalizeTerminal(String runId, String status, String reason) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+    AtomicBoolean updated = new AtomicBoolean(false);
     stateStore
         .findRun(runId)
         .ifPresent(
             r -> {
+              if (isTerminal(r.getStatus())) {
+                log.info(
+                    "[TB] finalize skipped run={} currentStatus={} attemptedStatus={}",
+                    runId,
+                    r.getStatus(),
+                    status);
+                return;
+              }
               r.setStatus(status);
               r.setCompletedAt(Instant.now());
               r.setStatusReason(reason);
@@ -431,11 +473,27 @@ iterating needlessly.
                 r.setTotalOutputTokens(cost.outputTokens());
               }
               stateStore.saveRun(r);
+              updated.set(true);
             });
+    if (!updated.get()) {
+      return false;
+    }
     broadcaster.emit(runId, RunEvent.runStatus(runId, status));
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
     broadcaster.emit(runId, RunEvent.complete(runId, status, reason)); // the adapter's stop signal
     broadcaster.complete(runId);
+    return true;
+  }
+
+  private static boolean isTerminal(String status) {
+    return "COMPLETE".equals(status)
+        || "FAILED".equals(status)
+        || "CANCELLED".equals(status)
+        || "PARTIAL".equals(status);
+  }
+
+  private static Integer positiveOrNull(Integer value) {
+    return value != null && value > 0 ? value : null;
   }
 
   private static void deleteTree(Path root) {

@@ -587,7 +587,8 @@ public class WorkerAgent {
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
                     // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
                     // their HTTP timeouts).
-                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                    .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                    .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                     .build());
       } catch (Exception e) {
         log.error("WorkerAgent router failure at iter={}", iter, e);
@@ -1095,8 +1096,29 @@ public class WorkerAgent {
             iter,
             terminalArtifactDeadlineAfter,
             totalWriteCalls);
-        history.add(new UserMessage(terminalArtifactDeadlineMessage()));
+        history.add(new UserMessage(terminalArtifactDeadlineMessage(requiredDeliverables)));
         terminalArtifactDeadlineNudged = true;
+        if (!requiredDeliverables.isEmpty()) {
+          List<String> missing = missingDeliverables(req.context(), requiredDeliverables);
+          if (!missing.isEmpty()) {
+            log.warn(
+                "WorkerAgent TERMINAL_ARTIFACT_DEADLINE missing deliverables run={} task={} iter={}"
+                    + " missing={} - forcing finalizer",
+                req.context().runId(),
+                req.context().taskId(),
+                iter,
+                missing);
+            history.add(
+                new UserMessage(
+                    "DETERMINISTIC CHECK: these required deliverable path(s) are still missing: "
+                        + String.join(", ", missing)
+                        + ". Create the exact missing file(s) now. Do not call completeTask and do"
+                        + " not run broad exploration until the missing path(s) exist."));
+            WorkerResult finalized =
+                runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, true);
+            if (finalized != null) return finalized;
+          }
+        }
       }
       if (terminalTaskMode
           && !terminalForcedFinalizerAttempted
@@ -1298,7 +1320,8 @@ public class WorkerAgent {
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                  .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                   .build());
     } catch (Exception e) {
       log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
@@ -1471,7 +1494,8 @@ public class WorkerAgent {
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(workerReadTimeoutSeconds(req))
+                  .transientRetryMaxAttempts(req.transientRetryMaxAttempts())
                   .build());
     } catch (Exception e) {
       log.warn(
@@ -1496,14 +1520,14 @@ public class WorkerAgent {
     for (AssistantMessage.ToolCall tc : calls) {
       dispatched++;
       if (CompleteTaskTool.NAME.equals(tc.name())) {
-        // RL-2026-06 (TB 2.0 autopsy) — the finalizer previously accepted completeTask WITHOUT the
-        // deliverable gate, so a run that reached the finalizer could complete artifact-less even
-        // with required paths configured (one of the four confirmed NO_DELIVERABLE routes). Re-run
-        // the deterministic existence check here; if anything is missing, reject ONCE and force a
-        // write-the-artifact retry, then accept regardless (fail-open, bounded by the flag).
+        // RL-2026-06 (TB 2.0/2.1 autopsy) — the finalizer previously accepted completeTask WITHOUT
+        // the deliverable gate, so a run that reached the finalizer could complete artifact-less
+        // even with required paths configured. Re-run the deterministic existence check here; if
+        // anything is missing, reject once and force a write-the-artifact retry, then fall back to
+        // the main loop. The normal completeTask deliverable gate owns the bounded fail-open.
         List<String> required =
             req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
-        if (deliverableRetryAllowed && !required.isEmpty()) {
+        if (!required.isEmpty()) {
           List<String> missing = missingDeliverables(req.context(), required);
           if (!missing.isEmpty()) {
             String joined = String.join(", ", missing);
@@ -1523,19 +1547,21 @@ public class WorkerAgent {
                         + " file at its EXACT path NOW with writeFile, using your best available"
                         + " candidate content — an imperfect artifact at the right path beats no"
                         + " artifact. Then call completeTask."));
-            WorkerResult retry =
-                terminalFinalizerAttempt(
-                    req,
-                    history,
-                    dispatched,
-                    toolLog,
-                    start,
-                    iter,
-                    terminalFinalizerTools(req, true),
-                    "required",
-                    false);
-            if (retry != null) return retry;
-            // fail-open: the retry produced nothing — accept the original completion below.
+            if (deliverableRetryAllowed) {
+              WorkerResult retry =
+                  terminalFinalizerAttempt(
+                      req,
+                      history,
+                      dispatched,
+                      toolLog,
+                      start,
+                      iter,
+                      terminalFinalizerTools(req, true),
+                      "required",
+                      false);
+              if (retry != null) return retry;
+            }
+            return null;
           }
         }
         String summary = "terminal finalizer: " + extractSummary(tc.arguments());
@@ -1569,6 +1595,32 @@ public class WorkerAgent {
     }
 
     if (productive) {
+      List<String> required =
+          req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
+      if (!required.isEmpty()) {
+        List<String> missing = missingDeliverables(req.context(), required);
+        if (!missing.isEmpty()) {
+          toolLog.add(
+              "TERMINAL_FINALIZER productive tools but deliverables still missing ("
+                  + String.join(", ", missing)
+                  + ")");
+          log.info(
+              "WorkerAgent TERMINAL_FINALIZER productive tools but deliverables still missing"
+                  + " run={} task={} tools={} missing={}",
+              req.context().runId(),
+              req.context().taskId(),
+              productiveTools,
+              missing);
+          history.add(
+              new UserMessage(
+                  "FINALIZER TOOL CALLS RAN, but the required deliverable path(s) still do not"
+                      + " exist: "
+                      + String.join(", ", missing)
+                      + ". The run is not complete. Create the exact missing file(s) now with"
+                      + " writeFile/editFile or a focused shell command, then call completeTask."));
+          return null;
+        }
+      }
       log.info(
           "WorkerAgent TERMINAL_FINALIZER produced productive tools run={} task={} tools={}",
           req.context().runId(),
@@ -2036,6 +2088,14 @@ public class WorkerAgent {
   }
 
   static String terminalArtifactDeadlineMessage() {
+    return terminalArtifactDeadlineMessage(List.of());
+  }
+
+  static String terminalArtifactDeadlineMessage(List<String> requiredDeliverables) {
+    String required =
+        requiredDeliverables == null || requiredDeliverables.isEmpty()
+            ? ""
+            : " Required deliverable path(s): " + String.join(", ", requiredDeliverables) + ".";
     return "TERMINAL DELIVERABLE DEADLINE:\n"
         + "Stop broad exploration. In the next tool call, do ONE focused action:\n"
         + "1. If the requested /app deliverable already exists, verify it with a focused"
@@ -2059,7 +2119,8 @@ public class WorkerAgent {
         + " optimizations.\n"
         + "Do not spend another turn on package installs, directory listings, broad"
         + " searches, or unrelated analysis unless that single command directly creates or"
-        + " verifies the required deliverable.";
+        + " verifies the required deliverable."
+        + required;
   }
 
   /**
@@ -2307,5 +2368,11 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
     return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && "shell".equals(toolName));
+  }
+
+  private static int workerReadTimeoutSeconds(WorkerTaskRequest req) {
+    return req.llmReadTimeoutSeconds() != null && req.llmReadTimeoutSeconds() > 0
+        ? req.llmReadTimeoutSeconds()
+        : WORKER_HTTP_READ_TIMEOUT_SECONDS;
   }
 }

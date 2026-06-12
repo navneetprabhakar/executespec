@@ -135,6 +135,21 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 | `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`) |
 | `tb/tb-bench-bridge.py` | the in-app `/benchmark` bridge — one `TASK_SCORED` per trial (reward + esRunId + cost + **input/output tokens** from each `result.json`) → the V236/V238 tracking dashboard |
 
+Benchmark deploys also sync the version-controlled `tb/` harness files into `~/tbench` and run
+`python3 -m py_compile` on the VM, so app deploys and Harbor adapter fixes stay in lockstep.
+The sync/start path discovers the operator home that has both `tbench/.venv/bin/harbor` and
+`swebench-bench/.espec-admin.env`, then runs the pilot as that user; the GitHub Actions SSH user
+does not have the Terminal-Bench venv or admin env.
+For post-fix mechanics checks, a benchmark push whose commit message contains `[tb21-pilot]` starts
+only the focused TB 2.1 Flash pilot (`gcode-to-text`, `polyglot-rust-c`, `train-fasttext`,
+`build-pmars`) after health is green; full model runs remain manual/gated.
+For read-only monitoring when local `gcloud` auth is unavailable, push a benchmark commit whose
+message contains `[tb-monitor]` (or run the manual **Benchmark VM Monitor** workflow after it exists
+on the default branch). The marker path skips the normal deploy job, SSHes through IAP using
+Workload Identity, and prints the current job's Harbor/bridge process state, trial counts,
+reward/esRunId linkage, bridge `benchmark_run id`, app tracking row, and recent logs without
+deploying or mutating the VM.
+
 **Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
 locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.
 

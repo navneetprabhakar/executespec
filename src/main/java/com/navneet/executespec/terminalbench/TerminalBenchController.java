@@ -1,11 +1,15 @@
 package com.navneet.executespec.terminalbench;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.terminalbench.TerminalBenchRunService.StartResult;
 
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 public class TerminalBenchController {
 
   private final TerminalBenchRunService service;
+  private final RunAccessGuard guard;
 
   /**
    * Request to launch a remote-tool worker run. {@code maxIterations} null or below the
@@ -40,7 +45,9 @@ public class TerminalBenchController {
       String provider,
       String model,
       Integer maxIterations,
-      Integer wallClockSeconds) {}
+      Integer wallClockSeconds,
+      Integer llmReadTimeoutSeconds,
+      Integer transientRetryMaxAttempts) {}
 
   @PostMapping("/start")
   public StartResult start(
@@ -63,6 +70,17 @@ public class TerminalBenchController {
         body.provider(),
         body.model(),
         body.maxIterations(),
-        body.wallClockSeconds());
+        body.wallClockSeconds(),
+        body.llmReadTimeoutSeconds(),
+        body.transientRetryMaxAttempts());
+  }
+
+  @DeleteMapping("/{runId}")
+  public ResponseEntity<Void> cancel(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+    guard.requireRunAccess(runId, userDetails);
+    return service.cancel(runId, "Terminal-Bench adapter interrupted")
+        ? ResponseEntity.ok().build()
+        : ResponseEntity.notFound().build();
   }
 }
