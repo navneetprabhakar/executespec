@@ -116,11 +116,12 @@ class ValidationReportServiceAdditiveScoreTest {
   }
 
   @Test
-  void half_tests_pass_dampens_test_slot_proportionally() {
+  void half_tests_pass_dampens_test_slot_and_caps_headline() {
     // build OK + 5/10 tests + CLEAN + 0 crit + 4 files:
     //   30*100 + 25*100 + 20*50 + 20*100 + 5*100 = 3000+2500+1000+2000+500 = 9000/100 = 90
+    // Trust cap: any concrete test failure caps the headline at 85.
     int score = svcAdditiveOn().computeVerifiedScore(true, 5, 10, "CLEAN", 0, null, null, 4);
-    assertEquals(90, score);
+    assertEquals(85, score);
   }
 
   // TESTS: no real tests, LLM grades
@@ -161,29 +162,51 @@ class ValidationReportServiceAdditiveScoreTest {
   }
 
   @Test
-  void review_failed_dampens_reviewer_slot_but_doesnt_zero_headline() {
+  void review_failed_caps_headline() {
     // Multiplicative: REVIEW_FAILED → 0.2 × everything → ~20. Additive: only the 20-pt reviewer
     // slot earns 10/100 of its weight = 20 weighted contribution out of 2000 max.
     //   30*100 + 25*100 + 20*100 + 20*10 + 5*100 = 3000+2500+2000+200+500 = 8200/100 = 82
+    // Trust cap: a failed reviewer pass cannot credibly headline above 70.
     int score =
         svcAdditiveOn().computeVerifiedScore(true, 50, 50, "REVIEW_FAILED", 0, null, null, 4);
-    assertEquals(82, score);
+    assertEquals(70, score);
   }
 
   @Test
-  void single_critical_takes_one_point_off() {
+  void unresolved_issues_caps_headline() {
+    int score =
+        svcAdditiveOn().computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, null, null, 4);
+    assertEquals(80, score);
+  }
+
+  @Test
+  void single_critical_caps_headline() {
     // 1 critical → criticals slot scores 80 (100 − 20).
     //   30*100 + 25*100 + 20*100 + 20*100 + 5*80 = 3000+2500+2000+2000+400 = 9900/100 = 99
+    // Trust cap: any unresolved critical caps the headline at 85.
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 1, null, null, 4);
-    assertEquals(99, score);
+    assertEquals(85, score);
   }
 
   @Test
-  void five_criticals_zero_criticals_slot() {
+  void five_criticals_zero_criticals_slot_and_caps_headline() {
     // 5 criticals → 100 − 100 = 0 for the criticals slot.
     //   30*100 + 25*100 + 20*100 + 20*100 + 5*0 = 3000+2500+2000+2000+0 = 9500/100 = 95
+    // Trust cap: 3+ unresolved criticals cap the headline at 70.
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 5, null, null, 4);
-    assertEquals(95, score);
+    assertEquals(70, score);
+  }
+
+  @Test
+  void explicit_no_test_coverage_caps_headline() {
+    int score = svcAdditiveOn().computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, "NONE", 4);
+    assertEquals(75, score);
+  }
+
+  @Test
+  void unknown_test_coverage_caps_headline_at_90() {
+    int score = svcAdditiveOn().computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, "UNKNOWN", 4);
+    assertEquals(90, score);
   }
 
   @Test

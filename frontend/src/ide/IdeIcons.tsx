@@ -81,7 +81,7 @@ export function WorkspaceIcon(p: IconProps) {
   );
 }
 
-/** New spec — document with a plus badge. */
+/** New work — document with a plus badge. */
 export function NewSpecIcon(p: IconProps) {
   return (
     <Svg {...p}>
@@ -92,7 +92,7 @@ export function NewSpecIcon(p: IconProps) {
   );
 }
 
-/** All runs — play inside a circle (an executed/streaming run). */
+/** Work — play inside a circle. */
 export function RunsIcon(p: IconProps) {
   return (
     <Svg {...p}>
@@ -141,6 +141,17 @@ export function BellIcon(p: IconProps) {
     <Svg {...p}>
       <path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9' />
       <path d='M13.73 21a2 2 0 0 1-3.46 0' />
+    </Svg>
+  );
+}
+
+/** Decisions — inbox tray with a check. */
+export function DecisionsIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d='M4 5h16v10l-3 4H7l-3-4z' />
+      <path d='M4 15h5l1.5 2h3l1.5-2h5' />
+      <path d='M8.5 10.5l2 2 4-4' />
     </Svg>
   );
 }
@@ -530,7 +541,7 @@ export const FolderOpenIcon = mk('folder-open');
 // Per-language file icons. Names mirror the canonical Material icon each maps to
 // so the EXT_MAP / NAME_MAP below read like the upstream VS Code mapping. The
 // public component names are unchanged from the previous hand-drawn set so every
-// `IdeIcons` caller (IdeKit, IdeWorkspace) stays put.
+// `IdeIcons` caller in IdeKit stays put.
 export const TsIcon = mk('typescript');
 export const TsxIcon = mk('react_ts');
 export const JsIcon = mk('javascript');
