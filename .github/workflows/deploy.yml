@@ -721,7 +721,8 @@ jobs:
           . "$ADMIN_ENV"
 
           mark_run_failed() {
-            local job="$1" reason="$2" log="$JOBS_DIR/${job}-bridge.log"
+            local job="$1" reason="$2"
+            local log="$JOBS_DIR/${job}-bridge.log"
             [ -f "$log" ] || return 0
             local rid token
             rid="$(grep -oE 'benchmark_run id = [a-f0-9-]+' "$log" | tail -1 | awk '{print $NF}')"
