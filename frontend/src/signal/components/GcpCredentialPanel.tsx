@@ -89,7 +89,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
         borderRadius: 12,
         padding: 14,
         marginBottom: 12,
-        background: 'var(--signal-card-bg)',
+        background: 'var(--signal-surface)',
       };
   const muted = ide ? 'var(--ide-fg-muted)' : 'var(--signal-text-dim)';
   const heading = ide ? 'var(--ide-fg-bright)' : 'var(--signal-ink)';

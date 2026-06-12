@@ -2,7 +2,6 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {Markdown} from '@/signal/components/Markdown';
-import {ConfirmModal} from '@/signal/components/Modal';
 import {Button, StatusPill} from '@/signal/components/Primitives';
 import {IdeBadge} from '@/ide/IdeKit';
 
@@ -66,8 +65,6 @@ export function CodeReviewPanel({
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<api.CodeReviewScanDto['status'] | null>(null);
   const [autofixBusy, setAutofixBusy] = useState<Severity | null>(null);
-  // C8 — severity bucket awaiting dispatch confirmation.
-  const [confirmSev, setConfirmSev] = useState<Severity | null>(null);
   const [downloading, setDownloading] = useState(false);
   // 403 (FREE) / 429 (quota) — surface the backend message verbatim + disable
   // the gated actions until the next successful call.
@@ -463,13 +460,12 @@ export function CodeReviewPanel({
           >
             {sev} · {list.length}
           </div>
-          {/* C8 — credit-spending dispatch goes through a confirm modal. */}
           {ide ? (
             <button
               className='ide-btn'
               style={{padding: '3px 10px'}}
               disabled={busy || gated || !completedScanId}
-              onClick={() => completedScanId && setConfirmSev(sev)}
+              onClick={() => completedScanId && autofix(sev, completedScanId)}
             >
               {busy ? 'Dispatching…' : `Autofix ${list.length} →`}
             </button>
@@ -478,7 +474,7 @@ export function CodeReviewPanel({
               kind='secondary'
               sm
               disabled={busy || gated || !completedScanId}
-              onClick={() => completedScanId && setConfirmSev(sev)}
+              onClick={() => completedScanId && autofix(sev, completedScanId)}
             >
               {busy ? 'Dispatching…' : `Autofix ${list.length} →`}
             </Button>
@@ -616,24 +612,6 @@ export function CodeReviewPanel({
           No scan yet. Run a scan to surface code-quality issues across the whole repo.
         </div>
       )}
-
-      {/* C8 — confirm before the paid autofix dispatch; on confirm the existing
-          autofix() runs (navigates to /result/{runId}). */}
-      <ConfirmModal
-        open={confirmSev != null}
-        title='Dispatch autofix run'
-        body={
-          confirmSev
-            ? `This dispatches a new run targeting severity ${confirmSev} (${grouped[confirmSev].length} finding${grouped[confirmSev].length === 1 ? '' : 's'}). It consumes credits and opens a new PR. Continue?`
-            : ''
-        }
-        confirmLabel='Dispatch run'
-        busy={confirmSev != null && autofixBusy === confirmSev}
-        onConfirm={async () => {
-          if (confirmSev && completedScanId) await autofix(confirmSev, completedScanId);
-        }}
-        onClose={() => setConfirmSev(null)}
-      />
     </div>
   );
 }

@@ -178,16 +178,3 @@ module "loadbalancer" {
 
   depends_on = [module.compute, google_project_service.apis]
 }
-
-# ── Deploy-SA access to the deploy bucket ────────────────────────────────────
-# Build & Deploy (GitHub Actions) impersonates a single WIF SA
-# (var.deploy_service_account = executespec-dev-gce) to upload the JAR to EVERY env's deploy
-# bucket. The compute_sa module only grants the env's OWN compute SA (which equals the deploy SA
-# for dev only), so non-dev deploy buckets (benchmark/prod) must grant the shared deploy SA
-# explicitly — otherwise `gsutil cp` 403s and the deploy fails at "Upload JAR to GCS". Idempotent
-# with the dev env (redundant grant there).
-resource "google_storage_bucket_iam_member" "deploy_sa_deploy_bucket" {
-  bucket = module.storage.deploy_bucket_name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${var.deploy_service_account}"
-}

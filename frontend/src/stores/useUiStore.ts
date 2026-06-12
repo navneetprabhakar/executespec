@@ -29,15 +29,10 @@ type ViewMode = 'pro' | 'project';
 type Theme = 'dark' | 'light' | 'system';
 
 /**
- * UI chrome mode. 'ide' = the VS Code-style workspace (the only live chrome);
- * 'signal' = the retired classic chrome. As of the 2026-05-22 IDE-only switch
- * the chrome is no longer user-switchable — `App.tsx` hard-codes `const ide =
- * true`, so every route renders its IDE surface. The value is still applied to
- * `<html data-ui>` (always 'ide') for CSS. `uiMode` + `setUiMode` are retained
- * only because the undeleted Signal `AccountPage` fallback still references the
- * old Interface toggle; nothing in the live IDE tree reads them.
+ * UI chrome mode. Console is the protected app shell; the older values survive
+ * only so stale persisted state and retired call sites do not break.
  */
-type UiMode = 'signal' | 'ide';
+type UiMode = 'signal' | 'ide' | 'console';
 
 interface UiStore {
   sidebarExpanded: boolean;
@@ -59,7 +54,7 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
-  /** UI chrome mode (always 'ide' since the 2026-05-22 IDE-only switch). */
+  /** UI chrome mode for the protected shell. */
   uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
@@ -140,17 +135,11 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
   });
 }
 
-// UI chrome — applied to <html data-ui> pre-paint so the chrome renders without
-// a flash. 2026-05-22: the Signal chrome was retired as a user-facing option;
-// the VS Code-style IDE workspace is now the ONLY chrome and the A/B toggle was
-// removed. We force 'ide' regardless of any previously-persisted es:uiMode.
-// (`setUiMode` survives only because the undeleted Signal `AccountPage` fallback
-// still references the old Interface toggle; the live IDE tree never calls it.)
+// UI chrome — Console is now the protected shell. Ignore stale local chrome
+// persistence from earlier builds so /home and protected routes start together.
 function initUiMode(): UiMode {
-  if (typeof document !== 'undefined') {
-    document.documentElement.dataset.ui = 'ide';
-  }
-  return 'ide';
+  if (typeof document !== 'undefined') document.documentElement.dataset.ui = 'console';
+  return 'console';
 }
 
 // M-026 (Wave 1) — first-time users land with sidebar expanded so they can

@@ -1,10 +1,10 @@
 # ExecuteSpec User Manual
 
-> Current manual for the IDE-first web app. The retired Signal protected chrome is not described here; surviving `frontend/src/signal/` files are public/admin/shared components only.
+> Current manual for the Console control-plane web app. The retired Signal protected chrome is not described here; surviving `frontend/src/signal/` files are public/admin/shared components only.
 
 ## Main Navigation
 
-Protected users land in the IDE workspace (`frontend/src/ide/`). The exact visual shell may be IDE or opt-in Console, but the product surfaces are the same:
+Protected users land in the Console shell (`frontend/src/console/`). The route-level product surfaces remain under `frontend/src/ide/` and render inside that control-plane frame:
 
 | Surface | Purpose |
 | --- | --- |
@@ -46,10 +46,15 @@ Run result should answer:
 - Did build/tests pass?
 - What did reviewer find or fix?
 - What verified score was assigned?
+- Which evidence backs that score, and which parts are deterministic vs LLM-
+  assessed?
 - Was a PR opened?
 - What did the run cost?
 
 The Logs tab reads persisted run-event replay where available; it is not only the ephemeral live SSE stream.
+The validation report includes a verification ledger; treat `verifiedScore` as a
+summary of measured signals, not a substitute for spot-reading the diff and
+output examples before external publication.
 
 ## Project Workbench
 

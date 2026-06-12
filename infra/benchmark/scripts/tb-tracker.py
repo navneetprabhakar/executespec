@@ -148,17 +148,8 @@ def main():
     out = a.out or os.path.join(os.path.expanduser("~"), "tb-tracker.html")
 
     def ping(msg):
-        if not a.telegram:
-            return
-        if not os.path.exists(a.tg_script):
-            print(f"telegram_send=missing tg_script={a.tg_script}", flush=True)
-            return
-        proc = subprocess.run(["python3", a.tg_script, msg], capture_output=True, text=True)
-        if proc.returncode == 0:
-            print(f"telegram_send=ok chars={len(msg)}", flush=True)
-        else:
-            err = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:300]
-            print(f"telegram_send=failed code={proc.returncode} error={err}", flush=True)
+        if a.telegram and os.path.exists(a.tg_script):
+            subprocess.run(["python3", a.tg_script, msg], capture_output=True)
 
     seen = set()      # tasks already pinged (k results in)
     cyc = [0]
@@ -183,16 +174,8 @@ def main():
                      f"→ {resolved}/{scored} resolved · {a.total} total · ${cost:.2f}")
         # heartbeat digest (alive signal between completions)
         if a.heartbeat and (cyc[0] == 1 or cyc[0] % a.heartbeat == 0):
-            pct = (100.0 * resolved / scored) if scored else 0
-            ping(
-                "ExecuteSpec TB Update\n\n"
-                f"Run: {a.name}\n"
-                f"Progress: {scored}/{a.total} tasks scored\n"
-                f"Resolved: {resolved}/{scored} ({pct:.1f}%)\n"
-                f"Cost: ${cost:.2f}\n"
-                f"State: {'running' if running else 'done'}\n"
-                "Dashboard: https://benchmark.executespec.ai/benchmark"
-            )
+            ping(f"📊 {a.name} · {time.strftime('%H:%M')} · {scored}/{a.total} scored · "
+                 f"{resolved} resolved · ${cost:.2f} · {'running' if running else 'done'}")
         return running
 
     if a.loop:
@@ -217,14 +200,7 @@ def main():
                              if resolved >= bn else "⚠️ below baseline — review first")
         except Exception:
             pass
-    ping(
-        "ExecuteSpec TB Complete\n\n"
-        f"Run: {a.name}\n"
-        f"Resolved: {resolved}/{scored} ({pct:.1f}%)\n"
-        f"Cost: ${cost:.2f}"
-        f"{hint}\n"
-        "Next: review, upload, and submit only after approval."
-    )
+    ping(f"🏁 DONE — {a.name}\n{resolved}/{scored} resolved ({pct:.0f}%) · ${cost:.2f}{hint}")
     print("dashboard:", out, ("→ " + a.gcs) if a.gcs else "")
 
 

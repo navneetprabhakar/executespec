@@ -33,6 +33,14 @@ const SEV: Record<string, {l: string; k: 'ok' | 'warn' | 'bad'}> = {
   WOULD_CAUSE_BUG: {l: 'BUG', k: 'warn'},
   WOULD_FAIL_LINT: {l: 'LINT', k: 'ok'},
 };
+const evidenceKind = (status?: string): 'ok' | 'warn' | 'bad' =>
+  status === 'PASS' ? 'ok' : status === 'FAIL' ? 'bad' : 'warn';
+const confidenceColor = (confidence?: string) =>
+  confidence === 'HIGH'
+    ? 'var(--ide-green)'
+    : confidence === 'LOW'
+      ? 'var(--ide-red)'
+      : 'var(--ide-yellow)';
 const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 const num = (n?: number | null) => (n == null ? '—' : n.toLocaleString());
 
@@ -146,6 +154,18 @@ const TABS = [
   'Chat',
 ] as const;
 type Tab = (typeof TABS)[number];
+const TAB_LABEL: Record<Tab, string> = {
+  Overview: 'Overview',
+  Code: 'Code',
+  Tasks: 'Steps',
+  Timeline: 'Timeline',
+  Logs: 'Activity log',
+  Validation: 'Evidence',
+  Cost: 'Cost',
+  PR: 'Pull request',
+  Tests: 'Tests',
+  Chat: 'Ask',
+};
 
 function Kv({k, v}: {k: string; v: React.ReactNode}) {
   return (
@@ -172,6 +192,7 @@ export default function IdeRunResult() {
   );
   const [filesWidth, setFilesWidth] = useState(240);
   const [tab, setTab] = useState<Tab>('Overview');
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
@@ -485,7 +506,53 @@ export default function IdeRunResult() {
   return (
     <div style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}>
       {/* tab strip */}
-      <div className='ide-rtabs'>
+      <div className='ide-result-mobile-nav'>
+        <button
+          type='button'
+          className='ide-project-mobile-trigger'
+          aria-haspopup='menu'
+          aria-expanded={tabMenuOpen}
+          onClick={() => setTabMenuOpen((v) => !v)}
+        >
+          <span>
+            {TAB_LABEL[tab]}
+            {tab === 'Code' && files.length ? ` · ${files.length}` : ''}
+            {tab === 'Tasks' && run?.tasks?.length ? ` · ${run.tasks.length}` : ''}
+            {tab === 'Validation' && issues.length ? ` · ${issues.length}` : ''}
+          </span>
+          <span aria-hidden='true'>⌄</span>
+        </button>
+        {tabMenuOpen && (
+          <div className='ide-project-mobile-menu' role='menu'>
+            {TABS.map((t) => {
+              const badge =
+                t === 'Code'
+                  ? files.length
+                  : t === 'Tasks'
+                    ? run?.tasks?.length
+                    : t === 'Validation'
+                      ? issues.length
+                      : null;
+              return (
+                <button
+                  key={t}
+                  type='button'
+                  className={`ide-project-mobile-item${tab === t ? ' active' : ''}`}
+                  role='menuitem'
+                  onClick={() => {
+                    setTab(t);
+                    setTabMenuOpen(false);
+                  }}
+                >
+                  {TAB_LABEL[t]}
+                  {badge ? ` · ${badge}` : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className='ide-rtabs ide-result-tabs'>
         {TABS.map((t) => {
           const badge =
             t === 'Code'
@@ -501,7 +568,7 @@ export default function IdeRunResult() {
               className={`ide-rtab${tab === t ? ' active' : ''}`}
               onClick={() => setTab(t)}
             >
-              {t}
+              {TAB_LABEL[t]}
               {badge ? <span className='ide-rtab-badge'>{badge}</span> : null}
             </button>
           );
@@ -514,7 +581,7 @@ export default function IdeRunResult() {
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <Crumbs
               items={[
-                {label: 'Runs', to: '/runs'},
+                {label: 'Work', to: '/runs'},
                 {label: run?.runTitle || `R-${runId.slice(0, 6)}`},
               ]}
             />
@@ -522,7 +589,7 @@ export default function IdeRunResult() {
               className='ide-h1 ide-clamp2'
               title={run?.runTitle || run?.userRequest || undefined}
             >
-              {run ? run.runTitle || (run.userRequest || '').slice(0, 70) || 'Run' : 'Loading…'}
+              {run ? run.runTitle || (run.userRequest || '').slice(0, 70) || 'Work' : 'Loading…'}
             </div>
             <div style={{display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 18px'}}>
               <IdeBadge kind={v.kind}>{v.label}</IdeBadge>
@@ -590,7 +657,7 @@ export default function IdeRunResult() {
               )}
               <div className='ide-card' style={{flex: 1, minWidth: 240}}>
                 <div className='ide-h2' style={{marginTop: 0}}>
-                  Run
+                  Execution details
                 </div>
                 <Kv k='Status' v={run?.status ?? '—'} />
                 <Kv k='Provider' v={(run?.aiProvider || '—').toLowerCase()} />
@@ -609,7 +676,7 @@ export default function IdeRunResult() {
 
             {run?.userRequest && (
               <>
-                <div className='ide-h2'>Submitted prompt</div>
+                <div className='ide-h2'>Original request</div>
                 <div
                   className='ide-card ide-mono'
                   style={{fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap'}}
@@ -619,7 +686,7 @@ export default function IdeRunResult() {
               </>
             )}
 
-            <div className='ide-h2'>What now</div>
+            <div className='ide-h2'>Next action</div>
             {/* RES-1 — one context-aware primary CTA; everything else is a ghost
                 or lives in the ⋯ overflow. Bench/patch runs with no workspace
                 files get "Iterate in chat" instead of a blue Push-to-GitHub. */}
@@ -1071,9 +1138,9 @@ export default function IdeRunResult() {
         {/* ── Tasks ── */}
         {tab === 'Tasks' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>Tasks</div>
+            <div className='ide-h1'>Steps</div>
             {!run?.tasks?.length ? (
-              <div className='ide-empty'>No tasks.</div>
+              <div className='ide-empty'>No steps.</div>
             ) : (
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => (
@@ -1146,7 +1213,7 @@ export default function IdeRunResult() {
             return (
               <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
                 <div className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                  Live log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
+                  Activity log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
                   <span
                     className='ide-mono'
                     style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
@@ -1341,7 +1408,7 @@ export default function IdeRunResult() {
         {tab === 'Validation' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <div className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 10}}>
-              Validation
+              Evidence
               {report && (
                 <button
                   className='ide-btn ghost'
@@ -1359,7 +1426,7 @@ export default function IdeRunResult() {
               )}
             </div>
             {!report ? (
-              <div className='ide-empty'>No validation report.</div>
+              <div className='ide-empty'>No evidence report.</div>
             ) : (
               <>
                 <div className='ide-card'>
@@ -1369,6 +1436,56 @@ export default function IdeRunResult() {
                   <Kv k='Review failures' v={report.reviewFailures} />
                   <Kv k='Issues caught' v={report.issuesCaught} />
                 </div>
+                {report.verificationLedger && report.verificationLedger.length > 0 && (
+                  <>
+                    <div className='ide-h2'>Evidence ledger</div>
+                    <div className='ide-card' style={{padding: 0}}>
+                      {report.verificationLedger.map((e, i) => (
+                        <div
+                          key={e.id || i}
+                          style={{
+                            padding: '11px 16px',
+                            borderBottom:
+                              i < (report.verificationLedger?.length ?? 0) - 1
+                                ? '1px solid var(--ide-border)'
+                                : 'none',
+                          }}
+                        >
+                          <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+                            <IdeBadge kind={evidenceKind(e.status)}>{e.status}</IdeBadge>
+                            <span style={{fontWeight: 600}}>{e.label}</span>
+                            <span
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            >
+                              {e.source}
+                            </span>
+                            <span
+                              className='ide-mono'
+                              style={{
+                                fontSize: 11,
+                                color: confidenceColor(e.confidence),
+                                marginLeft: 'auto',
+                              }}
+                            >
+                              {e.confidence}
+                            </span>
+                          </div>
+                          <div style={{fontSize: 13, marginTop: 4}}>{e.summary}</div>
+                          <div
+                            className='ide-mono'
+                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                          >
+                            {e.artifact}
+                            {e.total != null && e.observed != null
+                              ? ` · ${e.observed}/${e.total}`
+                              : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <div className='ide-h2'>Issues · {issues.length}</div>
                 {issues.length === 0 ? (
                   <div className='ide-empty'>No issues flagged.</div>
@@ -1476,8 +1593,8 @@ export default function IdeRunResult() {
             ) : (
               <div className='ide-card'>
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
-                  No PR yet — a pull request opens when you push this run's code. Pushing requires a
-                  GitHub token (set one under Integrations).
+                  No pull request yet. Push the generated changes when you are ready to open one.
+                  Pushing requires a GitHub token under Integrations.
                 </div>
                 <button
                   className='ide-btn'
@@ -1763,10 +1880,10 @@ export default function IdeRunResult() {
             className='ide-pane'
             style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}
           >
-            <div className='ide-h1'>Chat</div>
+            <div className='ide-h1'>Ask about this work</div>
             <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
-              Run-scoped chat — ask the agent about its decisions or describe a change and start a
-              fresh iteration from this run&apos;s codebase.
+              Ask the agent about its decisions, or describe a change and start a fresh iteration
+              from this work&apos;s codebase.
             </div>
             {msg && (
               <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
@@ -1788,7 +1905,7 @@ export default function IdeRunResult() {
                 <IdeLoader label='Loading chat…' />
               ) : chat.length === 0 && !chatBusy ? (
                 <div className='ide-empty'>
-                  No messages yet. Ask the agent anything about this run.
+                  No messages yet. Ask the agent anything about this work.
                 </div>
               ) : (
                 chat.map((m, i) => {
@@ -1835,7 +1952,7 @@ export default function IdeRunResult() {
                     void sendChat();
                   }
                 }}
-                placeholder='Ask anything about this run…'
+                placeholder='Ask anything about this work…'
                 rows={2}
                 disabled={chatBusy}
                 style={{flex: 1, resize: 'vertical', minHeight: 56, maxHeight: 200}}
@@ -1852,9 +1969,9 @@ export default function IdeRunResult() {
                   className='ide-btn ghost'
                   onClick={iterateAsNewRun}
                   disabled={chatBusy || !chatInput.trim()}
-                  title='Start a new run from this run’s code with your change applied'
+                  title='Start new work from this result with your change applied'
                 >
-                  ⑂ Iterate as new run
+                  Start follow-up work
                 </button>
               </div>
             </div>

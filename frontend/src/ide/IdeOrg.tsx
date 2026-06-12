@@ -92,7 +92,7 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
 
 // API keys (BYOK) — /api-keys
 export function IdeApiKeys() {
-  useDocumentTitle('API keys');
+  useDocumentTitle('Provider keys');
   const tier = useAuthStore(selectNormalizedTier);
   const user = useAuthStore((s) => s.user);
   // Gate strictly by tier (FREE only is blocked). Some running JVMs return
@@ -138,7 +138,7 @@ export function IdeApiKeys() {
         provider === 'DEEPSEEK' ? key.trim() : '',
         provider === 'FIREWORKS' ? key.trim() : '',
       );
-      setMsg(`${provider} key saved. Runs against ${provider} now bypass the platform cap.`);
+      setMsg(`${provider} key saved. Work using ${provider} now bypasses the platform cap.`);
       if (provider === 'OPENAI') setOpenaiKey('');
       if (provider === 'ANTHROPIC') setAnthropicKey('');
       if (provider === 'GEMINI') setGeminiKey('');
@@ -205,11 +205,11 @@ export function IdeApiKeys() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>API keys</div>
-      <div className='ide-sub'>BYOK · bypass platform cost cap</div>
+      <div className='ide-h1'>Provider keys</div>
+      <div className='ide-sub'>Bring your own model keys · bypass platform cost cap</div>
 
       <InfoCard>
-        When you connect a provider key, runs against that provider{' '}
+        When you connect a provider key, work using that provider{' '}
         <strong>bypass our cost cap</strong> entirely. Keys are encrypted at rest. Available on
         PRO/TEAM/ENTERPRISE tiers.
       </InfoCard>
@@ -224,7 +224,7 @@ export function IdeApiKeys() {
             borderColor: 'var(--ide-red)',
           }}
         >
-          BYOK is a PRO+ feature.{' '}
+          Provider keys are a PRO+ feature.{' '}
           <Link to='/plans' style={{color: 'var(--ide-red)', fontWeight: 600}}>
             Upgrade →
           </Link>
@@ -593,7 +593,7 @@ export function IdeOrgMembers() {
       <ConfirmModal
         open={!!confirmRemove}
         title='Remove member?'
-        body={`${confirmRemove?.label || 'This member'} will lose access to all org projects, runs, and billing. This action is irreversible.`}
+        body={`${confirmRemove?.label || 'This member'} will lose access to all org projects, work, and billing. This action is irreversible.`}
         confirmLabel='Remove'
         danger
         busy={!!confirmRemove && rowBusy === `remove-${confirmRemove.userId}`}
@@ -1029,9 +1029,9 @@ export function IdeOrgSettings() {
       {/* ── AI provider keys ── */}
       <div className='ide-h2'>AI provider keys</div>
       <InfoCard>
-        Org-wide BYOK keys shared by every member. Runs against a provider you supply a key for
-        bypass the platform cost cap. Keys are encrypted at rest and never shown again — paste a new
-        value to replace one, or leave a field blank to keep the current key.
+        Org-wide provider keys shared by every member. Work using a provider you supply a key for
+        bypasses the platform cost cap. Keys are encrypted at rest and never shown again — paste a
+        new value to replace one, or leave a field blank to keep the current key.
       </InfoCard>
       <div className='ide-card' style={{padding: 0}}>
         {orgKeyRows.map((row, i) => (
@@ -1091,7 +1091,7 @@ export function IdeOrgSettings() {
       <InfoCard>
         Tiers: <strong>Planning</strong> (complex reasoning) · <strong>Workhorse</strong> (default)
         · <strong>Lightweight</strong> (cheap/fast). &lsquo;Default · &lt;model&gt;&rsquo; follows
-        the platform matrix; pick a model to override it for this org&apos;s runs. Editable on
+        the platform matrix; pick a model to override it for this org&apos;s work. Editable on
         ENTERPRISE.
         {matrix && !matrix.editable && (
           <>
@@ -1158,7 +1158,7 @@ export function IdeOrgSettings() {
                       <option value=''>Default · {def}</option>
                       {(matrix.modelsByProvider[p] ?? []).map((mdl) => (
                         <option key={mdl} value={mdl}>
-                          {mdl}
+                          {matrix.modelLabels?.[mdl] || mdl}
                         </option>
                       ))}
                     </select>

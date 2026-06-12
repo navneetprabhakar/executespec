@@ -2,7 +2,7 @@ import {useEffect} from 'react';
 
 /**
  * C2 (UI/UX review 2026-06-11) — per-surface browser-tab titles. The shells
- * (IdeWorkspace / ConsoleShell) set a route-derived default for every route;
+ * ConsoleShell sets a route-derived default for every route;
  * detail surfaces call this with a richer name once their data loads (e.g.
  * `useDocumentTitle(run?.runTitle ?? null)`), which wins over the default.
  *

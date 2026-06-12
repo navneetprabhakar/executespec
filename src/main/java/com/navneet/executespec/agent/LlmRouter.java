@@ -218,11 +218,7 @@ public class LlmRouter {
       String resolvedKey,
       RunKeyContext.Source source) {
     RuntimeException lastError = null;
-    int maxAttempts =
-        request.transientRetryMaxAttempts() != null && request.transientRetryMaxAttempts() > 0
-            ? request.transientRetryMaxAttempts()
-            : TRANSIENT_RETRY_MAX_ATTEMPTS;
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
       long start = System.currentTimeMillis();
       try {
         ChatResponse resp = dispatch(request, tools, resolvedKey);
@@ -254,10 +250,10 @@ public class LlmRouter {
             request.model(),
             elapsed,
             attempt,
-            maxAttempts,
+            TRANSIENT_RETRY_MAX_ATTEMPTS,
             e.getMessage());
         lastError = e;
-        if (attempt < maxAttempts && isTransientError(e)) {
+        if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
           long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
@@ -571,7 +567,6 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(apiKey)
-            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -598,7 +593,6 @@ public class LlmRouter {
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
             .extraBody(Map.of("provider", Map.of("sort", "latency")))
-            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -635,7 +629,6 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(deepSeekBaseUrl)
-            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -662,7 +655,6 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(fireworksBaseUrl)
-            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
