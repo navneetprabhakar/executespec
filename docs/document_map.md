@@ -126,13 +126,13 @@ Two YAML/Markdown catalogue schemas that ship with the product. Both are loaded 
 
 ## 7. Frontend
 
-The frontend has its own conventions because the IDE-first protected app, the opt-in Console shell, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
+The frontend has its own conventions because the Console-first protected app, the IDE work surfaces, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
 
 | Doc | Path | What | When to read |
 | --- | --- | --- | --- |
 | Frontend API usage | [`docs/frontend-api-usage.md`](frontend-api-usage.md) | Current `frontend/src/lib/api/` domain-module layout, request contract, SSE rules, and endpoint-addition checklist. | Before adding or changing frontend API calls. |
 | Code style | [`docs/design/code-style.md`](design/code-style.md) | Frontend code-style commitments — file layout, naming, prop-shape conventions, when to reach for a hook vs a store, mobile-first rules. | Before writing a new React component. |
-| UI tokens | [`docs/design/ui-tokens.md`](design/ui-tokens.md) | The design-token surface — Tailwind tokens, color ramps, spacing scale, radius scale, the V2 vs V3 chrome differences, a11y minima. | Before introducing a new color, spacing, or radius. |
+| UI tokens | [`docs/design/ui-tokens.md`](design/ui-tokens.md) | The design-token surface — Tailwind tokens, color ramps, spacing scale, radius scale, Console vs public Signal chrome notes, a11y minima. | Before introducing a new color, spacing, or radius. |
 
 ## 8. API surface
 

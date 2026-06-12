@@ -502,13 +502,15 @@ export function MorePage() {
           meta={<span>GitHub, Slack, Jira</span>}
           showChev
         />
-        <Row to='/api-keys' title='API keys (BYOK)' meta={<span>Provider keys</span>} showChev />
+        <Row
+          to='/provider-keys'
+          title='Provider keys'
+          meta={<span>BYOK model routing</span>}
+          showChev
+        />
 
-        <SectionHeader>Discover</SectionHeader>
+        <SectionHeader>System</SectionHeader>
         <Row to='/insights' title='Insights' meta={<span>Analytics dashboard</span>} showChev />
-        <Row to='/library' title='Library' meta={<span>Readymade solutions</span>} showChev />
-        <Row to='/migrations' title='Migrations' meta={<span>Migration recipes</span>} showChev />
-        <Row to='/templates' title='Spec templates' meta={<span>Saved specs</span>} showChev />
         {(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin) && (
           <Row to='/audit' title='Audit log' meta={<span>Compliance trail</span>} showChev />
         )}

@@ -213,7 +213,7 @@ export function IdeWelcome() {
 
       <div style={{display: 'flex', gap: 10, marginBottom: 8}}>
         <Link className='ide-btn' to='/compose'>
-          ＋ New spec
+          ＋ New work
         </Link>
         <Link className='ide-btn ghost' to='/runs'>
           ◎ All runs
@@ -348,6 +348,7 @@ export function IdeCompose() {
   const [err, setErr] = useState('');
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
+  const [mobileStep, setMobileStep] = useState(0);
 
   // Compose handoff — a discovery surface (library / templates / chat compile)
   // may stash a pre-filled spec under `signal:pending-spec` before navigating
@@ -519,6 +520,27 @@ export function IdeCompose() {
     permissions != null &&
     permissions.monthlyRunLimit !== -1 &&
     permissions.currentRunCount >= permissions.monthlyRunLimit;
+  const selectedProject = projectId ? projects.find((p) => p.id === projectId) : null;
+  const selectedProjectName = selectedProject?.name ?? 'Sandbox';
+  const providerName =
+    provider === 'ANTHROPIC'
+      ? 'Anthropic'
+      : provider === 'OPENAI'
+        ? 'OpenAI'
+        : provider === 'GEMINI'
+          ? 'Gemini'
+          : 'OpenRouter';
+  const composeSteps = ['Spec', 'Context', 'Route', 'Review'];
+  const canAdvanceMobile =
+    mobileStep === 0
+      ? spec.trim().length > 0
+      : mobileStep === 1
+        ? !projectId || selectedRepoIds.length > 0
+        : true;
+  function nextMobileStep() {
+    if (!canAdvanceMobile) return;
+    setMobileStep((s) => Math.min(composeSteps.length - 1, s + 1));
+  }
 
   async function submit() {
     if (!spec.trim()) {
@@ -550,12 +572,26 @@ export function IdeCompose() {
   }
 
   return (
-    <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>New spec</div>
+    <div className='ide-pane ide-compose' style={{maxWidth: 920}}>
+      <div className='ide-h1'>New work</div>
       <div className='ide-sub'>
         Describe the change in plain language. The pipeline plans it, writes the code across your
         repos, builds + tests, and opens a PR with a verified score.{' '}
         {quotaSubtitle(tier, permissions)}
+      </div>
+
+      <div className='ide-compose-steps' aria-label='Create work steps'>
+        {composeSteps.map((s, i) => (
+          <button
+            key={s}
+            type='button'
+            className={`ide-compose-step-pill${mobileStep === i ? ' active' : ''}${i < mobileStep ? ' done' : ''}`}
+            onClick={() => setMobileStep(i)}
+          >
+            <span>{i + 1}</span>
+            {s}
+          </button>
+        ))}
       </div>
 
       {isAtCap && (
@@ -580,339 +616,424 @@ export function IdeCompose() {
         </div>
       )}
 
-      <textarea
-        className='ide-textarea'
-        rows={12}
-        placeholder='e.g. Add a /health endpoint that returns build SHA + uptime, with a unit test…'
-        value={spec}
-        onChange={(e) => setSpec(e.target.value)}
-      />
-      <div style={{marginTop: 10}}>
-        <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
-      </div>
+      <section className={`ide-compose-step${mobileStep === 0 ? ' active' : ''}`}>
+        <textarea
+          className='ide-textarea'
+          rows={12}
+          placeholder='e.g. Add a /health endpoint that returns build SHA + uptime, with a unit test…'
+          value={spec}
+          onChange={(e) => setSpec(e.target.value)}
+        />
+        <div style={{marginTop: 10}}>
+          <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
+        </div>
 
-      {samples.length > 0 && (
-        <>
-          <div className='ide-h2'>Start from a sample</div>
-          <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-            {samples.map((s) => (
-              <button
-                key={s.id}
-                className='ide-btn ghost'
-                disabled={sampleBusyId != null}
-                onClick={() => void applySample(s)}
-                title={`${s.category} · ${s.complexity}`}
-              >
-                {sampleBusyId === s.id ? '…' : s.title}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        {samples.length > 0 && (
+          <>
+            <div className='ide-h2'>Start from a sample</div>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+              {samples.map((s) => (
+                <button
+                  key={s.id}
+                  className='ide-btn ghost'
+                  disabled={sampleBusyId != null}
+                  onClick={() => void applySample(s)}
+                  title={`${s.category} · ${s.complexity}`}
+                >
+                  {sampleBusyId === s.id ? '…' : s.title}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
-      <div className='ide-h2'>Project</div>
-      <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
-        <button
-          className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
-          onClick={() => pickProject(null)}
-        >
-          {projectId == null ? '✓ ' : ''}Sandbox (no repo)
-        </button>
-        {chipProjects.map((p) => (
+      <section className={`ide-compose-step${mobileStep === 1 ? ' active' : ''}`}>
+        <div className='ide-h2'>Project context</div>
+        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
           <button
-            key={p.id}
-            className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
-            onClick={() => pickProject(p.id)}
+            className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
+            onClick={() => pickProject(null)}
           >
-            {projectId === p.id ? '✓ ' : ''}
-            {p.name}
+            {projectId == null ? '✓ ' : ''}Sandbox (no repo)
           </button>
-        ))}
-        {projects.length > 4 && (
-          <button
-            className='ide-btn ghost'
-            aria-expanded={projectPickerOpen}
-            onClick={() => {
-              setProjectPickerOpen((v) => !v);
-              setProjectQuery('');
+          {chipProjects.map((p) => (
+            <button
+              key={p.id}
+              className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
+              onClick={() => pickProject(p.id)}
+            >
+              {projectId === p.id ? '✓ ' : ''}
+              {p.name}
+            </button>
+          ))}
+          {projects.length > 4 && (
+            <button
+              className='ide-btn ghost'
+              aria-expanded={projectPickerOpen}
+              onClick={() => {
+                setProjectPickerOpen((v) => !v);
+                setProjectQuery('');
+              }}
+            >
+              All projects… ({projects.length})
+            </button>
+          )}
+        </div>
+        {projectPickerOpen && (
+          <div
+            className='ide-card'
+            style={{marginBottom: 8, padding: 10}}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setProjectPickerOpen(false);
             }}
           >
-            All projects… ({projects.length})
-          </button>
+            <input
+              className='ide-input'
+              autoFocus
+              placeholder='Search projects…'
+              value={projectQuery}
+              onChange={(e) => setProjectQuery(e.target.value)}
+              aria-label='Search projects'
+              style={{marginBottom: 8}}
+            />
+            <div style={{maxHeight: 240, overflowY: 'auto'}}>
+              {filteredProjects.length === 0 ? (
+                <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
+                  No projects match “{projectQuery.trim()}”.
+                </div>
+              ) : (
+                filteredProjects.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type='button'
+                    onClick={() => pickProject(p.id)}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom:
+                        i < filteredProjects.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      padding: '8px 6px',
+                      fontSize: 13,
+                      color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {projectId === p.id ? '✓ ' : ''}
+                    {p.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         )}
-      </div>
-      {projectPickerOpen && (
-        <div
-          className='ide-card'
-          style={{marginBottom: 8, padding: 10}}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setProjectPickerOpen(false);
-          }}
-        >
-          <input
-            className='ide-input'
-            autoFocus
-            placeholder='Search projects…'
-            value={projectQuery}
-            onChange={(e) => setProjectQuery(e.target.value)}
-            aria-label='Search projects'
-            style={{marginBottom: 8}}
-          />
-          <div style={{maxHeight: 240, overflowY: 'auto'}}>
-            {filteredProjects.length === 0 ? (
-              <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
-                No projects match “{projectQuery.trim()}”.
-              </div>
-            ) : (
-              filteredProjects.map((p, i) => (
-                <button
-                  key={p.id}
-                  type='button'
-                  onClick={() => pickProject(p.id)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    background: 'transparent',
-                    border: 'none',
-                    borderBottom:
-                      i < filteredProjects.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    padding: '8px 6px',
-                    fontSize: 13,
-                    color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {projectId === p.id ? '✓ ' : ''}
-                  {p.name}
-                </button>
-              ))
-            )}
-          </div>
+        <div className='ide-sub' style={{marginTop: 0}}>
+          {projectId
+            ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
+            : 'Sandbox mode: a temporary project is created. Pick a real project to run against your codebase.'}
         </div>
-      )}
-      <div className='ide-sub' style={{marginTop: 0}}>
-        {projectId
-          ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-          : 'Sandbox mode: a temporary project is created. Pick a real project to run against your codebase.'}
-      </div>
 
-      {projectId && projectRepos.length > 0 && (
-        <>
-          <div className='ide-h2'>Repos the agent may touch</div>
-          <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-            {projectRepos.map((r) => {
-              const rId = repoIdFor(r);
-              const selected = selectedRepoIds.includes(rId);
-              return (
-                <button
-                  key={rId}
-                  className={selected ? 'ide-btn' : 'ide-btn ghost'}
-                  onClick={() => toggleRepo(rId)}
-                >
-                  {selected ? '✓ ' : ''}
-                  {repoDisplayName(r)}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+        {projectId && projectRepos.length > 0 && (
+          <>
+            <div className='ide-h2'>Repos the agent may touch</div>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+              {projectRepos.map((r) => {
+                const rId = repoIdFor(r);
+                const selected = selectedRepoIds.includes(rId);
+                return (
+                  <button
+                    key={rId}
+                    className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                    onClick={() => toggleRepo(rId)}
+                  >
+                    {selected ? '✓ ' : ''}
+                    {repoDisplayName(r)}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
-      {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
+        {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
           system PAT since 2026-05-23). Without one, a project run completes but
           the PR push fails — previously discovered only on the result page. */}
-      {projectId != null && user != null && !user.hasGithubPat && (
+        {projectId != null && user != null && !user.hasGithubPat && (
+          <div
+            className='ide-card'
+            style={{
+              borderColor: 'var(--ide-yellow)',
+              margin: '12px 0',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            No GitHub token connected — the run will generate code, but it can't open a PR on your
+            repo until you add one.{' '}
+            <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
+              Connect GitHub →
+            </Link>
+          </div>
+        )}
+      </section>
+
+      <section className={`ide-compose-step${mobileStep === 2 ? ' active' : ''}`}>
+        {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
+          .ide-stack-mobile collapses to one column under 600px. */}
         <div
-          className='ide-card'
+          className='ide-stack-mobile'
           style={{
-            borderColor: 'var(--ide-yellow)',
-            margin: '12px 0',
-            fontSize: 13,
-            lineHeight: 1.5,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${tier === 'ENTERPRISE' ? 4 : 3}, minmax(0, 1fr))`,
+            gap: 12,
+            margin: '14px 0',
           }}
         >
-          No GitHub token connected — the run will generate code, but it can't open a PR on your
-          repo until you add one.{' '}
-          <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            Connect GitHub →
-          </Link>
-        </div>
-      )}
-
-      {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
-          .ide-stack-mobile collapses to one column under 600px. */}
-      <div
-        className='ide-stack-mobile'
-        style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${tier === 'ENTERPRISE' ? 4 : 3}, minmax(0, 1fr))`,
-          gap: 12,
-          margin: '14px 0',
-        }}
-      >
-        <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
-          <div className='ide-h2' id='compose-provider-label' style={{marginTop: 0}}>
-            Provider
-          </div>
-          <select
-            className='ide-select'
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            <option value='ANTHROPIC'>Anthropic</option>
-            <option value='OPENAI'>OpenAI</option>
-            <option value='GEMINI'>Gemini</option>
-            {tier === 'ENTERPRISE' && <option value='OPENROUTER'>OpenRouter</option>}
-          </select>
-        </div>
-        {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
-            default matrix for this run only. '' = Default → no modelName sent. */}
-        {tier === 'ENTERPRISE' && (
-          <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
-            <div className='ide-h2' id='compose-model-label' style={{marginTop: 0}}>
-              Model · Beta
+          <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-provider-label' style={{marginTop: 0}}>
+              Provider
             </div>
             <select
               className='ide-select'
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
             >
-              <option value=''>Recommended (default)</option>
-              {(modelsByProvider[provider.toLowerCase()] || []).map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
+              <option value='ANTHROPIC'>Anthropic</option>
+              <option value='OPENAI'>OpenAI</option>
+              <option value='GEMINI'>Gemini</option>
+              {tier === 'ENTERPRISE' && <option value='OPENROUTER'>OpenRouter</option>}
+            </select>
+          </div>
+          {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
+            default matrix for this run only. '' = Default → no modelName sent. */}
+          {tier === 'ENTERPRISE' && (
+            <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
+              <div className='ide-h2' id='compose-model-label' style={{marginTop: 0}}>
+                Model · Beta
+              </div>
+              <select
+                className='ide-select'
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+              >
+                <option value=''>Recommended (default)</option>
+                {(modelsByProvider[provider.toLowerCase()] || []).map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                Overrides org &amp; default matrix for this run
+              </div>
+            </div>
+          )}
+          <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-mode-label' style={{marginTop: 0}}>
+              Mode
+            </div>
+            <select
+              className='ide-select'
+              value={mode}
+              onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
+            >
+              <option value='PRODUCTION'>Production (plan gate)</option>
+              <option value='PROTOTYPE'>Prototype (auto)</option>
             </select>
             <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-              Overrides org &amp; default matrix for this run
+              Production pauses for plan + price approval; Prototype runs straight through.
             </div>
           </div>
-        )}
-        <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
-          <div className='ide-h2' id='compose-mode-label' style={{marginTop: 0}}>
-            Mode
-          </div>
-          <select
-            className='ide-select'
-            value={mode}
-            onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
-          >
-            <option value='PRODUCTION'>Production (plan gate)</option>
-            <option value='PROTOTYPE'>Prototype (auto)</option>
-          </select>
-          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-            Production pauses for plan + price approval; Prototype runs straight through.
-          </div>
-        </div>
-        <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
-          <div className='ide-h2' id='compose-cap-label' style={{marginTop: 0}}>
-            Spending cap
-          </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-            <input
-              className='ide-input'
-              type='number'
-              step='0.5'
-              min='0.5'
-              max={tierMaxCap}
-              value={costCap}
-              aria-labelledby='compose-cap-label'
-              onChange={(e) =>
-                setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
-              }
-              style={{width: 90}}
-            />
-            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              {/* RUN-6 — say "no platform cap" in words instead of "$∞". */}
-              {tierMaxCap === 1000
-                ? 'USD · no platform cap on your plan'
-                : `USD · max $${tierMaxCap}`}
-            </span>
+          <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
+            <div className='ide-h2' id='compose-cap-label' style={{marginTop: 0}}>
+              Spending cap
+            </div>
+            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+              <input
+                className='ide-input'
+                type='number'
+                step='0.5'
+                min='0.5'
+                max={tierMaxCap}
+                value={costCap}
+                aria-labelledby='compose-cap-label'
+                onChange={(e) =>
+                  setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
+                }
+                style={{width: 90}}
+              />
+              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                {/* RUN-6 — say "no platform cap" in words instead of "$∞". */}
+                {tierMaxCap === 1000
+                  ? 'USD · no platform cap on your plan'
+                  : `USD · max $${tierMaxCap}`}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div
-        style={{display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12}}
-      >
-        <label
-          style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            marginBottom: 12,
+          }}
         >
-          <input type='checkbox' checked={tddMode} onChange={(e) => setTddMode(e.target.checked)} />
-          TDD mode — write tests first
-        </label>
-        <div style={{flex: 1, minWidth: 220}}>
           <label
-            htmlFor='compose-figma-url'
-            style={{display: 'block', fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+            style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
           >
-            Figma URL (optional)
+            <input
+              type='checkbox'
+              checked={tddMode}
+              onChange={(e) => setTddMode(e.target.checked)}
+            />
+            TDD mode — write tests first
           </label>
-          <input
-            id='compose-figma-url'
-            className='ide-input'
-            type='url'
-            placeholder='https://figma.com/… (passed to the planner)'
-            value={figmaUrl}
-            onChange={(e) => setFigmaUrl(e.target.value)}
-            style={{width: '100%'}}
-          />
-        </div>
-      </div>
-
-      {estimate && (
-        <div className='ide-card' style={{marginBottom: 12}}>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Estimate from project history
+          <div style={{flex: 1, minWidth: 220}}>
+            <label
+              htmlFor='compose-figma-url'
+              style={{
+                display: 'block',
+                fontSize: 12,
+                color: 'var(--ide-fg-muted)',
+                marginBottom: 4,
+              }}
+            >
+              Figma URL (optional)
+            </label>
+            <input
+              id='compose-figma-url'
+              className='ide-input'
+              type='url'
+              placeholder='https://figma.com/… (passed to the planner)'
+              value={figmaUrl}
+              onChange={(e) => setFigmaUrl(e.target.value)}
+              style={{width: '100%'}}
+            />
           </div>
-          {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
-          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
-            {estimateStale ? (
-              <button
-                type='button'
-                onClick={refreshEstimate}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  font: 'inherit',
-                  color: 'var(--ide-accent)',
-                  cursor: 'pointer',
-                }}
-              >
-                · refresh
-              </button>
-            ) : (
-              '· refreshed just now'
+        </div>
+
+        {estimate && (
+          <div className='ide-card' style={{marginBottom: 12}}>
+            <div className='ide-h2' style={{marginTop: 0}}>
+              Estimate from project history
+            </div>
+            {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
+            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+              {estimateStale ? (
+                <button
+                  type='button'
+                  onClick={refreshEstimate}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    font: 'inherit',
+                    color: 'var(--ide-accent)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  · refresh
+                </button>
+              ) : (
+                '· refreshed just now'
+              )}
+            </div>
+            <div className='ide-kv'>
+              <span>Tasks</span>
+              <span>
+                {estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh}
+              </span>
+            </div>
+            <div className='ide-kv'>
+              <span>Cost</span>
+              <span>
+                ${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
+              </span>
+            </div>
+            {estimate.basis && (
+              <div className='ide-sub' style={{marginTop: 6}}>
+                {estimate.basis}
+              </div>
             )}
           </div>
+        )}
+      </section>
+
+      <section
+        className={`ide-compose-step ide-compose-review${mobileStep === 3 ? ' active' : ''}`}
+      >
+        <div className='ide-h2'>Review</div>
+        <div className='ide-card'>
           <div className='ide-kv'>
-            <span>Tasks</span>
+            <span>Spec</span>
             <span>
-              {estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh}
+              {spec.trim()
+                ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '…' : ''}`
+                : 'Missing'}
             </span>
           </div>
           <div className='ide-kv'>
-            <span>Cost</span>
+            <span>Context</span>
             <span>
-              ${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
+              {selectedProjectName}
+              {projectId ? ` · ${selectedRepoIds.length} repos` : ''}
             </span>
           </div>
-          {estimate.basis && (
-            <div className='ide-sub' style={{marginTop: 6}}>
-              {estimate.basis}
+          <div className='ide-kv'>
+            <span>Route</span>
+            <span>
+              {providerName} · {mode === 'PRODUCTION' ? 'Plan gate' : 'Prototype'} · ${costCap}
+            </span>
+          </div>
+          {tddMode && (
+            <div className='ide-kv'>
+              <span>Tests</span>
+              <span>TDD mode enabled</span>
             </div>
           )}
         </div>
-      )}
+        {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginTop: 10}}>{err}</div>}
+        <div className='ide-run-action'>
+          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+            {busy ? 'Submitting…' : 'Create plan'}
+          </button>
+        </div>
+      </section>
 
-      {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <div className='ide-run-action'>
-        <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-          {busy ? 'Submitting…' : '▷ Run spec'}
+      <div className='ide-compose-mobile-actions'>
+        <button
+          className='ide-btn ghost'
+          type='button'
+          disabled={mobileStep === 0}
+          onClick={() => setMobileStep((s) => Math.max(0, s - 1))}
+        >
+          Back
         </button>
+        {mobileStep < composeSteps.length - 1 ? (
+          <button
+            className='ide-btn'
+            type='button'
+            disabled={!canAdvanceMobile}
+            onClick={nextMobileStep}
+          >
+            Next
+          </button>
+        ) : (
+          <button
+            className='ide-btn'
+            type='button'
+            onClick={submit}
+            disabled={busy || isAtCap || !spec.trim()}
+          >
+            {busy ? 'Submitting…' : 'Create plan'}
+          </button>
+        )}
       </div>
     </div>
   );

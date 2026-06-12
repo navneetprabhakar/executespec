@@ -172,6 +172,7 @@ export default function IdeRunResult() {
   );
   const [filesWidth, setFilesWidth] = useState(240);
   const [tab, setTab] = useState<Tab>('Overview');
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
@@ -485,7 +486,46 @@ export default function IdeRunResult() {
   return (
     <div style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}>
       {/* tab strip */}
-      <div className='ide-rtabs'>
+      <div className='ide-result-mobile-nav'>
+        <button
+          type='button'
+          className='ide-result-mobile-trigger'
+          aria-expanded={tabMenuOpen}
+          onClick={() => setTabMenuOpen((v) => !v)}
+        >
+          {tab}
+          <span>⌄</span>
+        </button>
+        {tabMenuOpen && (
+          <div className='ide-result-mobile-menu'>
+            {TABS.map((t) => {
+              const badge =
+                t === 'Code'
+                  ? files.length
+                  : t === 'Tasks'
+                    ? run?.tasks?.length
+                    : t === 'Validation'
+                      ? issues.length
+                      : null;
+              return (
+                <button
+                  key={t}
+                  type='button'
+                  className={tab === t ? 'active' : ''}
+                  onClick={() => {
+                    setTab(t);
+                    setTabMenuOpen(false);
+                  }}
+                >
+                  {t}
+                  {badge ? <span>{badge}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className='ide-rtabs ide-result-tabs'>
         {TABS.map((t) => {
           const badge =
             t === 'Code'
@@ -1018,21 +1058,8 @@ export default function IdeRunResult() {
             />
             <div className='ide-split-main'>
               {files.length > 0 && (
-                <div className='ide-mobile-file-picker'>
-                  <select
-                    className='ide-select'
-                    value={activeFile || ''}
-                    onChange={(e) => {
-                      if (e.target.value) void openFile(e.target.value);
-                    }}
-                  >
-                    <option value=''>Select a file</option>
-                    {files.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                <div className='ide-mobile-file-tree result'>
+                  <IdeFileTree files={files} activePath={activeFile} onOpen={openFile} />
                 </div>
               )}
               {openFiles.length > 0 && (

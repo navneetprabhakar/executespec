@@ -315,8 +315,10 @@ Declared in `tokens.css` and consumed by the `useBreakpoint()` hook:
 | `--bp-wide`      | `1280px`   |
 | `--bp-xl`        | `1536px`   |
 
-The mobile UI cuts over to desktop chrome at `1024px` (the persistent sidebar in `Shell.tsx`
-flips on at `min-width: 1024px`).
+The authenticated app uses `ConsoleShell` as the protected chrome. Console mobile behavior changes
+at `860px`: the left rail becomes a drawer, the bottom tab bar appears, top-bar affordances
+collapse, and dense project/run tabs switch to dropdown selectors. Public Signal auth/marketing
+pages keep their own responsive breakpoints and token scope.
 
 ---
 

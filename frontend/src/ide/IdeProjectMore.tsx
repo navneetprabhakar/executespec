@@ -27,19 +27,51 @@ function RTabs({
   active: string;
   onSelect: (k: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const activeTab = tabs.find((t) => t.key === active) ?? tabs[0];
   return (
-    <div className='ide-rtabs' style={{marginBottom: 16, borderRadius: 4}}>
-      {tabs.map((t) => (
+    <>
+      <div className='ide-local-mobile-nav'>
         <button
-          key={t.key}
           type='button'
-          className={`ide-rtab${active === t.key ? ' active' : ''}`}
-          onClick={() => onSelect(t.key)}
+          className='ide-local-mobile-trigger'
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
         >
-          {t.label}
+          {activeTab?.label}
+          <span>⌄</span>
         </button>
-      ))}
-    </div>
+        {open && (
+          <div className='ide-local-mobile-menu'>
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type='button'
+                className={active === t.key ? 'active' : ''}
+                onClick={() => {
+                  onSelect(t.key);
+                  setOpen(false);
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className='ide-rtabs ide-local-tabs' style={{marginBottom: 16, borderRadius: 4}}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type='button'
+            className={`ide-rtab${active === t.key ? ' active' : ''}`}
+            onClick={() => onSelect(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -446,6 +478,7 @@ export function IdeProjectCode() {
   const [content, setContent] = useState<Record<string, string>>({});
   // C9 — mobile file picker search query (replaces the flat <select>).
   const [fileQuery, setFileQuery] = useState('');
+  const [mobileCodeMode, setMobileCodeMode] = useState<'tree' | 'file'>('tree');
 
   // Other tabs
   const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
@@ -511,6 +544,7 @@ export function IdeProjectCode() {
 
   async function open(path: string) {
     setActive(path);
+    setMobileCodeMode('file');
     if (content[path]) return;
     try {
       const f = await api.readRepoFile(projectId, repoId, path);
@@ -617,6 +651,11 @@ export function IdeProjectCode() {
   );
 
   const browseIsSplit = sub === 'browse';
+  const filteredFiles = useMemo(() => {
+    if (!files) return [];
+    const q = fileQuery.trim().toLowerCase();
+    return (q ? files.filter((f) => f.toLowerCase().includes(q)) : files).slice(0, 500);
+  }, [files, fileQuery]);
 
   return (
     <div
@@ -633,7 +672,7 @@ export function IdeProjectCode() {
         <ProjectTabs projectId={projectId} />
         <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
           <div className='ide-h1' style={{margin: 0}}>
-            Code &amp; quality
+            Codebase
           </div>
           {(sub === 'browse' || sub === 'review') && repos.length > 0 && (
             <select
@@ -654,12 +693,12 @@ export function IdeProjectCode() {
           active={sub}
           onSelect={(k) => setSub(k as CodeSub)}
           tabs={[
-            {key: 'browse', label: `Browse · ${repos.length}`},
-            {key: 'debt', label: `Tech debt · ${debtCats.length}`},
-            {key: 'review', label: 'Code review'},
-            {key: 'health', label: 'Health'},
+            {key: 'browse', label: files == null ? 'Files' : `Files · ${files.length}`},
+            {key: 'debt', label: `Issues · ${debtCats.length}`},
+            {key: 'review', label: 'Review'},
+            {key: 'health', label: 'Repo health'},
             {key: 'standards', label: 'Standards'},
-            {key: 'docs', label: `Docs · ${docs?.length ?? 0}`},
+            {key: 'docs', label: `Generated docs · ${docs?.length ?? 0}`},
           ]}
         />
         {sub !== 'browse' && <Banner err={err} msg={msg} />}
@@ -681,10 +720,9 @@ export function IdeProjectCode() {
               </div>
               <div className='ide-split-main'>
                 {files?.length ? (
-                  // C9 — searchable picker (a flat <select> over 100+ paths was
-                  // unusable on phones). List shows until a file is opened;
-                  // typing filters case-insensitively and reopens it.
-                  <div className='ide-mobile-file-picker'>
+                  <div
+                    className={`ide-mobile-file-tree ${mobileCodeMode === 'tree' ? 'tree' : 'file'}`}
+                  >
                     <input
                       className='ide-input'
                       type='search'
@@ -692,61 +730,28 @@ export function IdeProjectCode() {
                       value={fileQuery}
                       onChange={(e) => setFileQuery(e.target.value)}
                     />
-                    {(fileQuery.trim() !== '' || !active) && (
-                      <div style={{maxHeight: 200, overflowY: 'auto', marginTop: 6}}>
-                        {(() => {
-                          const q = fileQuery.trim().toLowerCase();
-                          const matches = (
-                            q ? files.filter((f) => f.toLowerCase().includes(q)) : files
-                          ).slice(0, 200);
-                          if (matches.length === 0) {
-                            return (
-                              <div
-                                style={{
-                                  fontSize: 12,
-                                  color: 'var(--ide-fg-muted)',
-                                  padding: '6px 2px',
-                                }}
-                              >
-                                No files match “{fileQuery.trim()}”.
-                              </div>
-                            );
-                          }
-                          return matches.map((f) => (
-                            <button
-                              key={f}
-                              type='button'
-                              className='ide-mono'
-                              onClick={() => {
-                                void open(f);
-                                setFileQuery('');
-                              }}
-                              style={{
-                                display: 'block',
-                                width: '100%',
-                                textAlign: 'left',
-                                padding: '5px 8px',
-                                background: f === active ? 'var(--ide-bg-sidebar)' : 'transparent',
-                                border: 'none',
-                                borderRadius: 4,
-                                color: 'var(--ide-fg)',
-                                cursor: 'pointer',
-                                fontSize: 12.5,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {f}
-                            </button>
-                          ));
-                        })()}
+                    {filteredFiles.length === 0 ? (
+                      <div className='ide-empty' style={{padding: 10}}>
+                        No files match “{fileQuery.trim()}”.
+                      </div>
+                    ) : (
+                      <div className='ide-mobile-file-tree-list'>
+                        <IdeFileTree files={filteredFiles} activePath={active} onOpen={open} />
                       </div>
                     )}
                   </div>
                 ) : null}
                 {active ? (
-                  <IdeCodeViewer filename={active} content={content[active] ?? '…'} />
+                  <div className='ide-mobile-file-view'>
+                    <button
+                      type='button'
+                      className='ide-btn ghost ide-mobile-file-back'
+                      onClick={() => setMobileCodeMode('tree')}
+                    >
+                      File tree
+                    </button>
+                    <IdeCodeViewer filename={active} content={content[active] ?? '…'} />
+                  </div>
                 ) : (
                   <div className='ide-empty'>Select a file to browse the live source.</div>
                 )}

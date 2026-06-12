@@ -115,6 +115,17 @@ export function ProjectsIcon(p: IconProps) {
   );
 }
 
+/** Decisions — plan gates / approvals checklist. */
+export function DecisionsIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d='M5 5h14v14H5z' />
+      <path d='M8 12l2 2 5-5' />
+      <path d='M8 17h8' />
+    </Svg>
+  );
+}
+
 /** Admin — shield. */
 export function AdminIcon(p: IconProps) {
   return (
@@ -530,7 +541,7 @@ export const FolderOpenIcon = mk('folder-open');
 // Per-language file icons. Names mirror the canonical Material icon each maps to
 // so the EXT_MAP / NAME_MAP below read like the upstream VS Code mapping. The
 // public component names are unchanged from the previous hand-drawn set so every
-// `IdeIcons` caller (IdeKit, IdeWorkspace) stays put.
+// `IdeIcons` caller (IdeKit and console/project surfaces) stays put.
 export const TsIcon = mk('typescript');
 export const TsxIcon = mk('react_ts');
 export const JsIcon = mk('javascript');

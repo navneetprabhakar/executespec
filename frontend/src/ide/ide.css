@@ -1235,3 +1235,197 @@
     line-height: 1.3;
   }
 }
+
+/* Console migration UX: compose, project, result, and codebase responsive controls. */
+.ide-compose-steps {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 18px;
+}
+.ide-compose-step-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--ide-border);
+  border-radius: 999px;
+  background: var(--ide-bg-sidebar);
+  color: var(--ide-fg-muted);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ide-compose-step-pill span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ide-bg-tab-inactive);
+  color: var(--ide-fg);
+  font-size: 10px;
+}
+.ide-compose-step-pill.active {
+  color: var(--ide-fg-bright);
+  border-color: var(--ide-accent);
+}
+.ide-compose-step-pill.done span {
+  background: var(--ide-accent);
+  color: var(--ide-accent-fg);
+}
+.ide-compose-step {
+  margin-bottom: 18px;
+}
+.ide-compose-mobile-actions {
+  display: none;
+}
+.ide-project-tabs {
+  gap: 0;
+}
+.ide-project-tabs-spacer {
+  flex: 1;
+  min-width: 12px;
+}
+.ide-project-mobile-nav,
+.ide-local-mobile-nav,
+.ide-result-mobile-nav {
+  display: none;
+}
+.ide-mobile-file-tree {
+  display: none;
+}
+.ide-mobile-file-back {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .ide-compose {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+  .ide-compose-steps {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .ide-compose-step-pill {
+    flex: 1 0 auto;
+  }
+  .ide-compose-step {
+    display: none;
+  }
+  .ide-compose-step.active {
+    display: block;
+  }
+  .ide-compose-mobile-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--ide-border);
+    background: var(--ide-bg-sidebar);
+  }
+  .ide-compose-mobile-actions .ide-btn {
+    justify-content: center;
+  }
+  .ide-compose-review .ide-run-action {
+    display: none;
+  }
+
+  .ide-project-tabs,
+  .ide-local-tabs,
+  .ide-result-tabs {
+    display: none;
+  }
+  .ide-project-mobile-nav,
+  .ide-local-mobile-nav,
+  .ide-result-mobile-nav {
+    position: relative;
+    display: block;
+    margin: 0 0 12px;
+  }
+  .ide-project-mobile-trigger,
+  .ide-local-mobile-trigger,
+  .ide-result-mobile-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--ide-border);
+    border-radius: 6px;
+    background: var(--ide-bg-sidebar);
+    color: var(--ide-fg-bright);
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .ide-project-mobile-menu,
+  .ide-local-mobile-menu,
+  .ide-result-mobile-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--ide-border);
+    border-radius: 8px;
+    background: var(--ide-bg-widget);
+    padding: 6px;
+    box-shadow: 0 8px 20px var(--ide-shadow);
+  }
+  .ide-project-mobile-menu a,
+  .ide-local-mobile-menu button,
+  .ide-result-mobile-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ide-fg);
+    padding: 9px 10px;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    text-decoration: none;
+  }
+  .ide-project-mobile-menu a.active,
+  .ide-local-mobile-menu button.active,
+  .ide-result-mobile-menu button.active {
+    background: var(--ide-list-active);
+    color: var(--ide-fg-bright);
+  }
+  .ide-result-mobile-nav {
+    padding: 10px 12px 0;
+  }
+
+  .ide-mobile-file-tree {
+    display: block;
+    flex-shrink: 0;
+    padding: 10px;
+    border-bottom: 1px solid var(--ide-border);
+    background: var(--ide-bg-sidebar);
+  }
+  .ide-mobile-file-tree-list {
+    max-height: 260px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+  .ide-mobile-file-tree.file {
+    display: none;
+  }
+  .ide-mobile-file-view {
+    display: contents;
+  }
+  .ide-mobile-file-back {
+    display: inline-flex;
+    align-self: flex-start;
+    margin: 10px 10px 0;
+  }
+}

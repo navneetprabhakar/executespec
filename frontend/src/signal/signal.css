@@ -2447,34 +2447,19 @@ body {
   .signal-app .signal-auth-layout .auth-brand-col {
     display: flex;
     flex: 1 1 50%;
-    background: linear-gradient(135deg, var(--signal-hero-bg-1), var(--signal-hero-bg-2));
+    background: #11120f;
     color: var(--signal-hero-text);
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 48px 56px;
+    padding: 40px 56px;
     position: relative;
-    overflow: hidden;
+    overflow-y: auto;
   }
-  /* Decorative signal-yellow glow */
   .signal-app .signal-auth-layout .auth-brand-col::before {
-    content: '';
-    position: absolute;
-    top: -120px;
-    right: -120px;
-    width: 480px;
-    height: 480px;
-    background: radial-gradient(circle, var(--signal-hero-glow), transparent 60%);
-    pointer-events: none;
+    content: none;
   }
   .signal-app .signal-auth-layout .auth-brand-col::after {
-    content: '';
-    position: absolute;
-    bottom: -200px;
-    left: -120px;
-    width: 400px;
-    height: 400px;
-    background: radial-gradient(circle, rgba(124, 227, 180, 0.1), transparent 60%);
-    pointer-events: none;
+    content: none;
   }
 }
 
@@ -2495,13 +2480,13 @@ body {
   max-width: 480px;
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
 }
 .signal-app .auth-brand-top .brand-line {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 18px;
   font-size: 16px;
   font-weight: 600;
   color: var(--signal-hero-text);
@@ -2519,9 +2504,9 @@ body {
 }
 .signal-app .auth-brand-headline {
   font-family: inherit;
-  font-size: clamp(28px, 3vw, 38px);
+  font-size: clamp(26px, 2.4vw, 32px);
   font-weight: 600;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   line-height: 1.1;
   margin: 0 0 14px;
   color: var(--signal-hero-text);
@@ -2541,6 +2526,82 @@ body {
 .signal-app .auth-brand-lede strong {
   color: var(--signal-hero-text);
   font-weight: 600;
+}
+
+.signal-app .auth-console-mock {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: #171812;
+  overflow: hidden;
+  box-shadow: 0 18px 50px -22px rgba(0, 0, 0, 0.65);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.signal-app .auth-console-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+}
+.signal-app .auth-console-top strong {
+  border-radius: 5px;
+  background: #f5c451;
+  color: #181814;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.signal-app .auth-console-body {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.signal-app .auth-console-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+.signal-app .auth-console-row.hot strong {
+  color: #f5c451;
+}
+.signal-app .auth-console-run {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.78);
+}
+.signal-app .auth-console-run strong,
+.signal-app .auth-console-run span {
+  display: block;
+}
+.signal-app .auth-console-run strong {
+  color: #ffffff;
+  font-size: 12.5px;
+  margin-bottom: 3px;
+}
+.signal-app .auth-console-run span {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.signal-app .auth-console-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #f5c451;
+  flex-shrink: 0;
+}
+.signal-app .auth-console-dot.green {
+  background: #7ce3b4;
 }
 
 /* Live-run preview card on the brand panel */

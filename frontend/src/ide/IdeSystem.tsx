@@ -417,7 +417,7 @@ export function IdeSearch() {
           </div>
           <div className='ide-card' style={{padding: 0}}>
             {[
-              {to: '/compose', label: 'New spec', sub: 'Open the composer'},
+              {to: '/compose', label: 'New work', sub: 'Open the composer'},
               {to: '/projects', label: 'Browse projects', sub: 'All your active projects'},
               {to: '/runs', label: 'All runs', sub: 'Filter and browse'},
             ].map((row, i, arr) => (
@@ -853,17 +853,14 @@ export function IdeMoreMenu() {
         rows={[
           {to: '/org-members', label: 'Org members', sub: 'Invite teammates'},
           {to: '/integrations', label: 'Integrations', sub: 'GitHub, Slack, Jira'},
-          {to: '/api-keys', label: 'API keys (BYOK)', sub: 'Provider keys'},
+          {to: '/provider-keys', label: 'Provider keys', sub: 'BYOK model routing'},
         ]}
       />
 
       <MoreSection
-        title='Discover'
+        title='System'
         rows={[
           {to: '/insights', label: 'Insights', sub: 'Analytics dashboard'},
-          {to: '/library', label: 'Library', sub: 'Readymade solutions'},
-          {to: '/migrations', label: 'Migrations', sub: 'Migration recipes'},
-          {to: '/templates', label: 'Spec templates', sub: 'Saved specs'},
           ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
             ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
             : []),

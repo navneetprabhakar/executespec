@@ -2,15 +2,13 @@ import {lazy, Suspense} from 'react';
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// The VS Code-style IDE workspace is the ONLY chrome. Every protected route is
-// IDE-native (2026-05-23 Signal-removal waves finished the port). The only
-// surviving Signal pages are the standalone PUBLIC pages (auth / marketing /
-// legal / shared) — which have no IDE chrome by design — plus AdminPage for the
-// /admin/* deep links.
-import IdeWorkspace from '@/ide/IdeWorkspace';
+// The authenticated app now uses the Console chrome. Existing IDE-native
+// surfaces still render inside the console content slot, but the outer product
+// metaphor is mission control rather than a VS Code clone.
 import ConsoleShell from '@/console/ConsoleShell';
 import ConsoleHome from '@/console/ConsoleHome';
-import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import ConsoleDecisions from '@/console/ConsoleDecisions';
+import {IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
@@ -38,19 +36,6 @@ const IdeIntegrations = lazy(() =>
 const IdeAdmin = lazy(() => import('@/ide/IdeSettings').then((m) => ({default: m.IdeAdmin})));
 const IdeInsights = lazy(() =>
   import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeInsights})),
-);
-const IdeLibrary = lazy(() => import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeLibrary})));
-const IdeLibraryDetail = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeLibraryDetail})),
-);
-const IdeMigrations = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeMigrations})),
-);
-const IdeMigrationDetail = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeMigrationDetail})),
-);
-const IdeSpecTemplates = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeSpecTemplates})),
 );
 const IdeApiKeys = lazy(() => import('@/ide/IdeOrg').then((m) => ({default: m.IdeApiKeys})));
 const IdeOrgMembers = lazy(() => import('@/ide/IdeOrg').then((m) => ({default: m.IdeOrgMembers})));
@@ -150,10 +135,7 @@ function protectedChildren() {
     <>
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
-      <Route
-        path='/home'
-        element={localStorage.getItem('es:console') === '1' ? <ConsoleHome /> : <IdeWelcome />}
-      />
+      <Route path='/home' element={<ConsoleHome />} />
       <Route path='/runs' element={<IdeRuns />} />
       <Route path='/compose' element={<IdeCompose />} />
       <Route path='/plan' element={<IdePlan />} />
@@ -177,6 +159,7 @@ function protectedChildren() {
       <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
       <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />
       <Route path='/projects/:projectId/architecture' element={<IdeProjectArchitecture />} />
+      <Route path='/projects/:projectId/system-map' element={<IdeProjectArchitecture />} />
       <Route path='/projects/:projectId/settings' element={<IdeProjectSettings />} />
 
       {/* Account + billing */}
@@ -187,22 +170,24 @@ function protectedChildren() {
       <Route path='/plans' element={<IdePlans />} />
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
       <Route path='/integrations' element={<IdeIntegrations />} />
-      <Route path='/api-keys' element={<IdeApiKeys />} />
+      <Route path='/api-keys' element={<Navigate to='/provider-keys' replace />} />
+      <Route path='/provider-keys' element={<IdeApiKeys />} />
       <Route path='/org-members' element={<IdeOrgMembers />} />
       <Route path='/org/settings' element={<IdeOrgSettings />} />
 
       {/* Discover */}
       <Route path='/insights' element={<IdeInsights />} />
-      <Route path='/library' element={<IdeLibrary />} />
-      <Route path='/library/:slug' element={<IdeLibraryDetail />} />
-      <Route path='/migrations' element={<IdeMigrations />} />
-      <Route path='/migrations/:slug' element={<IdeMigrationDetail />} />
-      <Route path='/templates' element={<IdeSpecTemplates />} />
+      <Route path='/library' element={<Navigate to='/home' replace />} />
+      <Route path='/library/:slug' element={<Navigate to='/home' replace />} />
+      <Route path='/migrations' element={<Navigate to='/home' replace />} />
+      <Route path='/migrations/:slug' element={<Navigate to='/home' replace />} />
+      <Route path='/templates' element={<Navigate to='/home' replace />} />
       <Route path='/audit' element={<IdeAudit />} />
       <Route path='/deployments' element={<IdeDeployments />} />
 
       {/* System */}
       <Route path='/notifications' element={<IdeNotifications />} />
+      <Route path='/decisions' element={<ConsoleDecisions />} />
       <Route path='/search' element={<IdeSearch />} />
       <Route path='/more' element={<IdeMoreMenu />} />
       <Route path='/admin' element={<IdeAdmin />} />
@@ -261,18 +246,9 @@ export default function App() {
         <Route path='/reports/shared/:token' element={<SharedPage />} />
         <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
-        {/* ───── Protected app chrome ─────
-          Control-plane reframe (RL-2026-05-052): the new ConsoleShell is opt-in behind
-          localStorage `es:console`='1' (default OFF → the IDE chrome is byte-identical).
-          The same protectedChildren render in either shell's <Outlet/>. */}
+        {/* ───── Protected app chrome ───── */}
         <Route element={<ProtectedRoute />}>
-          <Route
-            element={
-              localStorage.getItem('es:console') === '1' ? <ConsoleShell /> : <IdeWorkspace />
-            }
-          >
-            {protectedChildren()}
-          </Route>
+          <Route element={<ConsoleShell />}>{protectedChildren()}</Route>
         </Route>
 
         {/* Legacy URL catchers — collapse to canonical equivalents */}

@@ -652,7 +652,7 @@ export function IdeAccount() {
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
           {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
-          {to: '/api-keys', label: 'API keys (BYOK)', sub: ''},
+          {to: '/provider-keys', label: 'Provider keys', sub: 'BYOK model routing'},
         ]}
       />
 

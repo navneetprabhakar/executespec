@@ -423,13 +423,170 @@
   color: var(--ide-fg-bright);
 }
 
+/* Console-first refinements. */
+.con-brand {
+  letter-spacing: 0;
+}
+.con-side-details {
+  border-top: 1px solid var(--ide-border);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+.con-side-details > summary {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+.con-side-details > summary::-webkit-details-marker {
+  display: none;
+}
+.con-side-count,
+.con-nav-badge {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  font-size: 10px;
+  background: var(--ide-bg-tab-inactive);
+  color: var(--ide-fg-muted);
+}
+.con-nav-badge {
+  margin-left: auto;
+  background: var(--ide-red);
+  color: var(--ide-accent-fg);
+}
+.con-runitem-action {
+  margin-top: 3px;
+  color: var(--ide-accent);
+}
+.con-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.con-home {
+  max-width: 1120px;
+  gap: 18px;
+}
+.con-cockpit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'main cta'
+    'metrics metrics';
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  background: var(--ide-bg-sidebar);
+}
+.con-cockpit-main {
+  grid-area: main;
+}
+.con-cockpit > .con-newrun {
+  grid-area: cta;
+  align-self: start;
+}
+.con-kicker {
+  color: var(--ide-yellow);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  margin-bottom: 8px;
+}
+.con-cockpit-metrics {
+  grid-area: metrics;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.con-metric-card {
+  border: 1px solid var(--ide-border);
+  border-radius: 7px;
+  background: var(--ide-bg-editor);
+  color: var(--ide-fg);
+  text-align: left;
+  padding: 12px;
+  cursor: pointer;
+}
+.con-metric-card:hover {
+  border-color: var(--ide-accent);
+}
+.con-metric-label {
+  display: block;
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.con-metric-card strong {
+  font-size: 24px;
+  color: var(--ide-fg-bright);
+}
+.con-section-priority {
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  background: var(--ide-bg-sidebar);
+  padding: 14px;
+}
+.con-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 14px;
+}
+.con-home-grid .con-section {
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  background: var(--ide-bg-sidebar);
+  padding: 14px;
+}
+.con-proj-grid.compact {
+  grid-template-columns: 1fr;
+}
+
 /* "New run" collapses to icon-only on narrow phones — the two-line wrap at
    375px read as broken. */
 @media (max-width: 480px) {
+  .con-topbar .con-account-menu-anchor,
+  .con-topbar > a.con-icon,
+  .con-topbar > .con-icon:nth-of-type(2) {
+    display: none;
+  }
   .con-newrun .con-newrun-label {
     display: none;
   }
   .con-newrun {
     padding: 8px 10px;
+  }
+}
+
+@media (max-width: 860px) {
+  .con-home {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .con-cockpit,
+  .con-home-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .con-cockpit {
+    grid-template-areas:
+      'main'
+      'metrics'
+      'cta';
+  }
+  .con-cockpit > .con-newrun {
+    justify-content: center;
+    width: 100%;
+  }
+  .con-cockpit-metrics {
+    grid-template-columns: 1fr;
+  }
+  .con-tabbar {
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }

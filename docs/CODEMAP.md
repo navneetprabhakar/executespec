@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V239** in the current worktree. Frontend chrome: the **Console** shell (`frontend/src/console/`) is the default protected app chrome after the 2026-06-12 console-default flip; `frontend/src/ide/` now holds the work surfaces rendered inside the console outlet plus shared file/code UI primitives. The old VS Code-clone web shell (`IdeWorkspace`) was deleted; the VS Code extension owns the editor metaphor. Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
 
 ---
 

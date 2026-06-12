@@ -19,7 +19,7 @@ export default function IdeProject() {
   const {projectId} = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // §3.4 — explicit compose intent (the Compose tab + Pulse's "New spec" card
+  // §3.4 — explicit compose intent (the New work tab + Pulse's launch card
   // pass {compose:true} via Link state) skips the landing→Pulse redirect below,
   // so the composer stays reachable on projects with run history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
@@ -107,7 +107,7 @@ export default function IdeProject() {
         {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
       </div>
 
-      <div className='ide-h2'>New spec in this project</div>
+      <div className='ide-h2'>New work in this project</div>
       <textarea
         className='ide-textarea'
         rows={8}

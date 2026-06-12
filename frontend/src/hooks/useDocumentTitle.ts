@@ -2,7 +2,7 @@ import {useEffect} from 'react';
 
 /**
  * C2 (UI/UX review 2026-06-11) — per-surface browser-tab titles. The shells
- * (IdeWorkspace / ConsoleShell) set a route-derived default for every route;
+ * (ConsoleShell) sets a route-derived default for every route;
  * detail surfaces call this with a richer name once their data loads (e.g.
  * `useDocumentTitle(run?.runTitle ?? null)`), which wins over the default.
  *
@@ -30,14 +30,15 @@ export function routeTitle(pathname: string): string {
   const exact: Record<string, string> = {
     '/home': 'Home',
     '/runs': 'All runs',
-    '/compose': 'New spec',
+    '/compose': 'New work',
     '/projects': 'Projects',
     '/account': 'Account',
     '/settings': 'Account',
     '/billing': 'Billing',
     '/plans': 'Plans',
     '/integrations': 'Integrations',
-    '/api-keys': 'API keys',
+    '/api-keys': 'Provider keys',
+    '/provider-keys': 'Provider keys',
     '/org-members': 'Org members',
     '/org/settings': 'Org settings',
     '/insights': 'Insights',
@@ -47,6 +48,7 @@ export function routeTitle(pathname: string): string {
     '/audit': 'Audit log',
     '/deployments': 'Deployments',
     '/notifications': 'Notifications',
+    '/decisions': 'Decisions',
     '/search': 'Search',
     '/more': 'More',
     '/admin': 'Admin',

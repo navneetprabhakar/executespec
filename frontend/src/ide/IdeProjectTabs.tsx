@@ -52,17 +52,22 @@ const scoreBand = (sc: number): 'ok' | 'warn' | 'bad' =>
 
 // Workbench tab strip — shown on every project sub-route. `count` keys a tab
 // to the live-count map below; tabs without a key stay label-only.
-const T: Array<{label: string; seg: string; count?: 'repos' | 'runs' | 'code' | 'members'}> = [
-  {label: 'Compose', seg: ''},
-  {label: 'Pulse', seg: '/pulse'},
-  {label: 'Repos', seg: '/repos', count: 'repos'},
-  {label: 'Runs', seg: '/runs', count: 'runs'},
-  {label: 'Code', seg: '/code', count: 'code'},
-  {label: 'Chat', seg: '/chat'},
-  {label: 'Architecture', seg: '/architecture'},
-  {label: 'Members', seg: '/members', count: 'members'},
-  {label: 'Activity', seg: '/activity'},
-  {label: 'Settings', seg: '/settings'},
+const T: Array<{
+  label: string;
+  seg: string;
+  count?: 'repos' | 'runs' | 'code' | 'members';
+  group: 'primary' | 'secondary';
+}> = [
+  {label: 'New work', seg: '', group: 'primary'},
+  {label: 'Overview', seg: '/pulse', group: 'primary'},
+  {label: 'Work', seg: '/runs', count: 'runs', group: 'primary'},
+  {label: 'Codebase', seg: '/code', group: 'primary'},
+  {label: 'Chat', seg: '/chat', group: 'primary'},
+  {label: 'Settings', seg: '/settings', group: 'primary'},
+  {label: 'Repos', seg: '/repos', count: 'repos', group: 'secondary'},
+  {label: 'System map', seg: '/system-map', group: 'secondary'},
+  {label: 'Members', seg: '/members', count: 'members', group: 'secondary'},
+  {label: 'Activity', seg: '/activity', group: 'secondary'},
 ];
 
 type TabCounts = {repos?: number; runs?: number; code?: number; members?: number};
@@ -76,6 +81,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   const [counts, setCounts] = useState<TabCounts>({});
   // C2/C3 — project name for the browser-tab title + the breadcrumb trail.
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -116,29 +122,56 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   // name loads, so there's no placeholder flash).
   useDocumentTitle(projectName);
 
+  const isActive = (t: (typeof T)[number]) => {
+    const to = `/projects/${projectId}${t.seg}`;
+    if (t.seg === '') return pathname === to;
+    if (t.seg === '/system-map') {
+      return (
+        pathname.startsWith(`/projects/${projectId}/system-map`) ||
+        pathname.startsWith(`/projects/${projectId}/architecture`)
+      );
+    }
+    return pathname.startsWith(to);
+  };
+  const activeTab = T.find(isActive) ?? T[1];
+  const renderTab = (t: (typeof T)[number]) => {
+    const to = `/projects/${projectId}${t.seg}`;
+    const active = isActive(t);
+    const n = t.count && t.group === 'primary' ? counts[t.count] : undefined;
+    return (
+      <Link
+        key={t.label}
+        to={to}
+        state={t.seg === '' ? {compose: true} : undefined}
+        className={`ide-rtab${active ? ' active' : ''}`}
+        style={{textDecoration: 'none'}}
+        onClick={() => setMobileOpen(false)}
+      >
+        {n != null ? `${t.label} · ${n}` : t.label}
+      </Link>
+    );
+  };
+
   return (
     <>
       {/* C3 — one breadcrumb trail above the strip; every sub-tab inherits it. */}
       <Crumbs items={[{label: 'Projects', to: '/projects'}, {label: projectName ?? '…'}]} />
-      <div className='ide-rtabs' style={{marginBottom: 16}}>
-        {T.map((t) => {
-          const to = `/projects/${projectId}${t.seg}`;
-          const active = t.seg === '' ? pathname === to : pathname.startsWith(to);
-          const n = t.count ? counts[t.count] : undefined;
-          return (
-            <Link
-              key={t.label}
-              to={to}
-              // §3.4 — Compose-tab clicks carry explicit intent so IdeProject's
-              // landing→Pulse redirect doesn't bounce them straight back.
-              state={t.seg === '' ? {compose: true} : undefined}
-              className={`ide-rtab${active ? ' active' : ''}`}
-              style={{textDecoration: 'none'}}
-            >
-              {n != null ? `${t.label} · ${n}` : t.label}
-            </Link>
-          );
-        })}
+      <div className='ide-project-mobile-nav'>
+        <button
+          type='button'
+          className='ide-project-mobile-trigger'
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((v) => !v)}
+        >
+          {activeTab.label}
+          <span>⌄</span>
+        </button>
+        {mobileOpen && <div className='ide-project-mobile-menu'>{T.map(renderTab)}</div>}
+      </div>
+      <div className='ide-rtabs ide-project-tabs' style={{marginBottom: 16}}>
+        {T.filter((t) => t.group === 'primary').map(renderTab)}
+        <span className='ide-project-tabs-spacer' />
+        {T.filter((t) => t.group === 'secondary').map(renderTab)}
       </div>
     </>
   );
@@ -252,7 +285,7 @@ export function IdeProjectPulse() {
           className='ide-btn ghost'
           style={{textDecoration: 'none', display: 'inline-block'}}
         >
-          ＋ New spec in this project
+          ＋ New work in this project
         </Link>
       </div>
       {!dash ? (

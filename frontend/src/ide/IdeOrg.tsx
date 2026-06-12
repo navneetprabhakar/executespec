@@ -1,5 +1,5 @@
 /* IDE-native port of the Signal SETTINGS cluster:
- *   - IdeApiKeys     ← signal/pages/account/MiscAccountPages.tsx ApiKeysPage    (/api-keys)
+ *   - IdeApiKeys     ← signal/pages/account/MiscAccountPages.tsx ApiKeysPage    (/provider-keys)
  *   - IdeOrgMembers  ← signal/pages/account/MiscAccountPages.tsx OrgMembersPage (/org-members)
  *   - IdeOrgSettings ← signal/pages/LegalPages.tsx OrgSettingsPage              (/org/settings)
  *
@@ -90,9 +90,9 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
-// API keys (BYOK) — /api-keys
+// Provider keys (BYOK) — /provider-keys
 export function IdeApiKeys() {
-  useDocumentTitle('API keys');
+  useDocumentTitle('Provider keys');
   const tier = useAuthStore(selectNormalizedTier);
   const user = useAuthStore((s) => s.user);
   // Gate strictly by tier (FREE only is blocked). Some running JVMs return
@@ -205,7 +205,7 @@ export function IdeApiKeys() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>API keys</div>
+      <div className='ide-h1'>Provider keys</div>
       <div className='ide-sub'>BYOK · bypass platform cost cap</div>
 
       <InfoCard>
