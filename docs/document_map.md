@@ -119,10 +119,11 @@ Two YAML/Markdown catalogue schemas that ship with the product. Both are loaded 
 | --- | --- | --- | --- |
 | Readymades catalog format | [`docs/readymades-catalog-format.md`](readymades-catalog-format.md) | Current YAML schema, seeder behavior, public API, tier gating, and maintenance rules for readymade solutions. | When adding, retiring, reseeding, or debugging a readymade. |
 | Migration recipes catalog format | [`docs/migration-recipes-catalog-format.md`](migration-recipes-catalog-format.md) | Current YAML schema, seeder behavior, dry-run/apply API, tier gating, and maintenance rules for migration recipes. | When adding, retiring, reseeding, or debugging a migration recipe. |
+| Reason log 2026-06 | [`docs/reason-log/2026-06.md`](reason-log/2026-06.md) | Current-month rationale entries, including the verifiedScore trust-cap and verification-ledger decision. | When reviewing why a scoring, verification, benchmark, or execution behavior changed in June 2026. |
 
 ## 7. Frontend
 
-The frontend has its own conventions because the IDE-first protected app, the opt-in Console shell, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
+The frontend has its own conventions because the Console protected shell, the IDE route-level surfaces, and the surviving public Signal pages share stores, tokens, and API clients. Read all three before touching `frontend/src/`.
 
 | Doc | Path | What | When to read |
 | --- | --- | --- | --- |

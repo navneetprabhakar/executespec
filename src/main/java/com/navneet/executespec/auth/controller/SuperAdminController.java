@@ -105,17 +105,18 @@ public class SuperAdminController {
   // P1.2-followup: backfill historical verified scores
 
   /**
-   * GA-readiness P1.2-followup (2026-05-06) — re-compute {@code validation_report.verified_score}
-   * for every existing row using the corrected formula (synth-issue filter + endpoint coverage
-   * bonus). One-shot, idempotent. Synchronous — the caller times out after 60s if there are more
-   * rows than fit comfortably; in that case use the chunked variant tracked as a P1.2-followup-2.
+   * Re-compute {@code validation_report.verified_score} and {@code rubric_score} for existing rows
+   * using the current formula. Idempotent. Body is optional; use {@code dryRun=true} first on a
+   * large table and {@code runId}/ {@code limit} to narrow the pass.
    *
    * <p>SUPER_ADMIN-gated by SecurityConfig (this whole controller is /api/admin).
    */
   @PostMapping("/validation-reports/backfill-verified-score")
   public ResponseEntity<com.navneet.executespec.report.VerifiedScoreBackfillService.BackfillResult>
-      backfillVerifiedScore() {
-    return ResponseEntity.ok(verifiedScoreBackfillService.backfillAll());
+      backfillVerifiedScore(
+          @RequestBody(required = false)
+              com.navneet.executespec.report.VerifiedScoreBackfillService.BackfillRequest request) {
+    return ResponseEntity.ok(verifiedScoreBackfillService.backfill(request));
   }
 
   // Re-review (2026-05-02 — vendored-path exclusion follow-up)
