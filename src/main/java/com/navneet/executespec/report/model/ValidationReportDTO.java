@@ -43,6 +43,12 @@ public record ValidationReportDTO(
     String reviewerVerdict, // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
     Integer verifiedScore, // 0-100 deterministic score; primary UI badge
     /**
+     * RL-2026-06 — auditable evidence ledger behind the headline score. The score remains the
+     * operational routing number; this ledger explains which claims are deterministic, LLM-derived,
+     * or unmeasured.
+     */
+    List<VerificationEvidenceDTO> verificationLedger,
+    /**
      * PR-E Phase A (2026-05-13, V194) — additive rubric score 0-100. Each dimension contributes
      * points independently so a single zero factor doesn't collapse the headline number the way the
      * multiplicative {@link #verifiedScore} does. UI picks the more informative of the two per run
