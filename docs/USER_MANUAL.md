@@ -1,10 +1,10 @@
 # ExecuteSpec User Manual
 
-> Current manual for the IDE-first web app. The retired Signal protected chrome is not described here; surviving `frontend/src/signal/` files are public/admin/shared components only.
+> Current manual for the Console control-plane web app. The retired Signal protected chrome is not described here; surviving `frontend/src/signal/` files are public/admin/shared components only.
 
 ## Main Navigation
 
-Protected users land in the IDE workspace (`frontend/src/ide/`). The exact visual shell may be IDE or opt-in Console, but the product surfaces are the same:
+Protected users land in the Console shell (`frontend/src/console/`). The route-level product surfaces remain under `frontend/src/ide/` and render inside that control-plane frame:
 
 | Surface | Purpose |
 | --- | --- |

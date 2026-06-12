@@ -499,14 +499,15 @@ make those scorer-facing checks explicit.
 
 ---
 
-## 5. Frontend chrome (IDE-first, Console opt-in)
+## 5. Frontend chrome (Console control plane)
 
-The protected app is IDE-native. `App.tsx` mounts
-[`IdeWorkspace`](../frontend/src/ide/IdeWorkspace.tsx) for protected routes by
-default. A newer control-plane shell,
-[`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx), is opt-in behind
-`localStorage es:console='1'`; it renders the same protected route outlet and keeps
-the default IDE shell byte-identical when the flag is absent.
+The protected web app is now the Console control plane. `App.tsx` mounts
+[`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx) for every protected
+route; the old `localStorage es:console='1'` opt-in path and
+`IdeWorkspace` shell are removed. The `frontend/src/ide/` package remains the
+route-level implementation layer for runs, projects, billing, org settings,
+benchmark tracking, and related protected surfaces. The in-editor IDE metaphor
+belongs to the VS Code extension, not the web chrome.
 
 `frontend/src/signal/` now holds the standalone public pages (auth, marketing, legal,
 shared links), `AdminPage` for `/admin/*`, and shared components/styles reused by
@@ -517,16 +518,15 @@ cleanup.
 ### Route table
 
 The router lives in
-[`frontend/src/App.tsx`](../frontend/src/App.tsx). The default protected shell is
-[`frontend/src/ide/IdeWorkspace.tsx`](../frontend/src/ide/IdeWorkspace.tsx), with
-[`frontend/src/console/ConsoleShell.tsx`](../frontend/src/console/ConsoleShell.tsx)
-available behind the localStorage flag.
+[`frontend/src/App.tsx`](../frontend/src/App.tsx). The protected shell is
+[`frontend/src/console/ConsoleShell.tsx`](../frontend/src/console/ConsoleShell.tsx).
+Heavy protected areas are lazy-loaded so the run loop remains in the entry path.
 Highlights:
 
 - **Public**: `/login`, `/register`, `/welcome`, `/pricing`, `/trust`, `/terms`,
   `/privacy`, `/dpa`, `/shared/:token`, `/reports/shared/:token`, `/forgot-password`,
   `/reset-password`, `/accept-invite`, `/auth/callback`.
-- **Protected** (under `<ProtectedRoute>` + IDE or Console shell):
+- **Protected** (under `<ProtectedRoute>` + Console shell):
   - Run loop: `/home`, `/runs`, `/compose`, `/plan/:runId`, `/live/:runId`,
     `/result/:runId`.
   - Project pages: `/projects`, `/projects/:projectId` (Compose default landing),
@@ -541,10 +541,11 @@ Highlights:
 
 ### Primitives and surfaces
 
-IDE-native components live under [`frontend/src/ide/`](../frontend/src/ide/):
-`IdeWorkspace`, `IdeSurfaces`, `IdeRunResult`, `IdePlan`, `IdeProject*`,
-`IdeSystem`, `IdeDiscovery`, `IdeBilling`, `IdeOrg`, and `IdeSettings`. The console
-reframe lives under [`frontend/src/console/`](../frontend/src/console/). Shared
+Console components live under [`frontend/src/console/`](../frontend/src/console/):
+`ConsoleShell`, `ConsoleHome`, and `ConsoleDecisions`. Route-level protected
+surfaces live under [`frontend/src/ide/`](../frontend/src/ide/): `IdeSurfaces`,
+`IdeRunResult`, `IdePlan`, `IdeProject*`, `IdeSystem`, `IdeDiscovery`,
+`IdeBilling`, `IdeOrg`, and `IdeSettings`. Shared
 Signal-era primitives such as `Markdown`, `CodeView`, `FileTree`, review panels,
 modals, auth layout, and public-page CSS remain in `frontend/src/signal/`.
 

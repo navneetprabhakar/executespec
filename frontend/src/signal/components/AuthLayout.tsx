@@ -35,73 +35,93 @@ export default function AuthLayout({children}: {children: ReactNode}) {
             </p>
           </div>
 
-          {/* VS Code-style editor mock — previews the IDE workspace the user
-              is signing into (the product is IDE-only since 2026-05-22). Hard-
-              coded Dark+ palette so it reads as a real editor regardless of the
-              auth page's token context. */}
+          {/* Console preview - mirrors the control-plane shell after sign-in. */}
           <div
-            className='auth-ide-mock'
+            className='auth-console-mock'
             style={{
-              borderRadius: 12,
+              borderRadius: 8,
               overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              background: '#1e1e1e',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              background: '#141511',
               boxShadow: '0 18px 50px -22px rgba(0, 0, 0, 0.65)',
-              fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
             }}
           >
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
-                padding: '8px 12px',
-                background: '#323233',
+                gap: 10,
+                padding: '10px 12px',
+                background: '#1d1e19',
+                borderBottom: '1px solid rgba(255,255,255,0.08)',
               }}
             >
-              <span style={{width: 11, height: 11, borderRadius: 999, background: '#ff5f57'}} />
-              <span style={{width: 11, height: 11, borderRadius: 999, background: '#febc2e'}} />
-              <span style={{width: 11, height: 11, borderRadius: 999, background: '#28c840'}} />
-              <span style={{marginLeft: 8, fontSize: 11.5, color: '#9d9d9d'}}>
-                spec.md — ExecuteSpec
-              </span>
-            </div>
-            <div style={{display: 'flex', background: '#252526'}}>
               <span
                 style={{
-                  padding: '6px 16px',
-                  fontSize: 11.5,
-                  color: '#ffffff',
-                  background: '#1e1e1e',
-                  boxShadow: 'inset 0 2px 0 #007acc',
+                  width: 22,
+                  height: 22,
+                  borderRadius: 6,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: '#d6fe51',
+                  color: '#15170e',
+                  fontWeight: 800,
+                  fontSize: 12,
                 }}
               >
-                spec.md
+                E
+              </span>
+              <span style={{fontSize: 12, color: '#f1f2ea', fontWeight: 700}}>
+                ExecuteSpec Console
+              </span>
+              <span style={{marginLeft: 'auto', fontSize: 11, color: '#a0a395'}}>
+                verified work
               </span>
             </div>
-            <div style={{padding: '12px 0', fontSize: 12.5, lineHeight: 1.75, color: '#cccccc'}}>
+            <div style={{display: 'flex', background: '#20221c'}}>
+              <span
+                style={{
+                  padding: '7px 14px',
+                  fontSize: 11.5,
+                  color: '#f1f2ea',
+                  background: '#141511',
+                  boxShadow: 'inset 0 2px 0 #d6fe51',
+                }}
+              >
+                Mission control
+              </span>
+            </div>
+            <div style={{padding: '12px 0', fontSize: 12.5, lineHeight: 1.75, color: '#dfe4d0'}}>
               {[
                 {
                   n: 1,
                   t: (
                     <>
-                      <span style={{color: '#569cd6'}}># </span>
-                      <span style={{color: '#9cdcfe'}}>Add a /health endpoint</span>
+                      <span style={{color: '#d6fe51'}}>Awaiting approval</span>
+                      <span style={{color: '#858b7a'}}> · 3 plans need a decision</span>
                     </>
                   ),
                 },
-                {n: 2, t: <span style={{color: '#6a9955'}}>returns build SHA + uptime,</span>},
-                {n: 3, t: <span style={{color: '#6a9955'}}>with a unit test.</span>},
+                {
+                  n: 2,
+                  t: <span style={{color: '#7ce3b4'}}>Live work · 2 runs coding and testing</span>,
+                },
+                {
+                  n: 3,
+                  t: (
+                    <span style={{color: '#9db7ff'}}>Project health · PRs, debt, architecture</span>
+                  ),
+                },
                 {n: 4, t: <span />},
                 {
                   n: 5,
                   t: (
                     <>
-                      <span style={{color: '#4ec9b0'}}>→ plan</span>
+                      <span style={{color: '#7ce3b4'}}>plan</span>
                       <span style={{color: '#858585'}}> · </span>
-                      <span style={{color: '#4ec9b0'}}>code</span>
+                      <span style={{color: '#7ce3b4'}}>code</span>
                       <span style={{color: '#858585'}}> · </span>
-                      <span style={{color: '#4ec9b0'}}>test</span>
+                      <span style={{color: '#7ce3b4'}}>test</span>
                       <span style={{color: '#858585'}}> · </span>
                       <span style={{color: '#dcdcaa'}}>PR ✓</span>
                     </>
@@ -123,13 +143,14 @@ export default function AuthLayout({children}: {children: ReactNode}) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
-                padding: '5px 12px',
-                background: '#007acc',
-                color: '#ffffff',
+                padding: '8px 12px',
+                background: '#20221c',
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                color: '#dfe4d0',
                 fontSize: 11,
               }}
             >
-              <span>⎇ main</span>
+              <span>Plan gate ready</span>
               <span style={{flex: 1}} />
               <span>Verified 94</span>
               <span>$0.42</span>
