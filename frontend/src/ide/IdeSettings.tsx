@@ -215,7 +215,7 @@ export function IdeIntegrations() {
     },
     {
       name: 'Slack',
-      desc: 'Run-completion alerts in your channel',
+      desc: 'Work-completion alerts in your channel',
       connected: !!slack?.connected,
       sub: slack?.connected ? slack.teamName || undefined : undefined,
       actions: !slack?.connected ? (
@@ -230,7 +230,7 @@ export function IdeIntegrations() {
     },
     {
       name: 'Jira',
-      desc: 'Trigger runs from issues',
+      desc: 'Start work from issues',
       connected: jiraConnected,
       sub: user?.jiraBaseUrl || undefined,
       actions: (
@@ -241,7 +241,7 @@ export function IdeIntegrations() {
     },
     {
       name: 'Confluence',
-      desc: 'Trigger runs from pages',
+      desc: 'Start work from pages',
       connected: confluenceConnected,
       sub: user?.confluenceBaseUrl || undefined,
       actions: (
@@ -340,9 +340,9 @@ export function IdeIntegrations() {
 const FUNNEL_STAGES: Array<[string, string]> = [
   ['Signups', 'SIGNUP'],
   ['Projects', 'PROJECT_CREATED'],
-  ['Specs', 'SPEC_SUBMITTED'],
+  ['Requests drafted', 'SPEC_SUBMITTED'],
   ['Plans approved', 'PLAN_APPROVED'],
-  ['Runs complete', 'RUN_COMPLETE'],
+  ['Work complete', 'RUN_COMPLETE'],
   ['PRs merged', 'PR_MERGED'],
 ];
 
@@ -602,7 +602,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
               style={{padding: '3px 9px', fontSize: 12}}
               onClick={() => setGrantFor(u)}
             >
-              + Runs
+              + Work
             </button>
           </div>
         ))}
@@ -621,8 +621,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       />
       <PromptModal
         open={!!grantFor}
-        title='Grant runs'
-        body={grantFor ? `Grant how many runs to ${grantFor.email}?` : ''}
+        title='Grant work items'
+        body={grantFor ? `Grant how many work items to ${grantFor.email}?` : ''}
         fields={[{name: 'quantity', label: 'Quantity', defaultValue: '10', required: true}]}
         submitLabel='Grant'
         // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
@@ -634,7 +634,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
           if (!Number.isFinite(qty) || qty <= 0) return;
           await api
             .adminGrantUserRuns(u.id, qty, null, 'admin grant')
-            .then(() => ok(`Granted ${qty} runs to ${u.email}`))
+            .then(() => ok(`Granted ${qty} work items to ${u.email}`))
             .catch(bad);
         }}
         onClose={() => setGrantFor(null)}
@@ -694,7 +694,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
             <div style={{flex: 1, minWidth: 160}}>
               <div style={{fontWeight: 500}}>{o.name}</div>
               <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
-                {o.monthlyRunCount} runs ·{' '}
+                {o.monthlyRunCount} work items ·{' '}
                 {o.monthlyRunLimitOverride != null
                   ? `${o.monthlyRunLimitOverride} cap`
                   : 'tier cap'}
@@ -718,7 +718,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
               style={{padding: '3px 9px', fontSize: 12}}
               onClick={() => setGrantFor(o)}
             >
-              + Runs
+              + Work
             </button>
           </div>
         ))}
@@ -737,10 +737,10 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       />
       <PromptModal
         open={!!limitFor}
-        title='Run-limit override'
+        title='Work-limit override'
         body={
           limitFor
-            ? `Monthly run-limit override for ${limitFor.name} (blank = clear, use tier default):`
+            ? `Monthly work-limit override for ${limitFor.name} (blank = clear, use tier default):`
             : ''
         }
         fields={[
@@ -774,8 +774,8 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       />
       <PromptModal
         open={!!grantFor}
-        title='Grant runs'
-        body={grantFor ? `Grant how many runs to ${grantFor.name}?` : ''}
+        title='Grant work items'
+        body={grantFor ? `Grant how many work items to ${grantFor.name}?` : ''}
         fields={[{name: 'quantity', label: 'Quantity', defaultValue: '10', required: true}]}
         submitLabel='Grant'
         // eslint-disable-next-line no-restricted-syntax -- PromptModal callback prop (modal owns submit lifecycle); result reported via ok()/bad() toast.
@@ -787,7 +787,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
           if (!Number.isFinite(qty) || qty <= 0) return;
           await api
             .adminGrantOrgRuns(o.id, qty, null, 'admin grant')
-            .then(() => ok(`Granted ${qty} runs to ${o.name}`))
+            .then(() => ok(`Granted ${qty} work items to ${o.name}`))
             .catch(bad);
         }}
         onClose={() => setGrantFor(null)}
@@ -837,7 +837,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
           <div className='ide-h2'>Usage</div>
           <div style={{display: 'flex', gap: 10, flexWrap: 'wrap'}}>
             {[
-              ['Total runs', String(usage.totalRuns)],
+              ['Total work', String(usage.totalRuns)],
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
               ['Partial', String(usage.partialRuns)],
@@ -912,7 +912,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
                 <span style={{flex: 1}}>
                   {m.firstName} {m.lastName}
                 </span>
-                <span style={{color: 'var(--ide-fg-muted)'}}>{m.runCount} runs</span>
+                <span style={{color: 'var(--ide-fg-muted)'}}>{m.runCount} work items</span>
                 <span style={{color: 'var(--ide-fg-bright)'}}>
                   {Math.round((m.successRate ?? 0) * 100)}%
                 </span>
@@ -1105,7 +1105,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
     setBusy('halt');
     return api
       .haltAllActiveRuns('admin emergency halt')
-      .then((r) => ok(`Halted ${r.haltedCount} run(s).`))
+      .then((r) => ok(`Halted ${r.haltedCount} work item(s).`))
       .catch(bad)
       .finally(() => setBusy(null));
   }
@@ -1187,8 +1187,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
       <div className='ide-h2'>Operations</div>
       <AdminList>
         <OpRow
-          title='Halt all active runs'
-          desc='Emergency stop — cancels every in-flight pipeline platform-wide.'
+          title='Halt all active work'
+          desc='Emergency stop — cancels every in-flight work item platform-wide.'
           danger
           busyKey='halt'
           action={() => setConfirmKind('halt')}
@@ -1202,8 +1202,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
           label='Verify'
         />
         <OpRow
-          title='Reconcile orphan runs'
-          desc='Mark stale non-terminal ExecutionRuns as FAILED.'
+          title='Reconcile orphan work'
+          desc='Mark stale non-terminal execution records as FAILED.'
           busyKey='reconcile'
           action={() => setConfirmKind('reconcile')}
           label='Reconcile'
@@ -1236,8 +1236,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
 
       <ConfirmModal
         open={confirmKind === 'halt'}
-        title='Halt all active runs'
-        body='Halt ALL active runs platform-wide? This cancels in-flight pipelines for every org.'
+        title='Halt all active work'
+        body='Halt ALL active work platform-wide? This cancels in-flight pipelines for every org.'
         confirmLabel='Halt all'
         danger
         busy={busy === 'halt'}
@@ -1246,8 +1246,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
       />
       <ConfirmModal
         open={confirmKind === 'reconcile'}
-        title='Reconcile orphan runs'
-        body='Reconcile orphan runs — mark stale non-terminal runs FAILED?'
+        title='Reconcile orphan work'
+        body='Reconcile orphan work — mark stale non-terminal execution records FAILED?'
         confirmLabel='Reconcile'
         busy={busy === 'reconcile'}
         onConfirm={doReconcile}
@@ -1306,7 +1306,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
               <div style={{flex: 1, minWidth: 150}}>
                 <div style={{fontWeight: 500}}>{p.name}</div>
                 <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
-                  {p.runCount} runs · ₹{p.amountInr} / ${p.amountUsd}
+                  {p.runCount} work items · ₹{p.amountInr} / ${p.amountUsd}
                 </div>
               </div>
               <IdeBadge kind={p.active ? 'ok' : 'warn'}>{p.active ? 'Active' : 'Off'}</IdeBadge>
@@ -1339,7 +1339,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
         title='New top-up package'
         fields={[
           {name: 'name', label: 'Package name', placeholder: 'Starter pack', required: true},
-          {name: 'runCount', label: 'Run count', defaultValue: '50', required: true},
+          {name: 'runCount', label: 'Work item count', defaultValue: '50', required: true},
           {name: 'amountInr', label: 'Amount (INR)', defaultValue: '500', required: true},
         ]}
         submitLabel='Create'

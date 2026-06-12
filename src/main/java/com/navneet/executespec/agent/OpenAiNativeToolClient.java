@@ -71,13 +71,7 @@ public class OpenAiNativeToolClient {
   /** Connect timeout for the OpenAI HTTP call. */
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
-  /**
-   * Default read timeout for the OpenAI-wire HTTP call. Generous because tool-emitting calls can be
-   * slow. Overridable per call via {@link OpenAiToolCallRequest#readTimeoutSeconds()} — the worker
-   * passes 240s (RL-2026-06: DeepSeek-native intermittently exceeds 120s on long agentic turns; the
-   * TB 2.0 runs logged ~9% of worker calls dying at exactly 120s then burning wall-clock on
-   * retries).
-   */
+  /** Read timeout for the OpenAI HTTP call. Generous because tool-emitting calls can be slow. */
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
 
   private final ObjectMapper objectMapper;
@@ -118,11 +112,7 @@ public class OpenAiNativeToolClient {
     // connection or stalled body never blocks the harness loop indefinitely.
     HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-    Duration readTimeout =
-        (request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0)
-            ? Duration.ofSeconds(request.readTimeoutSeconds())
-            : READ_TIMEOUT;
-    factory.setReadTimeout(readTimeout);
+    factory.setReadTimeout(READ_TIMEOUT);
     RestClient client =
         RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
     JsonNode response;
@@ -373,6 +363,5 @@ public class OpenAiNativeToolClient {
       Integer maxCompletionTokens,
       String apiKey,
       String baseUrl,
-      Map<String, Object> extraBody,
-      Integer readTimeoutSeconds) {}
+      Map<String, Object> extraBody) {}
 }

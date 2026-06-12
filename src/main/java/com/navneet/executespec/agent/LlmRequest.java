@@ -38,9 +38,6 @@ import lombok.Builder;
  *     Anthropic (Spring AI) + Gemini ignore it today. Set to {@code "required"} by the WorkerAgent
  *     Lever-B salvage call (RL-2026-05-059) to force a tool call out of a model that would
  *     otherwise return reasoning-only text and silently fail the salvage.
- * @param transientRetryMaxAttempts optional same-provider transient retry cap. Null keeps the
- *     router default. Terminal-Bench passes a smaller value so several full read timeouts cannot
- *     outlive Harbor's per-task agent budget.
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -52,8 +49,7 @@ public record LlmRequest(
     Integer maxTokens,
     List<ToolCallback> toolsOverride,
     Integer readTimeoutSeconds,
-    String toolChoice,
-    Integer transientRetryMaxAttempts) {
+    String toolChoice) {
 
   public LlmRequest {
     if (provider == null || provider.isBlank())

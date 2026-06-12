@@ -27,19 +27,54 @@ function RTabs({
   active: string;
   onSelect: (k: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const activeTab = tabs.find((t) => t.key === active) ?? tabs[0];
+  function choose(key: string) {
+    onSelect(key);
+    setOpen(false);
+  }
   return (
-    <div className='ide-rtabs' style={{marginBottom: 16, borderRadius: 4}}>
-      {tabs.map((t) => (
+    <>
+      <div className='ide-local-mobile-nav'>
         <button
-          key={t.key}
           type='button'
-          className={`ide-rtab${active === t.key ? ' active' : ''}`}
-          onClick={() => onSelect(t.key)}
+          className='ide-project-mobile-trigger'
+          aria-haspopup='menu'
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
         >
-          {t.label}
+          <span>{activeTab?.label ?? 'Section'}</span>
+          <span aria-hidden='true'>⌄</span>
         </button>
-      ))}
-    </div>
+        {open && (
+          <div className='ide-project-mobile-menu' role='menu'>
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type='button'
+                className={`ide-project-mobile-item${active === t.key ? ' active' : ''}`}
+                role='menuitem'
+                onClick={() => choose(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className='ide-rtabs ide-local-tabs' style={{marginBottom: 16, borderRadius: 4}}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type='button'
+            className={`ide-rtab${active === t.key ? ' active' : ''}`}
+            onClick={() => onSelect(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -80,6 +115,41 @@ function MetaLabel({children}: {children: React.ReactNode}) {
 }
 
 type ChatBubble = {role: 'user' | 'assistant'; content: string; ts?: string};
+type ChatPanel = 'chat' | 'artifacts' | 'memory';
+
+function looksLikeArtifact(content: string): boolean {
+  return content.length > 1200 || /```|^#{2,}\s|\|.+\|/m.test(content);
+}
+
+function ChatMessageCard({message}: {message: ChatBubble}) {
+  const artifact = message.role === 'assistant' && looksLikeArtifact(message.content);
+  const [open, setOpen] = useState(!artifact);
+  const visible = open ? message.content : `${message.content.slice(0, 520).trim()}…`;
+
+  return (
+    <div
+      className={`ide-card ide-project-chat-message ${artifact ? 'artifact' : ''}`}
+      style={{
+        borderColor: message.role === 'user' ? 'var(--ide-accent)' : undefined,
+      }}
+    >
+      <div className='ide-project-chat-message-meta'>
+        <span>
+          {message.role === 'user' ? 'You' : artifact ? 'Assistant artifact' : 'Assistant'}
+        </span>
+        {message.ts && <span> · {new Date(message.ts).toLocaleTimeString()}</span>}
+        {artifact && (
+          <button type='button' onClick={() => setOpen((v) => !v)}>
+            {open ? 'Collapse' : 'Expand'}
+          </button>
+        )}
+      </div>
+      <div className='signal-md' style={{fontSize: 13.5}}>
+        <Markdown>{visible}</Markdown>
+      </div>
+    </div>
+  );
+}
 
 export function IdeProjectChat() {
   const {projectId = ''} = useParams();
@@ -95,6 +165,8 @@ export function IdeProjectChat() {
   // Memory digest is reference context, not needed every message — collapsed by
   // default so it doesn't dominate the chat pane; click the header to expand.
   const [memOpen, setMemOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<ChatPanel>('chat');
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -216,6 +288,9 @@ export function IdeProjectChat() {
 
   const memDigest = memory?.fullContext?.trim() || '';
   const memRuns = memory?.stats?.totalRuns ?? 0;
+  const artifactMessages = (msgs ?? []).filter(
+    (m) => m.role === 'assistant' && looksLikeArtifact(m.content),
+  );
 
   return (
     <div
@@ -223,183 +298,195 @@ export function IdeProjectChat() {
       style={{display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 'none'}}
     >
       <ProjectTabs projectId={projectId} />
-      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-        <div className='ide-h1' style={{margin: 0}}>
-          Project chat
+      <div className='ide-project-chat-head'>
+        <div className='ide-project-chat-title'>
+          <div className='ide-h1' style={{margin: 0}}>
+            Ask about project
+          </div>
+          <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+            context: {memRuns} completed work item{memRuns === 1 ? '' : 's'}
+          </span>
         </div>
-        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-          memory: {memRuns} {memRuns === 1 ? 'run' : 'runs'}
-        </span>
-        <span style={{flex: 1}} />
         <button
-          className='ide-btn ghost'
-          onClick={compile}
-          disabled={busy || gated}
-          title='Turns this conversation into a run-ready spec in the composer'
+          type='button'
+          className='ide-project-chat-mobile-actions'
+          aria-expanded={mobileActionsOpen}
+          onClick={() => setMobileActionsOpen((v) => !v)}
         >
-          Generate spec from chat
+          Actions
         </button>
-        <button
-          className='ide-btn ghost'
-          onClick={compact}
-          disabled={gated}
-          title='Summarize older messages to free up the chat token budget (keeps recent messages verbatim)'
-        >
-          Compact
-        </button>
-        <button
-          className='ide-btn ghost'
-          onClick={() => setConfirmClear(true)}
-          disabled={gated}
-          style={{color: 'var(--ide-red)'}}
-        >
-          Clear
-        </button>
-      </div>
-
-      <div style={{marginTop: 12}}>
-        <Banner err={err} />
-      </div>
-
-      {memDigest && (
-        <div
-          className='ide-card'
-          style={{
-            marginBottom: 8,
-            borderColor: 'var(--ide-yellow)',
-            padding: memOpen ? undefined : '8px 12px',
-          }}
-        >
+        <div className={`ide-project-chat-actions${mobileActionsOpen ? ' open' : ''}`}>
           <button
-            type='button'
-            onClick={() => setMemOpen((v) => !v)}
-            aria-expanded={memOpen}
-            title={memOpen ? 'Hide memory digest' : 'Show memory digest'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              width: '100%',
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--ide-yellow)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-            }}
+            className='ide-btn ghost'
+            onClick={compile}
+            disabled={busy || gated}
+            title='Turns this conversation into a ready-to-review work request'
           >
-            <span
-              style={{
-                display: 'inline-block',
-                transition: 'transform 0.15s',
-                transform: memOpen ? 'rotate(90deg)' : 'none',
-              }}
-            >
-              ▸
-            </span>
-            Memory digest · {memRuns} runs
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontWeight: 400,
-                letterSpacing: 0,
-                textTransform: 'none',
-                color: 'var(--ide-fg-muted)',
-              }}
-            >
-              {memOpen ? 'hide' : 'show'}
-            </span>
+            Create work from chat
           </button>
-          {memOpen && (
-            <div style={{fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 8}}>
-              {memDigest.slice(0, 1200)}
-            </div>
-          )}
+          <button
+            className='ide-btn ghost'
+            onClick={compact}
+            disabled={gated}
+            title='Summarize older messages to free up the chat token budget (keeps recent messages verbatim)'
+          >
+            Compact
+          </button>
+          <button
+            className='ide-btn ghost'
+            onClick={() => setConfirmClear(true)}
+            disabled={gated}
+            style={{color: 'var(--ide-red)'}}
+          >
+            Clear
+          </button>
         </div>
-      )}
-
-      <div style={{flex: 1, overflowY: 'auto', minHeight: 0, margin: '12px 0'}}>
-        {gated ? (
-          <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: 'var(--ide-blue)',
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                marginBottom: 6,
-              }}
-            >
-              Project chat is a TEAM+ feature
-            </div>
-            <div style={{fontSize: 13, lineHeight: 1.5}}>
-              The agent uses your project's memory + codemap + linked docs to answer questions —
-              gated to TEAM and ENTERPRISE plans.{' '}
-              <a href='/plans' style={{color: 'var(--ide-accent)'}}>
-                Compare plans →
-              </a>
-            </div>
-          </div>
-        ) : msgs === null ? (
-          <IdeLoader label='Loading chat…' />
-        ) : msgs.length === 0 && !busy ? (
-          <div className='ide-empty'>No messages yet — ask about your codebase.</div>
-        ) : (
-          msgs.map((m, i) => (
-            <div
-              key={i}
-              className='ide-card'
-              style={{
-                marginBottom: 8,
-                borderColor: m.role === 'user' ? 'var(--ide-accent)' : undefined,
-              }}
-            >
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}>
-                {m.role === 'user' ? 'You' : 'Assistant'}
-                {m.ts && ` · ${new Date(m.ts).toLocaleTimeString()}`}
-              </div>
-              <div className='signal-md' style={{fontSize: 13.5}}>
-                <Markdown>{m.content}</Markdown>
-              </div>
-            </div>
-          ))
-        )}
-        {busy && (
-          <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '4px 0'}}>
-            Thinking…
-          </div>
-        )}
-        <div ref={endRef} />
       </div>
 
-      <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
-        <textarea
-          className='ide-input'
-          rows={2}
-          placeholder={
-            gated
-              ? 'Upgrade to TEAM to enable project chat.'
-              : 'Ask about the codebase…  (Enter to send · Shift+Enter for a new line)'
-          }
-          value={text}
-          disabled={gated}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          style={{resize: 'vertical', minHeight: 40, maxHeight: 160, fontFamily: 'inherit'}}
-        />
-        <button className='ide-btn' onClick={send} disabled={busy || gated}>
-          {busy ? '…' : 'Send'}
-        </button>
+      <div className='ide-project-chat-segments' role='tablist' aria-label='Project chat panels'>
+        {[
+          ['chat', 'Chat'],
+          ['artifacts', `Artifacts · ${artifactMessages.length}`],
+          ['memory', `Context · ${memRuns}`],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type='button'
+            className={mobilePanel === key ? 'active' : ''}
+            onClick={() => setMobilePanel(key as ChatPanel)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className='ide-project-chat-shell' data-mobile-panel={mobilePanel}>
+        <section className='ide-project-chat-main'>
+          <Banner err={err} />
+          <div className='ide-project-chat-scroll'>
+            {gated ? (
+              <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: 'var(--ide-blue)',
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    marginBottom: 6,
+                  }}
+                >
+                  Project chat is a TEAM+ feature
+                </div>
+                <div style={{fontSize: 13, lineHeight: 1.5}}>
+                  The agent uses project context, code maps, and linked docs to answer questions.
+                  This is gated to TEAM and ENTERPRISE plans.{' '}
+                  <a href='/plans' style={{color: 'var(--ide-accent)'}}>
+                    Compare plans →
+                  </a>
+                </div>
+              </div>
+            ) : msgs === null ? (
+              <IdeLoader label='Loading chat…' />
+            ) : msgs.length === 0 && !busy ? (
+              <div className='ide-card ide-project-chat-empty'>
+                <div className='ide-project-chat-empty-title'>Ask about this project</div>
+                {[
+                  'Summarize the current system map.',
+                  'What should I review before the next work item?',
+                  'Find risky files or unresolved code issues.',
+                  'Turn this discussion into a ready work request.',
+                ].map((prompt) => (
+                  <button key={prompt} type='button' onClick={() => setText(prompt)}>
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              msgs.map((m, i) => <ChatMessageCard key={i} message={m} />)
+            )}
+            {busy && (
+              <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '4px 0'}}>
+                Thinking…
+              </div>
+            )}
+            <div ref={endRef} />
+          </div>
+
+          <div className='ide-project-chat-composer'>
+            <textarea
+              className='ide-input'
+              rows={2}
+              placeholder={
+                gated
+                  ? 'Upgrade to TEAM to enable project chat.'
+                  : 'Ask about the codebase…  (Enter to send · Shift+Enter for a new line)'
+              }
+              value={text}
+              disabled={gated}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              style={{resize: 'vertical', minHeight: 40, maxHeight: 160, fontFamily: 'inherit'}}
+            />
+            <button className='ide-btn' onClick={send} disabled={busy || gated}>
+              {busy ? '…' : 'Send'}
+            </button>
+          </div>
+        </section>
+
+        <aside className='ide-project-chat-rail'>
+          <div className='ide-card ide-project-chat-memory-card'>
+            <button
+              type='button'
+              onClick={() => setMemOpen((v) => !v)}
+              aria-expanded={memOpen}
+              title={memOpen ? 'Hide memory digest' : 'Show memory digest'}
+              className='ide-project-chat-rail-head'
+            >
+              Project context · {memRuns} item{memRuns === 1 ? '' : 's'}
+              <span>{memOpen ? 'hide' : 'show'}</span>
+            </button>
+            {memDigest ? (
+              <div className='ide-project-chat-rail-body'>
+                {(memOpen ? memDigest : memDigest.slice(0, 420)).trim()}
+                {!memOpen && memDigest.length > 420 ? '…' : ''}
+              </div>
+            ) : (
+              <div className='ide-project-chat-rail-body muted'>
+                No compacted project context yet. Completed work will build this context.
+              </div>
+            )}
+          </div>
+
+          <div className='ide-card ide-project-chat-artifacts-card'>
+            <div className='ide-project-chat-rail-head static'>
+              Artifacts
+              <span>{artifactMessages.length}</span>
+            </div>
+            {artifactMessages.length === 0 ? (
+              <div className='ide-project-chat-rail-body muted'>
+                Long generated answers and code-heavy outputs will appear here.
+              </div>
+            ) : (
+              artifactMessages.map((m, i) => (
+                <div key={i} className='ide-project-chat-artifact-row'>
+                  <div>Assistant artifact {i + 1}</div>
+                  <button
+                    type='button'
+                    onClick={() => void navigator.clipboard.writeText(m.content)}
+                  >
+                    Copy
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
       </div>
 
       <ConfirmModal
@@ -415,7 +502,7 @@ export function IdeProjectChat() {
   );
 }
 
-// Code (Browse · Tech debt · Code review · Health · Standards · Docs)
+// Code (Files · Issues · Review · Repo health · Standards · Generated docs)
 type CodeSub = 'browse' | 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
 // Change-detection stamp for a generated doc — the row carries no status
@@ -444,8 +531,10 @@ export function IdeProjectCode() {
   const [files, setFiles] = useState<string[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState<Record<string, string>>({});
-  // C9 — mobile file picker search query (replaces the flat <select>).
+  // Mobile tree search query. The mobile view still renders the real folder
+  // tree so file/folder icons and hierarchy are preserved.
   const [fileQuery, setFileQuery] = useState('');
+  const [mobileCodeMode, setMobileCodeMode] = useState<'tree' | 'file'>('tree');
 
   // Other tabs
   const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
@@ -511,6 +600,7 @@ export function IdeProjectCode() {
 
   async function open(path: string) {
     setActive(path);
+    setMobileCodeMode('file');
     if (content[path]) return;
     try {
       const f = await api.readRepoFile(projectId, repoId, path);
@@ -526,9 +616,9 @@ export function IdeProjectCode() {
     setMsg('');
     try {
       const res = await api.dispatchTechDebtFix(projectId, category);
-      setMsg(res.runId ? `Autofix dispatched: R-${res.runId.slice(0, 6)}` : 'Autofix dispatched.');
+      setMsg(res.runId ? `Fix work started: R-${res.runId.slice(0, 6)}` : 'Fix work started.');
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Autofix failed.');
+      setErr(e instanceof Error ? e.message : 'Fix work failed.');
     } finally {
       setBusy('');
     }
@@ -617,6 +707,11 @@ export function IdeProjectCode() {
   );
 
   const browseIsSplit = sub === 'browse';
+  const mobileTreeFiles = useMemo(() => {
+    if (!files) return [];
+    const q = fileQuery.trim().toLowerCase();
+    return q ? files.filter((f) => f.toLowerCase().includes(q)) : files;
+  }, [files, fileQuery]);
 
   return (
     <div
@@ -631,9 +726,17 @@ export function IdeProjectCode() {
     >
       <div style={browseIsSplit ? {padding: '16px 16px 0'} : undefined}>
         <ProjectTabs projectId={projectId} />
-        <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
-          <div className='ide-h1' style={{margin: 0}}>
-            Code &amp; quality
+        <div
+          className='ide-code-head'
+          style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
+        >
+          <div>
+            <div className='ide-h1' style={{margin: 0}}>
+              Codebase
+            </div>
+            <div className='ide-sub' style={{margin: 0}}>
+              Browse linked repo files, review code issues, and regenerate project docs.
+            </div>
           </div>
           {(sub === 'browse' || sub === 'review') && repos.length > 0 && (
             <select
@@ -654,12 +757,12 @@ export function IdeProjectCode() {
           active={sub}
           onSelect={(k) => setSub(k as CodeSub)}
           tabs={[
-            {key: 'browse', label: `Browse · ${repos.length}`},
-            {key: 'debt', label: `Tech debt · ${debtCats.length}`},
-            {key: 'review', label: 'Code review'},
-            {key: 'health', label: 'Health'},
+            {key: 'browse', label: files == null ? 'Files' : `Files · ${files.length}`},
+            {key: 'debt', label: `Issues · ${debtCats.length}`},
+            {key: 'review', label: 'Review'},
+            {key: 'health', label: 'Repo health'},
             {key: 'standards', label: 'Standards'},
-            {key: 'docs', label: `Docs · ${docs?.length ?? 0}`},
+            {key: 'docs', label: `Generated docs · ${docs?.length ?? 0}`},
           ]}
         />
         {sub !== 'browse' && <Banner err={err} msg={msg} />}
@@ -681,72 +784,64 @@ export function IdeProjectCode() {
               </div>
               <div className='ide-split-main'>
                 {files?.length ? (
-                  // C9 — searchable picker (a flat <select> over 100+ paths was
-                  // unusable on phones). List shows until a file is opened;
-                  // typing filters case-insensitively and reopens it.
-                  <div className='ide-mobile-file-picker'>
+                  <div className='ide-mobile-file-tree' data-mode={mobileCodeMode}>
+                    <div className='ide-mobile-code-switch'>
+                      <button
+                        type='button'
+                        className={mobileCodeMode === 'tree' ? 'active' : ''}
+                        onClick={() => setMobileCodeMode('tree')}
+                      >
+                        Tree
+                      </button>
+                      <button
+                        type='button'
+                        className={mobileCodeMode === 'file' ? 'active' : ''}
+                        onClick={() => setMobileCodeMode('file')}
+                        disabled={!active}
+                      >
+                        File
+                      </button>
+                    </div>
                     <input
                       className='ide-input'
                       type='search'
-                      placeholder='Search files…'
+                      placeholder='Search files and folders…'
                       value={fileQuery}
                       onChange={(e) => setFileQuery(e.target.value)}
                     />
-                    {(fileQuery.trim() !== '' || !active) && (
-                      <div style={{maxHeight: 200, overflowY: 'auto', marginTop: 6}}>
-                        {(() => {
-                          const q = fileQuery.trim().toLowerCase();
-                          const matches = (
-                            q ? files.filter((f) => f.toLowerCase().includes(q)) : files
-                          ).slice(0, 200);
-                          if (matches.length === 0) {
-                            return (
-                              <div
-                                style={{
-                                  fontSize: 12,
-                                  color: 'var(--ide-fg-muted)',
-                                  padding: '6px 2px',
-                                }}
-                              >
-                                No files match “{fileQuery.trim()}”.
-                              </div>
-                            );
-                          }
-                          return matches.map((f) => (
-                            <button
-                              key={f}
-                              type='button'
-                              className='ide-mono'
-                              onClick={() => {
-                                void open(f);
-                                setFileQuery('');
-                              }}
-                              style={{
-                                display: 'block',
-                                width: '100%',
-                                textAlign: 'left',
-                                padding: '5px 8px',
-                                background: f === active ? 'var(--ide-bg-sidebar)' : 'transparent',
-                                border: 'none',
-                                borderRadius: 4,
-                                color: 'var(--ide-fg)',
-                                cursor: 'pointer',
-                                fontSize: 12.5,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {f}
-                            </button>
-                          ));
-                        })()}
+                    <div className='ide-mobile-file-tree-list'>
+                      {mobileTreeFiles.length === 0 ? (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--ide-fg-muted)',
+                            padding: '6px 2px',
+                          }}
+                        >
+                          No files match “{fileQuery.trim()}”.
+                        </div>
+                      ) : (
+                        <IdeFileTree files={mobileTreeFiles} activePath={active} onOpen={open} />
+                      )}
+                    </div>
+                    {active && (
+                      <div className='ide-mobile-active-file ide-mono' title={active}>
+                        {active}
                       </div>
                     )}
                   </div>
                 ) : null}
                 {active ? (
-                  <IdeCodeViewer filename={active} content={content[active] ?? '…'} />
+                  <div className='ide-mobile-file-view'>
+                    <button
+                      type='button'
+                      className='ide-btn ghost ide-mobile-file-back'
+                      onClick={() => setMobileCodeMode('tree')}
+                    >
+                      ← File tree
+                    </button>
+                    <IdeCodeViewer filename={active} content={content[active] ?? '…'} />
+                  </div>
                 ) : (
                   <div className='ide-empty'>Select a file to browse the live source.</div>
                 )}
@@ -759,10 +854,10 @@ export function IdeProjectCode() {
       {sub === 'debt' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
           {debt === undefined ? (
-            <IdeLoader label='Loading tech debt…' />
+            <IdeLoader label='Loading code issues…' />
           ) : debtCats.length === 0 ? (
             <div className='ide-empty'>
-              No tech debt detected. Run a code-review scan to surface issues.
+              No code issues found yet. Start a review scan to surface risks.
             </div>
           ) : (
             debtCats.map((c) => (
@@ -779,7 +874,7 @@ export function IdeProjectCode() {
                     // C8 — credit-spending dispatch goes through a confirm modal.
                     onClick={() => setFixFor({category: c.name, count: c.count})}
                   >
-                    {busy === `fix-${c.name}` ? 'Dispatching…' : `Autofix ${c.count} →`}
+                    {busy === `fix-${c.name}` ? 'Starting…' : `Start fix work · ${c.count}`}
                   </button>
                 </div>
               </div>
@@ -792,7 +887,7 @@ export function IdeProjectCode() {
       {sub === 'review' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
           {repos.length === 0 ? (
-            <div className='ide-empty'>No repos linked — link one to enable per-repo review.</div>
+            <div className='ide-empty'>No repos linked — link one to review code.</div>
           ) : !reviewRepo ? (
             <IdeLoader label='Loading…' />
           ) : (
@@ -839,9 +934,9 @@ export function IdeProjectCode() {
                         to={`/projects/${projectId}/repos`}
                         className='ide-btn ghost'
                         style={{padding: '3px 10px', fontSize: 12, textDecoration: 'none'}}
-                        title='Open Repos to sync metadata or regenerate the codemap + architecture'
+                        title='Open Repos to sync metadata or refresh the system map'
                       >
-                        Sync / Regenerate →
+                        Sync / Refresh →
                       </Link>
                     )}
                   </div>
@@ -862,7 +957,7 @@ export function IdeProjectCode() {
                       </div>
                     </div>
                     <div>
-                      <MetaLabel>Codemap</MetaLabel>
+                      <MetaLabel>System map</MetaLabel>
                       <div
                         className='ide-mono'
                         style={{fontWeight: 600, color: drift ? 'var(--ide-yellow)' : undefined}}
@@ -945,7 +1040,7 @@ export function IdeProjectCode() {
                           {v.summary?.slice(0, 80)}
                         </div>
                       </div>
-                      <span title='BLOCKING = fails the run · WARNING = reported · INFO = advisory'>
+                      <span title='BLOCKING = fails the work item · WARNING = reported · INFO = advisory'>
                         <IdeBadge
                           kind={sev === 'BLOCKING' ? 'bad' : sev === 'WARNING' ? 'warn' : 'ok'}
                         >
@@ -965,7 +1060,7 @@ export function IdeProjectCode() {
       {sub === 'docs' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
           {(docs || []).length === 0 ? (
-            <div className='ide-empty'>No docs generated yet. Use the buttons below.</div>
+            <div className='ide-empty'>No generated docs yet. Use the buttons below.</div>
           ) : (
             (docs || []).map((d) => (
               <div
@@ -995,7 +1090,7 @@ export function IdeProjectCode() {
                   disabled={busy === `gen-${d.docType}` || genPending?.type === d.docType}
                   onClick={() => genDoc(d.docType)}
                 >
-                  {genPending?.type === d.docType ? 'Generating…' : 'Regen'}
+                  {genPending?.type === d.docType ? 'Generating…' : 'Regenerate'}
                 </button>
               </div>
             ))
@@ -1008,7 +1103,7 @@ export function IdeProjectCode() {
             >
               {busy === 'gen-EXPLANATION' || genPending?.type === 'EXPLANATION'
                 ? 'Generating…'
-                : 'Generate EXPLANATION.md'}
+                : 'Generate explanation doc'}
             </button>
             <button
               className='ide-btn ghost'
@@ -1017,7 +1112,7 @@ export function IdeProjectCode() {
             >
               {busy === 'gen-SETUP' || genPending?.type === 'SETUP'
                 ? 'Generating…'
-                : 'Generate SETUP.md'}
+                : 'Generate setup doc'}
             </button>
           </div>
         </div>
@@ -1027,13 +1122,13 @@ export function IdeProjectCode() {
           success message + run id inside autofixCategory() is untouched. */}
       <ConfirmModal
         open={!!fixFor}
-        title='Dispatch autofix run'
+        title='Start fix work'
         body={
           fixFor
-            ? `This dispatches a new run targeting '${fixFor.category}' issues (${fixFor.count} finding${fixFor.count === 1 ? '' : 's'}). It consumes credits and opens a new PR. Continue?`
+            ? `This starts new work targeting '${fixFor.category}' issues (${fixFor.count} finding${fixFor.count === 1 ? '' : 's'}). It consumes credits and opens a pull request. Continue?`
             : ''
         }
-        confirmLabel='Dispatch run'
+        confirmLabel='Start fix work'
         busy={!!fixFor && busy === `fix-${fixFor.category}`}
         onConfirm={async () => {
           const f = fixFor;
@@ -1045,7 +1140,7 @@ export function IdeProjectCode() {
   );
 }
 
-// Architecture (Current · Versions · Invariants · ADRs · Contracts)
+// System map (Current map · History · Rules · Decisions · Contracts)
 type ArchSub = 'current' | 'versions' | 'invariants' | 'adrs' | 'contracts';
 
 // Split a markdown doc into a preamble (text before the first `##`) + top-level (`##`) sections.
@@ -1233,10 +1328,10 @@ export function IdeProjectArchitecture() {
     setMsg('');
     try {
       await api.generateArchitecture(projectId);
-      setMsg('Architecture regeneration started.');
+      setMsg('System map refresh started.');
       refresh();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Regenerate failed.');
+      setErr(e instanceof Error ? e.message : 'Refresh failed.');
     } finally {
       setBusy('');
     }
@@ -1342,14 +1437,14 @@ export function IdeProjectArchitecture() {
       <ProjectTabs projectId={projectId} />
       <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
         <div className='ide-h1' style={{margin: 0}}>
-          Architecture
+          System map
         </div>
         {arch?.version != null && (
           <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>v{arch.version}</span>
         )}
         <span style={{flex: 1}} />
         <button className='ide-btn ghost' onClick={regenerate} disabled={busy === 'regen'}>
-          {busy === 'regen' ? 'Regenerating…' : '↻ Regenerate'}
+          {busy === 'regen' ? 'Refreshing…' : 'Refresh map'}
         </button>
       </div>
       <div style={{marginTop: 12}}>
@@ -1357,10 +1452,10 @@ export function IdeProjectArchitecture() {
           active={sub}
           onSelect={(k) => setSub(k as ArchSub)}
           tabs={[
-            {key: 'current', label: 'Current'},
-            {key: 'versions', label: `Versions · ${versions?.length ?? 0}`},
-            {key: 'invariants', label: `Invariants · ${invariants?.length ?? 0}`},
-            {key: 'adrs', label: `ADRs · ${adrs?.length ?? 0}`},
+            {key: 'current', label: 'Current map'},
+            {key: 'versions', label: `History · ${versions?.length ?? 0}`},
+            {key: 'invariants', label: `Rules · ${invariants?.length ?? 0}`},
+            {key: 'adrs', label: `Decisions · ${adrs?.length ?? 0}`},
             {key: 'contracts', label: 'Contracts'},
           ]}
         />
@@ -1370,7 +1465,7 @@ export function IdeProjectArchitecture() {
       {/* ── Current ── */}
       {sub === 'current' &&
         (arch === undefined ? (
-          <IdeLoader label='Loading architecture…' />
+          <IdeLoader label='Loading system map…' />
         ) : (
           <>
             <div className='ide-card'>
@@ -1385,7 +1480,7 @@ export function IdeProjectArchitecture() {
                       textTransform: 'uppercase',
                     }}
                   >
-                    Architecture
+                    System map
                   </div>
                   <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                     {arch?.version ? `v${arch.version}` : 'Latest'}
@@ -1403,7 +1498,7 @@ export function IdeProjectArchitecture() {
                 </div>
               ) : (
                 <div className='ide-empty' style={{padding: '12px 0'}}>
-                  No architecture doc yet — click Regenerate to build one from your repos.
+                  No system map yet — refresh it to build one from your repos.
                 </div>
               )}
             </div>
@@ -1413,7 +1508,7 @@ export function IdeProjectArchitecture() {
               onClick={regenerate}
               disabled={busy === 'regen'}
             >
-              {busy === 'regen' ? 'Regenerating…' : 'Regenerate codemap + arch doc'}
+              {busy === 'regen' ? 'Refreshing…' : 'Refresh system map'}
             </button>
           </>
         ))}
@@ -1421,14 +1516,14 @@ export function IdeProjectArchitecture() {
       {/* ── Versions ── */}
       {sub === 'versions' &&
         (versions === null ? (
-          <IdeLoader label='Loading versions…' />
+          <IdeLoader label='Loading history…' />
         ) : versions.length === 0 ? (
-          <div className='ide-empty'>No previous versions yet.</div>
+          <div className='ide-empty'>No previous map versions yet.</div>
         ) : (
           <>
             <div className='ide-card' style={{marginBottom: 12}}>
               <div className='ide-h2' style={{marginTop: 0}}>
-                Compare versions
+                Compare history
               </div>
               <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
                 <select
@@ -1545,9 +1640,9 @@ export function IdeProjectArchitecture() {
       {/* ── Invariants ── */}
       {sub === 'invariants' &&
         (invariants === null ? (
-          <IdeLoader label='Loading invariants…' />
+          <IdeLoader label='Loading rules…' />
         ) : invariants.length === 0 ? (
-          <div className='ide-empty'>No invariants declared yet.</div>
+          <div className='ide-empty'>No rules declared yet.</div>
         ) : (
           <div className='ide-card' style={{padding: 0}}>
             {invariants.map((inv, i) => {
@@ -1576,12 +1671,12 @@ export function IdeProjectArchitecture() {
           </div>
         ))}
 
-      {/* ── ADRs ── */}
+      {/* ── Decisions ── */}
       {sub === 'adrs' &&
         (adrs === null ? (
-          <IdeLoader label='Loading ADRs…' />
+          <IdeLoader label='Loading decisions…' />
         ) : adrs.length === 0 ? (
-          <div className='ide-empty'>No ADRs yet.</div>
+          <div className='ide-empty'>No architecture decisions yet.</div>
         ) : (
           <div className='ide-card' style={{padding: 0}}>
             {adrs.map((adr, i) => {
@@ -1651,7 +1746,7 @@ export function IdeProjectArchitecture() {
                       <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{repoName}</div>
                       <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                         {cov == null
-                          ? 'No coverage data — run a scan'
+                          ? 'No coverage data — start a scan'
                           : `${scanned} detector${scanned === 1 ? '' : 's'} scanned${failed > 0 ? ` · ${failed} failed` : ''} · ${totalContracts} contract${totalContracts === 1 ? '' : 's'}`}
                       </div>
                     </div>
@@ -2339,8 +2434,8 @@ export function IdeProjectSettings() {
             onSelect={(k) => setSub(k as SettingsSub)}
             tabs={[
               {key: 'settings', label: 'Settings'},
-              {key: 'documents', label: `Documents · ${docs?.length ?? '—'}`},
-              {key: 'memory', label: 'Memory'},
+              {key: 'documents', label: `Reference docs · ${docs?.length ?? '—'}`},
+              {key: 'memory', label: 'Project context'},
             ]}
           />
           <Banner err={err} msg={msg} />
@@ -2376,6 +2471,7 @@ export function IdeProjectSettings() {
                     <option value='ANTHROPIC'>Anthropic</option>
                     <option value='OPENAI'>OpenAI</option>
                     <option value='GEMINI'>Gemini</option>
+                    <option value='DEEPSEEK'>DeepSeek</option>
                   </select>
                 </Field>
                 <Field label='Target branch'>
@@ -2464,8 +2560,8 @@ export function IdeProjectSettings() {
             <>
               <div className='ide-card' style={{marginBottom: 12, borderColor: 'var(--ide-blue)'}}>
                 <div style={{fontSize: 13, lineHeight: 1.55}}>
-                  Upload markdown, PDF, or plain-text docs to give the planner and chat extra
-                  context. Documents are chunked, embedded, and retrieved at run time.
+                  Upload markdown, PDF, or plain-text docs to give future work and project chat
+                  extra context.
                 </div>
               </div>
               <input
@@ -2546,10 +2642,10 @@ export function IdeProjectSettings() {
             <>
               <div className='ide-card'>
                 <div className='ide-h2' style={{marginTop: 0}}>
-                  Project memory
+                  Project context
                 </div>
                 <div className='ide-kv'>
-                  <span>Total runs in ledger</span>
+                  <span>Completed work in context</span>
                   <span>{memory?.stats?.totalRuns ?? '—'}</span>
                 </div>
                 <div className='ide-kv'>
@@ -2574,15 +2670,15 @@ export function IdeProjectSettings() {
                   disabled={busy === 'compact'}
                   onClick={compactMemory}
                 >
-                  {busy === 'compact' ? 'Compacting…' : 'Compact memory'}
+                  {busy === 'compact' ? 'Compacting…' : 'Compact context'}
                 </button>
               </div>
 
-              <div className='ide-h2'>What the planner remembers</div>
+              <div className='ide-h2'>What ExecuteSpec remembers</div>
               <div className='ide-card'>
                 <div style={{fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap'}}>
                   {memory?.fullContext?.trim() ||
-                    'No memory snapshot yet. The planner builds context after the first ~5 completed runs.'}
+                    'No context snapshot yet. ExecuteSpec builds this after the first few completed work items.'}
                 </div>
               </div>
             </>
@@ -2593,7 +2689,7 @@ export function IdeProjectSettings() {
       <ConfirmModal
         open={!!deleteDocFor}
         title='Delete document'
-        body={deleteDocFor ? `Delete "${deleteDocFor.label}" from the RAG index?` : ''}
+        body={deleteDocFor ? `Delete "${deleteDocFor.label}" from project reference docs?` : ''}
         confirmLabel='Delete'
         danger
         onConfirm={async () => {

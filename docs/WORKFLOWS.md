@@ -15,7 +15,7 @@ POST /api/runs
   -> approve
   -> execute tasks through WorkerAgent
   -> reviewer passes
-  -> final validation/report/score
+  -> final validation/report/verifiedScore + verificationLedger
   -> PR/preview/background validation
 ```
 
@@ -104,6 +104,21 @@ POST /api/code-reviews
 ## 8. Tech Debt Fix Workflow
 
 Tech-debt rollups come from validation report issues. Category-level fix dispatches a PATCH run through the common finding submitter.
+
+## 8b. Verified Score Backfill
+
+```text
+POST /api/admin/validation-reports/backfill-verified-score
+  -> optional dryRun/runId/limit filter
+  -> load existing validation_report rows
+  -> recompute verifiedScore with current additive guards and trust caps
+  -> recompute rubricScore
+  -> persist changed rows unless dryRun=true
+```
+
+Use `dryRun=true` first for historical rows. The endpoint is SUPER_ADMIN-only and
+is intended as a one-shot operator action after scoring logic changes, not a
+customer workflow.
 
 ## 9. Billing Workflow
 

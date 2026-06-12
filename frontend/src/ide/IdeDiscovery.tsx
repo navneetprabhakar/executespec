@@ -9,14 +9,11 @@ import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
-import Crumbs from '@/ide/Crumbs';
-import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {ConfirmModal, PromptModal, Modal} from '@/signal/components/Modal';
 
-// Inline error banner — red-bordered ide-card. Mirrors the Banner in
-// IdeProjectMore. C7: pass `onRetry` to render a ghost Retry button.
-function ErrBanner({msg, onRetry}: {msg?: string; onRetry?: () => void}) {
+// Inline error banner — red-bordered ide-card. Mirrors the Banner in IdeProjectMore.
+function ErrBanner({msg}: {msg?: string}) {
   if (!msg) return null;
   return (
     <div
@@ -29,15 +26,6 @@ function ErrBanner({msg, onRetry}: {msg?: string; onRetry?: () => void}) {
       }}
     >
       {msg}
-      {onRetry && (
-        <button
-          className='ide-btn ghost'
-          style={{padding: '2px 10px', marginLeft: 8}}
-          onClick={onRetry}
-        >
-          Retry
-        </button>
-      )}
     </div>
   );
 }
@@ -329,16 +317,13 @@ function ProjectRepoPickerBody({
 // Insights (analytics)
 // ← Signal InsightsPage. Route /insights. api: getMetrics, getModelComparison, getUserRunsSummary.
 export function IdeInsights() {
-  useDocumentTitle('Insights');
   const [days, setDays] = useState(30);
-  const [reloadTick, setReloadTick] = useState(0);
   const [metrics, setMetrics] = useState<api.MetricsResponse | null>(null);
   const [byProvider, setByProvider] = useState<api.ModelComparisonData | null>(null);
   const [summary, setSummary] = useState<api.UserRunsSummaryData | null>(null);
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    setErr('');
     Promise.allSettled([
       api.getMetrics(days),
       api.getModelComparison(days),
@@ -349,7 +334,7 @@ export function IdeInsights() {
       if (s.status === 'fulfilled') setSummary(s.value);
       if (m.status === 'rejected' && mc.status === 'rejected') setErr('Failed to load metrics.');
     });
-  }, [days, reloadTick]);
+  }, [days]);
 
   const mAny = (metrics || {}) as unknown as {
     totalRuns?: number;
@@ -415,69 +400,25 @@ export function IdeInsights() {
     },
   ];
 
-  // Export the visible metric rows as a CSV blob (no deps; mirrors IdeAudit).
-  function exportCsv() {
-    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    const rows = ['metric,value'];
-    rows.push(`${esc('Avg score')},${esc(avgScore)}`);
-    rows.push(`${esc('Avg run time')},${esc(avgDuration)}`);
-    rows.push(`${esc('Total spend')},${esc(spend)}`);
-    rows.push(`${esc('Runs completed')},${esc(`${shipped} of ${total}`)}`);
-    for (const p of providers) {
-      rows.push(
-        `${esc(`Cost · ${p.provider ?? '—'}`)},${esc(
-          `${p.spend != null ? `$${p.spend.toFixed(2)}` : '—'}${
-            p.cacheHitRate != null ? ` (${Math.round(p.cacheHitRate * 100)}% cache)` : ''
-          }`,
-        )}`,
-      );
-    }
-    rows.push(`${esc('Shipped')},${esc(shipped)}`);
-    rows.push(`${esc('Needs review')},${esc(needs)}`);
-    rows.push(`${esc('Failed / cancelled')},${esc(failed)}`);
-    const blob = new Blob([rows.join('\n')], {type: 'text/csv'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `insights-${days}d-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <div className='ide-pane'>
       <div className='ide-h1'>Insights</div>
       <div className='ide-sub'>Last {days} days · all projects</div>
 
-      <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
-        <div className='ide-rtabs' style={{flex: 1, marginBottom: 0}}>
-          {RANGES.map((r) => (
-            <button
-              key={r.n}
-              type='button'
-              className={`ide-rtab${days === r.n ? ' active' : ''}`}
-              onClick={() => setDays(r.n)}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-        <button
-          className='ide-btn ghost'
-          style={{flexShrink: 0}}
-          disabled={!metricsLoaded}
-          onClick={exportCsv}
-        >
-          Export CSV
-        </button>
+      <div className='ide-rtabs' style={{marginBottom: 12}}>
+        {RANGES.map((r) => (
+          <button
+            key={r.n}
+            type='button'
+            className={`ide-rtab${days === r.n ? ' active' : ''}`}
+            onClick={() => setDays(r.n)}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
 
-      <ErrBanner
-        msg={err}
-        onRetry={() => {
-          setReloadTick((t) => t + 1);
-        }}
-      />
+      <ErrBanner msg={err} />
 
       <div className='ide-grid' style={{marginBottom: 4}}>
         {cards.map((c) => (
@@ -576,11 +517,9 @@ export function IdeInsights() {
 // Library (readymade solutions)
 // ← Signal LibraryPage. Route /library. api: getLibraryFacets, listLibrary.
 export function IdeLibrary() {
-  useDocumentTitle('Library');
   const [items, setItems] = useState<api.ReadymadeListItem[] | null>(null);
   const [facets, setFacets] = useState<api.LibraryFacets | null>(null);
   const [category, setCategory] = useState<string | null>(null);
-  const [reloadTick, setReloadTick] = useState(0);
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -615,7 +554,7 @@ export function IdeLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [category, reloadTick]);
+  }, [category]);
 
   const categories = Object.entries(facets?.categories ?? {}).sort((a, b) => b[1] - a[1]);
   const totalCount = categories.reduce((sum, [, n]) => sum + n, 0);
@@ -656,12 +595,7 @@ export function IdeLibrary() {
         </div>
       )}
 
-      <ErrBanner
-        msg={err}
-        onRetry={() => {
-          setReloadTick((t) => t + 1);
-        }}
-      />
+      <ErrBanner msg={err} />
 
       {items === null ? (
         <IdeLoader label='Loading library…' />
@@ -764,8 +698,6 @@ export function IdeLibraryDetail() {
   const [fav, setFav] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // C2 — richer tab title once the solution loads (shell default until then).
-  useDocumentTitle(detail?.solution?.name ?? null);
 
   useEffect(() => {
     if (!slug) return;
@@ -821,9 +753,9 @@ export function IdeLibraryDetail() {
     <div className='ide-pane'>
       <div style={{display: 'flex', alignItems: 'flex-start', gap: 12}}>
         <div style={{flex: 1, minWidth: 0}}>
-          <Crumbs
-            items={[{label: 'Library', to: '/library'}, {label: s?.name || 'Library solution'}]}
-          />
+          <Link to='/library' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+            ‹ Library
+          </Link>
           <div className='ide-h1' style={{marginTop: 4}}>
             {s?.name || 'Library solution'}
           </div>
@@ -1115,15 +1047,11 @@ function LibraryInstantiateModal({
 
 // ← Signal MigrationsPage. Route /migrations. api: listMigrations.
 export function IdeMigrations() {
-  useDocumentTitle('Migrations');
   const [items, setItems] = useState<api.MigrationListItem[] | null>(null);
-  const [reloadTick, setReloadTick] = useState(0);
   const [err, setErr] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    setItems(null);
-    setErr('');
     api
       .listMigrations()
       .then((r) => {
@@ -1137,7 +1065,7 @@ export function IdeMigrations() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, []);
 
   return (
     <div className='ide-pane'>
@@ -1153,12 +1081,7 @@ export function IdeMigrations() {
         route — so your CI stays green throughout.
       </NoteCard>
 
-      <ErrBanner
-        msg={err}
-        onRetry={() => {
-          setReloadTick((t) => t + 1);
-        }}
-      />
+      <ErrBanner msg={err} />
 
       {items === null ? (
         <IdeLoader label='Loading migrations…' />
@@ -1245,8 +1168,6 @@ export function IdeMigrationDetail() {
   const [err, setErr] = useState('');
   const [dryRunOpen, setDryRunOpen] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
-  // C2 — richer tab title once the recipe loads (shell default until then).
-  useDocumentTitle(detail?.recipe?.name ?? null);
 
   useEffect(() => {
     if (!slug) return;
@@ -1271,7 +1192,9 @@ export function IdeMigrationDetail() {
 
   return (
     <div className='ide-pane'>
-      <Crumbs items={[{label: 'Migrations', to: '/migrations'}, {label: r?.name || 'Migration'}]} />
+      <Link to='/migrations' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+        ‹ Migrations
+      </Link>
       <div className='ide-h1' style={{marginTop: 4}}>
         {r?.name || 'Migration'}
       </div>
@@ -1588,7 +1511,6 @@ function MigrationApplyModal({
 // ← Signal SpecTemplatesPage. Route /templates. api: getProjects,
 // listSpecTemplates, createProjectSpecTemplate, deleteSpecTemplate.
 export function IdeSpecTemplates() {
-  useDocumentTitle('Spec templates');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<api.SpecTemplate[] | null>(null);

@@ -2,15 +2,13 @@ import {lazy, Suspense} from 'react';
 import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 
-// The VS Code-style IDE workspace is the ONLY chrome. Every protected route is
-// IDE-native (2026-05-23 Signal-removal waves finished the port). The only
-// surviving Signal pages are the standalone PUBLIC pages (auth / marketing /
-// legal / shared) — which have no IDE chrome by design — plus AdminPage for the
-// /admin/* deep links.
-import IdeWorkspace from '@/ide/IdeWorkspace';
+// The protected app now uses the Console shell as the product chrome. Code/file
+// surfaces keep their route-level components, but the VS Code-style workspace
+// shell is no longer mounted.
 import ConsoleShell from '@/console/ConsoleShell';
 import ConsoleHome from '@/console/ConsoleHome';
-import {IdeWelcome, IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
+import ConsoleDecisions from '@/console/ConsoleDecisions';
+import {IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
@@ -38,19 +36,6 @@ const IdeIntegrations = lazy(() =>
 const IdeAdmin = lazy(() => import('@/ide/IdeSettings').then((m) => ({default: m.IdeAdmin})));
 const IdeInsights = lazy(() =>
   import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeInsights})),
-);
-const IdeLibrary = lazy(() => import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeLibrary})));
-const IdeLibraryDetail = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeLibraryDetail})),
-);
-const IdeMigrations = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeMigrations})),
-);
-const IdeMigrationDetail = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeMigrationDetail})),
-);
-const IdeSpecTemplates = lazy(() =>
-  import('@/ide/IdeDiscovery').then((m) => ({default: m.IdeSpecTemplates})),
 );
 const IdeApiKeys = lazy(() => import('@/ide/IdeOrg').then((m) => ({default: m.IdeApiKeys})));
 const IdeOrgMembers = lazy(() => import('@/ide/IdeOrg').then((m) => ({default: m.IdeOrgMembers})));
@@ -140,20 +125,17 @@ function LegacyRedirect() {
 }
 
 /**
- * Protected route children — all IDE-native (the Signal-page fallbacks were
- * removed in the 2026-05-23 cleanup). The only Signal page reached from here is
- * AdminPage for the /admin/* deep links; bare /live + /result (no run id)
- * redirect to /runs since there's nothing to render without an id.
+ * Protected route children. Console provides the product chrome; the route
+ * components keep their current implementation until each surface is redesigned.
+ * Bare /live + /result redirect to /runs because there is no run id to render.
  */
 function protectedChildren() {
   return (
     <>
       {/* Default + run loop */}
       <Route path='/' element={<Navigate to='/home' replace />} />
-      <Route
-        path='/home'
-        element={localStorage.getItem('es:console') === '1' ? <ConsoleHome /> : <IdeWelcome />}
-      />
+      <Route path='/home' element={<ConsoleHome />} />
+      <Route path='/decisions' element={<ConsoleDecisions />} />
       <Route path='/runs' element={<IdeRuns />} />
       <Route path='/compose' element={<IdeCompose />} />
       <Route path='/plan' element={<IdePlan />} />
@@ -177,6 +159,7 @@ function protectedChildren() {
       <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
       <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />
       <Route path='/projects/:projectId/architecture' element={<IdeProjectArchitecture />} />
+      <Route path='/projects/:projectId/system-map' element={<IdeProjectArchitecture />} />
       <Route path='/projects/:projectId/settings' element={<IdeProjectSettings />} />
 
       {/* Account + billing */}
@@ -188,16 +171,17 @@ function protectedChildren() {
       <Route path='/topup' element={<Navigate to='/billing' replace />} />
       <Route path='/integrations' element={<IdeIntegrations />} />
       <Route path='/api-keys' element={<IdeApiKeys />} />
+      <Route path='/provider-keys' element={<IdeApiKeys />} />
       <Route path='/org-members' element={<IdeOrgMembers />} />
       <Route path='/org/settings' element={<IdeOrgSettings />} />
 
       {/* Discover */}
       <Route path='/insights' element={<IdeInsights />} />
-      <Route path='/library' element={<IdeLibrary />} />
-      <Route path='/library/:slug' element={<IdeLibraryDetail />} />
-      <Route path='/migrations' element={<IdeMigrations />} />
-      <Route path='/migrations/:slug' element={<IdeMigrationDetail />} />
-      <Route path='/templates' element={<IdeSpecTemplates />} />
+      <Route path='/library' element={<Navigate to='/home' replace />} />
+      <Route path='/library/:slug' element={<Navigate to='/home' replace />} />
+      <Route path='/migrations' element={<Navigate to='/home' replace />} />
+      <Route path='/migrations/:slug' element={<Navigate to='/home' replace />} />
+      <Route path='/templates' element={<Navigate to='/home' replace />} />
       <Route path='/audit' element={<IdeAudit />} />
       <Route path='/deployments' element={<IdeDeployments />} />
 
@@ -262,17 +246,11 @@ export default function App() {
         <Route path='/projects/snapshot/:token' element={<SharedPage />} />
 
         {/* ───── Protected app chrome ─────
-          Control-plane reframe (RL-2026-05-052): the new ConsoleShell is opt-in behind
-          localStorage `es:console`='1' (default OFF → the IDE chrome is byte-identical).
-          The same protectedChildren render in either shell's <Outlet/>. */}
+          Console is now the only protected shell. Code/file-oriented surfaces
+          still render inside the route outlet, but the global VS Code chrome is
+          not part of the product frame. */}
         <Route element={<ProtectedRoute />}>
-          <Route
-            element={
-              localStorage.getItem('es:console') === '1' ? <ConsoleShell /> : <IdeWorkspace />
-            }
-          >
-            {protectedChildren()}
-          </Route>
+          <Route element={<ConsoleShell />}>{protectedChildren()}</Route>
         </Route>
 
         {/* Legacy URL catchers — collapse to canonical equivalents */}

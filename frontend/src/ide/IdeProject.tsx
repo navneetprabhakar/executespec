@@ -13,15 +13,15 @@ function fmtWhen(iso?: string | null): string {
   return relTime(iso);
 }
 
-// Real IDE project workspace — replaces the Signal ProjectComposePage. Project
-// header + spec composer (repo scoping) + recent project runs, all IDE-native.
+// Project compose surface. Project header + spec composer (repo scoping) +
+// recent project work, all inside the Console route outlet.
 export default function IdeProject() {
   const {projectId} = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // §3.4 — explicit compose intent (the Compose tab + Pulse's "New spec" card
-  // pass {compose:true} via Link state) skips the landing→Pulse redirect below,
-  // so the composer stays reachable on projects with run history.
+  // §3.4 — explicit compose intent (the New work tab + Overview CTA
+  // pass {compose:true} via Link state) skips the landing→Overview redirect below,
+  // so the composer stays reachable on projects with work history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -89,7 +89,7 @@ export default function IdeProject() {
   }
 
   // §3.4 (P1 IA) — most arrivals at /projects/:id are status checks: land on
-  // Pulse once the project has run history. Brand-new projects (0 runs) keep
+  // Overview once the project has work history. Brand-new projects keep
   // the compose-first landing.
   if (!composeIntent && runs.length > 0) {
     return <Navigate to={`/projects/${projectId}/pulse`} replace />;
@@ -107,7 +107,7 @@ export default function IdeProject() {
         {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
       </div>
 
-      <div className='ide-h2'>New spec in this project</div>
+      <div className='ide-h2'>New work in this project</div>
       <textarea
         className='ide-textarea'
         rows={8}
@@ -159,6 +159,7 @@ export default function IdeProject() {
             <option value='ANTHROPIC'>Anthropic</option>
             <option value='OPENAI'>OpenAI</option>
             <option value='GEMINI'>Gemini</option>
+            <option value='DEEPSEEK'>DeepSeek</option>
           </select>
         </div>
         <div style={{flex: 1, minWidth: 160}}>
@@ -177,12 +178,12 @@ export default function IdeProject() {
       </div>
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
       <button className='ide-btn' onClick={submit} disabled={busy}>
-        {busy ? 'Submitting…' : '▷ Submit run'}
+        {busy ? 'Submitting…' : 'Start work'}
       </button>
 
-      <div className='ide-h2'>Recent runs in this project</div>
+      <div className='ide-h2'>Recent work in this project</div>
       {runs.length === 0 ? (
-        <div className='ide-empty'>No runs yet.</div>
+        <div className='ide-empty'>No work yet.</div>
       ) : (
         <div className='ide-grid'>
           {runs.map((r) => (

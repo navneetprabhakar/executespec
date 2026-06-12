@@ -13,6 +13,7 @@ import {
   WorkspaceIcon,
   RunsIcon,
   ProjectsIcon,
+  DecisionsIcon,
   AdminIcon,
   AccountIcon,
   BellIcon,
@@ -27,23 +28,25 @@ import {
 } from '@/ide/IdeIcons';
 
 /**
- * ConsoleShell — the control-plane chrome (RL-2026-05-052, web reframe). Replaces
- * the VS Code-style IdeWorkspace (activity bar + "Explorer" + "editor") with a
- * product console: a top bar (brand · plan-gate indicator · New-run CTA · ⌘K ·
- * theme · account) + a slim left nav (Home / Runs / Projects) + live Recent runs.
- * Flag-gated in App.tsx (localStorage `es:console`) so it has ZERO impact on the
- * default chrome until flipped. Every existing protected surface renders unchanged
- * in <Outlet/>.
+ * ConsoleShell is the product chrome. It replaces the VS Code-style global
+ * workspace metaphor with a control plane: top bar, primary product nav, live
+ * recent runs, and a protected route outlet for the actual work surfaces.
  */
 type NavItem = {path: string; Icon: (p: IconProps) => React.ReactElement; label: string};
 const NAV: NavItem[] = [
   {path: '/home', Icon: WorkspaceIcon, label: 'Home'},
-  {path: '/runs', Icon: RunsIcon, label: 'Runs'},
+  {path: '/runs', Icon: RunsIcon, label: 'Work'},
   {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
+  {path: '/decisions', Icon: DecisionsIcon, label: 'Decisions'},
+  {path: '/account', Icon: AccountIcon, label: 'Account'},
 ];
 
 function runLabel(r: api.RunSummary): string {
   return (r.runTitle || r.userRequest || r.runId).slice(0, 48);
+}
+
+function projectLabel(p: api.ProjectDto): string {
+  return (p.name || p.id).slice(0, 48);
 }
 
 export default function ConsoleShell() {
@@ -56,6 +59,7 @@ export default function ConsoleShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
+  const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [unread, setUnread] = useState(0);
 
   usePaletteHotkey(setPaletteOpen);
@@ -75,10 +79,17 @@ export default function ConsoleShell() {
       .then((r) => setUnread(r.count ?? 0))
       .catch(() => {});
   }, []);
+  const refreshProjects = useCallback(() => {
+    api
+      .getProjects()
+      .then((items) => setProjects(items.filter((p) => !p.archivedAt)))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     refreshRuns();
     refreshUnread();
-  }, [refreshRuns, refreshUnread]);
+    refreshProjects();
+  }, [refreshRuns, refreshUnread, refreshProjects]);
   useEffect(() => {
     const id = window.setInterval(() => {
       if (!document.hidden) {
@@ -92,7 +103,8 @@ export default function ConsoleShell() {
     setDrawerOpen(false);
     refreshRuns();
     refreshUnread();
-  }, [location.pathname, refreshRuns, refreshUnread]);
+    refreshProjects();
+  }, [location.pathname, refreshRuns, refreshUnread, refreshProjects]);
 
   // C2 — route-derived tab titles; C4 — focus the content region on navigation.
   useEffect(() => {
@@ -110,27 +122,16 @@ export default function ConsoleShell() {
   const navActive = (p: string) =>
     p === '/home' ? path === '/' || path.startsWith('/home') : path.startsWith(p);
 
-  // C1.4 — every route is reachable from the palette.
   const commands: PaletteCmd[] = [
-    {id: 'home', label: 'Go: Home', run: () => navigate('/home')},
-    {id: 'compose', label: 'New run', hint: '＋', run: () => navigate('/compose')},
-    {id: 'runs', label: 'Go: Runs', run: () => navigate('/runs')},
+    {id: 'home', label: 'Go: Home', hint: 'Home', run: () => navigate('/home')},
+    {id: 'compose', label: 'New work', hint: '＋', run: () => navigate('/compose')},
+    {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
+    {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
+    {id: 'decisions', label: 'Go: Decisions', run: () => navigate('/decisions')},
     {id: 'search', label: 'Go: Search', run: () => navigate('/search')},
     {id: 'notifications', label: 'Go: Notifications', run: () => navigate('/notifications')},
     {id: 'account', label: 'Go: Account', run: () => navigate('/account')},
-    {id: 'billing', label: 'Go: Billing', run: () => navigate('/billing')},
-    {id: 'plans', label: 'Go: Plans', run: () => navigate('/plans')},
-    {id: 'api-keys', label: 'Go: API keys (BYOK)', run: () => navigate('/api-keys')},
-    {id: 'org-members', label: 'Go: Org members', run: () => navigate('/org-members')},
-    {id: 'org-settings', label: 'Go: Org settings', run: () => navigate('/org/settings')},
-    {id: 'integrations', label: 'Go: Integrations', run: () => navigate('/integrations')},
-    {id: 'deployments', label: 'Go: Deployments', run: () => navigate('/deployments')},
-    {id: 'insights', label: 'Go: Insights', run: () => navigate('/insights')},
-    {id: 'library', label: 'Go: Library', run: () => navigate('/library')},
-    {id: 'migrations', label: 'Go: Migrations', run: () => navigate('/migrations')},
-    {id: 'templates', label: 'Go: Spec templates', run: () => navigate('/templates')},
-    {id: 'audit', label: 'Go: Audit log', run: () => navigate('/audit')},
     ...(isSuperAdmin
       ? [
           {id: 'admin', label: 'Go: Admin', run: () => navigate('/admin')},
@@ -142,6 +143,11 @@ export default function ConsoleShell() {
       id: r.runId,
       label: `Open run: ${runLabel(r)}`,
       run: () => navigate(`/result/${r.runId}`),
+    })),
+    ...projects.map((p) => ({
+      id: p.id,
+      label: `Open project: ${projectLabel(p)}`,
+      run: () => navigate(`/projects/${p.id}`),
     })),
   ];
 
@@ -159,13 +165,13 @@ export default function ConsoleShell() {
           <MenuIcon size={20} />
         </button>
         <NavLink to='/home' className='con-brand'>
-          ExecuteSpec
+          <span>ExecuteSpec</span>
         </NavLink>
         <span className='con-topbar-spacer' />
         <PlanGateIndicator dir='down' />
-        <button className='con-newrun' onClick={() => navigate('/compose')} title='Start a new run'>
+        <button className='con-newrun' onClick={() => navigate('/compose')} title='Start new work'>
           <PlusIcon size={15} />
-          <span className='con-newrun-label'>New run</span>
+          <span className='con-newrun-label'>New work</span>
         </button>
         <button
           className='con-icon'
@@ -215,9 +221,8 @@ export default function ConsoleShell() {
             </span>
           )}
         </NavLink>
-        {/* C1.3 — Account is a dropdown: billing / keys / org / integrations were
-            unreachable from the chrome (deep-link only). */}
-        <div style={{position: 'relative'}}>
+        {/* Profile/account entry point. Deeper billing/org routes stay inside Account. */}
+        <div className='con-account-menu-anchor' style={{position: 'relative'}}>
           <button
             className='con-icon'
             title='Account & settings'
@@ -230,20 +235,10 @@ export default function ConsoleShell() {
           </button>
           {accountOpen && (
             <div role='menu' className='con-menu'>
-              {[
-                {to: '/account', label: 'Account'},
-                {to: '/billing', label: 'Billing'},
-                {to: '/plans', label: 'Plans'},
-                {to: '/api-keys', label: 'API keys (BYOK)'},
-                {to: '/org-members', label: 'Org members'},
-                {to: '/org/settings', label: 'Org settings'},
-                {to: '/integrations', label: 'Integrations'},
-                {to: '/deployments', label: 'Deployments'},
-              ].map((m) => (
-                <NavLink key={m.to} to={m.to} className='con-menu-item' role='menuitem'>
-                  {m.label}
-                </NavLink>
-              ))}
+              <NavLink to='/account' className='con-menu-item' role='menuitem'>
+                <AccountIcon size={15} />
+                <span>Account</span>
+              </NavLink>
             </div>
           )}
         </div>
@@ -271,57 +266,91 @@ export default function ConsoleShell() {
               <span>Admin</span>
             </NavLink>
           )}
+          <NavLink
+            to='/notifications'
+            className={`con-navitem${path.startsWith('/notifications') ? ' active' : ''}`}
+            title={unread > 0 ? `Notifications · ${unread} unread` : 'Notifications'}
+          >
+            <BellIcon size={18} />
+            <span>Notifications</span>
+            {unread > 0 && <span className='con-nav-badge'>{unread > 9 ? '9+' : unread}</span>}
+          </NavLink>
 
-          {/* C1.3 — Discover routes were orphaned (no nav entry anywhere). */}
-          <div className='con-side-section'>Discover</div>
-          {[
-            {to: '/insights', label: 'Insights'},
-            {to: '/library', label: 'Library'},
-            {to: '/migrations', label: 'Migrations'},
-            {to: '/templates', label: 'Templates'},
-          ].map((d) => (
-            <NavLink
-              key={d.to}
-              to={d.to}
-              className={`con-runitem${path.startsWith(d.to) ? ' active' : ''}`}
+          <details className='con-side-details'>
+            <summary className='con-side-section'>
+              Recent work
+              <span style={{flex: 1}} />
+              <span className='con-side-count'>{runs.length}</span>
+            </summary>
+            {runs.length === 0 ? (
+              <div className='con-side-empty'>No work yet</div>
+            ) : (
+              runs.slice(0, 5).map((r) => (
+                <NavLink
+                  key={r.runId}
+                  to={`/result/${r.runId}`}
+                  className={({isActive}) => `con-runitem${isActive ? ' active' : ''}`}
+                  title={runLabel(r)}
+                >
+                  <StatusDot kind={statusKind(r.status)} size={8} />
+                  <span className='con-runitem-label'>{runLabel(r)}</span>
+                  {r.verifiedScore != null && (
+                    <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
+                      {r.verifiedScore}
+                    </span>
+                  )}
+                </NavLink>
+              ))
+            )}
+          </details>
+
+          <details className='con-side-details'>
+            <summary className='con-side-section'>
+              Projects
+              <span style={{flex: 1}} />
+              <span className='con-side-count'>{projects.length}</span>
+            </summary>
+            {projects.length === 0 ? (
+              <button className='con-runitem' onClick={() => navigate('/projects')}>
+                <PlusIcon size={13} />
+                <span className='con-runitem-label'>New project</span>
+              </button>
+            ) : (
+              projects.slice(0, 8).map((p) => (
+                <NavLink
+                  key={p.id}
+                  to={`/projects/${p.id}`}
+                  className={({isActive}) => `con-runitem${isActive ? ' active' : ''}`}
+                  title={projectLabel(p)}
+                >
+                  <ProjectsIcon size={14} />
+                  <span className='con-runitem-label'>{projectLabel(p)}</span>
+                </NavLink>
+              ))
+            )}
+            <button
+              className='con-runitem con-runitem-action'
+              onClick={() => navigate('/projects')}
             >
-              <span className='con-runitem-label'>{d.label}</span>
-            </NavLink>
-          ))}
+              <PlusIcon size={13} />
+              <span className='con-runitem-label'>All projects</span>
+            </button>
+          </details>
 
-          <div className='con-side-section'>Recent runs</div>
-          {runs.length === 0 ? (
-            <div className='con-side-empty'>No runs yet</div>
-          ) : (
-            runs.map((r) => (
+          {isSuperAdmin && (
+            <>
+              <div className='con-side-section'>System</div>
               <NavLink
-                key={r.runId}
-                to={`/result/${r.runId}`}
-                className={({isActive}) => `con-runitem${isActive ? ' active' : ''}`}
-                title={runLabel(r)}
+                to='/benchmark'
+                className={`con-runitem${path.startsWith('/benchmark') ? ' active' : ''}`}
               >
-                <StatusDot kind={statusKind(r.status)} size={8} />
-                <span className='con-runitem-label'>{runLabel(r)}</span>
-                {r.verifiedScore != null && (
-                  <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
-                    {r.verifiedScore}
-                  </span>
-                )}
+                <MonitorIcon size={14} />
+                <span className='con-runitem-label'>Benchmarks</span>
               </NavLink>
-            ))
+            </>
           )}
 
           <span className='con-side-grow' />
-          <button
-            className='con-switch'
-            onClick={() => {
-              localStorage.removeItem('es:console');
-              window.location.reload();
-            }}
-            title='Switch back to the classic IDE chrome'
-          >
-            ← Classic IDE
-          </button>
           <div className='con-side-tier' title={`Plan: ${tier}`}>
             {tier}
           </div>
@@ -352,16 +381,6 @@ export default function ConsoleShell() {
             {n.label}
           </NavLink>
         ))}
-        <NavLink
-          to='/account'
-          className={({isActive}) => (isActive ? 'active' : '')}
-          title='Account'
-        >
-          <span className='ico'>
-            <AccountIcon size={20} />
-          </span>
-          Account
-        </NavLink>
       </nav>
 
       <IdeCommandPalette

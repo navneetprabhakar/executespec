@@ -4,7 +4,7 @@
 > against code, migrations, or a live walk on 2026-06-10/11 (RL-2026-06-019 + RL-2026-06-020).
 > Companions: [`launch-readiness-2026-06-10.md`](launch-readiness-2026-06-10.md) (ops checklist
 > detail) · `review/07` + `review/11` (positioning + UX verdicts, local) ·
-> [`docs/marketing/product-hunt-launch.md`](marketing/product-hunt-launch.md) (PH kit, refreshed).
+> [`website/product-hunt-launch.md`](../website/product-hunt-launch.md) (PH kit, refreshed).
 > A styled PDF of this doc lives at `docs/reports/launch-playbook-2026-06-11.pdf`.
 
 ---
@@ -19,7 +19,7 @@ You are **not lacking product** — you're finishing a consistency-and-proof pus
 | UX wave 1 (review/11 defects) | ✅ Shipped + live-verified at 375px/desktop (commit `26ab3f66`) |
 | Trust-number bugs (score degradation on Gradle, OpenRouter $0 cost, Stripe checkout) | 🔶 In flight in the review-fix sessions — **the only engineering launch gates** |
 | Benchmarks | 🔶 Re-running on the rebuilt harness (2 days); ALL public surfaces are number-free until then |
-| Console-as-default chrome | ⏳ **Your decision** — preview via the "Try Console ⤴" status-bar button |
+| Console-as-default chrome | ✅ Implemented on the cleanup branch; protected routes mount `ConsoleShell` directly |
 | Ops (prod URL check, coupons, alerts, status page) | ⏳ Checklist in §7 |
 
 **The one-sentence thesis:** you built a trust machine; launch is the moment every surface says
@@ -94,7 +94,7 @@ SOC 2 complete, dedicated region, or hard uptime SLAs.
 | App SEO/sharing | `frontend/index.html` | Zero meta tags → full description + OG + twitter (shared verified reports now unfurl) |
 | Login panel | `AuthLayout.tsx` | "BYOK bypasses the cost cap" insider bullet → "Deterministic verified score on every PR" |
 | Proof | `docs/reports/swebench-brief-*` | Marked **SUPERSEDED — do not quote** (worker model untracked on the old harness) |
-| GTM kit | `docs/marketing/product-hunt-launch.md` | Rewritten current (tiers, score formula, honest "hard truths", asset status) |
+| GTM kit | `website/product-hunt-launch.md` | Rewritten current (tiers, score formula, honest "hard truths", asset status) |
 
 ---
 
@@ -112,13 +112,13 @@ Production-vs-Prototype explainer · Pro cap constant $25→$5 · status-bar tie
 on the empty workspace · GitHub-PAT pre-flight at compose · **verified score now on the run-list
 wire** (was reading a field that never existed) with 4-band badges on run cards.
 
-**The pending decision — Console as default.** Preview both yourself: status bar → **Try Console ⤴**
-(or `localStorage es:console='1'`; remove the key to go back). If you say go, wave 2 executes
-reframe Phases 2–4: Home depth ("needs your attention", onboarding) → mobile pass → flip default +
-retire the IDE shell (keep the editor metaphor only inside run-result Code tabs and the VS Code
-extension). ~1 focused week.
+**Console default — implemented on the cleanup branch.** The protected web app now mounts
+`ConsoleShell` directly; the old `localStorage es:console='1'` preview path and `IdeWorkspace`
+shell are removed. The route-level `ide/` surfaces still own runs, projects, billing, org
+settings, benchmark tracking, and code/result views; the editor metaphor is reserved for
+run-result code tabs and the VS Code extension.
 
-**Wave 2 priority order:** ① Console flip · ② notification spam (auto-read on view + digest — a
+**Next UX priority order:** ① notification spam (auto-read on view + digest — a
 fresh account shows "9+" unread) · ③ typography split (mono for data, humanist sans for prose) +
 ONE accent (kill coral-as-link; it collides with the score scale's red) · ④ result-page action
 hierarchy (10 equal buttons → primary Push/PR + overflow; Delete away from primary) + tab merge ·
@@ -155,7 +155,7 @@ hierarchy (10 equal buttons → primary Push/PR + overflow; Delete away from pri
 6. Minimal ops story: Grafana alert destinations → your Telegram bot; hosted status page or an
    explicit "support email only" decision.
 7. Demo video (60–90s, script in PH kit §6) + the verified-report gallery.
-8. Secondary copy sweeps (non-blocking): `docs/marketing/pricing-analysis.md`, `tier-decision.md`,
+8. Secondary copy sweeps (non-blocking): `website/pricing-analysis.md`, `tier-decision.md`,
    `press-kit/README.md` still carry pre-V176 numbers.
 
 ---
@@ -183,9 +183,9 @@ SPEC_SUBMITTED → PLAN_APPROVED conversion.
 | Truth-pass commit | `1be342eb` (RL-2026-06-019) |
 | UX wave-1 commit | `26ab3f66` (RL-2026-06-020) |
 | Ops checklist detail | [`docs/launch-readiness-2026-06-10.md`](launch-readiness-2026-06-10.md) |
-| Reason log | [`docs/reason-log/2026-06.md`](reason-log/2026-06.md) — RL-2026-06-019/-020 at the top |
+| Reason log | [`docs/reason-log/2026-05.md`](reason-log/2026-05.md) — RL-2026-06-019/-020 at the top |
 | UX verdicts + defects | `review/11-ux-review.md` (local, gitignored) |
 | Console reframe plan | [`docs/plans/web-control-plane-reframe.md`](plans/web-control-plane-reframe.md) — Phases 2–4 pending |
 | Enterprise claim rules | [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) |
-| PH launch kit | [`docs/marketing/product-hunt-launch.md`](marketing/product-hunt-launch.md) |
+| PH launch kit | [`website/product-hunt-launch.md`](../website/product-hunt-launch.md) |
 | Tier/billing truth | migrations V165 · V176 · V177 · V185 · V200 · V206 · V207 + `TierEnforcementService.resolveRunCostBudget` |

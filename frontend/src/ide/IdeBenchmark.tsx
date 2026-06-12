@@ -164,7 +164,7 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
   return (
     <button
       onClick={onClick}
-      className='ide-card'
+      className='ide-card ide-benchmark-row'
       style={{
         width: '100%',
         textAlign: 'left',
@@ -178,16 +178,25 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
         color: 'var(--ide-fg)',
       }}
     >
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+      <div
+        className='ide-benchmark-row-head'
+        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
+      >
         <SuiteChip suite={r.suite} />
         <span style={{fontWeight: 600}}>{r.model}</span>
         <span style={{color: MUTED, fontSize: 12}}>{r.provider}</span>
-        <span style={{marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8}}>
+        <span
+          className='ide-benchmark-row-status'
+          style={{marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8}}
+        >
           {r.submissionStatus && <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />}
           <IdeBadge kind={benchKind(r.status)}>{r.status}</IdeBadge>
         </span>
       </div>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+      <div
+        className='ide-benchmark-row-stats'
+        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
+      >
         <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
         <span style={{fontSize: 12, whiteSpace: 'nowrap'}}>
           <strong>
@@ -200,7 +209,12 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
         <span style={{fontSize: 12, color: MUTED}} title='input ↑ / output ↓ tokens'>
           {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓ tok
         </span>
-        <span style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}>{relTime(r.createdAt)}</span>
+        <span
+          className='ide-benchmark-row-time'
+          style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}
+        >
+          {relTime(r.createdAt)}
+        </span>
       </div>
     </button>
   );
@@ -294,7 +308,7 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
       <table style={{width: '100%', borderCollapse: 'collapse'}}>
         <thead>
           <tr>
-            {['Task', 'Result', `Attempts (k=${k})`, 'Cost', 'Tokens', 'Run'].map((h) => (
+            {['Task', 'Result', `Attempts (k=${k})`, 'Cost', 'Tokens', 'Work'].map((h) => (
               <th key={h} style={TH}>
                 {h}
               </th>
@@ -325,7 +339,7 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
               </td>
               <td style={TD}>
                 {g.runId ? (
-                  <Link to={`/runs/${g.runId}`} style={{color: 'var(--ide-blue)'}}>
+                  <Link to={`/result/${g.runId}`} style={{color: 'var(--ide-blue)'}}>
                     {g.runId.slice(0, 8)}
                   </Link>
                 ) : (
@@ -526,17 +540,17 @@ export default function IdeBenchmark() {
         </button>
       </div>
       <div className='ide-sub'>
-        Live tracking of Terminal-Bench / SWE-bench runs + leaderboard submission. An external
+        Live tracking of Terminal-Bench / SWE-bench work + leaderboard submission. An external
         verifier publishes events; this auto-refreshes every few seconds.
       </div>
 
       {err && <ErrCard msg={err} />}
 
       {runs === null ? (
-        <IdeLoader label='Loading benchmark runs…' pad={24} />
+        <IdeLoader label='Loading benchmark work…' pad={24} />
       ) : runs.length === 0 ? (
         <EmptyCard>
-          No benchmark runs tracked yet. Runs appear here as the harness publishes events to{' '}
+          No benchmark work tracked yet. Items appear here as the harness publishes events to{' '}
           <code>/api/v2/test/benchmark</code>.
         </EmptyCard>
       ) : (

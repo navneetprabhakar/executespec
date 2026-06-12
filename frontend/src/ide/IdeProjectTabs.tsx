@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import Crumbs from '@/ide/Crumbs';
@@ -50,30 +50,42 @@ const costOf = (r: unknown) =>
 const scoreBand = (sc: number): 'ok' | 'warn' | 'bad' =>
   sc >= 85 ? 'ok' : sc >= 70 ? 'warn' : 'bad';
 
-// Workbench tab strip — shown on every project sub-route. `count` keys a tab
-// to the live-count map below; tabs without a key stay label-only.
-const T: Array<{label: string; seg: string; count?: 'repos' | 'runs' | 'code' | 'members'}> = [
-  {label: 'Compose', seg: ''},
-  {label: 'Pulse', seg: '/pulse'},
-  {label: 'Repos', seg: '/repos', count: 'repos'},
-  {label: 'Runs', seg: '/runs', count: 'runs'},
-  {label: 'Code', seg: '/code', count: 'code'},
+// Project workbench IA. Keep every deep link alive, but stop presenting ten
+// routes as equal peers. Primary tabs are the frequent workflow surfaces;
+// secondary operational surfaces live under More.
+type ProjectTab = {
+  label: string;
+  seg: string;
+  count?: 'repos' | 'runs' | 'code' | 'members';
+};
+const PRIMARY_TABS: ProjectTab[] = [
+  {label: 'New work', seg: ''},
+  {label: 'Overview', seg: '/pulse'},
+  {label: 'Work', seg: '/runs', count: 'runs'},
+  {label: 'Code', seg: '/code'},
   {label: 'Chat', seg: '/chat'},
-  {label: 'Architecture', seg: '/architecture'},
+  {label: 'Settings', seg: '/settings'},
+];
+const SECONDARY_TABS: ProjectTab[] = [
+  {label: 'Repos', seg: '/repos', count: 'repos'},
+  {label: 'System map', seg: '/system-map'},
   {label: 'Members', seg: '/members', count: 'members'},
   {label: 'Activity', seg: '/activity'},
-  {label: 'Settings', seg: '/settings'},
 ];
 
 type TabCounts = {repos?: number; runs?: number; code?: number; members?: number};
 
 export function ProjectTabs({projectId}: {projectId: string}) {
   const {pathname} = useLocation();
+  const activeTabRef = useRef<HTMLAnchorElement | null>(null);
+  const activeMoreRef = useRef<HTMLButtonElement | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   // Live counts from the project dashboard + companions, clamped >= 0 so a
   // garbage signed-int can never reach the badge. Repos comes from the repo
   // list (dashboard carries no repo count) and Code from the tech-debt total
   // (dashboard carries no findings count) — matching what each tab surfaces.
   const [counts, setCounts] = useState<TabCounts>({});
+  const [mobileOpen, setMobileOpen] = useState(false);
   // C2/C3 — project name for the browser-tab title + the breadcrumb trail.
   const [projectName, setProjectName] = useState<string | null>(null);
   useEffect(() => {
@@ -116,29 +128,109 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   // name loads, so there's no placeholder flash).
   useDocumentTitle(projectName);
 
+  useEffect(() => {
+    (activeTabRef.current ?? activeMoreRef.current)?.scrollIntoView({
+      block: 'nearest',
+      inline: 'center',
+    });
+  }, [pathname]);
+
+  useEffect(() => {
+    setMoreOpen(false);
+    setMobileOpen(false);
+  }, [pathname]);
+
+  const tabTo = (t: ProjectTab) => `/projects/${projectId}${t.seg}`;
+  const tabActive = (t: ProjectTab) => {
+    const to = tabTo(t);
+    if (t.seg === '/system-map') {
+      return pathname.startsWith(to) || pathname.startsWith(`/projects/${projectId}/architecture`);
+    }
+    return t.seg === '' ? pathname === to : pathname.startsWith(to);
+  };
+  const tabLabel = (t: ProjectTab) => {
+    const n = t.count ? counts[t.count] : undefined;
+    return n != null ? `${t.label} · ${n}` : t.label;
+  };
+  const secondaryActive = SECONDARY_TABS.find(tabActive);
+  const allTabs = [...PRIMARY_TABS, ...SECONDARY_TABS];
+  const activeProjectTab = PRIMARY_TABS.find(tabActive) ?? secondaryActive ?? PRIMARY_TABS[0];
+
   return (
     <>
       {/* C3 — one breadcrumb trail above the strip; every sub-tab inherits it. */}
       <Crumbs items={[{label: 'Projects', to: '/projects'}, {label: projectName ?? '…'}]} />
-      <div className='ide-rtabs' style={{marginBottom: 16}}>
-        {T.map((t) => {
-          const to = `/projects/${projectId}${t.seg}`;
-          const active = t.seg === '' ? pathname === to : pathname.startsWith(to);
-          const n = t.count ? counts[t.count] : undefined;
+      <div className='ide-project-mobile-nav'>
+        <button
+          type='button'
+          className='ide-project-mobile-trigger'
+          aria-haspopup='menu'
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((v) => !v)}
+        >
+          <span>{tabLabel(activeProjectTab)}</span>
+          <span aria-hidden='true'>⌄</span>
+        </button>
+        {mobileOpen && (
+          <div className='ide-project-mobile-menu' role='menu'>
+            {allTabs.map((t) => (
+              <Link
+                key={t.label}
+                to={tabTo(t)}
+                state={t.seg === '' ? {compose: true} : undefined}
+                className={`ide-project-mobile-item${tabActive(t) ? ' active' : ''}`}
+                role='menuitem'
+              >
+                {tabLabel(t)}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className='ide-rtabs ide-project-tabs-strip' style={{marginBottom: 16}}>
+        {PRIMARY_TABS.map((t) => {
+          const active = tabActive(t);
           return (
             <Link
               key={t.label}
-              to={to}
-              // §3.4 — Compose-tab clicks carry explicit intent so IdeProject's
-              // landing→Pulse redirect doesn't bounce them straight back.
+              to={tabTo(t)}
+              // §3.4 — New-work tab clicks carry explicit intent so IdeProject's
+              // landing→Overview redirect doesn't bounce them straight back.
               state={t.seg === '' ? {compose: true} : undefined}
               className={`ide-rtab${active ? ' active' : ''}`}
+              ref={active ? activeTabRef : undefined}
               style={{textDecoration: 'none'}}
             >
-              {n != null ? `${t.label} · ${n}` : t.label}
+              {tabLabel(t)}
             </Link>
           );
         })}
+        <div className='ide-project-more-tab'>
+          <button
+            ref={secondaryActive ? activeMoreRef : undefined}
+            type='button'
+            className={`ide-rtab${secondaryActive ? ' active' : ''}`}
+            aria-haspopup='menu'
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            More
+          </button>
+          {moreOpen && (
+            <div className='ide-project-more-menu' role='menu'>
+              {SECONDARY_TABS.map((t) => (
+                <Link
+                  key={t.label}
+                  to={tabTo(t)}
+                  className={`ide-project-more-item${tabActive(t) ? ' active' : ''}`}
+                  role='menuitem'
+                >
+                  {tabLabel(t)}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -242,8 +334,8 @@ export function IdeProjectPulse() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Pulse</div>
-      {/* §3.4 — the project landing redirects here once runs exist; keep the
+      <div className='ide-h1'>Overview</div>
+      {/* §3.4 — the project landing redirects here once work exists; keep the
           composer one click away. {compose:true} skips the redirect. */}
       <div style={{margin: '4px 0 12px'}}>
         <Link
@@ -252,7 +344,7 @@ export function IdeProjectPulse() {
           className='ide-btn ghost'
           style={{textDecoration: 'none', display: 'inline-block'}}
         >
-          ＋ New spec in this project
+          ＋ New work in this project
         </Link>
       </div>
       {!dash ? (
@@ -261,7 +353,7 @@ export function IdeProjectPulse() {
         <>
           <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8}}>
             <Metric label='Avg score' value={avgScore != null ? `${Math.round(avgScore)}%` : '—'} />
-            <Metric label='Avg run time' value={runTime} />
+            <Metric label='Avg work time' value={runTime} />
             <Metric label='Spent · 30d' value={spent != null ? `$${spent.toFixed(2)}` : '—'} />
             <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
           </div>
@@ -360,7 +452,7 @@ export function IdeProjectPulse() {
             style={{display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4}}
             className='ide-h2'
           >
-            <span>Recent runs</span>
+            <span>Recent work</span>
             <span style={{flex: 1}} />
             <Link
               to={`/projects/${projectId}/runs`}
@@ -370,9 +462,9 @@ export function IdeProjectPulse() {
             </Link>
           </div>
           {recent === null ? (
-            <IdeLoader label='Loading runs…' />
+            <IdeLoader label='Loading work…' />
           ) : recent.length === 0 ? (
-            <div className='ide-empty'>No runs yet in this project.</div>
+            <div className='ide-empty'>No work yet in this project.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {recent.slice(0, 5).map((r, i) => {
@@ -722,14 +814,14 @@ export function IdeProjectRuns() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Runs</div>
+      <div className='ide-h1'>Work</div>
 
       <div className='ide-rtabs' style={{marginBottom: 12}}>
         <button
           className={`ide-rtab${sub === 'runs' ? ' active' : ''}`}
           onClick={() => setSub('runs')}
         >
-          Runs <span className='ide-rtab-badge'>{runs?.length ?? 0}</span>
+          Work <span className='ide-rtab-badge'>{runs?.length ?? 0}</span>
         </button>
         <button
           className={`ide-rtab${sub === 'prs' ? ' active' : ''}`}
@@ -757,9 +849,9 @@ export function IdeProjectRuns() {
           </div>
 
           {runs === null ? (
-            <IdeLoader label='Loading runs…' />
+            <IdeLoader label='Loading work…' />
           ) : filtered.length === 0 ? (
-            <div className='ide-empty'>No runs match this filter.</div>
+            <div className='ide-empty'>No work matches this filter.</div>
           ) : (
             <div
               // C9.3 — stacks to one column under 600px (ide-stack-mobile in ide.css).

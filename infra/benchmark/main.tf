@@ -58,10 +58,9 @@ resource "google_compute_instance" "benchmark" {
 
   network_interface {
     network = google_compute_network.benchmark.id
-    # No external IP — the org policy constraints/compute.vmExternalIpAccess forbids
-    # public IPs on VMs in this project (the dev VM is internal-only too). EGRESS
-    # (Docker Hub / apt / GitHub / LLM APIs) goes via Cloud NAT (nat.tf); inbound SSH
-    # is IAP-only (tcp/22 from the IAP range in the firewall above).
+    # Ephemeral public IP — needed for EGRESS only (Docker Hub image pulls +
+    # LLM API calls). Inbound is locked to tcp/22 from the IAP range above.
+    access_config {}
   }
 
   metadata = {

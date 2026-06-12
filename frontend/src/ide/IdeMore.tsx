@@ -59,7 +59,8 @@ function scoreColor(score?: number | null): string {
   return 'var(--ide-red)';
 }
 
-// All runs (list)
+// Work list. Internally this still reads runs; the Console IA presents them as
+// user-requested work, not an implementation primitive.
 export function IdeRuns() {
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
@@ -142,11 +143,11 @@ export function IdeRuns() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>All runs</div>
+      <div className='ide-h1'>Work</div>
       <div className='ide-sub'>
         {runs === null
-          ? 'Every spec you’ve run, newest first.'
-          : `${counts.all} loaded · ${counts.live} live`}
+          ? 'Every request ExecuteSpec has worked on, newest first.'
+          : `${counts.all} loaded · ${counts.live} in progress`}
       </div>
 
       <div
@@ -166,8 +167,8 @@ export function IdeRuns() {
         <input
           className='ide-input'
           type='search'
-          placeholder='Filter by title or R-id…'
-          aria-label='Filter runs by title or run id'
+          placeholder='Filter by title or work id…'
+          aria-label='Filter work by title or run id'
           value={q}
           onChange={(e) => setQ(e.target.value)}
           style={{width: 230, flex: '0 1 230px'}}
@@ -190,12 +191,12 @@ export function IdeRuns() {
       )}
 
       {runs === null ? (
-        <IdeLoader label='Loading runs…' />
+        <IdeLoader label='Loading work…' />
       ) : runs.length === 0 ? (
-        <div className='ide-empty'>No runs yet — start with a new spec.</div>
+        <div className='ide-empty'>No work yet — start with new work.</div>
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>
-          No runs match{q.trim() ? ` “${q.trim()}”` : ' this filter'}.{' '}
+          No work matches{q.trim() ? ` “${q.trim()}”` : ' this filter'}.{' '}
           <button
             className='ide-btn ghost'
             style={{padding: '2px 8px', marginLeft: 4}}
@@ -218,51 +219,29 @@ export function IdeRuns() {
                 <Link
                   key={r.runId}
                   to={live ? `/live/${r.runId}` : `/result/${r.runId}`}
+                  className='ide-work-row'
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '11px 16px',
-                    textDecoration: 'none',
-                    color: 'var(--ide-fg)',
                     borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
                   }}
                 >
                   <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
-                  <span style={{flex: 1, minWidth: 0}}>
-                    <span
-                      style={{
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {runTitleFor(r)}
-                    </span>
-                    <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                  <span className='ide-work-main'>
+                    <span className='ide-work-title'>{runTitleFor(r)}</span>
+                    <span className='ide-mono ide-work-meta'>
                       R-{r.runId.slice(0, 6)}
                       {r.projectName ? ` · ${String(r.projectName).slice(0, 24)}` : ''} ·{' '}
                       {relTime(r.startedAt)}
                     </span>
                   </span>
                   {r.aiProvider && (
-                    <span style={{color: 'var(--ide-fg-muted)', fontSize: 12, flexShrink: 0}}>
-                      {providerLabel(r.aiProvider)}
-                    </span>
+                    <span className='ide-work-provider'>{providerLabel(r.aiProvider)}</span>
                   )}
-                  <span style={{flexShrink: 0, textAlign: 'right', minWidth: 56}}>
+                  <span className='ide-work-score'>
                     <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
                       {score != null ? `${Math.round(score)}%` : live ? 'live' : '—'}
                     </span>
                     {cost != null && (
-                      <span
-                        className='ide-mono'
-                        style={{display: 'block', fontSize: 11, color: 'var(--ide-fg-muted)'}}
-                      >
-                        ${cost.toFixed(2)}
-                      </span>
+                      <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
                     )}
                   </span>
                 </Link>
@@ -474,14 +453,14 @@ export function IdeAccount() {
   // Plan-limits rows from the permissions object (mirrors AccountPage's KvList).
   const limitRows: Array<{k: string; v: string}> = [
     {
-      k: 'Monthly run cap',
+      k: 'Monthly work cap',
       v: permissions
         ? permissions.monthlyRunLimit === -1
           ? 'Unlimited'
           : String(permissions.monthlyRunLimit)
         : '—',
     },
-    {k: 'Runs used', v: permissions ? String(permissions.currentRunCount) : '—'},
+    {k: 'Work used', v: permissions ? String(permissions.currentRunCount) : '—'},
     {
       k: 'Max org seats',
       v: permissions
@@ -491,7 +470,7 @@ export function IdeAccount() {
         : '—',
     },
     {k: 'Live log access', v: permissions?.canViewLiveLog ? 'Enabled' : 'PRO+'},
-    {k: 'BYOK keys', v: permissions?.canManageAiKeys ? 'Enabled' : 'PRO+'},
+    {k: 'Provider keys', v: permissions?.canManageAiKeys ? 'Enabled' : 'PRO+'},
     {k: 'Audit log', v: permissions?.canViewAudit ? 'Enabled' : 'TEAM+'},
     {
       k: 'Deploy engine',
@@ -534,7 +513,7 @@ export function IdeAccount() {
         <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
         <div style={{display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap'}}>
           <IdeBadge kind='ok'>{tier} tier</IdeBadge>
-          <IdeBadge kind='warn'>{usage} runs</IdeBadge>
+          <IdeBadge kind='warn'>{usage} work items</IdeBadge>
           {user?.globalRole === 'SUPER_ADMIN' && <IdeBadge kind='bad'>SUPER_ADMIN</IdeBadge>}
         </div>
       </div>
@@ -639,7 +618,7 @@ export function IdeAccount() {
       <div className='ide-h2'>Plan &amp; billing</div>
       <LinkRows
         rows={[
-          {to: '/billing', label: 'Billing & invoices', sub: `${tier} tier`},
+          {to: '/billing', label: 'Usage & billing', sub: `${tier} tier`},
           {to: '/plans', label: 'Compare plans', sub: ''},
         ]}
       />
@@ -652,7 +631,7 @@ export function IdeAccount() {
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
           {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
-          {to: '/api-keys', label: 'API keys (BYOK)', sub: ''},
+          {to: '/api-keys', label: 'Provider keys', sub: 'Bring your own model keys'},
         ]}
       />
 
@@ -775,7 +754,7 @@ export function IdeAccount() {
               Export my data (GDPR)
             </span>
             <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              ZIP · runs, projects, billing
+              ZIP · work, projects, billing
             </span>
           </span>
           <button
@@ -822,7 +801,7 @@ export function IdeAccount() {
               Delete my data (right to erasure)
             </span>
             <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              Schedules your runs for permanent deletion · GDPR Art. 17
+              Schedules your completed work for permanent deletion · GDPR Art. 17
             </span>
           </span>
           <button
@@ -851,7 +830,7 @@ export function IdeAccount() {
       <ConfirmModal
         open={eraseOpen}
         title='Delete my data'
-        body='Delete your data? This soft-deletes every completed and failed run on your account and schedules the workspaces for permanent deletion. Active runs must be cancelled first. This cannot be undone.'
+        body='Delete your data? This soft-deletes every completed and failed work item on your account and schedules the workspaces for permanent deletion. Active work must be cancelled first. This cannot be undone.'
         confirmLabel='Delete'
         danger
         busy={erasing}
@@ -908,8 +887,7 @@ export function IdeDeployments() {
     <div className='ide-pane'>
       <div className='ide-h1'>Deployments</div>
       <div className='ide-sub'>
-        Permanent Cloud Run services promoted from completed runs. Deploy a run from its result
-        page.
+        Permanent Cloud Run services promoted from completed work. Deploy from a result page.
       </div>
       <GcpCredentialPanel variant='ide' />
       {msg && (
@@ -941,7 +919,7 @@ export function IdeDeployments() {
                   to={`/result/${d.runId}`}
                   style={{fontSize: 11, color: 'var(--ide-blue)', marginLeft: 'auto'}}
                 >
-                  run ↗
+                  work ↗
                 </Link>
               </div>
               {d.serviceUrl && (
