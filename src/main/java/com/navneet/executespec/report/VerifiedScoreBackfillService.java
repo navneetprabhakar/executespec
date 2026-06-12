@@ -2,12 +2,15 @@ package com.navneet.executespec.report;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.report.entity.ValidationReport;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,9 +31,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Idempotent: running it twice produces the same result. Backfill is per-row independent — a
  * crash mid-job leaves rows in mixed states but a re-run fixes them.
  *
- * <p>Triggered only by the SUPER_ADMIN endpoint (see {@code
- * SuperAdminController.backfillVerifiedScore} — to be added separately). Synchronous; the caller
- * times out after 60s if the table grew past ~10K rows.
+ * <p>RL-2026-06-026: because the service delegates to the live scoring method, it also applies the
+ * current trust caps (review/build/test blockers cap the maximum credible headline). Triggered only
+ * by the SUPER_ADMIN endpoint (see {@code SuperAdminController.backfillVerifiedScore}).
+ * Synchronous; use {@code limit} and {@code dryRun} before running it against a large table.
  */
 @Slf4j
 @Service
@@ -41,46 +45,116 @@ public class VerifiedScoreBackfillService {
   private final ValidationReportService scoreService;
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final int MAX_LIMIT = 10_000;
+  private static final int MAX_CHANGE_SAMPLES = 50;
+
+  /**
+   * Optional SUPER_ADMIN request. Null body keeps backward-compatible behaviour: mutate every
+   * report.
+   */
+  public record BackfillRequest(String runId, Integer limit, Boolean dryRun) {}
+
+  /** Before/after sample so operators can audit what the job would change. */
+  public record ScoreChange(
+      String reportId,
+      String runId,
+      Integer oldVerifiedScore,
+      Integer newVerifiedScore,
+      Integer oldRubricScore,
+      Integer newRubricScore) {}
 
   /** Outcome counts so the SUPER_ADMIN UI can show a summary after the run completes. */
-  public record BackfillResult(int total, int updated, int unchanged, int skipped, int errors) {}
+  public record BackfillResult(
+      int total,
+      int evaluated,
+      int updated,
+      int unchanged,
+      int skipped,
+      int errors,
+      boolean dryRun,
+      String runId,
+      Integer limit,
+      List<ScoreChange> changes) {}
 
   @Transactional
   public BackfillResult backfillAll() {
-    List<ValidationReport> rows = reportRepo.findAll();
-    log.info("[VerifiedScoreBackfill] starting: {} rows to evaluate", rows.size());
+    return backfill(new BackfillRequest(null, null, false));
+  }
+
+  @Transactional
+  public BackfillResult backfill(BackfillRequest request) {
+    BackfillRequest req = request == null ? new BackfillRequest(null, null, false) : request;
+    boolean dryRun = Boolean.TRUE.equals(req.dryRun());
+    Integer safeLimit = safeLimit(req.limit());
+    List<ValidationReport> rows = rowsFor(req.runId(), safeLimit);
+    log.info(
+        "[VerifiedScoreBackfill] starting: rows={} runId={} limit={} dryRun={}",
+        rows.size(),
+        req.runId(),
+        safeLimit,
+        dryRun);
 
     int updated = 0;
     int unchanged = 0;
     int skipped = 0;
     int errors = 0;
+    List<ScoreChange> changes = new java.util.ArrayList<>();
 
     for (ValidationReport row : rows) {
       try {
-        // Skip rows whose required signals aren't recorded — backfill formula needs at least
-        // finalBuildPassed + reviewerVerdict to produce a meaningful number.
-        if (row.getFinalBuildPassed() == null && row.getReviewerVerdict() == null) {
+        if (row == null) {
           skipped++;
           continue;
         }
 
-        int recomputed =
+        Integer endpointCoverage = endpointCoverageFromAccuracyJson(row.getAccuracyJson());
+        String testCoverageLevel = testCoverageLevelFromAccuracyJson(row.getAccuracyJson());
+        int unfixedCritical = countUnfixedCriticalFromIssuesJson(row.getIssuesJson());
+        int recomputedVerified =
             scoreService.computeVerifiedScore(
                 row.getFinalBuildPassed(),
                 row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
                 row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
                 row.getReviewerVerdict(),
-                countUnfixedCriticalFromIssuesJson(row.getIssuesJson()),
-                endpointCoverageFromAccuracyJson(row.getAccuracyJson()));
+                unfixedCritical,
+                endpointCoverage,
+                testCoverageLevel,
+                row.getFilesGenerated());
+        int recomputedRubric =
+            scoreService.computeRubricScore(
+                row.getFinalBuildPassed(),
+                row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
+                row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
+                row.getReviewerVerdict(),
+                unfixedCritical,
+                endpointCoverage,
+                testCoverageLevel);
 
-        Integer existing = row.getVerifiedScore();
-        if (existing != null && existing == recomputed) {
+        Integer existingVerified = row.getVerifiedScore();
+        Integer existingRubric = row.getRubricScore();
+        boolean same =
+            java.util.Objects.equals(existingVerified, recomputedVerified)
+                && java.util.Objects.equals(existingRubric, recomputedRubric);
+        if (same) {
           unchanged++;
           continue;
         }
 
-        row.setVerifiedScore(recomputed);
-        reportRepo.save(row);
+        if (changes.size() < MAX_CHANGE_SAMPLES) {
+          changes.add(
+              new ScoreChange(
+                  row.getId(),
+                  row.getRunId(),
+                  existingVerified,
+                  recomputedVerified,
+                  existingRubric,
+                  recomputedRubric));
+        }
+        if (!dryRun) {
+          row.setVerifiedScore(recomputedVerified);
+          row.setRubricScore(recomputedRubric);
+          reportRepo.save(row);
+        }
         updated++;
       } catch (RuntimeException ex) {
         // Per-row failure must NOT break the batch — log + continue.
@@ -93,9 +167,44 @@ public class VerifiedScoreBackfillService {
       }
     }
 
-    BackfillResult result = new BackfillResult(rows.size(), updated, unchanged, skipped, errors);
+    BackfillResult result =
+        new BackfillResult(
+            rows.size(),
+            updated + unchanged + skipped + errors,
+            updated,
+            unchanged,
+            skipped,
+            errors,
+            dryRun,
+            blankToNull(req.runId()),
+            safeLimit,
+            List.copyOf(changes));
     log.info("[VerifiedScoreBackfill] done: {}", result);
     return result;
+  }
+
+  private List<ValidationReport> rowsFor(String runId, Integer limit) {
+    String targetRun = blankToNull(runId);
+    if (targetRun != null) {
+      Optional<ValidationReport> one = reportRepo.findByRunId(targetRun);
+      return one.map(List::of).orElseGet(List::of);
+    }
+    if (limit != null) {
+      return reportRepo
+          .findAll(PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "createdAt")))
+          .getContent();
+    }
+    return reportRepo.findAll();
+  }
+
+  private static Integer safeLimit(Integer raw) {
+    if (raw == null) return null;
+    return Math.max(1, Math.min(MAX_LIMIT, raw));
+  }
+
+  private static String blankToNull(String value) {
+    if (value == null || value.isBlank()) return null;
+    return value.trim();
   }
 
   /**
@@ -142,6 +251,19 @@ public class VerifiedScoreBackfillService {
       JsonNode percent = coverage.path("coveragePercent");
       if (percent.isMissingNode() || percent.isNull() || !percent.canConvertToInt()) return null;
       return percent.asInt();
+    } catch (IOException ex) {
+      return null;
+    }
+  }
+
+  static String testCoverageLevelFromAccuracyJson(String accuracyJson) {
+    if (accuracyJson == null || accuracyJson.isBlank()) return null;
+    try {
+      JsonNode root = MAPPER.readTree(accuracyJson);
+      JsonNode level = root.path("testCoverageLevel");
+      if (level.isMissingNode() || level.isNull() || !level.isTextual()) return null;
+      String text = level.asText();
+      return text == null || text.isBlank() ? null : text.trim().toUpperCase();
     } catch (IOException ex) {
       return null;
     }

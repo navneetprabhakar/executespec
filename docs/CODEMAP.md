@@ -473,7 +473,7 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 | `ReadymadeSlot` | `readymade_slot` | Per-solution slot definition |
 | `ReadymadeDependency` | `readymade_dependency` | Solution→solution dependency |
 | `ReadymadeFavourite` | `readymade_favourite` | Per-user favourite |
-| `ValidationReport` | `validation_report` | Per-run report + V194 rubric_score |
+| `ValidationReport` | `validation_report` | Per-run report + V194 rubric_score; report DTO also exposes `verificationEvidence[]` so deterministic checks, LLM assessments, and internal score summaries are distinguishable |
 | `TestPlan` | `test_plan` | Test generation plan |
 | `TestTask` | `test_task` | Per-test task |
 | `TestResult` | `test_result` | Per-test result |
