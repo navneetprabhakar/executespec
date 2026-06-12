@@ -26,11 +26,21 @@ function rowStyle(last: boolean): React.CSSProperties {
   };
 }
 
-// Shared inline error card (red foreground) — same shape IdeRuns uses.
-function ErrCard({msg}: {msg: string}) {
+// Shared inline error card (red foreground) — same shape IdeRuns uses. C7:
+// pass `onRetry` to render a ghost Retry button next to the message.
+function ErrCard({msg, onRetry}: {msg: string; onRetry?: () => void}) {
   return (
     <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
       {msg}
+      {onRetry && (
+        <button
+          className='ide-btn ghost'
+          style={{padding: '2px 10px', marginLeft: 8}}
+          onClick={onRetry}
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
@@ -38,11 +48,14 @@ function ErrCard({msg}: {msg: string}) {
 type NotifFilter = 'all' | 'run' | 'team' | 'billing' | 'system';
 
 export default function IdeNotifications() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<api.NotificationItem[] | null>(null);
   const [filter, setFilter] = useState<NotifFilter>('all');
+  const [markBusy, setMarkBusy] = useState(false);
   const [err, setErr] = useState('');
 
   async function refresh() {
+    setErr('');
     try {
       const page = await api.getNotifications(0, 50);
       setItems((page as unknown as {content?: api.NotificationItem[]}).content ?? []);
@@ -95,17 +108,20 @@ export default function IdeNotifications() {
   }
 
   async function readAll() {
+    setMarkBusy(true);
     try {
       await api.markAllNotificationsRead();
       setItems((prev) => prev?.map((n) => ({...n, read: true})) || prev);
     } catch {
       /* ignore */
+    } finally {
+      setMarkBusy(false);
     }
   }
 
   const TABS: Array<{key: NotifFilter; label: string; n?: number}> = [
     {key: 'all', label: 'All', n: items?.length ?? 0},
-    {key: 'run', label: 'Run'},
+    {key: 'run', label: 'Work'},
     {key: 'team', label: 'Team'},
     {key: 'billing', label: 'Billing'},
     {key: 'system', label: 'System'},
@@ -115,7 +131,7 @@ export default function IdeNotifications() {
     <div className='ide-pane' style={{maxWidth: 760}}>
       <div className='ide-h1'>Notifications</div>
       <div className='ide-sub'>
-        {items === null ? 'Run, team, billing, and system events.' : `${unreadCount} unread`}
+        {items === null ? 'Work, team, billing, and system events.' : `${unreadCount} unread`}
       </div>
 
       <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
@@ -134,14 +150,14 @@ export default function IdeNotifications() {
         <button
           className='ide-btn ghost'
           style={{flexShrink: 0}}
-          disabled={unreadCount === 0}
+          disabled={unreadCount === 0 || markBusy}
           onClick={readAll}
         >
-          Mark all read
+          {markBusy ? 'Marking…' : 'Mark all read'}
         </button>
       </div>
 
-      {err && <ErrCard msg={err} />}
+      {err && <ErrCard msg={err} onRetry={() => void refresh()} />}
 
       {items === null ? (
         <IdeLoader label='Loading notifications…' />
@@ -190,13 +206,13 @@ export default function IdeNotifications() {
                 key={nAny.id || i}
                 onClick={() => {
                   if (nAny.id) void readOne(nAny.id);
-                  // Absolute backend links → full navigation; otherwise SPA-navigate
-                  // via history.pushState so React Router catches it.
+                  // C11 — absolute backend links open in a new tab; in-app
+                  // targets go through the router (was a hand-rolled
+                  // pushState + PopStateEvent that broke on malformed targets).
                   if (linkTarget.startsWith('http')) {
-                    window.location.href = linkTarget;
+                    window.open(linkTarget, '_blank', 'noopener,noreferrer');
                   } else {
-                    window.history.pushState({}, '', linkTarget);
-                    window.dispatchEvent(new PopStateEvent('popstate'));
+                    navigate(linkTarget);
                   }
                 }}
                 style={{...rowStyle(i >= filtered.length - 1), cursor: 'pointer'}}
@@ -322,7 +338,7 @@ export function IdeSearch() {
           id: p.id,
           kind: 'project',
           title: p.name,
-          subtitle: `${(p as unknown as {repoCount?: number}).repoCount ?? 0} repos · ${(p as unknown as {totalRuns?: number}).totalRuns ?? 0} runs`,
+          subtitle: `${(p as unknown as {repoCount?: number}).repoCount ?? 0} repos · ${(p as unknown as {totalRuns?: number}).totalRuns ?? 0} work items`,
           to: `/projects/${p.id}`,
         });
       }
@@ -335,7 +351,7 @@ export function IdeSearch() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
       <div className='ide-h1'>Search</div>
-      <div className='ide-sub'>Runs, projects, files.</div>
+      <div className='ide-sub'>Work, projects, files.</div>
 
       <div
         style={{
@@ -363,7 +379,7 @@ export function IdeSearch() {
           type='search'
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder='Search runs, projects, files…'
+          placeholder='Search work, projects, files…'
           autoFocus
           onKeyDown={(e) => {
             if (e.key === 'Enter' && hits.length > 0) navigate(hits[0].to);
@@ -401,9 +417,9 @@ export function IdeSearch() {
           </div>
           <div className='ide-card' style={{padding: 0}}>
             {[
-              {to: '/compose', label: 'New spec', sub: 'Open the composer'},
+              {to: '/compose', label: 'New work', sub: 'Draft a request'},
               {to: '/projects', label: 'Browse projects', sub: 'All your active projects'},
-              {to: '/runs', label: 'All runs', sub: 'Filter and browse'},
+              {to: '/runs', label: 'Work', sub: 'Filter and browse'},
             ].map((row, i, arr) => (
               <Link key={row.to} to={row.to} style={rowStyle(i >= arr.length - 1)}>
                 <span style={{flex: 1, minWidth: 0}}>
@@ -419,9 +435,9 @@ export function IdeSearch() {
 
           <div className='ide-h2'>Recent</div>
           {!loaded ? (
-            <IdeLoader label='Loading recent runs…' />
+            <IdeLoader label='Loading recent work…' />
           ) : recent.length === 0 ? (
-            <div className='ide-empty'>No runs yet.</div>
+            <div className='ide-empty'>No work yet.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {recent.map((r, i) => (
@@ -459,7 +475,9 @@ export function IdeSearch() {
             {hits.length} result{hits.length === 1 ? '' : 's'} for “{q}”
           </div>
           {hits.length === 0 ? (
-            <div className='ide-empty'>No matches. Try a different query.</div>
+            <div className='ide-empty'>
+              No matches for “{q.trim()}”. Try a run id (R-abc123), a project name, or a page name.
+            </div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {hits.map((h, i) => (
@@ -704,7 +722,7 @@ export function IdeEmptyProject() {
           style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 12, lineHeight: 1.5}}
         >
           Bring an existing codebase. We’ll install a webhook, snapshot the architecture, and you
-          can run specs against it immediately.
+          can start work against it immediately.
         </div>
         <Link className='ide-btn' to='/integrations' style={{display: 'inline-flex', gap: 8}}>
           <svg viewBox='0 0 24 24' style={{width: 15, height: 15}} aria-hidden>
@@ -722,24 +740,11 @@ export function IdeEmptyProject() {
         <div
           style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 12, lineHeight: 1.5}}
         >
-          We’ll spin up a brand-new repo with one of three preset specs. Free, no commits to your
-          repos.
+          We’ll spin up a brand-new repo with one of three preset work requests. Free, no commits to
+          your repos.
         </div>
         <Link className='ide-btn ghost' to='/welcome'>
           Pick a starter →
-        </Link>
-      </div>
-
-      <div className='ide-h2'>Path 3 · Browse the library</div>
-      <div className='ide-card'>
-        <div
-          style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 12, lineHeight: 1.5}}
-        >
-          28 readymade solutions (Stripe, OAuth, RAG, …) and 11 migrations (JS→TS, Express→Fastify,
-          …) — each pre-tuned to ship to a real repo.
-        </div>
-        <Link className='ide-btn ghost' to='/library'>
-          Open library →
         </Link>
       </div>
     </div>
@@ -809,10 +814,10 @@ export function IdeMoreMenu() {
           {to: '/projects', label: 'Projects', sub: `${projects.length} active`},
           {
             to: '/runs',
-            label: 'All runs',
-            sub: runCount != null ? `${runCount} total` : 'Loading…',
+            label: 'Work',
+            sub: runCount != null ? `${runCount} items` : 'Loading…',
           },
-          {to: '/search', label: 'Search · ⌘K', sub: 'Runs, projects, files'},
+          {to: '/search', label: 'Search · ⌘K', sub: 'Work, projects, files'},
           {
             to: '/notifications',
             label: 'Notifications',
@@ -835,17 +840,14 @@ export function IdeMoreMenu() {
         rows={[
           {to: '/org-members', label: 'Org members', sub: 'Invite teammates'},
           {to: '/integrations', label: 'Integrations', sub: 'GitHub, Slack, Jira'},
-          {to: '/api-keys', label: 'API keys (BYOK)', sub: 'Provider keys'},
+          {to: '/provider-keys', label: 'Provider keys', sub: 'BYOK model keys'},
         ]}
       />
 
       <MoreSection
         title='Discover'
         rows={[
-          {to: '/insights', label: 'Insights', sub: 'Analytics dashboard'},
-          {to: '/library', label: 'Library', sub: 'Readymade solutions'},
-          {to: '/migrations', label: 'Migrations', sub: 'Migration recipes'},
-          {to: '/templates', label: 'Spec templates', sub: 'Saved specs'},
+          {to: '/insights', label: 'Insights', sub: 'Usage and outcomes'},
           ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
             ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
             : []),

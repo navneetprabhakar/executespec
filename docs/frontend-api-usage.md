@@ -66,7 +66,7 @@ Benchmark tracking uses its own domain module and should stay separate from run 
 
 - Do not put new endpoints back into `core.ts` just because it already has many types.
 - Do not bypass model/BYOK DTOs in `models.ts`/`org.ts`; the model matrix has layered semantics.
-- Do not assume every protected route renders in the same shell; the IDE shell is default and the Console shell is opt-in.
+- Protected routes now render inside the Console shell by default; keep route-level components shell-neutral and avoid reintroducing `localStorage es:console` or `uiMode` branching.
 - Do not expose run event tokens outside their run scope.
 - Keep binary downloads (`report/pdf`, invoices, exports) explicit about response type.
 
