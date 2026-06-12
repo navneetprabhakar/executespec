@@ -22,6 +22,9 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
+    ES_TB_LLM_READ_TIMEOUT_SECONDS  backend per-call LLM read timeout (default 240)
+    ES_TB_LLM_RETRY_ATTEMPTS        backend transient retry attempts (default 1)
+    ES_TB_STARTUP_RETRIES           whole-run retries after zero-tool ERROR (default 1)
 """
 import asyncio
 import base64
@@ -78,8 +81,8 @@ def _wall_clock_for(instruction: str):
     """Derived wallClockSeconds for this task, or None (→ server default 900s).
 
     ES_TB_WALL_CLOCK forces a value. Otherwise: harbor [agent] timeout − 200s (one slow in-flight
-    LLM turn at the 240s read-timeout ceiling + the terminal finalizer must land the artifact
-    BEFORE harbor's kill), floored at 300s, capped at 3300s.
+    LLM/tool tail plus the terminal finalizer must land the artifact BEFORE Harbor's kill),
+    floored at 300s, capped at 3420s.
     """
     forced = os.environ.get("ES_TB_WALL_CLOCK")
     if forced:
@@ -93,7 +96,7 @@ def _wall_clock_for(instruction: str):
     t = _TASK_TIMEOUT_INDEX.get(_norm_text(instruction))
     if not t:
         return None
-    return int(min(max(t - 200, 300), 3300))
+    return int(min(max(t - 80, 300), 3420))
 
 
 def _trunc(s: str, n: int) -> str:
@@ -131,6 +134,9 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
+        self.llm_read_timeout = int(os.environ.get("ES_TB_LLM_READ_TIMEOUT_SECONDS", "240"))
+        self.llm_retry_attempts = int(os.environ.get("ES_TB_LLM_RETRY_ATTEMPTS", "1"))
+        self.startup_retries = int(os.environ.get("ES_TB_STARTUP_RETRIES", "1"))
         if not self.provider or not self.model:
             raise ValueError("ES_PROVIDER and ES_MODEL env vars are required")
 
@@ -142,25 +148,86 @@ class ExecuteSpecAgent(BaseAgent):
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
             token = await self._auth(client)
             wall = _wall_clock_for(instruction)
-            # Scale the iteration cap with the per-task clock (a 3300s task supports far more
-            # turns than the 120 floor); the server keeps its own floor for small values.
-            iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
-            payload = {"instruction": instruction, "provider": self.provider,
-                       "model": self.model, "maxIterations": iters}
-            if wall is not None:
-                payload["wallClockSeconds"] = wall
-            started = await self._post(
-                client, "/api/v2/test/terminal-bench/start", token, payload,
-            )
-            run_id, sse_token = started["runId"], started["sseToken"]
-            self.logger.info(
-                f"[es] run={run_id} provider={self.provider} model={self.model}"
-                f" wall={wall or 'default'} iters={iters}")
+            retry_of = None
+            for attempt in range(self.startup_retries + 1):
+                run_id = None
+                tools = 0
+                final = None
+                try:
+                    final, tools, run_id = await self._run_once(
+                        client, token, instruction, environment, context, wall, retry_of
+                    )
+                    if self._should_retry_startup_failure(final, tools) and attempt < self.startup_retries:
+                        self.logger.warning(
+                            f"[es] run={run_id} terminal={final} tools=0; retrying startup"
+                            f" ({attempt + 1}/{self.startup_retries})")
+                        retry_of = run_id
+                        continue
 
-            tools = 0
-            final = None
-            url = f"{self.base}/api/runs/{run_id}/events?token={sse_token}"
-            headers = {"Accept": "text/event-stream", "Last-Event-ID": "0"}
+                    try:
+                        cost = await self._get(client, f"/api/runs/{run_id}/cost", token)
+                        context.n_input_tokens = cost.get("inputTokens") or cost.get("totalInputTokens")
+                        context.n_output_tokens = cost.get("outputTokens") or cost.get("totalOutputTokens")
+                        context.cost_usd = cost.get("costUsd") or cost.get("actualCostUsd")
+                    except Exception as e:
+                        self.logger.warning(f"[es] cost fetch failed: {e}")
+                    metadata = {"es_run_id": run_id, "es_terminal": final, "tools": tools}
+                    if retry_of:
+                        metadata["startup_retry_of"] = retry_of
+                    context.metadata = metadata
+                    return
+                except BaseException as e:
+                    if run_id:
+                        context.metadata = {
+                            "es_run_id": run_id,
+                            "es_terminal": final or "INTERRUPTED",
+                            "tools": tools,
+                            "error": type(e).__name__,
+                        }
+                        await self._cancel_backend_run(client, token, run_id, type(e).__name__)
+                    raise
+
+    async def _run_once(
+        self,
+        client: httpx.AsyncClient,
+        token: str,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+        wall,
+        retry_of,
+    ):
+        tools = 0
+        final = None
+        # Scale the iteration cap with the per-task clock (a 3300s task supports far more
+        # turns than the 120 floor); the server keeps its own floor for small values.
+        iters = self.max_iters if wall is None else max(self.max_iters, min(wall // 7, 400))
+        payload = {
+            "instruction": instruction,
+            "provider": self.provider,
+            "model": self.model,
+            "maxIterations": iters,
+            "llmReadTimeoutSeconds": self.llm_read_timeout,
+            "transientRetryMaxAttempts": self.llm_retry_attempts,
+        }
+        if wall is not None:
+            payload["wallClockSeconds"] = wall
+        started = await self._post(
+            client, "/api/v2/test/terminal-bench/start", token, payload,
+        )
+        run_id, sse_token = started["runId"], started["sseToken"]
+        metadata = {"es_run_id": run_id, "es_terminal": "RUNNING", "tools": 0}
+        if retry_of:
+            metadata["startup_retry_of"] = retry_of
+        context.metadata = metadata
+        self.logger.info(
+            f"[es] run={run_id} provider={self.provider} model={self.model}"
+            f" wall={wall or 'default'} iters={iters}"
+            + (f" startup_retry_of={retry_of}" if retry_of else ""))
+
+        url = f"{self.base}/api/runs/{run_id}/events?token={sse_token}"
+        headers = {"Accept": "text/event-stream", "Last-Event-ID": "0"}
+        try:
             async with client.stream("GET", url, headers=headers, timeout=None) as resp:
                 buf = []
                 async for line in resp.aiter_lines():
@@ -188,17 +255,31 @@ class ExecuteSpecAgent(BaseAgent):
                             break
                     else:
                         buf.append(line)
+        except BaseException as e:
+            context.metadata = {
+                "es_run_id": run_id,
+                "es_terminal": final or "INTERRUPTED",
+                "tools": tools,
+                "error": type(e).__name__,
+            }
+            await self._cancel_backend_run(client, token, run_id, type(e).__name__)
+            raise
 
-            self.logger.info(f"[es] run={run_id} terminal={final} tools={tools}")
-            # populate context cost/tokens from the run cost snapshot
-            try:
-                cost = await self._get(client, f"/api/runs/{run_id}/cost", token)
-                context.n_input_tokens = cost.get("inputTokens") or cost.get("totalInputTokens")
-                context.n_output_tokens = cost.get("outputTokens") or cost.get("totalOutputTokens")
-                context.cost_usd = cost.get("costUsd") or cost.get("actualCostUsd")
-                context.metadata = {"es_run_id": run_id, "es_terminal": final, "tools": tools}
-            except Exception as e:
-                self.logger.warning(f"[es] cost fetch failed: {e}")
+        if final is None:
+            context.metadata = {
+                "es_run_id": run_id,
+                "es_terminal": "NO_COMPLETE",
+                "tools": tools,
+            }
+            await self._cancel_backend_run(client, token, run_id, "NO_COMPLETE")
+            raise RuntimeError(f"ExecuteSpec run {run_id} ended SSE without COMPLETE")
+
+        self.logger.info(f"[es] run={run_id} terminal={final} tools={tools}")
+        return final, tools, run_id
+
+    @staticmethod
+    def _should_retry_startup_failure(final, tools: int) -> bool:
+        return tools == 0 and isinstance(final, str) and final.startswith("FAILED|ERROR")
 
     # ---------------- tool execution in the TB container ----------------
     async def _exec_tool(self, name: str, args: dict, env: BaseEnvironment) -> dict:
@@ -207,7 +288,10 @@ class ExecuteSpecAgent(BaseAgent):
                 cmd = args.get("command")
                 if not cmd:
                     return _err("INVALID_ARGS", f"{name}: no command")
-                r = await env.exec(cmd, timeout_sec=self.tool_timeout)
+                r = await asyncio.wait_for(
+                    env.exec(cmd, timeout_sec=self.tool_timeout),
+                    timeout=self.tool_timeout + 15,
+                )
                 out = (r.stdout or "") + (r.stderr or "")
                 body = _trunc(out, SHELL_LIMIT)
                 return _ok(body + (f"\n[exit code {r.return_code}]" if r.return_code else ""))
@@ -256,6 +340,8 @@ class ExecuteSpecAgent(BaseAgent):
             if name == "completeTask":
                 return _ok(args.get("summary", "task marked complete"))
             return _err("INVALID_ARGS", f"unknown tool: {name}")
+        except asyncio.TimeoutError:
+            return _err("TIMEOUT", f"{name}: command timed out after {self.tool_timeout}s")
         except Exception as e:
             return _err("INTERNAL", f"{type(e).__name__}: {e}")
 
@@ -292,6 +378,21 @@ class ExecuteSpecAgent(BaseAgent):
         r = await client.get(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
         r.raise_for_status()
         return r.json() if r.content else {}
+
+    async def _delete(self, client, path, token) -> dict:
+        r = await client.delete(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    async def _cancel_backend_run(self, client, token, run_id, reason) -> None:
+        try:
+            try:
+                await self._delete(client, f"/api/v2/test/terminal-bench/{run_id}", token)
+            except Exception:
+                await self._delete(client, f"/api/runs/{run_id}", token)
+            self.logger.warning(f"[es] run={run_id} cancelled after adapter interruption: {reason}")
+        except Exception as e:
+            self.logger.warning(f"[es] run={run_id} cancel failed after {reason}: {e}")
 
     @staticmethod
     def _parse_frame(lines):

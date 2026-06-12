@@ -218,7 +218,11 @@ public class LlmRouter {
       String resolvedKey,
       RunKeyContext.Source source) {
     RuntimeException lastError = null;
-    for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+    int maxAttempts =
+        request.transientRetryMaxAttempts() != null && request.transientRetryMaxAttempts() > 0
+            ? request.transientRetryMaxAttempts()
+            : TRANSIENT_RETRY_MAX_ATTEMPTS;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       long start = System.currentTimeMillis();
       try {
         ChatResponse resp = dispatch(request, tools, resolvedKey);
@@ -250,10 +254,10 @@ public class LlmRouter {
             request.model(),
             elapsed,
             attempt,
-            TRANSIENT_RETRY_MAX_ATTEMPTS,
+            maxAttempts,
             e.getMessage());
         lastError = e;
-        if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
+        if (attempt < maxAttempts && isTransientError(e)) {
           long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);

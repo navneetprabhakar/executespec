@@ -26,8 +26,53 @@ env:
   DEPLOY_BUCKET_PREFIX: executespec    # Bucket: executespec-{env}-deploy
 
 jobs:
+  benchmark-monitor:
+    name: Benchmark VM monitor
+    if: github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]')
+    runs-on: ubuntu-latest
+
+    environment: development
+
+    env:
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+      GCE_ZONE: ${{ secrets.GCE_ZONE }}
+      GCE_INSTANCE: executespec-benchmark-vm
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Read-only TB status
+        run: |
+          gcloud compute scp infra/benchmark/scripts/monitor-tb.sh ${{ env.GCE_INSTANCE }}:/tmp/monitor-tb.sh \
+            --project "${{ env.GCP_PROJECT }}" \
+            --zone "${{ env.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+          gcloud compute ssh ${{ env.GCE_INSTANCE }} \
+            --project "${{ env.GCP_PROJECT }}" \
+            --zone "${{ env.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="JOB_NAME='' bash /tmp/monitor-tb.sh"
+
   build-and-deploy:
     name: Build → Deploy (${{ inputs.target_env || (github.ref_name == 'main' && 'prod' || 'dev') }})
+    if: ${{ !(github.ref_name == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb-monitor]')) }}
     runs-on: ubuntu-latest
 
     # ── Environment ───────────────────
@@ -325,6 +370,43 @@ jobs:
               echo 'Deploy done — service restarting'
             "
 
+      - name: Sync Terminal-Bench harness to benchmark VM
+        if: env.DEPLOY_ENV == 'benchmark'
+        run: |
+          gcloud compute scp \
+            infra/benchmark/tb/es_harbor_agent.py \
+            infra/benchmark/tb/tb-bench-bridge.py \
+            ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/ \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="
+              set -e
+              RUN_HOME=''
+              for home in \"\$HOME\" /home/*; do
+                [ -d \"\$home\" ] || continue
+                if [ -x \"\$home/tbench/.venv/bin/harbor\" ] && [ -f \"\$home/swebench-bench/.espec-admin.env\" ]; then
+                  RUN_HOME=\"\$home\"
+                  break
+                fi
+              done
+              [ -n \"\$RUN_HOME\" ] || RUN_HOME=\"\$HOME\"
+              RUN_USER=\$(stat -c %U \"\$RUN_HOME\" 2>/dev/null || whoami)
+              sudo mkdir -p \"\$RUN_HOME/tbench\"
+              sudo cp /tmp/es_harbor_agent.py \"\$RUN_HOME/tbench/es_harbor_agent.py\"
+              sudo cp /tmp/tb-bench-bridge.py \"\$RUN_HOME/tbench/tb-bench-bridge.py\"
+              sudo chown \"\$RUN_USER:\$RUN_USER\" \"\$RUN_HOME/tbench/es_harbor_agent.py\" \"\$RUN_HOME/tbench/tb-bench-bridge.py\" || true
+              sudo -H -u \"\$RUN_USER\" python3 -m py_compile \"\$RUN_HOME/tbench/es_harbor_agent.py\" \"\$RUN_HOME/tbench/tb-bench-bridge.py\"
+              echo \"Terminal-Bench harness synced to \$RUN_HOME/tbench\"
+            "
+
       # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
       - name: Wait for app startup
         run: sleep 45
@@ -369,6 +451,385 @@ jobs:
           done
           echo "Health check FAILED after 20 attempts"
           exit 1
+
+      - name: Start TB 2.1 focused Flash pilot
+        if: env.DEPLOY_ENV == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb21-pilot]')
+        run: |
+          cat > /tmp/tb21-focused-pilot.sh << 'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+
+          if [ "${ES_TB_AS_OPERATOR:-0}" != "1" ]; then
+            RUN_HOME=""
+            for home in "$HOME" /home/*; do
+              [ -d "$home" ] || continue
+              if [ -x "$home/tbench/.venv/bin/harbor" ] && [ -f "$home/swebench-bench/.espec-admin.env" ]; then
+                RUN_HOME="$home"
+                break
+              fi
+            done
+            if [ -z "$RUN_HOME" ]; then
+              echo "No Terminal-Bench operator home found with tbench/.venv/bin/harbor and swebench-bench/.espec-admin.env"
+              exit 1
+            fi
+            RUN_USER="$(stat -c %U "$RUN_HOME" 2>/dev/null || echo "")"
+            if [ -z "$RUN_USER" ]; then
+              echo "Could not resolve owner for $RUN_HOME"
+              exit 1
+            fi
+            echo "Using Terminal-Bench operator home: $RUN_HOME (user=$RUN_USER)"
+            exec sudo -H -u "$RUN_USER" env ES_TB_AS_OPERATOR=1 HOME="$RUN_HOME" bash "$0"
+          fi
+
+          TB_DIR="$HOME/tbench"
+          JOBS_DIR="$HOME/es-tb-jobs"
+          ADMIN_ENV="$HOME/swebench-bench/.espec-admin.env"
+          JOB="es-tb-21-focused-flash-$(date +%Y%m%d-%H%M%S)"
+          CFG="$TB_DIR/es-tb-runtb-${JOB}.yaml"
+
+          mkdir -p "$JOBS_DIR"
+          [ -x "$TB_DIR/.venv/bin/harbor" ] || { echo "Harbor missing: $TB_DIR/.venv/bin/harbor"; exit 1; }
+          [ -f "$ADMIN_ENV" ] || { echo "Admin env missing: $ADMIN_ENV"; exit 1; }
+          [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
+
+          cleanup_invalid_focused_harbor() {
+            local active_file="$1"
+            local cleaned=0
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              local pid cfg cfg_base job pids_file bridge_pid harbor_pid bridge_log run_log bridge_alive invalid reason
+              pid="$(printf '%s\n' "$line" | awk '{print $1}')"
+              cfg="$(printf '%s\n' "$line" | sed -nE 's#.* -c ([^ ]*es-tb-runtb-es-tb-21-focused-flash-[^ ]+\.ya?ml).*#\1#p')"
+              [ -n "$pid" ] && [ -n "$cfg" ] || continue
+              cfg_base="$(basename "$cfg")"
+              job="${cfg_base#es-tb-runtb-}"
+              job="${job%.yaml}"
+              job="${job%.yml}"
+              case "$job" in
+                es-tb-21-focused-flash-*) ;;
+                *) continue ;;
+              esac
+              pids_file="$JOBS_DIR/${job}-pids.txt"
+              bridge_pid=""
+              harbor_pid=""
+              if [ -f "$pids_file" ]; then
+                bridge_pid="$(sed -nE 's/.*bridge_pid=([0-9]+).*/\1/p' "$pids_file" | tail -1)"
+                harbor_pid="$(sed -nE 's/.*harbor_pid=([0-9]+).*/\1/p' "$pids_file" | tail -1)"
+              fi
+              if [ -n "$harbor_pid" ] && [ "$harbor_pid" != "$pid" ]; then
+                continue
+              fi
+              bridge_log="$JOBS_DIR/${job}-bridge.log"
+              run_log="$JOBS_DIR/${job}-run.log"
+              bridge_alive=0
+              if [ -n "$bridge_pid" ] && kill -0 "$bridge_pid" 2>/dev/null; then
+                bridge_alive=1
+              fi
+              invalid=0
+              reason=""
+              if [ "$bridge_alive" != "1" ] && [ -f "$bridge_log" ] && grep -q 'RUN_DONE' "$bridge_log"; then
+                invalid=1
+                reason="bridge already posted RUN_DONE while Harbor is still alive"
+              elif [ "$bridge_alive" != "1" ] && [ -f "$run_log" ] && grep -q 'cancelled after adapter interruption' "$run_log"; then
+                invalid=1
+                reason="agent adapter cancelled after bridge interruption"
+              fi
+              if [ "$invalid" = "1" ]; then
+                echo "Cleaning invalid focused-pilot Harbor pid=$pid job=$job: $reason"
+                kill "$pid" || true
+                sleep 3
+                kill -0 "$pid" 2>/dev/null && kill -9 "$pid" || true
+                cleaned=1
+              fi
+            done < "$active_file"
+            return "$cleaned"
+          }
+
+          if ! pgrep -af '/harbor .*run|harbor run' >/dev/null 2>&1; then
+            STALE_BRIDGES="$(pgrep -af 'tb-bench-bridge.py .*es-tb-21-focused-flash' || true)"
+            if [ -n "$STALE_BRIDGES" ]; then
+              echo "Cleaning stale focused-pilot bridge processes before relaunch:"
+              echo "$STALE_BRIDGES"
+              STALE_JOBS="$(printf '%s\n' "$STALE_BRIDGES" | sed -nE 's#.*--job-dir ([^ ]+).*#\1#p' | xargs -r -n1 basename | tr '\n' ' ')"
+              export BR_ES_BASE=http://localhost:8080 \
+                     BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                     BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+              python3 - "$JOBS_DIR" $STALE_JOBS <<'PY' || true
+          import json, os, re, sys, urllib.request
+
+          jobs_dir = sys.argv[1]
+          jobs = sys.argv[2:]
+          base = os.environ.get("BR_ES_BASE", "http://localhost:8080")
+          email = os.environ.get("BR_ADMIN_EMAIL", "")
+          pw = os.environ.get("BR_ADMIN_PW", "")
+
+          def req(path, token=None, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Authorization"] = "Bearer " + token
+              request = urllib.request.Request(
+                  base.rstrip("/") + path,
+                  data=data,
+                  headers=headers,
+                  method="POST" if body is not None else "GET",
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read().decode()
+              return json.loads(raw) if raw.strip() else {}
+
+          if not email or not pw:
+              print("stale-bridge cleanup: admin credentials missing")
+              raise SystemExit
+          token = req("/api/auth/login", body={"email": email, "password": pw})["accessToken"]
+          for job in jobs:
+              log = os.path.join(jobs_dir, f"{job}-bridge.log")
+              if not os.path.exists(log):
+                  continue
+              text = open(log, errors="ignore").read()
+              matches = re.findall(r"benchmark_run id = ([a-f0-9-]+)", text)
+              if not matches:
+                  continue
+              run_id = matches[-1]
+              req(
+                  f"/api/v2/test/benchmark/{run_id}/event",
+                  token,
+                  body={
+                      "type": "RUN_FAILED",
+                      "error": "Harbor failed before creating a job directory; launcher cleaned stale bridge",
+                  },
+              )
+              print(f"stale-bridge cleanup: marked {run_id} failed for {job}")
+          PY
+              printf '%s\n' "$STALE_BRIDGES" | awk '{print $1}' | xargs -r kill || true
+            fi
+          fi
+
+          TB_ACTIVE="$JOBS_DIR/${JOB}-active-harbor.txt"
+          if pgrep -af '/harbor .*run|harbor run' >"$TB_ACTIVE" 2>/dev/null; then
+            cleanup_invalid_focused_harbor "$TB_ACTIVE" || true
+          fi
+          if pgrep -af '/harbor .*run|harbor run' >"$TB_ACTIVE" 2>/dev/null; then
+            echo "Refusing to start TB 2.1 focused pilot because Harbor is already active:"
+            cat "$TB_ACTIVE"
+            exit 1
+          fi
+
+          curl -fsS http://localhost:8080/actuator/health >/dev/null
+          python3 -m py_compile "$TB_DIR/es_harbor_agent.py" "$TB_DIR/tb-bench-bridge.py"
+
+          cat > "$CFG" <<EOF
+          job_name: $JOB
+          jobs_dir: $JOBS_DIR
+          n_concurrent_trials: 4
+          n_attempts: 1
+          agents:
+            - import_path: es_harbor_agent:ExecuteSpecAgent
+              model_name: deepseek/deepseek-v4-flash-native
+          datasets:
+            - name: terminal-bench/terminal-bench-2-1
+              task_names:
+                - terminal-bench/gcode-to-text
+                - terminal-bench/polyglot-rust-c
+                - terminal-bench/train-fasttext
+                - terminal-bench/build-pmars
+          EOF
+
+          export ES_PROVIDER=deepseek \
+                 ES_MODEL=deepseek-v4-flash-native \
+                 ES_MAX_ITERS=120 \
+                 ES_BASE=http://localhost:8080 \
+                 ES_TOOL_TIMEOUT=300 \
+                 ES_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 ES_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+
+          export BR_ES_BASE=http://localhost:8080 \
+                 BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+          nohup python3 "$TB_DIR/tb-bench-bridge.py" \
+            --job-dir "$JOBS_DIR/$JOB" \
+            --provider deepseek \
+            --model deepseek-v4-flash-native \
+            --k 1 \
+            --total 4 \
+            --dataset terminal-bench-2-1 \
+            --idle-min 30 \
+            --max-min 360 \
+            > "$JOBS_DIR/${JOB}-bridge.log" 2>&1 &
+          BRIDGE_PID=$!
+
+          cd "$TB_DIR"
+          nohup ./.venv/bin/harbor run -c "$CFG" -y > "$JOBS_DIR/${JOB}-run.log" 2>&1 &
+          HARBOR_PID=$!
+
+          echo "$JOB" > "$JOBS_DIR/tb21-focused-current.txt"
+          echo "bridge_pid=$BRIDGE_PID harbor_pid=$HARBOR_PID" > "$JOBS_DIR/${JOB}-pids.txt"
+          if [ -f "$TB_DIR/tg-send.py" ]; then
+            python3 "$TB_DIR/tg-send.py" "TB 2.1 focused Flash pilot started: $JOB. Scope: 4 harness-risk tasks (gcode-to-text, polyglot-rust-c, train-fasttext, build-pmars), k=1, concurrency=4. Purpose: validate linkage/timeout/cancel/bridge hygiene before full Flash." || true
+          fi
+          echo "Started TB 2.1 focused Flash pilot: $JOB"
+          echo "Run log: $JOBS_DIR/${JOB}-run.log"
+          echo "Bridge log: $JOBS_DIR/${JOB}-bridge.log"
+          SCRIPT
+          chmod +x /tmp/tb21-focused-pilot.sh
+
+          gcloud compute scp /tmp/tb21-focused-pilot.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/tb21-focused-pilot.sh \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="bash /tmp/tb21-focused-pilot.sh"
+
+      - name: Start TB 2.1 full Pro
+        if: env.DEPLOY_ENV == 'benchmark' && github.event_name == 'push' && contains(github.event.head_commit.message, '[tb21-pro-full]')
+        run: |
+          cat > /tmp/tb21-pro-full.sh << 'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+
+          if [ "${ES_TB_AS_OPERATOR:-0}" != "1" ]; then
+            RUN_HOME=""
+            for home in "$HOME" /home/*; do
+              [ -d "$home" ] || continue
+              if [ -x "$home/tbench/.venv/bin/harbor" ] && [ -f "$home/swebench-bench/.espec-admin.env" ]; then
+                RUN_HOME="$home"
+                break
+              fi
+            done
+            [ -n "$RUN_HOME" ] || { echo "No Terminal-Bench operator home found"; exit 1; }
+            RUN_USER="$(stat -c %U "$RUN_HOME" 2>/dev/null || echo "")"
+            [ -n "$RUN_USER" ] || { echo "Could not resolve owner for $RUN_HOME"; exit 1; }
+            echo "Using Terminal-Bench operator home: $RUN_HOME (user=$RUN_USER)"
+            exec sudo -H -u "$RUN_USER" env ES_TB_AS_OPERATOR=1 HOME="$RUN_HOME" bash "$0"
+          fi
+
+          TB_DIR="$HOME/tbench"
+          JOBS_DIR="$HOME/es-tb-jobs"
+          ADMIN_ENV="$HOME/swebench-bench/.espec-admin.env"
+          JOB="es-tb-21-pro-k5-$(date +%Y%m%d-%H%M%S)"
+          CFG="$TB_DIR/es-tb-runtb-${JOB}.yaml"
+
+          mkdir -p "$JOBS_DIR"
+          [ -x "$TB_DIR/.venv/bin/harbor" ] || { echo "Harbor missing: $TB_DIR/.venv/bin/harbor"; exit 1; }
+          [ -f "$ADMIN_ENV" ] || { echo "Admin env missing: $ADMIN_ENV"; exit 1; }
+          . "$ADMIN_ENV"
+
+          mark_run_failed() {
+            local job="$1" reason="$2"
+            local log="$JOBS_DIR/${job}-bridge.log"
+            [ -f "$log" ] || return 0
+            local rid token
+            rid="$(grep -oE 'benchmark_run id = [a-f0-9-]+' "$log" | tail -1 | awk '{print $NF}')"
+            [ -n "$rid" ] || return 0
+            token="$(curl -fsS -X POST http://localhost:8080/api/auth/login \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("accessToken",""))' 2>/dev/null || true)"
+            [ -n "$token" ] || return 0
+            curl -fsS -X POST "http://localhost:8080/api/v2/test/benchmark/$rid/event" \
+              -H "Authorization: Bearer $token" \
+              -H 'Content-Type: application/json' \
+              -d "{\"type\":\"RUN_FAILED\",\"error\":\"$reason\"}" >/dev/null || true
+            echo "Marked focused benchmark_run $rid failed: $reason"
+          }
+
+          stop_focused() {
+            local focused=""
+            [ -f "$JOBS_DIR/tb21-focused-current.txt" ] && focused="$(cat "$JOBS_DIR/tb21-focused-current.txt")"
+            if [ -n "$focused" ]; then
+              mark_run_failed "$focused" "Stopped by operator before full TB 2.1 Pro run"
+              if [ -f "$JOBS_DIR/${focused}-pids.txt" ]; then
+                sed -nE 's/.*bridge_pid=([0-9]+).*/\1/p; s/.*harbor_pid=([0-9]+).*/\1/p' "$JOBS_DIR/${focused}-pids.txt" \
+                  | xargs -r kill || true
+                sleep 3
+                sed -nE 's/.*bridge_pid=([0-9]+).*/\1/p; s/.*harbor_pid=([0-9]+).*/\1/p' "$JOBS_DIR/${focused}-pids.txt" \
+                  | while read -r pid; do kill -0 "$pid" 2>/dev/null && kill -9 "$pid" || true; done
+              fi
+            fi
+            pkill -f 'tb-bench-bridge.py .*es-tb-21-focused-flash' || true
+            pkill -f 'harbor run -c .*es-tb-runtb-es-tb-21-focused-flash' || true
+            rm -f "$JOBS_DIR/tb21-focused-current.txt"
+          }
+
+          stop_focused
+          ACTIVE="$JOBS_DIR/${JOB}-active-harbor.txt"
+          if pgrep -af '/harbor .*run|harbor run' >"$ACTIVE" 2>/dev/null; then
+            echo "Refusing to start full Pro because Harbor is already active:"
+            cat "$ACTIVE"
+            exit 1
+          fi
+
+          curl -fsS http://localhost:8080/actuator/health >/dev/null
+          python3 -m py_compile "$TB_DIR/es_harbor_agent.py" "$TB_DIR/tb-bench-bridge.py"
+
+          cat > "$CFG" <<EOF
+          job_name: $JOB
+          jobs_dir: $JOBS_DIR
+          n_concurrent_trials: 8
+          n_attempts: 5
+          agents:
+            - import_path: es_harbor_agent:ExecuteSpecAgent
+              model_name: deepseek/deepseek-v4-pro-native
+          datasets:
+            - name: terminal-bench/terminal-bench-2-1
+          EOF
+
+          export ES_PROVIDER=deepseek \
+                 ES_MODEL=deepseek-v4-pro-native \
+                 ES_MAX_ITERS=120 \
+                 ES_BASE=http://localhost:8080 \
+                 ES_TOOL_TIMEOUT=300 \
+                 ES_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 ES_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+
+          export BR_ES_BASE=http://localhost:8080 \
+                 BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" \
+                 BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
+          nohup python3 "$TB_DIR/tb-bench-bridge.py" \
+            --job-dir "$JOBS_DIR/$JOB" \
+            --provider deepseek \
+            --model deepseek-v4-pro-native \
+            --k 5 \
+            --total 89 \
+            --dataset terminal-bench-2-1 \
+            --idle-min 30 \
+            --max-min 1440 \
+            > "$JOBS_DIR/${JOB}-bridge.log" 2>&1 &
+          BRIDGE_PID=$!
+
+          cd "$TB_DIR"
+          nohup ./.venv/bin/harbor run -c "$CFG" -y > "$JOBS_DIR/${JOB}-run.log" 2>&1 &
+          HARBOR_PID=$!
+
+          echo "$JOB" > "$JOBS_DIR/tb21-current.txt"
+          echo "bridge_pid=$BRIDGE_PID harbor_pid=$HARBOR_PID" > "$JOBS_DIR/${JOB}-pids.txt"
+          if [ -f "$TB_DIR/tg-send.py" ]; then
+            python3 "$TB_DIR/tg-send.py" "TB 2.1 full DeepSeek Pro started: $JOB. Scope: full 89 tasks, k=5, concurrency=8. Dashboard: https://benchmark.executespec.ai/benchmark" || true
+          fi
+          echo "Started TB 2.1 full DeepSeek Pro: $JOB"
+          echo "Run log: $JOBS_DIR/${JOB}-run.log"
+          echo "Bridge log: $JOBS_DIR/${JOB}-bridge.log"
+          SCRIPT
+          chmod +x /tmp/tb21-pro-full.sh
+
+          gcloud compute scp /tmp/tb21-pro-full.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/tb21-pro-full.sh \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+
+          gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="bash /tmp/tb21-pro-full.sh"
 
       # ── Dump logs on failure ─────────────────────────────────────────────
       - name: Dump app logs (on failure)

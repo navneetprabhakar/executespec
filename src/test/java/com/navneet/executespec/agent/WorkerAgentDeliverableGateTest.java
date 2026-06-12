@@ -22,6 +22,7 @@ import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
 
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,9 @@ class WorkerAgentDeliverableGateTest {
     lenient().when(runRepo.findById(anyString())).thenReturn(Optional.of(runRow));
 
     lenient().when(registry.isRemoteRun(any())).thenReturn(remote);
+    Tool placeholderTool = mock(Tool.class);
+    lenient().when(registry.find(anyString())).thenReturn(placeholderTool);
+    lenient().when(registry.bindForWorker(any())).thenReturn(List.of());
     // The gate's existence check embeds "ESMISS" in its shell command; the worker's own tool calls
     // do not. Route accordingly.
     lenient()
@@ -131,6 +135,25 @@ class WorkerAgentDeliverableGateTest {
         .build();
   }
 
+  private static WorkerTaskRequest terminalReqWithArtifactDeadline(List<String> requiredPaths) {
+    return WorkerTaskRequest.builder()
+        .provider("deepseek")
+        .model("deepseek-v4-flash")
+        .systemPrompt("system")
+        .userPrompt("produce /app/answer.txt")
+        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-tb-deliverable")))
+        .maxIterations(12)
+        .temperature(0.0)
+        .maxTokensPerCall(8192)
+        .stagnationWarnAfter(20)
+        .stagnationForceAfter(20)
+        .terminalTaskMode(true)
+        .forceToolChoiceOnSalvage(true)
+        .terminalArtifactDeadlineAfter(1)
+        .requiredDeliverablePaths(requiredPaths)
+        .build();
+  }
+
   @Test
   void refuses_while_missing_then_yields_after_bounded_refusals() {
     // iter1 shell (creates nothing in this stub), iters 2.. completeTask. Gate reports MISSING
@@ -168,6 +191,34 @@ class WorkerAgentDeliverableGateTest {
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
     assertEquals(2, result.iterations(), "deliverable present → no refusal, completes on iter 2.");
+  }
+
+  @Test
+  void finalizer_productive_shell_does_not_complete_when_deliverable_still_missing() {
+    // Regression for the TB 2.1 pilot gcode-to-text failure: the terminal finalizer produced a
+    // successful shell tool call, but the exact required deliverable was still absent. That must
+    // fall back into the worker loop instead of returning COMPLETED from the finalizer.
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"ls /app\"}")));
+    seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"echo explored\"}")));
+    for (int i = 0; i < WorkerAgent.DELIVERABLE_GATE_MAX_REFUSALS + 3; i++) {
+      seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
+    }
+    Fixture f = newWorker(seq, true, false);
+
+    WorkerResult result = f.worker.run(terminalReqWithArtifactDeadline(List.of("/app/answer.txt")));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    org.junit.jupiter.api.Assertions.assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(
+                line ->
+                    line.contains(
+                        "TERMINAL_FINALIZER productive tools but deliverables still missing")),
+        "productive finalizer tool calls must not complete while the required path is missing");
+    org.junit.jupiter.api.Assertions.assertTrue(
+        result.iterations() > 1,
+        "missing deliverable must continue the worker loop instead of completing at the deadline");
   }
 
   @Test
