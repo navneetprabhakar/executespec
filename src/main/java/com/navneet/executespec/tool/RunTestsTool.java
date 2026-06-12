@@ -170,7 +170,7 @@ public class RunTestsTool implements Tool {
       String swCid = swebenchContainers.get(ctx.runId());
       if (swCid != null) {
         containerId = swCid;
-        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+        workdir = swebenchContainers.getWorkdir(ctx.runId());
         useLoginShell = true;
       }
     }

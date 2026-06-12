@@ -44,8 +44,26 @@ public class SwebenchProperties {
   /** Output base — one subdir per submit holds preds.json + traj.json + submission.patch. */
   private String outputBase = "/var/swebench/runs";
 
+  /**
+   * Dataset/output dialect. Supported values:
+   *
+   * <ul>
+   *   <li>{@code swe-bench} / {@code classic}: Princeton SWE-bench/Lite images under {@code
+   *       /testbed}, classic object-shaped {@code preds.json}.
+   *   <li>{@code swe-bench-pro} / {@code pro}: Scale SWE-bench Pro images under {@code /app},
+   *       Docker tags from the dataset's {@code dockerhub_tag}, and list-shaped patch JSON.
+   * </ul>
+   */
+  private String suite = "swe-bench";
+
   /** Default LLM provider when caller doesn't specify. */
   private String defaultProvider = "anthropic";
+
+  /** Docker repository for SWE-bench Pro prebuilt images. */
+  private String proImageRepository = "jefzda/sweap-images";
+
+  /** Prefix written into SWE-bench Pro patch JSON entries. */
+  private String predictionPrefix = "executespec";
 
   /**
    * Path to a JSON file containing SWE-bench Lite instance metadata. Loaded by {@link
@@ -94,4 +112,16 @@ public class SwebenchProperties {
    * {@code docker.io/swebench/sweb.eval.x86_64.sqlfluff_1776_sqlfluff-1625:latest}.
    */
   private String imageTemplate = "docker.io/swebench/sweb.eval.x86_64.%s:latest";
+
+  public boolean isSweBenchPro() {
+    String normalized = suite == null ? "" : suite.trim().toLowerCase();
+    return normalized.equals("swe-bench-pro")
+        || normalized.equals("swebench-pro")
+        || normalized.equals("swe_pro")
+        || normalized.equals("pro");
+  }
+
+  public String workdir() {
+    return isSweBenchPro() ? "/app" : "/testbed";
+  }
 }
