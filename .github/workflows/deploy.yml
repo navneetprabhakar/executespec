@@ -56,9 +56,14 @@ jobs:
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Read-only TB status
+      - name: TB status and notifier health
         run: |
           gcloud compute scp infra/benchmark/scripts/monitor-tb.sh ${{ env.GCE_INSTANCE }}:/tmp/monitor-tb.sh \
+            --project "${{ env.GCP_PROJECT }}" \
+            --zone "${{ env.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no
+          gcloud compute scp infra/benchmark/scripts/tb-tracker.py ${{ env.GCE_INSTANCE }}:/tmp/tb-tracker.py \
             --project "${{ env.GCP_PROJECT }}" \
             --zone "${{ env.GCE_ZONE }}" \
             --tunnel-through-iap \

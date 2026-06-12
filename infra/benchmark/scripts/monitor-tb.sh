@@ -3,6 +3,7 @@ set -euo pipefail
 
 JOB="${JOB_NAME:-}"
 PROCESS_LINES="$(pgrep -af '/harbor .*run|harbor run|tb-bench-bridge.py|es_harbor_agent.py' || true)"
+TRACKER_LINES="$(pgrep -af 'tb-tracker.py|tg-send.py' || true)"
 ACTIVE_JOB_DIR="$(printf '%s\n' "$PROCESS_LINES" | sed -nE 's#.*--job-dir ([^ ]+).*#\1#p' | tail -1)"
 if [ -z "$ACTIVE_JOB_DIR" ]; then
   ACTIVE_JOB_FROM_HARBOR="$(
@@ -79,6 +80,10 @@ echo "== processes =="
 printf '%s\n' "$PROCESS_LINES"
 echo
 
+echo "== telegram/tracker =="
+printf '%s\n' "${TRACKER_LINES:-<none>}"
+echo
+
 if [ -z "$JOB" ]; then
   echo "No job found."
   exit 0
@@ -88,6 +93,22 @@ JOB_DIR="$JOBS_DIR/$JOB"
 RUN_LOG="$JOBS_DIR/${JOB}-run.log"
 BRIDGE_LOG="$JOBS_DIR/${JOB}-bridge.log"
 PIDS="$JOBS_DIR/${JOB}-pids.txt"
+DONE_MARKER="$JOBS_DIR/${JOB}.done"
+TRACKER_LOG="$JOBS_DIR/${JOB}-tracker.log"
+TG_SCRIPT=""
+for candidate in /tmp/tg-send.py "$HOME_FOR_JOB/tbench/tg-send.py" "$HOME_FOR_JOB/tbench/tg-send.py"; do
+  if [ -f "$candidate" ]; then
+    TG_SCRIPT="$candidate"
+    break
+  fi
+done
+TRACKER_SCRIPT=""
+for candidate in /tmp/tb-tracker.py "$HOME_FOR_JOB/executespec/infra/benchmark/scripts/tb-tracker.py" "$HOME_FOR_JOB/Documents/antigravity/executespec/infra/benchmark/scripts/tb-tracker.py"; do
+  if [ -f "$candidate" ]; then
+    TRACKER_SCRIPT="$candidate"
+    break
+  fi
+done
 
 echo "== files =="
 [ -f "$PIDS" ] && cat "$PIDS" || echo "no pids file"
@@ -95,6 +116,51 @@ echo "== files =="
 [ -f "$JOB_DIR/result.json" ] && echo "harbor_root_result=yes" || echo "harbor_root_result=no"
 [ -f "$RUN_LOG" ] && echo "run_log=$RUN_LOG"
 [ -f "$BRIDGE_LOG" ] && echo "bridge_log=$BRIDGE_LOG"
+[ -f "$DONE_MARKER" ] && echo "done_marker=yes" || echo "done_marker=no"
+echo "tg_script=${TG_SCRIPT:-missing}"
+echo "tracker_script=${TRACKER_SCRIPT:-missing}"
+echo
+
+echo "== telegram self-heal =="
+TRACKER_FOR_JOB="$(printf '%s\n' "$TRACKER_LINES" | grep -F "$JOB_DIR" || true)"
+if [ -n "$TRACKER_FOR_JOB" ]; then
+  echo "tracker_for_job=alive"
+elif [ -f "$DONE_MARKER" ]; then
+  echo "tracker_for_job=not_running job_done=yes"
+elif [ ! -d "$JOB_DIR" ]; then
+  echo "tracker_for_job=not_started job_dir_missing=yes"
+elif [ -z "$TG_SCRIPT" ] || [ -z "$TRACKER_SCRIPT" ]; then
+  echo "tracker_for_job=not_running cannot_restart tg_or_tracker_missing=yes"
+else
+  echo "tracker_for_job=missing restarting_digest_tracker=yes"
+  nohup python3 "$TRACKER_SCRIPT" "$JOB_DIR" \
+    --name "DeepSeek Pro · Terminal-Bench 2.1 k=5" \
+    --total 89 \
+    --k 9999 \
+    --loop 300 \
+    --heartbeat 6 \
+    --telegram \
+    --tg-script "$TG_SCRIPT" \
+    --done-marker "$DONE_MARKER" \
+    --out "$JOBS_DIR/${JOB}-dashboard.html" \
+    --gcs "gs://executespec-benchmark-workspaces/tb/tb-tracker.html" \
+    > "$TRACKER_LOG" 2>&1 &
+  echo "tracker_pid=$!"
+  sleep 3
+  python3 "$TG_SCRIPT" "ExecuteSpec TB Update
+
+Run: DeepSeek Pro · Terminal-Bench 2.1 k=5
+Status: Telegram tracker restored from benchmark monitor.
+Progress: see dashboard for current live counts.
+Dashboard: https://benchmark.executespec.ai/benchmark" >/tmp/tg-monitor-send.log 2>&1 \
+    && echo "telegram_test_send=ok" \
+    || { echo "telegram_test_send=failed"; cat /tmp/tg-monitor-send.log; }
+fi
+if [ -f "$TRACKER_LOG" ]; then
+  echo
+  echo "== tracker log tail =="
+  tail -80 "$TRACKER_LOG" || true
+fi
 echo
 
 echo "== harness homes =="
