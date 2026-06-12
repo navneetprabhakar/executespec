@@ -2249,6 +2249,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/OrgDto'
 
+  /org/me/model-matrix:
+    get:
+      tags: [Organization]
+      summary: Get effective org model matrix (ORG_ADMIN+)
+      description: >
+        Returns YAML defaults, sparse org overrides, selectable models by provider,
+        and `modelLabels` keyed by canonical model id. Non-ENTERPRISE orgs may read
+        the grid but receive `editable=false`.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tier:
+                    type: string
+                    nullable: true
+                  editable:
+                    type: boolean
+                  providers:
+                    type: array
+                    items:
+                      type: string
+                  tiers:
+                    type: array
+                    items:
+                      type: string
+                  defaults:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  overrides:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  modelsByProvider:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+                  modelLabels:
+                    type: object
+                    additionalProperties:
+                      type: string
+    put:
+      tags: [Organization]
+      summary: Replace org model-matrix overrides (ENTERPRISE)
+      description: >
+        Replaces the sparse `(provider:tier) -> model id` override map. Empty
+        overrides clear the org override layer. The response shape is the same as
+        the GET endpoint and includes `modelLabels`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                overrides:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+
   # ──────────────────────────────────────────────────
   # PROJECTS
   # ──────────────────────────────────────────────────
