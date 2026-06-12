@@ -164,7 +164,7 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
   return (
     <button
       onClick={onClick}
-      className='ide-card'
+      className='ide-card ide-benchmark-row'
       style={{
         width: '100%',
         textAlign: 'left',
@@ -178,16 +178,25 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
         color: 'var(--ide-fg)',
       }}
     >
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+      <div
+        className='ide-benchmark-row-head'
+        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
+      >
         <SuiteChip suite={r.suite} />
         <span style={{fontWeight: 600}}>{r.model}</span>
         <span style={{color: MUTED, fontSize: 12}}>{r.provider}</span>
-        <span style={{marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8}}>
+        <span
+          className='ide-benchmark-row-status'
+          style={{marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8}}
+        >
           {r.submissionStatus && <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />}
           <IdeBadge kind={benchKind(r.status)}>{r.status}</IdeBadge>
         </span>
       </div>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}>
+      <div
+        className='ide-benchmark-row-stats'
+        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
+      >
         <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
         <span style={{fontSize: 12, whiteSpace: 'nowrap'}}>
           <strong>
@@ -200,7 +209,12 @@ function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onC
         <span style={{fontSize: 12, color: MUTED}} title='input ↑ / output ↓ tokens'>
           {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓ tok
         </span>
-        <span style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}>{relTime(r.createdAt)}</span>
+        <span
+          className='ide-benchmark-row-time'
+          style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}
+        >
+          {relTime(r.createdAt)}
+        </span>
       </div>
     </button>
   );
@@ -219,17 +233,82 @@ const TH: React.CSSProperties = {
 };
 const TD: React.CSSProperties = {padding: '8px 12px', fontSize: 13, verticalAlign: 'top'};
 
-function TaskTable({tasks}: {tasks: api.BenchmarkTaskResult[]}) {
-  if (!tasks.length) return <EmptyCard>No task scores yet.</EmptyCard>;
-  const sorted = [...tasks].sort(
-    (a, b) => a.taskName.localeCompare(b.taskName) || a.attempt - b.attempt,
+/** One task with its up-to-k attempts folded together. Harbor runs k attempts per
+ *  task (and interleaves them across tasks), so the raw event rows list each task
+ *  up to k times — we group them so the table shows ONE row per task. */
+interface TaskGroup {
+  taskName: string;
+  attempts: api.BenchmarkTaskResult[]; // ascending by attempt
+  passed: boolean; // pass@k — any attempt with reward>0
+  done: number; // attempts scored so far
+  cost: number;
+  inTok: number;
+  outTok: number;
+  runId: string | null; // the passing attempt's run, else the latest
+}
+
+function groupTasks(tasks: api.BenchmarkTaskResult[]): TaskGroup[] {
+  const byName = new Map<string, api.BenchmarkTaskResult[]>();
+  for (const t of tasks) {
+    const arr = byName.get(t.taskName);
+    if (arr) arr.push(t);
+    else byName.set(t.taskName, [t]);
+  }
+  const groups: TaskGroup[] = [];
+  byName.forEach((atts, taskName) => {
+    const sorted = [...atts].sort((a, b) => a.attempt - b.attempt);
+    const passing = sorted.find((a) => a.reward > 0);
+    groups.push({
+      taskName,
+      attempts: sorted,
+      passed: Boolean(passing),
+      done: sorted.length,
+      cost: sorted.reduce((s, a) => s + Number(a.costUsd ?? 0), 0),
+      inTok: sorted.reduce((s, a) => s + Number(a.inputTokens ?? 0), 0),
+      outTok: sorted.reduce((s, a) => s + Number(a.outputTokens ?? 0), 0),
+      runId: (passing ?? sorted[sorted.length - 1])?.esRunId ?? null,
+    });
+  });
+  return groups.sort((a, b) => a.taskName.localeCompare(b.taskName));
+}
+
+/** Per-attempt pass/fail pips. The stored attempt NUMBER is harbor discovery order,
+ *  not a meaningful k-index, so we render positionally: ✓ pass · ✗ fail · · not-yet-run. */
+function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: number}) {
+  const slots = Math.max(k, attempts.length);
+  return (
+    <span style={{display: 'inline-flex', gap: 5, fontFamily: 'monospace'}}>
+      {Array.from({length: slots}).map((_, i) => {
+        const a = attempts[i];
+        if (!a)
+          return (
+            <span key={i} style={{color: MUTED, opacity: 0.4}} title='not yet run'>
+              ·
+            </span>
+          );
+        const pass = a.reward > 0;
+        return (
+          <span
+            key={i}
+            style={{color: pass ? 'var(--ide-green)' : 'var(--ide-red)'}}
+            title={`attempt ${i + 1}: ${pass ? 'pass' : 'fail'}`}
+          >
+            {pass ? '✓' : '✗'}
+          </span>
+        );
+      })}
+    </span>
   );
+}
+
+function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDone: boolean}) {
+  if (!groups.length) return <EmptyCard>No task scores yet.</EmptyCard>;
   return (
     <div className='ide-card' style={{padding: 0, overflowX: 'auto'}}>
       <table style={{width: '100%', borderCollapse: 'collapse'}}>
         <thead>
           <tr>
-            {['Task', 'Attempt', 'Result', 'Cost', 'Tokens', 'Run'].map((h) => (
+            {['Task', 'Result', `Attempts (k=${k})`, 'Cost', 'Tokens', 'Work'].map((h) => (
               <th key={h} style={TH}>
                 {h}
               </th>
@@ -237,25 +316,31 @@ function TaskTable({tasks}: {tasks: api.BenchmarkTaskResult[]}) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((t) => (
-            <tr key={t.id} style={{borderTop: '1px solid var(--ide-border)'}}>
-              <td style={{...TD, fontFamily: 'monospace'}}>{t.taskName}</td>
-              <td style={TD}>{t.attempt}</td>
+          {groups.map((g) => (
+            <tr key={g.taskName} style={{borderTop: '1px solid var(--ide-border)'}}>
+              <td style={{...TD, fontFamily: 'monospace'}}>{g.taskName}</td>
               <td style={TD}>
-                {t.reward > 0 ? (
-                  <span style={{color: 'var(--ide-green)'}}>✓ pass</span>
+                {g.passed ? (
+                  <span style={{color: 'var(--ide-green)'}}>✓ resolved</span>
+                ) : g.done >= k || runDone ? (
+                  <span style={{color: 'var(--ide-red)'}}>✗ failed</span>
                 ) : (
-                  <span style={{color: 'var(--ide-red)'}}>✗ fail</span>
+                  <span style={{color: MUTED}}>
+                    … {g.done}/{k}
+                  </span>
                 )}
               </td>
-              <td style={TD}>{fmtCost(t.costUsd)}</td>
+              <td style={TD}>
+                <AttemptPips attempts={g.attempts} k={k} />
+              </td>
+              <td style={TD}>{fmtCost(g.cost)}</td>
               <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
-                {fmtTok(t.inputTokens)}↑ {fmtTok(t.outputTokens)}↓
+                {fmtTok(g.inTok)}↑ {fmtTok(g.outTok)}↓
               </td>
               <td style={TD}>
-                {t.esRunId ? (
-                  <Link to={`/runs/${t.esRunId}`} style={{color: 'var(--ide-blue)'}}>
-                    {t.esRunId.slice(0, 8)}
+                {g.runId ? (
+                  <Link to={`/result/${g.runId}`} style={{color: 'var(--ide-blue)'}}>
+                    {g.runId.slice(0, 8)}
                   </Link>
                 ) : (
                   <span style={{color: MUTED}}>—</span>
@@ -298,6 +383,11 @@ function EventLog({events}: {events: api.BenchmarkEvent[]}) {
 
 function Detail({d, onClose}: {d: api.BenchmarkDetail; onClose: () => void}) {
   const r = d.run;
+  const groups = groupTasks(d.tasks);
+  const runDone = ['DONE', 'FAILED', 'CANCELLED'].includes((r.status || '').toUpperCase());
+  const resolved = groups.filter((g) => g.passed).length;
+  const failed = groups.filter((g) => !g.passed && (g.done >= r.k || runDone)).length;
+  const pending = groups.length - resolved - failed;
   return (
     <div style={{marginTop: 20}}>
       <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
@@ -354,9 +444,20 @@ function Detail({d, onClose}: {d: api.BenchmarkDetail; onClose: () => void}) {
       )}
 
       <div className='ide-h2' style={{marginTop: 18}}>
-        Tasks ({d.tasks.length})
+        Tasks ({groups.length})
+        <span style={{fontSize: 12, fontWeight: 400, color: MUTED, marginLeft: 8}}>
+          {d.tasks.length} attempts ·{' '}
+          <span style={{color: 'var(--ide-green)'}}>{resolved} resolved</span>
+          {failed > 0 && (
+            <>
+              {' · '}
+              <span style={{color: 'var(--ide-red)'}}>{failed} failed</span>
+            </>
+          )}
+          {pending > 0 && <> · {pending} in progress</>}
+        </span>
       </div>
-      <TaskTable tasks={d.tasks} />
+      <TaskTable groups={groups} k={r.k} runDone={runDone} />
 
       <div className='ide-h2' style={{marginTop: 18}}>
         Event log ({d.events.length})
@@ -439,17 +540,17 @@ export default function IdeBenchmark() {
         </button>
       </div>
       <div className='ide-sub'>
-        Live tracking of Terminal-Bench / SWE-bench runs + leaderboard submission. An external
+        Live tracking of Terminal-Bench / SWE-bench work + leaderboard submission. An external
         verifier publishes events; this auto-refreshes every few seconds.
       </div>
 
       {err && <ErrCard msg={err} />}
 
       {runs === null ? (
-        <IdeLoader label='Loading benchmark runs…' pad={24} />
+        <IdeLoader label='Loading benchmark work…' pad={24} />
       ) : runs.length === 0 ? (
         <EmptyCard>
-          No benchmark runs tracked yet. Runs appear here as the harness publishes events to{' '}
+          No benchmark work tracked yet. Items appear here as the harness publishes events to{' '}
           <code>/api/v2/test/benchmark</code>.
         </EmptyCard>
       ) : (

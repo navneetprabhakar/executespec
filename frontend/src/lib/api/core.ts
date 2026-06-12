@@ -935,6 +935,8 @@ export interface ModelMatrixView {
   defaults: Record<string, string>;
   overrides: Record<string, string>;
   modelsByProvider: Record<string, string[]>;
+  /** Display labels keyed by canonical model id. Falls back to the id when absent. */
+  modelLabels?: Record<string, string>;
 }
 
 export interface ProjectDto {
@@ -1131,6 +1133,23 @@ export interface ValidationReportData {
   testsTotal?: number | null;
   reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
   verifiedScore?: number | null;
+  rubricScore?: number | null;
+  /** Auditable evidence behind verifiedScore. Source/confidence make self-scored signals explicit. */
+  verificationLedger?: VerificationEvidence[];
+}
+
+export interface VerificationEvidence {
+  id: string;
+  label: string;
+  category: string;
+  status: 'PASS' | 'WARN' | 'FAIL' | 'UNKNOWN' | 'NOT_APPLICABLE' | string;
+  source: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | string;
+  claim: string;
+  summary: string;
+  artifact: string;
+  observed?: number | null;
+  total?: number | null;
 }
 
 export interface SharedReportData {
