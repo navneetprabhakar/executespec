@@ -212,7 +212,7 @@ export function IdeBilling() {
               }}
             >
               <Stat
-                label='Runs'
+                label='Work items'
                 value={
                   <>
                     {periodRuns} / {runCap}
@@ -242,10 +242,10 @@ export function IdeBilling() {
               >
                 <div>
                   <strong style={{color: 'var(--ide-fg-bright)'}}>
-                    Bring your own keys, bypass the $3 cap.
+                    Bring your own provider keys, bypass the $3 cap.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
-                    Upgrade to TEAM and run on your own Anthropic / OpenAI / Gemini / DeepSeek /
+                    Upgrade to TEAM and use your own Anthropic / OpenAI / Gemini / DeepSeek /
                     Fireworks keys — you pay the LLM bill directly, no platform cap.
                   </span>
                 </div>
@@ -273,7 +273,7 @@ export function IdeBilling() {
                 marginBottom: 8,
               }}
             >
-              Runs used
+              Work used
             </div>
             <div
               style={{
@@ -320,7 +320,7 @@ export function IdeBilling() {
               <span>${totalSpend.toFixed(2)}</span>
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
-              <span>Successful runs (30d)</span>
+              <span>Successful work (30d)</span>
               {/* TIER-6 — a real 0 renders as 0; '—' only when the metric is
                   genuinely unknown (usage endpoint unavailable). */}
               <span>{typeof usage?.successfulRuns === 'number' ? usage.successfulRuns : '—'}</span>
@@ -349,6 +349,7 @@ export function IdeBilling() {
                 return (
                   <div
                     key={String(p.id || num)}
+                    className='ide-invoice-row'
                     style={{
                       padding: '11px 16px',
                       borderBottom:
@@ -361,8 +362,13 @@ export function IdeBilling() {
                     }}
                   >
                     <div style={{flex: 1, minWidth: 0}}>
-                      <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-                        {num} — {amount}
+                      <div
+                        className='ide-invoice-title'
+                        style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}
+                      >
+                        <span className='ide-invoice-number'>{num}</span>
+                        <span className='ide-invoice-sep'> — </span>
+                        <span>{amount}</span>
                       </div>
                       <div
                         style={{
@@ -414,29 +420,29 @@ export function IdeBilling() {
 // Feature bullets by tier. ✓ = included, ○ = constraint (rendered muted).
 const FEATURES: Record<string, string[]> = {
   FREE: [
-    '✓ 15 runs / month',
+    '✓ 15 work items / month',
     '✓ Small specs (1 credit)',
     '✓ Email support',
-    '○ $3 per-run cost cap',
+    '○ $3 per-work cost cap',
     '○ 1 project · 1 repo',
   ],
   PRO: [
-    '✓ 30 runs / month on managed keys',
+    '✓ 30 work items / month on managed keys',
     '✓ Anthropic · OpenAI · Gemini',
     '✓ PR review + code review (4 scans/mo)',
     '✓ 2 projects · 2 repos each',
-    '○ $5 per-run cap — BYOK lifts it',
+    '○ $5 per-work cap — provider keys lift it',
   ],
   TEAM: [
-    '✓ Unlimited runs on your keys',
+    '✓ Unlimited work on your keys',
     '✓ No platform cost cap',
     '✓ Org spend caps + approval thresholds',
-    '✓ 5 projects · cross-repo runs',
+    '✓ 5 projects · cross-repo work',
     '✓ Unlimited code reviews + sharing',
     '✓ Autofix: PR review · tech debt · code scans',
   ],
   ENTERPRISE: [
-    '✓ Unlimited runs · no cost cap',
+    '✓ Unlimited work · no cost cap',
     '✓ Model matrix override + per-run model pins',
     '✓ OpenRouter gateway models',
     '✓ Standards · Contracts · ADRs',
@@ -447,9 +453,9 @@ const FEATURES: Record<string, string[]> = {
 
 // Card sub-copy — product truths (runs/caps/seats), not prices.
 const SUBCOPY: Record<string, string> = {
-  FREE: 'For solo developers · 15 runs/month · $3/run cap',
-  PRO: 'For individuals · 30 runs/month on our keys · $5/run cap · BYOK lifts the cap',
-  TEAM: 'Unlimited runs on your own keys · 1–20 seats · no per-run cap',
+  FREE: 'For solo developers · 15 work items/month · $3/work cap',
+  PRO: 'For individuals · 30 work items/month on our keys · $5/work cap · provider keys lift the cap',
+  TEAM: 'Unlimited work on your own keys · 1–20 seats · no per-work cap',
   ENTERPRISE: 'SSO · SLA · custom models · dedicated support',
 };
 

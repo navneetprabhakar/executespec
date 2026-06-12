@@ -62,20 +62,11 @@ The selling-point line: **"AI that ships pull requests your team will actually m
 - **Security**: 8-layer defense-in-depth, sandboxed code execution, BYOK keys encrypted at rest and never logged, TLS 1.3, RBAC with tenant-isolation guards pinned by automated tests
 - **Compliance**: GDPR (data export + erasure built-in, SCCs for EU transfers), signed DPA available. SOC 2 Type II is on the roadmap, not yet certified — security questionnaire available on request.
 
-## Benchmarks
-
-- Results page: https://executespec.ai/benchmarks/ — raw data: https://executespec.ai/data/benchmarks.json (one JSON entry per suite/run; only entries with `"publishable": true` and `"mode": "blind"` are published results).
-- **Publication policy: only blind runs of the production pipeline are published.** Blind = the pipeline sees the issue-only spec (never the benchmark's tests or expected patch); hidden tests are applied externally at scoring; the run uses the exact code path customers run, with no task-specific prompts.
-- Oracle-mode results (tests visible in the prompt) are discarded, never published — including ExecuteSpec's own earlier oracle-mode SWE-bench numbers.
-- Every published number carries its mode, slice, model, and run date — no naked percentages. Derived figures (resolved %, cost per resolved) are computed from the raw counts at render time.
-- Suites still in re-measurement appear as name-only "pending" rows, never as estimates.
-
 ## Links
 
 - Home: https://executespec.ai/
 - App (sign up): https://app.executespec.ai
 - Pricing: https://executespec.ai/#pricing
-- Benchmarks: https://executespec.ai/benchmarks/
 - Trust & security: https://app.executespec.ai/trust
 - FAQ: https://executespec.ai/#faq
 

@@ -34,7 +34,7 @@ For exhaustive class discovery use:
 | --- | --- |
 | `RunController` | `/api/runs`, approval, retry, cancel, archive, sync, push, cost. |
 | `ModelController` | `/api/models/available`. |
-| `OrgController` | `/api/org`, `/api/org/me/model-matrix`, org settings. |
+| `OrgController` | `/api/org`, `/api/org/me/model-matrix` (defaults, overrides, selectable models, `modelLabels`), org settings. |
 | `AuthController` | `/api/auth/*`, user settings, PATs, provider-key validation. |
 | `ProjectController` and project companions | `/api/projects/*`, repos, docs, architecture, memory, tech debt. |
 | `PrReviewController` | `/api/pr-reviews`. |
@@ -54,7 +54,8 @@ For exhaustive class discovery use:
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
 | `ModelRegistry` / `ModelResolver` | YAML model matrix and tier lookup. |
 | `RunCostTracker` | Token/cost accounting and pricing lookup. |
-| `ValidationReportService` | Additive score and report assembly. |
+| `ValidationReportService` | Additive verifiedScore, trust caps, verification ledger, and report assembly. |
+| `VerifiedScoreBackfillService` | SUPER_ADMIN one-shot recomputation of historical report scores. |
 | `ProjectAccessGuard` / `RunAccessGuard` | Tenant access checks. |
 | `BillingService` / `RunTopupService` | Subscription/top-up operations. |
 

@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Link, useNavigate, useSearchParams} from 'react-router-dom';
+import {useNavigate, useSearchParams} from 'react-router-dom';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
@@ -20,9 +20,8 @@ export default function AuthCallbackPage() {
     const refresh = searchParams.get('refresh');
 
     if (!token) {
-      // Persistent error — no auto-redirect; the user leaves via the
-      // "Back to sign-in" button so the message stays readable.
       setError('Authentication failed. No token received.');
+      setTimeout(() => navigate('/login', {replace: true}), 2000);
       return;
     }
 
@@ -84,22 +83,12 @@ export default function AuthCallbackPage() {
           placeItems: 'center',
           minHeight: '100dvh',
           background: 'var(--signal-bg)',
+          color: 'var(--signal-coral-text)',
           padding: 24,
           textAlign: 'center',
         }}
       >
-        <div>
-          <p
-            role='alert'
-            aria-live='polite'
-            style={{fontSize: 14, margin: '0 0 16px', color: 'var(--signal-coral-text)'}}
-          >
-            {error}
-          </p>
-          <Link to='/login' replace className='signal-btn secondary'>
-            Back to sign-in
-          </Link>
-        </div>
+        <p style={{fontSize: 14, margin: 0}}>{error}</p>
       </div>
     );
   }
@@ -115,8 +104,6 @@ export default function AuthCallbackPage() {
     >
       <div style={{textAlign: 'center'}}>
         <div
-          role='status'
-          aria-label='Completing sign in'
           style={{
             width: 32,
             height: 32,
@@ -124,14 +111,13 @@ export default function AuthCallbackPage() {
             border: '3px solid var(--signal-hairline)',
             borderTopColor: 'var(--signal-coral)',
             margin: '0 auto 16px',
-            // signal-spin is defined globally in signal.css (loaded via main.tsx);
-            // the previous local `spin` keyframe is gone with the <style> tag.
-            animation: 'signal-spin 0.9s linear infinite',
+            animation: 'spin 0.9s linear infinite',
           }}
         />
         <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0}}>
           Completing sign in...
         </p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
   );

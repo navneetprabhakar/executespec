@@ -119,12 +119,6 @@ variable "enable_iap" {
   default     = true
 }
 
-variable "deploy_service_account" {
-  description = "GitHub Actions WIF deploy SA (impersonated by Build & Deploy to upload the JAR). Fixed across envs — the compute_sa module only grants the env's OWN compute SA (== the deploy SA for dev only), so non-dev deploy buckets must grant this shared SA explicitly or `gsutil cp` 403s."
-  type        = string
-  default     = "executespec-dev-gce@executespecv1.iam.gserviceaccount.com"
-}
-
 # ── Labels ──────────────────────────────────────────────────────────────────
 
 variable "labels" {

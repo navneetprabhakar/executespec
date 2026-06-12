@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.*;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -17,6 +18,7 @@ import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.report.model.ReportIssueDTO;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.report.model.ValidationReportShareDTO;
+import com.navneet.executespec.report.model.VerificationEvidenceDTO;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
@@ -670,8 +672,283 @@ public class ValidationReportService {
         entity.getTestsTotal(),
         entity.getReviewerVerdict(),
         entity.getVerifiedScore(),
+        buildVerificationLedger(entity, issues),
         entity.getRubricScore(),
         entity.getPreviewUrl());
+  }
+
+  List<VerificationEvidenceDTO> buildVerificationLedger(
+      ValidationReport entity, List<ReportIssueDTO> issues) {
+    List<VerificationEvidenceDTO> out = new ArrayList<>();
+
+    out.add(
+        evidence(
+            "code-delivered",
+            "Code delivered",
+            "CODE",
+            entity.getFilesGenerated() > 0 ? "PASS" : "FAIL",
+            "DETERMINISTIC",
+            "HIGH",
+            "The run produced source changes.",
+            entity.getFilesGenerated() > 0
+                ? entity.getFilesGenerated() + " file(s) generated or modified."
+                : "No generated files were captured; the score cannot vouch for delivery.",
+            "validation_report.files_generated",
+            entity.getFilesGenerated(),
+            null));
+
+    Boolean build = entity.getFinalBuildPassed();
+    out.add(
+        evidence(
+            "build",
+            "Build",
+            "BUILD",
+            build == null ? "UNKNOWN" : build ? "PASS" : "FAIL",
+            "DETERMINISTIC",
+            build == null ? "MEDIUM" : "HIGH",
+            "The generated workspace compiled or passed the configured build check.",
+            build == null
+                ? "No final build signal was stored for this report."
+                : build ? "Final build passed." : "Final build failed.",
+            "validation_report.final_build_passed",
+            build == null ? null : build ? 1 : 0,
+            build == null ? null : 1));
+
+    Integer testsPassed = entity.getTestsPassed();
+    Integer testsTotal = entity.getTestsTotal();
+    int total = testsTotal == null ? 0 : testsTotal;
+    int passed = testsPassed == null ? 0 : testsPassed;
+    out.add(
+        evidence(
+            "tests",
+            "Tests",
+            "TESTS",
+            total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
+            "DETERMINISTIC",
+            total <= 0 ? "MEDIUM" : "HIGH",
+            "Generated or workspace tests passed.",
+            total <= 0
+                ? "No concrete test execution was captured."
+                : passed + "/" + total + " tests passed.",
+            "validation_report.tests_passed/tests_total",
+            total <= 0 ? null : passed,
+            total <= 0 ? null : total));
+
+    String reviewer = entity.getReviewerVerdict();
+    out.add(
+        evidence(
+            "reviewer",
+            "Reviewer",
+            "REVIEW",
+            reviewerStatus(reviewer),
+            "LLM_REVIEWER",
+            "MEDIUM",
+            "The reviewer pass found no unresolved critical implementation issues.",
+            reviewer == null ? "Reviewer verdict unavailable." : "Reviewer verdict: " + reviewer,
+            "validation_report.reviewer_verdict",
+            null,
+            null));
+
+    int blockingIssues = countBlockingIssues(issues);
+    out.add(
+        evidence(
+            "report-issues",
+            "Report issues",
+            "ISSUES",
+            blockingIssues == 0 ? "PASS" : "FAIL",
+            "HYBRID",
+            "MEDIUM",
+            "No non-lint build/review/bug issues remain open in the report.",
+            blockingIssues == 0
+                ? "No non-lint report issues."
+                : blockingIssues + " non-lint issue(s) remain in the report.",
+            "validation_report.issues_json",
+            blockingIssues,
+            null));
+
+    AccuracyFacts accuracy = parseAccuracyFacts(entity.getAccuracyJson());
+    out.add(
+        evidence(
+            "spec-adherence",
+            "Spec adherence",
+            "SPEC",
+            accuracy.score() == null
+                ? "UNKNOWN"
+                : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
+            "LLM_ASSESSMENT",
+            "LOW",
+            "The delivered code appears to satisfy the natural-language spec.",
+            accuracy.score() == null
+                ? "Accuracy assessment was not captured."
+                : "LLM assessment: "
+                    + accuracy.score()
+                    + "/100"
+                    + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
+                    + ".",
+            "validation_report.accuracy_json",
+            accuracy.score(),
+            accuracy.score() == null ? null : 100));
+
+    if (accuracy.endpointCoverage() != null) {
+      out.add(
+          evidence(
+              "endpoint-coverage",
+              "Endpoint coverage",
+              "ENDPOINTS",
+              accuracy.endpointCoverage() >= 95
+                  ? "PASS"
+                  : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
+              "LLM_ASSISTED_COUNT",
+              "MEDIUM",
+              "Expected API endpoints are present in the generated implementation.",
+              "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
+              "validation_report.accuracy_json.endpointCoverage",
+              accuracy.endpointCoverage(),
+              100));
+    }
+
+    if (accuracy.testCoverageLevel() != null) {
+      String level = accuracy.testCoverageLevel();
+      out.add(
+          evidence(
+              "test-coverage-judgment",
+              "Test coverage judgment",
+              "TESTS",
+              switch (level.toUpperCase()) {
+                case "GOOD", "COMPREHENSIVE" -> "PASS";
+                case "PARTIAL" -> "WARN";
+                case "NONE" -> "FAIL";
+                default -> "UNKNOWN";
+              },
+              "LLM_ASSESSMENT",
+              "LOW",
+              "Test coverage matches what the spec implied should be tested.",
+              "LLM test coverage judgment: " + level + ".",
+              "validation_report.accuracy_json.testCoverageLevel",
+              null,
+              null));
+    }
+
+    TrustCap trustCap =
+        trustCap(
+            100,
+            entity.getFinalBuildPassed(),
+            passed,
+            total,
+            entity.getReviewerVerdict(),
+            countBlockingIssues(issues),
+            accuracy.testCoverageLevel());
+    if (trustCap.cap() < 100) {
+      out.add(
+          evidence(
+              "trust-cap",
+              "Trust cap",
+              "SCORE",
+              entity.getVerifiedScore() != null && entity.getVerifiedScore() <= trustCap.cap()
+                  ? "WARN"
+                  : "UNKNOWN",
+              "INTERNAL_FORMULA",
+              "HIGH",
+              "The headline score is capped when verification signals say the run needs review.",
+              "Maximum credible score capped at "
+                  + trustCap.cap()
+                  + " because "
+                  + trustCap.reason()
+                  + ".",
+              "validation_report.*",
+              entity.getVerifiedScore(),
+              trustCap.cap()));
+    }
+
+    out.add(
+        evidence(
+            "score-summary",
+            "Internal score",
+            "SCORE",
+            entity.getVerifiedScore() == null
+                ? "UNKNOWN"
+                : entity.getVerifiedScore() >= 85
+                    ? "PASS"
+                    : entity.getVerifiedScore() >= 70 ? "WARN" : "FAIL",
+            "INTERNAL_FORMULA",
+            "MEDIUM",
+            "The internal routing score summarizes the available evidence.",
+            "verifiedScore="
+                + (entity.getVerifiedScore() == null ? "n/a" : entity.getVerifiedScore())
+                + (entity.getRubricScore() == null
+                    ? ""
+                    : ", rubricScore=" + entity.getRubricScore())
+                + ". Treat this as a summary, not independent proof.",
+            "validation_report.verified_score",
+            entity.getVerifiedScore(),
+            entity.getVerifiedScore() == null ? null : 100));
+
+    return List.copyOf(out);
+  }
+
+  private VerificationEvidenceDTO evidence(
+      String id,
+      String label,
+      String category,
+      String status,
+      String source,
+      String confidence,
+      String claim,
+      String summary,
+      String artifact,
+      Integer observed,
+      Integer total) {
+    return new VerificationEvidenceDTO(
+        id, label, category, status, source, confidence, claim, summary, artifact, observed, total);
+  }
+
+  private String reviewerStatus(String reviewerVerdict) {
+    if (reviewerVerdict == null) return "UNKNOWN";
+    return switch (reviewerVerdict) {
+      case "CLEAN", "FIXED_ISSUES" -> "PASS";
+      case "UNRESOLVED_ISSUES" -> "WARN";
+      case "REVIEW_FAILED" -> "FAIL";
+      default -> "UNKNOWN";
+    };
+  }
+
+  private int countBlockingIssues(List<ReportIssueDTO> issues) {
+    if (issues == null) return 0;
+    int count = 0;
+    for (ReportIssueDTO issue : issues) {
+      if (issue == null || issue.severity() == null) continue;
+      if (!"WOULD_FAIL_LINT".equals(issue.severity())) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private record AccuracyFacts(
+      Integer score, String grade, Integer endpointCoverage, String testCoverageLevel) {}
+
+  private AccuracyFacts parseAccuracyFacts(String accuracyJson) {
+    if (accuracyJson == null || accuracyJson.isBlank()) {
+      return new AccuracyFacts(null, null, null, null);
+    }
+    try {
+      JsonNode root = objectMapper.readTree(accuracyJson);
+      Integer score =
+          root.hasNonNull("specAdherenceScore") ? root.get("specAdherenceScore").asInt() : null;
+      String grade =
+          root.hasNonNull("overallAccuracyGrade")
+              ? root.get("overallAccuracyGrade").asText()
+              : null;
+      JsonNode endpoint = root.path("endpointCoverage");
+      Integer endpointCoverage =
+          endpoint.hasNonNull("coveragePercent") ? endpoint.get("coveragePercent").asInt() : null;
+      String testCoverage =
+          root.hasNonNull("testCoverageLevel") ? root.get("testCoverageLevel").asText() : null;
+      return new AccuracyFacts(score, grade, endpointCoverage, testCoverage);
+    } catch (Exception e) {
+      log.warn("Failed to parse accuracy facts for verification ledger: {}", e.getMessage());
+      return new AccuracyFacts(null, null, null, null);
+    }
   }
 
   private ValidationReportShareDTO toShareDTO(ValidationReport entity) {
@@ -1215,7 +1492,75 @@ public class ValidationReportService {
 
     if (weightTotal <= 0.0) return 0;
     double raw = weightedSum / weightTotal;
-    return (int) Math.max(0, Math.min(100, Math.round(raw)));
+    int weighted = (int) Math.max(0, Math.min(100, Math.round(raw)));
+    return trustCap(
+            weighted,
+            finalBuildPassed,
+            testsPassed,
+            testsTotal,
+            reviewerVerdictName,
+            unfixedCriticalCount,
+            testCoverageLevel)
+        .score();
+  }
+
+  record TrustCap(int score, int cap, String reason) {}
+
+  /**
+   * Trust caps run after the weighted score. The additive score intentionally preserves partial
+   * credit, but customers read the headline as a trust signal; review/build/test blockers must cap
+   * the maximum credible score even when other slots are strong.
+   */
+  TrustCap trustCap(
+      int rawScore,
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel) {
+    int cap = 100;
+    List<String> reasons = new ArrayList<>();
+
+    if ("REVIEW_FAILED".equals(reviewerVerdictName)) {
+      cap = Math.min(cap, 70);
+      reasons.add("reviewer failed");
+    } else if ("UNRESOLVED_ISSUES".equals(reviewerVerdictName)) {
+      cap = Math.min(cap, 80);
+      reasons.add("reviewer reported unresolved issues");
+    }
+
+    if (unfixedCriticalCount >= 3) {
+      cap = Math.min(cap, 70);
+      reasons.add(unfixedCriticalCount + " unresolved critical issues");
+    } else if (unfixedCriticalCount >= 1) {
+      cap = Math.min(cap, 85);
+      reasons.add(unfixedCriticalCount + " unresolved critical issue(s)");
+    }
+
+    if (Boolean.FALSE.equals(finalBuildPassed)) {
+      cap = Math.min(cap, 75);
+      reasons.add("final build failed");
+    }
+
+    if (testsTotal > 0 && testsPassed < testsTotal) {
+      cap = Math.min(cap, testsPassed <= 0 ? 70 : 85);
+      reasons.add(testsPassed + "/" + testsTotal + " tests passed");
+    } else if (testsTotal <= 0) {
+      String level = testCoverageLevel == null ? null : testCoverageLevel.toUpperCase();
+      if ("NONE".equals(level)) {
+        cap = Math.min(cap, 75);
+        reasons.add("test coverage was judged NONE");
+      } else if ("UNKNOWN".equals(level)) {
+        cap = Math.min(cap, 90);
+        reasons.add("tests were not concretely measured");
+      }
+    }
+
+    int boundedCap = Math.max(0, Math.min(100, cap));
+    int score = Math.min(Math.max(0, Math.min(100, rawScore)), boundedCap);
+    String reason = reasons.isEmpty() ? "no trust cap applied" : String.join("; ", reasons);
+    return new TrustCap(score, boundedCap, reason);
   }
 
   /**

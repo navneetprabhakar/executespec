@@ -363,20 +363,36 @@ synthesises `WorkerReports`/`ReviewReport`, runs
   (flag `scoring.additive-v2`, seeded by V201; `computeVerifiedScoreAdditive`):
   ```
   verifiedScore = clamp(0, 100, round( Σ(weight × slotScore) / Σ(weight) ))   // over fired slots
-  CODE_DELIVERED(30)  filesGenerated>0 ⇒ 100 else 0 (hard 0-floor on the headline)
+  CODE_DELIVERED(30)  delivery + endpoint coverage, hard 0-floor when filesGenerated == 0
   BUILD(25)           PASSING 100 / FAILING 0; skipped when finalBuildPassed null
-  TESTS(20)           passed/total ×100 if tests ran; else damped LLM grade (G/C=70, P=40, N=10)
+  TESTS(20)           real passed/total blended with coverage quality, else damped LLM grade
   REVIEWER(20)        CLEAN 100 / FIXED 85 / UNRESOLVED 40 / FAILED 10
   CRITICALS(5)        100 − 20×unfixedCriticalCount, floored 0
   ```
   Unmeasured signals drop from both numerator and denominator (no implicit
-  ×1.0). `endpointFactor` and the two old trust-gate floors are retired — the
-  reviewer's wiring pass already covers the bug class they guarded. The legacy
+  ×1.0). `scoring.gaming-guards` keeps the slot scores honest by linking code
+  delivery to endpoint coverage and capping test credit when coverage quality is
+  missing or partial. After the weighted score is computed, RL-2026-06-026 trust
+  caps limit the headline when the reviewer failed, unresolved issues remain, the
+  final build failed, concrete tests failed, or test coverage is missing/none.
+  This keeps the number useful for routing while preventing a high headline from
+  implying independent proof. `endpointFactor` and the two old trust-gate floors
+  are retired — the reviewer's wiring pass already covers the bug class they
+  guarded. The legacy
   multiplicative formula (`buildFactor × testFactor × reviewerFactor ×
   endpointFactor × criticalDamper`, multiplicative since 264cca58) survives
   behind `scoring.additive-v2=false`.
+- Exposes `verificationLedger[]` on the report DTO. Each row labels the claim,
+  source (`DETERMINISTIC`, `LLM_REVIEWER`, `LLM_ASSESSMENT`,
+  `LLM_ASSISTED_COUNT`, or `INTERNAL_FORMULA`), confidence, observed/total
+  values, and artifact reference. This is the public explanation layer behind
+  `verifiedScore`; the score itself remains an internal formula summary.
 - Computes `rubricScore` (additive 25/20/20/15/10/10 dimension breakdown, PR-E
   Phase A, 2026-05-13 / V194). Spec-aware via `rubricTestPointsFromCoverageLevel`.
+- SUPER_ADMINs can run `POST /api/admin/validation-reports/backfill-verified-score`
+  to recompute `verifiedScore` and `rubricScore` for existing reports. The
+  endpoint accepts optional `{runId, limit, dryRun}`; use `dryRun=true` before a
+  broad pass.
 - Reroutes provider OPENAI → ANTHROPIC for the report LLM call to dodge Spring AI
   1.1.4 OpenAI `extra_body` bug. Flagged as a billing-attribution hazard
   (audit E #37); a proper fix is to surface an explicit provider override on
@@ -483,14 +499,15 @@ make those scorer-facing checks explicit.
 
 ---
 
-## 5. Frontend chrome (IDE-first, Console opt-in)
+## 5. Frontend chrome (Console control plane)
 
-The protected app is IDE-native. `App.tsx` mounts
-[`IdeWorkspace`](../frontend/src/ide/IdeWorkspace.tsx) for protected routes by
-default. A newer control-plane shell,
-[`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx), is opt-in behind
-`localStorage es:console='1'`; it renders the same protected route outlet and keeps
-the default IDE shell byte-identical when the flag is absent.
+The protected web app is now the Console control plane. `App.tsx` mounts
+[`ConsoleShell`](../frontend/src/console/ConsoleShell.tsx) for every protected
+route; the old `localStorage es:console='1'` opt-in path and
+`IdeWorkspace` shell are removed. The `frontend/src/ide/` package remains the
+route-level implementation layer for runs, projects, billing, org settings,
+benchmark tracking, and related protected surfaces. The in-editor IDE metaphor
+belongs to the VS Code extension, not the web chrome.
 
 `frontend/src/signal/` now holds the standalone public pages (auth, marketing, legal,
 shared links), `AdminPage` for `/admin/*`, and shared components/styles reused by
@@ -501,16 +518,15 @@ cleanup.
 ### Route table
 
 The router lives in
-[`frontend/src/App.tsx`](../frontend/src/App.tsx). The default protected shell is
-[`frontend/src/ide/IdeWorkspace.tsx`](../frontend/src/ide/IdeWorkspace.tsx), with
-[`frontend/src/console/ConsoleShell.tsx`](../frontend/src/console/ConsoleShell.tsx)
-available behind the localStorage flag.
+[`frontend/src/App.tsx`](../frontend/src/App.tsx). The protected shell is
+[`frontend/src/console/ConsoleShell.tsx`](../frontend/src/console/ConsoleShell.tsx).
+Heavy protected areas are lazy-loaded so the run loop remains in the entry path.
 Highlights:
 
 - **Public**: `/login`, `/register`, `/welcome`, `/pricing`, `/trust`, `/terms`,
   `/privacy`, `/dpa`, `/shared/:token`, `/reports/shared/:token`, `/forgot-password`,
   `/reset-password`, `/accept-invite`, `/auth/callback`.
-- **Protected** (under `<ProtectedRoute>` + IDE or Console shell):
+- **Protected** (under `<ProtectedRoute>` + Console shell):
   - Run loop: `/home`, `/runs`, `/compose`, `/plan/:runId`, `/live/:runId`,
     `/result/:runId`.
   - Project pages: `/projects`, `/projects/:projectId` (Compose default landing),
@@ -525,10 +541,11 @@ Highlights:
 
 ### Primitives and surfaces
 
-IDE-native components live under [`frontend/src/ide/`](../frontend/src/ide/):
-`IdeWorkspace`, `IdeSurfaces`, `IdeRunResult`, `IdePlan`, `IdeProject*`,
-`IdeSystem`, `IdeDiscovery`, `IdeBilling`, `IdeOrg`, and `IdeSettings`. The console
-reframe lives under [`frontend/src/console/`](../frontend/src/console/). Shared
+Console components live under [`frontend/src/console/`](../frontend/src/console/):
+`ConsoleShell`, `ConsoleHome`, and `ConsoleDecisions`. Route-level protected
+surfaces live under [`frontend/src/ide/`](../frontend/src/ide/): `IdeSurfaces`,
+`IdeRunResult`, `IdePlan`, `IdeProject*`, `IdeSystem`, `IdeDiscovery`,
+`IdeBilling`, `IdeOrg`, and `IdeSettings`. Shared
 Signal-era primitives such as `Markdown`, `CodeView`, `FileTree`, review panels,
 modals, auth layout, and public-page CSS remain in `frontend/src/signal/`.
 
