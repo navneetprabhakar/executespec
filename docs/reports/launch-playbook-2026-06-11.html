@@ -83,7 +83,7 @@
   <tr><td>UX wave 1 (review/11 defects)</td><td><span class="chip ok">DONE</span> &nbsp;shipped + live-verified 375px/desktop (commit <code>26ab3f66</code>)</td></tr>
   <tr><td>Trust-number bugs — score-on-Gradle · OpenRouter $0 cost · Stripe activation</td><td><span class="chip warn">IN FLIGHT</span> &nbsp;the only engineering launch gates</td></tr>
   <tr><td>Benchmarks</td><td><span class="chip warn">RE-RUNNING</span> &nbsp;all public surfaces number-free until the rebuilt eval lands</td></tr>
-  <tr><td>Console-as-default chrome</td><td><span class="chip todo">YOUR CALL</span> &nbsp;preview via the “Try Console ⤴” status-bar button</td></tr>
+  <tr><td>Console-as-default chrome</td><td><span class="chip ok">DONE</span> &nbsp;protected routes mount <code>ConsoleShell</code> directly</td></tr>
   <tr><td>Ops — prod URL, coupons, alerts, status page</td><td><span class="chip todo">CHECKLIST</span> &nbsp;§7</td></tr>
 </table>
 <div class="callout">The one-sentence thesis: <b>you built a trust machine; launch is the moment every surface
@@ -146,11 +146,11 @@ timestamps (absolute on hover) · ⌘K off touch · OpenAI/OpenRouter casing · 
 Production-vs-Prototype explainer · Pro cap $25→$5 · status-bar chip readable + 375px overflow fixed +
 “IDE · Beta” deleted · diff tints · first-run starter samples · PAT pre-flight · <b>verified score on the
 run-list wire</b> with 4-band badges (the score column previously read a field that never existed).</div>
-<div class="callout"><b>Pending decision — Console as default.</b> Preview both: status bar → <b>Try Console ⤴</b>
-(back: remove <code>es:console</code> from localStorage). On go: reframe Phases 2–4 — Home depth → mobile pass →
-flip default, retire the IDE shell (editor metaphor stays in run-result Code tabs + the VS Code extension).
-≈ 1 focused week.</div>
-<p><b>Wave-2 order:</b> ① Console flip · ② notification spam (auto-read + digest; fresh accounts show “9+”) ·
+<div class="callout"><b>Console default — implemented on the cleanup branch.</b> The protected web app mounts
+<code>ConsoleShell</code> directly; the old <code>localStorage es:console</code> preview path and
+<code>IdeWorkspace</code> shell are removed. Route-level <code>ide/</code> surfaces still own runs, projects,
+billing, org settings, benchmark tracking, and code/result views.</div>
+<p><b>Next UX order:</b> ① notification spam (auto-read + digest; fresh accounts show “9+”) ·
 ③ typography split (mono = data, sans = prose) + ONE accent (kill coral-as-link) · ④ result-page action
 hierarchy + tab merge · ⑤ provider-first removal (rides the model-taxonomy rework, review docs 09/10).</p>
 

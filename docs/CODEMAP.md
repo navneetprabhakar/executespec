@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the VS Code-style **IDE workspace** (`frontend/src/ide/`) — the only chrome since the 2026-05-22 IDE-only switch; the Signal pages were retired in the 2026-05-23 cleanup, so `frontend/src/signal/` now holds only the public + admin pages + shared components.
+Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
 
 ---
 

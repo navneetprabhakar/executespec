@@ -9,6 +9,9 @@ The model matrix has three layers:
 3. User-level BYOK keys and future user model preferences for users allowed to bring their own keys.
 
 FREE users do not get a matrix. They should receive the configured free-tier default model from properties only.
+The org matrix API returns `modelLabels` keyed by canonical model id, so the UI
+renders YAML display labels instead of raw provider slugs while still submitting
+canonical ids.
 
 ## Provider Classes
 
@@ -23,6 +26,7 @@ FREE users do not get a matrix. They should receive the configured free-tier def
 | --- | --- | --- |
 | YAML model registry | Live | `router/ModelRegistry.java`, `application.yml` |
 | Tier-to-model lookup | Live | `router/ModelResolver.java` |
+| Matrix display labels | Live | `OrgController.ModelMatrixView.modelLabels`, `router/ModelRegistry.displayLabelFor` |
 | Native tool routing | Live | `agent/LlmRouter.java` |
 | OpenAI-wire shared client | Live | `agent/OpenAiNativeToolClient.java` |
 | Gemini native client | Live | `agent/GeminiNativeToolClient.java` |
