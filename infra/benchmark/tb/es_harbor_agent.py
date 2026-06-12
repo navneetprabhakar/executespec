@@ -22,8 +22,8 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
-    ES_TB_LLM_READ_TIMEOUT_SECONDS  backend per-call LLM read timeout (default 120)
-    ES_TB_LLM_RETRY_ATTEMPTS        backend transient retry attempts (default 2)
+    ES_TB_LLM_READ_TIMEOUT_SECONDS  backend per-call LLM read timeout (default 240)
+    ES_TB_LLM_RETRY_ATTEMPTS        backend transient retry attempts (default 1)
     ES_TB_STARTUP_RETRIES           whole-run retries after zero-tool ERROR (default 1)
 """
 import asyncio
@@ -134,8 +134,8 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
-        self.llm_read_timeout = int(os.environ.get("ES_TB_LLM_READ_TIMEOUT_SECONDS", "120"))
-        self.llm_retry_attempts = int(os.environ.get("ES_TB_LLM_RETRY_ATTEMPTS", "2"))
+        self.llm_read_timeout = int(os.environ.get("ES_TB_LLM_READ_TIMEOUT_SECONDS", "240"))
+        self.llm_retry_attempts = int(os.environ.get("ES_TB_LLM_RETRY_ATTEMPTS", "1"))
         self.startup_retries = int(os.environ.get("ES_TB_STARTUP_RETRIES", "1"))
         if not self.provider or not self.model:
             raise ValueError("ES_PROVIDER and ES_MODEL env vars are required")
