@@ -296,9 +296,9 @@ public class ProgramBenchTaskService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, taskId));
     try {
-      // V182 — runMode=PATCH so the orchestrator dispatches a single
-      // PatchAgent loop instead of fragmenting the reverse-engineer
-      // task across classifier / planner / executor / reviewer phases.
+      // V182 — runMode=PATCH so the orchestrator dispatches a single CodeGenEngine loop instead of
+      // fragmenting the reverse-engineer task across classifier / planner / executor / reviewer
+      // phases.
       run =
           orchestrator.submitRun(
               userRequest,

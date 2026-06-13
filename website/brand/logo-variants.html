@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ExecuteSpec Logo Directions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0B0D10;
+      --surface: #14171C;
+      --surface-2: #1B1F26;
+      --surface-3: #242A33;
+      --ink: #ECEEF2;
+      --ink-2: #C9D1DB;
+      --muted: #8A94A6;
+      --blue: #5B8DEF;
+      --teal: #7AD1C8;
+      --amber: #FBBF24;
+      --success: #10B981;
+      --paper: #FBFAF6;
+      --paper-2: #F4F2EB;
+      --paper-ink: #0E0F12;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(91, 141, 239, 0.16), transparent 30%),
+        radial-gradient(circle at 88% 12%, rgba(122, 209, 200, 0.12), transparent 28%),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 44px 28px 56px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      border-bottom: 1px solid rgba(236, 238, 242, 0.12);
+      padding-bottom: 28px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 70px);
+      line-height: 0.94;
+      letter-spacing: -0.04em;
+      max-width: 780px;
+    }
+
+    .summary {
+      margin: 18px 0 0;
+      color: var(--ink-2);
+      max-width: 720px;
+      font-size: 18px;
+      line-height: 1.5;
+    }
+
+    .verdict {
+      border: 1px solid rgba(251, 191, 36, 0.34);
+      background: rgba(251, 191, 36, 0.08);
+      color: var(--amber);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .compare {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+
+    .legacy, .recommendation, .card {
+      border: 1px solid rgba(236, 238, 242, 0.12);
+      background: rgba(20, 23, 28, 0.78);
+      border-radius: 18px;
+    }
+
+    .legacy {
+      padding: 18px;
+    }
+
+    .legacy img {
+      display: block;
+      width: 138px;
+      height: 138px;
+      object-fit: contain;
+      margin: 6px auto 16px;
+      background: #FFFFFF;
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .label {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .legacy p, .recommendation p, .card p {
+      margin: 0;
+      color: var(--ink-2);
+      line-height: 1.5;
+    }
+
+    .recommendation {
+      padding: 22px;
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 22px;
+      align-items: center;
+    }
+
+    .recommendation img {
+      width: 92px;
+      height: 92px;
+    }
+
+    .recommendation h2 {
+      margin: 0 0 8px;
+      font-size: clamp(26px, 3vw, 40px);
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      min-height: 430px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .card .stage {
+      min-height: 152px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background:
+        linear-gradient(135deg, rgba(236, 238, 242, 0.05), rgba(236, 238, 242, 0.015)),
+        #0E1116;
+      border: 1px solid rgba(236, 238, 242, 0.09);
+    }
+
+    .card .stage img {
+      width: 104px;
+      height: 104px;
+      display: block;
+    }
+
+    .card h3 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+    }
+
+    .score {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--success);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .score::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 12px currentColor;
+    }
+
+    .use {
+      margin-top: auto;
+      border-top: 1px solid rgba(236, 238, 242, 0.1);
+      padding-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .mini-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .mini-row img {
+      width: 28px;
+      height: 28px;
+      display: block;
+    }
+
+    .mini-row span {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .applications {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .application {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(236, 238, 242, 0.12);
+      background: var(--surface);
+    }
+
+    .nav-demo {
+      height: 82px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      border-bottom: 1px solid rgba(236, 238, 242, 0.1);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      display: block;
+    }
+
+    .nav-demo .links {
+      display: flex;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .light-demo {
+      background: var(--paper);
+      color: var(--paper-ink);
+    }
+
+    .light-demo .nav-demo {
+      border-bottom-color: #E6E2D8;
+    }
+
+    .light-demo .nav-demo .links {
+      color: #6B6960;
+    }
+
+    .app-body {
+      min-height: 170px;
+      padding: 22px;
+      color: var(--ink-2);
+    }
+
+    .light-demo .app-body {
+      color: #2D2E33;
+    }
+
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .chip {
+      border: 1px solid rgba(91, 141, 239, 0.32);
+      background: rgba(91, 141, 239, 0.1);
+      color: #9DBBFF;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .light-demo .chip {
+      color: #355EB4;
+      background: #EAF0FF;
+      border-color: #C8D7FF;
+    }
+
+    @media (max-width: 1080px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .compare, .applications { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 620px) {
+      main { padding: 28px 16px 40px; }
+      header { grid-template-columns: 1fr; align-items: start; }
+      .grid { grid-template-columns: 1fr; }
+      .recommendation { grid-template-columns: 1fr; }
+      .nav-demo .links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="label mono">Brand exploration / Website grounded</p>
+        <h1>Logo directions for a darker, code-native ExecuteSpec.</h1>
+        <p class="summary">These keep the current website palette, mono/product typography, and merge-validation story. ExecuteSpec remains the brand name; Merge Rail is the selected logo direction for favicon, file explorer, app nav, CLI, VS Code, and OG-card usage.</p>
+      </div>
+      <div class="verdict mono">5 options</div>
+    </header>
+
+    <section class="compare">
+      <div class="legacy">
+        <p class="label mono">Current asset</p>
+        <img src="../images/logo.png" alt="Current ExecuteSpec gear logo">
+        <p>The current gear is recognizable but reads like generic automation. Its glossy treatment fights the newer website and product theme.</p>
+      </div>
+      <div class="recommendation">
+        <img src="../assets/brand/merge-rail/executespec-merge-rail-mark.svg" alt="Recommended Merge Rail mark">
+        <div>
+          <p class="label mono">Selected logo direction</p>
+          <h2>Merge Rail</h2>
+          <p>The strongest product story: an E-shaped delivery rail that ends at a verified merge. This is the direction now expanded into website, CLI, and VS Code assets.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid" aria-label="Logo options">
+      <article class="card">
+        <div class="stage"><img src="../assets/brand/options/executespec-logo-option-a-es-terminal.svg" alt="ES Terminal Tile logo"></div>
+        <div>
+          <p class="label mono">Option A</p>
+          <h3>ES Terminal Tile</h3>
+        </div>
+        <p>Monogram-first, direct, product-app friendly. Best all-rounder for favicon, sidebar, app shell, login, and website nav.</p>
+        <div class="mini-row">
+          <img src="../assets/brand/options/executespec-logo-option-a-es-terminal.svg" alt="">
+          <span>ExecuteSpec</span>
+        </div>
+        <div class="use mono">Use when: you want the cleanest Codex-like brand direction.</div>
+      </article>
+
+      <article class="card">
+        <div class="stage"><img src="../assets/brand/options/executespec-logo-option-b-spec-gate.svg" alt="Spec Gate logo"></div>
+        <div>
+          <p class="label mono">Option B</p>
+          <h3>Spec Gate</h3>
+        </div>
+        <p>Document plus code plus verified result. More literal than A, but it explains the product promise without needing the wordmark.</p>
+        <div class="mini-row">
+          <img src="../assets/brand/options/executespec-logo-option-b-spec-gate.svg" alt="">
+          <span>ExecuteSpec</span>
+        </div>
+        <div class="use mono">Use when: onboarding clarity matters more than pure brand abstraction.</div>
+      </article>
+
+      <article class="card">
+        <div class="stage"><img src="../assets/brand/options/executespec-logo-option-c-merge-rail.svg" alt="Merge Rail logo"></div>
+        <div>
+          <p class="label mono">Option C</p>
+          <h3>Merge Rail</h3>
+        </div>
+        <p>Branch topology forming an E, ending in a verified merge. Strongest strategic mark for a PR automation product.</p>
+        <div class="mini-row">
+          <img src="../assets/brand/options/executespec-logo-option-c-merge-rail.svg" alt="">
+          <span>ExecuteSpec</span>
+        </div>
+        <div class="use mono">Use when: you want the logo to own the merge-validated positioning.</div>
+      </article>
+
+      <article class="card">
+        <div class="stage"><img src="../assets/brand/options/executespec-logo-option-d-pipeline-gate.svg" alt="Pipeline Gate logo"></div>
+        <div>
+          <p class="label mono">Option D</p>
+          <h3>Pipeline Gate</h3>
+        </div>
+        <p>Planner, worker, reviewer as stacked gates. Operational and enterprise-coded, but less distinctive as a standalone logo.</p>
+        <div class="mini-row">
+          <img src="../assets/brand/options/executespec-logo-option-d-pipeline-gate.svg" alt="">
+          <span>ExecuteSpec</span>
+        </div>
+        <div class="use mono">Use when: dashboards and enterprise control-plane language lead.</div>
+      </article>
+
+      <article class="card">
+        <div class="stage"><img src="../assets/brand/options/executespec-logo-option-e-delta-continuity.svg" alt="Delta Continuity logo"></div>
+        <div>
+          <p class="label mono">Option E</p>
+          <h3>Delta Continuity</h3>
+        </div>
+        <p>A cleaner descendant of the current chevron mark. Keeps continuity but removes the gear and glossy legacy feel.</p>
+        <div class="mini-row">
+          <img src="../assets/brand/options/executespec-logo-option-e-delta-continuity.svg" alt="">
+          <span>ExecuteSpec</span>
+        </div>
+        <div class="use mono">Use when: you want a migration path from the old brand instead of a reset.</div>
+      </article>
+    </section>
+
+    <section class="applications" aria-label="Logo usage previews">
+      <div class="application">
+        <div class="nav-demo">
+          <div class="brand">
+            <img src="../assets/brand/merge-rail/executespec-merge-rail-mark.svg" alt="">
+            <span>ExecuteSpec</span>
+          </div>
+          <div class="links mono"><span>Projects</span><span>Runs</span><span>Reports</span></div>
+        </div>
+        <div class="app-body">
+          <p class="label mono">Dark product chrome</p>
+          <p>The Merge Rail mark holds enough contrast for the app shell and reinforces the verified-delivery story.</p>
+          <div class="chips mono"><span class="chip">Ready</span><span class="chip">Plan gate</span><span class="chip">Verified PR</span></div>
+        </div>
+      </div>
+
+      <div class="application light-demo">
+        <div class="nav-demo">
+          <div class="brand">
+            <img src="../assets/brand/merge-rail/executespec-merge-rail-mark-light.svg" alt="">
+            <span>ExecuteSpec</span>
+          </div>
+          <div class="links mono"><span>Workspace</span><span>Quality</span><span>Pricing</span></div>
+        </div>
+        <div class="app-body">
+          <p class="label mono">Light website nav</p>
+          <p>The light mark keeps the same rail shape while fitting the current marketing palette.</p>
+          <div class="chips mono"><span class="chip">Multi-repo</span><span class="chip">Review gate</span><span class="chip">Merge-ready</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

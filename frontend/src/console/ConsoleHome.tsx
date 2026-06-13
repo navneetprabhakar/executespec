@@ -138,7 +138,7 @@ export default function ConsoleHome() {
         <div className='con-hero'>
           <div>
             <div className='con-hero-kicker'>Mission control</div>
-            <div className='con-hero-title'>What needs attention?</div>
+            <h1 className='con-hero-title'>What needs attention?</h1>
             <div className='con-hero-sub'>
               Review approvals, watch live work, and start the next code change from one console.
             </div>

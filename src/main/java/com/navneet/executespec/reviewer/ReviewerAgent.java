@@ -445,9 +445,9 @@ public class ReviewerAgent {
             .temperature(0.0)
             .maxTokensPerCall(8192)
             // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
-            // a successful buildProject call before terminating. Mirrors PatchAgent's gold-test
-            // gate (V182 layer-3). Without this, reviewer can call completeTask after a few
-            // edits without verifying — leaves run in PARTIAL/FINAL_BUILD_FAILED.
+            // a successful buildProject call before terminating. Mirrors the patch-mode test gate
+            // shape (V182 layer-3). Without this, reviewer can call completeTask after a few edits
+            // without verifying — leaves run in PARTIAL/FINAL_BUILD_FAILED.
             .requireBuildVerification(preBuildError != null)
             .build());
   }

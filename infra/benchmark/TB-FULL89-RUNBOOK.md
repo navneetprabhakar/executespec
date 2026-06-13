@@ -1,6 +1,6 @@
-# Terminal-Bench 2.0 — full-89 sweep runbook (4 models, k=5, leaderboard)
+# Terminal-Bench 2.1 — full-89 sweep runbook (4 models, k=5, leaderboard)
 
-> Operator runbook for the full 89-task TB 2.0 sweep on the amd64 benchmark VM, with **live
+> Operator runbook for the full 89-task TB 2.1 sweep on the amd64 benchmark VM, with **live
 > in-app token tracking** (`/benchmark`) + **leaderboard submission** per model.
 > Pairs with [`EVAL-ENV-PLAN.md`](EVAL-ENV-PLAN.md) (VM stand-up) and the scripts in `scripts/`.
 
@@ -31,10 +31,13 @@ Run **one at a time**, in this order. Gate after Pro.
 
 ## Config (locked)
 
-- **k = 5** attempts/task · **n_concurrent_trials = 8** · full `terminal-bench/terminal-bench-2` (89 tasks).
+- **k = 5** attempts/task · **n_concurrent_trials = 8** · full `terminal-bench/terminal-bench-2-1` (89 tasks).
 - 8 on a 16-core/64 GB box leaves ~2 cores/trial headroom (each trial = 1 TB container + the remote
   WorkerAgent driving it; the backend runs on the same box).
 - **No provider-shift** — `cross-provider-fallback=OFF` (a 429 is a failed trial, never a silent model swap).
+- Harbor compliance: the ExecuteSpec Harbor agent writes `agent/trajectory.json` during every trial
+  (`SUPPORTS_ATIF=true`). `submit-tb.sh` fails before upload if any passing trial is missing that
+  file, because Terminal-Bench leaderboard validation rejects passing trials without trajectories.
 
 ## Pre-flight (once, after the VM is up + `setup-tb.sh` has run)
 
@@ -61,6 +64,7 @@ GCS-syncs results.
 ```bash
 GCS_BUCKET=$(cd ~/executespec/infra/benchmark && terraform output -raw results_bucket) \
 REPO=~/executespec JOBS_DIR=~/es-tb-jobs \
+TB_DATASET=terminal-bench/terminal-bench-2-1 BENCHMARK_DATASET=terminal-bench-2-1 \
 ES_PROVIDER=deepseek ES_MODEL=deepseek-v4-flash-native HARBOR_MODEL=deepseek/deepseek-v4-flash-native \
 K=5 CONCURRENCY=8 JOB_NAME=es-tb-flash-k5 \
   nohup bash ~/executespec/infra/benchmark/scripts/run-tb.sh > ~/es-tb-jobs/flash.out 2>&1 &
@@ -81,10 +85,14 @@ Swap the three `ES_*`/`HARBOR_MODEL` + `JOB_NAME` per the table for Pro / Sonnet
 ## Submit one model (after its run finishes + you've validated the dashboard)
 
 ```bash
-JOB_NAME=es-tb-flash-k5 bash ~/executespec/infra/benchmark/scripts/submit-tb.sh
-# reads the benchmark_run id from the bridge log, runs `harbor upload <job> --public`,
+JOB_NAME=es-tb-flash-k5 \
+METADATA_FILE=~/es-tb-jobs/metadata-flash-tb21.yaml \
+LEADERBOARD_SLUG=terminal-bench-2-1 REQUIRE_ATIF=1 \
+  bash ~/executespec/infra/benchmark/scripts/submit-tb.sh
+# reads the benchmark_run id from the bridge log, verifies passing trials have agent/trajectory.json,
+# runs `harbor upload <job> --public`, then `harbor leaderboard submit -l terminal-bench-2-1 ...`,
 # posts SUBMITTED{url} to /benchmark (submissionStatus + leaderboardUrl), pings Telegram.
-# Dry-run first if unsure: DRY_RUN=1 JOB_NAME=es-tb-flash-k5 bash …/submit-tb.sh
+# Dry-run first if unsure: DRY_RUN=1 JOB_NAME=es-tb-flash-k5 METADATA_FILE=~/es-tb-jobs/metadata-flash-tb21.yaml bash …/submit-tb.sh
 ```
 
 ## The sequence (with the gate)

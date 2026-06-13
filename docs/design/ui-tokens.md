@@ -35,6 +35,30 @@ scoped under `.signal-app` and uses its own `--signal-*` token set with a separa
 behaviour (Signal's `.signal-app` declares light values; `.signal-app[data-signal-theme='dark']`
 overrides).
 
+### Console shell bridge (2026-06-12)
+
+The protected web app now renders inside `frontend/src/console/ConsoleShell.tsx` by default. That
+shell defines the `--ide-*` bridge tokens locally in `frontend/src/console/console.css` so the
+existing IDE-native work surfaces can keep their component classes while the global chrome uses the
+Merge Rail / Codex-like graphite palette instead of the retired VS Code metaphor.
+
+Current console token direction:
+
+| Role | Light | Dark |
+| --- | --- | --- |
+| Page/editor background | `#f6f7f8` | `#0b0d10` |
+| Sidebar / cards | `#ffffff` | `#11151b` / `#14171c` |
+| Primary text | `#111318` | `#eceef2` |
+| Muted text | `#687181` | `#8a94a6` |
+| Accent | `#2f64d6` | `#4f7fe7` |
+| Success | `#139a67` | `#7ad1c8` |
+| Warning | `#b88700` | `#fbbf24` |
+| Error | `#d14b4b` | `#f08a8a` |
+
+Responsive shell rules also live in `console.css`: mobile top-bar icon targets are 44px, the drawer
+hides the bottom tab bar while open, and `/compose` enters a focused mobile mode so its fixed action
+footer is not stacked above a second global nav.
+
 ---
 
 ## Surface ladder

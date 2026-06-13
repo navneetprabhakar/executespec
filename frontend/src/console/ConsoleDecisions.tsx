@@ -108,7 +108,7 @@ export default function ConsoleDecisions() {
     <div className='con-home con-decisions'>
       <section className='con-decision-hero'>
         <div>
-          <div className='con-hero-title'>Decisions</div>
+          <h1 className='con-hero-title'>Decisions</h1>
           <div className='con-hero-sub'>
             The work that needs human attention: plan approvals, running work, PR review comments,
             and failures.
