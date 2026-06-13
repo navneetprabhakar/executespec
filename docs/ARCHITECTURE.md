@@ -463,11 +463,12 @@ override skips auto-push.
 Differences from BUILD:
 
 - Skips classifier, planner, reviewer.
-- Single thin-agent loop:
-  [`agent/PatchAgent.run`](../src/main/java/com/navneet/executespec/agent/PatchAgent.java)
-  delegates to `WorkerAgent` with no per-task fragmentation. Per-provider iteration
-  cap: Anthropic/DeepSeek/OpenRouter 220, OpenAI 150, Gemini 180. Stagnation disabled.
-  `requireTestVerification=true`.
+- Single code-gen engine loop:
+  [`engine/CodeGenEngineImpl.solve`](../src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java)
+  builds one `WorkerTaskRequest` and calls `WorkerAgent` with no per-task fragmentation.
+  Per-provider iteration cap: Anthropic/DeepSeek/OpenRouter/Fireworks 220, OpenAI 150,
+  Gemini 180. Stagnation disabled. `requireTestVerification=true` for customer patch
+  sources and OFF for blind `swebench*` / `benchmark*` sources whose target tests are held out.
 - BYOK cost-cap exemption: OWN_KEYS orgs skip the platform cap.
 - Outcome mapping: `COMPLETED` / `COMPLETED_BY_STAGNATION` /
   `STOPPED_WITHOUT_COMPLETE` → `COMPLETE`; `ITERATION_LIMIT_EXCEEDED` /

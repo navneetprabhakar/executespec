@@ -129,7 +129,7 @@ export default function IdeNotifications() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Notifications</div>
+      <h1 className='ide-h1'>Notifications</h1>
       <div className='ide-sub'>
         {items === null ? 'Work, team, billing, and system events.' : `${unreadCount} unread`}
       </div>

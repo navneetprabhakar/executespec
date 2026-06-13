@@ -1,6 +1,7 @@
 package com.navneet.executespec.benchmark;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -14,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PostConstruct;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.event.PipelineEvent;
@@ -113,7 +115,7 @@ public class BenchmarkRunService {
    */
   private static final ThreadLocal<SetupRecipe> PENDING = new ThreadLocal<>();
 
-  record SetupRecipe(String image, String containerName, String instanceId) {}
+  record SetupRecipe(String image, String containerName, String instanceId, String workdir) {}
 
   /**
    * Synchronous {@link PipelineEvent.RunStarted} listener. For benchmark runs (recipe present in
@@ -147,8 +149,10 @@ public class BenchmarkRunService {
         throw new RuntimeException("docker create failed for " + recipe.image());
       }
       try {
-        if (run("docker cp " + tempName + ":/testbed/. " + workspaceHost, 600).exit() != 0) {
-          throw new RuntimeException("docker cp /testbed failed");
+        if (run("docker cp " + tempName + ":" + recipe.workdir() + "/. " + workspaceHost, 600)
+                .exit()
+            != 0) {
+          throw new RuntimeException("docker cp " + recipe.workdir() + " failed");
         }
       } finally {
         run("docker rm -f " + tempName, 30);
@@ -156,10 +160,12 @@ public class BenchmarkRunService {
 
       String runCmd =
           String.format(
-              "docker run -d --rm --network none --name %s -v %s:/testbed -w /testbed %s sleep"
-                  + " %dh",
+              "docker run -d --rm --network none --name %s -v %s:%s -w %s --entrypoint /bin/sh %s"
+                  + " -c 'sleep %dh'",
               recipe.containerName(),
               workspaceHost,
+              recipe.workdir(),
+              recipe.workdir(),
               recipe.image(),
               props.getTaskWallTimeoutMinutes() / 60 + 1);
       ShellResult startResult = run(runCmd, 60);
@@ -184,7 +190,7 @@ public class BenchmarkRunService {
           containerId,
           runId,
           workspaceHost);
-      containerStore.put(runId, containerId);
+      containerStore.put(runId, containerId, recipe.workdir());
     } catch (Exception e) {
       log.error(
           "benchmark: cleanroom setup FAILED for runId={} instance={} — marking run FAILED to avoid"
@@ -277,7 +283,7 @@ public class BenchmarkRunService {
     boolean permitHandedOff = false;
     try {
       PipelineRun run;
-      PENDING.set(new SetupRecipe(image, containerName, instanceId));
+      PENDING.set(new SetupRecipe(image, containerName, instanceId, workdirFor(instance)));
       try {
         // RL-2026-05-050 — runMode=BUILD + source="swebench-codegen" → run the REAL system end to
         // end (classifier picks the strategy, planner plans, worker generates with the full tool
@@ -419,11 +425,14 @@ public class BenchmarkRunService {
     try {
       Files.createDirectories(outputDir);
       String baseCommit = "";
+      SwebenchInstanceLoader.SwebenchInstance instance = null;
       try {
-        baseCommit = loader.findById(instanceId).baseCommit();
+        instance = loader.findById(instanceId);
+        baseCommit = instance.baseCommit();
       } catch (Exception ignore) {
         // fall back to HEAD below
       }
+      String workdir = instance == null ? props.workdir() : workdirFor(instance);
       String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
       // Diff against the REAL base commit (not HEAD) so any pipeline commit can't hide the fix, and
       // exclude run-infra noise (scaffolding / caches) so the patch is the source change only.
@@ -455,6 +464,7 @@ public class BenchmarkRunService {
               + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
               + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
               + " \":(exclude,glob)**/.github/**\""
+              + " \":(exclude,glob)appendonlydir/**\""
               // test files — the gold test_patch is applied separately by the scorer
               + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
               + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
@@ -467,7 +477,9 @@ public class BenchmarkRunService {
           "docker exec "
               + containerName
               + " sh -c '"
-              + "cd /testbed && "
+              + "cd "
+              + workdir
+              + " && "
               + "git ls-files --others --exclude-standard | xargs -r git add -N >/dev/null 2>&1; "
               + "git diff "
               + diffTarget
@@ -486,14 +498,19 @@ public class BenchmarkRunService {
       entry.put("model_patch", patch);
       Path predsPath = outputDir.resolve("preds.json");
       Files.writeString(predsPath, preds.toPrettyString());
+      Path proPatchesPath = null;
+      if ((instance != null && instance.isSweBenchPro()) || props.isSweBenchPro()) {
+        proPatchesPath = writeSweBenchProPatches(outputDir, instanceId, model, patch);
+      }
 
       log.info(
-          "benchmark: captured runId={} instance={} status={} → patch={}B preds={}",
+          "benchmark: captured runId={} instance={} status={} → patch={}B preds={} proPatches={}",
           runId,
           instanceId,
           terminalStatus,
           patch.length(),
-          predsPath);
+          predsPath,
+          proPatchesPath);
     } catch (IOException ioe) {
       log.error("benchmark: capture failed for runId={}", runId, ioe);
     }
@@ -507,6 +524,25 @@ public class BenchmarkRunService {
         || "ABORTED".equals(status);
   }
 
+  private Path writeSweBenchProPatches(
+      Path outputDir, String instanceId, String model, String patch) throws IOException {
+    ArrayNode entries = JSON.createArrayNode();
+    ObjectNode entry = entries.addObject();
+    entry.put("instance_id", instanceId);
+    entry.put("patch", patch);
+    entry.put("prefix", predictionPrefix(model));
+    Path patchesPath = outputDir.resolve("swebench_pro_patches.json");
+    Files.writeString(patchesPath, entries.toPrettyString());
+    return patchesPath;
+  }
+
+  private String predictionPrefix(String model) {
+    String configured = props.getPredictionPrefix();
+    String prefix = configured == null || configured.isBlank() ? "executespec" : configured;
+    if (model == null || model.isBlank()) return prefix;
+    return prefix + "-" + model;
+  }
+
   /**
    * Blind spec — the issue {@code problem_statement} + offline/environment context only. NO
    * FAIL_TO_PASS/PASS_TO_PASS ids, NO gold test patch. The "existing repo, fix don't scaffold"
@@ -515,21 +551,33 @@ public class BenchmarkRunService {
    */
   private String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
     StringBuilder sb = new StringBuilder();
-    sb.append("Resolve the following GitHub issue in an existing Python repository.\n\n");
+    String workdir = workdirFor(i);
+    String language = i.repoLanguage();
+    if (language == null || language.isBlank()) language = "software";
+    sb.append("Resolve the following GitHub issue in an existing ")
+        .append(language)
+        .append(" repository.\n\n");
     sb.append("# Environment\n");
     sb.append(
-        "- You are working in an EXISTING repository already checked out at /testbed (your"
-            + " workspace). Investigate the existing code and fix the issue described below. Do NOT"
-            + " scaffold a new project.\n");
+        "- You are working in an EXISTING repository already checked out at "
+            + workdir
+            + " (your workspace). Investigate the existing code and fix the issue described below."
+            + " Do NOT scaffold a new project.\n");
     sb.append(
         "- The environment is offline (no network) and all dependencies are pre-installed. Do not"
             + " pip install / curl / git fetch.\n");
     sb.append(
         "- Edit only non-test source files. Do NOT modify or add test files. Your final submission"
-            + " is the git diff of /testbed against its base commit.\n\n");
+            + " is the git diff of "
+            + workdir
+            + " against its base commit.\n\n");
     sb.append("# Repository\n");
     sb.append("- Repo: ").append(i.repo()).append("\n");
-    sb.append("- Working directory: /testbed\n\n");
+    sb.append("- Working directory: ").append(workdir).append("\n");
+    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
+      sb.append("- Interface: ").append(i.interfaceName()).append("\n");
+    }
+    sb.append("\n");
     sb.append("# Issue\n\n");
     sb.append(i.problemStatement()).append("\n\n");
     sb.append("# How to work\n");
@@ -553,9 +601,9 @@ public class BenchmarkRunService {
             + " character-for-character.\n");
     sb.append(
         "3. REPRODUCE the bug first: write a tiny throwaway script OUTSIDE the repo (e.g."
-            + " /tmp/repro.py — NEVER under /testbed, so it stays out of your diff) that triggers"
-            + " the issue, and run it to confirm it currently fails the way the issue describes."
-            + " This proves you actually understand the bug before you change code.\n");
+            + " /tmp/repro.py — NEVER under the repository, so it stays out of your diff) that"
+            + " triggers the issue, and run it to confirm it currently fails the way the issue"
+            + " describes. This proves you actually understand the bug before you change code.\n");
     sb.append(
         "4. Make the SMALLEST fix that produces exactly that behavior. Change ONLY the lines"
             + " required — do NOT reformat, re-indent, reorder imports, rename, or refactor"
@@ -569,6 +617,10 @@ public class BenchmarkRunService {
     return sb.toString();
   }
 
+  private String workdirFor(SwebenchInstanceLoader.SwebenchInstance instance) {
+    return (instance.isSweBenchPro() || props.isSweBenchPro()) ? "/app" : "/testbed";
+  }
+
   private record ShellResult(int exit, String output) {}
 
   private ShellResult run(String command, int timeoutSec) {
@@ -576,13 +628,26 @@ public class BenchmarkRunService {
       ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
       pb.redirectErrorStream(true);
       Process p = pb.start();
+      StringBuilder output = new StringBuilder();
+      Thread reader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      output.append(
+                          new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+                    } catch (IOException ignored) {
+                      // The caller gets the process exit/timeout status; output is best effort.
+                    }
+                  });
       boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
       if (!done) {
         p.destroyForcibly();
+        reader.join(1000);
         return new ShellResult(-1, "timeout after " + timeoutSec + "s: " + command);
       }
-      String out = new String(p.getInputStream().readAllBytes());
-      return new ShellResult(p.exitValue(), out);
+      reader.join(1000);
+      return new ShellResult(p.exitValue(), output.toString());
     } catch (IOException ioe) {
       return new ShellResult(-2, "io error: " + ioe.getMessage());
     } catch (InterruptedException ie) {

@@ -286,9 +286,9 @@ public class SwebenchTaskService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, instanceId));
     try {
-      // V182 — call the 20-arg submitRun overload directly with runMode=PATCH
-      // so the orchestrator skips classifier / planner / executor / reviewer
-      // and dispatches the whole problem statement to a single PatchAgent loop.
+      // V182 — call the 20-arg submitRun overload directly with runMode=PATCH so the orchestrator
+      // skips classifier / planner / executor / reviewer and dispatches the whole problem statement
+      // to the shared CodeGenEngine single-task loop.
       run =
           orchestrator.submitRun(
               userRequest,

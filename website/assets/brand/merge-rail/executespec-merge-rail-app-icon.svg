@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">ExecuteSpec Merge Rail app icon</title>
+  <desc id="desc">Large app icon version of the ExecuteSpec Merge Rail mark.</desc>
+  <defs>
+    <linearGradient id="rail" x1="210" y1="178" x2="845" y2="846" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7AD1C8"/>
+      <stop offset="0.48" stop-color="#5B8DEF"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#5B8DEF" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#5B8DEF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="#0B0D10"/>
+  <rect x="58" y="58" width="908" height="908" rx="190" fill="url(#glow)"/>
+  <path d="M304 300h214c107 0 169 58 169 156v286" fill="none" stroke="url(#rail)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M304 512h275" fill="none" stroke="url(#rail)" stroke-width="82" stroke-linecap="round"/>
+  <path d="M304 724h383" fill="none" stroke="url(#rail)" stroke-width="82" stroke-linecap="round"/>
+  <circle cx="304" cy="300" r="66" fill="#ECEEF2"/>
+  <circle cx="304" cy="512" r="66" fill="#ECEEF2"/>
+  <circle cx="304" cy="724" r="66" fill="#ECEEF2"/>
+  <circle cx="687" cy="724" r="116" fill="#10B981"/>
+  <path d="m635 728 36 37 77-91" fill="none" stroke="#0B0D10" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M566 300h146" fill="none" stroke="#ECEEF2" stroke-width="48" stroke-linecap="round"/>
+</svg>

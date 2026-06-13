@@ -6,33 +6,33 @@
  * unchanged while the global chrome stops looking like VS Code or blue SaaS.
  */
 .con-root {
-  --ide-bg-editor: #f7f7f4;
-  --ide-bg-sidebar: #fbfbf8;
-  --ide-bg-activitybar: #fbfbf8;
+  --ide-bg-editor: #f6f7f8;
+  --ide-bg-sidebar: #ffffff;
+  --ide-bg-activitybar: #ffffff;
   --ide-bg-panel: #ffffff;
   --ide-bg-input: #ffffff;
   --ide-bg-tab-active: #ffffff;
-  --ide-bg-tab-inactive: #f0f0ec;
-  --ide-bg-statusbar: #111111;
+  --ide-bg-tab-inactive: #eef1f5;
+  --ide-bg-statusbar: #111318;
   --ide-bg-widget: #ffffff;
-  --ide-fg: #2f2f2b;
-  --ide-fg-muted: #74736b;
-  --ide-fg-bright: #111111;
+  --ide-fg: #252a33;
+  --ide-fg-muted: #687181;
+  --ide-fg-bright: #111318;
   --ide-fg-statusbar: #ffffff;
-  --ide-border: #e2e1da;
-  --ide-border-strong: #cbc9c0;
-  --ide-accent: #111111;
+  --ide-border: #dde2ea;
+  --ide-border-strong: #b8c0cc;
+  --ide-accent: #2f64d6;
   --ide-accent-fg: #ffffff;
-  --ide-hover: #efeee8;
-  --ide-list-active: #e9e8e1;
-  --ide-list-inactive: #f0f0ec;
-  --ide-green: #087b5b;
-  --ide-yellow: #96620a;
-  --ide-red: #b42318;
-  --ide-blue: #3f4f46;
-  --ide-add: rgba(8, 123, 91, 0.14);
-  --ide-del: rgba(180, 35, 24, 0.12);
-  --ide-shadow: rgba(17, 17, 17, 0.12);
+  --ide-hover: #eef1f5;
+  --ide-list-active: #e8eeff;
+  --ide-list-inactive: #eef1f5;
+  --ide-green: #139a67;
+  --ide-yellow: #b88700;
+  --ide-red: #d14b4b;
+  --ide-blue: #4f7fe7;
+  --ide-add: rgba(19, 154, 103, 0.14);
+  --ide-del: rgba(209, 75, 75, 0.12);
+  --ide-shadow: rgba(17, 19, 24, 0.12);
 
   display: flex;
   flex-direction: column;
@@ -50,61 +50,61 @@
 }
 
 [data-theme='dark'] .con-root {
-  --ide-bg-editor: #171713;
-  --ide-bg-sidebar: #1d1d19;
-  --ide-bg-activitybar: #1d1d19;
-  --ide-bg-panel: #20201c;
-  --ide-bg-input: #252520;
-  --ide-bg-tab-active: #20201c;
-  --ide-bg-tab-inactive: #24241f;
-  --ide-bg-statusbar: #f2f0e8;
-  --ide-bg-widget: #20201c;
-  --ide-fg: #dedbd0;
-  --ide-fg-muted: #9c988c;
-  --ide-fg-bright: #fbfaf4;
-  --ide-border: #353329;
-  --ide-border-strong: #4d493e;
-  --ide-hover: #2a2923;
-  --ide-list-active: #302f27;
-  --ide-list-inactive: #24241f;
-  --ide-accent: #f4f1e8;
-  --ide-accent-fg: #141410;
-  --ide-green: #4fd3a6;
-  --ide-yellow: #e8bd65;
-  --ide-red: #ff8c7d;
-  --ide-blue: #c2c8bd;
-  --ide-add: rgba(79, 211, 166, 0.16);
-  --ide-del: rgba(255, 140, 125, 0.14);
+  --ide-bg-editor: #0b0d10;
+  --ide-bg-sidebar: #11151b;
+  --ide-bg-activitybar: #11151b;
+  --ide-bg-panel: #14171c;
+  --ide-bg-input: #1b1f26;
+  --ide-bg-tab-active: #14171c;
+  --ide-bg-tab-inactive: #1b1f26;
+  --ide-bg-statusbar: #4f7fe7;
+  --ide-bg-widget: #14171c;
+  --ide-fg: #c9d1db;
+  --ide-fg-muted: #8a94a6;
+  --ide-fg-bright: #eceef2;
+  --ide-border: #242a33;
+  --ide-border-strong: #3d4553;
+  --ide-hover: #1b1f26;
+  --ide-list-active: #18243a;
+  --ide-list-inactive: #1b1f26;
+  --ide-accent: #4f7fe7;
+  --ide-accent-fg: #ffffff;
+  --ide-green: #7ad1c8;
+  --ide-yellow: #fbbf24;
+  --ide-red: #f08a8a;
+  --ide-blue: #9dbbff;
+  --ide-add: rgba(122, 209, 200, 0.16);
+  --ide-del: rgba(240, 138, 138, 0.14);
   --ide-shadow: rgba(0, 0, 0, 0.42);
 }
 
 [data-theme='light'] .con-root {
-  --ide-bg-editor: #f7f7f4;
-  --ide-bg-sidebar: #fbfbf8;
-  --ide-bg-activitybar: #fbfbf8;
+  --ide-bg-editor: #f6f7f8;
+  --ide-bg-sidebar: #ffffff;
+  --ide-bg-activitybar: #ffffff;
   --ide-bg-panel: #ffffff;
   --ide-bg-input: #ffffff;
   --ide-bg-tab-active: #ffffff;
-  --ide-bg-tab-inactive: #f0f0ec;
-  --ide-bg-statusbar: #111111;
+  --ide-bg-tab-inactive: #eef1f5;
+  --ide-bg-statusbar: #111318;
   --ide-bg-widget: #ffffff;
-  --ide-fg: #2f2f2b;
-  --ide-fg-muted: #74736b;
-  --ide-fg-bright: #111111;
-  --ide-border: #e2e1da;
-  --ide-border-strong: #cbc9c0;
-  --ide-hover: #efeee8;
-  --ide-list-active: #e9e8e1;
-  --ide-list-inactive: #f0f0ec;
-  --ide-accent: #111111;
+  --ide-fg: #252a33;
+  --ide-fg-muted: #687181;
+  --ide-fg-bright: #111318;
+  --ide-border: #dde2ea;
+  --ide-border-strong: #b8c0cc;
+  --ide-hover: #eef1f5;
+  --ide-list-active: #e8eeff;
+  --ide-list-inactive: #eef1f5;
+  --ide-accent: #2f64d6;
   --ide-accent-fg: #ffffff;
-  --ide-green: #087b5b;
-  --ide-yellow: #96620a;
-  --ide-red: #b42318;
-  --ide-blue: #3f4f46;
-  --ide-add: rgba(8, 123, 91, 0.14);
-  --ide-del: rgba(180, 35, 24, 0.12);
-  --ide-shadow: rgba(17, 17, 17, 0.12);
+  --ide-green: #139a67;
+  --ide-yellow: #b88700;
+  --ide-red: #d14b4b;
+  --ide-blue: #4f7fe7;
+  --ide-add: rgba(19, 154, 103, 0.14);
+  --ide-del: rgba(209, 75, 75, 0.12);
+  --ide-shadow: rgba(17, 19, 24, 0.12);
 }
 
 /* ── top bar ─────────────────────────────────────────────────────────────── */
@@ -368,7 +368,7 @@
   font-size: 20px;
   font-weight: 650;
   color: var(--ide-fg-bright);
-  margin-bottom: 6px;
+  margin: 0 0 6px;
 }
 .con-hero-sub {
   font-size: 12.5px;
@@ -564,6 +564,13 @@
   .con-only-mobile {
     display: inline-flex;
   }
+  .con-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .con-newrun {
+    min-height: 40px;
+  }
   .con-home {
     padding: 16px 14px 40px;
   }
@@ -645,6 +652,13 @@
   .con-tabbar .ico {
     display: inline-flex;
   }
+  .con-root.drawer-active .con-tabbar,
+  .con-root.compose-active .con-tabbar {
+    display: none;
+  }
+  .con-root.compose-active .ide-compose-mobile-actions {
+    bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* ============================================================
@@ -690,9 +704,6 @@
   }
   .con-brand {
     font-size: 13px;
-  }
-  .con-icon {
-    width: 30px;
   }
   .con-topbar .ide-gate-wrap {
     display: none;

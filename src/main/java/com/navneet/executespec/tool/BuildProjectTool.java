@@ -35,10 +35,10 @@ public class BuildProjectTool implements Tool {
   // Programbench tasks stash the cleanroom container ID per-runId; when set, build
   // dispatches via `docker exec` so language toolchains in the cleanroom image are used.
   private final ProgramBenchContainerStore programBenchContainers;
-  // SWE-bench tasks stash their container ID here. Same docker-exec routing as programbench but
-  // the in-container working directory is /testbed rather than /workspace, AND the no-op
-  // compile.sh detection wrapper does NOT apply (SWE-bench has no compile.sh contract — the
-  // tests are the truth).
+  // SWE-bench tasks stash their container ID here. Same docker-exec routing as programbench; the
+  // in-container workdir is stored per run because classic SWE-bench uses /testbed while
+  // SWE-bench Pro uses /app. The no-op compile.sh detection wrapper does NOT apply (SWE-bench has
+  // no compile.sh contract — the tests are the truth).
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
 
   @Override
@@ -109,7 +109,7 @@ public class BuildProjectTool implements Tool {
       String swCid = swebenchContainers.get(ctx.runId());
       if (swCid != null) {
         containerId = swCid;
-        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+        workdir = swebenchContainers.getWorkdir(ctx.runId());
         applyCompileCheckWrapper = false;
       }
     }

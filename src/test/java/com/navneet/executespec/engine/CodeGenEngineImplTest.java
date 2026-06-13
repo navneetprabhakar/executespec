@@ -10,11 +10,15 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
-import com.navneet.executespec.agent.PatchAgent;
+import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
-import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -29,9 +33,21 @@ import org.mockito.ArgumentCaptor;
  */
 class CodeGenEngineImplTest {
 
-  private final PatchAgent patchAgent = mock(PatchAgent.class);
+  private final WorkerAgent workerAgent = mock(WorkerAgent.class);
+  private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+  private final FeatureFlagService featureFlagService = mock(FeatureFlagService.class);
+  private final PromptAssembler promptAssembler = mock(PromptAssembler.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
-  private final CodeGenEngineImpl engine = new CodeGenEngineImpl(patchAgent, costTracker);
+  private final CodeGenEngineImpl engine =
+      new CodeGenEngineImpl(workerAgent, runRepo, featureFlagService, promptAssembler, costTracker);
+
+  @BeforeEach
+  void setUp() {
+    when(promptAssembler.assemble("patch-agent.md")).thenReturn("PATCH SYSTEM");
+    when(featureFlagService.isEnabled(anyString())).thenReturn(false);
+    when(runRepo.findById(anyString())).thenReturn(Optional.empty());
+    engine.loadPatchPrompt();
+  }
 
   private static EngineRequest req(Path workspace) {
     return EngineRequest.builder()
@@ -45,8 +61,7 @@ class CodeGenEngineImplTest {
   }
 
   private void stubWorker(WorkerResult wr) {
-    when(patchAgent.run(anyString(), anyString(), anyString(), any(ExecutionContext.class)))
-        .thenReturn(wr);
+    when(workerAgent.run(any(WorkerTaskRequest.class))).thenReturn(wr);
   }
 
   @Test
@@ -114,7 +129,7 @@ class CodeGenEngineImplTest {
     assertThat(r.cost()).isEqualTo(EngineCost.zero());
     assertThat(r.iterations()).isZero();
     assertThat(r.diff()).isEmpty();
-    verifyNoInteractions(patchAgent);
+    verifyNoInteractions(workerAgent);
   }
 
   @Test
@@ -147,8 +162,72 @@ class CodeGenEngineImplTest {
 
     engine.solve(request);
 
-    ArgumentCaptor<ExecutionContext> ctx = ArgumentCaptor.forClass(ExecutionContext.class);
-    verify(patchAgent).run(anyString(), anyString(), anyString(), ctx.capture());
-    assertThat(ctx.getValue().taskId()).isEqualTo("__root__");
+    ArgumentCaptor<WorkerTaskRequest> req = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(req.capture());
+    assertThat(req.getValue().context().taskId()).isEqualTo("__root__");
+  }
+
+  @Test
+  void solve_buildsDirectWorkerRequestWithPatchDefaults(@TempDir Path workspace) {
+    stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+
+    engine.solve(req(workspace));
+
+    ArgumentCaptor<WorkerTaskRequest> req = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(req.capture());
+    WorkerTaskRequest workerReq = req.getValue();
+    assertThat(workerReq.provider()).isEqualTo("anthropic");
+    assertThat(workerReq.model()).isEqualTo("claude-sonnet-4-6");
+    assertThat(workerReq.systemPrompt()).isEqualTo("PATCH SYSTEM");
+    assertThat(workerReq.userPrompt()).isEqualTo("fix the login bug");
+    assertThat(workerReq.maxIterations()).isEqualTo(220);
+    assertThat(workerReq.maxTokensPerCall()).isEqualTo(16_000);
+    assertThat(workerReq.stagnationWarnAfter()).isEqualTo(220);
+    assertThat(workerReq.stagnationForceAfter()).isEqualTo(220);
+    assertThat(workerReq.requireTestVerification()).isTrue();
+    assertThat(workerReq.criticPass()).isFalse();
+    assertThat(workerReq.verifyBeforeComplete()).isFalse();
+  }
+
+  @Test
+  void solve_disablesHardTestGateForBlindBenchmarkSources(@TempDir Path workspace) {
+    stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    when(runRepo.findById("run-1"))
+        .thenReturn(
+            Optional.of(PipelineRun.builder().runId("run-1").sourceType("benchmark").build()));
+
+    engine.solve(req(workspace));
+
+    ArgumentCaptor<WorkerTaskRequest> req = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(req.capture());
+    assertThat(req.getValue().requireTestVerification()).isFalse();
+  }
+
+  @Test
+  void solve_honorsExplicitNoVerifyMode(@TempDir Path workspace) {
+    stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+
+    EngineRequest request =
+        EngineRequest.builder()
+            .taskSpec("x")
+            .workspace(workspace)
+            .provider("anthropic")
+            .model("m")
+            .runId("run-1")
+            .taskId("task-1")
+            .verifyMode(VerifyMode.NONE)
+            .build();
+
+    engine.solve(request);
+
+    ArgumentCaptor<WorkerTaskRequest> req = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(req.capture());
+    assertThat(req.getValue().requireTestVerification()).isFalse();
   }
 }

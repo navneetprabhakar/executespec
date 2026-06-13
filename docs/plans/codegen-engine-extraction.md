@@ -115,22 +115,25 @@ Design (this doc) = the "start" of the extraction during the benchmark window. O
 `EngineCost` / `EngineVerification`), compile + spotless green. **No behaviour change — nothing
 implements or calls `CodeGenEngine` yet, so every production run is byte-identical.**
 
-**Phase 2 (the wrap facade) is also shipped** — `engine/CodeGenEngineImpl` (`@Service`) delegates to
-today's `PatchAgent.run` (→ `WorkerAgent` → tools → `LlmRouter`) and maps `WorkerResult` +
-`RunCostTracker.snapshot` into `EngineResult` (with a host-side `git diff`). It is registered as a bean
-but **not injected anywhere yet** (parallel + unused), so production stays byte-identical.
+**Phase 2 (initial wrap facade) shipped, now superseded** — `engine/CodeGenEngineImpl` first wrapped
+the then-current `PatchAgent.run` path and mapped `WorkerResult` + `RunCostTracker.snapshot` into
+`EngineResult`.
 
-**Phase 3 routing is done** — `BenchmarkGenerationService.generate()` now calls `CodeGenEngine.solve(...)`
-(the engine's first real consumer). The agent call is byte-identical (solve wraps the same
-`PatchAgent.run` with the same `ExecutionContext`), and the benchmark keeps its own container-based
-diff-capture for the scored patch — so the benchmark number is unchanged **by construction**. A parity
-re-run of the 30 is the remaining empirical confirmation.
+**Phase 3 routing shipped, now expanded** — `BenchmarkGenerationService.generate()` became the first
+consumer of `CodeGenEngine.solve(...)`; as of 2026-06-12, orchestrated PATCH runs also route through
+the same engine.
 
 **Phase 4 is done** — `WorkerAgent` + `WorkerResult` + `WorkerTaskRequest` relocated `agent/` → `engine/`
 (the worker loop now physically lives in the engine; worker tools stay in `tool/`). Behaviour-neutral
 package move — ~30 files re-pointed, `mvn compile` + `test-compile` green; `WorkerAgent.truncate` widened
-to `public` for the now-cross-package `WorkerAgentTruncateTest`. **Caveat:** 4 pre-existing worker unit-test
-off-by-ones (nudge / wall-clock / stagnation, all "expected N got N+1") are **debt from the earlier
+to `public` for the now-cross-package `WorkerAgentTruncateTest`. **Caveat:** 4 pre-existing worker
+unit-test off-by-ones (nudge / wall-clock / stagnation, all "expected N got N+1") are **debt from the earlier
 verify-nudge harness work (RL-2026-05-051), NOT the move** — verified by re-running them at HEAD (same 4
 red before the move). Flagged for a focused fix. Product runs stay on `RunOrchestrator` → byte-identical
 throughout. **Phase 5** (lift SSE/cost/DB behind an `EngineObserver`) is next.
+
+**Update (2026-06-12, RL-2026-06-030):** `CodeGenEngineImpl` now owns the PATCH-style
+`WorkerTaskRequest` construction directly and calls `WorkerAgent`; `RunOrchestrator.runPatchPipeline`
+and `BenchmarkGenerationService.generate` both route through `CodeGenEngine.solve`. `PatchAgent` is
+deprecated and has no active call sites. The former PatchAgent policy (patch prompt, provider patch
+fragments, raised caps, source-scoped test-verification gate, critic/VBC flags) moved into the engine.

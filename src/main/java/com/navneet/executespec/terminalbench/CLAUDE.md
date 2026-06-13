@@ -29,7 +29,7 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
 
-The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) are **NOT** Terminal-Bench code — they live in the shared `engine/WorkerAgent` as flag/data-activated, workspace-agnostic capabilities (see `engine/CLAUDE.md`). TB is just one **consumer** (it sets the flags via `ES_TB_CRITIC` / `ES_TB_DELIVERABLE_GATE` / `ES_TB_VERIFY_GATE`); `PatchAgent` is another (critic behind `worker.critic-pass.enabled`, V231, default OFF). So the "no reviewer" framing above is now "no *pipeline* reviewer (`ReviewerAgent`)" — TB gets the lightweight common critic instead, reading the `/app` files (remote) the way PATCH reads its `git diff` (local). Empirically the #2+#1 combo lifted a 13-task near-miss slice 4/13 → 8/13 (pass@2), 0 regressions.
+The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) are **NOT** Terminal-Bench code — they live in the shared `engine/WorkerAgent` as flag/data-activated, workspace-agnostic capabilities (see `engine/CLAUDE.md`). TB is just one **consumer** (it sets the flags via `ES_TB_CRITIC` / `ES_TB_DELIVERABLE_GATE` / `ES_TB_VERIFY_GATE`); PATCH uses the same critic through `CodeGenEngineImpl` behind `worker.critic-pass.enabled` (V231, default OFF). So the "no reviewer" framing above is now "no *pipeline* reviewer (`ReviewerAgent`)" — TB gets the lightweight common critic instead, reading the `/app` files (remote) the way PATCH reads its `git diff` (local). Empirically the #2+#1 combo lifted a 13-task near-miss slice 4/13 → 8/13 (pass@2), 0 regressions.
 
 ## The keystone mechanism (and the fix that made it work)
 
@@ -50,14 +50,17 @@ execution). The fix (RL-2026-06):
 
 ## The client (Harbor adapter)
 
-`~/tbench/es_harbor_agent.py` (`ExecuteSpecAgent(BaseAgent)`, slated to move into the repo / its own
-client folder). `harbor run -d terminal-bench/terminal-bench-2 -i <task> --agent-import-path
-es_harbor_agent:ExecuteSpecAgent -m deepseek/deepseek-v4-flash`. The adapter runs on the HOST, so the
-server only needs to be reachable at `localhost` (no in-container networking). Tool execution maps the
-12 worker tools onto `environment.exec` (shell/build/test/git, cat for readFile, grep for searchFiles,
-base64-via-exec for write/edit). Config via env: `ES_PROVIDER`, `ES_MODEL`, `ES_BASE`, `ES_MAX_ITERS`,
-`ES_PAT` or `ES_ADMIN_EMAIL`/`ES_ADMIN_PW`. Populates Harbor's `AgentContext` cost/tokens from
-`GET /api/runs/{id}/cost`.
+`~/tbench/es_harbor_agent.py` (`ExecuteSpecAgent(BaseAgent)`, version-controlled at
+`infra/benchmark/tb/es_harbor_agent.py`). `harbor run -d terminal-bench/terminal-bench-2-1 -i <task>
+--agent-import-path es_harbor_agent:ExecuteSpecAgent -m deepseek/deepseek-v4-flash`. The adapter runs
+on the HOST, so the server only needs to be reachable at `localhost` (no in-container networking).
+Tool execution maps the 12 worker tools onto `environment.exec` (shell/build/test/git, cat for
+readFile, grep for searchFiles, base64-via-exec for write/edit). Config via env: `ES_PROVIDER`,
+`ES_MODEL`, `ES_BASE`, `ES_MAX_ITERS`, `ES_PAT` or `ES_ADMIN_EMAIL`/`ES_ADMIN_PW`. Populates Harbor's
+`AgentContext` cost/tokens from `GET /api/runs/{id}/cost`. Since RL-2026-06-031 the adapter declares
+`SUPPORTS_ATIF=true` and writes `agent/trajectory.json` during each trial with the instruction,
+ExecuteSpec tool-call/result pairs, and terminal cost summary; `submit-tb.sh` refuses to upload when a
+passing trial is missing that trajectory because leaderboard validation rejects it.
 
 ## Verified
 

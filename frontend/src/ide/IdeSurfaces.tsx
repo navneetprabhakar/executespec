@@ -600,10 +600,11 @@ export function IdeCompose() {
     ? projects.find((p) => p.id === projectId)?.name || 'Selected project'
     : 'Sandbox';
   const mobileCanAdvanceFromSpec = spec.trim().length > 0;
+  const mobileNextBlocked = mobileStep === 1 && !mobileCanAdvanceFromSpec;
 
   return (
     <div className='ide-pane ide-compose' style={{maxWidth: 820}}>
-      <div className='ide-h1'>New work</div>
+      <h1 className='ide-h1'>New work</h1>
       <div className='ide-sub'>
         Describe the change in plain language. ExecuteSpec plans the work, writes the code across
         your repos, verifies it, and returns a scored pull request.{' '}
@@ -1053,7 +1054,8 @@ export function IdeCompose() {
             type='button'
             className='ide-btn'
             onClick={() => setMobileStep(Math.min(4, mobileStep + 1) as 1 | 2 | 3 | 4)}
-            disabled={mobileStep === 1 && !mobileCanAdvanceFromSpec}
+            disabled={mobileNextBlocked}
+            aria-describedby={mobileNextBlocked ? 'compose-mobile-next-help' : undefined}
           >
             Next
           </button>
@@ -1061,6 +1063,11 @@ export function IdeCompose() {
           <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
             {busy ? 'Submitting…' : 'Create plan'}
           </button>
+        )}
+        {mobileNextBlocked && (
+          <div id='compose-mobile-next-help' className='ide-compose-mobile-help'>
+            Describe the change before choosing context.
+          </div>
         )}
       </div>
     </div>

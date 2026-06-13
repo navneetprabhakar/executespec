@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">ExecuteSpec Merge Rail monochrome mark</title>
+  <desc id="desc">Single-color version of the ExecuteSpec Merge Rail logo mark.</desc>
+  <rect x="14" y="14" width="100" height="100" rx="24" fill="#0B0D10"/>
+  <path d="M38 37h27c13 0 20 7 20 19v35" fill="none" stroke="#ECEEF2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 64h34" fill="none" stroke="#ECEEF2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 91h47" fill="none" stroke="#ECEEF2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="38" cy="37" r="8" fill="#ECEEF2"/>
+  <circle cx="38" cy="64" r="8" fill="#ECEEF2"/>
+  <circle cx="38" cy="91" r="8" fill="#ECEEF2"/>
+  <circle cx="85" cy="91" r="15" fill="#ECEEF2"/>
+  <path d="m78.5 91.5 4.6 4.6 9.7-11.4" fill="none" stroke="#0B0D10" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
