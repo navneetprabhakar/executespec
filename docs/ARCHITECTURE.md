@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head in the current worktree: `V237`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V239`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -33,7 +33,7 @@ single Spring Boot JAR; the frontend build is served from `static/`.
        │                                                                              │
        │  ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐  │
        │  │ api/controller/*   │    │   ratelimit/       │    │  api/advice/       │  │
-       │  │ 106 controllers    │←──▶│  RateLimitFilter   │    │ Validation/Global/ │  │
+       │  │ 107 controllers    │←──▶│  RateLimitFilter   │    │ Validation/Global/ │  │
        │  │  REST + SSE        │    │  per-tier per-IP   │    │ OptimisticLock     │  │
        │  └─────────┬──────────┘    └────────────────────┘    └────────────────────┘  │
        │            │                                                                 │
@@ -74,8 +74,8 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V237       │             │   → GitHub / Bitbucket    │
-   │ 123 entity/table cls  │             ├───────────────────────────┤
+   │ Flyway V1..V239       │             │   → GitHub / Bitbucket    │
+   │ 127 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
    ┌───────────────────────┐             │   SWE-bench / ProgramBench│
@@ -173,6 +173,15 @@ It is the path for agents that do *not* use native tool calling:
 `ValidationReportGenerator`. These flow `Spring AI Prompt → callWithFallbackTracked
 → provider → ChatResponse`. Same pricing path through `RunCostTracker`, but no tool
 dispatch happens.
+
+### CLI / VS Code agent sessions
+
+`agentsession/` is the durable protocol layer for terminal and VS Code agent shells. It is
+separate from `pipeline_run`: an open-ended session can interpret intent, resolve the current repo
+to a project, list gates, or propose a run without becoming a billable execution run. Cost-bearing
+or destructive actions are represented as typed confirmation-required proposals; the existing run
+approval path remains the only place where run credits are charged. `V239` adds
+`agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` for this separation.
 
 ---
 
@@ -570,7 +579,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head in the current worktree is `V237`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V239`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.
@@ -579,7 +588,7 @@ Connection pool: HikariCP, `maximum-pool-size=30`, `minimum-idle=5`,
 `leak-detection-threshold=90000`. `spring.jpa.open-in-view=false`. Hibernate
 `connection.handling_mode=DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION`.
 
-There are 123 entity/table classes. The hottest table is
+There are 127 entity/table classes. The hottest table is
 [`pipeline_run`](../src/main/java/com/navneet/executespec/state/entity/PipelineRun.java)
 (597-line entity covering plan/review JSON, harness version, run mode, per-agent
 token counters, cost estimates, batch state, hierarchical-planner phase costs,

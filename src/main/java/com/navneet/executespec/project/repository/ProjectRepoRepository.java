@@ -17,4 +17,6 @@ public interface ProjectRepoRepository extends JpaRepository<ProjectRepo, UUID> 
   Optional<ProjectRepo> findByOwnerOrgIdAndGithubRepoFullName(String orgId, String fullName);
 
   Optional<ProjectRepo> findByOwnerUserIdAndGithubRepoFullName(String userId, String fullName);
+
+  List<ProjectRepo> findByGithubRepoFullNameIgnoreCase(String fullName);
 }
