@@ -10,10 +10,12 @@ public final class AgentSessionDtos {
   private AgentSessionDtos() {}
 
   public record CreateSessionRequest(
+      String id,
       String projectId,
       String repoRemote,
       String repoRootHash,
-      String clientSurface,
+      RepoContext repoContext,
+      String surface,
       String title,
       String defaultProvider,
       String defaultModel,
@@ -24,7 +26,7 @@ public final class AgentSessionDtos {
       String id,
       String projectId,
       String repoRemote,
-      String clientSurface,
+      String surface,
       String title,
       String status,
       String defaultProvider,
@@ -46,6 +48,13 @@ public final class AgentSessionDtos {
 
   public record TurnRequest(
       String message, RepoContext repoContext, ClientCapabilities clientCapabilities) {}
+
+  public record StreamTurnRequest(
+      String message,
+      List<Map<String, Object>> conversation,
+      RepoContext repoContext,
+      ClientCapabilities clientCapabilities,
+      String providerOverride) {}
 
   public record InterpretIntentRequest(
       String sessionId,
@@ -84,25 +93,28 @@ public final class AgentSessionDtos {
       String billingImpact,
       List<String> requiredFields) {}
 
-  public record ContextResolveRequest(String gitRemote, String repoName, String branch) {}
+  public record ContextResolveRequest(
+      String gitRemote, String repoName, String branch, RepoContext repoContext) {}
 
-  public record ProjectMatch(String id, String name, double confidence, String matchReason) {}
+  public record ProjectMatch(
+      String projectId, String projectName, String repoId, String repoFullName) {}
 
-  public record ContextResolveResponse(ProjectMatch matchedProject, List<String> suggestions) {}
+  public record ContextResolveResponse(ProjectMatch project, String reason) {}
 
   public record GateDecisionCard(
       String runId,
-      String title,
       String projectId,
       String projectName,
+      String title,
       String status,
+      Instant submittedAt,
       String provider,
       String model,
-      Double costEstimateUsd,
-      Double costCapUsd,
+      Double estimatedCostUsd,
+      Double hardCapUsd,
+      Integer creditsRequired,
       String risk,
-      String planSummary,
-      List<String> tasks,
-      String createdBy,
-      Instant createdAt) {}
+      String summary,
+      String recommendedAction,
+      List<String> tasks) {}
 }

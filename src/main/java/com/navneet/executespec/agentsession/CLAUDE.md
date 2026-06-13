@@ -2,7 +2,8 @@
 
 Backend protocol for the CLI and VS Code agent shells. This package owns durable agent sessions,
 turns, action events, the action catalog, deterministic first-pass intent classification, repo to
-project resolution, and gate decision cards.
+project resolution, gate decision cards, and the streaming chat bridge that records open-ended
+turns separately from runs.
 
 ## Boundaries
 
@@ -11,7 +12,8 @@ project resolution, and gate decision cards.
 - Cost-bearing or destructive actions are returned as typed confirmation-required proposals. This
   package must not approve a plan gate or create/approve a run implicitly from ambiguous chat text.
 - `agent_usage_ledger` is the future meter for open-ended CLI/VS Code conversation usage. Run
-  credits and refunds remain owned by the existing run approval path.
+  credits and refunds remain owned by the existing run approval path. Streaming chat writes usage
+  here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
 
@@ -19,7 +21,7 @@ project resolution, and gate decision cards.
 
 | File | Purpose |
 | --- | --- |
-| `AgentSessionController.java` | REST surface under `/api/agent`: sessions, turns, action catalog, context resolution, gate decision cards. |
+| `AgentSessionController.java` | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards. |
 | `AgentSessionService.java` | Persistence/access checks, turn recording, event append, gate card construction, repo/project resolution. |
 | `AgentIntentService.java` | Conservative rule-based intent classifier. LLM intent routing can replace/augment this later, but must preserve typed actions + confirmations. |
 | `AgentActionCatalog.java` | Static action descriptors exposed to clients and future LLM intent prompts. |
