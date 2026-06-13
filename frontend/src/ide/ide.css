@@ -616,6 +616,66 @@
   color: var(--ide-fg-muted);
 }
 
+.ide-recovery-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--ide-red) 50%, var(--ide-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ide-red) 9%, var(--ide-bg-sidebar));
+}
+.ide-recovery-main {
+  min-width: 0;
+}
+.ide-recovery-kicker {
+  margin-bottom: 4px;
+  color: var(--ide-red);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ide-recovery-title {
+  color: var(--ide-fg-bright);
+  font-size: 15px;
+  font-weight: 650;
+}
+.ide-recovery-copy {
+  margin-top: 6px;
+  color: var(--ide-fg-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ide-recovery-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+}
+.ide-recovery-meta span {
+  border: 1px solid var(--ide-border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--ide-bg-sidebar);
+}
+.ide-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ide-project-context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
 /* ───────── file icons · folder chevrons · tab close · resizer ───────── */
 .ide-fileicon {
   display: inline-block;
@@ -1639,6 +1699,17 @@
   .ide-root .ide-stack-mobile {
     grid-template-columns: 1fr !important;
   }
+  .ide-recovery-card,
+  .ide-project-context-grid {
+    grid-template-columns: 1fr;
+  }
+  .ide-recovery-actions {
+    justify-content: stretch;
+  }
+  .ide-recovery-actions .ide-btn {
+    flex: 1 1 140px;
+    justify-content: center;
+  }
   .ide-compose {
     padding-bottom: calc(82px + env(safe-area-inset-bottom));
   }
@@ -1715,6 +1786,12 @@
   .ide-compose-mobile-actions .ide-btn {
     min-height: 42px;
     justify-content: center;
+  }
+  .ide-compose-mobile-help {
+    grid-column: 1 / -1;
+    color: var(--ide-fg-muted);
+    font-size: 11px;
+    text-align: center;
   }
   .ide-invoice-row {
     align-items: flex-start !important;

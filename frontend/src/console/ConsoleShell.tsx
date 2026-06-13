@@ -119,6 +119,14 @@ export default function ConsoleShell() {
   useEffect(() => setAccountOpen(false), [location.pathname]);
 
   const path = location.pathname;
+  const shellClasses = [
+    'ide-root',
+    'con-root',
+    drawerOpen ? 'drawer-active' : '',
+    path.startsWith('/compose') ? 'compose-active' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const navActive = (p: string) =>
     p === '/home' ? path === '/' || path.startsWith('/home') : path.startsWith(p);
 
@@ -154,7 +162,7 @@ export default function ConsoleShell() {
   const ThemeIcon = theme === 'light' ? SunIcon : theme === 'system' ? MonitorIcon : MoonIcon;
 
   return (
-    <div className='ide-root con-root'>
+    <div className={shellClasses}>
       <header className='con-topbar'>
         <button
           className='con-icon con-only-mobile'

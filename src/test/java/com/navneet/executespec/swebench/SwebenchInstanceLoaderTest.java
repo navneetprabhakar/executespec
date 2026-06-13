@@ -81,4 +81,35 @@ class SwebenchInstanceLoaderTest {
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("missing dockerhub_tag");
   }
+
+  @Test
+  void parsesPythonStyleStringListsFromSweBenchProRows() throws Exception {
+    Path instances = tempDir.resolve("swepro-python-lists.json");
+    Files.writeString(
+        instances,
+        """
+        [
+          {
+            "instance_id": "instance_python_lists",
+            "repo": "owner/repo",
+            "base_commit": "abc123",
+            "problem_statement": "Fix issue",
+            "fail_to_pass": "['tests/a.test.js::case_one', 'tests/b.test.js::case_two']",
+            "pass_to_pass": "['tests/smoke.test.js::still_works']",
+            "dockerhub_tag": "owner-repo-python-lists"
+          }
+        ]
+        """);
+
+    SwebenchProperties props = new SwebenchProperties();
+    props.setInstancesFile(instances.toString());
+    props.setSuite("swe-bench-pro");
+
+    SwebenchInstanceLoader loader = new SwebenchInstanceLoader(props);
+    SwebenchInstanceLoader.SwebenchInstance instance = loader.findById("instance_python_lists");
+
+    assertThat(instance.failToPass())
+        .containsExactly("tests/a.test.js::case_one", "tests/b.test.js::case_two");
+    assertThat(instance.passToPass()).containsExactly("tests/smoke.test.js::still_works");
+  }
 }

@@ -9,6 +9,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +37,7 @@ public class SwebenchInstanceLoader {
 
   private final SwebenchProperties props;
   private final ObjectMapper mapper = new ObjectMapper();
+  private static final Pattern QUOTED_LIST_ITEM = Pattern.compile("'([^']*)'|\\\"([^\\\"]*)\\\"");
 
   /** {@code instance_id → SwebenchInstance} cache; populated on first {@link #findById} call. */
   private volatile Map<String, SwebenchInstance> cache;
@@ -180,9 +183,24 @@ public class SwebenchInstanceLoader {
       for (JsonNode el : arr) out.add(el.asText());
       return out;
     } catch (IOException ioe) {
+      List<String> literal = parseQuotedListLiteral(raw);
+      if (!literal.isEmpty()) return literal;
       log.warn("SwebenchInstanceLoader: bad list field {} — using empty", ioe.getMessage());
       return List.of();
     }
+  }
+
+  private List<String> parseQuotedListLiteral(String raw) {
+    if (raw == null || raw.isBlank()) return List.of();
+    String trimmed = raw.trim();
+    if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return List.of();
+    List<String> out = new ArrayList<>();
+    Matcher matcher = QUOTED_LIST_ITEM.matcher(trimmed);
+    while (matcher.find()) {
+      String value = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+      out.add(value);
+    }
+    return out;
   }
 
   /**

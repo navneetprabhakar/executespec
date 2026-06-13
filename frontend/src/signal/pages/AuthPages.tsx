@@ -5,6 +5,8 @@ import AuthLayout from '@/signal/components/AuthLayout';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
+const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
+
 // OAuth — direct hit on Spring Security's authorization endpoint mapped
 // at /api/auth/oauth2/authorize/{registrationId} (see SecurityConfig
 // .oauth2Login.authorizationEndpoint). The earlier /api/auth/oauth2/init
@@ -51,28 +53,7 @@ function GitHubIcon() {
 
 function OAuthBtn({href, children}: {href: string; children: React.ReactNode}) {
   return (
-    <a
-      href={href}
-      style={{
-        width: '100%',
-        background: 'var(--signal-card-bg)',
-        border: '1px solid var(--signal-hairline)',
-        color: 'var(--signal-ink)',
-        padding: '13px 16px',
-        borderRadius: 14,
-        fontSize: 15,
-        fontWeight: 500,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        marginBottom: 10,
-        fontFamily: 'inherit',
-        cursor: 'pointer',
-        textDecoration: 'none',
-        boxSizing: 'border-box',
-      }}
-    >
+    <a href={href} className='oauth-btn'>
       {children}
     </a>
   );
@@ -93,21 +74,7 @@ function decodeOAuthError(code: string): string {
 
 function ErrorBanner({msg}: {msg: string}) {
   if (!msg) return null;
-  return (
-    <div
-      style={{
-        background: 'var(--signal-coral-soft)',
-        color: 'var(--signal-coral-text)',
-        border: '1px solid var(--signal-coral)',
-        borderRadius: 10,
-        padding: '10px 14px',
-        marginBottom: 12,
-        fontSize: 13,
-      }}
-    >
-      {msg}
-    </div>
-  );
+  return <div className='auth-error'>{msg}</div>;
 }
 
 export function LoginPage() {
@@ -154,14 +121,14 @@ export function LoginPage() {
     <AuthLayout>
       <div className='signal-splash'>
         <div className='brand'>
-          <div className='logo'>E</div>
-          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
+          <div className='word'>ExecuteSpec</div>
         </div>
         <h1>
-          Welcome back, <em>builder.</em>
+          Sign in to <em>ExecuteSpec.</em>
         </h1>
         <p className='lede'>
-          Sign in to pick up your runs, projects and pull requests right where you left them.
+          Return to your project rails, pending plan gates, and generated pull requests.
         </p>
 
         <ErrorBanner msg={err} />
@@ -173,23 +140,7 @@ export function LoginPage() {
           <GitHubIcon /> Continue with GitHub
         </OAuthBtn>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            color: 'var(--signal-text-mute)',
-            fontSize: 12,
-            fontWeight: 600,
-            margin: '14px 0',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-          }}
-        >
-          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-          or
-          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-        </div>
+        <div className='or-row'>or</div>
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
@@ -214,9 +165,7 @@ export function LoginPage() {
               required
             />
             <div className='hint' style={{textAlign: 'right'}}>
-              <Link to='/forgot-password' style={{color: 'var(--signal-coral)'}}>
-                Forgot password?
-              </Link>
+              <Link to='/forgot-password'>Forgot password?</Link>
             </div>
           </div>
           <Button kind='primary' block type='submit' disabled={busy}>
@@ -277,13 +226,13 @@ export function SignupPage() {
     <AuthLayout>
       <div className='signal-splash'>
         <div className='brand'>
-          <div className='logo'>E</div>
-          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
+          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
+          <div className='word'>ExecuteSpec</div>
         </div>
         <h1>
-          Create an <em>account.</em>
+          Create your <em>workspace.</em>
         </h1>
-        <p className='lede'>Free tier · no card · 15 runs/month. You can upgrade any time.</p>
+        <p className='lede'>Start with 15 runs/month. Add team billing when the workflow sticks.</p>
 
         <ErrorBanner msg={err} />
 
@@ -294,23 +243,7 @@ export function SignupPage() {
           <GitHubIcon /> Continue with GitHub
         </OAuthBtn>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            color: 'var(--signal-text-mute)',
-            fontSize: 12,
-            fontWeight: 600,
-            margin: '14px 0',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-          }}
-        >
-          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-          or
-          <div style={{flex: 1, height: 1, background: 'var(--signal-hairline)'}} />
-        </div>
+        <div className='or-row'>or</div>
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
@@ -351,15 +284,8 @@ export function SignupPage() {
             lineHeight: 1.5,
           }}
         >
-          By signing up you agree to our{' '}
-          <a href='/terms' style={{color: 'var(--signal-coral)'}}>
-            Terms
-          </a>{' '}
-          &amp;{' '}
-          <a href='/privacy' style={{color: 'var(--signal-coral)'}}>
-            Privacy
-          </a>
-          .
+          By signing up you agree to our <a href='/terms'>Terms</a> &amp;{' '}
+          <a href='/privacy'>Privacy</a>.
         </p>
 
         <div className='footer-link'>

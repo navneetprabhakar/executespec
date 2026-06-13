@@ -1,6 +1,7 @@
 package com.navneet.executespec.benchmark;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -41,16 +42,16 @@ import lombok.extern.slf4j.Slf4j;
  * auto-push). For a benchmark, all of that is noise — and it was the source of most of the
  * operational friction (submit blocks until terminal, harvesting races, completion emails, etc.).
  *
- * <p>This service does <b>only code generation</b>: it wires the exact same code-gen components
- * ({@link PatchAgent} → {@code WorkerAgent} → tools → {@code LlmRouter}, run inside the cleanroom
- * container) <i>directly and synchronously</i>, and returns the patch. No {@code submitRun}, no
- * async, no listeners, no credits, no preview/report/email. The HTTP call blocks (~2–4 min for a
- * Live instance) and hands back the diff — no polling, no harvesting.
+ * <p>This service does <b>only code generation</b>: it calls {@code CodeGenEngineImpl}, which wires
+ * the same {@code WorkerAgent} → tools → {@code LlmRouter} loop inside the cleanroom container
+ * <i>directly and synchronously</i>, and returns the patch. No {@code submitRun}, no async, no
+ * listeners, no credits, no preview/report/email. The HTTP call blocks (~2–4 min for a Live
+ * instance) and hands back the diff — no polling, no harvesting.
  *
  * <p>It still creates ONE minimal {@link PipelineRun} row, because the worker reads two things from
  * it: {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code sourceType}
- * (the PATCH test-verification gate, in {@code PatchAgent} — {@code "benchmark"} ⇒ gate OFF for
- * blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
+ * (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"} ⇒ gate OFF
+ * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
  * lifecycle.
  *
  * <p>Blind, like {@link BenchmarkRunService}: the agent sees only the issue {@code
@@ -124,7 +125,7 @@ public class BenchmarkGenerationService {
     setupCleanroom(image, workspace, containerName, runId, instance);
     try {
       // Minimal run row — the only state the code-gen path reads back: hardCapUsd (worker budget
-      // cap) + sourceType="benchmark" (PatchAgent gate OFF for blind runs). NOT the full submitRun
+      // cap) + sourceType="benchmark" (engine gate OFF for blind runs). NOT the full submitRun
       // lifecycle.
       PipelineRun row =
           PipelineRun.builder()
@@ -150,11 +151,10 @@ public class BenchmarkGenerationService {
           provider,
           model);
 
-      // THE code-gen call — now routed through the engine seam (RL-2026-05-052, Phase 3).
-      // CodeGenEngine.solve builds the ExecutionContext + delegates to the SAME PatchAgent →
-      // WorkerAgent → tools → LlmRouter path, so the agent behaviour is byte-identical; the
-      // benchmark keeps its own container-based captureDiff below for the scored patch (so the
-      // number can't shift from a diff-capture change). Gate OFF because sourceType is "benchmark".
+      // THE code-gen call. CodeGenEngine.solve builds the ExecutionContext and dispatches the same
+      // WorkerAgent → tools → LlmRouter loop as PATCH mode; the benchmark keeps its own
+      // container-based captureDiff below for the scored patch. Gate OFF because sourceType is
+      // "benchmark".
       EngineResult er =
           codeGenEngine.solve(
               EngineRequest.builder()
@@ -217,8 +217,8 @@ public class BenchmarkGenerationService {
    * Pull (skip if present) → cp {@code /testbed/.} into the host workspace → run a live container
    * bind-mounting it at {@code /testbed} with {@code --network none} → register the container so
    * the worker's shell/build tools dispatch via {@code docker exec}. Mirrors {@link
-   * BenchmarkRunService#onRunStarted} but called directly (no event), so the setup is guaranteed
-   * complete before {@link PatchAgent#run} is invoked.
+   * BenchmarkRunService#onRunStarted} but called directly (no event), so setup is complete before
+   * {@code CodeGenEngine.solve} invokes the worker.
    */
   private void setupCleanroom(
       String image,
@@ -247,7 +247,8 @@ public class BenchmarkGenerationService {
     }
     String runCmd =
         String.format(
-            "docker run -d --rm --network none --name %s -v %s:%s -w %s %s sleep %dh",
+            "docker run -d --rm --network none --name %s -v %s:%s -w %s --entrypoint /bin/sh %s"
+                + " -c 'sleep %dh'",
             containerName,
             workspace,
             workdir,
@@ -286,6 +287,7 @@ public class BenchmarkGenerationService {
             + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
             + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
             + " \":(exclude,glob)**/.github/**\""
+            + " \":(exclude,glob)appendonlydir/**\""
             + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
             + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
             + " \":(exclude,glob)**/conftest.py\""
@@ -410,10 +412,23 @@ public class BenchmarkGenerationService {
         "2. Pin down the EXACT expected behavior BEFORE editing, and check whether the fix belongs"
             + " in a shared mechanism (callers, serialization/storage layers, sibling modules) vs."
             + " a single call site — match the codebase's conventions.\n");
-    sb.append("3. Make a minimal, targeted fix.\n");
-    sb.append(
-        "4. Run the repository's EXISTING tests for the module you changed to confirm no"
-            + " regression, then call completeTask.\n");
+    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
+      sb.append(
+          "3. The Interface above is a contract, not a complete file list. Inspect every named"
+              + " path, then search for production callers/consumers of those methods/functions and"
+              + " patch all code required for the issue's visible behavior. Do not stop after only"
+              + " adding helper methods if controllers, sockets, templates, schemas, or messages"
+              + " must use them.\n");
+      sb.append("4. Make a minimal, targeted fix across the required production files.\n");
+      sb.append(
+          "5. Run the repository's EXISTING tests for the module you changed to confirm no"
+              + " regression, then call completeTask.\n");
+    } else {
+      sb.append("3. Make a minimal, targeted fix.\n");
+      sb.append(
+          "4. Run the repository's EXISTING tests for the module you changed to confirm no"
+              + " regression, then call completeTask.\n");
+    }
     return sb.toString();
   }
 
@@ -428,12 +443,26 @@ public class BenchmarkGenerationService {
       ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
       pb.redirectErrorStream(true);
       Process p = pb.start();
+      StringBuilder output = new StringBuilder();
+      Thread reader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      output.append(
+                          new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+                    } catch (IOException ignored) {
+                      // The caller gets the process exit/timeout status; output is best effort.
+                    }
+                  });
       boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
       if (!done) {
         p.destroyForcibly();
+        reader.join(1000);
         return new ShellResult(-1, "timeout after " + timeoutSec + "s");
       }
-      return new ShellResult(p.exitValue(), new String(p.getInputStream().readAllBytes()));
+      reader.join(1000);
+      return new ShellResult(p.exitValue(), output.toString());
     } catch (IOException ioe) {
       return new ShellResult(-2, "io error: " + ioe.getMessage());
     } catch (InterruptedException ie) {
