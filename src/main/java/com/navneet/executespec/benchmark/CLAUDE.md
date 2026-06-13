@@ -62,6 +62,11 @@ GITHUB_* / REST) runs the full pipeline incl. reviewer, byte-identical.
 | `BenchmarkGenerationService.java` | **Lean, synchronous code-gen API** (RL-2026-05-028 follow-up). `generate()` reuses the code-gen components **directly** — sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the code-gen engine **synchronously**, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. **No `submitRun`** → no async pipeline, no event listeners (email/preview/report), no credits, no harvesting. Workspace under the (non-Documents) output base by design. This is the going-forward benchmark path: one instance = one call → score. |
 | `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` (async, via `submitRun` — `BenchmarkRunService`), **`POST /generate` (synchronous lean code-gen — `BenchmarkGenerationService`; preferred)**, `GET /preview/{id}` (resolved image/repo/baseCommit), `GET /instances` (loaded id count). |
 
+Diff capture hardening (RL-2026-06-030): both benchmark paths drain shell output while the process
+runs instead of waiting for process exit before reading stdout, so large diffs cannot deadlock the
+capture helper. Redis `appendonlydir/**` runtime artifacts are excluded; NodeBB/Redis smoke runs can
+otherwise create 100KB+ AOF noise and hide a valid source diff behind a timeout/empty patch.
+
 ## Reused from `swebench/` (sandbox layer — sound, not the problem)
 
 - `SwebenchProperties` — `enabled` flag (default OFF), `outputBase`, `instancesFile`,
@@ -72,13 +77,13 @@ GITHUB_* / REST) runs the full pipeline incl. reviewer, byte-identical.
   `FAIL_TO_PASS`/`PASS_TO_PASS` JSON-string fields and SWE-bench Pro lowercase array fields.
 - `SwebenchContainerStore` — per-run container registry + workdir consulted by the worker's tools.
 
-## Gate scoping (lives in `agent/PatchAgent.java`)
+## Gate scoping (lives in `engine/CodeGenEngineImpl.java`)
 
 PATCH mode normally enforces a **test-verification gate** (`requireTestVerification=true`): the
 worker can't call `completeTask` until `runTests` shows `failed:[]`/`errored:[]`/`exit_code:0`. That
 gate is correct for the autofix surfaces (the failing test IS the spec). It is **wrong for a blind
 benchmark run** — we hold out the target test, so the gate can never be satisfied and the worker
-loops to the iter cap. `PatchAgent.run` therefore reads the run's `sourceType` and sets
+loops to the iter cap. `CodeGenEngineImpl` therefore reads the run's `sourceType` and sets
 `requireTestVerification = !(src startsWith "swebench" | "benchmark")` — gate OFF for benchmark, ON
 for `finding:*`. (RL-2026-05-028.)
 

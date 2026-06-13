@@ -4,8 +4,8 @@
 #   • PERSISTENT jobs_dir (NOT /tmp — /tmp is wiped on reboot, which lost our data once)
 #   • live visual tracker (HTML → GCS + Telegram pings) via tb-tracker.py
 #   • GCS results sync at the end (survives VM teardown)
-# Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL K CONCURRENCY COMPACTION
-#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
+# Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
+#                               K CONCURRENCY COMPACTION JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -14,6 +14,8 @@ JOBS_DIR="${JOBS_DIR:-$HOME/es-tb-jobs}"               # PERSISTENT — survives
 PROVIDER="${ES_PROVIDER:-deepseek}"
 MODEL="${ES_MODEL:-deepseek-v4-pro-native}"            # ExecuteSpec model id
 HARBOR_MODEL="${HARBOR_MODEL:-deepseek/deepseek-v4-pro}"
+TB_DATASET="${TB_DATASET:-terminal-bench/terminal-bench-2-1}"
+BENCHMARK_DATASET="${BENCHMARK_DATASET:-${TB_DATASET##*/}}"
 K="${K:-5}"                                            # attempts per task (5 = leaderboard)
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
@@ -37,9 +39,9 @@ agents:
   - import_path: es_harbor_agent:ExecuteSpecAgent
     model_name: $HARBOR_MODEL
 datasets:
-  - name: terminal-bench/terminal-bench-2
+  - name: $TB_DATASET
 EOF
-LOG "config: $CFG (jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY)"
+LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY)"
 
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
@@ -76,7 +78,7 @@ if [ "${BRIDGE:-on}" = on ]; then
          BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
   nohup python3 "$BRIDGE_PY" --job-dir "$JOBS_DIR/$JOB_NAME" \
     --provider "$PROVIDER" --model "$MODEL" --k "$K" --total 89 \
-    --dataset terminal-bench-2 --idle-min 30 --max-min "${BRIDGE_MAX_MIN:-1440}" \
+    --dataset "$BENCHMARK_DATASET" --idle-min 30 --max-min "${BRIDGE_MAX_MIN:-1440}" \
     > "$JOBS_DIR/${JOB_NAME}-bridge.log" 2>&1 &
   LOG "in-app bridge live → http://localhost:8080/benchmark (run id in ${JOB_NAME}-bridge.log)"
 else

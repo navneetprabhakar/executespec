@@ -1,6 +1,7 @@
 package com.navneet.executespec.benchmark;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -159,7 +160,8 @@ public class BenchmarkRunService {
 
       String runCmd =
           String.format(
-              "docker run -d --rm --network none --name %s -v %s:%s -w %s %s sleep" + " %dh",
+              "docker run -d --rm --network none --name %s -v %s:%s -w %s --entrypoint /bin/sh %s"
+                  + " -c 'sleep %dh'",
               recipe.containerName(),
               workspaceHost,
               recipe.workdir(),
@@ -462,6 +464,7 @@ public class BenchmarkRunService {
               + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
               + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
               + " \":(exclude,glob)**/.github/**\""
+              + " \":(exclude,glob)appendonlydir/**\""
               // test files — the gold test_patch is applied separately by the scorer
               + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
               + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
@@ -625,13 +628,26 @@ public class BenchmarkRunService {
       ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
       pb.redirectErrorStream(true);
       Process p = pb.start();
+      StringBuilder output = new StringBuilder();
+      Thread reader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      output.append(
+                          new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+                    } catch (IOException ignored) {
+                      // The caller gets the process exit/timeout status; output is best effort.
+                    }
+                  });
       boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
       if (!done) {
         p.destroyForcibly();
+        reader.join(1000);
         return new ShellResult(-1, "timeout after " + timeoutSec + "s: " + command);
       }
-      String out = new String(p.getInputStream().readAllBytes());
-      return new ShellResult(p.exitValue(), out);
+      reader.join(1000);
+      return new ShellResult(p.exitValue(), output.toString());
     } catch (IOException ioe) {
       return new ShellResult(-2, "io error: " + ioe.getMessage());
     } catch (InterruptedException ie) {

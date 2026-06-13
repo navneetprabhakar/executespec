@@ -20,7 +20,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Patch-mode entry point — single thin-agent loop for bug-fix shapes.
+ * Deprecated patch-mode entry point — single thin-agent loop for bug-fix shapes.
+ *
+ * <p>Active PATCH/SWE-bench codegen now routes through {@link
+ * com.navneet.executespec.engine.CodeGenEngineImpl}, which constructs the same {@link
+ * WorkerTaskRequest} directly against {@link WorkerAgent}. Keep this class only as a compatibility
+ * shell until downstream tests/docs are fully migrated.
  *
  * <p>The architecture motivation lives in the discussion that produced V182 / {@link
  * com.navneet.executespec.state.RunMode}; this class is the runtime end of it. It does not
@@ -50,6 +55,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
+@Deprecated(forRemoval = true)
 public class PatchAgent {
 
   /**

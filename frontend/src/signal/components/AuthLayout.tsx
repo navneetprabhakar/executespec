@@ -1,5 +1,7 @@
 import {ReactNode} from 'react';
 
+const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
+
 /**
  * AuthLayout — responsive shell for splash-style auth pages.
  *
@@ -22,94 +24,48 @@ export default function AuthLayout({children}: {children: ReactNode}) {
         <div className='auth-brand-inner'>
           <div className='auth-brand-top'>
             <div className='brand-line'>
-              <span className='logo'>E</span>
+              <img className='logo' src={MERGE_RAIL_MARK} alt='' />
               <span className='word'>ExecuteSpec</span>
             </div>
             <h2 className='auth-brand-headline'>
-              An <em>agentic</em> engineer that ships PRs your team can actually merge.
+              Plan, code, review, and merge from one controlled rail.
             </h2>
             <p className='auth-brand-lede'>
-              Describe the change. ExecuteSpec classifies, plans, codes across one repo or twenty,
-              runs your tests, files the PR — and attaches a verified score so you know whether to
-              merge before you open the diff.
+              ExecuteSpec turns a requested change into a gated implementation path: scope the work,
+              confirm the plan, watch execution, and merge with a verified score attached.
             </p>
           </div>
 
-          {/* Console preview - mirrors the control-plane shell after sign-in. */}
-          <div
-            className='auth-console-mock'
-            style={{
-              borderRadius: 8,
-              overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              background: '#141511',
-              boxShadow: '0 18px 50px -22px rgba(0, 0, 0, 0.65)',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '10px 12px',
-                background: '#1d1e19',
-                borderBottom: '1px solid rgba(255,255,255,0.08)',
-              }}
-            >
-              <span
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 6,
-                  display: 'grid',
-                  placeItems: 'center',
-                  background: '#d6fe51',
-                  color: '#15170e',
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                E
-              </span>
-              <span style={{fontSize: 12, color: '#f1f2ea', fontWeight: 700}}>
-                ExecuteSpec Console
-              </span>
-              <span style={{marginLeft: 'auto', fontSize: 11, color: '#a0a395'}}>
-                verified work
-              </span>
+          <div className='auth-console-mock'>
+            <div className='auth-console-topbar'>
+              <img src={MERGE_RAIL_MARK} alt='' />
+              <span>ExecuteSpec Console</span>
+              <span className='auth-console-state'>verified work</span>
             </div>
-            <div style={{display: 'flex', background: '#20221c'}}>
-              <span
-                style={{
-                  padding: '7px 14px',
-                  fontSize: 11.5,
-                  color: '#f1f2ea',
-                  background: '#141511',
-                  boxShadow: 'inset 0 2px 0 #d6fe51',
-                }}
-              >
-                Mission control
-              </span>
+            <div className='auth-console-tabs'>
+              <span>Mission control</span>
             </div>
-            <div style={{padding: '12px 0', fontSize: 12.5, lineHeight: 1.75, color: '#dfe4d0'}}>
+            <div className='auth-console-lines'>
               {[
                 {
                   n: 1,
                   t: (
                     <>
-                      <span style={{color: '#d6fe51'}}>Awaiting approval</span>
-                      <span style={{color: '#858b7a'}}> · 3 plans need a decision</span>
+                      <span className='auth-line-blue'>Awaiting approval</span>
+                      <span className='auth-line-muted'> · 3 plans need a decision</span>
                     </>
                   ),
                 },
                 {
                   n: 2,
-                  t: <span style={{color: '#7ce3b4'}}>Live work · 2 runs coding and testing</span>,
+                  t: <span className='auth-line-teal'>Live work · 2 runs coding and testing</span>,
                 },
                 {
                   n: 3,
                   t: (
-                    <span style={{color: '#9db7ff'}}>Project health · PRs, debt, architecture</span>
+                    <span className='auth-line-violet'>
+                      Project health · PRs, debt, architecture
+                    </span>
                   ),
                 },
                 {n: 4, t: <span />},
@@ -117,39 +73,24 @@ export default function AuthLayout({children}: {children: ReactNode}) {
                   n: 5,
                   t: (
                     <>
-                      <span style={{color: '#7ce3b4'}}>plan</span>
-                      <span style={{color: '#858585'}}> · </span>
-                      <span style={{color: '#7ce3b4'}}>code</span>
-                      <span style={{color: '#858585'}}> · </span>
-                      <span style={{color: '#7ce3b4'}}>test</span>
-                      <span style={{color: '#858585'}}> · </span>
-                      <span style={{color: '#dcdcaa'}}>PR ✓</span>
+                      <span className='auth-line-teal'>plan</span>
+                      <span className='auth-line-muted'> · </span>
+                      <span className='auth-line-teal'>code</span>
+                      <span className='auth-line-muted'> · </span>
+                      <span className='auth-line-teal'>test</span>
+                      <span className='auth-line-muted'> · </span>
+                      <span className='auth-line-blue'>PR ready</span>
                     </>
                   ),
                 },
               ].map((r) => (
-                <div key={r.n} style={{display: 'flex', gap: 14, padding: '0 14px'}}>
-                  <span
-                    style={{color: '#858585', width: 14, textAlign: 'right', userSelect: 'none'}}
-                  >
-                    {r.n}
-                  </span>
+                <div key={r.n} className='auth-console-line'>
+                  <span>{r.n}</span>
                   <span>{r.t}</span>
                 </div>
               ))}
             </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 12px',
-                background: '#20221c',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
-                color: '#dfe4d0',
-                fontSize: 11,
-              }}
-            >
+            <div className='auth-console-footer'>
               <span>Plan gate ready</span>
               <span style={{flex: 1}} />
               <span>Verified 94</span>
@@ -159,15 +100,15 @@ export default function AuthLayout({children}: {children: ReactNode}) {
 
           <ul className='auth-brand-bullets'>
             <li>
-              <span className='dot mint' />
+              <span className='dot teal' />
               Real PRs, not diff suggestions
             </li>
             <li>
-              <span className='dot signal' />
-              You approve the plan — and the price — first
+              <span className='dot blue' />
+              You approve the plan and price first
             </li>
             <li>
-              <span className='dot coral' />
+              <span className='dot violet' />
               Deterministic verified score on every PR
             </li>
           </ul>

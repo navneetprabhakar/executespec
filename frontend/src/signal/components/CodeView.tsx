@@ -76,17 +76,17 @@ export function CodeView({
             let body = line;
             if (isDiff) {
               if (line.startsWith('+') && !line.startsWith('+++')) {
-                bg = 'rgba(124, 227, 180, 0.08)';
+                bg = 'color-mix(in srgb, var(--signal-mint) 12%, transparent)';
                 prefix = '+';
                 body = line.slice(1);
               } else if (line.startsWith('-') && !line.startsWith('---')) {
-                bg = 'rgba(255, 107, 107, 0.08)';
+                bg = 'color-mix(in srgb, var(--signal-coral) 10%, transparent)';
                 prefix = '-';
                 body = line.slice(1);
               } else if (line.startsWith('@@')) {
-                bg = 'rgba(91, 141, 239, 0.08)';
+                bg = 'color-mix(in srgb, var(--signal-ocean) 10%, transparent)';
               } else if (line.startsWith('+++') || line.startsWith('---')) {
-                bg = 'rgba(244, 211, 94, 0.06)';
+                bg = 'color-mix(in srgb, var(--signal-y) 8%, transparent)';
               }
             }
             return (
