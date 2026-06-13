@@ -101,7 +101,7 @@ Migration head: **V239** in the current worktree (V239 adds the CLI/VS Code agen
 | --- | --- | --- |
 | `api/controller/RunController` | `/api/runs` | Submit run, list, get, approve, cancel, archive, fork, pause/resume, retry-task, push-scm, workspace download, plan-versions, task-graph |
 | `api/controller/RunConversationController` | `/api/runs` | Post-run chat + apply-suggestion (async via dedicated executor) |
-| `agentsession/AgentSessionController` | `/api/agent` | CLI/VS Code agent-session protocol: action catalog, sessions, turns, context resolution, and gate decision cards |
+| `agentsession/AgentSessionController` | `/api/agent` | CLI/VS Code agent-session protocol: action catalog, sessions, streaming/recorded turns, context resolution, and gate decision cards |
 | `api/controller/PreviewController` | `/api/runs` | Preview analyze/start/stop/logs/rebuild + exec-in-container |
 | `api/controller/SseController` | `/api/runs` | SSE token issuance + event stream subscription |
 | `api/controller/TimelineController` | `/api` | Per-run timeline + per-model task statistics |
