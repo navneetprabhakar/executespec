@@ -247,9 +247,8 @@ Build the clean `benchmark/` path + compile-check locally, then **smoke ONE Live
 
 **The pivot.** Switched to **`runMode=PATCH`** — the production autofix engine (the thin-worker loop that already powers the four customer autofix surfaces via `finding/FindingPatchSubmitter`). PATCH emits a minimal diff with no formatter/scaffolding/auto-commit. **This still honours Principle 1** ("real system, sandbox-only"): PATCH is a first-class production code-gen path, not a benchmark fork — the same engine, tier routing, worker, and tools as the autofix product surfaces. The blind input + cleanroom + external scoring (Principles 2–3) are unchanged.
 
-**Knock-on change.** PATCH normally enforces a test-verification gate (`requireTestVerification=true` — can't `completeTask` until `runTests` is green). That gate is correct for autofix (the failing test IS the spec) but wrong for a **blind** benchmark run (the target test is held out, so the gate can never pass → the worker loops to the iter cap). `agent/PatchAgent.java#run` now scopes the gate by `sourceType`: OFF for `swebench*`/`benchmark*`, ON for `finding:*`.
+**Knock-on change.** PATCH normally enforces a test-verification gate (`requireTestVerification=true` — can't `completeTask` until `runTests` is green). That gate is correct for autofix (the failing test IS the spec) but wrong for a **blind** benchmark run (the target test is held out, so the gate can never pass → the worker loops to the iter cap). `engine/CodeGenEngineImpl.java` now scopes the gate by `sourceType`: OFF for `swebench*`/`benchmark*`, ON for `finding:*`.
 
 **D5 (agent-written tests) becomes moot** under PATCH — the `synthesizeBlindSpec` prompt instructs "edit only non-test source; do NOT add/modify test files," and the diff-capture excludes test churn anyway. The BUILD-only "tests are mandatory" `SYSTEM_PROMPT_BASE` directive does not run in PATCH mode.
 
 **The original BUILD submit config (above) is retained for the record** but is NOT what ships — see the as-built call in `BenchmarkRunService.submit` (`runMode=RunMode.PATCH`, `repoMode="NONE"`, repo arrives via `docker cp`, codemap/memory still inject via `projectId`).
-

@@ -92,7 +92,7 @@ public class EditDiagnosticsService {
       String s = swebenchContainers.get(ctx.runId());
       if (s != null) {
         cid = s;
-        workdir = SwebenchContainerStore.WORKDIR;
+        workdir = swebenchContainers.getWorkdir(ctx.runId());
       }
     }
     if (cid == null && programBenchContainers != null) {

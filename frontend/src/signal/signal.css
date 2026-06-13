@@ -7,47 +7,47 @@
 
 .signal-app {
   /* surfaces */
-  --signal-bg: #fbfaf6;
+  --signal-bg: #f6f7f8;
   --signal-card-bg: #ffffff;
-  --signal-card-elev: #f4f2eb;
-  --signal-bg-translucent: rgba(251, 250, 246, 0.88);
-  --signal-phone-frame: #0e0f12;
+  --signal-card-elev: #eef1f5;
+  --signal-bg-translucent: rgba(246, 247, 248, 0.9);
+  --signal-phone-frame: #0b0d10;
 
   /* text */
-  --signal-ink: #0e0f12;
-  --signal-ink-soft: #2d2e33;
-  --signal-text-dim: #6b6960;
-  --signal-text-mute: #9a968a;
+  --signal-ink: #111318;
+  --signal-ink-soft: #252a33;
+  --signal-text-dim: #5f6673;
+  --signal-text-mute: #8b93a0;
 
   /* feature dark card */
-  --signal-hero-bg-1: #0e0f12;
-  --signal-hero-bg-2: #15161b;
-  --signal-hero-text: #fbfaf6;
-  --signal-hero-text-dim: rgba(251, 250, 246, 0.6);
-  --signal-hero-text-mute: rgba(251, 250, 246, 0.15);
-  --signal-hero-glow: rgba(244, 211, 94, 0.18);
+  --signal-hero-bg-1: #0b0d10;
+  --signal-hero-bg-2: #171b22;
+  --signal-hero-text: #eceef2;
+  --signal-hero-text-dim: rgba(236, 238, 242, 0.64);
+  --signal-hero-text-mute: rgba(236, 238, 242, 0.14);
+  --signal-hero-glow: rgba(79, 127, 231, 0.18);
   --signal-hero-btn-bg: rgba(255, 255, 255, 0.1);
   --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.18);
 
   /* hairlines */
-  --signal-hairline: #e6e2d8;
-  --signal-hairline-strong: #bfb9a8;
+  --signal-hairline: #dde2ea;
+  --signal-hairline-strong: #b8c0cc;
 
   /* accents */
-  --signal-y: #f4d35e;
-  --signal-y-soft: #fbeec0;
-  --signal-y-text: #5a4a08;
-  --signal-coral: #ff6b6b;
-  --signal-coral-soft: #ffd9d5;
-  --signal-coral-text: #8a2828;
-  --signal-mint: #7ce3b4;
-  --signal-mint-soft: #d6f4e2;
-  --signal-mint-text: #0e0f12;
-  --signal-mint-text-on-light: #1d6543;
-  --signal-lavender: #c4b8e0;
-  --signal-lavender-soft: #e8e2f3;
-  --signal-lavender-text: #5443a8;
-  --signal-ocean: #5c9ddb;
+  --signal-y: #b88700;
+  --signal-y-soft: #f4e8bf;
+  --signal-y-text: #674c00;
+  --signal-coral: #d14b4b;
+  --signal-coral-soft: #f5dada;
+  --signal-coral-text: #8f2f2f;
+  --signal-mint: #2bb7a8;
+  --signal-mint-soft: #ddf5f1;
+  --signal-mint-text: #0b0d10;
+  --signal-mint-text-on-light: #139a67;
+  --signal-lavender: #7c6be8;
+  --signal-lavender-soft: #e7e4fb;
+  --signal-lavender-text: #4c3fc2;
+  --signal-ocean: #4f7fe7;
 
   /* radii + shadow */
   --signal-r-sm: 10px;
@@ -59,36 +59,36 @@
 }
 
 .signal-app[data-signal-theme='dark'] {
-  --signal-bg: #0f1014;
-  --signal-card-bg: #1b1c22;
-  --signal-card-elev: #0f1014;
-  --signal-bg-translucent: rgba(15, 16, 20, 0.88);
-  --signal-phone-frame: #34363d;
+  --signal-bg: #0b0d10;
+  --signal-card-bg: #14171c;
+  --signal-card-elev: #1b1f26;
+  --signal-bg-translucent: rgba(11, 13, 16, 0.9);
+  --signal-phone-frame: #242a33;
 
-  --signal-ink: #f3f1ed;
-  --signal-ink-soft: #d6d3ca;
-  --signal-text-dim: #9a9b95;
-  --signal-text-mute: #6e6e68;
+  --signal-ink: #eceef2;
+  --signal-ink-soft: #c9d1db;
+  --signal-text-dim: #9ea7b6;
+  --signal-text-mute: #737c8b;
 
-  --signal-hero-bg-1: #1f2028;
-  --signal-hero-bg-2: #15161b;
-  --signal-hero-text-dim: rgba(251, 250, 246, 0.55);
+  --signal-hero-bg-1: #111722;
+  --signal-hero-bg-2: #0b0d10;
+  --signal-hero-text-dim: rgba(236, 238, 242, 0.58);
   --signal-hero-text-mute: rgba(255, 255, 255, 0.08);
-  --signal-hero-glow: rgba(244, 211, 94, 0.22);
+  --signal-hero-glow: rgba(79, 127, 231, 0.2);
   --signal-hero-btn-bg: rgba(255, 255, 255, 0.07);
   --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.14);
 
   --signal-hairline: rgba(255, 255, 255, 0.08);
   --signal-hairline-strong: rgba(255, 255, 255, 0.16);
 
-  --signal-y-soft: rgba(244, 211, 94, 0.18);
-  --signal-y-text: #f4d35e;
-  --signal-coral-soft: rgba(255, 107, 107, 0.18);
-  --signal-coral-text: #ff8585;
-  --signal-mint-soft: rgba(124, 227, 180, 0.18);
-  --signal-mint-text-on-light: #7ce3b4;
-  --signal-lavender-soft: rgba(196, 184, 224, 0.16);
-  --signal-lavender-text: #c4b8e0;
+  --signal-y-soft: rgba(251, 191, 36, 0.14);
+  --signal-y-text: #fbbf24;
+  --signal-coral-soft: rgba(209, 75, 75, 0.16);
+  --signal-coral-text: #f08a8a;
+  --signal-mint-soft: rgba(122, 209, 200, 0.15);
+  --signal-mint-text-on-light: #7ad1c8;
+  --signal-lavender-soft: rgba(124, 107, 232, 0.16);
+  --signal-lavender-text: #a89cff;
 }
 
 /* Page bounce / rubber-band fix — kill BOTH the elastic overscroll AND the
@@ -1087,15 +1087,15 @@ body {
 }
 .signal-row .pill-dot.mint {
   background: var(--signal-mint);
-  box-shadow: 0 0 8px rgba(124, 227, 180, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--signal-mint) 42%, transparent);
 }
 .signal-row .pill-dot.coral {
   background: var(--signal-coral);
-  box-shadow: 0 0 8px rgba(255, 107, 107, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--signal-coral) 40%, transparent);
 }
 .signal-row .pill-dot.signal {
   background: var(--signal-y);
-  box-shadow: 0 0 8px rgba(244, 211, 94, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--signal-y) 38%, transparent);
 }
 .signal-row .pill-dot.lavender {
   background: var(--signal-lavender);
@@ -1105,7 +1105,7 @@ body {
 }
 .signal-row .pill-dot.live {
   background: var(--signal-coral);
-  box-shadow: 0 0 0 5px rgba(255, 107, 107, 0.16);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--signal-coral) 16%, transparent);
   animation: signal-pulse 1.4s infinite;
 }
 @keyframes signal-pulse {
@@ -2281,32 +2281,32 @@ body {
 .signal-app .signal-splash .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 36px;
+  gap: 12px;
+  margin-bottom: 34px;
 }
 .signal-app .signal-splash .brand .logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: var(--signal-ink);
-  color: var(--signal-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px -18px var(--signal-shadow-strong);
+}
+.signal-app .signal-splash .brand .word {
+  color: var(--signal-ink);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 .signal-app .signal-splash h1 {
-  font-size: clamp(28px, 6vw, 36px);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.05;
-  margin: 0 0 14px;
+  font-size: 34px;
+  font-weight: 680;
+  letter-spacing: 0;
+  line-height: 1.08;
+  margin: 0 0 12px;
   color: var(--signal-ink);
 }
 .signal-app .signal-splash h1 em {
   font-style: normal;
-  color: var(--signal-coral);
+  color: var(--signal-ocean);
 }
 .signal-app .signal-splash .lede {
   font-size: 16px;
@@ -2335,9 +2335,12 @@ body {
   margin-bottom: 10px;
   font-family: inherit;
   cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 .signal-app .signal-splash .oauth-btn:hover {
-  background: var(--signal-card-elev);
+  background: color-mix(in srgb, var(--signal-ocean) 8%, var(--signal-card-elev));
+  border-color: color-mix(in srgb, var(--signal-ocean) 36%, var(--signal-hairline));
 }
 .signal-app .signal-splash .oauth-btn svg {
   width: 18px;
@@ -2369,8 +2372,59 @@ body {
   padding-top: 16px;
 }
 .signal-app .signal-splash .footer-link a {
-  color: var(--signal-coral);
+  color: var(--signal-ocean);
   font-weight: 600;
+}
+
+.signal-app .signal-auth-layout .signal-splash {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+
+.signal-app .signal-auth-layout .signal-splash .hint a,
+.signal-app .signal-auth-layout .signal-splash p a {
+  color: var(--signal-ocean);
+  font-weight: 650;
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-field label {
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 650;
+  color: var(--signal-ink-soft);
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-field input:focus {
+  border-color: var(--signal-ocean);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-ocean) 18%, transparent);
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-btn.primary {
+  background: var(--signal-ocean);
+  color: #ffffff;
+  box-shadow: 0 16px 34px -22px rgba(79, 127, 231, 0.72);
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-btn.primary:hover {
+  background: #3c6fe4;
+}
+
+.signal-app .signal-auth-layout .auth-error {
+  background: var(--signal-coral-soft);
+  color: var(--signal-coral-text);
+  border: 1px solid color-mix(in srgb, var(--signal-coral) 48%, transparent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 /* Disabled / pending state for buttons (added 2026-05-15 with auth wiring). */
@@ -2447,7 +2501,9 @@ body {
   .signal-app .signal-auth-layout .auth-brand-col {
     display: flex;
     flex: 1 1 50%;
-    background: #11120f;
+    background:
+      radial-gradient(circle at 30% 20%, rgba(79, 127, 231, 0.12), transparent 32%),
+      radial-gradient(circle at 78% 75%, rgba(43, 183, 168, 0.1), transparent 34%), #0b0d10;
     color: var(--signal-hero-text);
     align-items: center;
     justify-content: center;
@@ -2499,28 +2555,38 @@ body {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: var(--signal-y);
-  color: var(--signal-mint-text);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: 18px;
+  box-shadow: 0 12px 26px -18px rgba(0, 0, 0, 0.72);
 }
 .signal-app .auth-brand-headline {
-  font-family: inherit;
-  font-size: clamp(28px, 3vw, 38px);
-  font-weight: 600;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-size: 36px;
+  font-weight: 700;
   letter-spacing: 0;
-  line-height: 1.1;
+  line-height: 1.12;
   margin: 0 0 14px;
   color: var(--signal-hero-text);
-  max-width: 18ch;
+  max-width: 21ch;
 }
 .signal-app .auth-brand-headline em {
   font-style: normal;
-  color: var(--signal-coral);
+  color: var(--signal-ocean);
 }
 .signal-app .auth-brand-lede {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 15.5px;
   color: var(--signal-hero-text-dim);
   margin: 0;
@@ -2630,6 +2696,87 @@ body {
   font-size: 10px;
 }
 
+.signal-app .auth-console-mock {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: #11151b;
+  box-shadow: 0 18px 50px -22px rgba(0, 0, 0, 0.65);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.signal-app .auth-console-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #151a22;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #eceef2;
+  font-size: 12px;
+  font-weight: 700;
+}
+.signal-app .auth-console-topbar img {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+.signal-app .auth-console-state {
+  margin-left: auto;
+  font-size: 11px;
+  color: #8a94a6;
+  font-weight: 500;
+}
+.signal-app .auth-console-tabs {
+  display: flex;
+  background: #1b1f26;
+}
+.signal-app .auth-console-tabs span {
+  padding: 7px 14px;
+  font-size: 11.5px;
+  color: #eceef2;
+  background: #11151b;
+  box-shadow: inset 0 2px 0 var(--signal-ocean);
+}
+.signal-app .auth-console-lines {
+  padding: 12px 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #c9d1db;
+}
+.signal-app .auth-console-line {
+  display: flex;
+  gap: 14px;
+  padding: 0 14px;
+}
+.signal-app .auth-console-line > span:first-child {
+  color: #737c8b;
+  width: 14px;
+  text-align: right;
+  user-select: none;
+}
+.signal-app .auth-line-blue {
+  color: #9dbbff;
+}
+.signal-app .auth-line-teal {
+  color: #7ad1c8;
+}
+.signal-app .auth-line-violet {
+  color: #b4aaff;
+}
+.signal-app .auth-line-muted {
+  color: #737c8b;
+}
+.signal-app .auth-console-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #1b1f26;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #c9d1db;
+  font-size: 11px;
+}
+
 /* Trust bullets at the bottom of the brand panel */
 .signal-app .auth-brand-bullets {
   list-style: none;
@@ -2651,14 +2798,17 @@ body {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.signal-app .auth-brand-bullets li .dot.teal,
 .signal-app .auth-brand-bullets li .dot.mint {
   background: var(--signal-mint);
 }
+.signal-app .auth-brand-bullets li .dot.blue,
 .signal-app .auth-brand-bullets li .dot.signal {
-  background: var(--signal-y);
+  background: var(--signal-ocean);
 }
+.signal-app .auth-brand-bullets li .dot.violet,
 .signal-app .auth-brand-bullets li .dot.coral {
-  background: var(--signal-coral);
+  background: var(--signal-lavender);
 }
 
 /* Tighten the inner splash padding now that AuthLayout owns the centering. */

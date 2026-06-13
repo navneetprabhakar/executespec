@@ -520,7 +520,7 @@ export default function IdeBenchmark() {
   if (!isAdmin) {
     return (
       <div className='ide-pane' style={{maxWidth: 760}}>
-        <div className='ide-h1'>Benchmarks</div>
+        <h1 className='ide-h1'>Benchmarks</h1>
         <EmptyCard>This is an operator-only surface (SUPER_ADMIN).</EmptyCard>
       </div>
     );
@@ -529,7 +529,7 @@ export default function IdeBenchmark() {
   return (
     <div className='ide-pane' style={{maxWidth: 1080}}>
       <div style={{display: 'flex', alignItems: 'baseline', gap: 12}}>
-        <div className='ide-h1'>Benchmarks</div>
+        <h1 className='ide-h1'>Benchmarks</h1>
         <button
           onClick={() => void loadList()}
           className='ide-btn ghost'
@@ -540,8 +540,8 @@ export default function IdeBenchmark() {
         </button>
       </div>
       <div className='ide-sub'>
-        Live tracking of Terminal-Bench / SWE-bench work + leaderboard submission. An external
-        verifier publishes events; this auto-refreshes every few seconds.
+        Operator telemetry for Terminal-Bench and SWE-bench. This is not a customer run launcher;
+        external harnesses publish verifier events and this page tracks them.
       </div>
 
       {err && <ErrCard msg={err} />}

@@ -129,10 +129,10 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 | File | Role |
 |---|---|
 | `scripts/setup-tb.sh` | one-time: uv + **harbor 0.13.1** venv in `~/tbench` + the `es_harbor_agent` **and `tb-bench-bridge.py`** from `tb/` |
-| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), harbor run, live HTML tracker **+ the in-app `/benchmark` bridge** (resolved%+cost+tokens), GCS results sync |
+| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), Harbor run (default dataset `terminal-bench/terminal-bench-2-1`), live HTML tracker **+ the in-app `/benchmark` bridge** (resolved%+cost+tokens), GCS results sync |
 | `scripts/tb-tracker.py` | live **visual dashboard** (per-task grid + metrics, auto-refresh) → HTML to GCS + Telegram pings |
-| `scripts/submit-tb.sh` | submit ONE finished job to the public leaderboard (`harbor upload --public`) + post `SUBMITTED{url}` to `/benchmark` (run manually per model after validation; needs `harbor auth login`) |
-| `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`) |
+| `scripts/submit-tb.sh` | submit ONE finished job: ATIF preflight for passing trials → `harbor upload --public` → `harbor leaderboard submit -l terminal-bench-2-1` + post `SUBMITTED{url}` to `/benchmark` (run manually per model after validation; needs `harbor auth login` + metadata yaml) |
+| `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`); declares `SUPPORTS_ATIF=true` and writes `agent/trajectory.json` during each Harbor trial |
 | `tb/tb-bench-bridge.py` | the in-app `/benchmark` bridge — one `TASK_SCORED` per trial (reward + esRunId + cost + **input/output tokens** from each `result.json`) → the V236/V238 tracking dashboard |
 
 **Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
@@ -147,7 +147,7 @@ GCS_BUCKET=$(cd ~/executespec/infra/benchmark && terraform output -raw results_b
 ES_MODEL=deepseek-v4-pro-native HARBOR_MODEL=deepseek/deepseek-v4-pro K=5 CONCURRENCY=12 \
   nohup bash ~/executespec/infra/benchmark/scripts/run-tb.sh > ~/tb.out 2>&1 &
 # watch: open  gs://<bucket>/tb-tracker.html  (auto-refresh) + Telegram pings every 5 min.
-# submit: ./.venv/bin/harbor upload <job> ; ./.venv/bin/harbor leaderboard …
+# submit: JOB_NAME=<job> METADATA_FILE=~/es-tb-jobs/metadata-<model>-tb21.yaml bash scripts/submit-tb.sh
 ```
 
 **⚠️ Pre-flight:** the box gets code via `git pull` → it needs the **TB-extraction commit pushed** (currently held). Push the branch or scp `TerminalBenchRunService.java` first.

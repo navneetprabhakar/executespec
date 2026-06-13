@@ -253,7 +253,8 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 | `TaskExpanderAgent` | `agent` | WORKHORSE | Phase-2 — fills body of one skeleton task; parallel for LARGE/LEGACY |
 | `CoherencePlannerAgent` | `agent` | LIGHTWEIGHT | Phase-3 — emits zero-or-more `patchPlan` minimal-delta patches |
 | `WorkerAgent` | `engine` | WORKHORSE | V2 sequential worker — one task, one ExecutionContext; per-complexity caps; one progress signal + Lever B salvage; build/test verification gates. Relocated `agent/`→`engine/` in Phase 4 (RL-2026-05-052). The manual dispatch path now honors remote-tool sessions for Terminal-Bench/local-hands runs (RL-2026-06-004). |
-| `PatchAgent` | `agent` | WORKHORSE | PATCH-mode entry — SWE-bench / autofix; raised iter cap (Anthropic/DeepSeek/OpenRouter 220 / OpenAI 150 / Gemini 180) |
+| `CodeGenEngineImpl` | `engine` | WORKHORSE | PATCH-mode codegen entry — SWE-bench / benchmark / autofix; direct `WorkerAgent` request construction with raised iter caps (Anthropic/DeepSeek/OpenRouter/Fireworks 220 / OpenAI 150 / Gemini 180) |
+| `PatchAgent` | `agent` | WORKHORSE | Deprecated compatibility shell; no active call sites |
 | `ConversationAgent` | `agent` | LIGHTWEIGHT | Post-run chat agent — generates ≤6-task suggestion plans |
 | `RunTitleSummarizer` | `agent` | LIGHTWEIGHT | Distils user request into 5-9 word imperative title |
 | `ReviewerAgent` | `reviewer` | PLANNING | General + wiring review passes; emits VERDICT: CLEAN / FIXED_ISSUES / UNRESOLVED |
@@ -313,7 +314,7 @@ Background command jobs (RL-2026-06-012, vix-leverage W4.2 = P6, flag `worker.ba
 
 Code outline (RL-2026-06-016, vix-leverage W3.1, flag `worker.code-outline.enabled` V234, default OFF): `tool/ReadCodeOutlineTool` (worker tool) — JavaParser structural outline of a `.java` file (package/imports/types/methods/fields + line ranges, bodies omitted) so the worker localizes a symbol in a large file then `readFile`s only that range. Read-only + fail-safe (syntax error → "readFile it directly"). **Conditionally bound** via the new `tool/FlagGatedTool` marker interface + `ToolRegistry.isToolBound` (generalized from V233) — absent from the model schema when OFF (RL-2026-05-061 schema-safety).
 
-Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete.enabled` V235, default OFF): a 4th `completeTask` stage in `engine/WorkerAgent` that SERVER-RUNS the project's test suite (`smoketest/WorkspaceTestRunner` DIRECTLY — decoupled from V217's `runWorkspaceTests` tool) and refuses if red (`WorkerTaskRequest.verifyBeforeComplete`; bounded `VBC_GATE_MAX_REFUSALS=3` + fail-open). A *server gate, not a model tool* (no schema change → immune to the RL-2026-05-061 stall); distinct from the model-dependent `requireTestVerification`/`requireBuildVerification` SOFT gates. `PatchAgent` every run; `SequentialExecutor` BUILD final-task only; remote/TB fail-open. Not a worker tool.
+Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete.enabled` V235, default OFF): a 4th `completeTask` stage in `engine/WorkerAgent` that SERVER-RUNS the project's test suite (`smoketest/WorkspaceTestRunner` DIRECTLY — decoupled from V217's `runWorkspaceTests` tool) and refuses if red (`WorkerTaskRequest.verifyBeforeComplete`; bounded `VBC_GATE_MAX_REFUSALS=3` + fail-open). A *server gate, not a model tool* (no schema change → immune to the RL-2026-05-061 stall); distinct from the model-dependent `requireTestVerification`/`requireBuildVerification` SOFT gates. `CodeGenEngineImpl` for PATCH runs; `SequentialExecutor` BUILD final-task only; remote/TB fail-open. Not a worker tool.
 
 ---
 
@@ -559,7 +560,7 @@ Files under `src/main/resources/prompts/`. Variables: `{{VAR}}`. Fragments: `{{i
 | `worker.txt` | WorkerAgent (Anthropic default) | Native tool-calling |
 | `worker-openai.txt` | WorkerAgent (OpenAI variant) | Uses `readFile`/`run`/`commit` etc. |
 | `worker-gemini.txt` | WorkerAgent (Gemini variant) | Snake_case tool names; per-response 10 tool-call cap |
-| `patch-agent.md` | PatchAgent | Patch-mode worker for SWE-bench / autofix |
+| `patch-agent.md` | CodeGenEngineImpl | Patch-mode worker prompt for SWE-bench / benchmark / autofix |
 | `compiler.txt` | (compile supervisor) | Legacy |
 | `task-compile-supervisor.txt` | (compile supervisor) | Legacy |
 | `triage.txt` | (triage agent) | Run-recovery loop classification |

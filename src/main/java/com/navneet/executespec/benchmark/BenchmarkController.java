@@ -67,10 +67,10 @@ public class BenchmarkController {
   }
 
   /**
-   * Lean, SYNCHRONOUS code-generation. Reuses the production code-gen components ({@link
-   * com.navneet.executespec.agent.PatchAgent} → worker → tools) directly — no {@code submitRun}
-   * lifecycle, no async, no listeners. Blocks until the worker terminates (~2–4 min for a Live
-   * instance) and returns the captured patch + cost. See {@link BenchmarkGenerationService}.
+   * Lean, SYNCHRONOUS code-generation. Reuses the production code-gen engine ({@code
+   * CodeGenEngineImpl} → worker → tools) directly — no {@code submitRun} lifecycle, no async, no
+   * listeners. Blocks until the worker terminates (~2–4 min for a Live instance) and returns the
+   * captured patch + cost. See {@link BenchmarkGenerationService}.
    */
   @PostMapping("/generate")
   public ResponseEntity<BenchmarkGenerationService.GenerateResult> generate(

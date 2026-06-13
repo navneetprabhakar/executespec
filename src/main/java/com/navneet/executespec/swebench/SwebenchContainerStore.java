@@ -14,8 +14,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Mirrors {@link com.navneet.executespec.programbench.ProgramBenchContainerStore} but for
  * SWE-bench. Separate Redis key prefix ({@code swebench:run:}) so the two adapters don't collide.
  * {@code ShellTool} and {@code BuildProjectTool} consult both stores; if a runId is in the
- * SWE-bench store, the in-container working directory is {@code /testbed} (vs {@code /workspace}
- * for programbench).
+ * SWE-bench store, the in-container working directory comes from the stored task family ({@code
+ * /testbed} for classic SWE-bench, {@code /app} for SWE-bench Pro) instead of the programbench
+ * {@code /workspace}.
  *
  * <p>Redis-backed; 4-hour TTL.
  */
@@ -27,19 +28,29 @@ public class SwebenchContainerStore {
   private static final Duration TTL = Duration.ofHours(4);
   private static final String KEY_PREFIX = "swebench:run:";
 
-  /**
-   * In-container working directory for SWE-bench tasks. Hardcoded because SWE-bench's official
-   * docker images all use {@code WORKDIR /testbed}; if a future task family uses a different
-   * convention we'll surface this as a per-instance field on the stored value.
-   */
+  /** Default in-container working directory for classic SWE-bench tasks. */
   public static final String WORKDIR = "/testbed";
 
   private final StringRedisTemplate redis;
 
   public void put(String runId, String containerId) {
+    put(runId, containerId, WORKDIR);
+  }
+
+  public void put(String runId, String containerId, String workdir) {
     if (runId == null || containerId == null) return;
     redis.opsForValue().set(KEY_PREFIX + runId + ":cid", containerId, TTL);
-    log.info("SwebenchContainerStore.put runId={} cid={}", runId, containerId);
+    redis
+        .opsForValue()
+        .set(
+            KEY_PREFIX + runId + ":workdir",
+            workdir == null || workdir.isBlank() ? WORKDIR : workdir,
+            TTL);
+    log.info(
+        "SwebenchContainerStore.put runId={} cid={} workdir={}",
+        runId,
+        containerId,
+        getWorkdir(runId));
   }
 
   /** Returns the containerId for this run, or {@code null} if this isn't a SWE-bench run. */
@@ -48,8 +59,15 @@ public class SwebenchContainerStore {
     return redis.opsForValue().get(KEY_PREFIX + runId + ":cid");
   }
 
+  public String getWorkdir(String runId) {
+    if (runId == null) return WORKDIR;
+    String workdir = redis.opsForValue().get(KEY_PREFIX + runId + ":workdir");
+    return workdir == null || workdir.isBlank() ? WORKDIR : workdir;
+  }
+
   public void remove(String runId) {
     if (runId == null) return;
     redis.delete(KEY_PREFIX + runId + ":cid");
+    redis.delete(KEY_PREFIX + runId + ":workdir");
   }
 }

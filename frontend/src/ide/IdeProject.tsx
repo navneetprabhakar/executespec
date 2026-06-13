@@ -95,16 +95,72 @@ export default function IdeProject() {
     return <Navigate to={`/projects/${projectId}/pulse`} replace />;
   }
 
+  const activeRuns = runs.filter((r) =>
+    [
+      'CLASSIFYING',
+      'PLANNING',
+      'EXECUTING',
+      'RUNNING',
+      'IN_PROGRESS',
+      'AWAITING_APPROVAL',
+    ].includes((r.status || '').toUpperCase()),
+  );
+  const lastRun = runs[0];
+
   return (
     <div className='ide-pane'>
       {/* C3 — ProjectTabs renders the Projects › {name} crumbs; the old "←"
           back button is redundant with the crumb trail. */}
       <ProjectTabs projectId={projectId || ''} />
-      <div className='ide-h1' style={{marginBottom: 4}}>
+      <h1 className='ide-h1' style={{marginBottom: 4}}>
         {project?.name || 'Project'}
-      </div>
+      </h1>
       <div className='ide-sub'>
         {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
+      </div>
+
+      <div className='ide-project-context-grid'>
+        <div className='ide-card'>
+          <div className='ide-h2' style={{marginTop: 0}}>
+            Code boundary
+          </div>
+          <div className='ide-kv'>
+            <span>Repos connected</span>
+            <span>{repos.length}</span>
+          </div>
+          <div className='ide-kv' style={{borderBottom: 'none'}}>
+            <span>Repos selected</span>
+            <span>{selected.length || repos.length || 0}</span>
+          </div>
+        </div>
+        <div className='ide-card'>
+          <div className='ide-h2' style={{marginTop: 0}}>
+            Work state
+          </div>
+          <div className='ide-kv'>
+            <span>Active</span>
+            <span>{activeRuns.length}</span>
+          </div>
+          <div className='ide-kv' style={{borderBottom: 'none'}}>
+            <span>Latest</span>
+            <span>
+              {lastRun ? `${lastRun.status} · ${fmtWhen(lastRun.startedAt)}` : 'No work yet'}
+            </span>
+          </div>
+        </div>
+        <div className='ide-card'>
+          <div className='ide-h2' style={{marginTop: 0}}>
+            Run behavior
+          </div>
+          <div className='ide-kv'>
+            <span>Provider</span>
+            <span>{provider.toLowerCase()}</span>
+          </div>
+          <div className='ide-kv' style={{borderBottom: 'none'}}>
+            <span>Approval</span>
+            <span>{mode === 'PRODUCTION' ? 'Plan gate' : 'Auto-start'}</span>
+          </div>
+        </div>
       </div>
 
       <div className='ide-h2'>New work in this project</div>

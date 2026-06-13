@@ -38,8 +38,14 @@ export default function ProtectedRoute() {
 
   if (isLoading) {
     return (
-      <div className='flex h-screen items-center justify-center bg-[#0f1117]'>
-        <div className='h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent' />
+      <div
+        className='flex h-screen items-center justify-center'
+        style={{background: 'var(--signal-bg)'}}
+      >
+        <div
+          className='h-8 w-8 animate-spin rounded-full border-4 border-t-transparent'
+          style={{borderColor: 'var(--signal-ocean)', borderTopColor: 'transparent'}}
+        />
       </div>
     );
   }
