@@ -9,6 +9,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +37,7 @@ public class SwebenchInstanceLoader {
 
   private final SwebenchProperties props;
   private final ObjectMapper mapper = new ObjectMapper();
+  private static final Pattern QUOTED_LIST_ITEM = Pattern.compile("'([^']*)'|\\\"([^\\\"]*)\\\"");
 
   /** {@code instance_id → SwebenchInstance} cache; populated on first {@link #findById} call. */
   private volatile Map<String, SwebenchInstance> cache;
@@ -62,7 +65,14 @@ public class SwebenchInstanceLoader {
       List<String> passToPass,
       String version,
       String testPatch,
-      String patch) {}
+      String patch,
+      String dockerhubTag,
+      String repoLanguage,
+      String interfaceName) {
+    public boolean isSweBenchPro() {
+      return dockerhubTag != null && !dockerhubTag.isBlank();
+    }
+  }
 
   public SwebenchInstance findById(String instanceId) {
     Map<String, SwebenchInstance> c = cache;
@@ -135,12 +145,34 @@ public class SwebenchInstanceLoader {
         n.path("base_commit").asText(),
         n.path("problem_statement").asText(),
         // SWE-bench stores FAIL_TO_PASS / PASS_TO_PASS as JSON strings inside the field, not as
-        // arrays — quirky dataset format.
-        parseJsonStringList(n.path("FAIL_TO_PASS").asText("[]")),
-        parseJsonStringList(n.path("PASS_TO_PASS").asText("[]")),
+        // arrays — quirky dataset format. SWE-bench Pro uses lowercase fields and often arrays.
+        parseFlexibleList(firstPresent(n, "FAIL_TO_PASS", "fail_to_pass")),
+        parseFlexibleList(firstPresent(n, "PASS_TO_PASS", "pass_to_pass")),
         n.path("version").asText(),
         n.path("test_patch").asText(""),
-        n.path("patch").asText(""));
+        n.path("patch").asText(""),
+        n.path("dockerhub_tag").asText(""),
+        n.path("repo_language").asText(""),
+        n.path("interface").asText(""));
+  }
+
+  private JsonNode firstPresent(JsonNode node, String... names) {
+    for (String name : names) {
+      JsonNode value = node.get(name);
+      if (value != null && !value.isMissingNode() && !value.isNull()) return value;
+    }
+    return mapper.createArrayNode();
+  }
+
+  private List<String> parseFlexibleList(JsonNode rawNode) {
+    if (rawNode == null || rawNode.isNull() || rawNode.isMissingNode()) return List.of();
+    if (rawNode.isArray()) {
+      List<String> out = new ArrayList<>(rawNode.size());
+      for (JsonNode el : rawNode) out.add(el.asText());
+      return out;
+    }
+    if (!rawNode.isTextual()) return List.of();
+    return parseJsonStringList(rawNode.asText("[]"));
   }
 
   private List<String> parseJsonStringList(String raw) {
@@ -151,9 +183,24 @@ public class SwebenchInstanceLoader {
       for (JsonNode el : arr) out.add(el.asText());
       return out;
     } catch (IOException ioe) {
+      List<String> literal = parseQuotedListLiteral(raw);
+      if (!literal.isEmpty()) return literal;
       log.warn("SwebenchInstanceLoader: bad list field {} — using empty", ioe.getMessage());
       return List.of();
     }
+  }
+
+  private List<String> parseQuotedListLiteral(String raw) {
+    if (raw == null || raw.isBlank()) return List.of();
+    String trimmed = raw.trim();
+    if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return List.of();
+    List<String> out = new ArrayList<>();
+    Matcher matcher = QUOTED_LIST_ITEM.matcher(trimmed);
+    while (matcher.find()) {
+      String value = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+      out.add(value);
+    }
+    return out;
   }
 
   /**
@@ -163,6 +210,20 @@ public class SwebenchInstanceLoader {
    * sqlfluff_1776_sqlfluff-1625} → image template substitution.
    */
   public String imageNameFor(String instanceId) {
+    SwebenchInstance instance = findById(instanceId);
+    if (instance.isSweBenchPro() || props.isSweBenchPro()) {
+      String tag = instance.dockerhubTag();
+      if (tag == null || tag.isBlank()) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST,
+            "SWE-bench Pro instance '"
+                + instanceId
+                + "' is missing dockerhub_tag in "
+                + props.getInstancesFile());
+      }
+      if (tag.contains("/") && tag.contains(":")) return tag;
+      return props.getProImageRepository() + ":" + tag;
+    }
     return String.format(props.getImageTemplate(), instanceId.replace("__", "_1776_"));
   }
 }

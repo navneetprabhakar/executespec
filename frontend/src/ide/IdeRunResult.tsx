@@ -478,6 +478,11 @@ export default function IdeRunResult() {
   const terminal = ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(
     statusUpper,
   );
+  const failedTerminal = ['FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(statusUpper);
+  const failedTasks =
+    run?.tasks?.filter((t) =>
+      ['FAILED', 'PARTIAL', 'BLOCKED'].includes((t.status || '').toUpperCase()),
+    ) ?? [];
   // Power-ops gating: pause is only meaningful while running; resume only when paused.
   const canPause = [
     'RUNNING',
@@ -492,6 +497,14 @@ export default function IdeRunResult() {
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
+  const failureText =
+    run?.failureReason ||
+    (run?.statusReason ? humanStatusReason(run.statusReason) : '') ||
+    (failedTasks.length > 0
+      ? `${failedTasks.length} step${failedTasks.length === 1 ? '' : 's'} need attention.`
+      : issues.length > 0
+        ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
+        : 'Open the logs and evidence to identify the failing stage.');
   // C2 — tab title carries the run name once loaded.
   useDocumentTitle(run?.runTitle || (run ? `R-${runId.slice(0, 6)}` : null));
 
@@ -585,12 +598,12 @@ export default function IdeRunResult() {
                 {label: run?.runTitle || `R-${runId.slice(0, 6)}`},
               ]}
             />
-            <div
+            <h1
               className='ide-h1 ide-clamp2'
               title={run?.runTitle || run?.userRequest || undefined}
             >
               {run ? run.runTitle || (run.userRequest || '').slice(0, 70) || 'Work' : 'Loading…'}
-            </div>
+            </h1>
             <div style={{display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 18px'}}>
               <IdeBadge kind={v.kind}>{v.label}</IdeBadge>
               {score != null && (
@@ -610,6 +623,48 @@ export default function IdeRunResult() {
             {msg && (
               <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
                 {msg}
+              </div>
+            )}
+
+            {failedTerminal && (
+              <div className='ide-recovery-card'>
+                <div className='ide-recovery-main'>
+                  <div className='ide-recovery-kicker'>Recovery path</div>
+                  <div className='ide-recovery-title'>
+                    {statusUpper === 'PARTIAL'
+                      ? 'This run completed with unresolved work.'
+                      : 'This run did not reach a clean result.'}
+                  </div>
+                  <div className='ide-recovery-copy'>{failureText}</div>
+                  <div className='ide-recovery-meta'>
+                    <span>
+                      {failedTasks.length} blocked step{failedTasks.length === 1 ? '' : 's'}
+                    </span>
+                    <span>
+                      {issues.length} evidence issue{issues.length === 1 ? '' : 's'}
+                    </span>
+                    <span>
+                      {files.length} file{files.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </div>
+                <div className='ide-recovery-actions' aria-label='Recovery actions'>
+                  <button className='ide-btn' onClick={() => setTab('Logs')}>
+                    Open logs
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Tasks')}>
+                    Failed steps
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
+                    Evidence
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Code')}>
+                    Files
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Chat')}>
+                    Ask about it
+                  </button>
+                </div>
               </div>
             )}
 

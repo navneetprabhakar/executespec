@@ -52,6 +52,11 @@ INVESTIGATE — find the RIGHT, ROOT fix
 - Error messages mislead about root cause more than half the time. The trace tells you where
   a symptom surfaced; the EXPECTED BEHAVIOR tells you what the code should do. Trace from the
   expected behavior back to the production code that actually produces it.
+- If the task gives an **Interface**, method/function name, or explicit source paths, treat those
+  as the contract, not as the complete fix. First inspect the named paths, then search for every
+  production caller/consumer of the named API. A correct patch often needs both sides: the shared
+  interface implementation AND the UI/controller/socket/schema code that uses it. Do not finish
+  after editing only the helper/interface if the issue describes visible user behavior.
 - Beware the "shallow fix" trap: don't stop at the first deprecation / typo / import error —
   that's often a smokescreen for the real bug. If fixing it only unblocks the crash but your
   repro still fails, keep digging.

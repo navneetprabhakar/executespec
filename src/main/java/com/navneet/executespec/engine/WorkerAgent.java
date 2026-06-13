@@ -12,6 +12,8 @@ import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
+import com.navneet.executespec.state.RunMode;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -156,6 +158,14 @@ public class WorkerAgent {
    * post-warning iterations to either call completeTask cleanly or write the missing piece.
    */
   public static final int STAGNATION_FORCE_AFTER_N = 12;
+
+  /**
+   * PATCH runs are issue-fix shaped, not greenfield build tasks. If they reach this many
+   * consecutive non-write iterations with zero edits, inject the existing progress nudge early so
+   * the worker commits to a source change instead of spending the normal full stagnation window on
+   * reads/searches. BUILD and terminal-task runs keep the standard thresholds.
+   */
+  public static final int PATCH_NO_EDIT_WARN_AFTER_N = 6;
 
   /**
    * V182 layer-3 — within how many iterations of {@code completeTask} must a successful {@code
@@ -420,8 +430,10 @@ public class WorkerAgent {
     // Bug #2 fix — load the run's hard cap once so the loop can stop
     // itself if cost blows past it mid-task. Null cap = no enforcement.
     final String runId = req.context().runId();
-    final Double hardCapUsd =
-        pipelineRunRepository.findById(runId).map(r -> r.getHardCapUsd()).orElse(null);
+    Optional<PipelineRun> runRow = pipelineRunRepository.findById(runId);
+    final Double hardCapUsd = runRow.map(r -> r.getHardCapUsd()).orElse(null);
+    final boolean patchNoEditNudgeOn =
+        !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
 
     // RL-2026-05-052 follow-up — prompt (input) tokens the previous LLM call reported; the trigger
     // signal for WorkerHistoryCompactor. 0 until the first call returns usage.
@@ -1041,6 +1053,15 @@ public class WorkerAgent {
       // one nudge — this replaces the old Lever A + Lever C + stagnation-warn trio.
       boolean wroteThisIter =
           calls.stream().anyMatch(tc -> isProgressTool(tc.name(), terminalTaskMode));
+      if (patchNoEditNudgeOn && totalWriteCalls == 0) {
+        // PATCH runs score the source diff. Before the first edit, build/test/read loops are useful
+        // evidence but not progress toward a patch; only an actual write should reset the no-edit
+        // watchdog. After the first edit, fall back to the normal progress definition so legitimate
+        // edit/build/test cycles still get room to converge.
+        wroteThisIter =
+            calls.stream()
+                .anyMatch(tc -> "writeFile".equals(tc.name()) || "editFile".equals(tc.name()));
+      }
       if (wroteThisIter) {
         itersSinceProgress = 0;
         for (AssistantMessage.ToolCall tc : calls) {
@@ -1048,6 +1069,21 @@ public class WorkerAgent {
         }
       } else {
         itersSinceProgress++;
+      }
+      if (patchNoEditNudgeOn
+          && !progressNudged
+          && totalWriteCalls == 0
+          && itersSinceProgress >= PATCH_NO_EDIT_WARN_AFTER_N) {
+        log.info(
+            "WorkerAgent PATCH_NO_EDIT_NUDGE run={} task={} iter={} itersSinceProgress={}"
+                + " threshold={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            itersSinceProgress,
+            PATCH_NO_EDIT_WARN_AFTER_N);
+        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, false)));
+        progressNudged = true;
       }
       if (!progressNudged && itersSinceProgress >= progressWarnAfter) {
         log.info(

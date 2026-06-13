@@ -240,7 +240,7 @@ private String verifyBeforeCompleteFailure(ExecutionContext ctx) {
 }
 ```
 
-**3. Activation wiring** — `harness/SequentialExecutor` (BUILD worker request) + `agent/PatchAgent` (PATCH): set `.verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))`. Both already inject `FeatureFlagService`.
+**3. Activation wiring** — `harness/SequentialExecutor` (BUILD worker request) + `engine/CodeGenEngineImpl` (PATCH): set `.verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))`. Both already inject `FeatureFlagService`.
 
 **4. Migration** — `V235__seed_worker_verify_before_complete_flag.sql`, default OFF. ⚠️ **Number is contingent** on how W3.1's `V234` reconciles — finalize at commit (`ls V*.sql`); if W3.1/V234 drops, this becomes V234.
 
@@ -268,13 +268,13 @@ Extend `missingDeliverables` (L1983) from "path exists" to "run-and-check": afte
 
 ### Final shape (and where it deviates from the §11 spec)
 - **Test-gate only** (not build+test). VBC server-runs the project's **test suite** via `smoketest/WorkspaceTestRunner` **directly** (not the flag-gated `runWorkspaceTests` tool → decoupled from V217 `worker.build-tdd.enabled`; no model-visible schema change → immune to the RL-2026-05-061 stall). The *build* step was deferred: build-red is already partly caught by the existing post-loop smoke + reviewer fix-build, and `buildProject`'s no-build-command semantics are murky (a clean fail-open is harder). The genuinely-new value is the in-loop **test** gate.
-- **Activation:** `PatchAgent` (PATCH — SWE-bench + autofix) every run; `SequentialExecutor` (BUILD) **final task only** (gated on `isFinalTask`, mirroring the smoke gate) so an intermediate task isn't blocked by a later task's not-yet-written tests. Remote/TB runs **fail-open** (the host runner can't reach a container — generic remote VBC is a follow-up; TB keeps its own `ES_TB_*` gates).
+- **Activation:** `CodeGenEngineImpl` (PATCH — SWE-bench + autofix) every run; `SequentialExecutor` (BUILD) **final task only** (gated on `isFinalTask`, mirroring the smoke gate) so an intermediate task isn't blocked by a later task's not-yet-written tests. Remote/TB runs **fail-open** (the host runner can't reach a container — generic remote VBC is a follow-up; TB keeps its own `ES_TB_*` gates).
 - **Mechanism:** a new `completeTask` stage in `engine/WorkerAgent` (after the deliverable gate, before the LLM critic), bounded to `VBC_GATE_MAX_REFUSALS=3` then YIELD; **fail-open** on unwired runner / remote / no-runner-resolves / zero-tests / any exception. Refusal feeds the failing-count detail back so the worker fixes before completing.
 
 ### Files
 - `engine/WorkerTaskRequest.java` — `+ Boolean verifyBeforeComplete`.
 - `engine/WorkerAgent.java` — `+ WorkspaceTestRunner` field (trailing, null-guarded), `vbcOn` activation, `vbcRefusals` counter + `VBC_GATE_MAX_REFUSALS`, the new stage, soft-nudge suppression (`&& !vbcOn`), `verifyBeforeCompleteFailure()` + `verifyBeforeCompleteMessage()`.
-- `agent/PatchAgent.java` + `harness/SequentialExecutor.java` — activation from the flag.
+- `engine/CodeGenEngineImpl.java` + `harness/SequentialExecutor.java` — activation from the flag.
 - `db/migration/V235__seed_worker_verify_before_complete_flag.sql` — seed OFF.
 - `WorkerAgentVerifyBeforeCompleteTest.java` (8 tests) + the 9 existing `new WorkerAgent(...)` call sites (+1 trailing null).
 

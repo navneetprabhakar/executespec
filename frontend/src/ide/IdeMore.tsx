@@ -506,7 +506,7 @@ export function IdeAccount() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Account</div>
+      <h1 className='ide-h1'>Account</h1>
       <div className='ide-sub'>{email}</div>
 
       <div className='ide-card'>
@@ -630,13 +630,17 @@ export function IdeAccount() {
           ...(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
-          {to: '/integrations', label: 'Integrations', sub: 'GitHub · Slack · Stripe'},
-          {to: '/api-keys', label: 'Provider keys', sub: 'Bring your own model keys'},
         ]}
       />
 
       <div className='ide-h2'>Developer</div>
-      <LinkRows rows={[{to: '/deployments', label: 'Deployments', sub: 'Cloud Run'}]} />
+      <LinkRows
+        rows={[
+          {to: '/integrations', label: 'Repository access', sub: 'GitHub token / app'},
+          {to: '/api-keys', label: 'Model provider keys', sub: 'BYOK credentials'},
+          {to: '/deployments', label: 'Deployments', sub: 'Cloud Run services'},
+        ]}
+      />
 
       <div className='ide-h2'>Plan limits</div>
       <div className='ide-card'>

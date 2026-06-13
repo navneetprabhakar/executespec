@@ -1,48 +1,58 @@
 package com.navneet.executespec.engine;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import com.navneet.executespec.agent.PatchAgent;
+import jakarta.annotation.PostConstruct;
+
+import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 2 of the engine extraction (RL-2026-05-052) — the <b>wrap facade</b>.
+ * Code-gen engine implementation for one prepared workspace.
  *
- * <p>"Wrap, don't move": delegates to today's single-task code-gen path ({@code PatchAgent.run} →
- * {@code WorkerAgent} → tools → {@code LlmRouter}) and maps in/out of the provider-agnostic {@link
- * CodeGenEngine} contract. Behaviour is byte-identical to a direct {@code PatchAgent.run} — this
- * just gives the pipeline + benchmark a stable seam to call. Later phases relocate the worker
- * internals into {@code engine/} and lift the run-row / cost coupling out behind an observer.
+ * <p>Owns the single-task PATCH-style worker request construction directly: prompt assembly,
+ * provider patch fragments, per-provider iteration caps, source-scoped test gate, common critic
+ * flags, and result mapping. This keeps benchmark and patch-mode orchestration on one code-gen
+ * surface instead of routing through the deprecated {@code PatchAgent} wrapper.
  *
  * <p><b>The caller owns setup</b> (per the contract): the workspace is already prepared and a
  * {@code PipelineRun} row for {@code request.runId()} already exists (the worker reads its {@code
  * hardCapUsd} + {@code sourceType} from it). The facade does NOT clone/checkout, write the DB, emit
  * SSE, or push.
  *
- * <p><b>Phase-2 caveat:</b> {@code request.budget()} + {@code request.verifyMode()} are honoured
- * via the existing path's own mechanisms today (the run-row {@code hardCapUsd}; {@code
- * PatchAgent}'s per-provider iter caps; the {@code sourceType}-scoped test-verification gate).
- * Explicit pass-through of budget/verifyMode lands when the worker internals move in (phase 4+).
- *
- * <p>Registered as a bean but <b>not yet injected anywhere</b> (parallel + unused) — so every
- * production run stays byte-identical until phase 3 routes the benchmark through it.
+ * <p>The caller still owns orchestration: clone/checkout, DB lifecycle, SSE, scoring, PR push, and
+ * benchmark patch capture stay outside this class.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CodeGenEngineImpl implements CodeGenEngine {
 
-  private final PatchAgent patchAgent;
+  private static final int MAX_TOKENS_PER_CALL = 16_000;
+  private static final int DEFAULT_MAX_ITERATIONS = 180;
+
+  private final WorkerAgent workerAgent;
+  private final PipelineRunRepository runRepo;
+  private final FeatureFlagService featureFlagService;
+  private final PromptAssembler promptAssembler;
   private final RunCostTracker costTracker;
+
+  private String patchPrompt;
 
   @Override
   public EngineResult solve(EngineRequest request) {
@@ -65,8 +75,8 @@ public class CodeGenEngineImpl implements CodeGenEngine {
           .build();
     }
 
-    // THE code-gen call — the existing production single-task path, synchronous.
-    WorkerResult wr = patchAgent.run(request.provider(), request.model(), request.taskSpec(), ctx);
+    WorkerTaskRequest workerReq = workerRequest(request, ctx);
+    WorkerResult wr = workerAgent.run(workerReq);
 
     return EngineResult.builder()
         .diff(captureDiff(workspace))
@@ -78,6 +88,88 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .toolCalls(wr.toolCallsDispatched())
         .summary(wr.completionSummary())
         .build();
+  }
+
+  private WorkerTaskRequest workerRequest(EngineRequest request, ExecutionContext ctx) {
+    int maxIterations =
+        request.budget() != null && request.budget().iterCap() != null
+            ? request.budget().iterCap()
+            : iterCapFor(request.provider());
+    int stagnationDisabled = maxIterations;
+
+    return WorkerTaskRequest.builder()
+        .provider(request.provider())
+        .model(request.model())
+        .systemPrompt(buildSystemPrompt(request.provider()))
+        .userPrompt(request.taskSpec())
+        .context(ctx)
+        .maxIterations(maxIterations)
+        .temperature(0.0)
+        .maxTokensPerCall(MAX_TOKENS_PER_CALL)
+        .stagnationWarnAfter(stagnationDisabled)
+        .stagnationForceAfter(stagnationDisabled)
+        .requireTestVerification(requireTestVerification(request))
+        .wallClockSeconds(request.budget() == null ? null : request.budget().wallClockSeconds())
+        .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
+        .verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+        .build();
+  }
+
+  private boolean requireTestVerification(EngineRequest request) {
+    if (request.verifyMode() == VerifyMode.NONE) return false;
+    String src = runRepo.findById(request.runId()).map(PipelineRun::getSourceType).orElse("");
+    if (src != null && (src.startsWith("swebench") || src.startsWith("benchmark"))) {
+      return false;
+    }
+    // Historical PATCH default: customer autofix/finding sources require a recent passing runTests
+    // call before completeTask. Blind benchmark sources opt out above because target tests are held
+    // out by design.
+    return true;
+  }
+
+  private String buildSystemPrompt(String provider) {
+    if (!featureFlagService.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)) {
+      return patchPrompt;
+    }
+    String fragment = loadProviderPatchFragment(provider);
+    return fragment.isBlank() ? patchPrompt : patchPrompt + "\n\n" + fragment;
+  }
+
+  private String loadProviderPatchFragment(String provider) {
+    if (provider == null || provider.isBlank()) return "";
+    String key = provider.trim().toLowerCase();
+    try {
+      Resource r =
+          new org.springframework.core.io.ClassPathResource(
+              "prompts/fragments/provider/" + key + "/patch.md");
+      if (!r.exists()) return "";
+      return r.getContentAsString(StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadProviderPatchFragment({}) failed: {}", provider, e.getMessage());
+      return "";
+    }
+  }
+
+  @PostConstruct
+  void loadPatchPrompt() {
+    try {
+      patchPrompt = promptAssembler.assemble("patch-agent.md");
+    } catch (Exception e) {
+      log.error("[CodeGenEngine] Failed to load classpath:prompts/patch-agent.md; using stub", e);
+      patchPrompt =
+          "You are a patch-mode coding agent. Make the minimum change that fixes the issue.";
+    }
+  }
+
+  private static int iterCapFor(String provider) {
+    if (provider == null) return DEFAULT_MAX_ITERATIONS;
+    return switch (provider.toLowerCase()) {
+      case "anthropic" -> 220;
+      case "openai" -> 150;
+      case "gemini", "google" -> 180;
+      case "openrouter", "deepseek", "fireworks" -> 220;
+      default -> DEFAULT_MAX_ITERATIONS;
+    };
   }
 
   private EngineCost costOf(String runId) {
@@ -105,7 +197,8 @@ public class CodeGenEngineImpl implements CodeGenEngine {
               ":(exclude).dockerignore",
               ":(exclude)__pycache__",
               ":(exclude).pytest_cache",
-              ":(exclude)*.egg-info");
+              ":(exclude)*.egg-info",
+              ":(exclude,glob)appendonlydir/**");
       pb.redirectErrorStream(true);
       Process p = pb.start();
       String out = new String(p.getInputStream().readAllBytes());

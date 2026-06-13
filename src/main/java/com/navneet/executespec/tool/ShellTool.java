@@ -40,9 +40,9 @@ public class ShellTool implements Tool {
   // For normal runs, this is always null and behavior is unchanged.
   private final ProgramBenchContainerStore programBenchContainers;
 
-  // SWE-bench tasks stash their container ID here. Same routing semantics as programbench but
-  // the in-container working directory is /testbed (per SWE-bench's image WORKDIR convention)
-  // rather than /workspace.
+  // SWE-bench tasks stash their container ID here. Same routing semantics as programbench; the
+  // in-container workdir is stored per run because classic SWE-bench uses /testbed while
+  // SWE-bench Pro uses /app.
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
 
   @Autowired
@@ -113,7 +113,7 @@ public class ShellTool implements Tool {
       String swCid = swebenchContainers.get(ctx.runId());
       if (swCid != null) {
         containerId = swCid;
-        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+        workdir = swebenchContainers.getWorkdir(ctx.runId());
       }
     }
     if (containerId == null && programBenchContainers != null) {

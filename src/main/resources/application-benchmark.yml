@@ -157,3 +157,21 @@ management:
   metrics:
     tags:
       environment: benchmark
+
+# ── Benchmark harnesses (off unless env enables them) ────────────────────────
+# SWE-bench Pro uses ScaleAI's OS dataset manifest plus jefzda/sweap-images:<dockerhub_tag>.
+# Keep these env-driven so the benchmark VM can switch classic SWE-bench / SWE-bench Pro without
+# another deploy.
+swebench:
+  enabled: ${SWEBENCH_ENABLED:false}
+  bootstrap: ${SWEBENCH_BOOTSTRAP:false}
+  suite: ${SWEBENCH_SUITE:swe-bench}
+  output-base: ${SWEBENCH_OUTPUT_BASE:/var/swebench/runs}
+  instances-file: ${SWEBENCH_INSTANCES_FILE:/var/swebench/swebench_instances.json}
+  image-template: ${SWEBENCH_IMAGE_TEMPLATE:docker.io/swebench/sweb.eval.x86_64.%s:latest}
+  pro-image-repository: ${SWEBENCH_PRO_IMAGE_REPOSITORY:jefzda/sweap-images}
+  prediction-prefix: ${SWEBENCH_PREDICTION_PREFIX:executespec}
+  default-provider: ${SWEBENCH_DEFAULT_PROVIDER:deepseek}
+  task-wall-timeout-minutes: ${SWEBENCH_TASK_WALL_TIMEOUT_MINUTES:60}
+  max-concurrent-runs: ${SWEBENCH_MAX_CONCURRENT_RUNS:1}
+  submit-queue-wait-seconds: ${SWEBENCH_SUBMIT_QUEUE_WAIT_SECONDS:180}

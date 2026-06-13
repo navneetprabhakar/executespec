@@ -34,6 +34,10 @@ import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.CostHistoryService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.CodeGenEngine;
+import com.navneet.executespec.engine.EngineRequest;
+import com.navneet.executespec.engine.EngineResult;
+import com.navneet.executespec.engine.VerifyMode;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -114,12 +118,8 @@ public class RunOrchestrator implements RunControlPort {
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
 
-  /**
-   * V182 (2026-05-08) — patch-mode entry. Used by the {@code runPatchPipeline} branch when {@link
-   * PipelineRun#getRunMode()} is {@code RunMode.PATCH}. Build-mode runs never call this — the
-   * existing planner / executor / reviewer flow is untouched.
-   */
-  private final com.navneet.executespec.agent.PatchAgent patchAgent;
+  /** Single-task code-gen engine used by PATCH-mode runs. */
+  private final CodeGenEngine codeGenEngine;
 
   /**
    * 2026-05-07 — deterministic auto-formatter pass between executor and reviewer. Runs prettier /
@@ -578,12 +578,11 @@ public class RunOrchestrator implements RunControlPort {
     // Finding 14. An ENTERPRISE per-run pin is honoured for all three roles to
     // preserve the override contract.
     //
-    // V182 PATCH-mode override: a patch run never invokes the planner or
-    // reviewer, but it *must* run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 /
-    // Gemini 3 Pro Preview) regardless of any caller-supplied modelName.
-    // PatchAgent picks `plannerDbModel` as the model passed to WorkerAgent.
-    // See PatchAgent javadoc — the reasoning gap between Haiku-class and
-    // Sonnet-class is bigger than any harness improvement on bug-fix shapes.
+    // V182 PATCH-mode override: a patch run never invokes the planner or reviewer, but it *must*
+    // run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview) regardless of any
+    // caller-supplied modelName. CodeGenEngine receives `plannerDbModel` as the worker model; the
+    // reasoning gap between Haiku-class and Sonnet-class is bigger than any harness improvement on
+    // bug-fix shapes.
     String plannerDbModel = model;
     String reviewerDbModel = model;
     boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
@@ -998,10 +997,9 @@ public class RunOrchestrator implements RunControlPort {
       // Bench services (swebench / programbench) submit runs with
       // RunMode.PATCH and own the workspace setup themselves (docker cp +
       // bind-mount). Skip everything build-mode does — codemap, assessment,
-      // classifier, planner, executor, reviewer, validation report — and
-      // dispatch the whole user request to a single PatchAgent loop.
-      // Product entry points stay on RunMode.BUILD by default and fall
-      // through to the unchanged build-mode flow below.
+      // classifier, planner, executor, reviewer, validation report — and dispatch the whole user
+      // request to a single CodeGenEngine loop. Product entry points stay on RunMode.BUILD by
+      // default and fall through to the unchanged build-mode flow below.
       {
         PipelineRun modeProbe = runRepo.findById(runId).orElse(null);
         if (modeProbe != null
@@ -1798,10 +1796,10 @@ public class RunOrchestrator implements RunControlPort {
    * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
    * downstream notifiers / dashboards can render meaningfully.
    *
-   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.engine.WorkerAgent}'s
-   * iter-3 budget guard, which reads {@code pipeline_run.hard_cap_usd}. We default that to {@link
-   * #DEFAULT_PATCH_HARD_CAP_USD} when unset so a runaway patch agent stops without manual
-   * intervention.
+   * <p>Cost cap: CodeGenEngine threads through to {@link
+   * com.navneet.executespec.engine.WorkerAgent}'s iter-3 budget guard, which reads {@code
+   * pipeline_run.hard_cap_usd}. We default that to {@link #DEFAULT_PATCH_HARD_CAP_USD} when unset
+   * so a runaway patch run stops without manual intervention.
    *
    * <p>Outcome → terminal status mapping:
    *
@@ -1891,16 +1889,26 @@ public class RunOrchestrator implements RunControlPort {
       }
     }
 
-    com.navneet.executespec.engine.WorkerResult result;
+    EngineResult result;
     try {
-      result = patchAgent.run(provider, model, userRequestLive, rootCtx);
+      result =
+          codeGenEngine.solve(
+              EngineRequest.builder()
+                  .taskSpec(userRequestLive)
+                  .workspace(rootCtx.workspaceRoot())
+                  .provider(provider)
+                  .model(model)
+                  .runId(runId)
+                  .taskId(rootCtx.taskId())
+                  .verifyMode(VerifyMode.HARD_GATE)
+                  .build());
     } catch (Exception e) {
       log.error("PATCH run={} dispatch threw", runId, e);
       terminate(
           runId,
           "FAILED",
-          "PATCH_AGENT_ERROR",
-          "patch agent error: " + e.getClass().getSimpleName(),
+          "PATCH_ENGINE_ERROR",
+          "patch engine error: " + e.getClass().getSimpleName(),
           startedAt);
       return;
     }
@@ -1913,25 +1921,29 @@ public class RunOrchestrator implements RunControlPort {
         terminalStatus = "COMPLETE";
         terminalReason = "CLEAN_COMPLETION";
       }
-      case COMPLETED_BY_STAGNATION -> {
+      case STAGNATED -> {
         terminalStatus = "COMPLETE";
         terminalReason = "PATCH_STAGNATION";
       }
-      case STOPPED_WITHOUT_COMPLETE -> {
+      case STOPPED -> {
         terminalStatus = "COMPLETE";
         terminalReason = "PATCH_STOPPED_WITHOUT_COMPLETE";
       }
-      case ITERATION_LIMIT_EXCEEDED -> {
+      case ITER_LIMIT -> {
         terminalStatus = "PARTIAL";
         terminalReason = "PATCH_ITER_LIMIT";
       }
-      case BUDGET_EXCEEDED -> {
+      case BUDGET -> {
         terminalStatus = "PARTIAL";
         terminalReason = "PATCH_BUDGET_EXCEEDED";
       }
+      case WALL_CLOCK -> {
+        terminalStatus = "PARTIAL";
+        terminalReason = "PATCH_WALL_CLOCK_EXCEEDED";
+      }
       case ERROR -> {
         terminalStatus = "FAILED";
-        terminalReason = "PATCH_AGENT_ERROR";
+        terminalReason = "PATCH_ENGINE_ERROR";
       }
       default -> {
         terminalStatus = "FAILED";
@@ -1942,14 +1954,12 @@ public class RunOrchestrator implements RunControlPort {
     RunCostTracker.Snapshot patchCost = costTracker.snapshot(runId);
 
     log.info(
-        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}"
-            + " in={} out={} ${}",
+        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} in={} out={} ${}",
         runId,
         terminalStatus,
         terminalReason,
         result.iterations(),
-        result.toolCallsDispatched(),
-        result.totalLatencyMs(),
+        result.toolCalls(),
         patchCost.inputTokens(),
         patchCost.outputTokens(),
         String.format("%.4f", patchCost.costUsd()));
@@ -1969,7 +1979,7 @@ public class RunOrchestrator implements RunControlPort {
             + "; iterations="
             + result.iterations()
             + "; toolCalls="
-            + result.toolCallsDispatched(),
+            + result.toolCalls(),
         startedAt);
     String persistedTerminalStatus =
         runRepo.findById(runId).map(PipelineRun::getStatus).orElse(terminalStatus);

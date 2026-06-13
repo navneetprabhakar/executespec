@@ -33,9 +33,9 @@ import lombok.Builder;
  * @param requireTestVerification V182 layer-3 gate. When true, {@link
  *     com.navneet.executespec.tool.CompleteTaskTool} calls are refused unless the agent has made at
  *     least one successful {@code runTests} call within {@link
- *     WorkerAgent#TEST_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link PatchAgent} so bug-fix
- *     runs can't claim completion without observing tests run; build-mode workers leave this
- *     null/false (build-mode has its own smoke gate downstream of the loop).
+ *     WorkerAgent#TEST_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link CodeGenEngineImpl} so
+ *     bug-fix runs can't claim completion without observing tests run; build-mode workers leave
+ *     this null/false (build-mode has its own smoke gate downstream of the loop).
  * @param requireBuildVerification 2026-05-08 reviewer-engagement gate. When true, {@link
  *     com.navneet.executespec.tool.CompleteTaskTool} calls are refused unless the agent has made at
  *     least one successful {@code buildProject} call (exit=0) within {@link
@@ -111,7 +111,7 @@ import lombok.Builder;
  *     (fail-open). One-shot ({@code criticNudged}) so it can't loop. Catches the dominant
  *     premature-completion class (structural/smoke pass, the one real requirement fails). When on
  *     it subsumes + suppresses the lighter {@code terminalVerifyGate} nudge. Set by {@code
- *     TerminalBenchRunService} (TB) and {@code PatchAgent} (PATCH, behind {@code
+ *     TerminalBenchRunService} (TB) and {@code CodeGenEngineImpl} (PATCH, behind {@code
  *     worker.critic-pass.enabled}, default OFF). Null/false ⇒ no critic pass (byte-identical).
  * @param verifyBeforeComplete VBC verify-before-complete (RL-2026-06-…, flag {@code
  *     worker.verify-before-complete.enabled}, V235, default OFF). When true, the worker SERVER-RUNS
@@ -125,7 +125,7 @@ import lombok.Builder;
  *     Real test failures refuse completion (bounded to {@link WorkerAgent#VBC_GATE_MAX_REFUSALS},
  *     then YIELD); no resolvable runner / a remote run / any error ⇒ fail-open (never false-FAILs a
  *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
- *     {@link PatchAgent} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
+ *     {@link CodeGenEngineImpl} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
  */
 @Builder
 public record WorkerTaskRequest(

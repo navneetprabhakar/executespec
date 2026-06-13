@@ -21,7 +21,7 @@ PATCH mode is the thin-worker path used by SWE-bench, ProgramBench, and the four
 | --- | --- | --- |
 | BUILD mode classify-plan-execute-review-report | Live | `integration/RunOrchestrator.java`, `harness/SequentialExecutor.java` |
 | Plan gate approval/rejection | Live | `RunController`, `RunLifecycleService`, frontend `IdePlan` |
-| PATCH mode autofix | Live | `agent/PatchAgent.java`, `finding/FindingPatchSubmitter.java` |
+| PATCH mode autofix | Live | `engine/CodeGenEngineImpl.java`, `finding/FindingPatchSubmitter.java` |
 | Multi-repo execution and PR creation | Live | `integration/scm/ScmPushService.java` |
 | Verified score additive model + trust caps | Live | `report/ValidationReportService.java` |
 | Verification ledger in validation reports | Live | `report/model/VerificationEvidenceDTO.java` |
