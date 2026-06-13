@@ -888,8 +888,11 @@ Other counters:
 Additional surfaces:
 
 - **Auth** — `SecurityConfig` configures JWT (access 1h, refresh 7d) + OAuth2
-  (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for
-  event streams. JWT secret via `app.jwt.secret` (env var).
+  (Google, GitHub). OAuth authorization requests use signed, state-keyed,
+  short-lived HttpOnly cookies (`CookieOAuth2AuthorizationRequestRepository`) so
+  provider callbacks do not depend only on Tomcat session lookup. Scoped SSE tokens
+  (5-min TTL, `scope=sse` + `runId` claim) protect event streams. JWT secret via
+  `app.jwt.secret` (env var).
 - **Rate limiting** —
   [`ratelimit/RateLimitFilter`](../src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java)
   (`OncePerRequestFilter`) gates `/api/**`. Endpoint group classification (AUTH /
