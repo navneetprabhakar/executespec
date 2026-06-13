@@ -21,7 +21,7 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 | `anonrun` | - | 4 | - | - | R-111 anonymous-trial sessions (abuse heuristic + rate limiter + dispatcher) |
 | `api` | 17 | 2 | - | - | REST controllers + DTOs + global exception advisors |
 | `arch/invariants` | 1 | 1 | - | - | Org architectural invariants + violation tracking |
-| `auth` | 7 | 12 | - | - | JWT/OAuth2 auth, RBAC, org/user/project lifecycle, GDPR export |
+| `auth` | 7 | 13 | - | - | JWT/OAuth2 auth, signed state-cookie OAuth callback recovery, RBAC, org/user/project lifecycle, GDPR export |
 | `batch` | - | 9 | - | - | Provider batch-mode job orchestration; the 3 concrete `BatchClient`s (`Anthropic`/`OpenAi`/`Gemini`, B1 2026-05-30) landed unit-tested but **inert** — coordinator/poll/resume wiring (P4) + the human submit-gate still pending; see `docs/plans/v2-batch-execution-plan.md` |
 | `benchmark` | 2 | 3 | - | - | **Two concerns.** (1) SWE-bench *execution* harness — blind real-production PATCH pipeline (supersedes oracle `swebench/`); `BenchmarkController` (`/api/admin/benchmark`) + `BenchmarkRunService` (async via submitRun) + `BenchmarkGenerationService` (lean sync `/generate`); branch `feature/swebench-harness`. (2) Common multi-suite *tracking* layer (V236, RL-2026-06, branch `benchmark`) — `BenchmarkTrackingController` (`/api/v2/test/benchmark`) + `BenchmarkTrackingService` + `benchmark_run`/`benchmark_task_result`/`benchmark_event` entities + `BenchmarkSuite`; ingest+SSE for events an external verifier publishes (TB first, SWE/ProgramBench next), reuses `sse/SseBroadcaster` |
 | `billing` | 5 | 16 | - | - | Razorpay + Stripe billing, invoices, GST, top-ups, tier lifecycle |
@@ -711,7 +711,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | SWE-bench adapter | `swebench/` |
 | ProgramBench adapter | `programbench/` |
 | Terminal-Bench adapter | `terminalbench/` — operator-only Harbor launcher that runs `WorkerAgent` in remote-brain/local-hands mode (`POST /api/v2/test/terminal-bench/start`) |
-| Security config | `auth/security/SecurityConfig.java` |
+| Security config | `auth/security/SecurityConfig.java` + `auth/oauth/CookieOAuth2AuthorizationRequestRepository.java` |
 | Billing service | `billing/service/BillingService.java` |
 | Feature flags | `config/featureflag/FeatureFlagService.java` |
 | Rate limiting | `ratelimit/RateLimitFilter.java` |
