@@ -30,7 +30,7 @@ turns separately from runs.
 
 ## Migration Trail
 
-- `V239__agent_session_protocol.sql` creates `agent_session`, `agent_turn`,
+- `V240__agent_session_protocol.sql` creates `agent_session`, `agent_turn`,
   `agent_action_event`, and `agent_usage_ledger`.
 
 ## Tests

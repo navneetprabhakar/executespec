@@ -1,4 +1,4 @@
--- RL-2026-06-013 — backend protocol for CLI/VS Code agent sessions.
+-- RL-2026-06-013 - backend protocol for CLI/VS Code agent sessions.
 -- Open-ended agent conversation is deliberately separate from pipeline_run so
 -- run billing, plan approval, verified score, PR/report, and refund semantics stay intact.
 

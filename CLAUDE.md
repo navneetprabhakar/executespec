@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V239** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V240** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -131,9 +131,9 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V239** in the current worktree). Recent heads: V236 creates benchmark tracking tables; V237 adds DeepSeek + Fireworks BYOK key lanes; V238 adds benchmark token tracking; V239 creates the `agentsession` protocol tables. Older migration details are in `docs/CODEMAP.md`.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V240** in the current worktree). Recent heads: V236 creates benchmark tracking tables; V237 adds DeepSeek + Fireworks BYOK key lanes; V238 adds benchmark token tracking; V239 defaults on worker quality gates; V240 creates the `agentsession` protocol tables. Older migration details are in `docs/CODEMAP.md`.
 
-**V237 adds DeepSeek + Fireworks BYOK key lanes** (`org.deepseek_api_key`, `org.fireworks_api_key`, `app_user.deepseek_api_key`, `app_user.fireworks_api_key`) so direct DeepSeek and Fireworks participate in the same user/org/system key hierarchy as the other providers. **V238 adds benchmark token-tracking columns. V239 creates the CLI/VS Code agent-session protocol tables** (`agent_session`, `agent_turn`, `agent_action_event`, `agent_usage_ledger`) so open-ended conversations stay separate from `pipeline_run` and run credits remain charged only through the existing plan-approval path.
+**V237 adds DeepSeek + Fireworks BYOK key lanes** (`org.deepseek_api_key`, `org.fireworks_api_key`, `app_user.deepseek_api_key`, `app_user.fireworks_api_key`) so direct DeepSeek and Fireworks participate in the same user/org/system key hierarchy as the other providers. **V238 adds benchmark token-tracking columns. V239 defaults on the evidence-safe worker quality gates. V240 creates the CLI/VS Code agent-session protocol tables** (`agent_session`, `agent_turn`, `agent_action_event`, `agent_usage_ledger`) so open-ended conversations stay separate from `pipeline_run` and run credits remain charged only through the existing plan-approval path.
 
 ### Patterns: MUST follow
 
@@ -420,7 +420,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V239)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V240)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api/` (`core.ts` + domain modules)                                                                                                                                                 |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |

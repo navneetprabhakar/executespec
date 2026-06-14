@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head in the current worktree: `V239`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V240`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -74,7 +74,7 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V239       │             │   → GitHub / Bitbucket    │
+   │ Flyway V1..V240       │             │   → GitHub / Bitbucket    │
    │ 127 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
@@ -180,7 +180,7 @@ dispatch happens.
 separate from `pipeline_run`: an open-ended session can interpret intent, resolve the current repo
 to a project, list gates, or propose a run without becoming a billable execution run. Cost-bearing
 or destructive actions are represented as typed confirmation-required proposals; the existing run
-approval path remains the only place where run credits are charged. `V239` adds
+approval path remains the only place where run credits are charged. `V240` adds
 `agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` for this separation.
 
 ---
@@ -579,7 +579,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head in the current worktree is `V239`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V240`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.
