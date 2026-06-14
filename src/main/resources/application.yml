@@ -407,6 +407,7 @@ model-matrix:
     ProjectChatCompiler: PLANNING
     ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
+    SpecChatService: LIGHTWEIGHT
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
     ProjectDocGeneratorService: WORKHORSE

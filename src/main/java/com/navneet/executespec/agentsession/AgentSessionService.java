@@ -31,6 +31,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
@@ -62,6 +63,7 @@ public class AgentSessionService {
   private final ProjectRepoLinkRepository projectRepoLinkRepo;
   private final PipelineRunRepository pipelineRunRepo;
   private final ObjectMapper objectMapper;
+  private final AiProviderPreferenceService aiProviderPreferenceService;
 
   @Transactional
   public AgentSessionResponse createSession(CreateSessionRequest request, AppUserDetails user) {
@@ -85,6 +87,11 @@ public class AgentSessionService {
     if (req.projectId() != null && !req.projectId().isBlank()) {
       projectAccessGuard.assertCanRead(req.projectId(), user);
     }
+    String requestedProvider = blankToNull(req.defaultProvider());
+    String effectiveProvider =
+        requestedProvider != null
+            ? aiProviderPreferenceService.updatePreferredProvider(user, requestedProvider)
+            : aiProviderPreferenceService.preferredProvider(user);
     Instant now = Instant.now();
     AgentSession session =
         AgentSession.builder()
@@ -100,7 +107,7 @@ public class AgentSessionService {
             .repoRootHash(blankToNull(req.repoRootHash()))
             .clientSurface(normalize(req.surface(), "CLI"))
             .title(firstNonBlank(req.title(), "New ExecuteSpec session"))
-            .defaultProvider(blankToNull(req.defaultProvider()))
+            .defaultProvider(effectiveProvider)
             .defaultModel(blankToNull(req.defaultModel()))
             .defaultExecutionMode(normalize(req.defaultExecutionMode(), "LOCAL"))
             .approvalPolicy(normalize(req.approvalPolicy(), "PLAN"))
@@ -217,6 +224,17 @@ public class AgentSessionService {
     turnRepo.save(turn);
 
     session.setUpdatedAt(Instant.now());
+    String explicitProvider = request == null ? null : blankToNull(request.providerOverride());
+    String effectiveProvider =
+        explicitProvider != null
+            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
+            : aiProviderPreferenceService.preferredProvider(user);
+    if (effectiveProvider == null) {
+      effectiveProvider = session.getDefaultProvider();
+    }
+    if (effectiveProvider != null) {
+      session.setDefaultProvider(effectiveProvider);
+    }
     if (message != null
         && !message.isBlank()
         && "New ExecuteSpec session".equals(session.getTitle())) {
@@ -241,6 +259,8 @@ public class AgentSessionService {
         session.getProjectId(),
         session.getOrgId(),
         String.valueOf(session.getUserId()),
+        effectiveProvider,
+        session.getDefaultModel(),
         decision);
   }
 
@@ -250,8 +270,7 @@ public class AgentSessionService {
     AgentTurn turn =
         turnRepo
             .findById(ctx.turnId())
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "turn not found"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "turn not found"));
     turn.setAssistantSummary(firstNonBlank(assistantSummary, turn.getAssistantSummary()));
     turn.setInputTokens(cost == null ? 0 : cost.inputTokens());
     turn.setOutputTokens(cost == null ? 0 : cost.outputTokens());
@@ -267,6 +286,8 @@ public class AgentSessionService {
             .userId(ctx.userId())
             .sourceType("AGENT_TURN")
             .sourceId(ctx.turnId())
+            .provider(ctx.provider())
+            .model(ctx.model())
             .inputTokens(cost == null ? 0 : cost.inputTokens())
             .outputTokens(cost == null ? 0 : cost.outputTokens())
             .reasoningTokens(cost == null ? 0 : cost.reasoningTokens())
@@ -322,8 +343,7 @@ public class AgentSessionService {
                 request.repoContext() == null ? null : request.repoContext().gitRemote()),
             request.repoName());
     if (repoFullName == null) {
-      return new ContextResolveResponse(
-          null, "no git remote or repository name was provided");
+      return new ContextResolveResponse(null, "no git remote or repository name was provided");
     }
 
     for (var repo : projectRepoRepo.findByGithubRepoFullNameIgnoreCase(repoFullName)) {
@@ -332,10 +352,7 @@ public class AgentSessionService {
           Project project = projectAccessGuard.assertCanRead(link.getProjectId(), user);
           return new ContextResolveResponse(
               new ProjectMatch(
-                  project.getId(),
-                  project.getName(),
-                  String.valueOf(repo.getId()),
-                  repoFullName),
+                  project.getId(), project.getName(), String.valueOf(repo.getId()), repoFullName),
               "repo remote matches linked project repo " + repoFullName);
         } catch (ResponseStatusException ignored) {
           // Another org/user's link; keep looking without leaking it.
@@ -509,5 +526,7 @@ public class AgentSessionService {
       String projectId,
       String orgId,
       String userId,
+      String provider,
+      String model,
       IntentDecision decision) {}
 }
