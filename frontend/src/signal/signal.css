@@ -7,10 +7,10 @@
 
 .signal-app {
   /* surfaces */
-  --signal-bg: #f6f7f8;
+  --signal-bg: #f7f8fb;
   --signal-card-bg: #ffffff;
-  --signal-card-elev: #eef1f5;
-  --signal-bg-translucent: rgba(246, 247, 248, 0.9);
+  --signal-card-elev: #eef2f7;
+  --signal-bg-translucent: rgba(247, 248, 251, 0.92);
   --signal-phone-frame: #0b0d10;
 
   /* text */
@@ -21,11 +21,11 @@
 
   /* feature dark card */
   --signal-hero-bg-1: #0b0d10;
-  --signal-hero-bg-2: #171b22;
+  --signal-hero-bg-2: #11151b;
   --signal-hero-text: #eceef2;
   --signal-hero-text-dim: rgba(236, 238, 242, 0.64);
   --signal-hero-text-mute: rgba(236, 238, 242, 0.14);
-  --signal-hero-glow: rgba(79, 127, 231, 0.18);
+  --signal-hero-glow: rgba(91, 141, 239, 0.18);
   --signal-hero-btn-bg: rgba(255, 255, 255, 0.1);
   --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.18);
 
@@ -47,22 +47,22 @@
   --signal-lavender: #7c6be8;
   --signal-lavender-soft: #e7e4fb;
   --signal-lavender-text: #4c3fc2;
-  --signal-ocean: #4f7fe7;
+  --signal-ocean: #5b8def;
 
   /* radii + shadow */
-  --signal-r-sm: 10px;
-  --signal-r-md: 16px;
-  --signal-r-lg: 22px;
-  --signal-r-xl: 28px;
-  --signal-shadow: 0 6px 16px -6px rgba(14, 15, 18, 0.08);
-  --signal-shadow-strong: rgba(14, 15, 18, 0.18);
+  --signal-r-sm: 6px;
+  --signal-r-md: 10px;
+  --signal-r-lg: 14px;
+  --signal-r-xl: 18px;
+  --signal-shadow: 0 8px 22px -14px rgba(14, 15, 18, 0.24);
+  --signal-shadow-strong: rgba(14, 15, 18, 0.24);
 }
 
 .signal-app[data-signal-theme='dark'] {
   --signal-bg: #0b0d10;
-  --signal-card-bg: #14171c;
-  --signal-card-elev: #1b1f26;
-  --signal-bg-translucent: rgba(11, 13, 16, 0.9);
+  --signal-card-bg: #11151b;
+  --signal-card-elev: #171b22;
+  --signal-bg-translucent: rgba(11, 13, 16, 0.92);
   --signal-phone-frame: #242a33;
 
   --signal-ink: #eceef2;
@@ -70,16 +70,16 @@
   --signal-text-dim: #9ea7b6;
   --signal-text-mute: #737c8b;
 
-  --signal-hero-bg-1: #111722;
+  --signal-hero-bg-1: #11151b;
   --signal-hero-bg-2: #0b0d10;
   --signal-hero-text-dim: rgba(236, 238, 242, 0.58);
   --signal-hero-text-mute: rgba(255, 255, 255, 0.08);
-  --signal-hero-glow: rgba(79, 127, 231, 0.2);
+  --signal-hero-glow: rgba(91, 141, 239, 0.2);
   --signal-hero-btn-bg: rgba(255, 255, 255, 0.07);
   --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.14);
 
-  --signal-hairline: rgba(255, 255, 255, 0.08);
-  --signal-hairline-strong: rgba(255, 255, 255, 0.16);
+  --signal-hairline: rgba(255, 255, 255, 0.09);
+  --signal-hairline-strong: rgba(255, 255, 255, 0.18);
 
   --signal-y-soft: rgba(251, 191, 36, 0.14);
   --signal-y-text: #fbbf24;
@@ -2697,11 +2697,11 @@ body {
 }
 
 .signal-app .auth-console-mock {
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  background: #11151b;
-  box-shadow: 0 18px 50px -22px rgba(0, 0, 0, 0.65);
+  border: 1px solid color-mix(in srgb, var(--signal-hairline-strong) 72%, transparent);
+  background: var(--signal-card-bg);
+  box-shadow: 0 18px 50px -28px rgba(0, 0, 0, 0.72);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .signal-app .auth-console-topbar {
@@ -2709,9 +2709,9 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: #151a22;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: #eceef2;
+  background: color-mix(in srgb, var(--signal-card-elev) 90%, var(--signal-bg));
+  border-bottom: 1px solid var(--signal-hairline);
+  color: var(--signal-ink);
   font-size: 12px;
   font-weight: 700;
 }
@@ -2723,25 +2723,25 @@ body {
 .signal-app .auth-console-state {
   margin-left: auto;
   font-size: 11px;
-  color: #8a94a6;
+  color: var(--signal-text-mute);
   font-weight: 500;
 }
 .signal-app .auth-console-tabs {
   display: flex;
-  background: #1b1f26;
+  background: color-mix(in srgb, var(--signal-card-elev) 86%, var(--signal-bg));
 }
 .signal-app .auth-console-tabs span {
   padding: 7px 14px;
   font-size: 11.5px;
-  color: #eceef2;
-  background: #11151b;
+  color: var(--signal-ink);
+  background: var(--signal-card-bg);
   box-shadow: inset 0 2px 0 var(--signal-ocean);
 }
 .signal-app .auth-console-lines {
   padding: 12px 0;
   font-size: 12.5px;
   line-height: 1.75;
-  color: #c9d1db;
+  color: var(--signal-ink-soft);
 }
 .signal-app .auth-console-line {
   display: flex;
@@ -2749,7 +2749,7 @@ body {
   padding: 0 14px;
 }
 .signal-app .auth-console-line > span:first-child {
-  color: #737c8b;
+  color: var(--signal-text-mute);
   width: 14px;
   text-align: right;
   user-select: none;
@@ -2764,16 +2764,16 @@ body {
   color: #b4aaff;
 }
 .signal-app .auth-line-muted {
-  color: #737c8b;
+  color: var(--signal-text-mute);
 }
 .signal-app .auth-console-footer {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: #1b1f26;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: #c9d1db;
+  background: color-mix(in srgb, var(--signal-card-elev) 86%, var(--signal-bg));
+  border-top: 1px solid var(--signal-hairline);
+  color: var(--signal-ink-soft);
   font-size: 11px;
 }
 

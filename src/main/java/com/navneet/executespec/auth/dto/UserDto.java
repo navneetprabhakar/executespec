@@ -38,7 +38,10 @@ public record UserDto(
     boolean hasConfluenceToken,
 
     // UI preference
-    String viewMode) {
+    String viewMode,
+
+    // Cross-surface AI provider preference
+    String preferredAiProvider) {
   private static boolean present(String s) {
     return s != null && !s.isBlank();
   }
@@ -79,6 +82,9 @@ public record UserDto(
         present(user.getConfluenceApiToken()),
 
         // UI preference
-        user.getViewMode() != null ? user.getViewMode() : "vibe");
+        user.getViewMode() != null ? user.getViewMode() : "vibe",
+
+        // Cross-surface AI provider preference
+        user.getPreferredAiProvider());
   }
 }
