@@ -16,6 +16,13 @@ turns separately from runs.
   here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
+- Provider choice is cross-surface account state, not a client-local default. Session creation and
+  turns must use `AiProviderPreferenceService`: explicit provider input updates
+  `app_user.preferred_ai_provider`; omitted input resolves from that preference.
+- Common chat is not only a run launcher. When an `agent_session` has a `projectId`, the streaming
+  turn path binds `ProjectChatTools` through `SpecChatService` so CLI and VS Code can answer
+  project/code questions with the same architecture, memory, document, tech-debt, and source-search
+  tools used by web project chat.
 
 ## Key Files
 
@@ -32,6 +39,8 @@ turns separately from runs.
 
 - `V240__agent_session_protocol.sql` creates `agent_session`, `agent_turn`,
   `agent_action_event`, and `agent_usage_ledger`.
+- `V242__user_preferred_ai_provider.sql` adds the shared account provider preference used by
+  agent-session chat defaults.
 
 ## Tests
 

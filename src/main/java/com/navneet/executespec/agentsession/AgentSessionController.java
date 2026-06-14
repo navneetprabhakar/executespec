@@ -24,7 +24,6 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.specchat.SpecChatService;
 
-import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -140,7 +140,7 @@ public class AgentSessionController {
           ctx.projectId(),
           ctx.orgId(),
           conversationOrCurrentMessage(request),
-          request == null ? null : request.providerOverride());
+          ctx.provider());
       emitter.complete();
     } catch (Exception e) {
       sessionService.failStreamTurn(ctx, e.getMessage());

@@ -28,13 +28,13 @@ User-selected provider routing with YAML as the single source of truth and a Red
 |------|-----------|--------|--------|--------|
 | PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.5-flash` | OutlinePlannerAgent, ReviewerAgent (Anthropic + OpenAI only — Gemini reviewer routes to WORKHORSE since `e9d0b6e8`), RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
 | WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3.5-flash` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator, **ToolOutputCompactor** (in `tool/`, RL-2026-05-052) |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, SpecChatService, ConversationAgent, TestReportGenerator, **ToolOutputCompactor** (in `tool/`, RL-2026-05-052) |
 
 > **Literals are illustrative — `application.yml model-matrix` is authoritative.** They drift; this table wrongly showed WORKHORSE = haiku/mini for months. WORKHORSE is the **flagship** tier ("keep flagship — worker is reasoning-heavy, +17pp on p30"), NOT a cheap model. **2026-06-02 (eval rebuild):** the matrix was set all-flagship per provider (openai/anthropic/gemini on their flagship; deepseek on flash-native).
 
 > ⚠️ **The WorkerAgent's ACTUAL model is COMPLEXITY-routed, not its `WORKHORSE` tier-map row.** `SequentialExecutor.tierConfigFor` re-resolves the worker by task complexity: **LOW→LIGHTWEIGHT, MEDIUM→WORKHORSE, HIGH→PLANNING**. So a `SINGLE_SHOT`/LOW task (most SWE-bench fixes) runs the worker on the **LIGHTWEIGHT** model regardless of the `WorkerAgent: WORKHORSE` row. **`pipeline_run.worker_model` is the run-level DEFAULT and is MISLEADING** — the real per-task model lives only in the backend log (`WorkerAgent START ... model=X`). A whole eval campaign silently ran on the cheap tier this way (2026-06-02). To control the worker model, **pin `RunRequest.modelName`** (overrides all three tiers via `RunModelOverrides.withRunPin`); always capture the logged model when measuring.
 
-Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). User-selectable per project.
+Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). Users can still set a project default, but cross-surface client defaults now live on `app_user.preferred_ai_provider` (V242). Web, CLI, and VS Code write `GET/PUT /api/auth/me/provider-preference`; explicit request input wins and is remembered, omitted input resolves through the account preference before falling back to project/YAML defaults.
 
 ## Provider failover
 

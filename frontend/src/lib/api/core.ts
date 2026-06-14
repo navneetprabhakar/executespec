@@ -775,6 +775,8 @@ export interface AuthUser {
   // column still accepts 'vibe' for write-compat (no V145 migration is
   // shipped here per the explicit "frontend-normalize only" decision).
   viewMode?: 'pro' | 'project';
+  /** User-level default provider shared by web, CLI, and VS Code. */
+  preferredAiProvider?: string | null;
 }
 
 export interface LoginResponse {

@@ -80,4 +80,14 @@ public record RunSummary(
      * when no report exists. Batch-hydrated on the list endpoint via {@code RunMapper.toSummaries};
      * single-run summary responses (submit/fork ACK) leave it null.
      */
-    Integer verifiedScore) {}
+    Integer verifiedScore,
+    /**
+     * CLI local-hands handshake. True only on submit/detail responses where the client requested
+     * local tool execution for this run.
+     */
+    Boolean localExecutionRequested,
+    /**
+     * CLI local-hands handshake. True only when the backend accepted LOCAL mode and will proxy
+     * worker tool calls back to the client instead of running server-side tools.
+     */
+    Boolean localExecutionAccepted) {}

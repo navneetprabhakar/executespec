@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import com.navneet.executespec.api.RunMapper;
@@ -18,8 +19,10 @@ import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunRequest;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.security.RunVisibilitySpec;
+import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
@@ -93,6 +96,8 @@ public class RunController {
   /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
   private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
 
+  private final AiProviderPreferenceService aiProviderPreferenceService;
+
   /**
    * Wave 2.1 — activation funnel (SPEC_SUBMITTED fired here on run submit, PLAN_APPROVED here on
    * approval).
@@ -106,6 +111,7 @@ public class RunController {
   public ResponseEntity<RunSummary> submit(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @Valid @RequestBody RunRequest req,
+      HttpServletRequest httpRequest,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = "Idempotency-Key",
               required = false)
@@ -121,6 +127,20 @@ public class RunController {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
           "Run submissions are temporarily paused for maintenance. Please try again later.");
+    }
+
+    boolean localExecutionRequested = Boolean.TRUE.equals(req.localExecution());
+    if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Local-hands execution is not enabled on this backend. Use remote run submit or ask an"
+              + " operator to enable worker.local-hands.enabled.");
+    }
+    if (localExecutionRequested && !isPatAuthenticated(httpRequest)) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
+              + " runs execute remotely.");
     }
 
     // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same
@@ -159,6 +179,10 @@ public class RunController {
     // Extract per-user GitHub credentials to pass into the run
     String githubPat = userDetails.getUser().getGithubPat();
     String githubOwner = userDetails.getUser().getGithubOwner();
+    String effectiveAiProvider =
+        req.aiProvider() != null && !req.aiProvider().isBlank()
+            ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
+            : aiProviderPreferenceService.preferredProvider(userDetails);
 
     // Pass ALL pre-async fields INTO submitRun so they're set on the entity
     // BEFORE the async pipeline thread starts (avoids race condition where the
@@ -177,7 +201,7 @@ public class RunController {
             Boolean.TRUE.equals(req.skipApproval()),
             Boolean.TRUE.equals(req.autoMerge()),
             req.modelName(),
-            req.aiProvider(),
+            effectiveAiProvider,
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
             req.projectId(),
@@ -220,11 +244,12 @@ public class RunController {
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
     // RunOrchestrator
     // consumes it once at pipeline start (gated by worker.local-hands.enabled, default OFF).
-    if (Boolean.TRUE.equals(req.localExecution())) {
+    if (localExecutionRequested) {
       runLocalExecutionFlag.mark(run.getRunId());
     }
 
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(mapper.toSummary(run, localExecutionRequested, localExecutionRequested));
   }
 
   /**
@@ -358,6 +383,11 @@ public class RunController {
 
   private static int safeTok(Integer v) {
     return v == null ? 0 : v;
+  }
+
+  static boolean isPatAuthenticated(HttpServletRequest request) {
+    return JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(
+        request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE));
   }
 
   /** Approve or reject the plan-approval gate. */
