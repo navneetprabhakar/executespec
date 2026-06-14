@@ -39,7 +39,12 @@ public class RunMapper {
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
-    return toSummary(r, null);
+    return toSummary(r, null, null, null);
+  }
+
+  public RunSummary toSummary(
+      PipelineRun r, Boolean localExecutionRequested, Boolean localExecutionAccepted) {
+    return toSummary(r, null, localExecutionRequested, localExecutionAccepted);
   }
 
   /**
@@ -55,10 +60,14 @@ public class RunMapper {
         scores.put(String.valueOf(row[0]), ((Number) row[1]).intValue());
       }
     }
-    return runs.stream().map(r -> toSummary(r, scores.get(r.getRunId()))).toList();
+    return runs.stream().map(r -> toSummary(r, scores.get(r.getRunId()), null, null)).toList();
   }
 
-  private RunSummary toSummary(PipelineRun r, Integer verifiedScore) {
+  private RunSummary toSummary(
+      PipelineRun r,
+      Integer verifiedScore,
+      Boolean localExecutionRequested,
+      Boolean localExecutionAccepted) {
     return new RunSummary(
         r.getRunId(),
         r.getStatus(),
@@ -95,7 +104,9 @@ public class RunMapper {
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
         r.getScmPrUrl(),
         r.getGithubPrUrl(),
-        verifiedScore);
+        verifiedScore,
+        localExecutionRequested,
+        localExecutionAccepted);
   }
 
   /** Resolves a project ID to its human-readable name, or null if not found / not set. */

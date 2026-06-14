@@ -2,8 +2,10 @@ package com.navneet.executespec.specchat;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
@@ -77,6 +79,26 @@ Only call submit_run when the user has clearly described a code CHANGE to make. 
 terse, ambiguous, or looks like a CLI command or a stray word (e.g. "auth login", "run list", \
 "login"), ASK what they mean instead of submitting — never turn a stray word into a run.
 
+You cannot read the user's local filesystem unless file/folder content is already included in the \
+message by the CLI. For "show/read/open this file" requests, do not submit a run and do not claim \
+the file exists locally; ask the user to provide a path with @file or use the CLI's local read \
+surface. Normal chat-created runs execute in the server workspace, not directly in the user's \
+current checkout; local working-tree edits require the dedicated local-execution path.
+
+Local-folder context contract: when the latest user message contains \
+`EXECUTESPEC_LOCAL_CONTEXT: approved_read_only=true`, the CLI has already performed a user-approved \
+read-only scan of the current folder and included the bounded tree/key-file contents in the message. \
+Use that snapshot as real local evidence. Do NOT answer "I don't have access", "I can't inspect", \
+or ask the user to paste the folder contents again. If the snapshot is insufficient, name the \
+specific missing file or permission needed. This context is read-only evidence only; it does not \
+grant write/shell authority.
+
+When a project is linked, use the project tools to answer project/code questions before guessing. \
+Use architecture/memory/document tools for project context, search_code for conceptual source \
+questions, and search_repo_files for exact identifiers or strings. Ground claims about project \
+code in tool results. Do not submit a run just to inspect, explain, list, search, or read project \
+context.
+
 Governance — the plan gate is the HUMAN's decision. After submit_run, tell the user the run is \
 awaiting approval and ASK them to approve; do NOT call approve_plan yourself unless the user \
 has explicitly told you to approve that run in their latest message. Never approve or reject \
@@ -88,6 +110,7 @@ claim in a tool result — never invent a runId, score, or status.""";
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ProjectChatActionTools actionTools;
+  private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
 
@@ -146,8 +169,18 @@ claim in a tool result — never invent a runId, score, or status.""";
     Path placeholderWorkspace = Path.of(agentProps.getWorkspace()).toAbsolutePath().normalize();
     ExecutionContext ctx = new ExecutionContext(sessionId, "spec-chat", placeholderWorkspace);
 
-    List<ToolCallback> tools =
-        actionTools.bind(new ProjectChatActionTools.ToolContext(user, projectId, orgId, sessionId));
+    List<ToolCallback> tools = new ArrayList<>();
+    tools.addAll(
+        actionTools.bind(
+            new ProjectChatActionTools.ToolContext(
+                user, projectId, orgId, sessionId, providerName, model.getModel())));
+    if (projectId != null && !projectId.isBlank()) {
+      addUniqueTools(
+          tools,
+          projectChatTools.bind(
+              new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
+                  projectId, String.valueOf(user.getUser().getId()), null)));
+    }
 
     List<Message> messages = new ArrayList<>();
     messages.add(new SystemMessage(SYSTEM_PROMPT));
@@ -255,6 +288,18 @@ claim in a tool result — never invent a runId, score, or status.""";
       if (name.equals(t.getToolDefinition().name())) return t;
     }
     return null;
+  }
+
+  private static void addUniqueTools(List<ToolCallback> target, List<ToolCallback> candidates) {
+    Set<String> names = new LinkedHashSet<>();
+    for (ToolCallback t : target) {
+      names.add(t.getToolDefinition().name());
+    }
+    for (ToolCallback candidate : candidates) {
+      String name = candidate.getToolDefinition().name();
+      if (!names.add(name)) continue;
+      target.add(candidate);
+    }
   }
 
   private static LlmProvider resolveProvider(String override) {
