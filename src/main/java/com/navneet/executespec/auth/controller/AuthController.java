@@ -19,6 +19,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.AuthService;
 import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierPermissionService;
@@ -48,6 +49,7 @@ public class AuthController {
   private final com.navneet.executespec.compliance.DataRetentionService dataRetentionService;
   private final UserDataExportService userDataExportService;
   private final PersonalAccessTokenService personalAccessTokenService;
+  private final AiProviderPreferenceService aiProviderPreferenceService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -148,6 +150,31 @@ public class AuthController {
   @GetMapping("/me")
   public ResponseEntity<UserDto> me(@AuthenticationPrincipal AppUserDetails userDetails) {
     return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember()));
+  }
+
+  public record ProviderPreferenceResponse(String provider) {}
+
+  public record ProviderPreferenceRequest(String provider) {}
+
+  @GetMapping("/me/provider-preference")
+  public ResponseEntity<ProviderPreferenceResponse> getProviderPreference(
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    return ResponseEntity.ok(
+        new ProviderPreferenceResponse(aiProviderPreferenceService.preferredProvider(userDetails)));
+  }
+
+  @PutMapping("/me/provider-preference")
+  public ResponseEntity<ProviderPreferenceResponse> updateProviderPreference(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestBody ProviderPreferenceRequest request) {
+    String provider =
+        aiProviderPreferenceService.updatePreferredProvider(
+            userDetails, request == null ? null : request.provider());
+    recordSettingsAudit(
+        userDetails.getUser(),
+        "USER_PROVIDER_PREFERENCE_CHANGED",
+        "{\"provider\":\"" + provider + "\"}");
+    return ResponseEntity.ok(new ProviderPreferenceResponse(provider));
   }
 
   /**

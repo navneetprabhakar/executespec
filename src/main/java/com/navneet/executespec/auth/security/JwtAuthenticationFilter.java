@@ -25,6 +25,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+  public static final String AUTH_SOURCE_ATTRIBUTE = "executespec.auth.source";
+  public static final String AUTH_SOURCE_JWT = "JWT";
+  public static final String AUTH_SOURCE_PAT = "PAT";
+
   private final JwtUtil jwtUtil;
   private final UserDetailsServiceImpl userDetailsService;
   private final PersonalAccessTokenService personalAccessTokenService;
@@ -56,7 +60,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private void authenticateWithPat(String token, HttpServletRequest request) {
     String userId = personalAccessTokenService.resolveUserId(token);
     if (userId != null) {
-      setAuthentication(userDetailsService.loadUserById(userId), request);
+      setAuthentication(userDetailsService.loadUserById(userId), request, AUTH_SOURCE_PAT);
     }
   }
 
@@ -72,14 +76,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     if (jwtUtil.isTokenValid(token, userInvalidatedAt)) {
-      setAuthentication(userDetails, request);
+      setAuthentication(userDetails, request, AUTH_SOURCE_JWT);
     }
   }
 
-  private void setAuthentication(UserDetails userDetails, HttpServletRequest request) {
+  private void setAuthentication(
+      UserDetails userDetails, HttpServletRequest request, String source) {
     UsernamePasswordAuthenticationToken authentication =
         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+    request.setAttribute(AUTH_SOURCE_ATTRIBUTE, source);
     SecurityContextHolder.getContext().setAuthentication(authentication);
   }
 

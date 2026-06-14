@@ -107,6 +107,26 @@ class MultiRepoWorkerPromptTest {
   }
 
   @Test
+  void local_hands_mode_adds_exact_file_scope_prompt_guard() {
+    String prompt =
+        newExecutor().composeSystemPrompt(task(), null, null, null, null, "deepseek", true);
+
+    assertTrue(prompt.contains("LOCAL-HANDS MODE"));
+    assertTrue(
+        prompt.contains("Obey explicit file scope exactly"),
+        "Local-hands must keep the worker from inventing files outside the user's requested edit.");
+    assertTrue(
+        prompt.contains("do not invent tests just because the workspace is empty"),
+        "Content-only local edits should not sprout validation scaffolds.");
+    assertTrue(
+        prompt.contains("LOCAL-HANDS FINAL OVERRIDE"),
+        "The local-hands scope rule must explicitly override the generic test mandate.");
+    assertTrue(
+        prompt.contains("creating any additional test, validator"),
+        "Exact-scope local requests must not create extra validation files.");
+  }
+
+  @Test
   void unrelated_workspace_summary_is_not_treated_as_multi_repo() {
     // The codemap-fallback branch in RunOrchestrator emits a different summary
     // ("Existing repository — codebase map below..."). The executor's contains-check

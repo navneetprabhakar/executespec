@@ -244,7 +244,9 @@ public class SseBroadcaster {
         emitter.send(SseEmitter.event().id(String.valueOf(seqNum)).data(json));
       } catch (Throwable t) {
         dead.add(emitter);
-        completeQuietly(emitter);
+        // Once send() fails, Tomcat/Spring has already marked the async response unusable.
+        // Calling complete() here can re-dispatch a second text/event-stream error through the
+        // global exception handler; removing the emitter is enough.
         log.debug("SSE client disconnected for run {} ({})", runId, t.getMessage());
       }
     }
@@ -374,7 +376,6 @@ public class SseBroadcaster {
             emitter.send(SseEmitter.event().data(json));
           } catch (Throwable t) {
             dead.add(emitter);
-            completeQuietly(emitter);
           }
         }
         if (!dead.isEmpty()) {

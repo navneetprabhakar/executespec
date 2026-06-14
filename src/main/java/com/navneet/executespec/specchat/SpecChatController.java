@@ -13,6 +13,7 @@ import java.util.UUID;
 import jakarta.servlet.http.HttpServletRequest;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 
@@ -59,6 +60,7 @@ public class SpecChatController {
   private final SpecChatAuditRepository auditRepository;
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
+  private final AiProviderPreferenceService aiProviderPreferenceService;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
@@ -92,7 +94,13 @@ public class SpecChatController {
     String ip = clientIp(forwardedFor, http);
     String ipHash = sha256(ip);
 
-    SpecChatAudit audit = upsertAudit(request, userId, orgId, ipHash);
+    String effectiveProvider =
+        request.providerOverride() != null && !request.providerOverride().isBlank()
+            ? aiProviderPreferenceService.updatePreferredProvider(
+                userDetails, request.providerOverride())
+            : aiProviderPreferenceService.preferredProvider(userDetails);
+
+    SpecChatAudit audit = upsertAudit(request, userId, orgId, ipHash, effectiveProvider);
 
     log.info(
         "spec-chat session={} user={} org={} project={} turn={} ipHash={}",
@@ -139,7 +147,7 @@ public class SpecChatController {
           request.projectId(),
           orgId,
           request.conversation(),
-          request.providerOverride());
+          effectiveProvider);
       emitter.complete();
     } catch (Exception e) {
       log.warn(
@@ -173,15 +181,15 @@ public class SpecChatController {
   }
 
   private SpecChatAudit upsertAudit(
-      SpecChatRequest request, String userId, String orgId, String ipHash) {
+      SpecChatRequest request, String userId, String orgId, String ipHash, String provider) {
     return auditRepository
         .findBySessionId(request.sessionId())
         .map(
             existing -> {
               existing.setLastTurnAt(Instant.now());
               existing.setTurnCount(existing.getTurnCount() + 1);
-              if (request.providerOverride() != null) {
-                existing.setModelUsed(request.providerOverride());
+              if (provider != null) {
+                existing.setModelUsed(provider);
               }
               return auditRepository.save(existing);
             })
@@ -196,7 +204,7 @@ public class SpecChatController {
                         .orgId(orgId)
                         .turnCount(1)
                         .ipHash(ipHash)
-                        .modelUsed(request.providerOverride())
+                        .modelUsed(provider)
                         .build()));
   }
 
