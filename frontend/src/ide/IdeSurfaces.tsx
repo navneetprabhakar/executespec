@@ -427,6 +427,23 @@ export function IdeCompose() {
     setModelName('');
   }, [provider]);
 
+  useEffect(() => {
+    if (user?.preferredAiProvider) {
+      setProvider(user.preferredAiProvider.toUpperCase());
+    }
+  }, [user?.preferredAiProvider]);
+
+  function chooseProvider(next: string) {
+    const normalized = next.toUpperCase();
+    setProvider(normalized);
+    if (user?.preferredAiProvider?.toUpperCase() !== normalized) {
+      useAuthStore.setState({user: user ? {...user, preferredAiProvider: normalized} : user});
+      api.updateProviderPreference(normalized).catch(() => {
+        /* Run submit will still send the selected provider; preference sync is best-effort. */
+      });
+    }
+  }
+
   async function applySample(sample: api.SampleSpecDto) {
     setSampleBusyId(sample.id);
     setErr('');
@@ -835,7 +852,7 @@ export function IdeCompose() {
             <select
               className='ide-select'
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
+              onChange={(e) => chooseProvider(e.target.value)}
             >
               {selectableProviders.map((p) => (
                 <option key={p.id} value={p.id}>

@@ -60,7 +60,15 @@ class ProjectChatActionToolsTest {
           mapper);
 
   private ToolCallback tool(String name) {
-    return tools.bind(new ProjectChatActionTools.ToolContext(userDetails, "p", "o", "s")).stream()
+    return tool(name, "p");
+  }
+
+  private ToolCallback tool(String name, String projectId) {
+    return tools
+        .bind(
+            new ProjectChatActionTools.ToolContext(
+                userDetails, projectId, "o", "s", "deepseek", null))
+        .stream()
         .filter(t -> name.equals(t.getToolDefinition().name()))
         .findFirst()
         .orElseThrow(() -> new AssertionError("no tool named " + name));
@@ -117,11 +125,57 @@ class ProjectChatActionToolsTest {
     when(pipelineRunRepo.findByCreatedByUserIdOrderByStartedAtDesc(any(), any()))
         .thenReturn(new PageImpl<>(List.of(r)));
 
-    JsonNode out = env(tool("list_recent_runs").call("{\"limit\":10}"));
+    JsonNode out = env(tool("list_recent_runs", null).call("{\"limit\":10}"));
 
     assertThat(out.get("ok").asBoolean()).isTrue();
     assertThat(out.get("count").asInt()).isEqualTo(1);
     // A read tool must NOT touch the write guard.
     verify(runAccessGuard, never()).requireRunWriteAccess(anyString(), any());
+  }
+
+  @Test
+  void submitRun_inheritsSessionProvider_whenToolOmitsProvider() throws Exception {
+    AppUser caller = mock(AppUser.class);
+    when(caller.getId()).thenReturn("u1");
+    when(userDetails.getUser()).thenReturn(caller);
+    PipelineRun submitted = mock(PipelineRun.class);
+    when(submitted.getRunId()).thenReturn("r-deepseek");
+    when(submitted.getStatus()).thenReturn("AWAITING_APPROVAL");
+    when(runOrchestrator.submitRun(
+            anyString(),
+            eq("spec-chat"),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            eq("deepseek"),
+            eq("u1"),
+            eq("o"),
+            eq("p"),
+            eq("PRODUCTION")))
+        .thenReturn(submitted);
+
+    JsonNode out = env(tool("submit_run").call("{\"spec\":\"create a codemap\"}"));
+
+    assertThat(out.get("ok").asBoolean()).isTrue();
+    verify(runOrchestrator)
+        .submitRun(
+            eq("create a codemap"),
+            eq("spec-chat"),
+            any(),
+            any(),
+            any(),
+            any(),
+            eq(false),
+            eq(false),
+            any(),
+            eq("deepseek"),
+            eq("u1"),
+            eq("o"),
+            eq("p"),
+            eq("PRODUCTION"));
   }
 }
