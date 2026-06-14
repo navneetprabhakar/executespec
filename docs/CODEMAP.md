@@ -4,19 +4,20 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks BYOK key lanes on `org` and `app_user`). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
+Migration head: **V242** in the current worktree (V240 adds the CLI/VS Code agent-session protocol tables; V241 seeds the CLI local-hands feature flag; V242 adds the account-level provider preference used by web, CLI, and VS Code). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
 
 ---
 
 ## 1. Top-level package table
 
-75 Java package roots / major package groups under `src/main/java/com/navneet/executespec/` in the current worktree. Counts are approximate (file-count proxies; an entity in a sub-package counts under its parent).
+76 Java package roots / major package groups under `src/main/java/com/navneet/executespec/` in the current worktree. Counts are approximate (file-count proxies; an entity in a sub-package counts under its parent).
 
 | Package | Ctrl | Svc | Agent | Tool | Purpose |
 | --- | --- | --- | --- | --- | --- |
 | `activity` | 1 | - | - | - | M-019 hash-chained activity feed + retention/partition jobs + `RunActivityFeedListener` (run lifecycle → feed, RL-2026-05-042) |
 | `adr` | 1 | 1 | - | - | Architecture Decision Records — frontmatter parser + planner-injection |
 | `agent` | - | 17 | 12 | - | V2 LLM pipeline: classifier/planner/worker/coherence/expander + LlmRouter |
+| `agentsession` | 1 | 3 | - | - | Durable CLI/VS Code agent-session protocol: sessions, turns, typed intent/action catalog, repo→project resolution, gate decision cards, and separate session usage ledger (V240) |
 | `analytics` | 1 | 1 | - | - | PostHog client + activation funnel event tracking |
 | `anonrun` | - | 4 | - | - | R-111 anonymous-trial sessions (abuse heuristic + rate limiter + dispatcher) |
 | `api` | 17 | 2 | - | - | REST controllers + DTOs + global exception advisors |
@@ -66,7 +67,7 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 | `reviewer` | - | 3 | 1 | - | ReviewerAgent (general + wiring passes) + PostEditFormatter |
 | `rollout` | 1 | 1 | - | - | Rollout-canary RunRegistry |
 | `router` | - | 9 | - | - | ModelRegistry + ModelResolver + ProviderHealthTracker plus OpenRouter/Fireworks slug mappers (LLM model and route selection) |
-| `run` | - | 1 | - | - | RunSkipPushFlag (one-shot push override) |
+| `run` | - | 2 | - | - | One-shot run markers: `RunSkipPushFlag` and `RunLocalExecutionFlag` (CLI local-hands) |
 | `run/sync` | - | 1 | - | - | RunSyncService — reset workspace to current/original HEAD |
 | `saga` | - | 2 | - | - | SideEffectOutbox — retry persistence for failed async effects |
 | `scoring` | - | 3 | - | - | RunRubricVerifier + TestCoverageRescorer + ReviewScoringService |
@@ -92,7 +93,7 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 
 ## 2. REST controllers
 
-106 controller classes in the current worktree. Grouped by domain.
+107 controller classes in the current worktree. Grouped by domain.
 
 ### Runs / pipeline (V2)
 
@@ -100,6 +101,7 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 | --- | --- | --- |
 | `api/controller/RunController` | `/api/runs` | Submit run, list, get, approve, cancel, archive, fork, pause/resume, retry-task, push-scm, workspace download, plan-versions, task-graph |
 | `api/controller/RunConversationController` | `/api/runs` | Post-run chat + apply-suggestion (async via dedicated executor) |
+| `agentsession/AgentSessionController` | `/api/agent` | CLI/VS Code agent-session protocol: action catalog, sessions, streaming/recorded turns, context resolution, and gate decision cards |
 | `api/controller/PreviewController` | `/api/runs` | Preview analyze/start/stop/logs/rebuild + exec-in-container |
 | `api/controller/SseController` | `/api/runs` | SSE token issuance + event stream subscription |
 | `api/controller/TimelineController` | `/api` | Per-run timeline + per-model task statistics |
@@ -270,6 +272,7 @@ Migration head: **V237** in the current worktree (V237 adds DeepSeek + Fireworks
 | `ArchitectureDocGenerator` | `codeintel` | PLANNING | Step-3 combined project arch doc |
 | `ProjectDocGeneratorService` | `codeintel` | WORKHORSE | Generated docs (EXPLANATION + SETUP) |
 | `ProjectBriefService` | `codeintel` | LIGHTWEIGHT | Architecture → 2-4-sentence summary |
+| `SpecChatService` | `specchat` | LIGHTWEIGHT | CLI/VS Code common chat loop; composes run-control tools plus project/code tools when a project is linked |
 | `FilePurposeSummaryService` | `codeintel` | LIGHTWEIGHT | Per-file 2-3 sentence purpose summaries (V196 cache) |
 | `MemoryCompactionService` | `memory` | LIGHTWEIGHT | Rewrites `project_memory_snapshot` every 10 runs |
 | `ProjectChatCompiler` | `memory` | PLANNING | Compile chat history → spec |
@@ -320,7 +323,7 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 
 ## 5. JPA entities
 
-123 entity/table classes in the current worktree. Grouped by domain.
+127 entity/table classes in the current worktree. Grouped by domain.
 
 ### Auth + RBAC (`auth/entity/`)
 
@@ -475,6 +478,10 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 | `ReadymadeDependency` | `readymade_dependency` | Solution→solution dependency |
 | `ReadymadeFavourite` | `readymade_favourite` | Per-user favourite |
 | `ValidationReport` | `validation_report` | Per-run report + V194 rubric_score; report DTO also exposes `verificationLedger[]` so deterministic checks, LLM assessments, and internal score summaries are distinguishable |
+| `AgentSession` | `agent_session` | V240 - durable CLI/VS Code open-ended agent session, separate from `pipeline_run` |
+| `AgentTurn` | `agent_turn` | V240 - per-session conversational turn with typed intent/action proposal and optional linked run |
+| `AgentActionEvent` | `agent_action_event` | V240 - append-only event stream for intent/action/session events |
+| `AgentUsageLedger` | `agent_usage_ledger` | V240 - separate meter for open-ended session usage; run credits remain tied to `pipeline_run` approval |
 | `TestPlan` | `test_plan` | Test generation plan |
 | `TestTask` | `test_task` | Per-test task |
 | `TestResult` | `test_result` | Per-test result |
@@ -484,9 +491,9 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 
 ---
 
-## 6. Flyway migrations — V170..V237
+## 6. Flyway migrations — V170..V242
 
-Head: **V237** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V242** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -536,6 +543,11 @@ Head: **V237** in the current worktree. Full chronology in `src/main/resources/d
 | V230 | Seed `codeintel.tiered.enabled = false` — tiered codemap injection: T0 skeleton + spec-relevant per-file symbol blocks instead of head truncation (RL-2026-06-003). |
 | V236 | Create `benchmark_run`, `benchmark_task_result`, `benchmark_event` — common in-app benchmark tracking/event sink. |
 | V237 | Add `deepseek_api_key` + `fireworks_api_key` to `org` and `app_user` — provider key lanes for native DeepSeek and Fireworks BYOK. |
+| V238 | Add benchmark token-tracking columns for benchmark run/task accounting. |
+| V239 | Default on evidence-safe worker quality gates. |
+| V240 | Create `agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` - CLI/VS Code agent-session protocol separate from run billing. |
+| V241 | Seed `worker.local-hands.enabled = false` and make localExecution submit fail closed unless enabled. |
+| V242 | Add `app_user.preferred_ai_provider` for cross-surface provider consistency plus `/api/auth/me/provider-preference`. |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -724,7 +736,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V237 in the current worktree) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V242 in the current worktree) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api/` (`core.ts` + domain modules) |
 | CLI + VS Code clients | **Moved out 2026-06-07 → the standalone `executespec-cli` repo** (RL-2026-06-014). Was `clients/` (`@executespec/core` + `cli` + `vscode`, an npm workspace). Only the server-side OAuth device-login fix + the API endpoints they consume remain in this repo. |

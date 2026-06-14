@@ -67,6 +67,9 @@ public interface PipelineRunRepository
    */
   Page<PipelineRun> findByCreatedByUserIdOrderByStartedAtDesc(String userId, Pageable pageable);
 
+  Page<PipelineRun> findByCreatedByUserIdAndStatusOrderByStartedAtDesc(
+      String userId, String status, Pageable pageable);
+
   long countByStatus(String status);
 
   @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r")

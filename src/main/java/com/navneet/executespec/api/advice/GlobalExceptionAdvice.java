@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -38,6 +39,16 @@ import lombok.extern.slf4j.Slf4j;
 @RestControllerAdvice
 @Order(Integer.MAX_VALUE)
 public class GlobalExceptionAdvice {
+
+  /**
+   * SSE clients routinely disconnect after they have received the terminal event they needed. At
+   * that point the servlet response is already committed as {@code text/event-stream}; attempting
+   * to render the normal JSON error envelope only creates a second noisy "no converter" failure.
+   */
+  @ExceptionHandler(AsyncRequestNotUsableException.class)
+  public void onAsyncRequestNotUsable(AsyncRequestNotUsableException ex) {
+    log.debug("Async client disconnected before response completion: {}", ex.getMessage());
+  }
 
   /**
    * Spring 6 ships {@link ErrorResponseException} as the supertype of every standard error-class

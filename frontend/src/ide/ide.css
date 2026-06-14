@@ -1,41 +1,40 @@
 /*
- * IDE chrome (2026-05-22 UX overhaul). A real VS Code-style workspace — its own
- * surfaces + components, NOT a reskin of Signal. Tokens scoped to .ide-root and
- * themed via <html data-theme> (follows OS). Loaded only in IDE mode.
+ * IDE chrome. The naming remains `ide-*` for compatibility, but the visual
+ * language is ExecuteSpec Merge Rail: graphite surfaces, subdued borders,
+ * merge-rail blue/teal accents, and compact workbench density.
  */
 
 .ide-root {
-  /* VS Code "Dark+" defaults */
-  --ide-bg-editor: #1e1e1e;
-  --ide-bg-sidebar: #252526;
-  --ide-bg-activitybar: #333333;
-  --ide-bg-panel: #1e1e1e;
-  --ide-bg-input: #3c3c3c;
-  --ide-bg-tab-active: #1e1e1e;
-  --ide-bg-tab-inactive: #2d2d2d;
-  --ide-bg-statusbar: #007acc;
-  --ide-bg-widget: #252526;
-  --ide-fg: #cccccc;
-  --ide-fg-muted: #858585;
-  --ide-fg-bright: #ffffff;
+  --ide-bg-editor: #0b0d10;
+  --ide-bg-sidebar: #11151b;
+  --ide-bg-activitybar: #171b22;
+  --ide-bg-panel: #0f1217;
+  --ide-bg-input: #171b22;
+  --ide-bg-tab-active: #0f1217;
+  --ide-bg-tab-inactive: #151a22;
+  --ide-bg-statusbar: #101825;
+  --ide-bg-widget: #151a22;
+  --ide-fg: #c9d1db;
+  --ide-fg-muted: #8a94a6;
+  --ide-fg-bright: #eceef2;
   --ide-fg-statusbar: #ffffff;
-  --ide-border: #2b2b2b;
-  --ide-border-strong: #3c3c3c;
-  --ide-accent: #007acc;
+  --ide-border: rgba(255, 255, 255, 0.08);
+  --ide-border-strong: rgba(255, 255, 255, 0.16);
+  --ide-accent: #5b8def;
   --ide-accent-fg: #ffffff;
-  --ide-hover: #2a2d2e;
-  --ide-list-active: #094771;
-  --ide-list-inactive: #37373d;
-  --ide-green: #4ec9b0;
-  --ide-yellow: #d7ba7d;
-  --ide-red: #f48771;
-  --ide-blue: #569cd6;
+  --ide-hover: #171d25;
+  --ide-list-active: #162338;
+  --ide-list-inactive: #1b2230;
+  --ide-green: #7ad1c8;
+  --ide-yellow: #f5c451;
+  --ide-red: #f17878;
+  --ide-blue: #7aa5f5;
   /* Diff line tints — translucent so token colors stay readable; the old solid
      #487e02/#6c1313 painted a new file's whole viewport saturated green
      (review/11 defect #10). */
   --ide-add: rgba(74, 129, 5, 0.32);
   --ide-del: rgba(128, 23, 23, 0.4);
-  --ide-shadow: rgba(0, 0, 0, 0.36);
+  --ide-shadow: rgba(0, 0, 0, 0.46);
 
   position: fixed;
   inset: 0;
@@ -50,27 +49,27 @@
 }
 
 [data-theme='light'] .ide-root {
-  --ide-bg-editor: #ffffff;
-  --ide-bg-sidebar: #f3f3f3;
-  --ide-bg-activitybar: #f3f3f3;
+  --ide-bg-editor: #f7f8fb;
+  --ide-bg-sidebar: #ffffff;
+  --ide-bg-activitybar: #eef2f7;
   --ide-bg-panel: #ffffff;
   --ide-bg-input: #ffffff;
   --ide-bg-tab-active: #ffffff;
-  --ide-bg-tab-inactive: #ececec;
-  --ide-bg-statusbar: #007acc;
+  --ide-bg-tab-inactive: #eef2f7;
+  --ide-bg-statusbar: #2f5fb8;
   --ide-bg-widget: #ffffff;
-  --ide-fg: #333333;
-  --ide-fg-muted: #616161;
-  --ide-fg-bright: #000000;
-  --ide-border: #e0e0e0;
-  --ide-border-strong: #c8c8c8;
-  --ide-hover: #e8e8e8;
-  --ide-list-active: #cfe3fa;
-  --ide-list-inactive: #e4e6f1;
-  --ide-green: #098658;
-  --ide-yellow: #b58900;
-  --ide-red: #cd3131;
-  --ide-blue: #0451a5;
+  --ide-fg: #1f2530;
+  --ide-fg-muted: #647082;
+  --ide-fg-bright: #0f141b;
+  --ide-border: #d8dee8;
+  --ide-border-strong: #b8c2d2;
+  --ide-hover: #eef3fb;
+  --ide-list-active: #dce9ff;
+  --ide-list-inactive: #e8edf5;
+  --ide-green: #0f9f8f;
+  --ide-yellow: #9b6b00;
+  --ide-red: #c43d3d;
+  --ide-blue: #2f6fdd;
   --ide-add: #cce8cc;
   --ide-del: #f7c5c5;
   --ide-shadow: rgba(0, 0, 0, 0.16);
@@ -163,6 +162,10 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
 .ide-tree-item:hover {
   background: var(--ide-hover);
@@ -208,6 +211,10 @@
   white-space: nowrap;
   cursor: pointer;
   max-width: 240px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 .ide-tab.active {
   color: var(--ide-fg);
@@ -267,8 +274,8 @@
   max-height: 60vh;
   background: var(--ide-bg-widget);
   border: 1px solid var(--ide-border-strong);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px var(--ide-shadow);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px -22px var(--ide-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -281,7 +288,7 @@
   font-size: 14px;
   padding: 10px 12px;
   margin: 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid var(--ide-border-strong);
 }
 .ide-palette-list {
@@ -407,8 +414,9 @@
 .ide-card {
   background: var(--ide-bg-sidebar);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 14px 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 .ide-grid {
   display: grid;

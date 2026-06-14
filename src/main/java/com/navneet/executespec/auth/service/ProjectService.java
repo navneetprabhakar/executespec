@@ -48,7 +48,10 @@ public class ProjectService {
     LlmProvider provider = LlmProvider.ANTHROPIC;
     if (req.aiProvider() != null) {
       try {
-        provider = LlmProvider.valueOf(req.aiProvider().toUpperCase());
+        String raw = req.aiProvider().trim().toUpperCase();
+        if ("GOOGLE".equals(raw)) raw = "GEMINI";
+        provider = LlmProvider.valueOf(raw);
+        rememberPreferredProvider(createdBy, provider);
       } catch (IllegalArgumentException ignored) {
         /* default ANTHROPIC */
       }
@@ -425,6 +428,7 @@ public class ProjectService {
       try {
         LlmProvider provider = LlmProvider.valueOf(raw);
         project.setAiProvider(provider);
+        rememberPreferredProvider(actorId, provider);
       } catch (IllegalArgumentException e) {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
@@ -486,6 +490,18 @@ public class ProjectService {
         oldGithubOwner,
         project.getGithubOwner());
     return result;
+  }
+
+  private void rememberPreferredProvider(String userId, LlmProvider provider) {
+    if (userId == null || provider == null) return;
+    userRepo
+        .findById(userId)
+        .ifPresent(
+            user -> {
+              user.setPreferredAiProvider(provider.name());
+              user.setUpdatedAt(Instant.now());
+              userRepo.save(user);
+            });
   }
 
   public List<ProjectMemberDto> listMembers(String projectId) {
