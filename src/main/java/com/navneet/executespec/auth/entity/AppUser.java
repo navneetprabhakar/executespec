@@ -201,6 +201,14 @@ public class AppUser {
   @Builder.Default
   private String viewMode = "vibe";
 
+  /**
+   * User-level provider preference shared by web, CLI, and VS Code. Project {@code aiProvider}
+   * remains the project default; this value is the user's current default when a surface does not
+   * send an explicit provider.
+   */
+  @Column(name = "preferred_ai_provider", length = 32)
+  private String preferredAiProvider;
+
   // Wave 2.1 — signup attribution (V125 migration)
   // Captured from signup request (utm_source / utm_campaign / ref). Null for
   // pre-existing users + direct-navigation signups. Used as a cohort

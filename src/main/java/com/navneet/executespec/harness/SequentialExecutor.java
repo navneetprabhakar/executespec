@@ -201,6 +201,35 @@ treat that as a HARD requirement: run `<formatter> --check <dir>` once at the
 end and only call completeTask if it exits 0.
 """;
 
+  private static final String LOCAL_HANDS_DIRECTIVE =
+      """
+
+
+LOCAL-HANDS MODE — you are editing the user's current working tree directly.
+Treat the request like an interactive coding-agent task, not a product scaffold:
+  - Obey explicit file scope exactly. If the user says "only", "exactly", "do not create", or names
+    specific files, touch only those files unless the task is impossible without another file.
+  - Do not create validation modules, test files, config files, package manifests, or framework
+    scaffolds unless the user explicitly asks for them or the existing project already requires
+    them for the requested change.
+  - For data/content/config/documentation-only edits, the test requirement is satisfied by
+    producing the requested files correctly; do not invent tests just because the workspace is empty.
+  - When the requested local edits are complete, call completeTask immediately.
+""";
+
+  private static final String LOCAL_HANDS_FINAL_OVERRIDE =
+      """
+
+
+LOCAL-HANDS FINAL OVERRIDE:
+The local-hands file-scope rule overrides the generic "tests are mandatory" rule above.
+If the user explicitly requested an exact file set, creating any additional test, validator,
+package, config, or scaffold file is a task failure. For exact-scope data/content/config/docs
+edits, write only the requested files and complete. Create tests only when the user asks for tests
+or when you are modifying existing executable source code in a real project that already has a
+test convention.
+""";
+
   /**
    * RL-2026-05-066 (verifyBoot) — appended to the worker prompt ONLY when {@code
    * worker.verify-boot.enabled} is on (default OFF). Kept out of {@link #SYSTEM_PROMPT_BASE} per
@@ -555,7 +584,8 @@ to boot — skip it for those.""";
             refDocs,
             req.plan() == null ? null : req.plan().projectType(),
             req.workspaceSummary(),
-            req.provider());
+            req.provider(),
+            req.localHandsMode());
     String userPrompt = composeUserPrompt(task, null);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -1591,7 +1621,8 @@ to boot — skip it for those.""";
       String refDocs,
       String projectType,
       String workspaceSummary) {
-    return composeSystemPrompt(task, designBlock, refDocs, projectType, workspaceSummary, null);
+    return composeSystemPrompt(
+        task, designBlock, refDocs, projectType, workspaceSummary, null, false);
   }
 
   /**
@@ -1644,7 +1675,23 @@ to boot — skip it for those.""";
       String projectType,
       String workspaceSummary,
       String provider) {
+    return composeSystemPrompt(
+        task, designBlock, refDocs, projectType, workspaceSummary, provider, false);
+  }
+
+  String composeSystemPrompt(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary,
+      String provider,
+      Boolean localHandsMode) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+
+    if (Boolean.TRUE.equals(localHandsMode)) {
+      sb.append(LOCAL_HANDS_DIRECTIVE);
+    }
 
     // 2026-05-28 (RL-2026-05-052, T3.10) — provider-specific BUILD prompt tuning. Each provider
     // has characteristic failure modes (Anthropic narrates, OpenAI re-reads, Gemini cache thrashes,
@@ -1715,6 +1762,9 @@ to boot — skip it for those.""";
       sb.append("\n\n--- REFERENCE DOCS (task-relevant excerpts) ---\n")
           .append(refDocs)
           .append("\n--- END REFERENCE DOCS ---\n");
+    }
+    if (Boolean.TRUE.equals(localHandsMode)) {
+      sb.append(LOCAL_HANDS_FINAL_OVERRIDE);
     }
     return sb.toString();
   }

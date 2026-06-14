@@ -1377,6 +1377,7 @@ public class RunOrchestrator implements RunControlPort {
                     .runContext(rootCtx)
                     .maxIterationsPerTask(null) // per-complexity caps applied in SequentialExecutor
                     .enableSmokeTests(!localRun)
+                    .localHandsMode(localRun)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
