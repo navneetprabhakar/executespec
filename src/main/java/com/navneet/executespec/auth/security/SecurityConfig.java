@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.security;
 
 import java.util.List;
 
+import com.navneet.executespec.auth.oauth.CookieOAuth2AuthorizationRequestRepository;
 import com.navneet.executespec.auth.oauth.OAuthRedirectCookieFilter;
 import com.navneet.executespec.auth.oauth.OAuthSuccessHandler;
 import com.navneet.executespec.config.SecurityProperties;
@@ -38,6 +39,7 @@ public class SecurityConfig {
   private final JwtAuthenticationFilter jwtAuthenticationFilter;
   private final com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter;
   @Nullable private final OAuthSuccessHandler oAuthSuccessHandler;
+  private final CookieOAuth2AuthorizationRequestRepository authorizationRequestRepository;
   private final SecurityProperties securityProperties;
   private final boolean oauthEnabled;
   private final JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint;
@@ -52,6 +54,7 @@ public class SecurityConfig {
       JwtAuthenticationFilter jwtAuthenticationFilter,
       com.navneet.executespec.ratelimit.RateLimitFilter rateLimitFilter,
       @Nullable OAuthSuccessHandler oAuthSuccessHandler,
+      CookieOAuth2AuthorizationRequestRepository authorizationRequestRepository,
       SecurityProperties securityProperties,
       JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint,
       @Value("${spring.security.oauth2.client.registration.google.client-id:none}")
@@ -61,6 +64,7 @@ public class SecurityConfig {
     this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     this.rateLimitFilter = rateLimitFilter;
     this.oAuthSuccessHandler = oAuthSuccessHandler;
+    this.authorizationRequestRepository = authorizationRequestRepository;
     this.securityProperties = securityProperties;
     this.jsonAuthenticationEntryPoint = jsonAuthenticationEntryPoint;
 
@@ -270,7 +274,10 @@ public class SecurityConfig {
       http.oauth2Login(
           oauth ->
               oauth
-                  .authorizationEndpoint(a -> a.baseUri("/api/auth/oauth2/authorize"))
+                  .authorizationEndpoint(
+                      a ->
+                          a.baseUri("/api/auth/oauth2/authorize")
+                              .authorizationRequestRepository(authorizationRequestRepository))
                   .redirectionEndpoint(r -> r.baseUri("/api/auth/oauth2/callback/*"))
                   .successHandler(oAuthSuccessHandler)
                   .failureHandler(
