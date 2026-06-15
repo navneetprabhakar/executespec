@@ -16,6 +16,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
@@ -36,6 +37,7 @@ public class ProjectService {
   private final ProjectRepository projectRepo;
   private final ProjectMemberRepository projectMemberRepo;
   private final AppUserRepository userRepo;
+  private final OrgMemberRepository orgMemberRepo;
   private final ActivityAuditService auditService;
   private final EventTrackingService eventTracking;
   private final TierEnforcementService tierEnforcement;
@@ -398,12 +400,31 @@ public class ProjectService {
             .build());
   }
 
-  /** Throws 403 unless the actor is a PROJECT_ADMIN on this project. */
+  /** Throws 403 unless the actor can manage membership for this project. */
   private void requireProjectAdmin(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    AppUser actor = userRepo.findById(actorId).orElse(null);
+    if (actor != null && "SUPER_ADMIN".equals(actor.getGlobalRole())) {
+      return;
+    }
+    if (actor != null
+        && actor.getOrgId() != null
+        && actor.getOrgId().equals(project.getOrgId())
+        && orgMemberRepo
+            .findByOrgIdAndUserId(project.getOrgId(), actorId)
+            .map(m -> "ORG_ADMIN".equals(m.getOrgRole()))
+            .orElse(false)) {
+      return;
+    }
     ProjectMember m = projectMemberRepo.findByProjectIdAndUserId(projectId, actorId).orElse(null);
     if (m == null || !"PROJECT_ADMIN".equals(m.getProjectRole())) {
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Only project admins can add or remove project members.");
+          HttpStatus.FORBIDDEN,
+          "Only project admins or org admins can add or remove project members.");
     }
   }
 

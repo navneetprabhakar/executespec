@@ -1,9 +1,11 @@
 import {useEffect, useRef, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {Button} from '@/signal/components/Primitives';
 import {Spinner} from '@/signal/components/Loaders';
 import {Markdown} from '@/signal/components/Markdown';
 import {Modal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
+import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
 
 // Sparkle / "build" mark used on the chat trigger + bubble label.
 function SparkleIcon({size = 14, color}: {size?: number; color?: string}) {
@@ -45,6 +47,7 @@ export function SpecChat({
   draftSpec: string;
   onApply: (refined: string) => void;
 }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<
     Array<{role: 'user' | 'assistant'; content: string; ts: string}>
@@ -76,12 +79,83 @@ export function SpecChat({
 
   // Last-assistant message becomes the candidate refined spec.
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  const slashSuggestions = uiSlashSuggestions(input, 'spec');
+
+  function note(content: string) {
+    setMessages((prev) => [...prev, {role: 'assistant', content, ts: new Date().toISOString()}]);
+  }
+
+  async function handleSlash(text: string): Promise<boolean> {
+    if (!text.startsWith('/')) return false;
+    const [cmd, arg] = text.split(/\s+/, 2);
+    if (cmd === '/help') {
+      note(uiSlashHelp('spec'));
+      return true;
+    }
+    if (cmd === '/team' || cmd === '/invite') {
+      setOpen(false);
+      navigate('/org-members');
+      return true;
+    }
+    if (cmd === '/clear') {
+      setMessages([]);
+      return true;
+    }
+    if (cmd === '/projects') {
+      const projects = await api.getProjects();
+      note(
+        projects.length
+          ? projects
+              .slice(0, 8)
+              .map((p) => `${p.name} · ${p.id}`)
+              .join('\n')
+          : 'No projects found.',
+      );
+      return true;
+    }
+    if (cmd === '/runs') {
+      const runs = await api.getRuns({scope: 'mine', size: 8});
+      note(
+        runs.content.length
+          ? runs.content
+              .map((r) => `${r.status} · ${r.runId.slice(0, 8)} · ${r.userRequest || 'Untitled'}`)
+              .join('\n')
+          : 'No recent work found.',
+      );
+      return true;
+    }
+    if (cmd === '/status') {
+      note(projectId ? `Project-scoped request chat · ${projectId}` : 'Global request chat');
+      return true;
+    }
+    if (cmd === '/provider') {
+      const provider = normalizeUiProvider(arg);
+      if (!provider) {
+        note('Usage: /provider anthropic|openai|gemini|deepseek');
+        return true;
+      }
+      const saved = await api.updateProviderPreference(provider);
+      note(`Provider preference saved: ${saved.provider}`);
+      return true;
+    }
+    return false;
+  }
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setBusy(true);
     setErr('');
+    setInput('');
+    try {
+      if (await handleSlash(text)) return;
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Command failed.');
+      return;
+    } finally {
+      setBusy(false);
+    }
+    setBusy(true);
     // Prepend the draft spec ONLY on the first user turn so the agent
     // has the starting context. Subsequent turns rely on conversation
     // history. Earlier the draft was prepended every turn, which both
@@ -98,7 +172,6 @@ export function SpecChat({
       {role: 'user', content: text, ts: new Date().toISOString()},
     ];
     setMessages(next);
-    setInput('');
     try {
       const wireHistory: api.ConversationMessage[] = next.map((m, i) => ({
         role: m.role,
@@ -343,6 +416,40 @@ export function SpecChat({
               boxSizing: 'border-box',
             }}
           />
+          {slashSuggestions.length > 0 && (
+            <div
+              style={{
+                display: 'grid',
+                gap: 4,
+                padding: '6px 8px',
+                border: '1px solid var(--signal-hairline)',
+                borderRadius: 8,
+                background: 'var(--signal-card-elev)',
+                fontSize: 12,
+              }}
+            >
+              {slashSuggestions.map((s) => (
+                <button
+                  key={s.command}
+                  type='button'
+                  onClick={() => setInput(s.args ? `${s.command} ` : s.command)}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    border: 0,
+                    background: 'transparent',
+                    color: 'var(--signal-ink)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{fontFamily: "'JetBrains Mono', monospace"}}>{uiSlashUsage(s)}</span>
+                  <span style={{color: 'var(--signal-text-dim)'}}>{s.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {/* Buttons in a horizontal row UNDER the textarea — same layout on
             every viewport. Earlier the buttons were stacked in a column
             next to the textarea; on a narrow mobile screen that column was
