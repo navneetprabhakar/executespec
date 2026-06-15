@@ -57,7 +57,12 @@ public record RunEvent(
   }
 
   public static RunEvent toolCall(
-      String runId, String taskId, String frameJson, String callId, String toolName, String argsJson) {
+      String runId,
+      String taskId,
+      String frameJson,
+      String callId,
+      String toolName,
+      String argsJson) {
     return withData(
         "TOOL_CALL",
         runId,
@@ -119,7 +124,11 @@ public record RunEvent(
   }
 
   public static RunEvent tokenUsage(
-      String runId, String taskId, String provider, String model, RunCostTracker.Snapshot snapshot) {
+      String runId,
+      String taskId,
+      String provider,
+      String model,
+      RunCostTracker.Snapshot snapshot) {
     int inputTokens = snapshot == null ? 0 : snapshot.inputTokens();
     int outputTokens = snapshot == null ? 0 : snapshot.outputTokens();
     String payload =

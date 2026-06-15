@@ -232,11 +232,18 @@ public class LlmRouter {
         String taskId = request.context().taskId();
         RunCostTracker.CallUsage callUsage =
             costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-        stepUsageRecorder.record(runId, taskId, request.provider(), request.model(), callUsage);
+        stepUsageRecorder.record(
+            runId,
+            taskId,
+            request.agentRole(),
+            request.stepId(),
+            retryOf(request, attempt),
+            request.provider(),
+            request.model(),
+            callUsage);
         RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
         broadcaster.emit(
-            runId,
-            RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
+            runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
         log.info(
             "LlmRouter <- {} {} ok in {}ms (attempt {})",
             request.provider(),
@@ -347,7 +354,12 @@ public class LlmRouter {
                   + " ("
                   + altModel
                   + ")"));
-      LlmRequest altRequest = request.toBuilder().provider(altProvider).model(altModel).build();
+      LlmRequest altRequest =
+          request.toBuilder()
+              .provider(altProvider)
+              .model(altModel)
+              .retryOf(attributionKey(request))
+              .build();
       try {
         return dispatchWithRetry(altRequest, tools, altKey, altSource);
       } catch (RuntimeException altError) {
@@ -357,6 +369,21 @@ public class LlmRouter {
       }
     }
     return null;
+  }
+
+  private static String retryOf(LlmRequest request, int attempt) {
+    if (attempt > 1) return attributionKey(request) + "#attempt-" + (attempt - 1);
+    return request.retryOf();
+  }
+
+  private static String attributionKey(LlmRequest request) {
+    String role =
+        request.agentRole() == null || request.agentRole().isBlank()
+            ? "unknown"
+            : request.agentRole();
+    String step =
+        request.stepId() == null || request.stepId().isBlank() ? "llm.call" : request.stepId();
+    return role + ":" + step;
   }
 
   /**

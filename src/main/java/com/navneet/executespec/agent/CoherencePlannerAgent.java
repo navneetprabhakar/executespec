@@ -117,6 +117,8 @@ public class CoherencePlannerAgent {
                   .model(resolved.getModel())
                   .messages(messages)
                   .context(context)
+                  .agentRole("CoherencePlannerAgent")
+                  .stepId("planner.coherence")
                   .temperature(0.0)
                   .maxTokens(COHERENCE_MAX_TOKENS)
                   .toolsOverride(List.of(patchPlan))

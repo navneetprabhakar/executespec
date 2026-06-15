@@ -38,6 +38,9 @@ import lombok.Builder;
  *     Anthropic (Spring AI) + Gemini ignore it today. Set to {@code "required"} by the WorkerAgent
  *     Lever-B salvage call (RL-2026-05-059) to force a tool call out of a model that would
  *     otherwise return reasoning-only text and silently fail the salvage.
+ * @param agentRole stable producer role for W0 usage attribution, e.g. {@code WorkerAgent}
+ * @param stepId stable phase/step identifier inside the role, e.g. {@code worker.iteration}
+ * @param retryOf optional parent step/call id when this request is a retry/failover attempt
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -49,7 +52,10 @@ public record LlmRequest(
     Integer maxTokens,
     List<ToolCallback> toolsOverride,
     Integer readTimeoutSeconds,
-    String toolChoice) {
+    String toolChoice,
+    String agentRole,
+    String stepId,
+    String retryOf) {
 
   public LlmRequest {
     if (provider == null || provider.isBlank())

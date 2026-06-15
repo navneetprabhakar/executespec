@@ -117,6 +117,8 @@ public class RouterTestController {
                   .model(model)
                   .messages(messages)
                   .context(ctx)
+                  .agentRole("RouterTestController")
+                  .stepId("router-test.probe")
                   .temperature(0.0)
                   .maxTokens(512)
                   .build());
