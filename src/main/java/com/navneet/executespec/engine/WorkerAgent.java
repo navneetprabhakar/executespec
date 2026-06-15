@@ -580,6 +580,8 @@ public class WorkerAgent {
                     .model(req.model())
                     .messages(history)
                     .context(req.context())
+                    .agentRole("WorkerAgent")
+                    .stepId("worker.iteration-" + iter)
                     .temperature(req.temperature())
                     .maxTokens(req.maxTokensPerCall())
                     // Strip gitCommit from the worker's tool authorities. See
@@ -1324,6 +1326,9 @@ public class WorkerAgent {
                   .model(req.model())
                   .messages(history)
                   .context(req.context())
+                  .agentRole("WorkerAgent")
+                  .stepId(
+                      toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
@@ -1494,6 +1499,11 @@ public class WorkerAgent {
                   .model(req.model())
                   .messages(history)
                   .context(req.context())
+                  .agentRole("WorkerAgent")
+                  .stepId(
+                      toolChoice == null
+                          ? "worker.terminal-finalizer-auto.iteration-" + iter
+                          : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
                   .toolsOverride(tools)
@@ -2214,6 +2224,8 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   .messages(
                       List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg)))
                   .context(req.context())
+                  .agentRole("WorkerCriticPass")
+                  .stepId("worker.critic-pass")
                   .temperature(0.0)
                   .maxTokens(1500)
                   .toolsOverride(List.of()) // no tools — a plain completion

@@ -482,7 +482,7 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 | `AgentTurn` | `agent_turn` | V240 - per-session conversational turn with typed intent/action proposal and optional linked run |
 | `AgentActionEvent` | `agent_action_event` | V240 - append-only event stream for intent/action/session events |
 | `AgentUsageLedger` | `agent_usage_ledger` | V240 - separate meter for open-ended session usage; run credits remain tied to `pipeline_run` approval |
-| `RunStepUsage` | `run_step_usage` | V243 - durable per-call LLM usage for W0 distributed execution telemetry |
+| `RunStepUsage` | `run_step_usage` | V243 - durable per-call LLM usage for W0 distributed execution telemetry, including role/step/retry attribution |
 | `TestPlan` | `test_plan` | Test generation plan |
 | `TestTask` | `test_task` | Per-test task |
 | `TestResult` | `test_result` | Per-test result |
@@ -549,7 +549,7 @@ Head: **V243** in the current worktree. Full chronology in `src/main/resources/d
 | V240 | Create `agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` - CLI/VS Code agent-session protocol separate from run billing. |
 | V241 | Seed `worker.local-hands.enabled = false` and make localExecution submit fail closed unless enabled. |
 | V242 | Add `app_user.preferred_ai_provider` for cross-surface provider consistency plus `/api/auth/me/provider-preference`. |
-| V243 | Add `run_step_usage` for durable per-call LLM usage: run/task/provider/model/tokens/cache/reasoning/cost/call-index, with reserved role/step/raw-provider columns. |
+| V243 | Add `run_step_usage` for durable per-call LLM usage: run/task/provider/model/tokens/cache/reasoning/cost/call-index; role/step/retry columns are populated by RL-2026-06-044, while raw provider usage remains reserved. |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 

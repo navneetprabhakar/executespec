@@ -99,8 +99,7 @@ public class RemoteToolDispatcher {
     try {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
       broadcaster.emit(
-          runId,
-          RunEvent.toolCall(runId, taskId, frameJson, callId, toolName, argsJson));
+          runId, RunEvent.toolCall(runId, taskId, frameJson, callId, toolName, argsJson));
       return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
       return errorEnvelope(

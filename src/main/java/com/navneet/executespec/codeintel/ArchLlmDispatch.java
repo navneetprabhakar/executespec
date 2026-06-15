@@ -56,6 +56,8 @@ final class ArchLlmDispatch {
               .model(resolved.getModel())
               .messages(messages)
               .context(new ExecutionContext(source, label, Path.of("/tmp")))
+              .agentRole("ArchLlmDispatch")
+              .stepId(label)
               .toolsOverride(List.of())
               .maxTokens(MAX_OUTPUT_TOKENS)
               .build());

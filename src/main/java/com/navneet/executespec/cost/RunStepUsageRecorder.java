@@ -20,6 +20,19 @@ public class RunStepUsageRecorder {
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void record(
       String runId, String taskId, String provider, String model, RunCostTracker.CallUsage usage) {
+    record(runId, taskId, null, null, null, provider, model, usage);
+  }
+
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void record(
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String retryOf,
+      String provider,
+      String model,
+      RunCostTracker.CallUsage usage) {
     if (runId == null || runId.isBlank() || usage == null) return;
     try {
       repository.save(
@@ -27,6 +40,9 @@ public class RunStepUsageRecorder {
               .id(UUID.randomUUID().toString())
               .runId(runId)
               .taskId(blankToNull(taskId))
+              .agentRole(blankToNull(agentRole))
+              .stepId(blankToNull(stepId))
+              .retryOf(blankToNull(retryOf))
               .provider(firstNonBlank(provider, usage.provider()))
               .model(firstNonBlank(model, usage.model()))
               .inputTokens(usage.inputTokens())

@@ -213,6 +213,8 @@ claim in a tool result — never invent a runId, score, or status.""";
               .model(modelName)
               .messages(conversation)
               .context(ctx)
+              .agentRole("SpecChatService")
+              .stepId("spec-chat.round-" + (round + 1))
               .temperature(0.2)
               .maxTokens(1200)
               .toolsOverride(tools)
