@@ -25,7 +25,7 @@
 
   <properties>
     <java.version>21</java.version>
-    <spring-ai.version>1.1.6</spring-ai.version>
+    <spring-ai.version>2.0.0</spring-ai.version>
     <!-- Override Spring Boot 3.3's Mockito 5.11 → 5.17 for Java 25 compatibility -->
     <mockito.version>5.17.0</mockito.version>
     <!-- Override ByteBuddy 1.14 → 1.16 (officially supports Java 25, class file version 69) -->
