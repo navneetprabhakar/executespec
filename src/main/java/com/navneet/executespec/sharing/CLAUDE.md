@@ -1,4 +1,4 @@
-# `sharing/` — External project sharing (V175 + V198)
+# `sharing/` — Project-only external collaborators (V175 + V198)
 
 > Last reviewed: 2026-05-16 (1.0.0-M1). **Merged to dev/main.**
 >
@@ -25,7 +25,7 @@
 
 ## Schema (V175)
 
-- `project_member.is_external BOOLEAN` — flags cross-org members so the UI badges them and billing skips them when computing seat usage.
+- `project_member.is_external BOOLEAN` — flags project-only external collaborators so the UI badges them and billing skips them when computing seat usage.
 - `project_member.project_role` extended to include `PROJECT_VIEWER` (read-only).
 - `project_invite` table — id, project_id, email, role, token UNIQUE, invited_by_user_id, invited_org_id, status, expires_at, accepted_at, accepted_by_user_id, revoked_at, revoked_by_user_id, created_at. Partial index on PENDING.
 - `project_share_link` table — id, project_id, token UNIQUE, surface (CHECK constraint), scope_id, label, created_by, expires_at, revoked_at, views, last_viewed_at. Partial index on active.
@@ -64,7 +64,8 @@ Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token i
 
 ## Frontend surfaces
 
-- `frontend/src/ide/IdeProjectMore.tsx` exposes project members, pending project invites, resend/revoke actions, and public share-link management in the Members surface.
+- `frontend/src/ide/IdeProjectMore.tsx` exposes project members, direct add for existing org members, pending project invites, resend/revoke actions, and public share-link management in the Members surface.
+- Keep wording explicit: project invites create project-only collaborators. They are not org-member invites and do not bypass Enterprise work-domain rules for `/org-members`.
 - `frontend/src/signal/pages/MiscPages.tsx` renders `/shared/:token` project share links for all current public surfaces (project overview, run detail, validation report, code review, PR review, architecture) while preserving legacy `/reports/shared/:token` validation-report links.
 - Project invite API helpers live in `frontend/src/lib/api/projects.ts`; public share-link helpers live in `frontend/src/lib/api/sharing.ts`.
 

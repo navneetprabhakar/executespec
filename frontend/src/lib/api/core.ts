@@ -870,7 +870,7 @@ export interface OrgDto {
   isPersonal?: boolean;
   /**
    * V198 — when true, ORG_ADMIN / SUPER_ADMIN may invite any email domain
-   * (gmail, outlook, etc.) as cross-org collaborators on a project. Defaults
+   * (gmail, outlook, etc.) as project-only collaborators. Defaults
    * to false on new orgs. Toggle via {@link updateExternalSharing}.
    */
   externalSharingEnabled?: boolean;

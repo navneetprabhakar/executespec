@@ -9,6 +9,7 @@ import {Markdown} from '@/signal/components/Markdown';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
+import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
 
 const tok = () => localStorage.getItem('access_token') ?? '';
 
@@ -153,6 +154,7 @@ function ChatMessageCard({message}: {message: ChatBubble}) {
 
 export function IdeProjectChat() {
   const {projectId = ''} = useParams();
+  const navigate = useNavigate();
   const [msgs, setMsgs] = useState<ChatBubble[] | null>(null);
   const [memory, setMemory] = useState<api.ProjectMemoryResponse | null>(null);
   const [text, setText] = useState('');
@@ -227,8 +229,12 @@ export function IdeProjectChat() {
     setBusy(true);
     setErr('');
     setText('');
-    setMsgs((prev) => [...(prev ?? []), {role: 'user', content: m, ts: new Date().toISOString()}]);
     try {
+      if (await handleSlashCommand(m)) return;
+      setMsgs((prev) => [
+        ...(prev ?? []),
+        {role: 'user', content: m, ts: new Date().toISOString()},
+      ]);
       const r = await fetch(`/api/projects/${projectId}/chat`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', Authorization: `Bearer ${tok()}`},
@@ -291,6 +297,85 @@ export function IdeProjectChat() {
   const artifactMessages = (msgs ?? []).filter(
     (m) => m.role === 'assistant' && looksLikeArtifact(m.content),
   );
+  const slashSuggestions = uiSlashSuggestions(text, 'project');
+
+  function note(content: string) {
+    setMsgs((prev) => [
+      ...(prev ?? []),
+      {role: 'assistant', content, ts: new Date().toISOString()},
+    ]);
+  }
+
+  async function handleSlashCommand(raw: string): Promise<boolean> {
+    if (!raw.startsWith('/')) return false;
+    const [cmd, arg] = raw.split(/\s+/, 2);
+    if (cmd === '/help') {
+      note(uiSlashHelp('project'));
+      return true;
+    }
+    if (cmd === '/team' || cmd === '/invite') {
+      navigate('/org-members');
+      return true;
+    }
+    if (cmd === '/clear') {
+      await clearAll();
+      return true;
+    }
+    if (cmd === '/compile') {
+      await compile();
+      return true;
+    }
+    if (cmd === '/compact') {
+      await compact();
+      return true;
+    }
+    if (cmd === '/memory') {
+      setMobilePanel('memory');
+      setMemOpen(true);
+      note(memDigest || 'No project memory has been generated yet.');
+      return true;
+    }
+    if (cmd === '/projects') {
+      const projects = await api.getProjects();
+      note(
+        projects.length
+          ? projects
+              .slice(0, 8)
+              .map((p) => `${p.name} · ${p.id}`)
+              .join('\n')
+          : 'No projects found.',
+      );
+      return true;
+    }
+    if (cmd === '/runs') {
+      const runs = await api.getRuns({scope: 'mine', projectId, size: 8});
+      note(
+        runs.content.length
+          ? runs.content
+              .map((r) => `${r.status} · ${r.runId.slice(0, 8)} · ${r.userRequest || 'Untitled'}`)
+              .join('\n')
+          : 'No recent work found for this project.',
+      );
+      return true;
+    }
+    if (cmd === '/status') {
+      note(
+        `Project chat · ${projectId} · ${memRuns} completed work item${memRuns === 1 ? '' : 's'}`,
+      );
+      return true;
+    }
+    if (cmd === '/provider') {
+      const provider = normalizeUiProvider(arg);
+      if (!provider) {
+        note('Usage: /provider anthropic|openai|gemini|deepseek');
+        return true;
+      }
+      const saved = await api.updateProviderPreference(provider);
+      note(`Provider preference saved: ${saved.provider}`);
+      return true;
+    }
+    return false;
+  }
 
   return (
     <div
@@ -414,25 +499,51 @@ export function IdeProjectChat() {
           </div>
 
           <div className='ide-project-chat-composer'>
-            <textarea
-              className='ide-input'
-              rows={2}
-              placeholder={
-                gated
-                  ? 'Upgrade to TEAM to enable project chat.'
-                  : 'Ask about the codebase…  (Enter to send · Shift+Enter for a new line)'
-              }
-              value={text}
-              disabled={gated}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
+            <div style={{display: 'grid', gap: 6, flex: 1}}>
+              <textarea
+                className='ide-input'
+                rows={2}
+                placeholder={
+                  gated
+                    ? 'Upgrade to TEAM to enable project chat.'
+                    : 'Ask about the codebase…  (Enter to send · Shift+Enter for a new line)'
                 }
-              }}
-              style={{resize: 'vertical', minHeight: 40, maxHeight: 160, fontFamily: 'inherit'}}
-            />
+                value={text}
+                disabled={gated}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+                style={{resize: 'vertical', minHeight: 40, maxHeight: 160, fontFamily: 'inherit'}}
+              />
+              {slashSuggestions.length > 0 && (
+                <div className='ide-card' style={{padding: 8, display: 'grid', gap: 4}}>
+                  {slashSuggestions.map((s) => (
+                    <button
+                      key={s.command}
+                      type='button'
+                      onClick={() => setText(s.args ? `${s.command} ` : s.command)}
+                      style={{
+                        border: 0,
+                        background: 'transparent',
+                        color: 'var(--ide-fg)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span className='ide-mono'>{uiSlashUsage(s)}</span>
+                      <span style={{color: 'var(--ide-fg-muted)'}}>{s.description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button className='ide-btn' onClick={send} disabled={busy || gated}>
               {busy ? '…' : 'Send'}
             </button>
@@ -1883,11 +1994,14 @@ export function IdeProjectMembers() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
   const [members, setMembers] = useState<api.ProjectMemberDto[] | null>(null);
+  const [orgMembers, setOrgMembers] = useState<api.OrgMemberDto[]>([]);
   const [invites, setInvites] = useState<api.ProjectInviteDto[] | null>(null);
   const [shareLinks, setShareLinks] = useState<api.ShareLinkDto[] | null>(null);
   const [externalSharingEnabled, setExternalSharingEnabled] = useState<boolean | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<api.ProjectInviteRole>('PROJECT_DEVELOPER');
+  const [orgMemberUserId, setOrgMemberUserId] = useState('');
+  const [orgMemberRole, setOrgMemberRole] = useState<api.ProjectInviteRole>('PROJECT_DEVELOPER');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -1908,6 +2022,10 @@ export function IdeProjectMembers() {
       .listProjectInvites(projectId)
       .then(setInvites)
       .catch(() => setInvites([]));
+    api
+      .getOrgMembers()
+      .then(setOrgMembers)
+      .catch(() => setOrgMembers([]));
   }
   useEffect(() => {
     if (!projectId) return;
@@ -1936,6 +2054,23 @@ export function IdeProjectMembers() {
       setInvites(await api.listProjectInvites(projectId));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Invite failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function addExistingOrgMember() {
+    if (!orgMemberUserId) return;
+    setBusy('add-member');
+    setErr('');
+    setMsg('');
+    try {
+      await api.addProjectMember(projectId, orgMemberUserId, orgMemberRole);
+      setMsg('Project member added.');
+      setOrgMemberUserId('');
+      load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Add member failed.');
     } finally {
       setBusy('');
     }
@@ -2001,13 +2136,16 @@ export function IdeProjectMembers() {
     }
   }
 
+  const projectMemberIds = new Set((members ?? []).map((m) => m.userId));
+  const availableOrgMembers = orgMembers.filter((m) => !projectMemberIds.has(m.userId));
+
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div className='ide-h1'>Members &amp; sharing</div>
       <Banner err={err} msg={msg} />
 
-      <div className='ide-h2'>Team · {members?.length ?? 0}</div>
+      <div className='ide-h2'>Project access · {members?.length ?? 0}</div>
       {members === null ? (
         <IdeLoader label='Loading members…' />
       ) : members.length === 0 ? (
@@ -2067,14 +2205,64 @@ export function IdeProjectMembers() {
         </div>
       )}
 
+      {canManage && availableOrgMembers.length > 0 && (
+        <>
+          <div className='ide-h2'>Add org member</div>
+          <div className='ide-card'>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
+              Grant this project to someone who is already in your organization. This does not send
+              an invite or change their org role.
+            </div>
+            <select
+              className='ide-select'
+              value={orgMemberUserId}
+              onChange={(e) => setOrgMemberUserId(e.target.value)}
+              style={{marginBottom: 8}}
+            >
+              <option value=''>Select org member…</option>
+              {availableOrgMembers.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {[member.firstName, member.lastName].filter(Boolean).join(' ') || member.email} ·{' '}
+                  {member.email}
+                </option>
+              ))}
+            </select>
+            <div style={{display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap'}}>
+              {INVITE_ROLES.map((r) => (
+                <button
+                  key={r}
+                  type='button'
+                  className='ide-btn ghost'
+                  style={{
+                    padding: '4px 10px',
+                    borderColor: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
+                    color: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
+                  }}
+                  onClick={() => setOrgMemberRole(r)}
+                >
+                  {r.replace('PROJECT_', '').toLowerCase()}
+                </button>
+              ))}
+            </div>
+            <button
+              className='ide-btn'
+              disabled={busy === 'add-member' || !orgMemberUserId}
+              onClick={addExistingOrgMember}
+            >
+              {busy === 'add-member' ? 'Adding…' : 'Add to project'}
+            </button>
+          </div>
+        </>
+      )}
+
       {canManage &&
         (canInviteExternals ? (
           <>
-            <div className='ide-h2'>Invite teammate</div>
+            <div className='ide-h2'>Invite external collaborator</div>
             <div className='ide-card'>
               <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-                Invite by email — recipients get a magic link to join this project (no existing
-                account needed).
+                Invite by email to this project only. Gmail, Outlook, contractors, and partner
+                domains are allowed here when project external collaborators are enabled.
               </div>
               <input
                 className='ide-input'
@@ -2112,7 +2300,7 @@ export function IdeProjectMembers() {
           </>
         ) : (
           <>
-            <div className='ide-h2'>Invite teammate</div>
+            <div className='ide-h2'>Invite external collaborator</div>
             <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
               <div
                 style={{
@@ -2124,16 +2312,16 @@ export function IdeProjectMembers() {
                   marginBottom: 6,
                 }}
               >
-                External sharing is off
+                Project external collaborators are off
               </div>
               {/* This branch only renders for canManage (ORG_ADMIN / SUPER_ADMIN),
                   so the settings link is already admin-gated — the copy now
                   addresses the admin instead of pointing them at themselves. */}
               <div style={{fontSize: 13, lineHeight: 1.55}}>
-                External sharing is disabled for your org, so people outside it can&apos;t be
-                invited. Enable it in{' '}
+                Project-only external collaborators are disabled for your org, so people outside it
+                can&apos;t be invited to this project. Enable it in{' '}
                 <a href='/org/settings' style={{color: 'var(--ide-accent)'}}>
-                  Org settings → External sharing
+                  Org settings → Project external collaborators
                 </a>
                 .
               </div>

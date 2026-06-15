@@ -626,7 +626,7 @@ export function IdeAccount() {
       <div className='ide-h2'>Organization</div>
       <LinkRows
         rows={[
-          {to: '/org-members', label: 'Org members', sub: 'Invite teammates'},
+          {to: '/org-members', label: 'Team access', sub: 'Invite teammates and assign roles'},
           ...(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
             ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
             : []),
