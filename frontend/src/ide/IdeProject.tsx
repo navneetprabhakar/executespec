@@ -19,7 +19,7 @@ export default function IdeProject() {
   const {projectId} = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // §3.4 — explicit compose intent (the New work tab + Overview CTA
+  // §3.4 — explicit compose intent (the Start tab + Overview CTA
   // pass {compose:true} via Link state) skips the landing→Overview redirect below,
   // so the composer stays reachable on projects with work history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
@@ -163,7 +163,7 @@ export default function IdeProject() {
         </div>
       </div>
 
-      <div className='ide-h2'>New work in this project</div>
+      <div className='ide-h2'>Start work in this project</div>
       <textarea
         className='ide-textarea'
         rows={8}

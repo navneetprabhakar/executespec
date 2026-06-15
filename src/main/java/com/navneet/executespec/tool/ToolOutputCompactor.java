@@ -195,6 +195,8 @@ public class ToolOutputCompactor {
                   .model(resolved.getModel())
                   .messages(messages)
                   .context(workerCtx)
+                  .agentRole("ToolOutputCompactor")
+                  .stepId("tool-output.compact")
                   .temperature(0.0)
                   .maxTokens(COMPACTOR_MAX_TOKENS)
                   .toolsOverride(Collections.emptyList())

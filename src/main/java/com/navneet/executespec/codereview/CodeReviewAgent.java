@@ -103,6 +103,8 @@ public class CodeReviewAgent {
                   .context(
                       new ExecutionContext(
                           "code-review-" + req.scanId(), "review", java.nio.file.Paths.get("/")))
+                  .agentRole("CodeReviewAgent")
+                  .stepId("code-review.scan")
                   .build());
     } catch (Exception e) {
       throw new CodeReviewAgentException("LLM dispatch failed: " + e.getMessage());

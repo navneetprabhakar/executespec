@@ -368,6 +368,8 @@ public class SmartClassifierAgent {
                   .model(resolved.getModel())
                   .messages(messages)
                   .context(ctx)
+                  .agentRole("SmartClassifierAgent")
+                  .stepId("planner.classify")
                   .temperature(0.0)
                   .maxTokens(LLM_MAX_TOKENS)
                   .toolsOverride(Collections.emptyList())

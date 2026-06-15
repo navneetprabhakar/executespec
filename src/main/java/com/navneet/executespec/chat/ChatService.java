@@ -202,6 +202,8 @@ public class ChatService {
               .model(modelName)
               .messages(conversation)
               .context(ctx)
+              .agentRole("RunChatAgent")
+              .stepId("run-chat.round-" + (round + 1))
               .temperature(0.2) // tiny bit of variety for a chat voice
               .maxTokens(1200) // ~900-1000 word answer cap
               .toolsOverride(tools) // read-only: list_run_files / read_run_file only

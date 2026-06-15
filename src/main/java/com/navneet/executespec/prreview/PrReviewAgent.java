@@ -100,6 +100,8 @@ public class PrReviewAgent {
                   .temperature(0.0)
                   .maxTokens(8192)
                   .toolsOverride(List.of(submitTool))
+                  .agentRole("PrReviewAgent")
+                  .stepId("pr-review.scan")
                   // Cost tracker scoping — runId/taskId convention used to attribute the
                   // tokens to a synthetic "pr-review-{prReviewId}" bucket so per-tier
                   // billing reports can pivot on it.

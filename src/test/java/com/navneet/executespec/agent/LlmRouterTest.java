@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -20,6 +21,7 @@ import java.util.Map;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -42,6 +44,7 @@ class LlmRouterTest {
   private RunKeyContextStore keyStore;
   private ModelRegistry registry;
   private FeatureFlagService flags;
+  private RunStepUsageRecorder stepUsageRecorder;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
@@ -51,6 +54,10 @@ class LlmRouterTest {
     gemini = mock(GeminiNativeToolClient.class);
     Metrics metrics = mock(Metrics.class);
     RunCostTracker cost = mock(RunCostTracker.class);
+    stepUsageRecorder = mock(RunStepUsageRecorder.class);
+    lenient()
+        .when(cost.record(anyString(), anyString(), anyString(), anyString(), any()))
+        .thenReturn(new RunCostTracker.CallUsage("openai", "gpt-x", 1, 2, 0, 0, 0.01, 1, 0));
     lenient()
         .when(cost.snapshot(anyString()))
         .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
@@ -67,6 +74,7 @@ class LlmRouterTest {
             gemini,
             metrics,
             cost,
+            stepUsageRecorder,
             broadcaster,
             keyStore,
             forced,
@@ -91,6 +99,13 @@ class LlmRouterTest {
         .build();
   }
 
+  private static LlmRequest attributedReq(String provider, String model) {
+    return req(provider, model).toBuilder()
+        .agentRole("WorkerAgent")
+        .stepId("worker.iteration-1")
+        .build();
+  }
+
   @Test
   void success_returns_response() {
     build();
@@ -105,8 +120,18 @@ class LlmRouterTest {
     when(openai.call(any()))
         .thenThrow(new RuntimeException("503 service unavailable"))
         .thenReturn(ok());
-    assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
+    assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
     verify(openai, times(2)).call(any());
+    verify(stepUsageRecorder)
+        .record(
+            eq("run-1"),
+            eq("T1"),
+            eq("WorkerAgent"),
+            eq("worker.iteration-1"),
+            eq("WorkerAgent:worker.iteration-1#attempt-1"),
+            eq("openai"),
+            eq("gpt-x"),
+            any());
   }
 
   @Test
@@ -150,8 +175,23 @@ class LlmRouterTest {
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
     when(gemini.call(any())).thenReturn(ok());
 
-    assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
+    LlmRequest req =
+        req("openai", "gpt-x").toBuilder()
+            .agentRole("OutlinePlannerAgent")
+            .stepId("planner.outline")
+            .build();
+    assertThat(router.call(req)).isNotNull();
     verify(gemini, times(1)).call(any());
+    verify(stepUsageRecorder)
+        .record(
+            eq("run-1"),
+            eq("T1"),
+            eq("OutlinePlannerAgent"),
+            eq("planner.outline"),
+            eq("OutlinePlannerAgent:planner.outline"),
+            eq("gemini"),
+            eq("gem-x"),
+            any());
   }
 
   @Test

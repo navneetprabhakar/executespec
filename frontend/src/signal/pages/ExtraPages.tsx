@@ -24,6 +24,8 @@ import {Search, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 
+const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
+
 // Insights (analytics)
 export function InsightsPage() {
   const [days, setDays] = useState(30);
@@ -1983,15 +1985,11 @@ export function ForgotPasswordPage() {
     <AuthLayout>
       <div className='signal-splash'>
         <div className='brand'>
-          <div className='logo'>E</div>
+          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
           <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <h1>
-          Forgot your <em>password?</em>
-        </h1>
-        <p className='lede'>
-          Tell us your email and we'll send you a reset link. The link is good for one hour.
-        </p>
+        <h1>Reset password.</h1>
+        <p className='lede'>Enter your email. We will send a one-hour reset link.</p>
         <FormError msg={err} />
         <FormSuccess msg={ok} />
         <form onSubmit={onSubmit}>
@@ -2055,13 +2053,11 @@ export function ResetPasswordPage() {
     <AuthLayout>
       <div className='signal-splash'>
         <div className='brand'>
-          <div className='logo'>E</div>
+          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
           <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <h1>
-          Pick a new <em>password.</em>
-        </h1>
-        <p className='lede'>12+ characters. One number, one symbol. Anything else goes.</p>
+        <h1>New password.</h1>
+        <p className='lede'>Use at least 12 characters. Keep it distinct from other tools.</p>
         <FormError msg={err} />
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
@@ -2117,10 +2113,10 @@ export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'})
       // the wrong one returns "Invite not found".
       if (kind === 'org') {
         await api.acceptInvite(token);
-        navigate('/home', {replace: true});
+        navigate('/setup', {replace: true});
       } else {
         const r = await api.acceptProjectInvite(token);
-        navigate(r?.projectId ? `/projects/${r.projectId}` : '/home', {replace: true});
+        navigate(r?.projectId ? `/projects/${r.projectId}` : '/setup', {replace: true});
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Could not accept this invite.');
@@ -2132,15 +2128,12 @@ export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'})
     <AuthLayout>
       <div className='signal-splash'>
         <div className='brand'>
-          <div className='logo'>E</div>
+          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
           <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
         </div>
-        <h1>
-          You've been <em>invited</em>.
-        </h1>
+        <h1>Accept invite.</h1>
         <p className='lede'>
-          Open this page from your email invite link. We'll add you to the {noun} and take you
-          straight there.
+          Open this from your email invite link. We will add you to the {noun} and take you there.
         </p>
         <FormError msg={err} />
         <Card style={{marginBottom: 18}}>
@@ -2170,7 +2163,7 @@ export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'})
         <Button kind='mint' block onClick={accept} disabled={busy || !token}>
           {busy ? 'Accepting…' : kind === 'org' ? 'Accept & continue' : 'Accept & open project'}
         </Button>
-        <Button kind='ghost' block to='/home' style={{color: 'var(--signal-coral-text)'}}>
+        <Button kind='ghost' block to='/compose' style={{color: 'var(--signal-coral-text)'}}>
           Decline invite
         </Button>
       </div>

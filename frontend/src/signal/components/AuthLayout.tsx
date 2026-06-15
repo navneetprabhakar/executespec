@@ -10,9 +10,8 @@ const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-li
  *   Desktop (> 920 px): 2-column · form scrolls on the left, a brand +
  *     preview panel sits on the right.
  *
- * The right panel is decorative + reinforces the value prop. It shows
- * a small live-run preview card that mirrors what the user will see in
- * the app once they're signed in.
+ * The right panel mirrors the protected Console shell so auth does not feel
+ * like a separate marketing site.
  */
 export default function AuthLayout({children}: {children: ReactNode}) {
   return (
@@ -28,22 +27,25 @@ export default function AuthLayout({children}: {children: ReactNode}) {
               <span className='word'>ExecuteSpec</span>
             </div>
             <h2 className='auth-brand-headline'>
-              Plan, code, review, and merge from one controlled rail.
+              Start with the change, keep control at the gate.
             </h2>
             <p className='auth-brand-lede'>
-              ExecuteSpec turns a requested change into a gated implementation path: scope the work,
-              confirm the plan, watch execution, and merge with a verified score attached.
+              The app opens on Start. From there you pick context, review the plan, then let the
+              worker produce a verified pull request.
             </p>
           </div>
 
           <div className='auth-console-mock'>
             <div className='auth-console-topbar'>
               <img src={MERGE_RAIL_MARK} alt='' />
-              <span>ExecuteSpec Console</span>
-              <span className='auth-console-state'>verified work</span>
+              <span>ExecuteSpec</span>
+              <span className='auth-console-state'>1 awaiting approval</span>
             </div>
             <div className='auth-console-tabs'>
-              <span>Mission control</span>
+              <span>Start</span>
+              <span>Work</span>
+              <span>Projects</span>
+              <span>Setup</span>
             </div>
             <div className='auth-console-lines'>
               {[
@@ -51,38 +53,32 @@ export default function AuthLayout({children}: {children: ReactNode}) {
                   n: 1,
                   t: (
                     <>
-                      <span className='auth-line-blue'>Awaiting approval</span>
-                      <span className='auth-line-muted'> · 3 plans need a decision</span>
+                      <span className='auth-line-blue'>Request</span>
+                      <span className='auth-line-muted'> · add billing webhook replay</span>
                     </>
                   ),
                 },
                 {
                   n: 2,
-                  t: <span className='auth-line-teal'>Live work · 2 runs coding and testing</span>,
+                  t: <span className='auth-line-teal'>Context · payments-service, web-console</span>,
                 },
                 {
                   n: 3,
-                  t: (
-                    <span className='auth-line-violet'>
-                      Project health · PRs, debt, architecture
-                    </span>
-                  ),
+                  t: <span className='auth-line-violet'>Plan gate · review cost and scope</span>,
                 },
-                {n: 4, t: <span />},
                 {
-                  n: 5,
+                  n: 4,
                   t: (
                     <>
-                      <span className='auth-line-teal'>plan</span>
-                      <span className='auth-line-muted'> · </span>
                       <span className='auth-line-teal'>code</span>
                       <span className='auth-line-muted'> · </span>
                       <span className='auth-line-teal'>test</span>
                       <span className='auth-line-muted'> · </span>
-                      <span className='auth-line-blue'>PR ready</span>
+                      <span className='auth-line-blue'>pull request</span>
                     </>
                   ),
                 },
+                {n: 5, t: <span className='auth-line-muted'>Setup · team, providers, integrations</span>},
               ].map((r) => (
                 <div key={r.n} className='auth-console-line'>
                   <span>{r.n}</span>
@@ -101,15 +97,15 @@ export default function AuthLayout({children}: {children: ReactNode}) {
           <ul className='auth-brand-bullets'>
             <li>
               <span className='dot teal' />
-              Real PRs, not diff suggestions
+              Start work without learning a command surface
             </li>
             <li>
               <span className='dot blue' />
-              You approve the plan and price first
+              Work is gated before code changes begin
             </li>
             <li>
               <span className='dot violet' />
-              Deterministic verified score on every PR
+              Setup is one place for team, providers, and integrations
             </li>
           </ul>
         </div>
