@@ -91,7 +91,7 @@ export function LoginPage() {
   // CLI/VS Code `/cli-login` device-authorization flow, which must preserve its ?port=&state=.
   const redirectParam = new URLSearchParams(location.search).get('redirect');
   const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
-  const target = safeRedirect || fromState || '/home';
+  const target = safeRedirect || fromState || '/compose';
   // Carry the device-auth return path through the OAuth round-trip too (the email path uses `target`).
   const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
 
@@ -124,12 +124,8 @@ export function LoginPage() {
           <img className='logo' src={MERGE_RAIL_MARK} alt='' />
           <div className='word'>ExecuteSpec</div>
         </div>
-        <h1>
-          Sign in to <em>ExecuteSpec.</em>
-        </h1>
-        <p className='lede'>
-          Return to your project rails, pending plan gates, and generated pull requests.
-        </p>
+        <h1>Sign in.</h1>
+        <p className='lede'>Start a change, review waiting plans, or continue project work.</p>
 
         <ErrorBanner msg={err} />
 
@@ -174,7 +170,7 @@ export function LoginPage() {
         </form>
 
         <div className='footer-link'>
-          New here? <Link to={`/signup${oauthQS}`}>Create an account</Link>
+          New here? <Link to={`/signup${oauthQS}`}>Create workspace</Link>
         </div>
       </div>
     </AuthLayout>
@@ -229,10 +225,8 @@ export function SignupPage() {
           <img className='logo' src={MERGE_RAIL_MARK} alt='' />
           <div className='word'>ExecuteSpec</div>
         </div>
-        <h1>
-          Create your <em>workspace.</em>
-        </h1>
-        <p className='lede'>Start with 15 runs/month. Add team billing when the workflow sticks.</p>
+        <h1>Create workspace.</h1>
+        <p className='lede'>Start from a request. Add repos, teammates, and provider keys in Setup.</p>
 
         <ErrorBanner msg={err} />
 
@@ -333,7 +327,7 @@ export function VerifyPage() {
 
   return (
     <AuthLayout>
-      <div className='signal-splash' style={{paddingTop: 60}}>
+      <div className='signal-splash auth-status-splash'>
         <div
           style={{
             width: 80,
@@ -359,13 +353,13 @@ export function VerifyPage() {
             <polyline points='22,6 12,13 2,6' />
           </svg>
         </div>
-        <h1>{err ? 'Something went wrong.' : msg ? 'One sec…' : 'Check your inbox.'}</h1>
+        <h1>{err ? 'Verification failed.' : msg ? 'Verifying.' : 'Check your inbox.'}</h1>
         <p className='lede'>
           {err
             ? err
             : msg
               ? msg
-              : `We've sent a verification link to your inbox. Tap the link to finish setting up your account.`}
+              : `Use the verification link to finish workspace setup.`}
         </p>
         {!err && !msg && (
           <Button kind='primary' block to='/login'>

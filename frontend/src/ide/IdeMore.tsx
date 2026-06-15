@@ -193,7 +193,7 @@ export function IdeRuns() {
       {runs === null ? (
         <IdeLoader label='Loading work…' />
       ) : runs.length === 0 ? (
-        <div className='ide-empty'>No work yet — start with new work.</div>
+        <div className='ide-empty'>No work yet — start work from Start.</div>
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>
           No work matches{q.trim() ? ` “${q.trim()}”` : ' this filter'}.{' '}

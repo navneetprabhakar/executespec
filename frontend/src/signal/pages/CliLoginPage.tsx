@@ -97,7 +97,7 @@ export default function CliLoginPage() {
             <button
               style={ghostBtn}
               disabled={status === 'working'}
-              onClick={() => navigate('/home', {replace: true})}
+              onClick={() => navigate('/compose', {replace: true})}
             >
               Cancel
             </button>

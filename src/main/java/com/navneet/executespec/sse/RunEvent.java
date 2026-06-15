@@ -1,6 +1,10 @@
 package com.navneet.executespec.sse;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import com.navneet.executespec.cost.RunCostTracker;
 
 public record RunEvent(
     String type, // RUN_STATUS | TASK_STATUS | LOG | GATE_OPENED | GATE_RESOLVED
@@ -8,7 +12,13 @@ public record RunEvent(
     String runId,
     String taskId,
     String payload,
-    Instant timestamp) {
+    Instant timestamp,
+    int schemaVersion,
+    Map<String, Object> data) {
+  public RunEvent(String type, String runId, String taskId, String payload, Instant timestamp) {
+    this(type, runId, taskId, payload, timestamp, 1, Map.of());
+  }
+
   public static RunEvent runStatus(String runId, String status) {
     return new RunEvent("RUN_STATUS", runId, null, status, Instant.now());
   }
@@ -44,6 +54,26 @@ public record RunEvent(
    */
   public static RunEvent toolCall(String runId, String taskId, String frameJson) {
     return new RunEvent("TOOL_CALL", runId, taskId, frameJson, Instant.now());
+  }
+
+  public static RunEvent toolCall(
+      String runId,
+      String taskId,
+      String frameJson,
+      String callId,
+      String toolName,
+      String argsJson) {
+    return withData(
+        "TOOL_CALL",
+        runId,
+        taskId,
+        frameJson,
+        "callId",
+        callId,
+        "toolName",
+        toolName,
+        "argsJson",
+        argsJson);
   }
 
   /**
@@ -91,6 +121,43 @@ public record RunEvent(
     String payload =
         "in=" + inputTokens + ",out=" + outputTokens + ",total=" + (inputTokens + outputTokens);
     return new RunEvent("TOKEN_USAGE", runId, null, payload, Instant.now());
+  }
+
+  public static RunEvent tokenUsage(
+      String runId,
+      String taskId,
+      String provider,
+      String model,
+      RunCostTracker.Snapshot snapshot) {
+    int inputTokens = snapshot == null ? 0 : snapshot.inputTokens();
+    int outputTokens = snapshot == null ? 0 : snapshot.outputTokens();
+    String payload =
+        "in=" + inputTokens + ",out=" + outputTokens + ",total=" + (inputTokens + outputTokens);
+    return withData(
+        "TOKEN_USAGE",
+        runId,
+        taskId,
+        payload,
+        "inputTokens",
+        inputTokens,
+        "outputTokens",
+        outputTokens,
+        "totalTokens",
+        inputTokens + outputTokens,
+        "cacheReadTokens",
+        snapshot == null ? 0 : snapshot.cacheReadTokens(),
+        "cacheWriteTokens",
+        snapshot == null ? 0 : snapshot.cacheWriteTokens(),
+        "reasoningTokens",
+        snapshot == null ? 0 : snapshot.reasoningTokens(),
+        "calls",
+        snapshot == null ? 0 : snapshot.calls(),
+        "costUsd",
+        snapshot == null ? 0.0 : snapshot.costUsd(),
+        "provider",
+        provider,
+        "model",
+        model);
   }
 
   public static RunEvent queued(String runId, int position) {
@@ -371,5 +438,20 @@ public record RunEvent(
         null,
         tier + "|" + String.format("%.2f", budgetUsd) + "|" + message,
         Instant.now());
+  }
+
+  private static RunEvent withData(
+      String type, String runId, String taskId, String payload, Object... pairs) {
+    return new RunEvent(type, runId, taskId, payload, Instant.now(), 1, data(pairs));
+  }
+
+  private static Map<String, Object> data(Object... pairs) {
+    if (pairs == null || pairs.length == 0) return Map.of();
+    Map<String, Object> out = new LinkedHashMap<>();
+    for (int i = 0; i + 1 < pairs.length; i += 2) {
+      Object key = pairs[i];
+      if (key != null && pairs[i + 1] != null) out.put(String.valueOf(key), pairs[i + 1]);
+    }
+    return Map.copyOf(out);
   }
 }

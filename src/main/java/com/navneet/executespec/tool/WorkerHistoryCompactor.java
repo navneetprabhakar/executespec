@@ -202,6 +202,8 @@ public class WorkerHistoryCompactor {
                   .model(resolved.getModel())
                   .messages(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(prompt)))
                   .context(ctx)
+                  .agentRole("WorkerHistoryCompactor")
+                  .stepId("worker-history.compact")
                   .temperature(0.0)
                   .maxTokens(SUMMARY_MAX_TOKENS)
                   .toolsOverride(Collections.emptyList())

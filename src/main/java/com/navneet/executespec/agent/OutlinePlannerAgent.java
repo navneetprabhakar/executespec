@@ -382,6 +382,8 @@ public class OutlinePlannerAgent {
                           .model(plannerModel)
                           .messages(messages)
                           .context(req.context())
+                          .agentRole("OutlinePlannerAgent")
+                          .stepId("planner.outline")
                           .temperature(0.0)
                           .maxTokens(maxTokens)
                           .toolsOverride(List.of(submitOutline))

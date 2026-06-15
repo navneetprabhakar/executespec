@@ -51,10 +51,10 @@ export default function AuthCallbackPage() {
     // full spec into `sessionStorage['v3-anon-spec']` (read by
     // HomeRedirectPage / EmptyProjectPage); both paths must survive the
     // bounce through Google/GitHub OAuth without being clobbered by the
-    // bare `/home` redirect.
+    // bare `/compose` redirect.
     //
     // Strategy: forward any `?spec=` query param from the callback URL
-    // through to /home. sessionStorage is browser-local and already
+    // through to /compose. sessionStorage is browser-local and already
     // survives the OAuth bounce; query params on the marketing-site
     // OAuth-init URL flow through to the backend's OAuth init endpoint
     // and back here as part of the state param (per OAuthInitController).
@@ -64,7 +64,7 @@ export default function AuthCallbackPage() {
     const redirectParam = searchParams.get('redirect');
     const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
     const stashedSpec = searchParams.get('spec');
-    const fallbackUrl = stashedSpec ? `/home?spec=${encodeURIComponent(stashedSpec)}` : '/home';
+    const fallbackUrl = stashedSpec ? `/compose?spec=${encodeURIComponent(stashedSpec)}` : '/compose';
     const target = safeRedirect ?? fallbackUrl;
     loadMe()
       .then(() => {

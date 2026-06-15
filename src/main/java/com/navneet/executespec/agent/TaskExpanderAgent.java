@@ -132,6 +132,8 @@ public class TaskExpanderAgent {
                 .model(resolved.getModel())
                 .messages(messages)
                 .context(context)
+                .agentRole("TaskExpanderAgent")
+                .stepId("planner.expand." + skeleton.id())
                 .temperature(0.0)
                 .maxTokens(EXPAND_MAX_TOKENS)
                 .toolsOverride(List.of(submitTaskDetail))

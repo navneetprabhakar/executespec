@@ -214,15 +214,15 @@ export default function ConsoleHome() {
       <div className='con-cockpit'>
         <div className='con-hero'>
           <div>
-            <div className='con-hero-kicker'>Mission control</div>
-            <h1 className='con-hero-title'>What needs attention?</h1>
+            <div className='con-hero-kicker'>Start</div>
+            <h1 className='con-hero-title'>What needs the next decision?</h1>
             <div className='con-hero-sub'>
               Review approvals, watch live work, and start the next code change from one console.
             </div>
           </div>
           <button className='con-newrun lg' onClick={() => navigate('/compose')}>
             <PlusIcon size={16} />
-            New work
+            Start work
           </button>
         </div>
         <div className='con-cockpit-metrics'>
@@ -251,7 +251,7 @@ export default function ConsoleHome() {
         {loading ? (
           <div className='con-empty'>Loading work…</div>
         ) : attention.length === 0 ? (
-          <div className='con-empty'>No blockers. Start new work or inspect project health.</div>
+          <div className='con-empty'>No blockers. Start work or inspect project health.</div>
         ) : (
           attention.map((r) => {
             const action = nextAction(r, prPending[r.runId] || 0);

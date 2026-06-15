@@ -105,6 +105,8 @@ public class TierEvalRunner {
             .model(model)
             .messages(testCase.messages())
             .context(ctx)
+            .agentRole("TierEvalRunner")
+            .stepId("tier-eval." + testCase.name())
             .temperature(0.0)
             .maxTokens(8192)
             .toolsOverride(testCase.tools().isEmpty() ? null : testCase.tools())

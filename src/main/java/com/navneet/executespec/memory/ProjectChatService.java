@@ -159,6 +159,8 @@ public class ProjectChatService {
                           new SystemMessage(system),
                           new UserMessage("Transcript:\n\n" + transcript)))
                   .context(ctx)
+                  .agentRole("ProjectChatCompactor")
+                  .stepId("project-chat.compact")
                   .temperature(0.2)
                   .maxTokens(1500)
                   .toolsOverride(Collections.emptyList())
@@ -267,6 +269,8 @@ public class ProjectChatService {
                           new SystemMessage(system),
                           new UserMessage("Transcript:\n\n" + transcript)))
                   .context(ctx)
+                  .agentRole("ProjectChatCompiler")
+                  .stepId("project-chat.compile-to-spec")
                   .temperature(0.2)
                   .maxTokens(800)
                   .toolsOverride(java.util.Collections.emptyList())
@@ -365,6 +369,8 @@ public class ProjectChatService {
                     .model(resolved.getModel())
                     .messages(conversation)
                     .context(ctx)
+                    .agentRole("ProjectChatAgent")
+                    .stepId("project-chat.round-" + (round + 1))
                     .temperature(0.3)
                     .maxTokens(2048)
                     .toolsOverride(tools)

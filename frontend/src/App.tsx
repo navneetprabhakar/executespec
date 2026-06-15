@@ -120,7 +120,7 @@ function LegacyRedirect() {
   )
     path = '/admin';
   if (path === '/claim') path = '/welcome';
-  if (path === '/landing' || path === '') path = '/home';
+  if (path === '/landing' || path === '') path = '/compose';
   return <Navigate to={path + location.search + location.hash} replace />;
 }
 
@@ -133,7 +133,7 @@ function protectedChildren() {
   return (
     <>
       {/* Default + run loop */}
-      <Route path='/' element={<Navigate to='/home' replace />} />
+      <Route path='/' element={<Navigate to='/compose' replace />} />
       <Route path='/home' element={<ConsoleHome />} />
       <Route path='/decisions' element={<ConsoleDecisions />} />
       <Route path='/runs' element={<IdeRuns />} />
@@ -177,18 +177,19 @@ function protectedChildren() {
 
       {/* Discover */}
       <Route path='/insights' element={<IdeInsights />} />
-      <Route path='/library' element={<Navigate to='/home' replace />} />
-      <Route path='/library/:slug' element={<Navigate to='/home' replace />} />
-      <Route path='/migrations' element={<Navigate to='/home' replace />} />
-      <Route path='/migrations/:slug' element={<Navigate to='/home' replace />} />
-      <Route path='/templates' element={<Navigate to='/home' replace />} />
+      <Route path='/library' element={<Navigate to='/setup' replace />} />
+      <Route path='/library/:slug' element={<Navigate to='/setup' replace />} />
+      <Route path='/migrations' element={<Navigate to='/setup' replace />} />
+      <Route path='/migrations/:slug' element={<Navigate to='/setup' replace />} />
+      <Route path='/templates' element={<Navigate to='/setup' replace />} />
       <Route path='/audit' element={<IdeAudit />} />
       <Route path='/deployments' element={<IdeDeployments />} />
 
       {/* System */}
       <Route path='/notifications' element={<IdeNotifications />} />
       <Route path='/search' element={<IdeSearch />} />
-      <Route path='/more' element={<IdeMoreMenu />} />
+      <Route path='/setup' element={<IdeMoreMenu />} />
+      <Route path='/more' element={<Navigate to='/setup' replace />} />
       <Route path='/admin' element={<IdeAdmin />} />
       <Route path='/admin/*' element={<AdminPage />} />
       {/* Operator-only benchmark tracking (SUPER_ADMIN) — RL-2026-06. */}
@@ -274,7 +275,7 @@ export default function App() {
         <Route path='/landing' element={<LegacyRedirect />} />
 
         {/* Catch-all */}
-        <Route path='*' element={<Navigate to='/home' replace />} />
+        <Route path='*' element={<Navigate to='/compose' replace />} />
       </Routes>
     </Suspense>
   );

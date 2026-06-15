@@ -13,7 +13,6 @@ import {
   WorkspaceIcon,
   RunsIcon,
   ProjectsIcon,
-  DecisionsIcon,
   AdminIcon,
   AccountIcon,
   BellIcon,
@@ -33,12 +32,12 @@ import {
  * recent runs, and a protected route outlet for the actual work surfaces.
  */
 type NavItem = {path: string; Icon: (p: IconProps) => React.ReactElement; label: string};
+const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 const NAV: NavItem[] = [
-  {path: '/home', Icon: WorkspaceIcon, label: 'Home'},
+  {path: '/compose', Icon: PlusIcon, label: 'Start'},
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
   {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
-  {path: '/decisions', Icon: DecisionsIcon, label: 'Decisions'},
-  {path: '/account', Icon: AccountIcon, label: 'Account'},
+  {path: '/setup', Icon: WorkspaceIcon, label: 'Setup'},
 ];
 
 function runLabel(r: api.RunSummary): string {
@@ -127,16 +126,45 @@ export default function ConsoleShell() {
   ]
     .filter(Boolean)
     .join(' ');
-  const navActive = (p: string) =>
-    p === '/home' ? path === '/' || path.startsWith('/home') : path.startsWith(p);
+  const navActive = (p: string) => {
+    if (p === '/compose') return path === '/' || path.startsWith('/home') || path.startsWith('/compose');
+    if (p === '/runs')
+      return (
+        path.startsWith('/runs') ||
+        path.startsWith('/decisions') ||
+        path.startsWith('/plan') ||
+        path.startsWith('/live') ||
+        path.startsWith('/result')
+      );
+    if (p === '/setup')
+      return (
+        path.startsWith('/setup') ||
+        path.startsWith('/more') ||
+        path.startsWith('/account') ||
+        path.startsWith('/billing') ||
+        path.startsWith('/plans') ||
+        path.startsWith('/integrations') ||
+        path.startsWith('/api-keys') ||
+        path.startsWith('/provider-keys') ||
+        path.startsWith('/org-members') ||
+        path.startsWith('/org/settings') ||
+        path.startsWith('/insights') ||
+        path.startsWith('/audit') ||
+        path.startsWith('/deployments') ||
+        path.startsWith('/admin') ||
+        path.startsWith('/benchmark')
+      );
+    return path.startsWith(p);
+  };
 
   const commands: PaletteCmd[] = [
-    {id: 'home', label: 'Go: Home', hint: 'Home', run: () => navigate('/home')},
-    {id: 'compose', label: 'New work', hint: '＋', run: () => navigate('/compose')},
+    {id: 'start', label: 'Go: Start', hint: 'Start', run: () => navigate('/compose')},
+    {id: 'compose', label: 'Start work', hint: '＋', run: () => navigate('/compose')},
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
-    {id: 'decisions', label: 'Go: Decisions', run: () => navigate('/decisions')},
+    {id: 'setup', label: 'Go: Setup', run: () => navigate('/setup')},
+    {id: 'decisions', label: 'Work: Awaiting approval', run: () => navigate('/decisions')},
     {id: 'search', label: 'Go: Search', run: () => navigate('/search')},
     {id: 'notifications', label: 'Go: Notifications', run: () => navigate('/notifications')},
     {id: 'account', label: 'Go: Account', run: () => navigate('/account')},
@@ -172,14 +200,15 @@ export default function ConsoleShell() {
         >
           <MenuIcon size={20} />
         </button>
-        <NavLink to='/home' className='con-brand'>
+        <NavLink to='/compose' className='con-brand'>
+          <img className='con-brand-mark' src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
           <span>ExecuteSpec</span>
         </NavLink>
         <span className='con-topbar-spacer' />
         <PlanGateIndicator dir='down' />
-        <button className='con-newrun' onClick={() => navigate('/compose')} title='Start new work'>
+        <button className='con-newrun' onClick={() => navigate('/compose')} title='Start work'>
           <PlusIcon size={15} />
-          <span className='con-newrun-label'>New work</span>
+          <span className='con-newrun-label'>Start</span>
         </button>
         <button
           className='con-icon'
@@ -255,6 +284,10 @@ export default function ConsoleShell() {
       <div className='con-body'>
         {drawerOpen && <div className='con-backdrop' onClick={() => setDrawerOpen(false)} />}
         <nav className={`con-side${drawerOpen ? ' drawer-open' : ''}`}>
+          <div className='con-side-brand'>
+            <img src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
+            <span>ExecuteSpec</span>
+          </div>
           {NAV.map((n) => (
             <NavLink
               key={n.path}
@@ -265,27 +298,9 @@ export default function ConsoleShell() {
               <span>{n.label}</span>
             </NavLink>
           ))}
-          {isSuperAdmin && (
-            <NavLink
-              to='/admin'
-              className={`con-navitem${path.startsWith('/admin') ? ' active' : ''}`}
-            >
-              <AdminIcon size={18} />
-              <span>Admin</span>
-            </NavLink>
-          )}
-          <NavLink
-            to='/notifications'
-            className={`con-navitem${path.startsWith('/notifications') ? ' active' : ''}`}
-            title={unread > 0 ? `Notifications · ${unread} unread` : 'Notifications'}
-          >
-            <BellIcon size={18} />
-            <span>Notifications</span>
-            {unread > 0 && <span className='con-nav-badge'>{unread > 9 ? '9+' : unread}</span>}
-          </NavLink>
-
           <details className='con-side-details'>
             <summary className='con-side-section'>
+              <RunsIcon size={12} />
               Recent work
               <span style={{flex: 1}} />
               <span className='con-side-count'>{runs.length}</span>
@@ -314,6 +329,7 @@ export default function ConsoleShell() {
 
           <details className='con-side-details'>
             <summary className='con-side-section'>
+              <ProjectsIcon size={12} />
               Projects
               <span style={{flex: 1}} />
               <span className='con-side-count'>{projects.length}</span>
@@ -347,7 +363,17 @@ export default function ConsoleShell() {
 
           {isSuperAdmin && (
             <>
-              <div className='con-side-section'>System</div>
+              <div className='con-side-section'>
+                <AdminIcon size={12} />
+                Operator
+              </div>
+              <NavLink
+                to='/admin'
+                className={`con-runitem${path.startsWith('/admin') ? ' active' : ''}`}
+              >
+                <AdminIcon size={14} />
+                <span className='con-runitem-label'>Admin</span>
+              </NavLink>
               <NavLink
                 to='/benchmark'
                 className={`con-runitem${path.startsWith('/benchmark') ? ' active' : ''}`}
@@ -380,7 +406,7 @@ export default function ConsoleShell() {
           <NavLink
             key={n.path}
             to={n.path}
-            className={({isActive}) => (isActive ? 'active' : '')}
+            className={() => (navActive(n.path) ? 'active' : '')}
             title={n.label}
           >
             <span className='ico'>

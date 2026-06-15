@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.sse.RunEvent;
@@ -90,6 +91,7 @@ public class LlmRouter {
   private final GeminiNativeToolClient geminiNativeToolClient;
   private final Metrics metrics;
   private final RunCostTracker costTracker;
+  private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
   private final AnthropicForcedToolClient anthropicForcedToolClient;
@@ -228,10 +230,20 @@ public class LlmRouter {
         metrics.recordKeySource(request.provider(), source.name());
         String runId = request.context().runId();
         String taskId = request.context().taskId();
-        costTracker.record(runId, taskId, request.provider(), request.model(), resp);
+        RunCostTracker.CallUsage callUsage =
+            costTracker.record(runId, taskId, request.provider(), request.model(), resp);
+        stepUsageRecorder.record(
+            runId,
+            taskId,
+            request.agentRole(),
+            request.stepId(),
+            retryOf(request, attempt),
+            request.provider(),
+            request.model(),
+            callUsage);
         RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
         broadcaster.emit(
-            runId, RunEvent.tokenUsage(runId, snap.inputTokens(), snap.outputTokens()));
+            runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
         log.info(
             "LlmRouter <- {} {} ok in {}ms (attempt {})",
             request.provider(),
@@ -342,7 +354,12 @@ public class LlmRouter {
                   + " ("
                   + altModel
                   + ")"));
-      LlmRequest altRequest = request.toBuilder().provider(altProvider).model(altModel).build();
+      LlmRequest altRequest =
+          request.toBuilder()
+              .provider(altProvider)
+              .model(altModel)
+              .retryOf(attributionKey(request))
+              .build();
       try {
         return dispatchWithRetry(altRequest, tools, altKey, altSource);
       } catch (RuntimeException altError) {
@@ -352,6 +369,21 @@ public class LlmRouter {
       }
     }
     return null;
+  }
+
+  private static String retryOf(LlmRequest request, int attempt) {
+    if (attempt > 1) return attributionKey(request) + "#attempt-" + (attempt - 1);
+    return request.retryOf();
+  }
+
+  private static String attributionKey(LlmRequest request) {
+    String role =
+        request.agentRole() == null || request.agentRole().isBlank()
+            ? "unknown"
+            : request.agentRole();
+    String step =
+        request.stepId() == null || request.stepId().isBlank() ? "llm.call" : request.stepId();
+    return role + ":" + step;
   }
 
   /**
