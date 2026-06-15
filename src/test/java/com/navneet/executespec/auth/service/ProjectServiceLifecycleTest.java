@@ -17,6 +17,7 @@ import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 
@@ -43,6 +44,7 @@ class ProjectServiceLifecycleTest {
   private ProjectRepository projectRepo;
   private ProjectMemberRepository projectMemberRepo;
   private AppUserRepository userRepo;
+  private OrgMemberRepository orgMemberRepo;
   private ActivityAuditService auditService;
   private EventTrackingService eventTracking;
   private TierEnforcementService tierEnforcement;
@@ -53,12 +55,19 @@ class ProjectServiceLifecycleTest {
     projectRepo = mock(ProjectRepository.class);
     projectMemberRepo = mock(ProjectMemberRepository.class);
     userRepo = mock(AppUserRepository.class);
+    orgMemberRepo = mock(OrgMemberRepository.class);
     auditService = mock(ActivityAuditService.class);
     eventTracking = mock(EventTrackingService.class);
     tierEnforcement = mock(TierEnforcementService.class);
     svc =
         new ProjectService(
-            projectRepo, projectMemberRepo, userRepo, auditService, eventTracking, tierEnforcement);
+            projectRepo,
+            projectMemberRepo,
+            userRepo,
+            orgMemberRepo,
+            auditService,
+            eventTracking,
+            tierEnforcement);
     when(projectRepo.save(any(Project.class))).thenAnswer(inv -> inv.getArgument(0));
   }
 

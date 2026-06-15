@@ -24,6 +24,13 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Conversion updates org profile fields, clears `is_personal`, stamps the creator as owner/admin contact, and self-heals a missing `ORG_ADMIN` membership row before returning `OrgDto.isPersonal=false`.
 - Users already attached to a non-personal org still cannot create a second org through this endpoint; multi-org switching is not implemented.
 
+## Team Access
+
+- Org membership invites (`POST /api/org/invite`) are work-domain invites. Enterprise orgs always block consumer domains and enforce configured org domains.
+- Project-only external collaborators use the separate V175 project invite surface (`POST /api/projects/{id}/invites`) and are controlled by `org.external_sharing_enabled`.
+- `DELETE /api/org/me/invitations/{id}` cancels pending/escalated org invites by marking them `EXPIRED` and writing an `INVITATION_CANCELLED` audit row.
+- Project member add/remove accepts org admins and super admins in addition to project admins; `ProjectService.requireProjectAdmin` mirrors the controller/access-guard semantics.
+
 ## Migration Trail
 
 - `V215__personal_access_token.sql` creates hashed PATs for programmatic auth.
