@@ -60,7 +60,9 @@ export default function AuthLayout({children}: {children: ReactNode}) {
                 },
                 {
                   n: 2,
-                  t: <span className='auth-line-teal'>Context · payments-service, web-console</span>,
+                  t: (
+                    <span className='auth-line-teal'>Context · payments-service, web-console</span>
+                  ),
                 },
                 {
                   n: 3,
@@ -78,7 +80,10 @@ export default function AuthLayout({children}: {children: ReactNode}) {
                     </>
                   ),
                 },
-                {n: 5, t: <span className='auth-line-muted'>Setup · team, providers, integrations</span>},
+                {
+                  n: 5,
+                  t: <span className='auth-line-muted'>Setup · team, providers, integrations</span>,
+                },
               ].map((r) => (
                 <div key={r.n} className='auth-console-line'>
                   <span>{r.n}</span>
