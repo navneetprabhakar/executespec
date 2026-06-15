@@ -22,6 +22,12 @@ export const authLogout = () => req<void>('/auth/logout', {method: 'DELETE'});
 export const getMyPermissions = () =>
   req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
 
+export const updateProviderPreference = (provider: string) =>
+  req<{provider: string}>('/auth/me/provider-preference', {
+    method: 'PUT',
+    body: JSON.stringify({provider}),
+  });
+
 // [F-29] (audit Sprint 1 PR-2, 2026-04-30) — verify-email returns
 // LoginResponse-shaped payload now (auto-session). Caller stores
 // `accessToken` and redirects, no password re-entry.

@@ -55,7 +55,12 @@ public class ProjectChatActionTools {
 
   /** Per-turn context the chat session carries through to each tool. */
   public record ToolContext(
-      AppUserDetails userDetails, String projectId, String orgId, String sessionId) {}
+      AppUserDetails userDetails,
+      String projectId,
+      String orgId,
+      String sessionId,
+      String defaultProvider,
+      String defaultModel) {}
 
   /**
    * Build the per-turn tool list. Pass the result to {@code LlmRequest.toolsOverride(...)} so the
@@ -92,7 +97,7 @@ public class ProjectChatActionTools {
     "provider": {
       "type": "string",
       "enum": ["anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks"],
-      "description": "Optional LLM provider override; defaults to the user/org default."
+      "description": "Optional LLM provider override; defaults to the current chat session provider."
     },
     "model": {
       "type": "string",
@@ -110,8 +115,8 @@ public class ProjectChatActionTools {
           if (spec == null || spec.isBlank()) {
             return errorEnvelope("spec is required");
           }
-          String provider = textOrNull(args, "provider");
-          String model = textOrNull(args, "model");
+          String provider = firstNonBlank(textOrNull(args, "provider"), ctx.defaultProvider());
+          String model = firstNonBlank(textOrNull(args, "model"), ctx.defaultModel());
 
           PipelineRun submitted =
               runOrchestrator.submitRun(
@@ -265,9 +270,10 @@ public class ProjectChatActionTools {
         DefaultToolDefinition.builder()
             .name("list_recent_runs")
             .description(
-                "List the user's recent runs (newest first). Optional filters: limit (1-50,"
-                    + " default 10) and status (e.g. COMPLETE, FAILED, AWAITING_APPROVAL,"
-                    + " RUNNING).")
+                "List recent runs (newest first). If the chat session is linked to a project,"
+                    + " this is scoped to that project; otherwise it lists the caller's runs."
+                    + " Optional filters: limit (1-50, default 10) and status (e.g. COMPLETE,"
+                    + " FAILED, AWAITING_APPROVAL, RUNNING).")
             .inputSchema(
                 """
 {
@@ -286,9 +292,12 @@ public class ProjectChatActionTools {
           String statusFilter = textOrNull(args, "status");
           String userId = String.valueOf(ctx.userDetails().getUser().getId());
 
-          var page =
-              pipelineRunRepo.findByCreatedByUserIdOrderByStartedAtDesc(
-                  userId, PageRequest.of(0, limit));
+          Iterable<PipelineRun> page =
+              ctx.projectId() != null && !ctx.projectId().isBlank()
+                  ? pipelineRunRepo.findByProjectIdOrderByStartedAtDesc(
+                      ctx.projectId(), PageRequest.of(0, limit))
+                  : pipelineRunRepo.findByCreatedByUserIdOrderByStartedAtDesc(
+                      userId, PageRequest.of(0, limit));
 
           ArrayNode arr = json.createArrayNode();
           int included = 0;
@@ -304,6 +313,9 @@ public class ProjectChatActionTools {
 
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
+          if (ctx.projectId() != null && !ctx.projectId().isBlank()) {
+            out.put("projectId", ctx.projectId());
+          }
           out.set("runs", arr);
           out.put("count", included);
           return out;
@@ -364,6 +376,13 @@ public class ProjectChatActionTools {
     if (args == null || !args.has(field) || args.get(field).isNull()) return null;
     String v = args.get(field).asText();
     return (v == null || v.isBlank()) ? null : v;
+  }
+
+  private static String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.isBlank()) return value.trim();
+    }
+    return null;
   }
 
   private static int intOrDefault(JsonNode args, String field, int dflt) {
