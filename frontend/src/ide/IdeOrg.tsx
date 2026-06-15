@@ -280,8 +280,14 @@ export function IdeOrgMembers() {
     };
   }, []);
 
-  const canInvite = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
-  const seats = (org as unknown as {seats?: number; usedSeats?: number})?.seats ?? members.length;
+  const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
+  const canInvite = user?.orgRole === 'ORG_ADMIN' || isSuperAdmin;
+  const orgTier = (org?.tier || tier || '').toUpperCase();
+  const seatCount = org?.seatCount ?? (org as unknown as {seats?: number})?.seats ?? 1;
+  const seatValue =
+    orgTier === 'ENTERPRISE'
+      ? `${members.length} active · contract-managed`
+      : `${members.length} / ${seatCount}`;
   const orgAny = (org || {}) as unknown as {name?: string};
 
   async function invite() {
@@ -310,6 +316,21 @@ export function IdeOrgMembers() {
       setMsg('Invite re-sent.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Resend failed.');
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function cancelInvite(id: string) {
+    setRowBusy(`cancel-${id}`);
+    setErr('');
+    setMsg('');
+    try {
+      await api.cancelInvitation(id);
+      setInvites(await api.getOrgInvitations());
+      setMsg('Invite cancelled.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Cancel failed.');
     } finally {
       setRowBusy(null);
     }
@@ -344,10 +365,11 @@ export function IdeOrgMembers() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>Org members</div>
+      <div className='ide-h1'>Team access</div>
       <div className='ide-sub'>
-        {orgAny.name || 'Personal org'} · {members.length} member{members.length === 1 ? '' : 's'} ·{' '}
-        {tier}
+        Manage organization members, roles, and work-domain invites for{' '}
+        {orgAny.name || 'Personal org'} · {members.length} member
+        {members.length === 1 ? '' : 's'} · {tier}
       </div>
 
       <Banner err={err} msg={msg} />
@@ -377,11 +399,36 @@ export function IdeOrgMembers() {
               Seats used
             </div>
             <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
-              {members.length} / {seats}
+              {seatValue}
             </div>
+            {orgTier === 'ENTERPRISE' && (
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                Enterprise membership is governed by contract and allowed domains.
+              </div>
+            )}
+            {orgTier !== 'ENTERPRISE' && (
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                Org members consume seats. External project collaborators do not.
+              </div>
+            )}
           </div>
           {canInvite && (
             <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240}}>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: 'var(--ide-fg-muted)',
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Invite org member
+              </div>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.45}}>
+                Use a company email matching your org domains. Gmail, Yahoo, Outlook, and similar
+                consumer domains are project-collaborator invites, not org membership.
+              </div>
               <input
                 className='ide-input'
                 type='email'
@@ -399,8 +446,11 @@ export function IdeOrgMembers() {
                 <option value='ORG_ADMIN'>ORG_ADMIN</option>
               </select>
               <button className='ide-btn' onClick={invite} disabled={busy || !inviteEmail.trim()}>
-                {busy ? 'Inviting…' : `Send ${inviteRole.toLowerCase()} invite`}
+                {busy ? 'Inviting…' : `Send org ${inviteRole.toLowerCase()} invite`}
               </button>
+              <Link to='/projects' style={{fontSize: 12, color: 'var(--ide-blue)'}}>
+                Need to invite an external contractor? Open a project Members page.
+              </Link>
             </div>
           )}
         </div>
@@ -478,6 +528,12 @@ export function IdeOrgMembers() {
                     }}
                   >
                     <span>{mAny.email}</span>
+                    {isMe && isSuperAdmin && (
+                      <>
+                        <span>·</span>
+                        <span>SUPER_ADMIN</span>
+                      </>
+                    )}
                     {mAny.lastSeen && (
                       <>
                         <span>·</span>
@@ -487,6 +543,7 @@ export function IdeOrgMembers() {
                   </div>
                 </div>
                 <div style={{display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0}}>
+                  {isMe && isSuperAdmin && <IdeBadge kind='warn'>SUPER_ADMIN</IdeBadge>}
                   {canInvite && !isMe ? (
                     <>
                       <select
@@ -534,10 +591,12 @@ export function IdeOrgMembers() {
               const ivAny = iv as unknown as {
                 id?: string;
                 email?: string;
+                invitedEmail?: string;
                 orgRole?: string;
                 expiresAt?: string;
                 status?: string;
               };
+              const email = ivAny.invitedEmail || ivAny.email || '—';
               return (
                 <div
                   key={ivAny.id}
@@ -551,7 +610,7 @@ export function IdeOrgMembers() {
                 >
                   <div style={{minWidth: 0, flex: 1}}>
                     <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                      {ivAny.email}
+                      {email}
                     </div>
                     <div
                       style={{
@@ -572,14 +631,28 @@ export function IdeOrgMembers() {
                     </div>
                   </div>
                   {canInvite ? (
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px', fontSize: 12, flexShrink: 0}}
-                      onClick={() => resend(ivAny.id || '')}
-                      disabled={rowBusy === `resend-${ivAny.id}`}
-                    >
-                      {rowBusy === `resend-${ivAny.id}` ? '…' : 'Resend'}
-                    </button>
+                    <div style={{display: 'flex', gap: 6, flexShrink: 0}}>
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '4px 10px', fontSize: 12}}
+                        onClick={() => resend(ivAny.id || '')}
+                        disabled={
+                          rowBusy === `resend-${ivAny.id}` || rowBusy === `cancel-${ivAny.id}`
+                        }
+                      >
+                        {rowBusy === `resend-${ivAny.id}` ? '…' : 'Resend'}
+                      </button>
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '4px 10px', fontSize: 12, color: 'var(--ide-red)'}}
+                        onClick={() => cancelInvite(ivAny.id || '')}
+                        disabled={
+                          rowBusy === `cancel-${ivAny.id}` || rowBusy === `resend-${ivAny.id}`
+                        }
+                      >
+                        {rowBusy === `cancel-${ivAny.id}` ? '…' : 'Cancel'}
+                      </button>
+                    </div>
                   ) : (
                     <IdeBadge kind='warn'>{ivAny.status || 'pending'}</IdeBadge>
                   )}
@@ -630,6 +703,7 @@ function CreateOrgPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const canCreate = tier !== 'FREE' && (!org || org.isPersonal === true);
+  const showCreateAction = canCreate || !org;
 
   async function submit() {
     const parsedDomains = domains
@@ -682,20 +756,20 @@ function CreateOrgPanel({
                 : 'Create an organization before inviting teammates.'}
           </div>
         </div>
-        <button
-          className='ide-btn'
-          disabled={!canCreate}
-          onClick={() => setOpen((v) => !v)}
-          title={
-            tier === 'FREE'
-              ? 'Organization creation is available after upgrading.'
-              : !canCreate
-                ? 'You are already in an organization.'
-                : undefined
-          }
-        >
-          {open ? 'Cancel' : org?.isPersonal ? 'Convert to org' : 'Create org'}
-        </button>
+        {showCreateAction ? (
+          <button
+            className='ide-btn'
+            disabled={!canCreate}
+            onClick={() => setOpen((v) => !v)}
+            title={
+              tier === 'FREE' ? 'Organization creation is available after upgrading.' : undefined
+            }
+          >
+            {open ? 'Cancel' : org?.isPersonal ? 'Convert to org' : 'Create org'}
+          </button>
+        ) : (
+          <IdeBadge kind='ok'>Active org</IdeBadge>
+        )}
       </div>
 
       {tier === 'FREE' && (
@@ -1019,7 +1093,10 @@ export function IdeOrgSettings() {
       : []),
   ];
 
-  const seatCount = (org as unknown as {seats?: number}).seats ?? 1;
+  const orgTier = (org.tier || '').toUpperCase();
+  const isTeamTier = orgTier === 'TEAM';
+  const seatCount = org.seatCount ?? (org as unknown as {seats?: number}).seats ?? 1;
+  const ssoProviderConfigOnly = ssoProvider === 'OKTA_SAML' || ssoProvider === 'AZURE_AD_SAML';
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
@@ -1068,41 +1145,64 @@ export function IdeOrgSettings() {
 
       {/* ── Seats ── */}
       <div className='ide-h2'>Seats</div>
-      <div className='ide-card'>
-        <div
-          style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginBottom: 12}}
-        >
-          TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your
-          billing gateway. You can&apos;t reduce below the current active member count.
-        </div>
-        <Field label='Seats'>
-          <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
-            <input
-              className='ide-input'
-              type='number'
-              min={1}
-              max={20}
-              value={seats}
-              onChange={(e) => setSeats(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-              disabled={!canEdit}
-              style={{width: 120}}
-            />
-            {canEdit && (
-              <button
-                className='ide-btn'
-                style={{flexShrink: 0}}
-                disabled={seatBusy || seats === (org.seatCount ?? 1)}
-                onClick={saveSeats}
-              >
-                {seatBusy ? 'Updating…' : 'Update seats'}
-              </button>
-            )}
+      {isTeamTier ? (
+        <div className='ide-card'>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: 'var(--ide-fg-muted)',
+              lineHeight: 1.5,
+              marginBottom: 12,
+            }}
+          >
+            TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your
+            billing gateway. You can&apos;t reduce below the current active member count.
           </div>
-        </Field>
-      </div>
+          <Field label='Seats'>
+            <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+              <input
+                className='ide-input'
+                type='number'
+                min={1}
+                max={20}
+                value={seats}
+                onChange={(e) => setSeats(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                disabled={!canEdit}
+                style={{width: 120}}
+              />
+              {canEdit && (
+                <button
+                  className='ide-btn'
+                  style={{flexShrink: 0}}
+                  disabled={seatBusy || seats === (org.seatCount ?? 1)}
+                  onClick={saveSeats}
+                >
+                  {seatBusy ? 'Updating…' : 'Update seats'}
+                </button>
+              )}
+            </div>
+          </Field>
+        </div>
+      ) : (
+        <div className='ide-card'>
+          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+            {orgTier === 'ENTERPRISE'
+              ? 'Enterprise seats are contract-managed'
+              : 'Seat changes are unavailable'}
+          </div>
+          <div
+            style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}
+          >
+            This org currently reports {seatCount} seat{seatCount === 1 ? '' : 's'}. Self-serve seat
+            adjustment only applies to TEAM-tier billing. To give someone access to a project, open
+            the project&apos;s <Link to='/projects'>Members</Link> tab; to invite them into the
+            organization first, use <Link to='/org-members'>Team access</Link>.
+          </div>
+        </div>
+      )}
 
       {/* ── Single sign-on ── */}
-      <div className='ide-h2'>Single sign-on (SSO)</div>
+      <div className='ide-h2'>Single sign-on</div>
       {/* TIER-5 — SAML login enforcement is not implemented yet (config storage
           only, per docs/sso-saml-wiring.md), so the copy + the SAML chips say
           so instead of promising enforcement. */}
@@ -1119,7 +1219,14 @@ export function IdeOrgSettings() {
                 <button
                   key={p}
                   type='button'
-                  onClick={canEdit ? () => setSsoProvider(p) : undefined}
+                  onClick={
+                    canEdit
+                      ? () => {
+                          setSsoProvider(p);
+                          if (p === 'OKTA_SAML' || p === 'AZURE_AD_SAML') setSsoEnforced(false);
+                        }
+                      : undefined
+                  }
                   disabled={!canEdit}
                   className='ide-badge'
                   title={
@@ -1172,10 +1279,12 @@ export function IdeOrgSettings() {
             <input
               type='checkbox'
               checked={ssoEnforced}
-              disabled={!canEdit}
+              disabled={!canEdit || ssoProviderConfigOnly}
               onChange={(e) => setSsoEnforced(e.target.checked)}
             />
-            Require SSO for all members on the login domain.
+            {ssoProviderConfigOnly
+              ? 'SAML enforcement is not enabled yet; this provider is config-only.'
+              : 'Require SSO for all members on the login domain.'}
           </label>
         </Field>
         {canEdit && (
@@ -1254,7 +1363,7 @@ export function IdeOrgSettings() {
       </div>
 
       {/* ── Model matrix (F3) ── */}
-      <div className='ide-h2'>Model matrix</div>
+      <div className='ide-h2'>AI routing policy</div>
       {/* TIER-4 — legend directly above the first tier card: what the tiers
           mean, what "Default · <model>" resolves from, and who can edit. The
           non-ENTERPRISE upgrade note sits here too — above the grid. */}
@@ -1348,8 +1457,8 @@ export function IdeOrgSettings() {
         </button>
       )}
 
-      {/* ── External sharing (V198) ── */}
-      <div className='ide-h2'>External sharing</div>
+      {/* ── External project collaborators (V198) ── */}
+      <div className='ide-h2'>Project external collaborators</div>
       <div className='ide-card'>
         <div
           style={{
@@ -1368,12 +1477,13 @@ export function IdeOrgSettings() {
                 color: 'var(--ide-fg-bright)',
               }}
             >
-              Allow inviting people outside your org
+              Allow project-only collaborators outside your org
             </div>
             <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
-              When on, you (org admin) or a super admin can invite any email — including gmail /
-              outlook — as a read-only or developer collaborator on a single project. When off,
-              project invites are restricted to existing org members.
+              When on, org admins and super admins can invite any email — including Gmail or Outlook
+              — to a single project as a viewer, developer, or project admin. This does not make
+              them organization members and does not bypass the work-domain requirement for org
+              membership. When off, project access is limited to existing org members.
             </div>
           </div>
           <button
@@ -1389,7 +1499,11 @@ export function IdeOrgSettings() {
               try {
                 const next = await api.updateExternalSharing(!org.externalSharingEnabled);
                 setOrg(next);
-                setMsg(`External sharing ${next.externalSharingEnabled ? 'enabled' : 'disabled'}.`);
+                setMsg(
+                  `Project external collaborators ${
+                    next.externalSharingEnabled ? 'enabled' : 'disabled'
+                  }.`,
+                );
               } catch (e: unknown) {
                 setErr(e instanceof Error ? e.message : 'Toggle failed.');
               } finally {
@@ -1430,10 +1544,11 @@ export function IdeOrgSettings() {
       {/* ── Members (suspend/reinstate) ── */}
       <div className='ide-h2'>Members</div>
       <InfoCard>
-        Suspend a member to block their access without removing them from the org. Reinstate to
-        restore it. Manage roles + invites from{' '}
+        Suspend a member to block their org access without deleting them. Org-member invites require
+        work-domain email. For Gmail or contractor access, use the Members page inside a specific
+        project. Manage roles and org invites from{' '}
         <Link to='/org-members' style={{color: 'var(--ide-blue)'}}>
-          Org members
+          Team access
         </Link>
         .
       </InfoCard>
@@ -1501,7 +1616,8 @@ export function IdeOrgSettings() {
         {!auditOpen ? (
           <div style={{padding: 16}}>
             <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
-              Org-scoped audit trail — role changes, SSO + sharing toggles, member actions.
+              Org-scoped audit trail — role changes, SSO, project-collaborator toggles, member
+              actions.
             </div>
             <button className='ide-btn ghost' onClick={loadAudit}>
               Load audit log

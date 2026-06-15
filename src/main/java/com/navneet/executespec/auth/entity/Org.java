@@ -151,9 +151,9 @@ public class Org {
 
   /**
    * V198 (2026-05-16) — when true, SUPER_ADMIN or ORG_ADMIN of this org may invite users from any
-   * email domain (gmail, outlook, etc.) as cross-org members on a project. When false (default),
-   * the {@link com.navneet.executespec.sharing.service.ProjectInviteService#createInvite} call
-   * rejects with 403 even on PRO+ tier — keeping invites scoped to the host org.
+   * email domain (gmail, outlook, etc.) as project-only collaborators. When false (default), the
+   * {@link com.navneet.executespec.sharing.service.ProjectInviteService#createInvite} call rejects
+   * with 403 even on PRO+ tier — keeping project access scoped to the host org.
    *
    * <p>Companion to {@link #blockCommonDomains}: that field gates which domains are allowed
    * <em>when</em> external sharing is on; this field gates whether external sharing is on at all.

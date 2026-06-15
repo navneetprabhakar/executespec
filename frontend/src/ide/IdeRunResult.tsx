@@ -8,6 +8,7 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
+import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
 import {
   IdeBadge,
   IdeCodeViewer,
@@ -437,8 +438,9 @@ export default function IdeRunResult() {
     const text = chatInput.trim();
     setChatInput('');
     setChatBusy(true);
-    setChat((prev) => [...(prev || []), {role: 'user', content: text}]);
     try {
+      if (await handleRunSlash(text)) return;
+      setChat((prev) => [...(prev || []), {role: 'user', content: text}]);
       const resp = await api.sendRunChatMessage(runId, text);
       setChat((prev) => [...(prev || []), {role: 'assistant', content: resp.reply || ''}]);
     } catch (e: unknown) {
@@ -446,6 +448,69 @@ export default function IdeRunResult() {
     } finally {
       setChatBusy(false);
     }
+  }
+
+  const runSlashSuggestions = uiSlashSuggestions(chatInput, 'run');
+
+  function appendRunChatNote(content: string) {
+    setChat((prev) => [...(prev || []), {role: 'assistant', content}]);
+  }
+
+  async function handleRunSlash(raw: string): Promise<boolean> {
+    if (!raw.startsWith('/')) return false;
+    const [cmd, arg] = raw.split(/\s+/, 2);
+    if (cmd === '/help') {
+      appendRunChatNote(uiSlashHelp('run'));
+      return true;
+    }
+    if (cmd === '/team' || cmd === '/invite') {
+      navigate('/org-members');
+      return true;
+    }
+    if (cmd === '/clear') {
+      setChat([]);
+      return true;
+    }
+    if (cmd === '/projects') {
+      const projects = await api.getProjects();
+      appendRunChatNote(
+        projects.length
+          ? projects
+              .slice(0, 8)
+              .map((p) => `${p.name} · ${p.id}`)
+              .join('\n')
+          : 'No projects found.',
+      );
+      return true;
+    }
+    if (cmd === '/runs') {
+      const runs = await api.getRuns({scope: 'mine', size: 8});
+      appendRunChatNote(
+        runs.content.length
+          ? runs.content
+              .map((r) => `${r.status} · ${r.runId.slice(0, 8)} · ${r.userRequest || 'Untitled'}`)
+              .join('\n')
+          : 'No recent work found.',
+      );
+      return true;
+    }
+    if (cmd === '/status') {
+      appendRunChatNote(
+        `Run ${runId.slice(0, 8)} · ${run?.status ?? 'loading'} · score ${run?.verifiedScore ?? 'n/a'}`,
+      );
+      return true;
+    }
+    if (cmd === '/provider') {
+      const provider = normalizeUiProvider(arg);
+      if (!provider) {
+        appendRunChatNote('Usage: /provider anthropic|openai|gemini|deepseek');
+        return true;
+      }
+      const saved = await api.updateProviderPreference(provider);
+      appendRunChatNote(`Provider preference saved: ${saved.provider}`);
+      return true;
+    }
+    return false;
   }
 
   // Iterate as new run — forks the run's codebase + spec into a fresh run via the
@@ -1997,21 +2062,47 @@ export default function IdeRunResult() {
               <div ref={chatEndRef} />
             </div>
             <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
-              <textarea
-                className='ide-input'
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void sendChat();
-                  }
-                }}
-                placeholder='Ask anything about this work…'
-                rows={2}
-                disabled={chatBusy}
-                style={{flex: 1, resize: 'vertical', minHeight: 56, maxHeight: 200}}
-              />
+              <div style={{display: 'grid', gap: 6, flex: 1}}>
+                <textarea
+                  className='ide-input'
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendChat();
+                    }
+                  }}
+                  placeholder='Ask anything about this work…'
+                  rows={2}
+                  disabled={chatBusy}
+                  style={{resize: 'vertical', minHeight: 56, maxHeight: 200}}
+                />
+                {runSlashSuggestions.length > 0 && (
+                  <div className='ide-card' style={{padding: 8, display: 'grid', gap: 4}}>
+                    {runSlashSuggestions.map((s) => (
+                      <button
+                        key={s.command}
+                        type='button'
+                        onClick={() => setChatInput(s.args ? `${s.command} ` : s.command)}
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          color: 'var(--ide-fg)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span className='ide-mono'>{uiSlashUsage(s)}</span>
+                        <span style={{color: 'var(--ide-fg-muted)'}}>{s.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div style={{display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0}}>
                 <button
                   className='ide-btn'
