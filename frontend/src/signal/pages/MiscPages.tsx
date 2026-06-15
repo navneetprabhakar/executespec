@@ -1441,23 +1441,12 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
   const expires = meta.expiresAt ? new Date(meta.expiresAt).toLocaleDateString() : 'No expiry';
 
   return (
-    <>
+    <div className='public-share-console'>
       <TopBar title='Public project link' sub='read-only · no auth' back backTo='/home' />
       <Feed>
-        <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: '#5443a8',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Shared project surface · public link
-          </div>
-          <div style={{fontSize: 14, color: '#5443a8', lineHeight: 1.55}}>
+        <Card className='public-share-notice'>
+          <div className='public-share-notice-eyebrow'>Shared project surface · public link</div>
+          <div className='public-share-notice-copy'>
             This read-only link can be opened without an ExecuteSpec account. The owner can revoke
             it at any time.
           </div>
@@ -1648,7 +1637,7 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
           </Link>
         </p>
       </Feed>
-    </>
+    </div>
   );
 }
 
@@ -1692,26 +1681,26 @@ export function SharedPage() {
 
   if (err) {
     return (
-      <>
+      <div className='public-share-console'>
         <TopBar title='Public report' sub='read-only · no auth' back backTo='/home' />
         <Feed>
-          <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
-            <div style={{fontSize: 13, color: 'var(--signal-coral-text)'}}>{err}</div>
+          <Card className='public-share-error'>
+            <div>{err}</div>
           </Card>
         </Feed>
-      </>
+      </div>
     );
   }
 
   if (!data) {
     if (projectSurface) return <SharedProjectSurfaceView surface={projectSurface} />;
     return (
-      <>
+      <div className='public-share-console'>
         <TopBar title='Public report' sub='loading…' back backTo='/home' />
         <Feed>
           <LoadingState label='Loading shared report…' />
         </Feed>
-      </>
+      </div>
     );
   }
 
@@ -1733,23 +1722,12 @@ export function SharedPage() {
   const tests = (data as unknown as {testsTotal?: number; testsPassed?: number}).testsTotal;
 
   return (
-    <>
+    <div className='public-share-console'>
       <TopBar title='Public report' sub='read-only · no auth' back backTo='/home' />
       <Feed>
-        <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent'}}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: '#5443a8',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Shared report · public link
-          </div>
-          <div style={{fontSize: 14, color: '#5443a8', lineHeight: 1.55}}>
+        <Card className='public-share-notice'>
+          <div className='public-share-notice-eyebrow'>Shared report · public link</div>
+          <div className='public-share-notice-copy'>
             This page is publicly accessible. The original owner can revoke at any time.
           </div>
         </Card>
@@ -1816,6 +1794,6 @@ export function SharedPage() {
           </Link>
         </p>
       </Feed>
-    </>
+    </div>
   );
 }
