@@ -2818,6 +2818,226 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Console-aligned public auth + shared-link surfaces.
+   These routes render outside ConsoleShell, so they pin the same flat
+   graphite ladder locally while leaving protected app behaviour unchanged.
+   ───────────────────────────────────────────────────────────── */
+.signal-app .signal-auth-layout,
+.signal-app .public-share-console {
+  --signal-bg: #101112;
+  --signal-card-bg: #18191b;
+  --signal-card-elev: #202124;
+  --signal-hairline: #2b2d31;
+  --signal-hairline-strong: #3a3d42;
+  --signal-ink: #f3f3f3;
+  --signal-ink-soft: #d6d7da;
+  --signal-text-dim: #a1a5ad;
+  --signal-text-mute: #737780;
+  --signal-ocean: #7dd3fc;
+  --signal-mint: #7ad1c8;
+  --signal-coral: #f08a8a;
+  background: var(--signal-bg);
+  color: var(--signal-ink);
+}
+
+.signal-app .signal-auth-layout .auth-form-col {
+  background: var(--signal-bg);
+}
+
+.signal-app .signal-auth-layout .signal-splash .brand {
+  margin-bottom: 32px;
+}
+
+.signal-app .signal-auth-layout .signal-splash .brand .logo,
+.signal-app .auth-brand-top .brand-line .logo {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.signal-app .signal-auth-layout .signal-splash h1 {
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1.12;
+  max-width: 12ch;
+}
+
+.signal-app .signal-auth-layout .signal-splash .lede {
+  color: var(--signal-text-dim);
+  max-width: 36ch;
+}
+
+.signal-app .signal-auth-layout .signal-splash .oauth-btn,
+.signal-app .signal-auth-layout .signal-field input,
+.signal-app .signal-auth-layout .signal-field textarea,
+.signal-app .signal-auth-layout .signal-field select {
+  background: var(--signal-card-bg);
+  border-color: var(--signal-hairline);
+  border-radius: 6px;
+  color: var(--signal-ink);
+  box-shadow: none;
+}
+
+.signal-app .signal-auth-layout .signal-splash .oauth-btn:hover {
+  background: var(--signal-card-elev);
+  border-color: var(--signal-hairline-strong);
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-btn.primary {
+  background: #d6f3ff;
+  border: 1px solid #d6f3ff;
+  color: #0b0d10;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.signal-app .signal-auth-layout .signal-splash .signal-btn.primary:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.signal-app .signal-auth-layout .auth-error {
+  background: #241719;
+  border-color: #5b3034;
+  border-radius: 6px;
+  color: #ffc6c6;
+}
+
+@media (min-width: 920px) {
+  .signal-app .signal-auth-layout .auth-brand-col {
+    background: #151618;
+    border-left: 1px solid var(--signal-hairline);
+  }
+}
+
+.signal-app .auth-brand-headline {
+  font-size: 34px;
+  font-weight: 650;
+  max-width: 22ch;
+}
+
+.signal-app .auth-brand-lede {
+  color: var(--signal-text-dim);
+}
+
+.signal-app .auth-preview-card {
+  background: var(--signal-card-bg);
+  border-color: var(--signal-hairline);
+  border-radius: 8px;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.signal-app .auth-preview-card .preview-ribbon,
+.signal-app .auth-preview-card .preview-stats .v.signal,
+.signal-app .auth-preview-card .preview-stats .v.mint {
+  color: var(--signal-ocean);
+}
+
+.signal-app .auth-preview-card .preview-ribbon .blink,
+.signal-app .auth-brand-bullets li .dot {
+  box-shadow: none;
+}
+
+.signal-app .auth-preview-card .preview-bar-fill {
+  background: var(--signal-ocean);
+  animation: signal-bar 6s ease-in-out infinite;
+}
+
+.signal-app .auth-console-mock {
+  border-radius: 6px;
+  background: #111214;
+  border-color: var(--signal-hairline-strong);
+  box-shadow: none;
+}
+
+.signal-app .auth-console-topbar,
+.signal-app .auth-console-tabs,
+.signal-app .auth-console-footer {
+  background: #18191b;
+}
+
+.signal-app .auth-console-tabs span {
+  background: #202124;
+  box-shadow: inset 0 2px 0 var(--signal-ocean);
+}
+
+.signal-app .public-share-console {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.signal-app .public-share-console .signal-topbar {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  background: rgba(16, 17, 18, 0.96);
+  border-bottom: 1px solid var(--signal-hairline);
+}
+
+.signal-app .public-share-console .signal-feed {
+  width: min(900px, calc(100vw - 32px));
+  max-width: none;
+  margin: 0 auto;
+  padding-top: 22px;
+}
+
+.signal-app .public-share-console .signal-card {
+  background: var(--signal-card-bg);
+  border-color: var(--signal-hairline);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.signal-app .public-share-console .public-share-notice {
+  background: #121a1c;
+  border-color: #244448;
+}
+
+.signal-app .public-share-notice-eyebrow {
+  margin-bottom: 6px;
+  color: var(--signal-ocean);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.signal-app .public-share-notice-copy {
+  color: var(--signal-ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.signal-app .public-share-console .public-share-error {
+  background: #241719;
+  border-color: #5b3034;
+  color: #ffc6c6;
+  font-size: 13px;
+}
+
+.signal-app .public-share-console a {
+  color: var(--signal-ocean);
+}
+
+@media (max-width: 640px) {
+  .signal-app .signal-auth-layout .auth-form-inner > .signal-splash,
+  .signal-app .signal-auth-layout .auth-form-inner > .welcome-step {
+    padding: 44px 18px 28px;
+  }
+
+  .signal-app .signal-auth-layout .signal-splash h1 {
+    max-width: 14ch;
+  }
+
+  .signal-app .public-share-console .signal-feed {
+    width: min(100% - 20px, 900px);
+    padding-top: 14px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
    Responsive grid utility — wraps repeating cards on desktop.
    Pages add `.signal-grid` (and optional cols-2 / cols-3) around
    their card list. Mobile = single column always.
