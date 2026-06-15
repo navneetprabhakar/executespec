@@ -2,6 +2,8 @@ package com.navneet.executespec.sharing.controller;
 
 import java.time.Instant;
 
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
@@ -46,6 +48,7 @@ public class ProjectSharePublicController {
   private final PrReviewRepository prReviewRepo;
   private final PrReviewCommentRepository prCommentRepo;
   private final ProjectArchitectureDocRepository archRepo;
+  private final ProjectRepository projectRepo;
 
   /**
    * Resolve a share link by token + surface metadata so the frontend can dispatch to the right
@@ -83,6 +86,28 @@ public class ProjectSharePublicController {
             run.getStartedAt(),
             run.getCompletedAt(),
             run.getActualCostUsd(),
+            link.getLabel()));
+  }
+
+  @GetMapping("/api/shared/{token}/project")
+  public ResponseEntity<SharedProjectOverview> sharedProject(@PathVariable String token) {
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.PROJECT_OVERVIEW);
+    Project project =
+        projectRepo
+            .findById(link.getProjectId())
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    linkService.recordView(link);
+    return ResponseEntity.ok(
+        new SharedProjectOverview(
+            project.getId(),
+            project.getName(),
+            project.getDescription(),
+            project.getStatus(),
+            project.getAiProvider() != null ? project.getAiProvider().name() : null,
+            project.getGithubOwner(),
+            project.getCreatedAt(),
+            project.getUpdatedAt(),
             link.getLabel()));
   }
 
@@ -233,6 +258,17 @@ public class ProjectSharePublicController {
       Instant startedAt,
       Instant completedAt,
       Double costUsd,
+      String label) {}
+
+  public record SharedProjectOverview(
+      String projectId,
+      String name,
+      String description,
+      String status,
+      String aiProvider,
+      String githubOwner,
+      Instant createdAt,
+      Instant updatedAt,
       String label) {}
 
   public record SharedValidationReport(

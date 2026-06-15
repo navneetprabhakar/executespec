@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
+import com.navneet.executespec.auth.dto.CreateOrgRequest;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.OrgMember;
@@ -196,5 +197,67 @@ class OrgServiceBootstrapPersonalOrgTest {
     verify(orgRepo).save(orgCap.capture());
     // "casey@example.com".split("@")[0] = "casey"
     assertThat(orgCap.getValue().getName()).isEqualTo("casey's workspace");
+  }
+
+  @Test
+  void createOrg_paidUserWithPersonalOrg_convertsItToRealOrg() {
+    AppUser user = freshUser();
+    user.setTier("TEAM");
+    user.setOrgId("personal-org-id");
+    Org personal =
+        Org.builder()
+            .id("personal-org-id")
+            .name("Casey's workspace")
+            .tier("TEAM")
+            .status("ACTIVE")
+            .isPersonal(true)
+            .build();
+    when(userRepo.findById("u-1")).thenReturn(Optional.of(user));
+    when(orgRepo.findById("personal-org-id")).thenReturn(Optional.of(personal));
+    when(orgRepo.save(any(Org.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(orgMemberRepo.existsByOrgIdAndUserId("personal-org-id", "u-1")).thenReturn(true);
+
+    var result =
+        svc.createOrg(
+            "u-1",
+            new CreateOrgRequest(
+                "Acme Engineering", java.util.List.of("acme.com"), "admin@acme.com"));
+
+    assertThat(result.id()).isEqualTo("personal-org-id");
+    assertThat(result.name()).isEqualTo("Acme Engineering");
+    assertThat(result.domainPatterns()).isEqualTo("acme.com");
+    assertThat(result.isPersonal()).isFalse();
+    assertThat(personal.isPersonal()).isFalse();
+    assertThat(personal.getAdminEmail()).isEqualTo("admin@acme.com");
+    verify(orgMemberRepo, never()).save(any(OrgMember.class));
+  }
+
+  @Test
+  void createOrg_personalOrgWithMissingMembership_recreatesOrgAdminRow() {
+    AppUser user = freshUser();
+    user.setTier("TEAM");
+    user.setOrgId("personal-org-id");
+    Org personal =
+        Org.builder()
+            .id("personal-org-id")
+            .name("Casey's workspace")
+            .tier("TEAM")
+            .status("ACTIVE")
+            .isPersonal(true)
+            .build();
+    when(userRepo.findById("u-1")).thenReturn(Optional.of(user));
+    when(orgRepo.findById("personal-org-id")).thenReturn(Optional.of(personal));
+    when(orgRepo.save(any(Org.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(orgMemberRepo.existsByOrgIdAndUserId("personal-org-id", "u-1")).thenReturn(false);
+
+    svc.createOrg(
+        "u-1",
+        new CreateOrgRequest("Acme Engineering", java.util.List.of("acme.com"), "admin@acme.com"));
+
+    ArgumentCaptor<OrgMember> memberCap = ArgumentCaptor.forClass(OrgMember.class);
+    verify(orgMemberRepo).save(memberCap.capture());
+    assertThat(memberCap.getValue().getOrgId()).isEqualTo("personal-org-id");
+    assertThat(memberCap.getValue().getUserId()).isEqualTo("u-1");
+    assertThat(memberCap.getValue().getOrgRole()).isEqualTo("ORG_ADMIN");
   }
 }

@@ -53,6 +53,7 @@ Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token i
 | GET | `/api/projects/{id}/share-links` | List + active count. |
 | DELETE | `/api/projects/{id}/share-links/{linkId}` | Revoke link. |
 | GET | `/api/shared/{token}/meta` | Public surface meta. |
+| GET | `/api/shared/{token}/project` | Public PROJECT_OVERVIEW surface. |
 | GET | `/api/shared/{token}/run` | Public RUN_DETAIL surface. |
 | GET | `/api/shared/{token}/validation-report` | Public VALIDATION_REPORT surface. |
 | GET | `/api/shared/{token}/code-review` | Public CODE_REVIEW surface. |
@@ -61,9 +62,13 @@ Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token i
 
 `/api/shared/**` and `/api/invites/preview` are whitelisted in `SecurityConfig`.
 
+## Frontend surfaces
+
+- `frontend/src/ide/IdeProjectMore.tsx` exposes project members, pending project invites, resend/revoke actions, and public share-link management in the Members surface.
+- `frontend/src/signal/pages/MiscPages.tsx` renders `/shared/:token` project share links for all current public surfaces (project overview, run detail, validation report, code review, PR review, architecture) while preserving legacy `/reports/shared/:token` validation-report links.
+- Project invite API helpers live in `frontend/src/lib/api/projects.ts`; public share-link helpers live in `frontend/src/lib/api/sharing.ts`.
+
 ## Outstanding follow-ups
 
-- Frontend dashboard panel for managing invites + share links (the API helpers are in `frontend/src/lib/api/projects.ts` + `sharing.ts`; the UI panels would be follow-up commits).
-- Public share-link viewer pages at `/shared/:token` route.
 - Scheduled cleanup job that flips PENDING invites past `expires_at` to EXPIRED (today the read path checks expiry on accept; a sweeper would keep the table tidy for analytics).
 - Per-tier monthly invite cap (today: paid-tier is the only gate; structure is in place to add a count).

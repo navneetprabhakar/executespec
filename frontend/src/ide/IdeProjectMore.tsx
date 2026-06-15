@@ -1883,6 +1883,7 @@ export function IdeProjectMembers() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
   const [members, setMembers] = useState<api.ProjectMemberDto[] | null>(null);
+  const [invites, setInvites] = useState<api.ProjectInviteDto[] | null>(null);
   const [shareLinks, setShareLinks] = useState<api.ShareLinkDto[] | null>(null);
   const [externalSharingEnabled, setExternalSharingEnabled] = useState<boolean | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -1891,6 +1892,7 @@ export function IdeProjectMembers() {
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [revokeFor, setRevokeFor] = useState<string | null>(null);
+  const [revokeInviteFor, setRevokeInviteFor] = useState<string | null>(null);
   const [removeFor, setRemoveFor] = useState<string | null>(null);
 
   function load() {
@@ -1902,6 +1904,10 @@ export function IdeProjectMembers() {
       .listShareLinks(projectId)
       .then((r) => setShareLinks(r.links ?? []))
       .catch(() => setShareLinks([]));
+    api
+      .listProjectInvites(projectId)
+      .then(setInvites)
+      .catch(() => setInvites([]));
   }
   useEffect(() => {
     if (!projectId) return;
@@ -1927,6 +1933,7 @@ export function IdeProjectMembers() {
       await api.createProjectInvite(projectId, {email, role: inviteRole});
       setMsg(`Invite sent to ${email}.`);
       setInviteEmail('');
+      setInvites(await api.listProjectInvites(projectId));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Invite failed.');
     } finally {
@@ -1957,6 +1964,31 @@ export function IdeProjectMembers() {
       setMsg('Share link revoked.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Revoke failed.');
+    }
+  }
+
+  async function revokeInvite(inviteId: string) {
+    try {
+      await api.revokeProjectInvite(projectId, inviteId);
+      setInvites((p) => (p ?? []).filter((i) => i.id !== inviteId));
+      setMsg('Invite revoked.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Revoke failed.');
+    }
+  }
+
+  async function resendInvite(invite: api.ProjectInviteDto) {
+    setBusy(`invite-${invite.id}`);
+    setErr('');
+    setMsg('');
+    try {
+      await api.createProjectInvite(projectId, {email: invite.email, role: invite.projectRole});
+      setInvites(await api.listProjectInvites(projectId));
+      setMsg(`Invite re-sent to ${invite.email}.`);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Resend failed.');
+    } finally {
+      setBusy('');
     }
   }
 
@@ -2109,6 +2141,85 @@ export function IdeProjectMembers() {
           </>
         ))}
 
+      {!canManage && (
+        <div className='ide-card' style={{borderColor: 'var(--ide-blue)', marginTop: 12}}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--ide-blue)',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              marginBottom: 6,
+            }}
+          >
+            Invite access is admin-only
+          </div>
+          <div style={{fontSize: 13, lineHeight: 1.55}}>
+            Ask an org admin to invite project collaborators or change your role. You can still view
+            current members and use share links if your role permits them.
+          </div>
+        </div>
+      )}
+
+      {canManage && (
+        <>
+          <div className='ide-h2'>Pending invites · {invites?.length ?? 0}</div>
+          {invites === null ? (
+            <IdeLoader label='Loading invites…' />
+          ) : invites.length === 0 ? (
+            <div className='ide-empty'>No pending invites.</div>
+          ) : (
+            <div className='ide-card' style={{padding: 0}}>
+              {invites.map((iv, i) => (
+                <div
+                  key={iv.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '11px 16px',
+                    borderBottom: i < invites.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                  }}
+                >
+                  <div style={{minWidth: 0, flex: 1}}>
+                    <div style={{fontWeight: 600}}>{iv.email}</div>
+                    <div
+                      className='ide-mono'
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--ide-fg-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {iv.projectRole.replace('PROJECT_', '').toLowerCase()} · {iv.status}
+                      {iv.expiresAt && ` · expires ${new Date(iv.expiresAt).toLocaleDateString()}`}
+                    </div>
+                  </div>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '3px 8px'}}
+                    disabled={busy === `invite-${iv.id}`}
+                    onClick={() => void resendInvite(iv)}
+                  >
+                    {busy === `invite-${iv.id}` ? 'Sending…' : 'Resend'}
+                  </button>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '3px 8px', color: 'var(--ide-red)'}}
+                    onClick={() => setRevokeInviteFor(iv.id)}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
       <div className='ide-h2'>Share links · {shareLinks?.length ?? 0}</div>
       {shareLinks === null ? (
         <IdeLoader label='Loading share links…' />
@@ -2188,6 +2299,18 @@ export function IdeProjectMembers() {
           if (id) await revokeLink(id);
         }}
         onClose={() => setRevokeFor(null)}
+      />
+      <ConfirmModal
+        open={!!revokeInviteFor}
+        title='Revoke invite'
+        body='Revoke this pending project invite? The existing magic link will stop working.'
+        confirmLabel='Revoke'
+        danger
+        onConfirm={async () => {
+          const id = revokeInviteFor;
+          if (id) await revokeInvite(id);
+        }}
+        onClose={() => setRevokeInviteFor(null)}
       />
       <ConfirmModal
         open={!!removeFor}
