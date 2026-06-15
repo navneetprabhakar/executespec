@@ -52,14 +52,14 @@ const scoreBand = (sc: number): 'ok' | 'warn' | 'bad' =>
 
 // Project workbench IA. Keep every deep link alive, but stop presenting ten
 // routes as equal peers. Primary tabs are the frequent workflow surfaces;
-// secondary operational surfaces live under More.
+// secondary operational surfaces live under project Setup.
 type ProjectTab = {
   label: string;
   seg: string;
   count?: 'repos' | 'runs' | 'code' | 'members';
 };
 const PRIMARY_TABS: ProjectTab[] = [
-  {label: 'New work', seg: ''},
+  {label: 'Start', seg: ''},
   {label: 'Overview', seg: '/pulse'},
   {label: 'Work', seg: '/runs', count: 'runs'},
   {label: 'Code', seg: '/code'},
@@ -194,7 +194,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
             <Link
               key={t.label}
               to={tabTo(t)}
-              // §3.4 — New-work tab clicks carry explicit intent so IdeProject's
+              // §3.4 — Start tab clicks carry explicit intent so IdeProject's
               // landing→Overview redirect doesn't bounce them straight back.
               state={t.seg === '' ? {compose: true} : undefined}
               className={`ide-rtab${active ? ' active' : ''}`}
@@ -214,7 +214,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((v) => !v)}
           >
-            More
+            Setup
           </button>
           {moreOpen && (
             <div className='ide-project-more-menu' role='menu'>
@@ -335,8 +335,8 @@ export function IdeProjectPulse() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div className='ide-h1'>Overview</div>
-      {/* §3.4 — the project landing redirects here once work exists; keep the
-          composer one click away. {compose:true} skips the redirect. */}
+          {/* §3.4 — the project landing redirects here once work exists; keep the
+              composer one click away. {compose:true} skips the redirect. */}
       <div style={{margin: '4px 0 12px'}}>
         <Link
           to={`/projects/${projectId}`}
@@ -344,7 +344,7 @@ export function IdeProjectPulse() {
           className='ide-btn ghost'
           style={{textDecoration: 'none', display: 'inline-block'}}
         >
-          ＋ New work in this project
+          ＋ Start work in this project
         </Link>
       </div>
       {!dash ? (

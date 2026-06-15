@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -329,12 +330,15 @@ public class RunController {
     // once the run is done (V2 orchestrator writes them at phase boundaries
     // and at terminate()).
     if (TERMINAL_STATUSES.contains(run.getStatus()) && run.getActualCostUsd() != null) {
-      return ResponseEntity.ok(
-          java.util.Map.of(
-              "runId", runId,
-              "costUsd", run.getActualCostUsd(),
-              "inputTokens", safeTok(run.getTotalInputTokens()),
-              "outputTokens", safeTok(run.getTotalOutputTokens())));
+      Map<String, Object> body = baseCostBody(runId, run.getActualCostUsd());
+      body.put("inputTokens", safeTok(run.getTotalInputTokens()));
+      body.put("outputTokens", safeTok(run.getTotalOutputTokens()));
+      body.put("cacheReadTokens", null);
+      body.put("cacheWriteTokens", null);
+      body.put("reasoningTokens", null);
+      body.put("calls", null);
+      body.put("source", "stored_total");
+      return ResponseEntity.ok(body);
     }
 
     // V2 in-progress: live cost AND live tokens come from RunCostTracker.
@@ -348,12 +352,15 @@ public class RunController {
       var snap = v2CostTracker.snapshot(runId);
       int liveIn = Math.max(snap.inputTokens(), safeTok(run.getTotalInputTokens()));
       int liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
-      return ResponseEntity.ok(
-          java.util.Map.of(
-              "runId", runId,
-              "costUsd", snap.costUsd(),
-              "inputTokens", liveIn,
-              "outputTokens", liveOut));
+      Map<String, Object> body = baseCostBody(runId, snap.costUsd());
+      body.put("inputTokens", liveIn);
+      body.put("outputTokens", liveOut);
+      body.put("cacheReadTokens", snap.cacheReadTokens());
+      body.put("cacheWriteTokens", snap.cacheWriteTokens());
+      body.put("reasoningTokens", snap.reasoningTokens());
+      body.put("calls", snap.calls());
+      body.put("source", "live_tracker");
+      return ResponseEntity.ok(body);
     }
 
     double[] cached =
@@ -369,16 +376,23 @@ public class RunController {
               double cost = costEstimator.computeCostForRun(runId);
               return new double[] {cost, System.currentTimeMillis()};
             });
-    return ResponseEntity.ok(
-        java.util.Map.of(
-            "runId",
-            runId,
-            "costUsd",
-            cached[0],
-            "inputTokens",
-            safeTok(run.getTotalInputTokens()),
-            "outputTokens",
-            safeTok(run.getTotalOutputTokens())));
+    Map<String, Object> body = baseCostBody(runId, cached[0]);
+    body.put("inputTokens", safeTok(run.getTotalInputTokens()));
+    body.put("outputTokens", safeTok(run.getTotalOutputTokens()));
+    body.put("cacheReadTokens", null);
+    body.put("cacheWriteTokens", null);
+    body.put("reasoningTokens", null);
+    body.put("calls", null);
+    body.put("source", "legacy_estimator");
+    return ResponseEntity.ok(body);
+  }
+
+  private static Map<String, Object> baseCostBody(String runId, double costUsd) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("runId", runId);
+    body.put("costUsd", costUsd);
+    body.put("schemaVersion", 1);
+    return body;
   }
 
   private static int safeTok(Integer v) {

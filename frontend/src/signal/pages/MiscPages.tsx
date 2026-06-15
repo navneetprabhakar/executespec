@@ -92,7 +92,7 @@ export function NotificationsPage() {
         title='Notifications'
         sub={`${unreadCount} unread`}
         back
-        backTo='/home'
+        backTo='/compose'
         actions={
           <Button kind='ghost' sm onClick={readAll} disabled={unreadCount === 0}>
             Mark all read
@@ -157,7 +157,7 @@ export function NotificationsPage() {
             const tone =
               nAny.severity === 'error' ? 'coral' : nAny.severity === 'warn' ? 'signal' : 'mint';
             // Deep-link target: prefer the backend-provided `link`, else
-            // route by event type. Falls through to /home so clicks never
+            // route by event type. Falls through to Start so clicks never
             // dead-end.
             const t = (nAny.type || nAny.category || '').toUpperCase();
             const linkTarget = nAny.link
@@ -170,7 +170,7 @@ export function NotificationsPage() {
                     ? '/billing'
                     : t.includes('MEMBER') || t.includes('INVITE')
                       ? '/org-members'
-                      : '/home';
+                      : '/compose';
             return (
               <NotifRow
                 key={nAny.id}
@@ -300,7 +300,7 @@ export function SearchPage() {
   return (
     <>
       <div className='signal-topbar' style={{gap: 8}}>
-        <Link to='/home' className='signal-back-btn' aria-label='Back'>
+        <Link to='/compose' className='signal-back-btn' aria-label='Back'>
           <svg
             viewBox='0 0 24 24'
             style={{width: 16, height: 16}}
@@ -570,7 +570,7 @@ export function AdminPage() {
   const [toast, setToast] = useState<{kind: 'ok' | 'bad'; text: string} | null>(null);
 
   useEffect(() => {
-    if (!isSuperAdmin) navigate('/home', {replace: true});
+    if (!isSuperAdmin) navigate('/compose', {replace: true});
   }, [isSuperAdmin, navigate]);
 
   const ok = (text: string) => setToast({kind: 'ok', text});
@@ -1442,7 +1442,7 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
 
   return (
     <div className='public-share-console'>
-      <TopBar title='Public project link' sub='read-only · no auth' back backTo='/home' />
+      <TopBar title='Public project link' sub='read-only · no auth' back backTo='/compose' />
       <Feed>
         <Card className='public-share-notice'>
           <div className='public-share-notice-eyebrow'>Shared project surface · public link</div>
@@ -1682,7 +1682,7 @@ export function SharedPage() {
   if (err) {
     return (
       <div className='public-share-console'>
-        <TopBar title='Public report' sub='read-only · no auth' back backTo='/home' />
+        <TopBar title='Public report' sub='read-only · no auth' back backTo='/compose' />
         <Feed>
           <Card className='public-share-error'>
             <div>{err}</div>
@@ -1696,7 +1696,7 @@ export function SharedPage() {
     if (projectSurface) return <SharedProjectSurfaceView surface={projectSurface} />;
     return (
       <div className='public-share-console'>
-        <TopBar title='Public report' sub='loading…' back backTo='/home' />
+        <TopBar title='Public report' sub='loading…' back backTo='/compose' />
         <Feed>
           <LoadingState label='Loading shared report…' />
         </Feed>
@@ -1723,7 +1723,7 @@ export function SharedPage() {
 
   return (
     <div className='public-share-console'>
-      <TopBar title='Public report' sub='read-only · no auth' back backTo='/home' />
+      <TopBar title='Public report' sub='read-only · no auth' back backTo='/compose' />
       <Feed>
         <Card className='public-share-notice'>
           <div className='public-share-notice-eyebrow'>Shared report · public link</div>

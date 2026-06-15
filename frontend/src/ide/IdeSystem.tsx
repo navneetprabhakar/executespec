@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor} from '@/signal/lib/runUtils';
+import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 
 // IDE-native versions of the remaining Signal "system" surfaces (notifications,
 // search, audit, empty-project, more menu). These mirror the data/API/actions of
@@ -187,7 +188,7 @@ export default function IdeNotifications() {
                   ? 'var(--ide-yellow)'
                   : 'var(--ide-green)';
             // Deep-link target: prefer the backend-provided `link`, else route by
-            // event type. Falls through to /home so clicks never dead-end.
+            // event type. Falls through to Start so clicks never dead-end.
             const t = (nAny.type || nAny.category || '').toUpperCase();
             const linkTarget = nAny.link
               ? nAny.link
@@ -199,7 +200,7 @@ export default function IdeNotifications() {
                     ? '/billing'
                     : t.includes('MEMBER') || t.includes('INVITE')
                       ? '/org-members'
-                      : '/home';
+                      : '/compose';
             const ts = nAny.createdAt ? new Date(nAny.createdAt).toLocaleString() : '';
             return (
               <div
@@ -417,7 +418,7 @@ export function IdeSearch() {
           </div>
           <div className='ide-card' style={{padding: 0}}>
             {[
-              {to: '/compose', label: 'New work', sub: 'Draft a request'},
+              {to: '/compose', label: 'Start work', sub: 'Draft a request'},
               {to: '/projects', label: 'Browse projects', sub: 'All your active projects'},
               {to: '/runs', label: 'Work', sub: 'Filter and browse'},
             ].map((row, i, arr) => (
@@ -752,6 +753,7 @@ export function IdeEmptyProject() {
 }
 
 // Named IdeMoreMenu to avoid clashing with IdeMore (the account-surface file).
+// User-facing route is now /setup; /more redirects here for old links.
 type MoreRow = {to: string; label: string; sub: string};
 
 function MoreSection({title, rows}: {title: string; rows: MoreRow[]}) {
@@ -776,12 +778,14 @@ function MoreSection({title, rows}: {title: string; rows: MoreRow[]}) {
 }
 
 export function IdeMoreMenu() {
+  useDocumentTitle('Setup');
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const tier = useAuthStore(selectNormalizedTier);
   const [unread, setUnread] = useState<number | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [runCount, setRunCount] = useState<number | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -805,19 +809,39 @@ export function IdeMoreMenu() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>More</div>
-      <div className='ide-sub'>Everything else.</div>
+      <div className='ide-h1'>Setup</div>
+      <div className='ide-sub'>
+        Connect the things needed for work to run: teammates, repositories, provider defaults, and
+        billing.
+      </div>
+
+      <MoreSection
+        title='Essentials'
+        rows={[
+          {
+            to: '/org-members',
+            label: 'Invite teammates',
+            sub: 'Add people and assign roles',
+          },
+          {
+            to: '/integrations',
+            label: 'Connect repositories',
+            sub: 'GitHub, Bitbucket, and issue trackers',
+          },
+          {to: '/provider-keys', label: 'Model provider', sub: 'Default provider and BYOK keys'},
+          {to: '/billing', label: 'Billing', sub: `${tier} tier`},
+        ]}
+      />
 
       <MoreSection
         title='Workspace'
         rows={[
-          {to: '/projects', label: 'Projects', sub: `${projects.length} active`},
+          {to: '/projects', label: 'Projects', sub: `${projects.length} active project${projects.length === 1 ? '' : 's'}`},
           {
             to: '/runs',
             label: 'Work',
             sub: runCount != null ? `${runCount} items` : 'Loading…',
           },
-          {to: '/search', label: 'Search · ⌘K', sub: 'Work, projects, files'},
           {
             to: '/notifications',
             label: 'Notifications',
@@ -826,46 +850,62 @@ export function IdeMoreMenu() {
         ]}
       />
 
-      <MoreSection
-        title='Account & billing'
-        rows={[
-          {to: '/account', label: 'Account', sub: user?.email || '—'},
-          {to: '/billing', label: 'Billing', sub: `${tier} tier`},
-          {to: '/plans', label: 'Plans & pricing', sub: 'Compare tiers'},
-        ]}
-      />
-
-      <MoreSection
-        title='Team'
-        rows={[
-          {to: '/org-members', label: 'Org members', sub: 'Invite teammates'},
-          {to: '/integrations', label: 'Integrations', sub: 'GitHub, Slack, Jira'},
-          {to: '/provider-keys', label: 'Provider keys', sub: 'BYOK model keys'},
-        ]}
-      />
-
-      <MoreSection
-        title='Discover'
-        rows={[
-          {to: '/insights', label: 'Insights', sub: 'Usage and outcomes'},
-          ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
-            ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
-            : []),
-          {to: '/deployments', label: 'Deployments', sub: 'Cloud Run / Docker'},
-          {to: '/trust', label: 'Trust & security', sub: 'Compliance, SOC2'},
-        ]}
-      />
+      <div className='ide-setup-advanced'>
+        <button
+          type='button'
+          className='ide-btn ghost'
+          aria-expanded={advancedOpen}
+          onClick={() => setAdvancedOpen((v) => !v)}
+        >
+          {advancedOpen ? 'Hide advanced' : 'Show advanced'}
+        </button>
+        {advancedOpen && (
+          <>
+            <MoreSection
+              title='Account'
+              rows={[
+                {to: '/account', label: 'Account', sub: user?.email || '—'},
+                {to: '/plans', label: 'Plans and pricing', sub: 'Compare tiers'},
+                {to: '/org/settings', label: 'Org settings', sub: 'Domains, seats, SSO, model matrix'},
+              ]}
+            />
+            <MoreSection
+              title='Operations'
+              rows={[
+                {to: '/search', label: 'Search', sub: 'Work, projects, files'},
+                {to: '/insights', label: 'Insights', sub: 'Usage and outcomes'},
+                ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
+                  ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
+                  : []),
+                {to: '/deployments', label: 'Deployments', sub: 'Cloud Run / Docker'},
+                {to: '/trust', label: 'Trust and security', sub: 'Compliance, SOC2'},
+              ]}
+            />
+          </>
+        )}
+      </div>
 
       {isSuperAdmin && (
         <>
-          <div className='ide-h2'>Admin</div>
+          <div className='ide-h2'>Operator controls</div>
           <div className='ide-card' style={{padding: 0}}>
-            <Link to='/admin' style={rowStyle(true)}>
+            <Link to='/admin' style={rowStyle(false)}>
               <span style={{flex: 1, minWidth: 0}}>
                 <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
                   Admin · SUPER_ADMIN
                 </span>
                 <span style={{fontSize: 12, color: 'var(--ide-red)'}}>Platform-wide controls</span>
+              </span>
+              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
+            </Link>
+            <Link to='/benchmark' style={rowStyle(true)}>
+              <span style={{flex: 1, minWidth: 0}}>
+                <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+                  Benchmarks
+                </span>
+                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                  Operator telemetry, not a customer workflow
+                </span>
               </span>
               <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
             </Link>

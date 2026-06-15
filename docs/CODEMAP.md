@@ -4,7 +4,7 @@ Mechanical index of every top-level package, REST controller, agent, tool, JPA e
 
 Base Java package: `com.navneet.executespec` (all paths under `src/main/java/com/navneet/executespec/`).
 
-Migration head: **V242** in the current worktree (V240 adds the CLI/VS Code agent-session protocol tables; V241 seeds the CLI local-hands feature flag; V242 adds the account-level provider preference used by web, CLI, and VS Code). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
+Migration head: **V243** in the current worktree (V240 adds the CLI/VS Code agent-session protocol tables; V241 seeds the CLI local-hands feature flag; V242 adds the account-level provider preference used by web, CLI, and VS Code; V243 adds durable per-call LLM usage in `run_step_usage`). Frontend chrome: the **Console** control plane (`frontend/src/console/`) is the only protected web shell since 2026-06-12; `frontend/src/ide/` remains the route-level protected surface layer, and `frontend/src/signal/` holds only public + admin pages + shared components.
 
 ---
 
@@ -99,11 +99,11 @@ Migration head: **V242** in the current worktree (V240 adds the CLI/VS Code agen
 
 | Controller | Base path | Purpose |
 | --- | --- | --- |
-| `api/controller/RunController` | `/api/runs` | Submit run, list, get, approve, cancel, archive, fork, pause/resume, retry-task, push-scm, workspace download, plan-versions, task-graph |
+| `api/controller/RunController` | `/api/runs` | Submit run, list, get, approve, cancel, archive, fork, pause/resume, retry-task, push-scm, workspace download, plan-versions, task-graph, live cost snapshot (`schemaVersion=1`, cache/reasoning fields for V2 live runs) |
 | `api/controller/RunConversationController` | `/api/runs` | Post-run chat + apply-suggestion (async via dedicated executor) |
 | `agentsession/AgentSessionController` | `/api/agent` | CLI/VS Code agent-session protocol: action catalog, sessions, streaming/recorded turns, context resolution, and gate decision cards |
 | `api/controller/PreviewController` | `/api/runs` | Preview analyze/start/stop/logs/rebuild + exec-in-container |
-| `api/controller/SseController` | `/api/runs` | SSE token issuance + event stream subscription |
+| `api/controller/SseController` | `/api/runs` | SSE token issuance + event stream subscription; `sse/RunEvent` preserves legacy `payload` and adds `schemaVersion` + typed `data` for W0 client contracts |
 | `api/controller/TimelineController` | `/api` | Per-run timeline + per-model task statistics |
 | `api/controller/FeasibilityController` | `/api/feasibility` | Retired — always returns 410 Gone |
 | `api/controller/ConversationController` | `/api/conversation` | Pre-flight requirement-refinement chat |
@@ -482,6 +482,7 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 | `AgentTurn` | `agent_turn` | V240 - per-session conversational turn with typed intent/action proposal and optional linked run |
 | `AgentActionEvent` | `agent_action_event` | V240 - append-only event stream for intent/action/session events |
 | `AgentUsageLedger` | `agent_usage_ledger` | V240 - separate meter for open-ended session usage; run credits remain tied to `pipeline_run` approval |
+| `RunStepUsage` | `run_step_usage` | V243 - durable per-call LLM usage for W0 distributed execution telemetry |
 | `TestPlan` | `test_plan` | Test generation plan |
 | `TestTask` | `test_task` | Per-test task |
 | `TestResult` | `test_result` | Per-test result |
@@ -491,9 +492,9 @@ Verify-before-complete (RL-2026-06-016, VBC, flag `worker.verify-before-complete
 
 ---
 
-## 6. Flyway migrations — V170..V242
+## 6. Flyway migrations — V170..V243
 
-Head: **V242** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
+Head: **V243** in the current worktree. Full chronology in `src/main/resources/db/migration/V*.sql`.
 
 | Version | Summary |
 | --- | --- |
@@ -548,6 +549,7 @@ Head: **V242** in the current worktree. Full chronology in `src/main/resources/d
 | V240 | Create `agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` - CLI/VS Code agent-session protocol separate from run billing. |
 | V241 | Seed `worker.local-hands.enabled = false` and make localExecution submit fail closed unless enabled. |
 | V242 | Add `app_user.preferred_ai_provider` for cross-surface provider consistency plus `/api/auth/me/provider-preference`. |
+| V243 | Add `run_step_usage` for durable per-call LLM usage: run/task/provider/model/tokens/cache/reasoning/cost/call-index, with reserved role/step/raw-provider columns. |
 
 Earlier waves (V1..V169) span: V1 baseline, V20 Slack integration, V21 tier permissions, V22 activity audit, V23 billing system, V26 run_topup, V28 invoicing/GST, V30 deploy engine, V109 plan_requirements_json, V112 ExecutionRun `@Version`, V125 signup attribution, V135 contract_registry, V140 tier caps, V143 product_id (later dropped by V179), V145 FREE→10 (reverted by V167), V147 activity_audit hash chain, V149 BYOK plans, V152 lifetime credits, V155 selected_repo_ids, V156 size_kb / attached_anyway, V157 readymade tables, V158 migration_recipe tables, V162 org.is_personal, V165 drop MAX tier flatten TEAM to $39, V168 V2 pause/resume cols, V169 PR record project_id + kind.
 
@@ -736,7 +738,7 @@ JWT epoch-based invalidation: per-user `app_user.token_invalidated_at` (set via 
 | GDPR export | `auth/service/UserDataExportService.java` |
 | Prompt assembler | `agent/PromptAssembler.java` |
 | App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V242 in the current worktree) |
+| DB migrations | `src/main/resources/db/migration/V*.sql` (head V243 in the current worktree) |
 | Frontend entry | `frontend/src/main.tsx` |
 | Frontend API client | `frontend/src/lib/api/` (`core.ts` + domain modules) |
 | CLI + VS Code clients | **Moved out 2026-06-07 → the standalone `executespec-cli` repo** (RL-2026-06-014). Was `clients/` (`@executespec/core` + `cli` + `vscode`, an npm workspace). Only the server-side OAuth device-login fix + the API endpoints they consume remain in this repo. |

@@ -92,8 +92,8 @@ public class RunCostTracker {
   private final Map<String, Accumulator> byRunTask = new ConcurrentHashMap<>();
 
   /** Records a single ChatResponse's token usage + cost against {@code runId}. */
-  public void record(String runId, String provider, String model, ChatResponse response) {
-    record(runId, null, provider, model, response);
+  public CallUsage record(String runId, String provider, String model, ChatResponse response) {
+    return record(runId, null, provider, model, response);
   }
 
   /**
@@ -101,9 +101,9 @@ public class RunCostTracker {
    * {@code taskId} may be null for non-task calls (planner, reviewer); behaviour matches the legacy
    * two-arg variant.
    */
-  public void record(
+  public CallUsage record(
       String runId, String taskId, String provider, String model, ChatResponse response) {
-    if (runId == null || response == null) return;
+    if (runId == null || response == null) return CallUsage.empty(provider, model);
 
     Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
     int inTok = usage == null ? 0 : safe(usage.getPromptTokens());
@@ -163,7 +163,7 @@ public class RunCostTracker {
     acc.cacheWriteTokens.addAndGet(cacheWrite);
     acc.cacheReadTokens.addAndGet(cacheRead);
     acc.costMicros.addAndGet((long) Math.round(callCost * 1_000_000d));
-    acc.calls.incrementAndGet();
+    long callIndex = acc.calls.incrementAndGet();
     acc.reasoningTokens.addAndGet(reasoningTok);
 
     if (taskId != null && !taskId.isBlank()) {
@@ -197,6 +197,16 @@ public class RunCostTracker {
           acc.outputTokens.get(),
           String.format("%.6f", acc.costMicros.get() / 1_000_000.0));
     }
+    return new CallUsage(
+        provider,
+        model,
+        inTok,
+        outTok,
+        cacheWrite,
+        cacheRead,
+        callCost,
+        (int) callIndex,
+        reasoningTok);
   }
 
   /** Current live cost snapshot, or zero-init if unknown. */
@@ -270,6 +280,21 @@ public class RunCostTracker {
 
   public record Estimate(
       double lowUsd, double highUsd, int credits, double hardCapUsd, int taskCount) {}
+
+  public record CallUsage(
+      String provider,
+      String model,
+      int inputTokens,
+      int outputTokens,
+      int cacheWriteTokens,
+      int cacheReadTokens,
+      double costUsd,
+      int callIndex,
+      int reasoningTokens) {
+    static CallUsage empty(String provider, String model) {
+      return new CallUsage(provider, model, 0, 0, 0, 0, 0.0, 0, 0);
+    }
+  }
 
   /**
    * Tier-aware estimate: each task's cost uses the model that will actually run it (resolved via

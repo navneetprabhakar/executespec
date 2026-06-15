@@ -71,7 +71,7 @@ export default function IdePlan() {
     setErr('');
     try {
       await api.cancelRun(runId);
-      navigate('/home');
+      navigate('/runs');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Cancel failed.');
       setBusy('');
