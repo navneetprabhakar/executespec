@@ -14,13 +14,13 @@ Domain modules:
 | --- | --- |
 | `core.ts` | `BASE`, auth headers, `ApiError`, `req<T>`, shared DTOs/types |
 | `runs.ts` | run lifecycle, plan gate, files, chat/apply/iterate |
-| `projects.ts` | project dashboard, repos, architecture, docs, memory, contracts, standards |
+| `projects.ts` | project dashboard, repos, architecture, docs, memory, contracts, standards, project invites |
 | `billing.ts` | plans, subscription, top-up, profile/invoices |
 | `auth.ts` | login/session/user/PAT helpers |
 | `org.ts` | org settings, members, model matrix, API keys |
 | `models.ts` | available models/provider metadata |
 | `reviews.ts` | PR review and code review |
-| `sharing.ts` | project invites and share links |
+| `sharing.ts` | org invite acceptance/admin invite helpers and project share links |
 | `notifications.ts` | notifications and preferences |
 | `discovery.ts` | readymades, migration recipes, spec templates |
 | `benchmark.ts` | benchmark tracking/dashboard APIs |

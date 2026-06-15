@@ -866,6 +866,8 @@ export interface OrgDto {
   // Confluence integration flags (raw credentials never returned)
   hasConfluenceCredentials?: boolean;
   confluenceBaseUrl?: string | null;
+  /** True for the auto-provisioned solo workspace created at signup. */
+  isPersonal?: boolean;
   /**
    * V198 — when true, ORG_ADMIN / SUPER_ADMIN may invite any email domain
    * (gmail, outlook, etc.) as cross-org collaborators on a project. Defaults

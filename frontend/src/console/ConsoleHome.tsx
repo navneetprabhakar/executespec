@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {PlusIcon, StatusDot} from '@/ide/IdeIcons';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * ConsoleHome — product cockpit. It avoids implementation nouns on the first
@@ -61,11 +62,24 @@ function nextAction(r: api.RunSummary, pendingPr = 0): {label: string; to: strin
   return {label: 'Review result', to: `/result/${r.runId}`};
 }
 
+type SetupItem = {
+  key: string;
+  label: string;
+  detail: string;
+  done: boolean;
+  action: string;
+  to: string;
+};
+
 export default function ConsoleHome() {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [gate, setGate] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  const [org, setOrg] = useState<api.OrgDto | null>(null);
+  const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
+  const [orgInvites, setOrgInvites] = useState<api.OrgInvitation[]>([]);
   const [loading, setLoading] = useState(true);
   // C1.2 (reframe §7 item 3) — PRs with inbound review comments belong in
   // "Needs your attention". The API is per-run only, so this is bounded:
@@ -103,6 +117,18 @@ export default function ConsoleHome() {
       .getProjects()
       .then(setProjects)
       .catch(() => {});
+    api
+      .getMyOrg()
+      .then(setOrg)
+      .catch(() => setOrg(null));
+    api
+      .getOrgMembers()
+      .then(setMembers)
+      .catch(() => setMembers([]));
+    api
+      .getOrgInvitations()
+      .then(setOrgInvites)
+      .catch(() => setOrgInvites([]));
   }, []);
 
   useEffect(() => {
@@ -131,6 +157,57 @@ export default function ConsoleHome() {
     }, 12000);
     return () => window.clearInterval(id);
   }, [liveCount, load]);
+
+  const hasTeamOrg = !!org && !org.isPersonal;
+  const teammateCount = Math.max(0, members.length - 1);
+  const pendingInvites = orgInvites.filter((i) => (i.status || '').toUpperCase() === 'PENDING');
+  const setupItems: SetupItem[] = [
+    {
+      key: 'org',
+      label: hasTeamOrg ? 'Team org ready' : 'Create team org',
+      detail: hasTeamOrg
+        ? `${org?.name || 'Org'} can hold shared projects, seats, keys, and billing.`
+        : 'Convert the personal workspace into the company/team account before inviting people.',
+      done: hasTeamOrg,
+      action: hasTeamOrg ? 'Open settings' : 'Create org',
+      to: '/org/settings',
+    },
+    {
+      key: 'members',
+      label: teammateCount > 0 || pendingInvites.length > 0 ? 'Team access started' : 'Invite team',
+      detail:
+        teammateCount > 0
+          ? `${teammateCount} teammate${teammateCount === 1 ? '' : 's'} added.`
+          : pendingInvites.length > 0
+            ? `${pendingInvites.length} pending invite${pendingInvites.length === 1 ? '' : 's'} waiting.`
+            : 'Add developers, product, UX, and EM stakeholders before the first serious migration run.',
+      done: teammateCount > 0 || pendingInvites.length > 0,
+      action: 'Manage members',
+      to: '/org-members',
+    },
+    {
+      key: 'project',
+      label: projects.length > 0 ? 'Project context ready' : 'Create project',
+      detail:
+        projects.length > 0
+          ? `${projects.length} project context${projects.length === 1 ? '' : 's'} available for runs, docs, and memory.`
+          : 'Create the first project so runs, repo context, architecture, and sharing do not stay scattered.',
+      done: projects.length > 0,
+      action: projects.length > 0 ? 'View projects' : 'Create project',
+      to: '/projects',
+    },
+    {
+      key: 'provider',
+      label: user?.preferredAiProvider ? 'Provider preference set' : 'Review provider default',
+      detail: user?.preferredAiProvider
+        ? `${user.preferredAiProvider} is your default across clients.`
+        : 'Set or confirm the provider default so web, CLI, and VS Code stay predictable.',
+      done: !!user?.preferredAiProvider,
+      action: 'Provider settings',
+      to: '/org/settings',
+    },
+  ];
+  const setupDone = setupItems.filter((i) => i.done).length;
 
   return (
     <div className='con-home'>
@@ -198,6 +275,27 @@ export default function ConsoleHome() {
               return <RunRow key={r.runId} r={r} to={action.to} action={action.label} />;
             })
           )}
+        </section>
+
+        <section className='con-section'>
+          <div className='con-section-title'>
+            Team setup
+            <span className='con-setup-progress'>
+              {setupDone}/{setupItems.length}
+            </span>
+          </div>
+          <div className='con-setup-list'>
+            {setupItems.map((item) => (
+              <button key={item.key} className='con-setup-item' onClick={() => navigate(item.to)}>
+                <span className={item.done ? 'con-setup-state done' : 'con-setup-state'} />
+                <span className='con-setup-copy'>
+                  <span className='con-setup-label'>{item.label}</span>
+                  <span className='con-setup-detail'>{item.detail}</span>
+                </span>
+                <span className='con-setup-action'>{item.action}</span>
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className='con-section'>

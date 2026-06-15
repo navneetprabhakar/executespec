@@ -17,6 +17,13 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Missing provider input should resolve through `AiProviderPreferenceService` before falling back to project or YAML defaults.
 - Legacy `GOOGLE` input is accepted as `GEMINI`; persistence should use canonical enum names.
 
+## Org Lifecycle
+
+- Registration bootstraps solo users into a personal org (`org.is_personal=true`) so project/run ownership always has an org boundary.
+- `POST /api/org` converts the caller's personal org into a real team org instead of rejecting the request just because `AppUser.orgId` is already set.
+- Conversion updates org profile fields, clears `is_personal`, stamps the creator as owner/admin contact, and self-heals a missing `ORG_ADMIN` membership row before returning `OrgDto.isPersonal=false`.
+- Users already attached to a non-personal org still cannot create a second org through this endpoint; multi-org switching is not implemented.
+
 ## Migration Trail
 
 - `V215__personal_access_token.sql` creates hashed PATs for programmatic auth.
