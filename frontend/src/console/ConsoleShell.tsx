@@ -32,6 +32,7 @@ import {
  * recent runs, and a protected route outlet for the actual work surfaces.
  */
 type NavItem = {path: string; Icon: (p: IconProps) => React.ReactElement; label: string};
+const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 const NAV: NavItem[] = [
   {path: '/compose', Icon: PlusIcon, label: 'Start'},
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
@@ -200,6 +201,7 @@ export default function ConsoleShell() {
           <MenuIcon size={20} />
         </button>
         <NavLink to='/compose' className='con-brand'>
+          <img className='con-brand-mark' src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
           <span>ExecuteSpec</span>
         </NavLink>
         <span className='con-topbar-spacer' />
@@ -282,6 +284,10 @@ export default function ConsoleShell() {
       <div className='con-body'>
         {drawerOpen && <div className='con-backdrop' onClick={() => setDrawerOpen(false)} />}
         <nav className={`con-side${drawerOpen ? ' drawer-open' : ''}`}>
+          <div className='con-side-brand'>
+            <img src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
+            <span>ExecuteSpec</span>
+          </div>
           {NAV.map((n) => (
             <NavLink
               key={n.path}
@@ -294,6 +300,7 @@ export default function ConsoleShell() {
           ))}
           <details className='con-side-details'>
             <summary className='con-side-section'>
+              <RunsIcon size={12} />
               Recent work
               <span style={{flex: 1}} />
               <span className='con-side-count'>{runs.length}</span>
@@ -322,6 +329,7 @@ export default function ConsoleShell() {
 
           <details className='con-side-details'>
             <summary className='con-side-section'>
+              <ProjectsIcon size={12} />
               Projects
               <span style={{flex: 1}} />
               <span className='con-side-count'>{projects.length}</span>
@@ -355,7 +363,10 @@ export default function ConsoleShell() {
 
           {isSuperAdmin && (
             <>
-              <div className='con-side-section'>Operator</div>
+              <div className='con-side-section'>
+                <AdminIcon size={12} />
+                Operator
+              </div>
               <NavLink
                 to='/admin'
                 className={`con-runitem${path.startsWith('/admin') ? ' active' : ''}`}
