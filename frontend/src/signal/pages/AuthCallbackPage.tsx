@@ -64,7 +64,9 @@ export default function AuthCallbackPage() {
     const redirectParam = searchParams.get('redirect');
     const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
     const stashedSpec = searchParams.get('spec');
-    const fallbackUrl = stashedSpec ? `/compose?spec=${encodeURIComponent(stashedSpec)}` : '/compose';
+    const fallbackUrl = stashedSpec
+      ? `/compose?spec=${encodeURIComponent(stashedSpec)}`
+      : '/compose';
     const target = safeRedirect ?? fallbackUrl;
     loadMe()
       .then(() => {

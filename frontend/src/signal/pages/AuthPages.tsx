@@ -226,7 +226,9 @@ export function SignupPage() {
           <div className='word'>ExecuteSpec</div>
         </div>
         <h1>Create workspace.</h1>
-        <p className='lede'>Start from a request. Add repos, teammates, and provider keys in Setup.</p>
+        <p className='lede'>
+          Start from a request. Add repos, teammates, and provider keys in Setup.
+        </p>
 
         <ErrorBanner msg={err} />
 
@@ -355,11 +357,7 @@ export function VerifyPage() {
         </div>
         <h1>{err ? 'Verification failed.' : msg ? 'Verifying.' : 'Check your inbox.'}</h1>
         <p className='lede'>
-          {err
-            ? err
-            : msg
-              ? msg
-              : `Use the verification link to finish workspace setup.`}
+          {err ? err : msg ? msg : `Use the verification link to finish workspace setup.`}
         </p>
         {!err && !msg && (
           <Button kind='primary' block to='/login'>

@@ -127,7 +127,8 @@ export default function ConsoleShell() {
     .filter(Boolean)
     .join(' ');
   const navActive = (p: string) => {
-    if (p === '/compose') return path === '/' || path.startsWith('/home') || path.startsWith('/compose');
+    if (p === '/compose')
+      return path === '/' || path.startsWith('/home') || path.startsWith('/compose');
     if (p === '/runs')
       return (
         path.startsWith('/runs') ||
