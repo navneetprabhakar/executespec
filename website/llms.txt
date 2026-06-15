@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 15 runs/month, no credit card), Pro ($29/mo or $289/yr — 30 managed runs/month), Team ($39/seat/mo from 1 seat — BYOK, unlimited runs on your own keys), Enterprise (custom contract + signed DPA). App: https://app.executespec.ai
+> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 15 runs/month, no credit card), Pro ($29/mo or $289/yr — 30 managed runs/month), Team ($39/seat/mo from 1 seat — BYOK, unlimited runs on your own keys), Enterprise (custom contract + signed DPA). App: https://dev.executespec.ai
 
 ## What it is
 
@@ -65,9 +65,9 @@ The selling-point line: **"AI that ships pull requests your team will actually m
 ## Links
 
 - Home: https://executespec.ai/
-- App (sign up): https://app.executespec.ai
+- App (sign up): https://dev.executespec.ai
 - Pricing: https://executespec.ai/#pricing
-- Trust & security: https://app.executespec.ai/trust
+- Trust & security: https://dev.executespec.ai/trust
 - FAQ: https://executespec.ai/#faq
 
 ## Contact

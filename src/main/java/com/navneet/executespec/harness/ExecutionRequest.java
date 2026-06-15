@@ -16,6 +16,8 @@ import lombok.Builder;
  * @param maxIterationsPerTask override for worker iteration cap per task (null = default 40)
  * @param enableSmokeTests if false, skip smoke tests entirely (useful for tests where the workspace
  *     has no buildable project)
+ * @param localHandsMode when true, the worker is editing the caller's local working tree through
+ *     proxied tools; prompt discipline should avoid unsolicited scaffold/test files.
  */
 @Builder
 public record ExecutionRequest(
@@ -25,6 +27,7 @@ public record ExecutionRequest(
     ExecutionContext runContext,
     Integer maxIterationsPerTask,
     Boolean enableSmokeTests,
+    Boolean localHandsMode,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
@@ -55,5 +58,6 @@ public record ExecutionRequest(
     if (model == null || model.isBlank()) throw new IllegalArgumentException("model required");
     if (runContext == null) throw new IllegalArgumentException("runContext required");
     if (enableSmokeTests == null) enableSmokeTests = true;
+    if (localHandsMode == null) localHandsMode = false;
   }
 }

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
@@ -18,7 +19,9 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
@@ -102,13 +105,21 @@ class SpecChatServiceTest {
   }
 
   private static SpecChatService newService(LlmRouter router, List<ToolCallback> tools) {
+    return newService(router, tools, List.of());
+  }
+
+  private static SpecChatService newService(
+      LlmRouter router, List<ToolCallback> actionToolList, List<ToolCallback> projectToolList) {
     ModelResolver modelResolver = mock(ModelResolver.class);
     ResolvedModel model = mock(ResolvedModel.class);
     when(model.getModel()).thenReturn("test-model");
     when(modelResolver.resolve(any(), any(), any())).thenReturn(model);
 
     ProjectChatActionTools actionTools = mock(ProjectChatActionTools.class);
-    when(actionTools.bind(any())).thenReturn(tools);
+    when(actionTools.bind(any())).thenReturn(actionToolList);
+    com.navneet.executespec.memory.chattools.ProjectChatTools projectTools =
+        mock(com.navneet.executespec.memory.chattools.ProjectChatTools.class);
+    when(projectTools.bind(any())).thenReturn(projectToolList);
 
     AgentProperties props = new AgentProperties();
     props.setWorkspace(
@@ -117,7 +128,8 @@ class SpecChatServiceTest {
     RunCostTracker costTracker = mock(RunCostTracker.class);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(10, 5, 0, 0, 0.01, 1));
 
-    return new SpecChatService(router, modelResolver, actionTools, props, costTracker);
+    return new SpecChatService(
+        router, modelResolver, actionTools, projectTools, props, costTracker);
   }
 
   @Test
@@ -158,7 +170,7 @@ class SpecChatServiceTest {
         sink,
         mock(AppUserDetails.class),
         "sess-2",
-        "proj-1",
+        null,
         "org-1",
         List.of(Map.of("role", "user", "content", "list my runs")),
         "anthropic");
@@ -190,5 +202,80 @@ class SpecChatServiceTest {
     assertThat(sink.toolResults).hasSize(1);
     assertThat(sink.toolResults.get(0)).contains("\"ok\":false").contains("unknown tool");
     assertThat(sink.doneTurnCount).isEqualTo(2);
+  }
+
+  @Test
+  void linkedProject_bindsProjectCodeToolsForCommonChat() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any()))
+        .thenReturn(
+            toolResponse(toolCall("search_code", "{\"query\":\"auth flow\"}")),
+            textResponse("Auth lives in the security package."));
+    ToolCallback actionRunTool = fakeTool("list_recent_runs", "{\"ok\":true,\"count\":0}");
+    ToolCallback duplicateProjectRunTool =
+        fakeTool("list_recent_runs", "{\"ok\":false,\"message\":\"duplicate should be skipped\"}");
+    ToolCallback searchCode =
+        fakeTool("search_code", "{\"ok\":true,\"results\":[{\"file\":\"Auth.java\"}]}");
+    SpecChatService svc =
+        newService(router, List.of(actionRunTool), List.of(duplicateProjectRunTool, searchCode));
+
+    AppUserDetails user = mock(AppUserDetails.class);
+    var appUser = mock(com.navneet.executespec.auth.entity.AppUser.class);
+    when(appUser.getId()).thenReturn("u1");
+    when(user.getUser()).thenReturn(appUser);
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        user,
+        "sess-project",
+        "proj-1",
+        "org-1",
+        List.of(Map.of("role", "user", "content", "where is auth implemented?")),
+        null);
+
+    assertThat(sink.toolCalls).containsExactly("search_code");
+    assertThat(sink.toolResults)
+        .containsExactly("{\"ok\":true,\"results\":[{\"file\":\"Auth.java\"}]}");
+    assertThat(sink.tokens).contains("Auth lives in the security package.");
+  }
+
+  @Test
+  void systemPromptTreatsCliLocalContextAsApprovedEvidence() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("This folder is a TypeScript CLI."));
+    SpecChatService svc = newService(router, List.of());
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-local-context",
+        null,
+        "org-1",
+        List.of(
+            Map.of(
+                "role",
+                "user",
+                "content",
+                "tell me about this folder\n"
+                    + "EXECUTESPEC_LOCAL_CONTEXT: approved_read_only=true\n"
+                    + "File tree:\n- package.json")),
+        null);
+
+    ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(captor.capture());
+    String system =
+        captor.getValue().messages().stream()
+            .filter(SystemMessage.class::isInstance)
+            .map(m -> m.getText())
+            .findFirst()
+            .orElse("");
+
+    assertThat(system)
+        .contains("EXECUTESPEC_LOCAL_CONTEXT: approved_read_only=true")
+        .contains("Use that snapshot as real local evidence")
+        .contains("Do NOT answer \"I don't have access\"")
+        .contains("does not grant write/shell authority");
   }
 }

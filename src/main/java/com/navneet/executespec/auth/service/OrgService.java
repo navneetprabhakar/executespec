@@ -62,8 +62,60 @@ public class OrgService {
           HttpStatus.FORBIDDEN, "Only paid tiers (Pro, Team, Max, Enterprise) can create an org");
     }
     if (creator.getOrgId() != null) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "You are already a member of an org. Leave it first.");
+      Org existing =
+          orgRepo
+              .findById(creator.getOrgId())
+              .orElseThrow(
+                  () ->
+                      new ResponseStatusException(
+                          HttpStatus.CONFLICT,
+                          "Your current org reference is stale. Contact support before creating an"
+                              + " org."));
+      if (!existing.isPersonal()) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT, "You are already a member of an org. Leave it first.");
+      }
+
+      String oldName = existing.getName();
+      existing.setName(req.name());
+      existing.setDomainPatterns(String.join(",", req.domains()).toLowerCase());
+      existing.setTier(creator.getTier());
+      existing.setStatus("ACTIVE");
+      existing.setAdminEmail(req.adminEmail());
+      existing.setPersonal(false);
+      existing.setUpdatedAt(Instant.now());
+      Org saved = orgRepo.save(existing);
+      if (!orgMemberRepo.existsByOrgIdAndUserId(saved.getId(), creatorUserId)) {
+        orgMemberRepo.save(
+            OrgMember.builder()
+                .id(UUID.randomUUID().toString())
+                .orgId(saved.getId())
+                .userId(creatorUserId)
+                .orgRole("ORG_ADMIN")
+                .build());
+      }
+
+      paymentAuditService.record(
+          "ORG",
+          saved.getId(),
+          "PLAN_ASSIGNED",
+          null,
+          saved.getTier(),
+          creatorUserId,
+          "Personal workspace converted to org");
+
+      auditOrgEvent(
+          "ORG_CONVERTED_FROM_PERSONAL",
+          saved.getId(),
+          creatorUserId,
+          Map.of("oldName", oldName, "name", req.name(), "tier", creator.getTier()));
+
+      log.info(
+          "Personal org {} converted to real org '{}' by {}",
+          saved.getId(),
+          req.name(),
+          creatorUserId);
+      return OrgDto.from(saved);
     }
 
     String domainPatterns = String.join(",", req.domains()).toLowerCase();

@@ -407,6 +407,7 @@ model-matrix:
     ProjectChatCompiler: PLANNING
     ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
+    SpecChatService: LIGHTWEIGHT
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
     ProjectDocGeneratorService: WORKHORSE
@@ -680,7 +681,7 @@ app:
     access-token-expiry-minutes: 360
     refresh-token-expiry-days: 7
   cors:
-    allowed-origins: http://localhost:5173
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
     app-return-url: ${APP_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
     build-return-url: ${BUILD_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
   tiers:

@@ -775,6 +775,8 @@ export interface AuthUser {
   // column still accepts 'vibe' for write-compat (no V145 migration is
   // shipped here per the explicit "frontend-normalize only" decision).
   viewMode?: 'pro' | 'project';
+  /** User-level default provider shared by web, CLI, and VS Code. */
+  preferredAiProvider?: string | null;
 }
 
 export interface LoginResponse {
@@ -864,6 +866,8 @@ export interface OrgDto {
   // Confluence integration flags (raw credentials never returned)
   hasConfluenceCredentials?: boolean;
   confluenceBaseUrl?: string | null;
+  /** True for the auto-provisioned solo workspace created at signup. */
+  isPersonal?: boolean;
   /**
    * V198 — when true, ORG_ADMIN / SUPER_ADMIN may invite any email domain
    * (gmail, outlook, etc.) as cross-org collaborators on a project. Defaults
