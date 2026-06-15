@@ -43,8 +43,8 @@ public record OrgDto(
     boolean isPersonal,
     /**
      * V198 — when true, ORG_ADMIN / SUPER_ADMIN of this org may invite any email domain (gmail,
-     * outlook, etc.) as cross-org collaborators on a project. Used by the frontend to gate the
-     * "External invite" UI on the project Members page + show/hide the toggle on Org Settings.
+     * outlook, etc.) as project-only collaborators. Used by the frontend to gate the external
+     * collaborator UI on the project Members page and the corresponding Org Settings toggle.
      */
     boolean externalSharingEnabled) {
   private static boolean present(String s) {

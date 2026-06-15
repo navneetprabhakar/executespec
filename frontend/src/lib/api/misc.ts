@@ -106,10 +106,9 @@ export const updateViewMode = (viewMode: 'pro' | 'project') =>
   });
 
 /**
- * V198 — toggle per-org external project sharing. When true, ORG_ADMIN or
- * SUPER_ADMIN may invite any email domain (gmail, outlook, etc.) as a
- * cross-org collaborator on a project. Default is false; existing tenants
- * are opt-in.
+ * V198 — toggle per-org external project collaborators. When true, ORG_ADMIN
+ * or SUPER_ADMIN may invite any email domain (gmail, outlook, etc.) as a
+ * project-only collaborator. Default is false; existing tenants are opt-in.
  */
 export const updateExternalSharing = (enabled: boolean) =>
   req<OrgDto>('/org/me/settings/external-sharing', {
@@ -119,6 +118,9 @@ export const updateExternalSharing = (enabled: boolean) =>
 
 export const resendInvitation = (id: string) =>
   req<{message: string}>(`/org/me/invitations/${id}/resend`, {method: 'POST'});
+
+export const cancelInvitation = (id: string) =>
+  req<void>(`/org/me/invitations/${id}`, {method: 'DELETE'});
 
 export const getTestGraph = async (runId: string): Promise<TestGraphData | null> => {
   try {

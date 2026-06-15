@@ -536,6 +536,42 @@ public class InvitationService {
     return invitationRepo.findByOrgId(orgId);
   }
 
+  @Transactional
+  public void cancelInvitation(String orgId, String invitationId, String actorUserId) {
+    OrgInvitation invitation =
+        invitationRepo
+            .findById(invitationId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+    if (!invitation.getOrgId().equals(orgId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found");
+    }
+    String previousStatus = invitation.getStatus();
+    if (!"PENDING".equals(previousStatus) && !"ESCALATED".equals(previousStatus)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Only pending or escalated invitations can be cancelled.");
+    }
+
+    invitation.setStatus("EXPIRED");
+    invitation.setResolvedAt(Instant.now());
+    invitationRepo.save(invitation);
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("INVITATION_CANCELLED")
+            .entityType("INVITATION")
+            .entityId(invitation.getId())
+            .orgId(orgId)
+            .actorId(actorUserId)
+            .newValue(
+                "{\"email\":\""
+                    + invitation.getInvitedEmail()
+                    + "\",\"previousStatus\":\""
+                    + previousStatus
+                    + "\"}")
+            .build());
+  }
+
   private boolean domainMatches(String email, String domainPatterns) {
     if (domainPatterns == null || domainPatterns.isBlank()) return false;
     String emailLower = email.toLowerCase();

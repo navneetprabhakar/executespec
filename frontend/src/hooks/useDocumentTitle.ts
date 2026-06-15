@@ -38,7 +38,7 @@ export function routeTitle(pathname: string): string {
     '/plans': 'Plans',
     '/integrations': 'Integrations',
     '/api-keys': 'API keys',
-    '/org-members': 'Org members',
+    '/org-members': 'Team access',
     '/org/settings': 'Org settings',
     '/insights': 'Insights',
     '/library': 'Setup',

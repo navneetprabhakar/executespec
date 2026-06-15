@@ -493,9 +493,9 @@ public class OrgService {
   }
 
   /**
-   * V198 (2026-05-16) — toggle the per-org "external sharing enabled" flag. When this is true,
+   * V198 (2026-05-16) — toggle the per-org project external collaborators flag. When this is true,
    * SUPER_ADMIN or ORG_ADMIN of this org may invite users from any email domain (gmail, outlook,
-   * etc.) as cross-org members on a project. Default is false; existing tenants are opt-in.
+   * etc.) as project-only collaborators. Default is false; existing tenants are opt-in.
    *
    * <p>Gated to ORG_ADMIN of this org / SUPER_ADMIN at the controller via {@code @PreAuthorize}.
    * The service method emits an audit row so flips can be retraced for compliance.
