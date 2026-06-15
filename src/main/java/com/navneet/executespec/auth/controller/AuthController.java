@@ -22,6 +22,7 @@ import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.AuthService;
 import com.navneet.executespec.auth.service.PersonalAccessTokenService;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.UserDataExportService;
 
@@ -50,6 +51,7 @@ public class AuthController {
   private final UserDataExportService userDataExportService;
   private final PersonalAccessTokenService personalAccessTokenService;
   private final AiProviderPreferenceService aiProviderPreferenceService;
+  private final TierEnforcementService tierEnforcementService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -149,7 +151,8 @@ public class AuthController {
 
   @GetMapping("/me")
   public ResponseEntity<UserDto> me(@AuthenticationPrincipal AppUserDetails userDetails) {
-    return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember()));
+    String tier = tierEnforcementService.resolveUserTier(userDetails.getUser().getId());
+    return ResponseEntity.ok(UserDto.from(userDetails.getUser(), userDetails.getOrgMember(), tier));
   }
 
   public record ProviderPreferenceResponse(String provider) {}
@@ -330,7 +333,7 @@ public class AuthController {
             + user.getGithubOwner()
             + "\"}");
 
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
   }
 
   record BitbucketSettingsRequest(
@@ -368,7 +371,7 @@ public class AuthController {
             + user.getBitbucketWorkspace()
             + "\"}");
 
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
   }
 
   record AiKeySettingsRequest(
@@ -420,7 +423,7 @@ public class AuthController {
             + (user.getFireworksApiKey() != null)
             + "}");
 
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
   }
 
   record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
@@ -448,7 +451,7 @@ public class AuthController {
             + user.getJiraBaseUrl()
             + "\"}");
 
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
   }
 
   record ConfluenceSettingsRequest(
@@ -478,7 +481,7 @@ public class AuthController {
             + user.getConfluenceBaseUrl()
             + "\"}");
 
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
   }
 
   record ViewModeRequest(String viewMode) {}
@@ -495,7 +498,12 @@ public class AuthController {
     user.setViewMode(mode);
     userRepo.save(user);
     log.info("User {} updated view mode to {}", user.getId(), mode);
-    return ResponseEntity.ok(UserDto.from(user, userDetails.getOrgMember()));
+    return ResponseEntity.ok(currentUserDto(user, userDetails));
+  }
+
+  private UserDto currentUserDto(AppUser user, AppUserDetails userDetails) {
+    return UserDto.from(
+        user, userDetails.getOrgMember(), tierEnforcementService.resolveUserTier(user.getId()));
   }
 
   record ValidateGitHubRequest(String pat, String owner) {}

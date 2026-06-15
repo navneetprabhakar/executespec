@@ -47,13 +47,17 @@ public record UserDto(
   }
 
   public static UserDto from(AppUser user, OrgMember orgMember) {
+    return from(user, orgMember, user.getTier());
+  }
+
+  public static UserDto from(AppUser user, OrgMember orgMember, String effectiveTier) {
     return new UserDto(
         user.getId(),
         user.getEmail(),
         user.getFirstName(),
         user.getLastName(),
         user.getGlobalRole(),
-        user.getTier(),
+        effectiveTier != null ? effectiveTier : user.getTier(),
         user.getStatus(),
         user.isMustChangePassword(),
         user.isEmailVerified(),

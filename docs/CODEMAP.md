@@ -74,7 +74,7 @@ Migration head: **V243** in the current worktree (V240 adds the CLI/VS Code agen
 | `security` | - | 4 | - | - | InputSanitizer + CodeAbuseScanner + KeyEncryptor + ContextSanitizer |
 | `security/dependency` | - | 1 | - | - | DependencySecurityPolicy (consumed by ShellSandboxPolicy) — SupplyChainScanner + NoopSupplyChainScanner deleted 2026-05-26, RL-2026-05-041 (zero callers) |
 | `security/guardrail` | - | 1 | - | - | GuardrailLevel enum + resolver (LOW/MEDIUM/HIGH) |
-| `sharing` | 3 | 2 | - | - | V175 cross-org project invites + public share links |
+| `sharing` | 3 | 2 | - | - | V175 cross-org project invites + public share links; accepted external members inherit active host-project org tier as an effective entitlement |
 | `smoketest` | - | 5 | - | - | CliSmokeRunner + BuildCommandResolver + TestCommandResolver + TestOutputParser + WorkspaceTestRunner (RL-2026-05-001 real test exec) |
 | `sse` | - | 2 | - | - | SseBroadcaster + RunDetailSseService (live event stream) |
 | `standards` | 4 | 3 | - | - | Org standards (lint/AST/LLM-review/file-pattern enforcement) |
@@ -620,7 +620,7 @@ Total: ~88 prompt files. Prompt-resource verification at boot (`PromptResourceVe
 
 ## 8. Frontend — chrome + pages
 
-The **Console shell** (`frontend/src/console/`) is the only protected web chrome since 2026-06-12; `App.tsx` mounts `ConsoleShell` for every protected route and `IdeWorkspace` is deleted. **The live protected surfaces remain route-level React modules** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md): `ConsoleShell` / `ConsoleHome` / `ConsoleDecisions`; `IdeSurfaces` (Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, 10 sub-tabs) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + tokenizer).
+The **Console shell** (`frontend/src/console/`) is the only protected web chrome since 2026-06-12; `App.tsx` mounts `ConsoleShell` for every protected route and `IdeWorkspace` is deleted. **The live protected surfaces remain route-level React modules** — see [`frontend/CLAUDE.md`](../frontend/CLAUDE.md): `ConsoleShell` / `ConsoleHome` / `ConsoleDecisions`; `IdeSurfaces` (Compose / Live) · `IdeRunResult` (flagship run detail) · `IdeProject(s|Tabs|More)` (project workbench, primary tabs plus `/projects/:id/setup` index for members/repos/system-map/activity/settings) · `IdePlan` · `IdeMore` (Runs / Account / Deployments) · `IdeSettings` (Integrations / Admin) · `IdeOrg` (api-keys / org-members / org-settings + F3 model matrix) · `IdeBilling` (billing / plans) · `IdeSystem` (notifications / search / more / audit / empty-project) · `IdeDiscovery` (insights / library / migrations / templates) · `IdeKit` (code viewer + tokenizer).
 
 The **2026-05-23 cleanup deleted 22 orphaned `signal/pages` files** (run-loop + `project/` + `account/`, incl. Billing/Plans) plus the dead `Shell.tsx`. The only `signal/pages/` that survive are the **standalone public pages + admin**, routed directly with no IDE chrome (by design):
 

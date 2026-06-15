@@ -24,5 +24,19 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, St
   @Query("SELECT pm.projectId FROM ProjectMember pm WHERE pm.userId = :userId")
   List<String> findProjectIdsByUserId(@Param("userId") String userId);
 
+  @Query(
+      """
+      SELECT DISTINCT o.tier
+      FROM ProjectMember pm, Project p, Org o
+      WHERE pm.userId = :userId
+        AND pm.external = true
+        AND p.id = pm.projectId
+        AND p.deletedAt IS NULL
+        AND p.status = 'ACTIVE'
+        AND o.id = p.orgId
+        AND (o.status IS NULL OR o.status <> 'DELETED')
+      """)
+  List<String> findActiveExternalHostOrgTiersByUserId(@Param("userId") String userId);
+
   int countByProjectIdAndProjectRole(String projectId, String projectRole);
 }

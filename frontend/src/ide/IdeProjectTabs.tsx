@@ -67,6 +67,7 @@ const PRIMARY_TABS: ProjectTab[] = [
   {label: 'Settings', seg: '/settings'},
 ];
 const SECONDARY_TABS: ProjectTab[] = [
+  {label: 'Setup', seg: '/setup'},
   {label: 'Repos', seg: '/repos', count: 'repos'},
   {label: 'System map', seg: '/system-map'},
   {label: 'Members', seg: '/members', count: 'members'},
@@ -78,8 +79,7 @@ type TabCounts = {repos?: number; runs?: number; code?: number; members?: number
 export function ProjectTabs({projectId}: {projectId: string}) {
   const {pathname} = useLocation();
   const activeTabRef = useRef<HTMLAnchorElement | null>(null);
-  const activeMoreRef = useRef<HTMLButtonElement | null>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const activeMoreRef = useRef<HTMLAnchorElement | null>(null);
   // Live counts from the project dashboard + companions, clamped >= 0 so a
   // garbage signed-int can never reach the badge. Repos comes from the repo
   // list (dashboard carries no repo count) and Code from the tech-debt total
@@ -136,7 +136,6 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   }, [pathname]);
 
   useEffect(() => {
-    setMoreOpen(false);
     setMobileOpen(false);
   }, [pathname]);
 
@@ -152,6 +151,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
     const n = t.count ? counts[t.count] : undefined;
     return n != null ? `${t.label} · ${n}` : t.label;
   };
+  const setupTab = SECONDARY_TABS[0];
   const secondaryActive = SECONDARY_TABS.find(tabActive);
   const allTabs = [...PRIMARY_TABS, ...SECONDARY_TABS];
   const activeProjectTab = PRIMARY_TABS.find(tabActive) ?? secondaryActive ?? PRIMARY_TABS[0];
@@ -206,30 +206,14 @@ export function ProjectTabs({projectId}: {projectId: string}) {
           );
         })}
         <div className='ide-project-more-tab'>
-          <button
+          <Link
             ref={secondaryActive ? activeMoreRef : undefined}
-            type='button'
             className={`ide-rtab${secondaryActive ? ' active' : ''}`}
-            aria-haspopup='menu'
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
+            to={tabTo(setupTab)}
+            style={{textDecoration: 'none'}}
           >
             Setup
-          </button>
-          {moreOpen && (
-            <div className='ide-project-more-menu' role='menu'>
-              {SECONDARY_TABS.map((t) => (
-                <Link
-                  key={t.label}
-                  to={tabTo(t)}
-                  className={`ide-project-more-item${tabActive(t) ? ' active' : ''}`}
-                  role='menuitem'
-                >
-                  {tabLabel(t)}
-                </Link>
-              ))}
-            </div>
-          )}
+          </Link>
         </div>
       </div>
     </>
