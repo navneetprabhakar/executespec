@@ -836,7 +836,11 @@ export function IdeMoreMenu() {
       <MoreSection
         title='Workspace'
         rows={[
-          {to: '/projects', label: 'Projects', sub: `${projects.length} active project${projects.length === 1 ? '' : 's'}`},
+          {
+            to: '/projects',
+            label: 'Projects',
+            sub: `${projects.length} active project${projects.length === 1 ? '' : 's'}`,
+          },
           {
             to: '/runs',
             label: 'Work',
@@ -866,7 +870,11 @@ export function IdeMoreMenu() {
               rows={[
                 {to: '/account', label: 'Account', sub: user?.email || '—'},
                 {to: '/plans', label: 'Plans and pricing', sub: 'Compare tiers'},
-                {to: '/org/settings', label: 'Org settings', sub: 'Domains, seats, SSO, model matrix'},
+                {
+                  to: '/org/settings',
+                  label: 'Org settings',
+                  sub: 'Domains, seats, SSO, model matrix',
+                },
               ]}
             />
             <MoreSection
