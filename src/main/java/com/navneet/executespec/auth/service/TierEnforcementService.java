@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Map;
 
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
@@ -13,6 +14,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
@@ -51,6 +53,7 @@ public class TierEnforcementService {
   private final ApplicationEventPublisher eventPublisher;
   private final ProjectRepository projectRepo;
   private final ProjectRepoLinkRepository projectRepoLinkRepo;
+  private final ProjectMemberRepository projectMemberRepo;
 
   /** Quota utilisation at which we emit a one-shot warning notification. */
   private static final double QUOTA_WARNING_THRESHOLD = 0.80;
@@ -78,6 +81,14 @@ public class TierEnforcementService {
   private static final double DEFAULT_FREE_COST_BUDGET = 3.0;
 
   private static final double DEFAULT_PRO_COST_BUDGET = 5.0;
+
+  private static final Map<String, Integer> TIER_RANK =
+      Map.of(
+          "FREE", 0,
+          "PRO", 1,
+          "TEAM", 2,
+          "MAX", 2,
+          "ENTERPRISE", 3);
 
   /**
    * Atomically checks quota AND increments the run count in a single transaction with pessimistic
@@ -122,7 +133,7 @@ public class TierEnforcementService {
     int personalBefore = user.getPersonalRunCount();
     user.setPersonalRunCount(personalBefore + 1);
     userRepo.save(user);
-    int limit = getMonthlyLimit(user.getTier());
+    int limit = getMonthlyLimit(resolveEffectiveTier(user));
     if (limit >= 0 && user.getPersonalRunCount() > limit) {
       runTopupService.consumeBonusRun(userId);
     }
@@ -176,7 +187,7 @@ public class TierEnforcementService {
     int personalBefore = user.getPersonalRunCount();
     user.setPersonalRunCount(personalBefore + credits);
     userRepo.save(user);
-    int limit = getMonthlyLimit(user.getTier());
+    int limit = getMonthlyLimit(resolveEffectiveTier(user));
     if (limit >= 0 && user.getPersonalRunCount() > limit) {
       for (int i = 0; i < credits; i++) {
         try {
@@ -355,8 +366,7 @@ public class TierEnforcementService {
 
   /**
    * Resolves the effective tier used by the new project / repo limit checks. Org tier wins when
-   * {@code orgId} is non-null; otherwise the caller's user tier applies (this is the FREE-solo
-   * path).
+   * {@code orgId} is non-null; otherwise the caller's effective user tier applies.
    */
   private String resolveTierForLimitCheck(AppUser user, String orgId) {
     if (orgId != null) {
@@ -365,15 +375,15 @@ public class TierEnforcementService {
         return org.getTier().toUpperCase();
       }
     }
-    return user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
+    return resolveEffectiveTier(user);
   }
 
   /**
    * Assert that the user's tier allows running a plan with the given complexity profile. Plans
-   * where the majority (>50%) of tasks are HIGH complexity are blocked for FREE tier users and
-   * users/orgs without BYOK (own API keys).
+   * where the majority (>50%) of tasks are HIGH complexity are blocked for FREE tier users.
    *
-   * <p>SUPER_ADMIN, PRO, and ENTERPRISE (with BYOK) users are always allowed.
+   * <p>SUPER_ADMIN and paid tiers are allowed. External Enterprise project membership is treated as
+   * a paid tier while that membership exists.
    *
    * @throws ResponseStatusException 403 if the plan complexity exceeds the user's tier allowance
    */
@@ -390,24 +400,24 @@ public class TierEnforcementService {
     // Check if plan is high-complexity
     if (!isHighComplexityPlan(plan)) return;
 
-    // Resolve effective tier and BYOK status
-    String effectiveTier;
+    // Resolve effective tier and BYOK status. External Enterprise project membership upgrades the
+    // feature tier while the membership exists, but BYOK still comes only from the user's own org.
+    String effectiveTier = resolveEffectiveTier(user);
     boolean hasByok;
     if (user.getOrgId() != null) {
       Org org = orgRepo.findById(user.getOrgId()).orElse(null);
-      effectiveTier = (org != null && org.getTier() != null) ? org.getTier().toUpperCase() : "FREE";
       hasByok = org != null && org.isApiKeysProvided();
     } else {
-      effectiveTier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
       hasByok = false; // standalone users don't have org-level BYOK
     }
 
-    // TEAM, PRO and ENTERPRISE with BYOK are always allowed
-    if ("ENTERPRISE".equals(effectiveTier) && hasByok) return;
+    // TEAM, PRO and ENTERPRISE are paid capabilities. BYOK still controls cost-cap behavior, not
+    // whether an Enterprise project collaborator can run the work they were invited to.
+    if ("ENTERPRISE".equals(effectiveTier)) return;
     if ("TEAM".equals(effectiveTier)) return; // v2.6.0 — TEAM unlocks high-complexity
     if ("PRO".equals(effectiveTier)) return;
 
-    // FREE tier or ENTERPRISE without BYOK — block high-complexity plans
+    // FREE tier — block high-complexity plans
     log.info(
         "[TierEnforcement] Blocking high-complexity plan for user {} (tier={}, byok={})",
         userId,
@@ -432,13 +442,7 @@ public class TierEnforcementService {
 
   /** Resolves the max_apply_suggestions limit for the user's effective tier. */
   private int getApplySuggestionLimit(AppUser user) {
-    String tier;
-    if (user.getOrgId() != null) {
-      Org org = orgRepo.findById(user.getOrgId()).orElse(null);
-      tier = (org != null && org.getTier() != null) ? org.getTier() : "FREE";
-    } else {
-      tier = user.getTier() != null ? user.getTier() : "FREE";
-    }
+    String tier = resolveEffectiveTier(user);
     return tierConfigRepo
         .findById(tier.toUpperCase())
         .map(TierConfig::getMaxApplySuggestions)
@@ -471,7 +475,7 @@ public class TierEnforcementService {
       userRepo.save(user);
 
       // If now over limit, consume a bonus run
-      int limit = getMonthlyLimit(user.getTier());
+      int limit = getMonthlyLimit(resolveEffectiveTier(user));
       if (limit >= 0 && user.getPersonalRunCount() > limit) {
         runTopupService.consumeBonusRun(userId);
       }
@@ -553,11 +557,11 @@ public class TierEnforcementService {
 
   /** Effective monthly limit for a solo FREE user. */
   public int effectiveUserLimit(AppUser user) {
-    return getMonthlyLimit(user.getTier());
+    return getMonthlyLimit(resolveEffectiveTier(user));
   }
 
   private void assertUserQuota(AppUser user) {
-    String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
+    String tier = resolveEffectiveTier(user);
     int limit = getMonthlyLimit(tier);
     if (limit < 0) return; // unlimited
 
@@ -760,11 +764,36 @@ public class TierEnforcementService {
     AppUser user = userRepo.findById(userId).orElse(null);
     if (user == null) return "FREE";
     if ("SUPER_ADMIN".equals(user.getGlobalRole())) return "ENTERPRISE";
+    return resolveEffectiveTier(user);
+  }
+
+  private String resolveEffectiveTier(AppUser user) {
+    String effective = normalizeTier(user.getTier());
     if (user.getOrgId() != null) {
       Org org = orgRepo.findById(user.getOrgId()).orElse(null);
-      return (org != null && org.getTier() != null) ? org.getTier().toUpperCase() : "FREE";
+      if (org != null && org.getTier() != null) {
+        effective = higherTier(effective, normalizeTier(org.getTier()));
+      }
     }
-    return user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
+    for (String hostTier : externalHostTiers(user.getId())) {
+      effective = higherTier(effective, normalizeTier(hostTier));
+    }
+    return effective;
+  }
+
+  private List<String> externalHostTiers(String userId) {
+    List<String> tiers = projectMemberRepo.findActiveExternalHostOrgTiersByUserId(userId);
+    return tiers != null ? tiers : List.of();
+  }
+
+  private static String normalizeTier(String tier) {
+    if (tier == null || tier.isBlank()) return "FREE";
+    String normalized = tier.trim().toUpperCase();
+    return "MAX".equals(normalized) ? "TEAM" : normalized;
+  }
+
+  private static String higherTier(String left, String right) {
+    return TIER_RANK.getOrDefault(right, 0) > TIER_RANK.getOrDefault(left, 0) ? right : left;
   }
 
   /**

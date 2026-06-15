@@ -275,7 +275,10 @@ public class TierPermissionService {
     // After this fix the API matches tier_config + role intent for solo
     // users (no-org path); org-member users keep going through
     // orgMemberPermissions() above.
-    String tier = user.getTier() != null ? user.getTier() : "FREE";
+    String tier = tierEnforcementService.resolveUserTier(user.getId());
+    if (tier == null || tier.isBlank()) {
+      tier = user.getTier() != null ? user.getTier() : "FREE";
+    }
     int limit = tierEnforcementService.effectiveUserLimit(user);
     int used = user.getPersonalRunCount();
     int maxApply = resolveMaxApplySuggestions(tier);

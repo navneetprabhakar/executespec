@@ -15,6 +15,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
@@ -57,7 +58,8 @@ class TierEnforcementServiceProjectLimitsTest {
             mock(BillingSubscriptionRepository.class),
             mock(ApplicationEventPublisher.class),
             projectRepo,
-            linkRepo);
+            linkRepo,
+            mock(ProjectMemberRepository.class));
   }
 
   private AppUser user(String id, String role, String tier, String orgId) {

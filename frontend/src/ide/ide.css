@@ -783,7 +783,6 @@
   position: relative;
   display: flex;
   flex-shrink: 0;
-  padding-right: 28px;
 }
 .ide-project-more-menu {
   position: absolute;

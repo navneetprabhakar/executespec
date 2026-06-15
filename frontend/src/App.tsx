@@ -17,6 +17,7 @@ import {
   IdeProjectChat,
   IdeProjectCode,
   IdeProjectArchitecture,
+  IdeProjectSetup,
   IdeProjectMembers,
   IdeProjectActivity,
   IdeProjectSettings,
@@ -156,6 +157,7 @@ function protectedChildren() {
       <Route path='/projects/:projectId/runs/:runShort' element={<IdeRunResult />} />
       <Route path='/projects/:projectId/code' element={<IdeProjectCode />} />
       <Route path='/projects/:projectId/chat' element={<IdeProjectChat />} />
+      <Route path='/projects/:projectId/setup' element={<IdeProjectSetup />} />
       <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
       <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />
       <Route path='/projects/:projectId/architecture' element={<IdeProjectArchitecture />} />

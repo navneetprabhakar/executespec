@@ -3,6 +3,7 @@ package com.navneet.executespec.entitlements;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.entity.AppUser;
@@ -10,6 +11,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.credit.LifetimeCreditService;
 
@@ -20,6 +22,7 @@ class EntitlementResolverTest {
 
   private AppUserRepository userRepo;
   private OrgRepository orgRepo;
+  private ProjectMemberRepository projectMemberRepo;
   private TierConfigRepository tierRepo;
   private LifetimeCreditService credit;
   private EntitlementResolver resolver;
@@ -28,9 +31,10 @@ class EntitlementResolverTest {
   void setUp() {
     userRepo = mock(AppUserRepository.class);
     orgRepo = mock(OrgRepository.class);
+    projectMemberRepo = mock(ProjectMemberRepository.class);
     tierRepo = mock(TierConfigRepository.class);
     credit = mock(LifetimeCreditService.class);
-    resolver = new EntitlementResolver(userRepo, orgRepo, tierRepo, credit);
+    resolver = new EntitlementResolver(userRepo, orgRepo, projectMemberRepo, tierRepo, credit);
   }
 
   private TierConfig tierCfg(String key, String display, int monthlyLimit) {
@@ -73,6 +77,28 @@ class EntitlementResolverTest {
     assertNull(e.softCostBudgetUsd(), "no soft budget for unlimited tiers");
     assertNull(e.hardCostCapUsd());
     assertEquals(-1, e.lifetimeRunCreditBalance(), "lifetime credits N/A on paid tiers");
+  }
+
+  @Test
+  void externalEnterpriseProjectMembershipOutranksPersonalProTier() {
+    AppUser u =
+        AppUser.builder()
+            .id("u-ext")
+            .email("external@example.com")
+            .firstName("External")
+            .tier("PRO")
+            .orgId(null)
+            .build();
+    when(userRepo.findById("u-ext")).thenReturn(Optional.of(u));
+    when(projectMemberRepo.findActiveExternalHostOrgTiersByUserId("u-ext"))
+        .thenReturn(List.of("ENTERPRISE"));
+    when(tierRepo.findById("ENTERPRISE"))
+        .thenReturn(Optional.of(tierCfg("ENTERPRISE", "Enterprise", -1)));
+
+    EntitlementsResponse e = resolver.resolve("u-ext");
+
+    assertEquals("ENTERPRISE", e.tierKey());
+    assertTrue(e.isUnlimited());
   }
 
   @Test

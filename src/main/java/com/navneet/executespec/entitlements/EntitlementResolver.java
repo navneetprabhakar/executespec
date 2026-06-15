@@ -8,6 +8,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.credit.LifetimeCreditService;
 
@@ -24,14 +25,15 @@ import lombok.extern.slf4j.Slf4j;
  * collapses tier + plan + caps + period usage into one read so v3 surfaces all consult the same
  * answer.
  *
- * <p>Tier resolution: pick the higher rank between the user's org tier (when orgId is set) and the
- * user's personal tier — whichever grants more capability wins. The audit on 2026-05-01 (F-14)
- * surfaced the previous "orgs always win" rule producing FREE for paid users whose backing org row
- * still said FREE: operator- promoted accounts, expired-but-not-demoted subscriptions, and test
- * fixtures whose `app_user.tier` was bumped without a matching `org.tier` move all rendered as FREE
- * on /billing while the legacy `/api/auth/me` correctly reported the paid tier. Picking the higher
- * rank closes that class of bug at the resolver instead of patching every consumer with
- * `canonicalTier(meTier, ent.tierKey)`.
+ * <p>Tier resolution: pick the highest rank across the user's personal tier, the user's org tier
+ * (when orgId is set), and any active external project memberships' host-org tiers. External
+ * membership is an effective entitlement only; it does not mutate the user's billing tier. The
+ * audit on 2026-05-01 (F-14) surfaced the previous "orgs always win" rule producing FREE for paid
+ * users whose backing org row still said FREE: operator-promoted accounts, expired-but-not-demoted
+ * subscriptions, and test fixtures whose `app_user.tier` was bumped without a matching `org.tier`
+ * move all rendered as FREE on /billing while the legacy `/api/auth/me` correctly reported the paid
+ * tier. Picking the highest rank closes that class of bug at the resolver instead of patching every
+ * consumer with `canonicalTier(meTier, ent.tierKey)`.
  *
  * <p>Limits / caps: - Read from tier_config row by tier key. Falls back to {-1, -1, ...} when
  * missing (interpreted as unlimited downstream).
@@ -68,6 +70,7 @@ public class EntitlementResolver {
 
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
+  private final ProjectMemberRepository projectMemberRepo;
   private final TierConfigRepository tierConfigRepo;
   private final LifetimeCreditService lifetimeCredit;
 
@@ -143,9 +146,17 @@ public class EntitlementResolver {
         orgTier = normalize(org.get().getTier());
       }
     }
-    int orgRank = TIER_RANK.getOrDefault(orgTier, 0);
-    int userRank = TIER_RANK.getOrDefault(userTier, 0);
-    return orgRank >= userRank ? orgTier : userTier;
+    String effective = higherTier(userTier, orgTier);
+    java.util.List<String> hostTiers =
+        projectMemberRepo.findActiveExternalHostOrgTiersByUserId(user.getId());
+    for (String hostTier : hostTiers != null ? hostTiers : java.util.List.<String>of()) {
+      effective = higherTier(effective, normalize(hostTier));
+    }
+    return effective;
+  }
+
+  private static String higherTier(String left, String right) {
+    return TIER_RANK.getOrDefault(right, 0) > TIER_RANK.getOrDefault(left, 0) ? right : left;
   }
 
   static String normalize(String tier) {

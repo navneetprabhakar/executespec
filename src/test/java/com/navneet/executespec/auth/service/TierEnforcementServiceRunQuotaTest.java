@@ -6,12 +6,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
@@ -28,6 +30,7 @@ class TierEnforcementServiceRunQuotaTest {
   private TierConfigRepository tierConfigRepo;
   private RunTopupService runTopupService;
   private BillingSubscriptionRepository subscriptionRepo;
+  private ProjectMemberRepository projectMemberRepo;
   private TierEnforcementService service;
 
   @BeforeEach
@@ -36,6 +39,7 @@ class TierEnforcementServiceRunQuotaTest {
     tierConfigRepo = mock(TierConfigRepository.class);
     runTopupService = mock(RunTopupService.class);
     subscriptionRepo = mock(BillingSubscriptionRepository.class);
+    projectMemberRepo = mock(ProjectMemberRepository.class);
     service =
         new TierEnforcementService(
             userRepo,
@@ -45,7 +49,8 @@ class TierEnforcementServiceRunQuotaTest {
             subscriptionRepo,
             mock(ApplicationEventPublisher.class),
             mock(ProjectRepository.class),
-            mock(ProjectRepoLinkRepository.class));
+            mock(ProjectRepoLinkRepository.class),
+            projectMemberRepo);
   }
 
   @Test
@@ -70,5 +75,30 @@ class TierEnforcementServiceRunQuotaTest {
     assertThat(user.getPersonalRunCount()).isEqualTo(16);
     verify(userRepo).save(user);
     verify(runTopupService).consumeBonusRun("user-1");
+  }
+
+  @Test
+  void externalEnterpriseProjectMembershipTemporarilyUpgradesEffectiveTier() {
+    AppUser user = new AppUser();
+    user.setId("user-2");
+    user.setTier("PRO");
+
+    when(userRepo.findById("user-2")).thenReturn(Optional.of(user));
+    when(projectMemberRepo.findActiveExternalHostOrgTiersByUserId("user-2"))
+        .thenReturn(List.of("ENTERPRISE"));
+
+    assertThat(service.resolveUserTier("user-2")).isEqualTo("ENTERPRISE");
+  }
+
+  @Test
+  void effectiveTierFallsBackWhenExternalProjectMembershipIsGone() {
+    AppUser user = new AppUser();
+    user.setId("user-3");
+    user.setTier("PRO");
+
+    when(userRepo.findById("user-3")).thenReturn(Optional.of(user));
+    when(projectMemberRepo.findActiveExternalHostOrgTiersByUserId("user-3")).thenReturn(List.of());
+
+    assertThat(service.resolveUserTier("user-3")).isEqualTo("PRO");
   }
 }

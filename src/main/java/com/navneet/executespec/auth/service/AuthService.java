@@ -58,6 +58,7 @@ public class AuthService {
   private final EventTrackingService eventTracking;
   private final ReferralService referralService;
   private final OrgService orgService;
+  private final TierEnforcementService tierEnforcementService;
 
   @Value("${app.mail.base-url:http://localhost:5173}")
   private String baseUrl;
@@ -136,7 +137,7 @@ public class AuthService {
             .newValue("{\"email\":\"" + user.getEmail() + "\",\"tier\":\"" + user.getTier() + "\"}")
             .build());
 
-    return UserDto.from(user, null);
+    return userDto(user, null);
   }
 
   /**
@@ -270,7 +271,7 @@ public class AuthService {
             ? orgMemberRepo.findByOrgIdAndUserId(user.getOrgId(), user.getId()).orElse(null)
             : null;
     String accessToken = jwtUtil.generateAccessToken(user, orgMember);
-    return new LoginResponse(accessToken, UserDto.from(user, orgMember));
+    return new LoginResponse(accessToken, userDto(user, orgMember));
   }
 
   public LoginResponse login(LoginRequest req) {
@@ -328,7 +329,7 @@ public class AuthService {
     user.setUpdatedAt(Instant.now());
     userRepo.save(user);
 
-    return new LoginResponse(accessToken, UserDto.from(user, orgMember));
+    return new LoginResponse(accessToken, userDto(user, orgMember));
   }
 
   /** Generate a refresh token string (for cookie). */
@@ -362,7 +363,11 @@ public class AuthService {
       orgMember = orgMemberRepo.findByOrgIdAndUserId(user.getOrgId(), user.getId()).orElse(null);
     }
     String accessToken = jwtUtil.generateAccessToken(user, orgMember);
-    return new LoginResponse(accessToken, UserDto.from(user, orgMember));
+    return new LoginResponse(accessToken, userDto(user, orgMember));
+  }
+
+  private UserDto userDto(AppUser user, OrgMember orgMember) {
+    return UserDto.from(user, orgMember, tierEnforcementService.resolveUserTier(user.getId()));
   }
 
   /** Revoke a refresh token. */
