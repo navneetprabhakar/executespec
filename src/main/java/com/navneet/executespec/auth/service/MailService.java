@@ -326,7 +326,7 @@ public class MailService {
    * terminal state. The visual hierarchy mirrors GitHub's "All checks have passed" / "Some checks
    * were not successful" mail: status badge first, run title second, key signals as a chip row,
    * then the action buttons. Submitting user only — the dispatcher filters by {@code
-   * createdByUserId} so cross-org members don't get spammed.
+   * createdByUserId} so project-only collaborators don't get spammed.
    *
    * <p>Fields:
    *

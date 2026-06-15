@@ -798,7 +798,7 @@ export function OrgSettingsPage() {
           </Button>
         )}
 
-        <SectionHeader>External sharing</SectionHeader>
+        <SectionHeader>Project external collaborators</SectionHeader>
         <Card>
           <div
             style={{
@@ -810,12 +810,13 @@ export function OrgSettingsPage() {
           >
             <div style={{minWidth: 0, flex: 1}}>
               <div style={{fontSize: 14.5, fontWeight: 600, marginBottom: 4}}>
-                Allow inviting people outside your org
+                Allow project-only collaborators outside your org
               </div>
               <div style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.5}}>
-                When on, you (org admin) or a super admin can invite any email — including gmail /
-                outlook — as a read-only or developer collaborator on a single project. When off,
-                project invites are restricted to existing org members.
+                When on, org admins and super admins can invite any email — including Gmail or
+                Outlook — to a single project as a viewer, developer, or project admin. This does
+                not make them organization members and does not bypass work-domain org membership.
+                When off, project access is limited to existing org members.
               </div>
             </div>
             {/* Reuse the same toggle pattern as the notification preference rows on
@@ -834,7 +835,9 @@ export function OrgSettingsPage() {
                   const next = await api.updateExternalSharing(!org.externalSharingEnabled);
                   setOrg(next);
                   setMsg(
-                    `External sharing ${next.externalSharingEnabled ? 'enabled' : 'disabled'}.`,
+                    `Project external collaborators ${
+                      next.externalSharingEnabled ? 'enabled' : 'disabled'
+                    }.`,
                   );
                 } catch (e: unknown) {
                   setErr(e instanceof Error ? e.message : 'Toggle failed.');
@@ -956,7 +959,8 @@ export function OrgSettingsPage() {
           {!auditOpen ? (
             <div style={{padding: 16}}>
               <div style={{fontSize: 13, color: 'var(--signal-text-dim)', marginBottom: 12}}>
-                Org-scoped audit trail — role changes, SSO + sharing toggles, member actions.
+                Org-scoped audit trail — role changes, SSO, project-collaborator toggles, member
+                actions.
               </div>
               <Button kind='secondary' sm onClick={loadAudit}>
                 Load audit log

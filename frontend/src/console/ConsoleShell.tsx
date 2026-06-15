@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
   {path: '/compose', Icon: PlusIcon, label: 'Start'},
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
   {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
+  {path: '/org-members', Icon: AccountIcon, label: 'Team'},
   {path: '/setup', Icon: WorkspaceIcon, label: 'Setup'},
 ];
 
@@ -137,6 +138,7 @@ export default function ConsoleShell() {
         path.startsWith('/live') ||
         path.startsWith('/result')
       );
+    if (p === '/org-members') return path.startsWith('/org-members');
     if (p === '/setup')
       return (
         path.startsWith('/setup') ||
@@ -147,7 +149,6 @@ export default function ConsoleShell() {
         path.startsWith('/integrations') ||
         path.startsWith('/api-keys') ||
         path.startsWith('/provider-keys') ||
-        path.startsWith('/org-members') ||
         path.startsWith('/org/settings') ||
         path.startsWith('/insights') ||
         path.startsWith('/audit') ||
@@ -164,6 +165,7 @@ export default function ConsoleShell() {
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
+    {id: 'team', label: 'Go: Team / invites', run: () => navigate('/org-members')},
     {id: 'setup', label: 'Go: Setup', run: () => navigate('/setup')},
     {id: 'decisions', label: 'Work: Awaiting approval', run: () => navigate('/decisions')},
     {id: 'search', label: 'Go: Search', run: () => navigate('/search')},

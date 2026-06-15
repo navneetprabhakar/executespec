@@ -161,9 +161,11 @@ public class OrgController {
 
   @DeleteMapping("/me/invitations/{id}")
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
-  public ResponseEntity<Void> cancelInvitation(@PathVariable String id) {
-    // Simply mark as expired
-    invitationService.listByOrg("").stream().filter(inv -> inv.getId().equals(id)).findFirst();
+  public ResponseEntity<Void> cancelInvitation(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    invitationService.cancelInvitation(orgId, id, userDetails.getUser().getId());
     return ResponseEntity.noContent().build();
   }
 
@@ -222,15 +224,16 @@ public class OrgController {
             orgId, req.keySourceMode(), req.enabledProviders(), userDetails.getUser().getId()));
   }
 
-  // External sharing toggle (V198, 2026-05-16)
+  // Project external collaborators toggle (V198, 2026-05-16)
 
   record ExternalSharingRequest(boolean enabled) {}
 
   /**
-   * Enable or disable external project sharing for the caller's org. When false (default), the
-   * {@code POST /api/projects/{id}/invites} endpoint refuses any new invite even from PRO+ org
-   * admins. When true, ORG_ADMIN / SUPER_ADMIN may invite any email (gmail, outlook, etc.) as a
-   * cross-org PROJECT_VIEWER or PROJECT_DEVELOPER on a single project.
+   * Enable or disable project-only external collaborators for the caller's org. When false
+   * (default), the {@code POST /api/projects/{id}/invites} endpoint refuses any new invite even
+   * from PRO+ org admins. When true, ORG_ADMIN / SUPER_ADMIN may invite any email (gmail, outlook,
+   * etc.) as a PROJECT_VIEWER or PROJECT_DEVELOPER on a single project without making that user an
+   * org member.
    *
    * <p>Gated to ORG_ADMIN of the caller's org or SUPER_ADMIN — same as the other compliance-grade
    * org settings endpoints. The Spring-AOP @PreAuthorize fires before the service even runs.

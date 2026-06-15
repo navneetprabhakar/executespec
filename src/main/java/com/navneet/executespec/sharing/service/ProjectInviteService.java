@@ -34,7 +34,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * V175 — orchestrator for cross-org project sharing via invitations.
+ * V175 — orchestrator for project-only external collaborator invitations.
  *
  * <p>The flow is intentionally email-first (not user-id-first) so the inviter doesn't need to know
  * whether the recipient already has an account on the platform:
@@ -73,7 +73,8 @@ public class ProjectInviteService {
   private final MailService mailService;
 
   /**
-   * RL-2026-05-041 (audit #11) — cross-org membership changes belong in the project activity feed.
+   * RL-2026-05-041 (audit #11) — project-only external collaborator changes belong in the project
+   * activity feed.
    */
   private final com.navneet.executespec.activity.ActivityEventEmitter activityEmitter;
 
@@ -145,13 +146,13 @@ public class ProjectInviteService {
               + " invite.");
     }
 
-    // Org-flag gate — the inviter's org must have external sharing enabled.
+    // Org-flag gate — the inviter's org must allow project-only external collaborators.
     Org org = orgRepo.findById(orgId).orElse(null);
     if (org == null || !org.isExternalSharingEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "External sharing is disabled for your org. Enable it in Org Settings → External sharing"
-              + " before sending invites.");
+          "Project external collaborators are disabled for your org. Enable them in Org Settings"
+              + " → Project external collaborators before sending project invites.");
     }
   }
 
