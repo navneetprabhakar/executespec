@@ -606,6 +606,147 @@ export function IdeOrgMembers() {
   );
 }
 
+function domainListFromEmail(email?: string | null): string[] {
+  const domain = email?.split('@')[1]?.trim().toLowerCase();
+  if (!domain || ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(domain)) {
+    return [];
+  }
+  return [domain];
+}
+
+function CreateOrgPanel({
+  org,
+  onCreated,
+}: {
+  org: api.OrgDto | null;
+  onCreated: (org: api.OrgDto) => void;
+}) {
+  const user = useAuthStore((s) => s.user);
+  const tier = useAuthStore(selectNormalizedTier);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [domains, setDomains] = useState(domainListFromEmail(user?.email).join(', '));
+  const [adminEmail, setAdminEmail] = useState(user?.email ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const canCreate = tier !== 'FREE' && (!org || org.isPersonal === true);
+
+  async function submit() {
+    const parsedDomains = domains
+      .split(',')
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+    if (!name.trim()) {
+      setErr('Enter an organization name.');
+      return;
+    }
+    if (parsedDomains.length === 0) {
+      setErr('Add at least one company email domain.');
+      return;
+    }
+    if (!adminEmail.trim()) {
+      setErr('Add an admin contact email.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      const created = await api.createOrg({
+        name: name.trim(),
+        domains: parsedDomains,
+        adminEmail: adminEmail.trim(),
+      });
+      onCreated(created);
+      await useAuthStore.getState().loadMe();
+      setOpen(false);
+      setName('');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Organization creation failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className='ide-card' style={{marginBottom: 12}}>
+      <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap'}}>
+        <div style={{minWidth: 0, flex: 1}}>
+          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+            Organization workspace
+          </div>
+          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
+            {org?.isPersonal
+              ? 'Convert your personal workspace into a team organization before inviting teammates.'
+              : org
+                ? 'You are already in an organization. Multi-org switching is not available yet.'
+                : 'Create an organization before inviting teammates.'}
+          </div>
+        </div>
+        <button
+          className='ide-btn'
+          disabled={!canCreate}
+          onClick={() => setOpen((v) => !v)}
+          title={
+            tier === 'FREE'
+              ? 'Organization creation is available after upgrading.'
+              : !canCreate
+                ? 'You are already in an organization.'
+                : undefined
+          }
+        >
+          {open ? 'Cancel' : org?.isPersonal ? 'Convert to org' : 'Create org'}
+        </button>
+      </div>
+
+      {tier === 'FREE' && (
+        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 10}}>
+          Organization creation is a paid-tier feature.{' '}
+          <Link to='/plans' style={{color: 'var(--ide-accent)'}}>
+            View plans
+          </Link>
+          .
+        </div>
+      )}
+
+      {open && canCreate && (
+        <div style={{marginTop: 12, borderTop: '1px solid var(--ide-border)', paddingTop: 12}}>
+          <Field label='Organization name'>
+            <input
+              className='ide-input'
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder='Acme Engineering'
+            />
+          </Field>
+          <Field label='Allowed email domains'>
+            <input
+              className='ide-input ide-mono'
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder='acme.com, acme.io'
+            />
+          </Field>
+          <Field label='Admin contact'>
+            <input
+              className='ide-input'
+              type='email'
+              value={adminEmail}
+              onChange={(e) => setAdminEmail(e.target.value)}
+              placeholder='admin@acme.com'
+            />
+          </Field>
+          {err && (
+            <div style={{fontSize: 12.5, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
+          )}
+          <button className='ide-btn' disabled={busy} onClick={submit}>
+            {busy ? 'Creating…' : org?.isPersonal ? 'Convert workspace' : 'Create organization'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Org settings — /org/settings
 export function IdeOrgSettings() {
   useDocumentTitle('Org settings');
@@ -613,6 +754,7 @@ export function IdeOrgSettings() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const canEdit = isSuperAdmin || user?.orgRole === 'ORG_ADMIN';
   const [org, setOrg] = useState<api.OrgDto | null>(null);
+  const [orgLoaded, setOrgLoaded] = useState(false);
   const [sso, setSso] = useState<api.SsoConfig | null>(null);
   const [name, setName] = useState('');
   const [domains, setDomains] = useState('');
@@ -686,6 +828,7 @@ export function IdeOrgSettings() {
       }
       if (mem.status === 'fulfilled') setMembers(mem.value);
       else setMembers([]);
+      setOrgLoaded(true);
     });
   }, []);
 
@@ -836,7 +979,25 @@ export function IdeOrgSettings() {
     }
   }
 
-  if (!org) return <IdeLoader label='Loading org…' />;
+  if (!orgLoaded) return <IdeLoader label='Loading org…' />;
+  if (!org) {
+    return (
+      <div className='ide-pane' style={{maxWidth: 820}}>
+        <div className='ide-h1'>Org settings</div>
+        <div className='ide-sub'>Create an organization to invite teammates</div>
+        <Banner err={err} msg={msg} />
+        <CreateOrgPanel
+          org={null}
+          onCreated={(next) => {
+            setOrg(next);
+            setName(next.name || '');
+            setDomains(next.domainPatterns || '');
+            setSeats(next.seatCount ?? 1);
+          }}
+        />
+      </div>
+    );
+  }
 
   // OpenRouter is an Enterprise-only gateway — only offer it when the org
   // qualifies (the backend rejects the key with 403 otherwise).
@@ -868,6 +1029,15 @@ export function IdeOrgSettings() {
       </div>
 
       <Banner err={err} msg={msg} />
+      <CreateOrgPanel
+        org={org}
+        onCreated={(next) => {
+          setOrg(next);
+          setName(next.name || '');
+          setDomains(next.domainPatterns || '');
+          setSeats(next.seatCount ?? 1);
+        }}
+      />
 
       {/* ── Profile ── */}
       <div className='ide-h2'>Profile</div>
