@@ -69,6 +69,12 @@ graphite direction as auth and the CLI/VS Code clients: `#0b0d10` page, `#11151b
 `frontend/src/signal/signal.css` was tightened to the same surface ladder and smaller radii, and
 the auth console mock now consumes `--signal-*` tokens instead of fixed dark literals.
 
+Public routes that render outside the protected Console shell must still stay in the same theme
+family. `frontend/src/signal/signal.css` now pins `.signal-auth-layout` and
+`.public-share-console` to a local flat graphite ladder (`#101112` page, `#18191b` cards,
+`#202124` raised/input, `#7dd3fc` accent) so `/login`, `/signup`, and `/shared/:token` do not fall
+back to old Signal lavender/marketing treatments.
+
 Design constraints for future theme edits:
 
 - Keep functionality and selectors stable; these are token/value changes, not a new shell.
