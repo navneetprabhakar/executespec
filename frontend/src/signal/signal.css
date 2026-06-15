@@ -2733,6 +2733,11 @@ body {
 .signal-app .auth-console-tabs span {
   padding: 7px 14px;
   font-size: 11.5px;
+  color: var(--signal-text-dim);
+  background: transparent;
+  border-right: 1px solid var(--signal-hairline);
+}
+.signal-app .auth-console-tabs span:first-child {
   color: var(--signal-ink);
   background: var(--signal-card-bg);
   box-shadow: inset 0 2px 0 var(--signal-ocean);
@@ -2858,7 +2863,7 @@ body {
   font-size: 32px;
   font-weight: 650;
   line-height: 1.12;
-  max-width: 12ch;
+  max-width: 16ch;
 }
 
 .signal-app .signal-auth-layout .signal-splash .lede {
@@ -2960,6 +2965,14 @@ body {
 .signal-app .auth-console-tabs span {
   background: #202124;
   box-shadow: inset 0 2px 0 var(--signal-ocean);
+}
+.signal-app .auth-console-tabs span:not(:first-child) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.signal-app .signal-auth-layout .auth-status-splash {
+  padding-top: 60px;
 }
 
 .signal-app .public-share-console {

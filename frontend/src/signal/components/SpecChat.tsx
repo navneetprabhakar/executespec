@@ -219,11 +219,11 @@ export function SpecChat({
         style={{display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 8}}
       >
         <SparkleIcon size={14} color='var(--signal-coral)' />
-        Draft with agent
+        Improve request
       </Button>
       <Modal
         open={open}
-        title={`Draft work with agent${projectId ? ' · project-scoped' : ''}`}
+        title={`Improve request${projectId ? ' · project-scoped' : ''}`}
         onClose={() => setOpen(false)}
         size='lg'
       >

@@ -51,6 +51,8 @@ class LlmRouterTest {
     gemini = mock(GeminiNativeToolClient.class);
     Metrics metrics = mock(Metrics.class);
     RunCostTracker cost = mock(RunCostTracker.class);
+    com.navneet.executespec.cost.RunStepUsageRecorder stepUsageRecorder =
+        mock(com.navneet.executespec.cost.RunStepUsageRecorder.class);
     lenient()
         .when(cost.snapshot(anyString()))
         .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
@@ -67,6 +69,7 @@ class LlmRouterTest {
             gemini,
             metrics,
             cost,
+            stepUsageRecorder,
             broadcaster,
             keyStore,
             forced,

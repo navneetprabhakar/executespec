@@ -75,15 +75,9 @@ export const NAV_ITEMS: {
   // entry removed since /pricing is now an admin tool (per-1M-token model
   // rates) reachable at /admin/model-rates; consumer-facing pricing lives
   // at /pricing reachable via the Header Upgrade pill.
-  // R-342 — bare `/` redirects to /home (the dispatcher).  The v2
+  // R-342 — bare `/` redirects to the Start surface. The v2
   // RunsPage moved to /runs so the sidebar entry now points there.
   {path: '/runs', label: 'Runs', icon: 'LayoutDashboard', adminOnly: false},
-  // R-330 / R-340 — first-class catalog surfaces.  Routes hop into the
-  // V3 chrome (TopBar) when clicked from the v2 sidebar — chrome
-  // flip is intentional until the v2 sidebar shell is fully retired.
-  // Visible to every tier — FREE sees locked rows with upgrade CTAs.
-  {path: '/library', label: 'Library', icon: 'Library', adminOnly: false},
-  {path: '/migrations', label: 'Migrations', icon: 'GitBranch', adminOnly: false},
   // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
   // Gated behind canViewCostBreakdown (PRO/TEAM/ENTERPRISE) — FREE can't
   // see the spend aggregate because that's a paid-tier analytics feature.

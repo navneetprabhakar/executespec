@@ -28,9 +28,9 @@ export function useDocumentTitle(title: string | null | undefined) {
  *  App.tsx's protected routes; detail surfaces override via useDocumentTitle. */
 export function routeTitle(pathname: string): string {
   const exact: Record<string, string> = {
-    '/home': 'Home',
-    '/runs': 'All runs',
-    '/compose': 'New spec',
+    '/home': 'Start',
+    '/runs': 'Work',
+    '/compose': 'Start',
     '/projects': 'Projects',
     '/account': 'Account',
     '/settings': 'Account',
@@ -41,14 +41,15 @@ export function routeTitle(pathname: string): string {
     '/org-members': 'Org members',
     '/org/settings': 'Org settings',
     '/insights': 'Insights',
-    '/library': 'Library',
-    '/migrations': 'Migrations',
-    '/templates': 'Spec templates',
+    '/library': 'Setup',
+    '/migrations': 'Setup',
+    '/templates': 'Setup',
     '/audit': 'Audit log',
     '/deployments': 'Deployments',
     '/notifications': 'Notifications',
     '/search': 'Search',
-    '/more': 'More',
+    '/setup': 'Setup',
+    '/more': 'Setup',
     '/admin': 'Admin',
     '/benchmark': 'Benchmarks',
   };
@@ -57,8 +58,7 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith('/live')) return 'Live run';
   if (pathname.startsWith('/result') || pathname.startsWith('/runs/')) return 'Run detail';
   if (pathname.startsWith('/projects/')) return 'Project';
-  if (pathname.startsWith('/library/')) return 'Library';
-  if (pathname.startsWith('/migrations/')) return 'Migrations';
+  if (pathname.startsWith('/library/') || pathname.startsWith('/migrations/')) return 'Setup';
   if (pathname.startsWith('/admin')) return 'Admin';
   return 'ExecuteSpec';
 }

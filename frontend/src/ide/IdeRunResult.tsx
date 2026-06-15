@@ -2024,7 +2024,7 @@ export default function IdeRunResult() {
                   className='ide-btn ghost'
                   onClick={iterateAsNewRun}
                   disabled={chatBusy || !chatInput.trim()}
-                  title='Start new work from this result with your change applied'
+                  title='Start follow-up work from this result with your change applied'
                 >
                   Start follow-up work
                 </button>

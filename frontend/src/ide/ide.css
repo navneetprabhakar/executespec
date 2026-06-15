@@ -1648,6 +1648,61 @@
 .ide-compose-section {
   display: block;
 }
+.ide-compose-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+.ide-compose-main,
+.ide-compose-side {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.ide-compose-side {
+  position: sticky;
+  top: 16px;
+}
+.ide-compose-request {
+  padding: 14px;
+}
+.ide-compose-samples {
+  margin-top: 12px;
+}
+.ide-compose-control-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.ide-compose-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.ide-compose-advanced {
+  margin-top: 14px;
+}
+.ide-compose-advanced summary {
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  list-style-position: inside;
+}
+.ide-compose-advanced[open] summary {
+  color: var(--ide-fg-bright);
+}
+.ide-setup-advanced {
+  margin-top: 18px;
+}
+.ide-setup-advanced > .ide-btn {
+  margin-bottom: 14px;
+}
+.ide-field-label {
+  margin-bottom: 4px;
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+}
 .ide-compose-review .ide-kv span:last-child {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1704,6 +1759,12 @@
 /* C9.3 — split panes stack to one column on phones. Apply alongside the
    inline grid styles: `className='ide-stack-mobile'`. */
 @media (max-width: 600px) {
+  .ide-compose-layout {
+    display: block;
+  }
+  .ide-compose-side {
+    position: static;
+  }
   .ide-root .ide-stack-mobile {
     grid-template-columns: 1fr !important;
   }
@@ -1719,7 +1780,7 @@
     justify-content: center;
   }
   .ide-compose {
-    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+    padding-bottom: calc(140px + env(safe-area-inset-bottom));
   }
   .ide-compose-steps {
     display: grid;
@@ -1772,7 +1833,7 @@
     display: block;
   }
   .ide-compose-textarea {
-    min-height: 260px;
+    min-height: 170px;
   }
   .ide-compose-section .ide-run-action {
     display: none;

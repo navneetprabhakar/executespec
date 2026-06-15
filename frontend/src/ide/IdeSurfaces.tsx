@@ -220,7 +220,7 @@ export function IdeWelcome() {
 
       <div style={{display: 'flex', gap: 10, marginBottom: 8}}>
         <Link className='ide-btn' to='/compose'>
-          ＋ New work
+          ＋ Start work
         </Link>
         <Link className='ide-btn ghost' to='/runs'>
           ◎ Work
@@ -620,20 +620,19 @@ export function IdeCompose() {
   const mobileNextBlocked = mobileStep === 1 && !mobileCanAdvanceFromSpec;
 
   return (
-    <div className='ide-pane ide-compose' style={{maxWidth: 820}}>
-      <h1 className='ide-h1'>New work</h1>
+    <div className='ide-pane ide-compose' style={{maxWidth: 1060}}>
+      <h1 className='ide-h1'>Start work</h1>
       <div className='ide-sub'>
-        Describe the change in plain language. ExecuteSpec plans the work, writes the code across
-        your repos, verifies it, and returns a scored pull request.{' '}
-        {quotaSubtitle(tier, permissions)}
+        Describe the change. We will ask before coding and keep the technical defaults out of the
+        way. {quotaSubtitle(tier, permissions)}
       </div>
 
       <div className='ide-compose-steps' aria-label='New work steps'>
         {[
-          [1, 'Describe'],
+          [1, 'Request'],
           [2, 'Context'],
-          [3, 'Controls'],
-          [4, 'Submit'],
+          [3, 'Setup'],
+          [4, 'Review'],
         ].map(([step, label]) => (
           <button
             key={step}
@@ -669,394 +668,409 @@ export function IdeCompose() {
         </div>
       )}
 
-      <section className={`ide-compose-section${mobileStep === 1 ? ' active' : ''}`}>
-        <textarea
-          className='ide-textarea ide-compose-textarea'
-          rows={12}
-          placeholder='e.g. Add a /health endpoint that returns build SHA + uptime, with a unit test…'
-          value={spec}
-          onChange={(e) => setSpec(e.target.value)}
-        />
-        <div style={{marginTop: 10}}>
-          <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
-        </div>
-
-        {samples.length > 0 && (
-          <>
-            <div className='ide-h2'>Start from a sample</div>
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-              {samples.map((s) => (
-                <button
-                  key={s.id}
-                  className='ide-btn ghost'
-                  disabled={sampleBusyId != null}
-                  onClick={() => void applySample(s)}
-                  title={`${s.category} · ${s.complexity}`}
-                >
-                  {sampleBusyId === s.id ? '…' : s.title}
-                </button>
-              ))}
+      <div className='ide-compose-layout'>
+        <div className='ide-compose-main'>
+          <section className={`ide-compose-section${mobileStep === 1 ? ' active' : ''}`}>
+            <div className='ide-card ide-compose-request'>
+              <div className='ide-h2' style={{marginTop: 0}}>
+                What should change?
+              </div>
+              <textarea
+                className='ide-textarea ide-compose-textarea'
+                rows={8}
+                placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
+              />
+              <div style={{marginTop: 10}}>
+                <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
+              </div>
             </div>
-          </>
-        )}
-      </section>
+          </section>
 
-      <section className={`ide-compose-section${mobileStep === 2 ? ' active' : ''}`}>
-        <div className='ide-h2'>Context</div>
-        <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
-          <button
-            className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
-            onClick={() => pickProject(null)}
-          >
-            {projectId == null ? '✓ ' : ''}Sandbox (no repo)
-          </button>
-          {chipProjects.map((p) => (
-            <button
-              key={p.id}
-              className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
-              onClick={() => pickProject(p.id)}
-            >
-              {projectId === p.id ? '✓ ' : ''}
-              {p.name}
-            </button>
-          ))}
-          {projects.length > 4 && (
-            <button
-              className='ide-btn ghost'
-              aria-expanded={projectPickerOpen}
-              onClick={() => {
-                setProjectPickerOpen((v) => !v);
-                setProjectQuery('');
-              }}
-            >
-              All projects… ({projects.length})
-            </button>
-          )}
-        </div>
-        {projectPickerOpen && (
-          <div
-            className='ide-card'
-            style={{marginBottom: 8, padding: 10}}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setProjectPickerOpen(false);
-            }}
-          >
-            <input
-              className='ide-input'
-              autoFocus
-              placeholder='Search projects…'
-              value={projectQuery}
-              onChange={(e) => setProjectQuery(e.target.value)}
-              aria-label='Search projects'
-              style={{marginBottom: 8}}
-            />
-            <div style={{maxHeight: 240, overflowY: 'auto'}}>
-              {filteredProjects.length === 0 ? (
-                <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
-                  No projects match “{projectQuery.trim()}”.
-                </div>
-              ) : (
-                filteredProjects.map((p, i) => (
+          <section className={`ide-compose-section${mobileStep === 2 ? ' active' : ''}`}>
+            <div className='ide-card'>
+              <div className='ide-h2' style={{marginTop: 0}}>
+                Context
+              </div>
+              <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
+                <button
+                  className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
+                  onClick={() => pickProject(null)}
+                >
+                  {projectId == null ? '✓ ' : ''}Sandbox
+                </button>
+                {chipProjects.map((p) => (
                   <button
                     key={p.id}
-                    type='button'
+                    className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
                     onClick={() => pickProject(p.id)}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom:
-                        i < filteredProjects.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                      padding: '8px 6px',
-                      fontSize: 13,
-                      color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
-                      cursor: 'pointer',
-                    }}
                   >
                     {projectId === p.id ? '✓ ' : ''}
                     {p.name}
                   </button>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-        <div className='ide-sub' style={{marginTop: 0}}>
-          {projectId
-            ? `Running against ${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-            : 'Sandbox mode: a temporary context is created. Pick a project to work against your codebase.'}
-        </div>
-
-        {projectId && projectRepos.length > 0 && (
-          <>
-            <div className='ide-h2'>Repos the agent may touch</div>
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-              {projectRepos.map((r) => {
-                const rId = repoIdFor(r);
-                const selected = selectedRepoIds.includes(rId);
-                return (
-                  <button
-                    key={rId}
-                    className={selected ? 'ide-btn' : 'ide-btn ghost'}
-                    onClick={() => toggleRepo(rId)}
-                  >
-                    {selected ? '✓ ' : ''}
-                    {repoDisplayName(r)}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
-          system PAT since 2026-05-23). Without one, a project run completes but
-          the PR push fails — previously discovered only on the result page. */}
-        {projectId != null && user != null && !user.hasGithubPat && (
-          <div
-            className='ide-card'
-            style={{
-              borderColor: 'var(--ide-yellow)',
-              margin: '12px 0',
-              fontSize: 13,
-              lineHeight: 1.5,
-            }}
-          >
-            No GitHub token connected — the run will generate code, but it can't open a PR on your
-            repo until you add one.{' '}
-            <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-              Connect GitHub →
-            </Link>
-          </div>
-        )}
-      </section>
-
-      {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
-          .ide-stack-mobile collapses to one column under 600px. */}
-      <section className={`ide-compose-section${mobileStep === 3 ? ' active' : ''}`}>
-        <div
-          className='ide-stack-mobile'
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${tier === 'ENTERPRISE' ? 4 : 3}, minmax(0, 1fr))`,
-            gap: 12,
-            margin: '14px 0',
-          }}
-        >
-          <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
-            <div className='ide-h2' id='compose-provider-label' style={{marginTop: 0}}>
-              Provider
-            </div>
-            <select
-              className='ide-select'
-              value={provider}
-              onChange={(e) => chooseProvider(e.target.value)}
-            >
-              {selectableProviders.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label || providerLabel(p.id)}
-                  {p.tag ? ` · ${p.tag}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
-            default matrix for this run only. '' = Default → no modelName sent. */}
-          {tier === 'ENTERPRISE' && (
-            <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
-              <div className='ide-h2' id='compose-model-label' style={{marginTop: 0}}>
-                Model · Beta
-              </div>
-              <select
-                className='ide-select'
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
-              >
-                <option value=''>Recommended (default)</option>
-                {providerModels.map((m) => (
-                  <option key={m} value={m}>
-                    {modelLabelById[m] || m}
-                  </option>
                 ))}
-              </select>
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                Overrides org &amp; default matrix for this run
+                {projects.length > 4 && (
+                  <button
+                    className='ide-btn ghost'
+                    aria-expanded={projectPickerOpen}
+                    onClick={() => {
+                      setProjectPickerOpen((v) => !v);
+                      setProjectQuery('');
+                    }}
+                  >
+                    All projects... ({projects.length})
+                  </button>
+                )}
               </div>
-            </div>
-          )}
-          <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
-            <div className='ide-h2' id='compose-mode-label' style={{marginTop: 0}}>
-              Approval
-            </div>
-            <select
-              className='ide-select'
-              value={mode}
-              onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
-            >
-              <option value='PRODUCTION'>Ask before coding</option>
-              <option value='PROTOTYPE'>Start automatically</option>
-            </select>
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-              Recommended: review the plan and price before code changes begin.
-            </div>
-          </div>
-          <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
-            <div className='ide-h2' id='compose-cap-label' style={{marginTop: 0}}>
-              Spending cap
-            </div>
-            <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
-              <input
-                className='ide-input'
-                type='number'
-                step='0.5'
-                min='0.5'
-                max={tierMaxCap}
-                value={costCap}
-                aria-labelledby='compose-cap-label'
-                onChange={(e) =>
-                  setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
-                }
-                style={{width: 90}}
-              />
-              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                {/* RUN-6 — say "no platform cap" in words instead of "$∞". */}
-                {tierMaxCap === 1000
-                  ? 'USD · no platform cap on your plan'
-                  : `USD · max $${tierMaxCap}`}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            gap: 16,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <label
-            style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
-          >
-            <input
-              type='checkbox'
-              checked={tddMode}
-              onChange={(e) => setTddMode(e.target.checked)}
-            />
-            TDD mode — write tests first
-          </label>
-          <div style={{flex: 1, minWidth: 220}}>
-            <label
-              htmlFor='compose-figma-url'
-              style={{
-                display: 'block',
-                fontSize: 12,
-                color: 'var(--ide-fg-muted)',
-                marginBottom: 4,
-              }}
-            >
-              Figma URL (optional)
-            </label>
-            <input
-              id='compose-figma-url'
-              className='ide-input'
-              type='url'
-              placeholder='https://figma.com/… (passed to the planner)'
-              value={figmaUrl}
-              onChange={(e) => setFigmaUrl(e.target.value)}
-              style={{width: '100%'}}
-            />
-          </div>
-        </div>
-
-        {estimate && (
-          <div className='ide-card' style={{marginBottom: 12}}>
-            <div className='ide-h2' style={{marginTop: 0}}>
-              Estimate from project history
-            </div>
-            {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
-              {estimateStale ? (
-                <button
-                  type='button'
-                  onClick={refreshEstimate}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: 0,
-                    font: 'inherit',
-                    color: 'var(--ide-accent)',
-                    cursor: 'pointer',
+              {projectPickerOpen && (
+                <div
+                  className='ide-card'
+                  style={{marginBottom: 8, padding: 10}}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setProjectPickerOpen(false);
                   }}
                 >
-                  · refresh
-                </button>
-              ) : (
-                '· refreshed just now'
+                  <input
+                    className='ide-input'
+                    autoFocus
+                    placeholder='Search projects...'
+                    value={projectQuery}
+                    onChange={(e) => setProjectQuery(e.target.value)}
+                    aria-label='Search projects'
+                    style={{marginBottom: 8}}
+                  />
+                  <div style={{maxHeight: 240, overflowY: 'auto'}}>
+                    {filteredProjects.length === 0 ? (
+                      <div
+                        style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}
+                      >
+                        No projects match "{projectQuery.trim()}".
+                      </div>
+                    ) : (
+                      filteredProjects.map((p, i) => (
+                        <button
+                          key={p.id}
+                          type='button'
+                          onClick={() => pickProject(p.id)}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            background: 'transparent',
+                            border: 'none',
+                            borderBottom:
+                              i < filteredProjects.length - 1
+                                ? '1px solid var(--ide-border)'
+                                : 'none',
+                            padding: '8px 6px',
+                            fontSize: 13,
+                            color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {projectId === p.id ? '✓ ' : ''}
+                          {p.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
               )}
+              <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
+                {projectId
+                  ? `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
+                  : 'Sandbox creates an isolated run without touching a repo.'}
+              </div>
             </div>
-            <div className='ide-kv'>
-              <span>Estimated steps</span>
-              <span>
-                {estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh}
-              </span>
-            </div>
-            <div className='ide-kv'>
-              <span>Cost</span>
-              <span>
-                ${estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
-              </span>
-            </div>
-            {estimate.basis && (
-              <div className='ide-sub' style={{marginTop: 6}}>
-                {estimate.basis}
+
+            {samples.length > 0 && (
+              <details className='ide-card ide-compose-samples ide-compose-advanced'>
+                <summary>Examples</summary>
+                <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12}}>
+                  {samples.map((s) => (
+                    <button
+                      key={s.id}
+                      className='ide-btn ghost'
+                      disabled={sampleBusyId != null}
+                      onClick={() => void applySample(s)}
+                      title={`${s.category} · ${s.complexity}`}
+                    >
+                      {sampleBusyId === s.id ? '...' : s.title}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {projectId && projectRepos.length > 0 && (
+              <div className='ide-card'>
+                <div className='ide-h2' style={{marginTop: 0}}>
+                  Repos
+                </div>
+                <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+                  {projectRepos.map((r) => {
+                    const rId = repoIdFor(r);
+                    const selected = selectedRepoIds.includes(rId);
+                    return (
+                      <button
+                        key={rId}
+                        className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                        onClick={() => toggleRepo(rId)}
+                      >
+                        {selected ? '✓ ' : ''}
+                        {repoDisplayName(r)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
-          </div>
-        )}
-      </section>
 
-      <section className={`ide-compose-section${mobileStep === 4 ? ' active' : ''}`}>
-        <div className='ide-card ide-compose-review'>
-          <div className='ide-h2' style={{marginTop: 0}}>
-            Review request
-          </div>
-          <div className='ide-kv'>
-            <span>Change</span>
-            <span>
-              {spec.trim()
-                ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '…' : ''}`
-                : 'Not described'}
-            </span>
-          </div>
-          <div className='ide-kv'>
-            <span>Context</span>
-            <span>{selectedProjectName}</span>
-          </div>
-          <div className='ide-kv'>
-            <span>Provider</span>
-            <span>{providerLabel(provider)}</span>
-          </div>
-          <div className='ide-kv'>
-            <span>Approval</span>
-            <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
-          </div>
-          <div className='ide-kv'>
-            <span>Cap</span>
-            <span>${costCap.toFixed(2)}</span>
-          </div>
+            {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
+          system PAT since 2026-05-23). Without one, a project run completes but
+          the PR push fails — previously discovered only on the result page. */}
+            {projectId != null && user != null && !user.hasGithubPat && (
+              <div
+                className='ide-card'
+                style={{
+                  borderColor: 'var(--ide-yellow)',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                No GitHub token connected. The run can generate code, but it cannot open a PR until
+                you add one.{' '}
+                <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
+                  Connect GitHub →
+                </Link>
+              </div>
+            )}
+          </section>
         </div>
-        {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-        <div className='ide-run-action'>
-          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-            {busy ? 'Submitting…' : 'Create plan'}
-          </button>
-        </div>
-      </section>
+
+        <aside className='ide-compose-side'>
+          {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
+          .ide-stack-mobile collapses to one column under 600px. */}
+          <section className={`ide-compose-section${mobileStep === 3 ? ' active' : ''}`}>
+            <div className='ide-card'>
+              <div className='ide-h2' style={{marginTop: 0}}>
+                Run setup
+              </div>
+              <div className='ide-compose-control-grid'>
+                <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
+                  <div className='ide-field-label' id='compose-provider-label'>
+                    Provider
+                  </div>
+                  <select
+                    className='ide-select'
+                    value={provider}
+                    onChange={(e) => chooseProvider(e.target.value)}
+                  >
+                    {selectableProviders.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label || providerLabel(p.id)}
+                        {p.tag ? ` · ${p.tag}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
+                  default matrix for this run only. '' = Default → no modelName sent. */}
+                {tier === 'ENTERPRISE' && (
+                  <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
+                    <div className='ide-field-label' id='compose-model-label'>
+                      Model · Beta
+                    </div>
+                    <select
+                      className='ide-select'
+                      value={modelName}
+                      onChange={(e) => setModelName(e.target.value)}
+                    >
+                      <option value=''>Recommended</option>
+                      {providerModels.map((m) => (
+                        <option key={m} value={m}>
+                          {modelLabelById[m] || m}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                      Overrides this run only
+                    </div>
+                  </div>
+                )}
+                <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
+                  <div className='ide-field-label' id='compose-mode-label'>
+                    Approval
+                  </div>
+                  <select
+                    className='ide-select'
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
+                  >
+                    <option value='PRODUCTION'>Ask before coding</option>
+                    <option value='PROTOTYPE'>Start automatically</option>
+                  </select>
+                </div>
+                <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
+                  <div className='ide-field-label' id='compose-cap-label'>
+                    Cap
+                  </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                    <input
+                      className='ide-input'
+                      type='number'
+                      step='0.5'
+                      min='0.5'
+                      max={tierMaxCap}
+                      value={costCap}
+                      aria-labelledby='compose-cap-label'
+                      onChange={(e) =>
+                        setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
+                      }
+                      style={{width: 90}}
+                    />
+                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                      {tierMaxCap === 1000 ? 'USD' : `max $${tierMaxCap}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <details className='ide-compose-advanced'>
+                <summary>Advanced options</summary>
+                <div className='ide-compose-options'>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={tddMode}
+                      onChange={(e) => setTddMode(e.target.checked)}
+                    />
+                    TDD mode
+                  </label>
+                  <div style={{flex: 1, minWidth: 220}}>
+                    <label
+                      htmlFor='compose-figma-url'
+                      style={{
+                        display: 'block',
+                        fontSize: 12,
+                        color: 'var(--ide-fg-muted)',
+                        marginBottom: 4,
+                      }}
+                    >
+                      Figma URL
+                    </label>
+                    <input
+                      id='compose-figma-url'
+                      className='ide-input'
+                      type='url'
+                      placeholder='https://figma.com/...'
+                      value={figmaUrl}
+                      onChange={(e) => setFigmaUrl(e.target.value)}
+                      style={{width: '100%'}}
+                    />
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            {estimate && (
+              <div className='ide-card'>
+                <div className='ide-h2' style={{marginTop: 0}}>
+                  Estimate
+                </div>
+                {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
+                <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+                  {estimateStale ? (
+                    <button
+                      type='button'
+                      onClick={refreshEstimate}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        font: 'inherit',
+                        color: 'var(--ide-accent)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Refresh
+                    </button>
+                  ) : (
+                    'Updated just now'
+                  )}
+                </div>
+                <div className='ide-kv'>
+                  <span>Steps</span>
+                  <span>
+                    {estimate.estimatedTasksLow}-{estimate.estimatedTasksHigh}
+                  </span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Cost</span>
+                  <span>
+                    ${estimate.estimatedCostLow.toFixed(2)}-${estimate.estimatedCostHigh.toFixed(2)}
+                  </span>
+                </div>
+                {estimate.basis && (
+                  <div className='ide-sub' style={{marginTop: 6, marginBottom: 0}}>
+                    {estimate.basis}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className={`ide-compose-section${mobileStep === 4 ? ' active' : ''}`}>
+            <div className='ide-card ide-compose-review'>
+              <div className='ide-h2' style={{marginTop: 0}}>
+                Review
+              </div>
+              <div className='ide-kv'>
+                <span>Request</span>
+                <span>
+                  {spec.trim()
+                    ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '...' : ''}`
+                    : 'Not described'}
+                </span>
+              </div>
+              <div className='ide-kv'>
+                <span>Context</span>
+                <span>{selectedProjectName}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Provider</span>
+                <span>{providerLabel(provider)}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Approval</span>
+                <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Cap</span>
+                <span>${costCap.toFixed(2)}</span>
+              </div>
+            </div>
+            {err && (
+              <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
+            )}
+            <div className='ide-run-action'>
+              <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+                {busy ? 'Submitting...' : 'Create plan'}
+              </button>
+            </div>
+          </section>
+        </aside>
+      </div>
+
       <div className='ide-compose-mobile-actions'>
         <button
           type='button'
@@ -1078,7 +1092,7 @@ export function IdeCompose() {
           </button>
         ) : (
           <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
-            {busy ? 'Submitting…' : 'Create plan'}
+            {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}
         {mobileNextBlocked && (

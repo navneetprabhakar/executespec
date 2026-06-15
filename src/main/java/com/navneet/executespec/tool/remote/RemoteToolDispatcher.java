@@ -97,9 +97,10 @@ public class RemoteToolDispatcher {
     CompletableFuture<String> future = new CompletableFuture<>();
     s.pending.put(callId, future);
     try {
+      String frameJson = frame(callId, runId, taskId, toolName, argsJson);
       broadcaster.emit(
           runId,
-          RunEvent.toolCall(runId, taskId, frame(callId, runId, taskId, toolName, argsJson)));
+          RunEvent.toolCall(runId, taskId, frameJson, callId, toolName, argsJson));
       return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
       return errorEnvelope(
