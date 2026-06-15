@@ -335,7 +335,7 @@ export function IdeProjectPulse() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div className='ide-h1'>Overview</div>
-          {/* §3.4 — the project landing redirects here once work exists; keep the
+      {/* §3.4 — the project landing redirects here once work exists; keep the
               composer one click away. {compose:true} skips the redirect. */}
       <div style={{margin: '4px 0 12px'}}>
         <Link

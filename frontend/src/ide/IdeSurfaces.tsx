@@ -742,9 +742,7 @@ export function IdeCompose() {
                   />
                   <div style={{maxHeight: 240, overflowY: 'auto'}}>
                     {filteredProjects.length === 0 ? (
-                      <div
-                        style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}
-                      >
+                      <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
                         No projects match "{projectQuery.trim()}".
                       </div>
                     ) : (
