@@ -196,6 +196,42 @@ export const downloadValidationReportPdf = async (runId: string): Promise<void> 
   URL.revokeObjectURL(url);
 };
 
+function filenameFromDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1].replace(/["']/g, ''));
+  const ascii = /filename="?([^";]+)"?/i.exec(header);
+  return ascii?.[1] ? ascii[1] : fallback;
+}
+
+export const downloadRunCode = async (
+  runId: string,
+  format: 'repo' | 'zip' = 'repo',
+): Promise<void> => {
+  const res = await fetch(`${BASE}/runs/${runId}/download?format=${format}`, {
+    headers: {...authHeader()},
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
+  }
+  const blob = await res.blob();
+  const fallback =
+    format === 'repo'
+      ? `${runId.substring(0, 8)}-repo.zip`
+      : `workspace-${runId.substring(0, 8)}.zip`;
+  const filename = filenameFromDisposition(res.headers.get('content-disposition'), fallback);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 // Pilot v3.0: Project workspace, repos, architecture, scoring
 
 // Project dashboard

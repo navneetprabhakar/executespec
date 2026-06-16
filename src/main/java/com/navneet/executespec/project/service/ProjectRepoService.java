@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.project.dto.CreateRepoRequest;
 import com.navneet.executespec.project.dto.ProjectRepoDto;
@@ -42,6 +43,7 @@ public class ProjectRepoService {
   private final ProjectRepoRepository repoRepo;
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepository projectRepo;
+  private final ProjectMemberRepository projectMemberRepo;
   private final StackDetector stackDetector;
   private final GitHubRepoService gitHub;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
@@ -576,11 +578,22 @@ public class ProjectRepoService {
             .findById(projectId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    if (callerOrgId == null || !callerOrgId.equals(project.getOrgId())) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project belongs to another organization");
+    if (callerOrgId != null && callerOrgId.equals(project.getOrgId())) {
+      return project;
     }
-    return project;
+    if (callerUserId != null
+        && projectMemberRepo.existsByProjectIdAndUserId(projectId, callerUserId)) {
+      return project;
+    }
+    boolean isSuperAdmin =
+        callerUserId != null
+            && userRepo
+                .findById(callerUserId)
+                .map(u -> "SUPER_ADMIN".equals(u.getGlobalRole()))
+                .orElse(false);
+    if (isSuperAdmin) return project;
+    throw new ResponseStatusException(
+        HttpStatus.FORBIDDEN, "Project belongs to another organization");
   }
 
   private static String extractOwner(String fullName) {

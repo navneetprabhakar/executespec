@@ -918,6 +918,24 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
+                disabled={busy === 'code' || files.length === 0}
+                title={
+                  files.length === 0
+                    ? 'No generated code is available for this run.'
+                    : 'Download the generated code as a clean repository zip.'
+                }
+                onClick={() =>
+                  action(
+                    'code',
+                    () => api.downloadRunCode(runId, 'repo'),
+                    () => 'Code downloaded.',
+                  )
+                }
+              >
+                ⬇ Code ZIP
+              </button>
+              <button
+                className='ide-btn ghost'
                 disabled={busy === 'share'}
                 onClick={() =>
                   action(

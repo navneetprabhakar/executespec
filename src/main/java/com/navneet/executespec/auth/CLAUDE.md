@@ -29,6 +29,7 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Org membership invites (`POST /api/org/invite`) are work-domain invites. Enterprise orgs always block consumer domains and enforce configured org domains.
 - Project-only external collaborators use the separate V175 project invite surface (`POST /api/projects/{id}/invites`) and are controlled by `org.external_sharing_enabled`.
 - Accepted external project collaborators inherit the highest active host-project org tier through `TierEnforcementService.resolveUserTier` / `EntitlementResolver.resolveTier`. This is an effective entitlement only: do not mutate the collaborator's personal billing tier. Removing the `ProjectMember` row naturally falls back to the user's own org/user tier.
+- Project-scoped read surfaces must honor `ProjectMember` even when the caller's home `orgId` differs from the host project org. This includes project-filtered run lists, single-run reads for runs with `PipelineRun.projectId`, linked repo reads, and project chat. Write access remains stricter: use `ProjectAccessGuard.assertCanWrite` / `RunAccessGuard.requireRunWriteAccess` so `PROJECT_VIEWER` cannot mutate project or run state.
 - `DELETE /api/org/me/invitations/{id}` cancels pending/escalated org invites by marking them `EXPIRED` and writing an `INVITATION_CANCELLED` audit row.
 - Project member add/remove accepts org admins and super admins in addition to project admins; `ProjectService.requireProjectAdmin` mirrors the controller/access-guard semantics.
 
