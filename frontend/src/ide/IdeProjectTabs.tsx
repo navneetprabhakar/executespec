@@ -522,6 +522,8 @@ function RunDetailPanel({
   run: api.RunDetail;
   report: api.ValidationReportData | null;
 }) {
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadMsg, setDownloadMsg] = useState('');
   const score =
     scoreOf(run) ?? (run as unknown as {accuracyScore?: number}).accuracyScore ?? undefined;
   const verdict =
@@ -533,6 +535,23 @@ function RunDetailPanel({
   const tasks = run.tasks || [];
   const testsLabel =
     report?.testsTotal != null ? `${report.testsPassed ?? 0}/${report.testsTotal}` : '—';
+  const filesGenerated =
+    report?.filesGenerated ??
+    (run as unknown as {filesGenerated?: number | null}).filesGenerated ??
+    null;
+
+  async function downloadCode() {
+    setDownloadBusy(true);
+    setDownloadMsg('');
+    try {
+      await api.downloadRunCode(run.runId, 'repo');
+      setDownloadMsg('Code downloaded.');
+    } catch (e: unknown) {
+      setDownloadMsg(e instanceof Error ? e.message : 'Download failed.');
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
 
   return (
     <div className='ide-card'>
@@ -567,6 +586,10 @@ function RunDetailPanel({
       <div className='ide-kv'>
         <span>Spent</span>
         <span>${cost.toFixed(2)}</span>
+      </div>
+      <div className='ide-kv'>
+        <span>Files</span>
+        <span>{filesGenerated ?? '—'}</span>
       </div>
       <div className='ide-kv'>
         <span>PR</span>
@@ -620,6 +643,19 @@ function RunDetailPanel({
         >
           Open full page
         </Link>
+        <button
+          className='ide-btn ghost'
+          style={{padding: '5px 12px'}}
+          disabled={downloadBusy || filesGenerated === 0}
+          title={
+            filesGenerated === 0
+              ? 'No generated code is available for this run.'
+              : 'Download the generated code as a clean repository zip.'
+          }
+          onClick={downloadCode}
+        >
+          {downloadBusy ? 'Downloading…' : 'Download code'}
+        </button>
         {isLive(run.status) && (
           <Link
             to={`/live/${run.runId}`}
@@ -639,6 +675,9 @@ function RunDetailPanel({
           </button>
         )}
       </div>
+      {downloadMsg && (
+        <div style={{marginTop: 8, color: 'var(--ide-fg-muted)', fontSize: 12}}>{downloadMsg}</div>
+      )}
     </div>
   );
 }
