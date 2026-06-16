@@ -21,11 +21,14 @@
  * users on stale shells.
  */
 
-const SHELL_CACHE = 'v3-shell-v1';
+const SHELL_CACHE = 'v3-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
+  '/favicon.svg',
   '/logo.png',
+  '/logo-192.png',
+  '/logo-512.png',
   '/manifest.webmanifest',
 ];
 
