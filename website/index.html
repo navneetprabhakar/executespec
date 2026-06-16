@@ -107,6 +107,7 @@
         "Autonomous CI/CD pipeline (syntax, type, lint, unit test gates)",
         "Single pipeline: planner → plan-approval gate → executor → reviewer → build + test gate → PR with verdict",
         "Multi-repo project workspace with architecture docs + per-repo codemaps",
+        "Token transparency with plan-time estimates, live input/output/cache token counters, and final provider cost ledger",
         "Project memory with auto-compaction (every new run starts from your current state)",
         "Project chat with RAG over repos and uploaded docs",
         "Tech debt panel with category, severity, and file hotspot tracking",
@@ -813,6 +814,67 @@
             margin: 0;
         }
 
+        /* ─────────── Demo + token transparency ─────────── */
+        .demo-shell {
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(127,127,127,.18);
+            box-shadow: 0 24px 60px rgba(0,0,0,.18);
+            background: #0b0d10;
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        .demo-caption {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-dim);
+            margin: 14px auto 0;
+            max-width: 74ch;
+        }
+        .demo-caption strong { color: var(--ink); font-weight: 600; }
+        .token-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+            gap: 12px;
+            margin-top: 28px;
+        }
+        .token-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 22px;
+        }
+        .token-card .k {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            color: var(--text-mute);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .token-card .v {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            color: var(--ink);
+            margin-bottom: 8px;
+        }
+        .token-card p {
+            font-size: 13.5px;
+            line-height: 1.55;
+            color: var(--text-dim);
+            margin: 0;
+        }
+        .token-card.highlight {
+            background: linear-gradient(135deg, var(--hero-bg-1), var(--hero-bg-2));
+            border-color: var(--hero-bg-1);
+            color: var(--hero-text);
+        }
+        .token-card.highlight .k,
+        .token-card.highlight p { color: var(--hero-text-dim); }
+        .token-card.highlight .v { color: var(--hero-text); }
+
         /* ─────────── Phone mock (mobile-first showcase) ─────────── */
         .phone-mock-section {
             background: linear-gradient(180deg, transparent, var(--card-elev));
@@ -1228,6 +1290,7 @@
         </div>
         <nav class='links'>
             <a href='#how'>How it works</a>
+            <a href='#tokens'>Token ledger</a>
             <a href='#workspace'>Workspace</a>
             <a href='#library'>Library</a>
             <a href='#pricing'>Pricing</a>
@@ -1259,7 +1322,7 @@
         <div class='hero-stats'>
             <div class='stat'><div class='v mint'>0–100</div><div class='lbl'>Verified score, every run</div></div>
             <div class='stat'><div class='v signal'>5–20 min</div><div class='lbl'>Typical run time</div></div>
-            <div class='stat'><div class='v'>28 + 11</div><div class='lbl'>Solutions + Migrations</div></div>
+            <div class='stat'><div class='v'>Tokens</div><div class='lbl'>Estimate, live meter, final ledger</div></div>
             <div class='stat'><div class='v coral'>BYOK</div><div class='lbl'>Bypass cost cap</div></div>
         </div>
     </div>
@@ -1267,10 +1330,37 @@
 
 <section class='section' id='demo' style='padding-top:8px'>
     <div class='wrap'>
-        <div style='border-radius:16px;overflow:hidden;border:1px solid rgba(127,127,127,.18);box-shadow:0 24px 60px rgba(0,0,0,.18);background:#0b0d10;max-width:980px;margin:0 auto'>
-            <video src='/media/hero.webm' autoplay loop muted playsinline preload='metadata' poster='/images/og-hero.png' aria-label='ExecuteSpec product walkthrough' style='display:block;width:100%;height:auto'></video>
+        <div class='demo-shell'>
+            <video src='/media/hero.webm' autoplay loop muted playsinline preload='metadata' poster='/media/hero-poster.png' aria-label='ExecuteSpec product walkthrough with token transparency' style='display:block;width:100%;height:auto'></video>
         </div>
-        <p style='text-align:center;font-size:13px;opacity:.65;margin-top:14px'>A real run, end to end — describe it, watch it plan, code, review, score, and open a PR.</p>
+        <p class='demo-caption'>A run story, end to end — describe it, approve the plan, watch the agents work, then review the verified score, pull request, and <strong>token ledger</strong>.</p>
+    </div>
+</section>
+
+<section class='section' id='tokens'>
+    <div class='wrap'>
+        <div class='section-eyebrow mint'>Token transparency</div>
+        <h2>Know what the agents spend before, during, and after the run.</h2>
+        <p class='lede'>
+            ExecuteSpec does not hide LLM usage behind a vague credit counter. Every production run exposes the estimate you approved, the live token stream while agents work, and the final provider-cost ledger your team can audit.
+        </p>
+        <div class='token-grid'>
+            <div class='token-card'>
+                <div class='k'>Before approval</div>
+                <div class='v'>Plan-time estimate</div>
+                <p>See expected input, output, cache-read tokens, provider route, and dollar cap before execution starts. Reject or revise without burning worker tokens.</p>
+            </div>
+            <div class='token-card highlight'>
+                <div class='k'>During execution</div>
+                <div class='v'>Live spend meter</div>
+                <p>Watch input, output, cache-read, reasoning tokens, and cost move task by task beside the live tool log.</p>
+            </div>
+            <div class='token-card'>
+                <div class='k'>After completion</div>
+                <div class='v'>Final token ledger</div>
+                <p>The run report and PR summary keep the provider-level ledger: planner, worker, reviewer, cache savings, total cost, and approved cap.</p>
+            </div>
+        </div>
     </div>
 </section>
 
@@ -1621,6 +1711,7 @@
             <h5>Product</h5>
             <ul>
                 <li><a href='#how'>How it works</a></li>
+                <li><a href='#tokens'>Token ledger</a></li>
                 <li><a href='#workspace'>Workspace</a></li>
                 <li><a href='#library'>Library</a></li>
                 <li><a href='#pricing'>Pricing</a></li>
