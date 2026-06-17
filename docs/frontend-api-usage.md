@@ -16,7 +16,7 @@ Domain modules:
 | `runs.ts` | run lifecycle, plan gate, files, chat/apply/iterate |
 | `projects.ts` | project dashboard, repos, architecture, docs, memory, contracts, standards, project invites |
 | `billing.ts` | plans, subscription, top-up, profile/invoices |
-| `auth.ts` | login/session/user/PAT helpers |
+| `auth.ts` | login/session/user, account provider preference (`PUT /auth/me/provider-preference`), PAT mint (`POST /auth/me/tokens`) |
 | `org.ts` | org settings, members, model matrix, API keys |
 | `models.ts` | available models/provider metadata |
 | `reviews.ts` | PR review and code review |
@@ -30,6 +30,12 @@ Domain modules:
 | `misc.ts` | SSO and smaller shared endpoints |
 
 New frontend code should import from `@/lib/api` unless it has a reason to import a domain module directly.
+
+Scope notes:
+
+- The web app reads `preferredAiProvider` off the `/auth/me` user DTO (`core.ts`) and only ever *writes* it through `updateProviderPreference` (`auth.ts`); there is no separate GET helper. The compose, project-chat, run-result, and Build-my-Spec surfaces all share this one account-scoped write.
+- `createPat` (`auth.ts`) is consumed only by the `/cli-login` device-login page (`signal/pages/CliLoginPage.tsx`), which hands the plaintext `es_pat_…` straight to the CLI/VS Code client; the web app does not list or revoke tokens.
+- The agent-session protocol (`/api/agent/sessions/*`) is a **CLI/VS Code surface, not a web-app one** — the browser client has no `api/` module for it. Do not add one unless the web UI genuinely starts driving sessions.
 
 ## Request Contract
 

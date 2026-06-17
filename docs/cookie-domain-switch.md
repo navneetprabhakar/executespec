@@ -34,14 +34,42 @@ Refresh rotates the token: the old refresh token is logged out/revoked, a new to
 
 Logout clears only the refresh cookie path and revokes the presented refresh token. Existing access JWTs are invalidated separately through `POST /api/auth/invalidate-sessions`, which sets the user's token invalidation epoch.
 
+## OAuth State Cookie
+
+OAuth authorization requests are persisted in short-lived signed cookies keyed by `state`, instead of relying only on the Tomcat session:
+
+- `src/main/java/com/navneet/executespec/auth/oauth/CookieOAuth2AuthorizationRequestRepository.java`
+- wired in `SecurityConfig` via `oauth2Login(...).authorizationEndpoint().authorizationRequestRepository(...)`
+
+Important attributes:
+
+- cookie name: `es_oauth2_req_<sha256(state)[..32]>` (one per in-flight OAuth state)
+- path: `/api/auth/oauth2/callback`
+- `HttpOnly`: true
+- `Secure`: set when the request is HTTPS
+- `SameSite`: `Lax`
+- TTL: 5 minutes
+- payload signed (HMAC-SHA256, `app.jwt.secret`); a bad/missing signature is ignored, and the cookie is cleared on callback
+
+This makes the provider callback resilient to missing, stale, duplicate, or overwritten session cookies and to parallel OAuth attempts, which previously surfaced as `authorization_request_not_found`.
+
 ## OAuth Redirect Cookie
 
-The CLI/device-login OAuth fix uses a short-lived redirect helper cookie:
+The CLI/device-login OAuth fix uses a separate short-lived redirect helper cookie:
 
 - `src/main/java/com/navneet/executespec/auth/oauth/OAuthRedirectCookieFilter.java`
 - `OAuthSuccessHandler`
 
-The cookie preserves a `/cli-login` return URL across Google/GitHub OAuth. It is separate from the refresh cookie and should not be treated as an authenticated session.
+Important attributes:
+
+- cookie name: `es_oauth_redirect`
+- path: `/`
+- `HttpOnly`: true
+- `Secure`: set when the request is HTTPS
+- `SameSite`: `Lax`
+- max age: 300 seconds
+
+The cookie captures the `?redirect=/cli-login...` return URL on the authorize request and preserves it across Google/GitHub OAuth; `OAuthSuccessHandler` reads, clears, and forwards back to `/cli-login`. Only `/cli-login` targets are eligible (open-redirect guard). It is separate from the refresh cookie and should not be treated as an authenticated session.
 
 ## SSE Tokens
 
@@ -74,6 +102,8 @@ Current contract:
 
 - `src/main/java/com/navneet/executespec/auth/controller/AuthController.java`
 - `src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java`
+- `src/main/java/com/navneet/executespec/auth/oauth/CookieOAuth2AuthorizationRequestRepository.java`
 - `src/main/java/com/navneet/executespec/auth/oauth/OAuthRedirectCookieFilter.java`
+- `src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java`
 - `src/main/java/com/navneet/executespec/api/controller/SseController.java`
 - `frontend/src/lib/api/core.ts`

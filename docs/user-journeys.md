@@ -72,7 +72,8 @@ FREE users do not get this matrix.
 Users can:
 
 - manage auth/session state,
-- create/revoke PATs,
+- mint Personal Access Tokens for the CLI/VS Code clients (the browser sign-in at `/cli-login` mints one and hands it to the local client; create/list/revoke are also available through the account API),
+- set an account-wide default AI provider that web, CLI, and VS Code all share (an explicit per-run/per-chat provider still wins),
 - export user data,
 - update integration credentials,
 - review notifications.
