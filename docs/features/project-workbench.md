@@ -28,6 +28,7 @@ The project workbench is the persistent workspace layer around runs. It provides
 
 - Project workspace files on disk are cache; DB blobs and repository state are authoritative.
 - Cross-org project sharing is opt-in per org through `org.external_sharing_enabled`.
+- Accepted cross-org invitees see the host project's runs, repos, and chat per their project role, and inherit the host org's highest active tier as an effective entitlement (without mutating their personal billing tier) — `EntitlementResolver`/`TierEnforcementService`, RL-2026-06-046. Private repo source listing for invitees reads through the linking user's GitHub credentials (RL-2026-06-047).
 - Public share links are separate from cross-org member invites.
 - Project chat tools are advisory and tool-enabled, but write actions still flow through guarded endpoints.
 - Contracts/standards are partially wired; planner injection and enforcement are flag-gated surfaces, not always-on product guarantees.

@@ -36,6 +36,16 @@ canonical ids.
 | DeepSeek native lane | Added | `LlmProvider.DEEPSEEK`, `spring.ai.deepseek.*` |
 | BYOK key resolution | Added for DeepSeek/Fireworks | `ApiKeyResolver`, `RunKeyContextStore`, `OrgService`, `AuthController` |
 | OpenRouter latency sort | Added | `LlmRouter.callOpenRouter`, `provider.sort=latency` |
+| Account-scoped provider preference | Live | `app_user.preferred_ai_provider` (V242), `AiProviderPreferenceService`, `GET/PUT /api/auth/me/provider-preference` |
+| Per-call usage attribution (role/step/retry) | Live | `agent/LlmRequest` (`agentRole`/`stepId`/`retryOf`), `cost/RunStepUsageRecorder`, `run_step_usage` (V243) |
+
+## Cross-Surface Provider Preference
+
+`app_user.preferred_ai_provider` (V242) is an account-scoped default provider shared by web, CLI, and VS Code through `GET/PUT /api/auth/me/provider-preference`.
+
+- Resolution order: an explicit provider on the current run/chat request wins **and is persisted as the new preference**; an absent provider resolves to the account preference; project/YAML defaults remain fallback only.
+- Legacy `GOOGLE` input normalizes to `GEMINI` (V2 provider naming).
+- `RunController.submit`, agent-session turns, and the legacy `/api/spec/chat` fallback all route through `AiProviderPreferenceService` (RL-2026-06-036).
 
 ## Latency Finding
 
@@ -61,4 +71,4 @@ Do not relocate the main app server before that data exists. Prefer route select
 
 - Whether OpenRouter should become pure aggregator transport with YAML-declared slugs instead of Java hardcoded slug maps.
 - Whether Fireworks becomes preferred route for Chinese models from GCP if VM latency proves better.
-- Whether user-level model preferences should be persisted separately from user BYOK keys.
+- Whether a per-(tier/model) user preference should be persisted beyond the account-level provider preference (V242), which currently only pins the provider, not the specific model.

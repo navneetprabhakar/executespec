@@ -4,17 +4,19 @@
 
 ## Main Navigation
 
-Protected users land in the Console shell (`frontend/src/console/`). The route-level product surfaces remain under `frontend/src/ide/` and render inside that control-plane frame:
+Protected users land in the Console shell (`frontend/src/console/`). The route-level product surfaces render inside that control-plane frame. The shell has a top bar (brand mark, plan-gate indicator, **Start** button, command palette, theme switch, notification bell, account menu), a left navigation rail, and — on phones and tablets — a slide-out drawer plus a bottom tab bar mirroring the same items.
 
-| Surface | Purpose |
+The primary navigation has five entries:
+
+| Nav item | Purpose |
 | --- | --- |
-| Runs | List runs, inspect status, open plan/live/result views. |
-| Compose | Submit a new spec. |
+| Start | Submit a new spec (the Compose surface). |
+| Work | List runs, inspect status, and open the plan, live, and result views. |
 | Projects | Manage linked repos, architecture, docs, memory, chat, reviews, and settings. |
-| Billing | View plan, quota, invoices, payment method, and upgrade actions. |
-| Org | Manage members, org settings, model matrix, and org provider keys. |
-| Integrations | Manage user SCM/integration credentials. |
-| System/Admin | Super-admin operations, feature flags, notifications, search, benchmark dashboard. |
+| Team | Manage org members and invites. |
+| Setup | Everything else: account, billing and plans, integration credentials, provider keys, org settings and model matrix, deployments, and (for operators) admin and the benchmark dashboard. |
+
+Outside the rail, the top bar also exposes the command palette (⌘K) for jumping to any surface, a notification bell with an unread badge, and a per-decision view. Super-admins additionally get an **Operator** section in the left rail (Admin, Benchmarks).
 
 ## Submit A Run
 

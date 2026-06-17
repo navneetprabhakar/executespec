@@ -31,6 +31,26 @@ PATCH mode is the thin-worker path used by SWE-bench, ProgramBench, and the four
 | Pause/resume | Flag-gated | `v2.pause.enabled` |
 | Verify-before-complete | Flag-gated default OFF | `worker.verify-before-complete.enabled`, `engine/WorkerAgent.java` |
 | Worker background jobs | Flag-gated default OFF | `tool/BackgroundJobTool.java`, `tool/JobRegistry.java` |
+| Local-hands run submit (`localExecution=true`) | Flag-gated default OFF, PAT-only | `worker.local-hands.enabled` (V241), `RunController.submit`, `JwtAuthenticationFilter` |
+| Live cost snapshot with cache/reasoning/call fields | Live | `/api/runs/{id}/cost`, `cost/RunCostTracker` |
+| Durable per-call LLM usage ledger | Live | `cost/RunStepUsageRecorder`, `run_step_usage` (V243) |
+
+## Agent Sessions (CLI / VS Code Control Plane)
+
+`agentsession/` (V240) is a durable conversation protocol for the CLI and VS Code clients, kept deliberately separate from `pipeline_run`:
+
+- Tables `agent_session`, `agent_turn`, `agent_action_event`, `agent_usage_ledger`; REST surface under `/api/agent` (action catalog, sessions, streaming + recorded turns, context resolution, gate decision cards).
+- CLI/VS Code chat prefers `POST /api/agent/sessions/{id}/turns/stream`; the legacy `POST /api/spec/chat` remains only as a compatibility fallback for older servers.
+- Open-ended turns can propose `create_run`, `local_code_task`, or `approve_run` but return them as typed confirmation-required proposals; the session protocol does not implicitly create or approve a run.
+- When a session carries a `projectId`, `SpecChatService` binds the project/code tool surface (`ProjectChatTools`) alongside run-control tools (RL-2026-06-035), so chat can answer grounded project/code questions, not just launch runs.
+
+Billing boundary: run credits are charged only through the plan-approval path. Session usage is metered separately in `agent_usage_ledger` (`billingPolicy=INCLUDED` until a conversation-billing policy exists), so chat cannot silently consume run credits.
+
+## Run Telemetry (W0)
+
+- `GET /api/runs/{id}/cost` returns `schemaVersion=1`, `source`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls`. Live V2 runs read from `RunCostTracker`; terminal/legacy rows expose null for fields older runs do not store.
+- `sse/RunEvent` carries an additive envelope (`schemaVersion=1`, typed `data`) while preserving the legacy string `payload`; `TOKEN_USAGE` and `TOOL_CALL` events expose typed fields (RL-2026-06-043).
+- `RunStepUsageRecorder` writes every successful LLM call to `run_step_usage` (V243) with run/task/provider/model/token/cache/reasoning/cost/call-index plus producer attribution (`agentRole`, `stepId`, `retryOf`); same-provider retries and cross-provider failover rows point back to the original role/step (RL-2026-06-044). Raw provider-usage capture and typed `TOOL_RESULT`/`STEP` events remain W0 follow-ups.
 
 ## Safety Invariants
 
@@ -42,6 +62,7 @@ PATCH mode is the thin-worker path used by SWE-bench, ProgramBench, and the four
 - Run ownership is stamped before async work starts.
 - A high `verifiedScore` must be backed by the ledger; failed reviewer/build/test
   signals cap the headline even when other slots are strong.
+- `localExecution=true` fails closed: rejected entirely while `worker.local-hands.enabled` is OFF, and accepted only from PAT-authenticated (CLI/VS Code) requests, never browser/JWT sessions. Accepted summaries echo `localExecutionAccepted=true`.
 
 ## Current Proof Level
 

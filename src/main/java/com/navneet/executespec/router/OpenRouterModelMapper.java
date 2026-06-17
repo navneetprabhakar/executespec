@@ -41,7 +41,22 @@ public final class OpenRouterModelMapper {
           Map.entry("qwen3-coder", "qwen/qwen3-coder"),
           // 2026-06-09 — Xiaomi MiMo v2.5 Pro for a TB 2.0 benchmark (OpenRouter-only,
           // tools-capable, 1M ctx). Slug verified vs the OpenRouter catalogue 2026-06-09.
-          Map.entry("mimo-v2.5-pro", "xiaomi/mimo-v2.5-pro"));
+          Map.entry("mimo-v2.5-pro", "xiaomi/mimo-v2.5-pro"),
+          // 2026-06-17 — Mistral coding models (OpenRouter-only, ENTERPRISE BYOK). Both expose
+          // tools + tool_choice (verified vs the OpenRouter /endpoints API 2026-06-17). devstral-2
+          // is the agentic SWE coder (262K ctx); codestral-2508 is the cheaper code model (256K).
+          Map.entry("devstral-2", "mistralai/devstral-2512"),
+          Map.entry("codestral-2508", "mistralai/codestral-2508"),
+          // 2026-06-17 — Top coding-model expansion (OpenRouter, ENTERPRISE BYOK). All verified to
+          // expose tools+tool_choice vs the OpenRouter /endpoints API 2026-06-17.
+          // OpenRouter's default latency routing handles tool requests for these models.
+          Map.entry("minimax-m3", "minimax/minimax-m3"),
+          Map.entry("gpt-5.3-codex", "openai/gpt-5.3-codex"),
+          Map.entry("grok-4.20", "x-ai/grok-4.20"),
+          Map.entry("glm-5.2", "z-ai/glm-5.2"),
+          Map.entry("kimi-k2.7-code", "moonshotai/kimi-k2.7-code"),
+          Map.entry("minimax-m2.7", "minimax/minimax-m2.7"),
+          Map.entry("qwen3-coder-next", "qwen/qwen3-coder-next"));
 
   /**
    * @return the OpenRouter slug for a matrix model id
