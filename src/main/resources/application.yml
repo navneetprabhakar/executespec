@@ -561,6 +561,11 @@ model-matrix:
   free-tier:
     provider: deepseek
     model: deepseek-v4-flash-native
+    # Model-level allow-list for the FREE tier (supersedes `provider`): DeepSeek V4 flash + pro.
+    # Edit this list to tune exactly which models free users may run.
+    models:
+      - deepseek-v4-flash-native
+      - deepseek-v4-pro-fw
 
   agent-tier-map:
     OutlinePlannerAgent: PLANNING

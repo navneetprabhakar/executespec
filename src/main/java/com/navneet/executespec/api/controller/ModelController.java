@@ -1,10 +1,9 @@
 package com.navneet.executespec.api.controller;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.router.LlmProvider;
@@ -115,33 +114,25 @@ public class ModelController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     String userId = userDetails.getUser().getId();
     List<UserModel> out = new ArrayList<>();
-    Set<String> seen = new HashSet<>();
-    matrixProps
-        .getProviders()
+    // Enumerate the full configured catalog (every entry under model-matrix.models), not just each
+    // provider's planning/workhorse/lightweight slots — otherwise models not wired into a tier slot
+    // (e.g. the OpenRouter coding models) never reach the picker.
+    modelRegistry
+        .allModels()
         .forEach(
-            (providerKey, models) -> {
-              for (String id :
-                  List.of(
-                      orEmpty(models.getPlanning()),
-                      orEmpty(models.getWorkhorse()),
-                      orEmpty(models.getLightweight()))) {
-                if (id.isEmpty() || !seen.add(id)) {
-                  continue;
-                }
-                out.add(
-                    new UserModel(
-                        id,
-                        providerKey.toUpperCase(),
-                        modelRegistry.displayLabelFor(id),
-                        modelAccess.minTierFor(id),
-                        modelAccess.isAllowed(userId, id)));
-              }
+            (id, cfg) -> {
+              String provider =
+                  cfg.getProvider() != null ? cfg.getProvider().toUpperCase() : "OTHER";
+              out.add(
+                  new UserModel(
+                      id,
+                      provider,
+                      modelRegistry.displayLabelFor(id),
+                      modelAccess.minTierFor(id),
+                      modelAccess.isAllowed(userId, id)));
             });
+    out.sort(Comparator.comparing(UserModel::provider).thenComparing(UserModel::label));
     return ResponseEntity.ok(out);
-  }
-
-  private static String orEmpty(String s) {
-    return s == null ? "" : s;
   }
 
   public record AvailableModelsResponse(List<ProviderEntry> providers) {}
