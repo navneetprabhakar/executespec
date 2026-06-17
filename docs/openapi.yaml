@@ -90,6 +90,8 @@ tags:
     description: Pre-run requirement clarification chat
   - name: SSE
     description: Server-Sent Events for live run updates
+  - name: Agent Sessions
+    description: V240 — CLI / VS Code agent-session protocol (durable conversations, turns, intent, gates)
   - name: Onboarding
     description: Wave 2 — sandbox provisioning + sample specs for first-run activation
   - name: Tier Lifecycle
@@ -287,6 +289,100 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TierPermissions'
+
+  /auth/me/provider-preference:
+    get:
+      tags: [Auth]
+      summary: Get cross-surface AI provider preference (V242)
+      description: >
+        Returns the account-scoped default AI provider (`app_user.preferred_ai_provider`)
+        shared by web, CLI, and VS Code. `provider` is null when no preference has been set
+        (callers then fall back to project / YAML defaults).
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderPreferenceResponse'
+    put:
+      tags: [Auth]
+      summary: Set cross-surface AI provider preference (V242)
+      description: >
+        Updates the account-scoped default AI provider. The legacy `GOOGLE` alias is accepted
+        and rewritten to `GEMINI` before persistence. An unknown or blank provider is rejected
+        with 400. Explicit per-run / per-chat provider input still wins and is remembered here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderPreferenceRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderPreferenceResponse'
+        '400':
+          description: provider is required or unknown
+
+  /auth/me/tokens:
+    post:
+      tags: [Auth]
+      summary: Create a Personal Access Token (V215)
+      description: >
+        Mints a Personal Access Token for programmatic auth (CLI / VS Code / CI). The plaintext
+        credential (prefix `es_pat_…`) is returned exactly once in the `token` field of this
+        create response and is never persisted or retrievable again — only its SHA-256 hash is
+        stored. Clients present it as `Authorization: Bearer es_pat_…` and it resolves to the
+        same identity (roles + tenant) a JWT would. Per-tier active-token cap (FREE 1, others 3)
+        is enforced by auto-revoking the least-recently-used token — creation never fails.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePatRequest'
+      responses:
+        '201':
+          description: Token created — plaintext returned once in `token`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePatResponse'
+        '400':
+          description: Token name is required or expiresInDays must be positive
+    get:
+      tags: [Auth]
+      summary: List Personal Access Tokens (V215)
+      description: >
+        Lists the authenticated user's Personal Access Tokens, newest first. Secret-free — the
+        plaintext is never returned after creation; includes revoked rows.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PatDto'
+
+  /auth/me/tokens/{tokenId}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a Personal Access Token (V215)
+      description: Revokes one of the authenticated user's Personal Access Tokens. Idempotent.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Token revoked
+        '404':
+          description: Token not found
 
   # ──────────────────────────────────────────────────
   # USER SETTINGS
@@ -515,6 +611,20 @@ paths:
     post:
       tags: [Runs]
       summary: Submit new run
+      description: >
+        Submits a run (202). Setting `localExecution=true` requests CLI local-hands mode and is
+        only honoured for PAT (CLI / VS Code) sessions while the `worker.local-hands.enabled`
+        feature flag is on — a browser/JWT session is rejected with 403, and any session is
+        rejected with 409 when the flag is off. The response echoes `localExecutionAccepted=true`
+        when the backend accepted LOCAL mode. A repeated `Idempotency-Key` header returns the
+        original run instead of creating a duplicate.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: A repeated submit carrying the same key returns the original run (no duplicate, no double-charge).
       requestBody:
         required: true
         content:
@@ -528,6 +638,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunSummary'
+        '403':
+          description: localExecution=true requires a PAT (CLI / VS Code) session
+        '409':
+          description: localExecution=true but worker.local-hands.enabled is off
 
   /runs/{runId}:
     get:
@@ -703,6 +817,11 @@ paths:
     get:
       tags: [Runs]
       summary: Get live cost estimate
+      description: >
+        Live token + cost snapshot. W0 telemetry (RL-2026-06-011): live V2 in-progress responses
+        (`source=live_tracker`) include cache, reasoning, and call-count fields from the in-memory
+        `RunCostTracker`; terminal (`source=stored_total`) and legacy (`source=legacy_estimator`)
+        responses return null for those fields. `schemaVersion` is always present.
       parameters:
         - $ref: '#/components/parameters/runId'
       responses:
@@ -717,6 +836,33 @@ paths:
                   costUsd:
                     type: number
                     format: double
+                  schemaVersion:
+                    type: integer
+                    description: Cost-envelope schema version (currently 1).
+                  source:
+                    type: string
+                    enum: [live_tracker, stored_total, legacy_estimator]
+                    description: Where the snapshot came from — live V2 tracker, stored DB totals (terminal), or the legacy estimator.
+                  inputTokens:
+                    type: integer
+                  outputTokens:
+                    type: integer
+                  cacheReadTokens:
+                    type: integer
+                    nullable: true
+                    description: Cache-read input tokens. Null outside live V2 (source != live_tracker).
+                  cacheWriteTokens:
+                    type: integer
+                    nullable: true
+                    description: Cache-write input tokens. Null outside live V2 (source != live_tracker).
+                  reasoningTokens:
+                    type: integer
+                    nullable: true
+                    description: Reasoning / thinking tokens (Gemini thinking_tokens, OpenAI/DeepSeek reasoning_tokens). Null outside live V2.
+                  calls:
+                    type: integer
+                    nullable: true
+                    description: Count of LLM calls observed so far. Null outside live V2 (source != live_tracker).
 
   /runs/{runId}/project:
     patch:
@@ -1047,6 +1193,223 @@ paths:
                 properties:
                   token:
                     type: string
+
+  # ──────────────────────────────────────────────────
+  # AGENT SESSIONS (V240 — CLI / VS Code agent protocol)
+  # ──────────────────────────────────────────────────
+  /agent/sessions:
+    post:
+      tags: [Agent Sessions]
+      summary: Create an agent session
+      description: >
+        Creates a durable CLI / VS Code conversation shell. This is NOT a billable
+        `pipeline_run` — open-ended conversation can inspect, interpret, or propose work
+        without becoming an execution run. An explicit `defaultProvider` updates the
+        cross-surface account provider preference; omitted input resolves from it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSessionResponse'
+    get:
+      tags: [Agent Sessions]
+      summary: List the caller's agent sessions
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentSessionResponse'
+
+  /agent/sessions/{sessionId}:
+    get:
+      tags: [Agent Sessions]
+      summary: Get one agent session
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSessionResponse'
+
+  /agent/sessions/{sessionId}/events:
+    get:
+      tags: [Agent Sessions]
+      summary: List the session's append-only action events
+      description: >
+        Returns the persisted `agent_action_event` rows for the session (action + intent-decision
+        history). This is a plain JSON list, not an SSE stream — live token / tool streaming is on
+        `POST /agent/sessions/{sessionId}/turns/stream`.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentActionEvent'
+
+  /agent/sessions/{sessionId}/turns:
+    post:
+      tags: [Agent Sessions]
+      summary: Record a conversational turn (non-streaming)
+      description: >
+        Records one user-visible turn and returns the deterministic intent decision. Cost-bearing
+        or destructive proposals (create/approve a run, local code task) are returned as typed
+        confirmation-required actions and are never executed implicitly from ambiguous chat text.
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnResponse'
+
+  /agent/sessions/{sessionId}/turns/stream:
+    post:
+      tags: [Agent Sessions]
+      summary: Stream a conversational turn (SSE)
+      description: |
+        Server-Sent Events stream for a streaming chat turn. Records a durable turn + usage
+        (`agent_usage_ledger`, `billingPolicy=INCLUDED`). Requires the `spec.chat.enabled` feature
+        flag for real chat output; when off, the stream still completes with an explanatory `done`.
+        When the session carries a `projectId`, the project/code tool surface is bound so the turn
+        can answer grounded project questions in addition to run-control proposals.
+        Event names: `ack`, `token` ({delta}), `tool_call` ({tool, args, id}),
+        `tool_result` ({id, result}), `done` ({session_id, turn_id, turn_count, cost_usd,
+        input_tokens, output_tokens, reasoning_tokens}), `error` ({session_id, turn_id, message}).
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamTurnRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /agent/actions:
+    get:
+      tags: [Agent Sessions]
+      summary: List the agent action catalog
+      description: >
+        Static action descriptors used to ground CLI / VS Code intent routing (e.g. `chat_answer`,
+        `list_gates`, `inspect_gate`, `approve_run`, `reject_run`, `create_run`, `local_code_task`,
+        `resolve_project`).
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentActionDescriptor'
+
+  /agent/intent/interpret:
+    post:
+      tags: [Agent Sessions]
+      summary: Interpret a message into a typed intent decision
+      description: >
+        Conservative rule-based first-pass intent classification. Returns the intent, a confidence,
+        and — for cost-bearing or destructive intents — a typed proposed action that requires an
+        explicit follow-up confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterpretIntentRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentDecision'
+
+  /agent/context/resolve:
+    post:
+      tags: [Agent Sessions]
+      summary: Resolve the current repository to a linked project
+      description: Maps a git remote / repo name to a linked ExecuteSpec project + repo, when one matches.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContextResolveRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextResolveResponse'
+
+  /agent/gates:
+    get:
+      tags: [Agent Sessions]
+      summary: List plan gates awaiting approval
+      description: Returns decision cards for runs paused at the plan-approval gate.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GateDecisionCard'
+
+  /agent/gates/{runId}:
+    get:
+      tags: [Agent Sessions]
+      summary: Get the plan-gate decision card for one run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GateDecisionCard'
 
   # ──────────────────────────────────────────────────
   # PREVIEW
@@ -3160,6 +3523,12 @@ components:
       schema:
         type: string
         format: uuid
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
 
   schemas:
     RegisterRequest:
@@ -3286,6 +3655,73 @@ components:
         message:
           type: string
 
+    ProviderPreferenceRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          description: "Canonical values ANTHROPIC / OPENAI / GEMINI (plus the BYOK routes OPENROUTER / DEEPSEEK / FIREWORKS). GOOGLE is accepted as input and rewritten to GEMINI before persistence."
+          enum: [ANTHROPIC, OPENAI, GEMINI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
+
+    ProviderPreferenceResponse:
+      type: object
+      properties:
+        provider:
+          type: string
+          nullable: true
+          description: The persisted canonical provider, or null when no preference is set.
+          enum: [ANTHROPIC, OPENAI, GEMINI, OPENROUTER, DEEPSEEK, FIREWORKS]
+
+    CreatePatRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          description: Human label for the token (required, non-blank).
+        expiresInDays:
+          type: integer
+          nullable: true
+          description: Optional positive number of days until expiry. Omit / null for a token that never expires.
+
+    CreatePatResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The plaintext credential (`es_pat_…`). Returned exactly once, here, and never retrievable again.
+        meta:
+          $ref: '#/components/schemas/PatDto'
+
+    PatDto:
+      type: object
+      description: Secret-free view of a Personal Access Token.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tokenPrefix:
+          type: string
+          description: Display-only prefix of the plaintext (e.g. `es_pat_AbCdEf`); not the full secret.
+        scopes:
+          type: string
+          description: Currently always `full`.
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        revoked:
+          type: boolean
+
     RunRequest:
       type: object
       required: [userRequest]
@@ -3313,6 +3749,13 @@ components:
           enum: [FRESH, EXISTING]
         repoUrl:
           type: string
+        localExecution:
+          type: boolean
+          description: >
+            P3 local-hands (RL-2026-06-014) — request CLI local-hands mode (worker tool calls
+            proxied to the caller's machine; clone / smoke / reviewer / auto-push skipped).
+            PAT-only and gated by the `worker.local-hands.enabled` flag; rejected for browser/JWT
+            sessions (403) and when the flag is off (409). Transient (not persisted). Default false.
 
     RunSummary:
       type: object
@@ -3354,6 +3797,14 @@ components:
           type: string
           nullable: true
           description: "REALTIME or BATCH. Null for pre-V61 runs or runs not yet approved."
+        localExecutionRequested:
+          type: boolean
+          nullable: true
+          description: CLI local-hands handshake — true only on submit/detail responses where the client requested local tool execution for this run.
+        localExecutionAccepted:
+          type: boolean
+          nullable: true
+          description: CLI local-hands handshake — true only when the backend accepted LOCAL mode and will proxy worker tool calls back to the client.
 
     RunDetail:
       type: object
@@ -3593,3 +4044,315 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    # ──────────────────────────────────────────────────
+    # AGENT SESSIONS (V240)
+    # ──────────────────────────────────────────────────
+    RepoContext:
+      type: object
+      description: Client-supplied snapshot of the caller's working tree.
+      properties:
+        cwdName:
+          type: string
+        gitRemote:
+          type: string
+        branch:
+          type: string
+        changedFiles:
+          type: array
+          items:
+            type: string
+        detectedStack:
+          type: array
+          items:
+            type: string
+
+    ClientCapabilities:
+      type: object
+      properties:
+        localTools:
+          type: boolean
+        interactive:
+          type: boolean
+        canRenderDiff:
+          type: boolean
+        canRenderTui:
+          type: boolean
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Optional client-supplied session id.
+        projectId:
+          type: string
+        repoRemote:
+          type: string
+        repoRootHash:
+          type: string
+        repoContext:
+          $ref: '#/components/schemas/RepoContext'
+        surface:
+          type: string
+          description: Client surface, e.g. CLI or VSCODE.
+        title:
+          type: string
+        defaultProvider:
+          type: string
+          description: Explicit provider also updates the cross-surface account preference. GOOGLE is accepted and rewritten to GEMINI.
+        defaultModel:
+          type: string
+        defaultExecutionMode:
+          type: string
+          description: e.g. LOCAL or CLOUD.
+        approvalPolicy:
+          type: string
+          description: e.g. PLAN.
+
+    AgentSessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        repoRemote:
+          type: string
+          nullable: true
+        surface:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        defaultProvider:
+          type: string
+          nullable: true
+        defaultModel:
+          type: string
+          nullable: true
+        defaultExecutionMode:
+          type: string
+        approvalPolicy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AgentActionEvent:
+      type: object
+      description: One append-only agent-session action / intent-decision event.
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        turnId:
+          type: string
+          nullable: true
+        type:
+          type: string
+        payloadJson:
+          type: string
+          nullable: true
+          description: Free-form JSON payload (stored as jsonb).
+        createdAt:
+          type: string
+          format: date-time
+
+    TurnRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        repoContext:
+          $ref: '#/components/schemas/RepoContext'
+        clientCapabilities:
+          $ref: '#/components/schemas/ClientCapabilities'
+
+    StreamTurnRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        conversation:
+          type: array
+          description: Optional prior conversation; each item is a free-form message object (e.g. {role, content}).
+          items:
+            type: object
+            additionalProperties: true
+        repoContext:
+          $ref: '#/components/schemas/RepoContext'
+        clientCapabilities:
+          $ref: '#/components/schemas/ClientCapabilities'
+        providerOverride:
+          type: string
+
+    TypedAction:
+      type: object
+      properties:
+        type:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        requiresConfirmation:
+          type: boolean
+        billingImpact:
+          type: string
+        confirmationPrompt:
+          type: string
+          nullable: true
+
+    IntentDecision:
+      type: object
+      properties:
+        intent:
+          type: string
+        confidence:
+          type: number
+          format: double
+        needsConfirmation:
+          type: boolean
+        confirmationPrompt:
+          type: string
+          nullable: true
+        proposedAction:
+          $ref: '#/components/schemas/TypedAction'
+        response:
+          type: string
+          nullable: true
+
+    TurnResponse:
+      type: object
+      properties:
+        turnId:
+          type: string
+        sessionId:
+          type: string
+        sequence:
+          type: integer
+        decision:
+          $ref: '#/components/schemas/IntentDecision'
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AgentActionDescriptor:
+      type: object
+      properties:
+        type:
+          type: string
+        description:
+          type: string
+        requiresConfirmation:
+          type: boolean
+        billingImpact:
+          type: string
+        requiredFields:
+          type: array
+          items:
+            type: string
+
+    InterpretIntentRequest:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        message:
+          type: string
+        projectId:
+          type: string
+        repoContext:
+          $ref: '#/components/schemas/RepoContext'
+        clientCapabilities:
+          $ref: '#/components/schemas/ClientCapabilities'
+
+    ContextResolveRequest:
+      type: object
+      properties:
+        gitRemote:
+          type: string
+        repoName:
+          type: string
+        branch:
+          type: string
+        repoContext:
+          $ref: '#/components/schemas/RepoContext'
+
+    ProjectMatch:
+      type: object
+      properties:
+        projectId:
+          type: string
+        projectName:
+          type: string
+        repoId:
+          type: string
+        repoFullName:
+          type: string
+
+    ContextResolveResponse:
+      type: object
+      properties:
+        project:
+          $ref: '#/components/schemas/ProjectMatch'
+        reason:
+          type: string
+
+    GateDecisionCard:
+      type: object
+      properties:
+        runId:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        projectName:
+          type: string
+          nullable: true
+        title:
+          type: string
+        status:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        estimatedCostUsd:
+          type: number
+          format: double
+          nullable: true
+        hardCapUsd:
+          type: number
+          format: double
+          nullable: true
+        creditsRequired:
+          type: integer
+          nullable: true
+        risk:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+        recommendedAction:
+          type: string
+          nullable: true
+        tasks:
+          type: array
+          items:
+            type: string
