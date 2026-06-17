@@ -1207,8 +1207,33 @@ export default function IdeRunResult() {
         {tab === 'Code' && (
           <div className='ide-split'>
             <div className='ide-split-files' style={{width: filesWidth}}>
-              <div className='ide-side-head'>
-                Explorer {files.length ? `· ${files.length}` : ''}
+              <div
+                className='ide-side-head'
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                }}
+              >
+                <span>Explorer {files.length ? `· ${files.length}` : ''}</span>
+                {files.length > 0 && (
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '2px 8px', fontSize: 11}}
+                    disabled={busy === 'code'}
+                    title='Download the generated code as a zip'
+                    onClick={() =>
+                      action(
+                        'code',
+                        () => api.downloadRunCode(runId, 'repo'),
+                        () => 'Code downloaded.',
+                      )
+                    }
+                  >
+                    {busy === 'code' ? '…' : '⬇ Zip'}
+                  </button>
+                )}
               </div>
               {files.length ? (
                 <IdeFileTree files={files} activePath={activeFile} onOpen={openFile} />

@@ -244,12 +244,14 @@ public class ProjectArchitectureController {
   //       to render the file tree.
   //
   //   GET /api/projects/{projectId}/repos/{repoId}/file?path=<rel>
-  //     → return the raw text content of one file. Uses the caller's
-  //       per-user PAT (preferred) or falls back to the system PAT,
-  //       same resolution order as the planner / worker use elsewhere.
+  //     → return the raw text content of one file. Reads through the actor
+  //       who linked the repo (projectRepoReadPat), falling back to the
+  //       caller's own PAT — so external invitees without direct GitHub
+  //       access to the host repo still see source. There is no system PAT.
   //
-  // Both go through ProjectAccessGuard so cross-org reads are blocked at
-  // the same line every other project-scoped endpoint uses.
+  // Both go through ProjectAccessGuard.assertCanRead, which admits the
+  // owning org AND cross-org ProjectMembers (read); write paths stay
+  // owner/org-admin. Rationale: RL-2026-06-047.
 
   public record RepoFileListDto(String repoFullName, String defaultBranch, List<String> files) {}
 

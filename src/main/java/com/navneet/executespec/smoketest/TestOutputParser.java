@@ -39,6 +39,17 @@ public final class TestOutputParser {
           "Tests"
               + " run:\\s*(\\d+),\\s*Failures:\\s*(\\d+),\\s*Errors:\\s*(\\d+)(?:,\\s*Skipped:\\s*(\\d+))?");
 
+  // JUnit XML reports (surefire target/surefire-reports/TEST-*.xml, gradle build/test-results/…):
+  // <testsuite ... tests="N" failures="F" errors="E" skipped="S" ...>. The reliable count when the
+  // stdout summary is suppressed (e.g. `mvn -q test` — RL-2026-06-049). Attributes appear in any
+  // order, so each is matched independently within the <testsuite> open tag.
+  private static final Pattern XML_TESTS = Pattern.compile("<testsuite\\b[^>]*\\btests=\"(\\d+)\"");
+  private static final Pattern XML_FAIL =
+      Pattern.compile("<testsuite\\b[^>]*\\bfailures=\"(\\d+)\"");
+  private static final Pattern XML_ERR = Pattern.compile("<testsuite\\b[^>]*\\berrors=\"(\\d+)\"");
+  private static final Pattern XML_SKIP =
+      Pattern.compile("<testsuite\\b[^>]*\\bskipped=\"(\\d+)\"");
+
   // cargo: "test result: ok. 5 passed; 0 failed; 1 ignored; ..."  (one per test binary)
   private static final Pattern CARGO_LINE =
       Pattern.compile(
@@ -95,6 +106,35 @@ public final class TestOutputParser {
       fail += Integer.parseInt(m.group(2));
       err += Integer.parseInt(m.group(3));
       skip += m.group(4) != null ? Integer.parseInt(m.group(4)) : 0;
+    }
+    if (!any) return Optional.empty();
+    int passed = Math.max(0, total - fail - err - skip);
+    return Optional.of(summary(total, passed, fail, err, skip));
+  }
+
+  /**
+   * Parse JUnit XML report file contents (surefire/gradle {@code <testsuite tests=.. failures=..
+   * errors=.. skipped=..>}). This is the trustworthy count when the stdout "Tests run:" summary is
+   * suppressed by {@code mvn -q test} (RL-2026-06-049): without it a run whose tests <i>failed</i>
+   * was scored as UNKNOWN (no penalty, no failed-tests trust cap). One {@code <testsuite>} per file
+   * (surefire writes one per class); sums across files. Empty when no parseable {@code
+   * <testsuite>}.
+   */
+  public static Optional<TestExecutionSummary> parseJunitXmlReports(java.util.List<String> xmls) {
+    boolean any = false;
+    int total = 0, fail = 0, err = 0, skip = 0;
+    for (String xml : xmls) {
+      if (xml == null) continue;
+      Matcher mt = XML_TESTS.matcher(xml);
+      if (!mt.find()) continue;
+      any = true;
+      total += Integer.parseInt(mt.group(1));
+      Matcher mf = XML_FAIL.matcher(xml);
+      Matcher me = XML_ERR.matcher(xml);
+      Matcher ms = XML_SKIP.matcher(xml);
+      fail += mf.find() ? Integer.parseInt(mf.group(1)) : 0;
+      err += me.find() ? Integer.parseInt(me.group(1)) : 0;
+      skip += ms.find() ? Integer.parseInt(ms.group(1)) : 0;
     }
     if (!any) return Optional.empty();
     int passed = Math.max(0, total - fail - err - skip);

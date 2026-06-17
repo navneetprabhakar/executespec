@@ -84,3 +84,5 @@ Project sharing has two paths:
 - Public read-only share link with scope validation.
 
 The org external-sharing flag gates the cross-org invite path, not public share links.
+
+Once an external invitee accepts, the host project's surfaces work for them, not just the project shell: the Work tab lists the project's runs, the Code tab browses linked repository source (read through the host/linking user's repository credentials, so private repos resolve), and project Chat runs at the host project's entitlement. The invitee's personal billing tier is not changed; access falls away if the membership is removed. `PROJECT_VIEWER` stays read-only — write actions require write-level access.
