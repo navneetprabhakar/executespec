@@ -1,0 +1,38 @@
+{
+  "label": "deepseek-v4-flash",
+  "band": "low",
+  "rid": "b435ecf8-b720-4727-98a8-3ff79902309f",
+  "pinned": "deepseek-v4-flash-native",
+  "provider": "DEEPSEEK",
+  "status": "COMPLETE",
+  "planStrategy": "SINGLE_SHOT",
+  "tasksTotal": 1,
+  "tasksDone": 1,
+  "verifiedScore": 100,
+  "cost": 0.004348,
+  "startedAt": "2026-06-17T17:36:47.268476Z",
+  "completedAt": "2026-06-17T17:37:56.153453Z",
+  "durationSec": 69,
+  "workerModelLogged": "deepseek-v4-flash-native",
+  "actualCalls": " 17 model=deepseek-v4-flash-native;",
+  "pinOK": "yes"
+}
+{
+  "label": "deepseek-v4-pro",
+  "band": "low",
+  "rid": "2e1581f4-5c2a-47ef-bba6-f7215417fb46",
+  "pinned": "deepseek-v4-pro",
+  "provider": "OPENROUTER",
+  "status": "COMPLETE",
+  "planStrategy": "SINGLE_SHOT",
+  "tasksTotal": 1,
+  "tasksDone": 1,
+  "verifiedScore": 100,
+  "cost": 0.127654,
+  "startedAt": "2026-06-17T17:36:47.262431Z",
+  "completedAt": "2026-06-17T17:38:27.707499Z",
+  "durationSec": 100,
+  "workerModelLogged": "deepseek-v4-pro",
+  "actualCalls": " 6 model=claude-sonnet-4-6; 6 model=deepseek-v4-pro;",
+  "pinOK": "yes"
+}
