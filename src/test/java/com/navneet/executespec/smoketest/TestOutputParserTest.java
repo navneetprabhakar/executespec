@@ -103,4 +103,37 @@ class TestOutputParserTest {
     assertTrue(TestOutputParser.parse(Framework.CARGO, "error[E0433]", 101).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.UNKNOWN, "5 passed", 0).isEmpty());
   }
+
+  // ── JUnit XML report fallback (RL-2026-06-049) ────────────────────────────────
+  // The `mvn -q test` regression: stdout has no "Tests run:" line, so the stdout parser returns
+  // empty and a run whose tests FAILED was scored UNKNOWN (no penalty / no failed-tests cap). The
+  // surefire/gradle TEST-*.xml reports are written regardless and carry the real counts.
+
+  @Test
+  void junit_xml_reports_sum_across_files() {
+    String a = "<testsuite name=\"FooTest\" tests=\"4\" failures=\"0\" errors=\"0\" skipped=\"0\">";
+    String b = "<testsuite name=\"BarTest\" tests=\"3\" failures=\"1\" errors=\"1\" skipped=\"1\">";
+    var s = ok(TestOutputParser.parseJunitXmlReports(java.util.List.of(a, b)));
+    assertEquals(7, s.getTotalTests());
+    assertEquals(1, s.getFailed());
+    assertEquals(1, s.getErrors());
+    assertEquals(1, s.getSkipped());
+    assertEquals(4, s.getPassed()); // 7 - 1 fail - 1 err - 1 skip
+  }
+
+  @Test
+  void junit_xml_reports_attribute_order_independent() {
+    String xml = "<testsuite failures=\"2\" name=\"X\" skipped=\"0\" tests=\"5\" errors=\"0\">";
+    var s = ok(TestOutputParser.parseJunitXmlReports(java.util.List.of(xml)));
+    assertEquals(5, s.getTotalTests());
+    assertEquals(2, s.getFailed());
+    assertEquals(3, s.getPassed());
+  }
+
+  @Test
+  void junit_xml_reports_empty_when_no_testsuite() {
+    assertTrue(TestOutputParser.parseJunitXmlReports(java.util.List.of()).isEmpty());
+    assertTrue(
+        TestOutputParser.parseJunitXmlReports(java.util.List.of("<not-a-report/>")).isEmpty());
+  }
 }

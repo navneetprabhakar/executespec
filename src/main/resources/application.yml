@@ -320,7 +320,7 @@ model-matrix:
         cached-input-per-1m: 0.16
         output-per-1m: 4.00
       notes: "Fireworks accounts/fireworks/models/kimi-k2p6 Standard path — ENTERPRISE BYOK. Priority/Fast tiers are more expensive and need route-level policy before exposure."
-    glm-5.1-fw:
+    "[glm-5.1-fw]": # bracket-wrapped: dotted key (5.1) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
       context-limit: 202000
@@ -331,6 +331,105 @@ model-matrix:
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
       notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+    devstral-2:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Devstral 2 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.40
+        cached-input-per-1m: 0.40
+        output-per-1m: 2.00
+      notes: "OpenRouter mistralai/devstral-2512 — Mistral agentic SWE coder (262K ctx); tools+tool_choice verified vs OpenRouter /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input (no Mistral prompt-cache via OpenRouter)."
+    codestral-2508:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 256000
+      max-output-tokens: 32000
+      display-label: "Codestral 2508 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.30
+        output-per-1m: 0.90
+      notes: "OpenRouter mistralai/codestral-2508 — Mistral code model (256K ctx); tools+tool_choice verified vs OpenRouter /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    minimax-m3:
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 524288
+      max-output-tokens: 32000
+      display-label: "MiniMax M3 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.30
+        output-per-1m: 1.20
+      notes: "OpenRouter minimax/minimax-m3 — 80.5% SWE-bench Verified, top open price/perf; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    "[gpt-5.3-codex]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 400000
+      max-output-tokens: 32000
+      display-label: "GPT-5.3 Codex (OpenRouter)"
+      pricing:
+        input-per-1m: 1.75
+        cached-input-per-1m: 1.75
+        output-per-1m: 14.00
+      notes: "OpenRouter openai/gpt-5.3-codex — top agentic coder (~85% SWE-bench Verified); tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. Premium output price. cached=input."
+    "[grok-4.20]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 2000000
+      max-output-tokens: 32000
+      display-label: "Grok 4.20 (OpenRouter)"
+      pricing:
+        input-per-1m: 1.25
+        cached-input-per-1m: 0.20
+        output-per-1m: 2.50
+      notes: "OpenRouter x-ai/grok-4.20 — frontier reasoning + agentic tool use, 2M ctx; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cache-read $0.20/1M."
+    "[glm-5.2]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "GLM 5.2 (OpenRouter)"
+      pricing:
+        input-per-1m: 1.40
+        cached-input-per-1m: 1.40
+        output-per-1m: 4.40
+      notes: "OpenRouter z-ai/glm-5.2 — coding-first GLM-5 flagship, 1M ctx; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    "[kimi-k2.7-code]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 16384
+      display-label: "Kimi K2.7 Code (OpenRouter)"
+      pricing:
+        input-per-1m: 0.74
+        cached-input-per-1m: 0.74
+        output-per-1m: 3.50
+      notes: "OpenRouter moonshotai/kimi-k2.7-code — coding-specialized 1T-MoE (supersedes K2.6); tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    "[minimax-m2.7]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      context-limit: 196608
+      max-output-tokens: 32000
+      display-label: "MiniMax M2.7 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.25
+        cached-input-per-1m: 0.25
+        output-per-1m: 1.00
+      notes: "OpenRouter minimax/minimax-m2.7 — cheapest frontier-class agentic model; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    qwen3-coder-next:
+      provider: openrouter
+      chain-tier: UTILITY
+      context-limit: 262144
+      max-output-tokens: 32000
+      display-label: "Qwen3-Coder-Next (OpenRouter)"
+      pricing:
+        input-per-1m: 0.11
+        cached-input-per-1m: 0.11
+        output-per-1m: 0.80
+      notes: "OpenRouter qwen/qwen3-coder-next — 80B-A3B coding agent, cheapest viable coder; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
     "[kimi-k2.6]":
       provider: openrouter
       chain-tier: CAPABLE

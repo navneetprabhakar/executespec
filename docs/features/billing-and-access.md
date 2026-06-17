@@ -25,13 +25,19 @@ Runs consume monthly quota at submission/approval boundaries depending on the fl
 | Org/user API keys | Live | `OrgService`, `AuthController`, `OrgController` |
 | Personal access tokens | Live | `PersonalAccessTokenService` |
 | External sharing flag | Live | `Org.external_sharing_enabled` |
+| External-invite effective entitlement | Live | `entitlements/EntitlementResolver`, `TierEnforcementService`, `ProjectMemberRepository` |
+| Account-scoped provider preference | Live | `app_user.preferred_ai_provider` (V242), `/api/auth/me/provider-preference` |
+| Agent-session usage ledger (separate from run credits) | Live | `agent_usage_ledger` (V240), `agentsession/` |
 | Rate limiting | Live | `ratelimit/RateLimitFilter` |
 
 ## Access Rules
 
-- JWT and PAT auth resolve to the same `AppUserDetails` model.
+- JWT and PAT auth resolve to the same `AppUserDetails` model, but the request is tagged JWT vs PAT so server-only capabilities can distinguish them.
+- `localExecution=true` run submit is PAT-only and gated behind `worker.local-hands.enabled` (default OFF); browser/JWT sessions are rejected because the web UI cannot enforce local command/file approvals.
 - Project/run write actions must use write guards, not read guards.
-- Cross-org project members can read shared projects according to their project role.
+- Cross-org project members can read shared projects (and the project's runs, repos, and chat) according to their project role.
+- Accepted external `ProjectMember` collaborators inherit the host project org's highest active tier as an **effective entitlement** through `EntitlementResolver`/`TierEnforcementService`; their personal `app_user.tier` is not mutated, so removing the membership automatically falls back to their own tier.
+- Provider preference is account-scoped (`app_user.preferred_ai_provider`); explicit per-run/chat provider input wins and is remembered.
 - Org settings and model matrix changes are ORG_ADMIN or SUPER_ADMIN operations.
 - Enterprise-only aggregator/org key settings must remain tier-gated.
 
