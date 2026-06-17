@@ -36,6 +36,7 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -64,6 +65,7 @@ public class AgentSessionService {
   private final PipelineRunRepository pipelineRunRepo;
   private final ObjectMapper objectMapper;
   private final AiProviderPreferenceService aiProviderPreferenceService;
+  private final ModelAccessService modelAccessService;
 
   @Transactional
   public AgentSessionResponse createSession(CreateSessionRequest request, AppUserDetails user) {
@@ -92,6 +94,9 @@ public class AgentSessionService {
         requestedProvider != null
             ? aiProviderPreferenceService.updatePreferredProvider(user, requestedProvider)
             : aiProviderPreferenceService.preferredProvider(user);
+    // Tier gate: reject a free-tier session that pins a premium default model (selectable
+    // client-side).
+    modelAccessService.assertModelAllowed(user.getUser().getId(), blankToNull(req.defaultModel()));
     Instant now = Instant.now();
     AgentSession session =
         AgentSession.builder()

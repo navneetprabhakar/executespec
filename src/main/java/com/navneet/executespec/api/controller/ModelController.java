@@ -1,14 +1,19 @@
 package com.navneet.executespec.api.controller;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +31,7 @@ public class ModelController {
 
   private final ModelMatrixProperties matrixProps;
   private final ModelRegistry modelRegistry;
+  private final ModelAccessService modelAccess;
 
   // Task 15 (2026-05-01 fix list): post-V120 the canonical provider key
   // is "gemini" (was "google" pre-migration); the label map lacked the
@@ -98,9 +104,52 @@ public class ModelController {
     return ResponseEntity.ok(new AvailableModelsResponse(providers));
   }
 
+  /**
+   * The catalog as seen by the authenticated user: every model flagged {@code available} against
+   * the caller's tier. The whole list is returned so the client picker can show locked models too;
+   * the free tier gets only its provider's models marked available (others are selectable in the UI
+   * but rejected at run/session submit).
+   */
+  @GetMapping("/me")
+  public ResponseEntity<List<UserModel>> myModels(
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    String userId = userDetails.getUser().getId();
+    List<UserModel> out = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    matrixProps
+        .getProviders()
+        .forEach(
+            (providerKey, models) -> {
+              for (String id :
+                  List.of(
+                      orEmpty(models.getPlanning()),
+                      orEmpty(models.getWorkhorse()),
+                      orEmpty(models.getLightweight()))) {
+                if (id.isEmpty() || !seen.add(id)) {
+                  continue;
+                }
+                out.add(
+                    new UserModel(
+                        id,
+                        providerKey.toUpperCase(),
+                        modelRegistry.displayLabelFor(id),
+                        modelAccess.minTierFor(id),
+                        modelAccess.isAllowed(userId, id)));
+              }
+            });
+    return ResponseEntity.ok(out);
+  }
+
+  private static String orEmpty(String s) {
+    return s == null ? "" : s;
+  }
+
   public record AvailableModelsResponse(List<ProviderEntry> providers) {}
 
   public record ProviderEntry(String id, String label, String tag, List<ModelEntry> models) {}
 
   public record ModelEntry(String id, String tier, String label) {}
+
+  public record UserModel(
+      String id, String provider, String label, String minTier, boolean available) {}
 }

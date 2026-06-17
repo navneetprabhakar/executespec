@@ -30,6 +30,7 @@ import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.integration.scm.ScmPushService;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -70,6 +71,7 @@ public class RunController {
   private final GcsWorkspaceStore gcsWorkspaceStore;
   private final AgentMessageRepository agentMessageRepository;
   private final TierEnforcementService tierEnforcementService;
+  private final ModelAccessService modelAccessService;
   private final UsageTrackingService usageTrackingService;
   private final RunVisibilitySpec runVisibilitySpec;
   private final RunAccessGuard guard;
@@ -163,6 +165,11 @@ public class RunController {
         }
       }
     }
+
+    // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
+    // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
+    // rejected model never burns the user's monthly quota.
+    modelAccessService.assertModelAllowed(userId, req.modelName());
 
     // SDET 2026-05-16 (BUG-006) — increment monthly counter at submit-time. The previous
     // `assertCanSubmitRun` was a non-incrementing probe; combined with
