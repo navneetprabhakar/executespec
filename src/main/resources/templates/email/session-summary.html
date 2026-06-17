@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+  <head>
+    <meta charset="utf-8" />
+    <title>ExecuteSpec session summary</title>
+  </head>
+  <body style="font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;background:#f8fafc;margin:0;padding:24px">
+    <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+      <div style="background:#0f172a;color:#fff;padding:20px 24px">
+        <div style="font-weight:700;font-size:18px">ExecuteSpec</div>
+        <div style="color:#94a3b8;font-size:13px">Local session summary</div>
+      </div>
+      <div style="padding:24px">
+        <p>Hi <span th:text="${firstName}">there</span>,</p>
+        <p>Here's the summary of your local working-tree session:</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0">
+          <tr>
+            <td style="padding:8px 0;color:#475569">Tasks run</td>
+            <td style="padding:8px 0;text-align:right;font-weight:600" th:text="${taskCount}">0</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#475569;border-top:1px solid #e2e8f0">Total cost</td>
+            <td style="padding:8px 0;text-align:right;font-weight:600;border-top:1px solid #e2e8f0"
+                th:text="'$' + ${#numbers.formatDecimal(costUsd, 1, 4)}">$0.0000</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#475569;border-top:1px solid #e2e8f0">Input tokens</td>
+            <td style="padding:8px 0;text-align:right;border-top:1px solid #e2e8f0"
+                th:text="${#numbers.formatInteger(inputTokens, 0, 'COMMA')}">0</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#475569;border-top:1px solid #e2e8f0">Output tokens</td>
+            <td style="padding:8px 0;text-align:right;border-top:1px solid #e2e8f0"
+                th:text="${#numbers.formatInteger(outputTokens, 0, 'COMMA')}">0</td>
+          </tr>
+        </table>
+        <p style="color:#64748b;font-size:13px">
+          These ran on your machine via the ExecuteSpec CLI (local-hands). You get this one summary
+          instead of an email per task.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

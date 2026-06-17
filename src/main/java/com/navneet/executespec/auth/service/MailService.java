@@ -388,6 +388,30 @@ public class MailService {
     sendHtml(toEmail, subject, "email/run-completion", ctx);
   }
 
+  /**
+   * #2b: ONE per-session usage summary (sent at chat-session exit), replacing the per-task run
+   * completion email for local-hands runs. The CLI rolls up the totals and posts them; we just send.
+   */
+  @Async
+  public void sendSessionSummaryEmail(
+      String toEmail,
+      String firstName,
+      int taskCount,
+      double costUsd,
+      long inputTokens,
+      long outputTokens) {
+    Context ctx = new Context();
+    ctx.setVariable("firstName", firstName != null && !firstName.isBlank() ? firstName : "there");
+    ctx.setVariable("taskCount", taskCount);
+    ctx.setVariable("costUsd", costUsd);
+    ctx.setVariable("inputTokens", inputTokens);
+    ctx.setVariable("outputTokens", outputTokens);
+    ctx.setVariable("baseUrl", baseUrl);
+    String subject =
+        "Your ExecuteSpec session — " + taskCount + (taskCount == 1 ? " task" : " tasks");
+    sendHtml(toEmail, subject, "email/session-summary", ctx);
+  }
+
   @Async
   public void sendBonusRunsEmail(String toEmail, String firstName, int quantity) {
     Context ctx = new Context();
