@@ -131,6 +131,13 @@ public class WorkspaceTestRunner {
       int exit = proc.exitValue();
 
       Optional<TestExecutionSummary> parsed = TestOutputParser.parse(cmd.framework(), output, exit);
+      if (parsed.isEmpty() && cmd.framework() == TestCommandResolver.Framework.SUREFIRE) {
+        // `mvn -q test` suppresses the stdout "Tests run:" summary; the surefire/gradle XML reports
+        // are written regardless, so recover the real pass/fail from them. Without this, a run
+        // whose
+        // tests FAILED was scored UNKNOWN (no penalty, no failed-tests cap). RL-2026-06-049.
+        parsed = parseXmlReports(workspaceRoot);
+      }
       parsed.ifPresent(
           s -> s.setExecutionDurationMs(Duration.between(start, Instant.now()).toMillis()));
       log.info(
@@ -150,6 +157,36 @@ public class WorkspaceTestRunner {
       Thread.currentThread().interrupt();
       return Optional.empty();
     }
+  }
+
+  /**
+   * XML-report fallback: scan the workspace for surefire/gradle {@code TEST-*.xml} reports and sum
+   * their counts. The reliable signal when {@code mvn -q test} suppressed the stdout summary.
+   * Bounded (depth 8, ≤2000 files) and fail-safe (any IO issue → empty). RL-2026-06-049.
+   */
+  private static Optional<TestExecutionSummary> parseXmlReports(Path root) {
+    java.util.List<String> xmls = new java.util.ArrayList<>();
+    try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(root, 8)) {
+      walk.filter(
+              p -> {
+                String s = p.toString();
+                return p.getFileName().toString().startsWith("TEST-")
+                    && s.endsWith(".xml")
+                    && (s.contains("surefire-reports") || s.contains("test-results"));
+              })
+          .limit(2000)
+          .forEach(
+              p -> {
+                try {
+                  xmls.add(java.nio.file.Files.readString(p));
+                } catch (IOException ignored) {
+                  // skip an unreadable report rather than fail the whole recovery
+                }
+              });
+    } catch (IOException | RuntimeException e) {
+      return Optional.empty();
+    }
+    return TestOutputParser.parseJunitXmlReports(xmls);
   }
 
   /**
