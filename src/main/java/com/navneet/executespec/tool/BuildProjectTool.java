@@ -56,23 +56,29 @@ public class BuildProjectTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "plannerCommand": {
-                 "type": "string",
-                 "description": "Optional explicit build command (overrides framework inference)"
-               }
-             },
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "plannerCommand": {
+      "type": "string",
+      "description": "Optional explicit build command (overrides framework inference)"
+    },
+    "command": {
+      "type": "string",
+      "description": "Optional explicit build command. Alias for plannerCommand, used by local clients."
+    }
+  },
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     String plannerCmd =
-        args.hasNonNull("plannerCommand") ? args.get("plannerCommand").asText() : null;
+        args.hasNonNull("plannerCommand")
+            ? args.get("plannerCommand").asText()
+            : args.hasNonNull("command") ? args.get("command").asText() : null;
     BuildCommand bc = resolver.resolve(ctx.workspaceRoot(), plannerCmd);
 
     // 2026-05-04 — preflight Maven dep version check. The 9-cell eval matrix
