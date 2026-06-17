@@ -390,7 +390,8 @@ public class MailService {
 
   /**
    * #2b: ONE per-session usage summary (sent at chat-session exit), replacing the per-task run
-   * completion email for local-hands runs. The CLI rolls up the totals and posts them; we just send.
+   * completion email for local-hands runs. The CLI rolls up the totals and posts them; we just
+   * send.
    */
   @Async
   public void sendSessionSummaryEmail(
