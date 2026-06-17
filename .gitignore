@@ -230,3 +230,6 @@ website/media/*
 
 # Review artifacts — kept local for now (working docs, not committed)
 /review/
+
+# eval per-run dumps (bulky, ephemeral)
+scripts/model-sample-results/raw-*/

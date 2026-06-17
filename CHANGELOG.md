@@ -7,9 +7,56 @@ The pre-1.0 development history (the v2.5.x line that ran from 2026-04-04 throug
 
 ---
 
-## [Unreleased] — work on `dev` since 1.0.0-M1 (range 2026-05-02 → 2026-05-19)
+## [Unreleased] — work on `dev` since 1.0.0-M1 (range 2026-05-02 → 2026-06-16)
 
 Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-track feature push around the V2 patch-mode pipeline, four customer-facing autofix surfaces, and the structural fixes that came out of the 2026-05-08 SWE-bench Lite eval. The 2026-05-19 **honesty pass** (`feature/honesty-pass-2026-05-19`, V199 → V202) follows up with scoring, quota, reviewer, and eval changes.
+
+A second multi-track push has since landed (V203 → V243, ~2026-05-20 → 2026-06-16): the agent-session protocol behind the CLI/VS Code clients, the W0 LLM-usage attribution contract, cross-surface provider preference, local-hands run gates, the Console-only web shell, Enterprise per-org model overrides, the OpenRouter/DeepSeek/Fireworks aggregator + BYOK lanes, anti-gaming scoring guards + trust caps, and a tranche of flag-gated worker-quality levers. Highlights below, newest first.
+
+### Added — CLI / VS Code agent sessions (V240)
+
+- **Agent-session protocol** (`agentsession/`, tables `agent_session` / `agent_turn` / `agent_action_event` / `agent_usage_ledger`) — durable, open-ended conversations for the CLI + VS Code clients, kept separate from `pipeline_run` so run credits stay charged only at plan approval. Endpoints under `/api/agent/*` (`/sessions`, `/sessions/{id}/events`, `/sessions/{id}/turns` + streaming `/turns/stream`, `/actions`, `/intent/interpret`, `/context/resolve`, `/gates`). CLI/VS Code chat prefers `turns/stream` over the legacy `/api/spec/chat`; when a session carries a `projectId`, the project/code tool surface (`ProjectChatTools`) is bound alongside run-control tools.
+- **Personal Access Tokens** (V215, `personal_access_token`) — revocable, SHA-256-hashed `es_pat_…` bearers minted via `POST /api/auth/me/tokens` for headless CLI / VS Code / CI auth; resolve to the same roles + tenant as a JWT, with the request auth source tagged so server-only paths can distinguish PAT from browser JWT.
+- **Local-hands run gates** (V241, flag `worker.local-hands.enabled`, default OFF) — `POST /api/runs localExecution=true` is PAT-only (rejected for browser/JWT sessions) and rejected entirely while the flag is OFF; accepted submits echo `localExecutionAccepted=true`.
+
+### Added — cross-surface provider preference (V242)
+
+- Account-scoped `app_user.preferred_ai_provider` + `GET/PUT /api/auth/me/provider-preference`, shared by web / CLI / VS Code. Explicit per-run/per-chat provider input still wins (and is remembered); absent input resolves to the account preference, then existing project/YAML defaults.
+
+### Added — W0 LLM usage attribution (V243)
+
+- `run_step_usage` (V243) records every successful LLM call (run/task/provider/model/input/output/cache/reasoning/cost/call-index) with exact producer attribution (`agentRole`, `stepId`, `retryOf`) via `cost/RunStepUsageRecorder`; same-provider retries and cross-provider failover rows point back to the original role/step. `RunEvent` gained an additive envelope (`schemaVersion=1`, typed `data`) alongside the legacy string payload, and `GET /api/runs/{id}/cost` now exposes `schemaVersion`, `source`, cache, reasoning, and per-`calls` fields for live V2 runs.
+
+### Changed — web app reframed as a Console control plane (RL-2026-06-027)
+
+- **Console is now the only protected web shell** — `App.tsx` mounts `ConsoleShell` for every protected route (`/home` → `ConsoleHome`, `/decisions` → `ConsoleDecisions`); the old `localStorage es:console` opt-in gate and the `IdeWorkspace` shell were removed. `frontend/src/ide/` is now the route-level implementation surface rendered inside the Console; the in-editor IDE metaphor moved to the VS Code extension. Protected routes lazy-load the heavy admin / billing / org / legal chunks.
+
+### Added — models, routing, BYOK
+
+- **Enterprise per-org model matrix overrides** (V205, `Org.model_overrides_json`) — an Enterprise org admin can pin a different model per `(provider, tier)` cell via `PUT /api/org/me/model-matrix`; unset cells fall back to YAML.
+- **DeepSeek + Fireworks BYOK key lanes** (V237) and the **OpenRouter org key** (V204) — native DeepSeek (`api.deepseek.com`) + Fireworks join the user/org/system key hierarchy; OpenRouter (an aggregator transport over the OpenAI wire) carries a `provider.sort=latency` routing hint.
+- **Bounded same-provider transient retry** in `LlmRouter` (up to 4 attempts, exponential backoff) on 5xx / reset / timeout / 429 before failing over — so a transient upstream blip no longer mid-run-switches the model.
+
+### Changed — scoring honesty + trust
+
+- **Anti-gaming guards** (V214, flag `scoring.gaming-guards`, default ON) — CODE_DELIVERED linked to deterministic endpoint coverage; the TESTS slot blends real pass-rate with coverage quality so trivial always-passing tests can't score 100.
+- **Trust caps + verification ledger** (RL-2026-06-026) — the headline `verifiedScore` is capped by failed review / unresolved issues / unresolved criticals / failed build / failed or missing tests, and the report DTO now carries a `verificationEvidence[]` ledger labelling each claim deterministic / LLM / hybrid / internal.
+- **Real workspace test execution** (V203 / V209) feeds the TESTS slot from actual `passed/total`, falling back to damped LLM-judged coverage (capped at 70) when no runner resolves.
+
+### Added — worker-quality levers (flag-gated)
+
+- A tranche of `worker.*` flags (V216 → V235, V239) — tool-output compaction, history compaction, build-mode TDD, provider-prompt tuning, cross-provider fallback, retry-context retention, edit diagnostics, background command jobs, code outline, and the verify-before-complete `completeTask` gate. Most default OFF pending eval; V239 defaults the evidence-safe gates ON. Tracked in the vix-leverage plan + `docs/operations/a1-flag-eval-2026-05-29.md`.
+- **Semantic code search** (V223, `project_code_chunk`) — per-repo embedding index powering project-chat `search_code`.
+
+### Added — benchmark tracking
+
+- Suite-agnostic in-app benchmark tracking (V236 / V238 tables + `BenchmarkTrackingController` at `/api/v2/test/benchmark` + the operator `/benchmark` dashboard) — ExecuteSpec ingests + displays externally-published benchmark events (Terminal-Bench first; SWE-bench + ProgramBench next via the same event contract).
+
+### Added — auth + sharing hardening
+
+- **OAuth state in signed cookies** (RL-2026-06-032, `CookieOAuth2AuthorizationRequestRepository`) — provider callbacks survive stale/missing session cookies and parallel attempts; a `/cli-login` redirect cookie carries the CLI device-auth return URL.
+- **External-invite effective entitlements** (RL-2026-06-046 / 047) — accepted cross-org `ProjectMember` collaborators inherit the host-project org's highest active tier as an effective entitlement (no personal-tier mutation), and now see host project runs / repos / source / chat. Cross-org invites stay gated by the per-org `org.external_sharing_enabled` flag (V198).
+- **INR pricing aligned to USD** (V206) and the **$8 default platform run-cost cap** (BYOK orgs exempt).
 
 ### Changed — honesty pass (2026-05-19, V199 → V202)
 

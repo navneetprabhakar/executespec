@@ -17,11 +17,13 @@ For exhaustive class discovery use:
 | `engine` | Worker agent and code-generation engine seam. |
 | `harness` | Sequential task executor and task-tier routing. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
+| `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
 | `router` | Model registry, resolver, provider enum, model override services, aggregator mappers. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |
 | `report` | Validation report and verified-score computation. |
-| `auth` | Auth, org, project, RBAC, SSO, PAT, GDPR export. |
+| `cost` | Run cost tracking, pricing lookup, and durable per-call LLM usage attribution (`run_step_usage`). |
+| `auth` | Auth, org, project, RBAC, SSO, PAT, provider preference, GDPR export. |
 | `billing` | Plans, subscriptions, gateways, invoices, top-ups, quota refunds. |
 | `codeintel` | Codemap, architecture generation, staleness, tiered codemap selection. |
 | `memory` | Project memory, project chat, chat tools. |
@@ -32,10 +34,11 @@ For exhaustive class discovery use:
 
 | Controller | Main routes |
 | --- | --- |
-| `RunController` | `/api/runs`, approval, retry, cancel, archive, sync, push, cost. |
+| `RunController` | `/api/runs`, approval, retry, cancel, archive, sync, push, cost (live `v2` cost exposes `schemaVersion`/`source`/cache/reasoning/`calls`). `localExecution=true` is PAT-only and gated by `worker.local-hands.enabled`. |
 | `ModelController` | `/api/models/available`. |
 | `OrgController` | `/api/org`, `/api/org/me/model-matrix` (defaults, overrides, selectable models, `modelLabels`), org settings. |
-| `AuthController` | `/api/auth/*`, user settings, PATs, provider-key validation. |
+| `AuthController` | `/api/auth/*`, user settings, PATs, provider-key validation, `/me/provider-preference`. |
+| `AgentSessionController` | `/api/agent/*` — sessions, recorded + streaming turns, action catalog, intent interpret, context resolve, gate cards (CLI/VS Code). |
 | `ProjectController` and project companions | `/api/projects/*`, repos, docs, architecture, memory, tech debt. |
 | `PrReviewController` | `/api/pr-reviews`. |
 | `CodeReviewController` | `/api/code-reviews`. |
@@ -54,8 +57,11 @@ For exhaustive class discovery use:
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
 | `ModelRegistry` / `ModelResolver` | YAML model matrix and tier lookup. |
 | `RunCostTracker` | Token/cost accounting and pricing lookup. |
+| `RunStepUsageRecorder` | Durable per-call LLM usage write to `run_step_usage` (role/step/retry attribution; fail-soft, `REQUIRES_NEW`). |
 | `ValidationReportService` | Additive verifiedScore, trust caps, verification ledger, and report assembly. |
 | `VerifiedScoreBackfillService` | SUPER_ADMIN one-shot recomputation of historical report scores. |
+| `AgentSessionService` | CLI/VS Code session/turn persistence, access checks, gate cards, repo→project resolution. |
+| `AiProviderPreferenceService` | Cross-surface `app_user.preferred_ai_provider` read/resolve/update. |
 | `ProjectAccessGuard` / `RunAccessGuard` | Tenant access checks. |
 | `BillingService` / `RunTopupService` | Subscription/top-up operations. |
 
@@ -77,12 +83,18 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V237`.
+Migration head in this worktree: `V243`.
 
 Recent relevant migrations:
 
 - `V236`: benchmark tracking tables.
 - `V237`: DeepSeek and Fireworks key lanes on `org` and `app_user`.
+- `V238`: benchmark token-tracking columns.
+- `V239`: default-on the evidence-safe worker quality gates.
+- `V240`: `agent_session` / `agent_turn` / `agent_action_event` / `agent_usage_ledger` — CLI/VS Code agent-session protocol, separate from `pipeline_run`.
+- `V241`: seed `worker.local-hands.enabled` (default OFF).
+- `V242`: `app_user.preferred_ai_provider` — cross-surface provider preference.
+- `V243`: `run_step_usage` — durable per-call LLM usage (tokens/cache/reasoning/cost/call-index + role/step/retry attribution).
 
 ## Deprecated / Transitional Areas
 

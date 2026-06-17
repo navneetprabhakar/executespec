@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head in the current worktree: `V240`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V243`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -74,7 +74,7 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V240       │             │   → GitHub / Bitbucket    │
+   │ Flyway V1..V243       │             │   → GitHub / Bitbucket    │
    │ 127 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
@@ -176,12 +176,30 @@ dispatch happens.
 
 ### CLI / VS Code agent sessions
 
-`agentsession/` is the durable protocol layer for terminal and VS Code agent shells. It is
-separate from `pipeline_run`: an open-ended session can interpret intent, resolve the current repo
-to a project, list gates, or propose a run without becoming a billable execution run. Cost-bearing
-or destructive actions are represented as typed confirmation-required proposals; the existing run
-approval path remains the only place where run credits are charged. `V240` adds
-`agent_session`, `agent_turn`, `agent_action_event`, and `agent_usage_ledger` for this separation.
+`agentsession/` is the durable protocol layer for terminal and VS Code agent shells, exposed under
+`/api/agent/*` by
+[`agentsession/AgentSessionController`](../src/main/java/com/navneet/executespec/agentsession/AgentSessionController.java):
+`/sessions` (+ `/{id}`, `/{id}/events`), recorded and streaming turns
+(`/sessions/{id}/turns` + `/sessions/{id}/turns/stream`), the static `/actions` catalog,
+`/intent/interpret` (rule-based first-pass intent classification via `AgentIntentService`),
+`/context/resolve` (repo→project resolution), and gate decision cards (`/gates`, `/gates/{runId}`).
+It is separate from `pipeline_run`: an open-ended session can interpret intent, resolve the current
+repo to a project, list gates, or propose a run without becoming a billable execution run.
+Cost-bearing or destructive actions are represented as typed confirmation-required proposals; the
+existing run approval path remains the only place where run credits are charged. The streaming-turn
+path bridges to `SpecChatService.runTurn` (gated by `spec.chat.enabled`); when the session carries a
+`projectId` it also binds `ProjectChatTools` so CLI/VS Code chat can answer project/code questions
+with the same tool surface as web project chat. Per-call usage is metered to `agent_usage_ledger`
+with `billingPolicy=INCLUDED`. `V240` adds `agent_session`, `agent_turn`, `agent_action_event`, and
+`agent_usage_ledger` for this separation.
+
+Provider choice for these surfaces is cross-surface account state, not a client-local default.
+`app_user.preferred_ai_provider` (V242) is read/written via
+`GET/PUT /api/auth/me/provider-preference`
+([`auth/service/AiProviderPreferenceService`](../src/main/java/com/navneet/executespec/auth/service/AiProviderPreferenceService.java)):
+explicit provider input on a run, chat turn, or project update is remembered there; an absent
+provider resolves through the account preference before falling back to the project/YAML default. Web,
+CLI, and VS Code all share the one preference.
 
 ---
 
@@ -199,6 +217,12 @@ unless noted otherwise.
    `InputSanitizer` (NFKC + zero-width strip + base64 decode-and-scan), then calls
    `tierEnforcementService.assertAndIncrementRunCount`, then dispatches to the
    orchestrator. Returns the `RunSummary` mapped from the freshly-persisted row.
+   **Local-hands gate (V241):** a submit with `localExecution=true` is rejected with
+   409 while `worker.local-hands.enabled` is OFF (default), and rejected with 403 unless
+   the request is PAT-authenticated (`JwtAuthenticationFilter.AUTH_SOURCE_PAT`) — the web
+   UI cannot enforce local command/file approvals, so only CLI / VS Code PAT sessions may
+   run locally (RL-2026-06-037). Accepted local submits echo `localExecutionAccepted=true`
+   on the summary.
 2. **Orchestrator stamp** — `submitRun(...)` (20-arg canonical signature; 7 progressive
    overloads exist for callsite back-compat) stamps `runId`, `provider`, `model`,
    `plannerDbModel` (tier-resolved via `ModelResolver.resolve("OutlinePlannerAgent")`),
@@ -579,7 +603,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head in the current worktree is `V240`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V243`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.
@@ -829,6 +853,30 @@ Other counters:
   `executespec.data.retention.deleted_projects{trigger}`.
 - `executespec.sse.emitters.active` (gauge).
 - `executespec.llm.rate_limited`.
+
+### W0 per-call LLM usage attribution
+
+Beyond the aggregate counters, every successful LLM call is recorded durably for
+distributed-execution telemetry (RL-2026-06-043 / RL-2026-06-044).
+[`cost/RunStepUsageRecorder`](../src/main/java/com/navneet/executespec/cost/RunStepUsageRecorder.java)
+writes a [`RunStepUsage`](../src/main/java/com/navneet/executespec/cost/RunStepUsage.java) row
+(`run_step_usage`, V243) per call carrying run/task/provider/model, input/output/cache-read/
+cache-write/reasoning tokens, cost, and `call_index`, plus exact producer attribution
+(`agentRole`, `stepId`, `retryOf`) drawn from the `LlmRequest`. Same-provider retries and
+cross-provider failover rows point back to the original role/step. The write is its own
+`REQUIRES_NEW` transaction and fail-soft (a failed insert is logged at debug and never breaks the
+run). The table has no FK to `pipeline_run` because the same router path also serves agent
+sessions, benchmarks, and local/dev diagnostics; raw provider-usage JSON is reserved for a later
+phase.
+
+[`sse/RunEvent`](../src/main/java/com/navneet/executespec/sse/RunEvent.java) carries an additive
+event envelope (`schemaVersion=1` + a typed `data` map) alongside the legacy string `payload`, so
+existing consumers keep working while richer fields ride along: `TOKEN_USAGE` includes typed
+cost/cache/reasoning/call fields and `TOOL_CALL` includes typed remote-tool fields.
+`GET /api/runs/{id}/cost` reflects this for live `v2` runs — it reads `RunCostTracker.snapshot` and
+returns `schemaVersion`, `source` (`live_tracker` / `stored_total` / `legacy_estimator`),
+`cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls` in addition to cost and token
+totals.
 
 ### Endpoints
 

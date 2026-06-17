@@ -34,7 +34,7 @@ frontend/
     ├── main.tsx                     # app entry + pre-paint theme/chrome + PostHog init
     ├── App.tsx                      # routes — ConsoleShell for every protected route
     ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
-    ├── ide/                         # the default VS Code-style protected chrome
+    ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
     │   ├── Crumbs.tsx                # compact breadcrumb trail reused by project/run detail surfaces
     │   ├── IdeSurfaces.tsx           # IdeWelcome / IdeCompose / IdeLive
     │   ├── IdeRunResult.tsx          # flagship run detail — file tree + editor tabs + IdeKit code viewer
@@ -52,7 +52,7 @@ frontend/
     │   ├── lib/                     # runUtils (repoDisplayName / repoIdFor / runTitleFor / relTime)
     │   ├── hooks/ · icons/
     │   └── signal.css               # .signal-* component styles (reused by ide/ via the ide.css token bridge)
-    ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + forced uiMode='ide'), useRunStore, useProjectStore, useExecutionStore, useMetricsStore, useSseStore
+    ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + uiMode pinned to 'console' via initUiMode), useRunStore, useProjectStore, useExecutionStore, useMetricsStore, useSseStore
     ├── hooks/                       # useSse, useTierPermissions, useAsyncAction, useIsMobile, useBreakpoint, useKeyboardShortcuts, …
     ├── lib/                         # api/ split client + analytics.ts + glossary.ts + verdict.ts + billing/execution/invoice-api clients
     ├── types/                       # project.ts, execution.ts
@@ -61,7 +61,7 @@ frontend/
 
 ## Chrome + routing (Console default)
 
-The default chrome is the **Console shell** (`console/ConsoleShell`). `App.tsx` renders every protected route inside `<ConsoleShell/>`; the old `localStorage es:console` opt-in path, `IdeWorkspace`, and `uiMode` switching code are gone. The routing model:
+The default chrome is the **Console shell** (`console/ConsoleShell`). `App.tsx` renders every protected route inside `<ConsoleShell/>`; the old `localStorage es:console` opt-in path, `IdeWorkspace`, and `uiMode` switching code are gone (`useUiStore.initUiMode()` now hard-pins `'console'`). The shell is a control plane, not an editor: a top bar (Merge Rail brand mark + "ExecuteSpec" · `PlanGateIndicator` · **Start** CTA · ⌘K palette · theme cycle · notification bell with unread badge · account menu), a slim left nav (**Start** /compose · **Work** /runs · **Projects** · **Team** /org-members · **Setup** /setup, plus live "Recent work" + "Projects" disclosure lists and an **Operator** section — Admin + Benchmarks — for SUPER_ADMIN), and a mobile drawer + bottom tab bar mirroring the same five nav items (RL-2026-06-045 restored the brand mark + section icons across the top bar, drawer brand row, and sidebar headings). The Merge Rail mark loads from `public/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg`. `/setup` is the umbrella that the nav treats as active for billing/plans/account/integrations/keys/org-settings/insights/audit/deployments/admin/benchmark. The routing model:
 
 - **Public routes** (`/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password`, `/accept-invite`, `/auth/callback`, `/welcome`, `/pricing`, `/trust`, `/terms`, `/privacy`, `/dpa`, `/shared/:token`) render **standalone Signal pages** with no chrome — there is no IDE-native auth/marketing surface yet.
 - **Protected routes** mount inside `<ConsoleShell>` and render route-level surfaces: `/home`→ConsoleHome, `/decisions`→ConsoleDecisions, `/compose`→IdeCompose, `/plan/:id`→IdePlan, `/live/:id`→IdeLive, `/result/:id`→IdeRunResult, `/runs`→IdeRuns, `/projects`→IdeProjects, `/projects/:id/*`→IdeProjectTabs/IdeProjectMore, `/projects/:id/setup`→project setup index for Members/Repos/System map/Activity/Settings, `/account`→IdeAccount, `/billing`→IdeBilling, `/plans`→IdePlans, `/api-keys` + `/provider-keys`→IdeApiKeys, `/org-members`→IdeOrgMembers, `/org/settings`→IdeOrgSettings, `/integrations`→IdeIntegrations, `/admin`→IdeAdmin, `/deployments`→IdeDeployments, plus the discovery/system surfaces (`ide/IdeDiscovery.tsx` + `ide/IdeSystem.tsx`).
@@ -109,36 +109,33 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 
 ## Notable components
 
-### Run detail
+> The component names below describe live IDE-native surfaces. The Signal-era page components (`RunDetailTabs`, `ResultPage`, `ProjectDashboardPage`, `PulseTab`, `ProjectChatPanel`, `InlineRunDetail`, `SignalBreakdown`, and the per-panel `*Panel` files) were **deleted in the 2026-05-23 cleanup**; their behaviour was folded into the surfaces named here.
 
-- `RunDetailTabs` — main run detail with live cost polling (5s while non-terminal) + file auto-refresh + SSE event subscription.
-- `ScoreCard` + `ScoreRing` — verifiedScore visualization (4-band colour, 132px hero ring). Backed by the additive scorer (`scoring.additive-v2`) since 2026-05-19. `ResultPage` (2026-05-19 honesty pass) leads with a plain-English verdict sentence built only from the _measured_ signals (build / tests / reviewer) plus an explicit "not measured" list, so the headline can't read "Failed 50%" on a run with a passing build + clean reviewer.
+### Run detail (`ide/IdeRunResult.tsx`)
+
+- The flagship run-detail surface — tabbed (Overview / Files / Logs / Timeline / PR / Chat), with live cost polling (5s while non-terminal), file auto-refresh, and a verdict-led header. A non-terminal run redirects to its correct surface: `AWAITING_APPROVAL` → `/plan/:id`, actively running → `/live/:id`; `/result` is terminal-only.
+- `ScoreCard` + `ScoreRing` — verifiedScore visualization (4-band colour). Backed by the additive scorer (`scoring.additive-v2`). The header leads with a plain-English verdict sentence built only from the _measured_ signals (build / tests / reviewer) plus an explicit "not measured" list, so the headline can't read "Failed 50%" on a run with a passing build + clean reviewer.
 - `VerdictPill` — Shippable / Needs review / Blocked derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
-- `SignalBreakdown` — "Build ✓ · Tests N/M · Reviewer CLEAN · Verified N" chip row on patch-mode runs.
-- `CostProgressBar` — live spend vs budget on Credits panel (green 0-80% / amber 80-100% / red ≥100%, aria-progressbar attributes).
-- `InlineRunDetail` — embedded run detail in V3 project chat thread; "Update PR" button on `alreadyPushed=true` runs to re-push after a per-task retry; "Download code" button restores the V2-page parity (regression fix 2026-05-12).
+- `CostProgressBar` — live spend vs budget (green 0-80% / amber 80-100% / red ≥100%, aria-progressbar attributes); on `IdeLive` it shows both spend-vs-hard-cap and spend-vs-estimate.
+- `PrCommentInbox` (shared `signal/components/`) — the PR tab's inbound review-comment inbox with Dismiss + apply-as-fix.
+- Header actions include fork / archive / unarchive / soft-delete, a `⬇ Code ZIP` download (`downloadRunCode` → `GET /api/runs/{id}/download?format=repo`), Report PDF, and Share.
 
-### Project workbench
+### Project workbench (`ide/IdeProjects.tsx` + `ide/IdeProject.tsx` + `ide/IdeProjectTabs.tsx` + `ide/IdeProjectMore.tsx`)
 
-- `ProjectDashboardPage` — 5-group tabbed dashboard (Pulse / Repos / Runs / Code / Chat).
-- `PulseTab` — last-run hero + ScoreRing + signal chips + workspace health rollup.
-- `ProjectChatPanel` — full-height chat with compaction + reset + per-bubble copy + branch override on launch.
-- `TechDebtPanel` — category × severity matrix; "Fix" button per category → autofix Phase 2 dispatch.
-- `CodeQualityPanel` — Code Review scan results; severity chips → autofix Phase 4 dispatch.
-- `PrReviewButton` — inline icon button on every PR row → opens PR Review verdict popover with "Autofix N comments" → autofix Phase 1.
-- `WorkspaceHealthPanel` — per-repo SHA drift + webhook + open-PR count.
-- `PostMergeBar` — stacked banner above the dashboard for recent merges.
-- `ArchitectureViewer` — per-version arch diff (LCS + GitHub `compareCommits`) on a click.
-- `GeneratedDocsPanel` — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
+- `IdeProjects` — health cards over the project list; `IdeProject` — the project composer with repo scoping.
+- Project sub-tabs (Pulse / Repos / Runs / Code / Chat / Architecture / Setup / Members / Activity / Settings) live across `IdeProjectTabs` + `IdeProjectMore`. `IdeProjectPulse` shows a last-run hero + `ScoreRing` + signal chips + workspace-health rollup and live-polls runs while any is non-terminal.
+- Tech-debt rollup (category × severity matrix) with a per-category "Fix" → autofix Phase 2 dispatch.
+- `CodeReviewPanel` (shared) — Code Review scan results; severity chips → autofix Phase 4 dispatch.
+- `PrReviewPanel` (shared) — PR Review verdict popover with "Autofix N comments" → autofix Phase 1, opened from a project PR row.
+- Workspace health — per-repo SHA drift + webhook + open-PR count; `IdeProjectRepos` splits fast **Sync** (metadata-only) from explicit **Regenerate** (codemap + per-repo arch rebuild).
+- Architecture viewer — per-version arch diff (LCS + GitHub `compareCommits`) on click.
+- Generated docs — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
 
 ### Shared primitives
 
-- `Button`, `Checkbox`, `Radio` — cva variant + size system.
-- `ResponsiveModal` — focus-trap + Escape + `disableDismiss` + `hideCloseButton` + ARIA role=dialog.
-- `Tooltip` — CSS-only, 250ms delay, hover/focus reveal.
-- `Glossary` — hover/focus tooltip with plain-English definitions for `codemap`, `wiring pass`, `verified score`, `status reason`, `classifier`.
-- `Drawer` — slide-in panel primitive.
-- `EstimateChip` — debounced p25/p75 task + cost estimate chip under the requirement textarea.
+The reusable surface lives in `signal/components/` and is enumerated in the **"Signal primitives"** section above (`Modal`/`ConfirmModal`/`PromptModal`, `Loaders`, `CodeView`, `Markdown`, `CostProgressBar`, `BrandLogos`, `SpecChat`, plus `Primitives.tsx` for `Button` + `VerdictPill`). They are reused by the IDE-native surfaces via the `ide.css` `--signal-*` → `--ide-*` token bridge. One additional primitive worth calling out:
+
+- `Glossary` (`signal/components/Glossary.tsx`) — hover/focus tooltip with plain-English definitions for `codemap`, `wiring pass`, `verified score`, `status reason`, `classifier`.
 
 ### Theme + analytics
 
@@ -147,16 +144,16 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 
 ## SSE event handling
 
-`useSse(runId, token)` hook subscribes to `/api/runs/{id}/events?token=<jwt>` (scoped JWT, 5-min TTL, `scope=sse` claim). Event types it dispatches into the store:
+`useSse(runId, token)` hook (`hooks/useSse.ts`) subscribes to `/api/runs/{id}/events?token=<jwt>` (scoped JWT, 5-min TTL, `scope=sse` claim) with exponential-backoff reconnect (full refetch on reconnect to catch missed events). Every event is added to a generic in-memory log buffer (`addEntry`) that `IdeLive` renders; specific types additionally drive the store:
 
-- `PLAN_READY` — opens plan-approval modal.
-- `RUN_STATUS` — updates status badge.
-- `TASK_STATUS` — updates per-task progress.
-- `LIVE_LOG` — appends tool call + LLM completion to the live-log pane.
-- `RUN_COST` — updates `CostProgressBar` + cost chip.
-- `EXEC_COMPENSATION_UPDATE` / `EXEC_COMPENSATION_DONE` — cancel rollback live cleanup view.
-- `RUN_PROVIDER_SWITCHED` — toast on provider fallback.
-- `COMPLETE` — terminal `{status, statusReason}` payload; flips badge + tooltip.
+- `RUN_DETAIL` — backend pushes the full run-detail JSON in `payload`; parsed straight into `activeRun` (not added to the log buffer). Malformed payload falls back to a refetch.
+- `RUN_STATUS` — `payload` carries the status string → `patchRunStatus`; terminal/transition states (`COMPLETE` / `FAILED` / `CANCELLED` / `COMPILING` / `WORKING` / `QUEUED_BATCH` / `IN_PROGRESS_BATCH`) trigger a fallback `fetchRun`. `WORKING` also refreshes the usage badge (credits charged at that transition).
+- `GATE_OPENED` — plan tasks are saved → refetch so the plan gate displays.
+- `RUN_RESTARTED` / `BUDGET_EXCEEDED` — refetch.
+- `BATCH_PROGRESS` / `BATCH_COMPLETE` / `BATCH_FAILED` — refetch.
+- `FILE_WRITTEN` — fired by `WriteFileTool` / `EditFileTool`; bumps a file-written tick the file-tree subscribes to (debounced re-fetch of the listing only, no run-metadata refetch).
+
+(The live log + cost telemetry rendering itself lives on `IdeLive` in `ide/IdeSurfaces.tsx`, which also polls `/cost`; the global amber plan-gate chip is `ide/PlanGateIndicator.tsx`.)
 
 ## Accessibility
 
