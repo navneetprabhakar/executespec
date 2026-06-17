@@ -263,6 +263,16 @@ public class ModelRegistry {
   }
 
   /**
+   * Model-level FREE-tier allow-list ({@code free-tier.models}). Empty when only a provider lock is
+   * configured — callers then fall back to {@link #freeTierProvider()}.
+   */
+  public java.util.List<String> freeTierModels() {
+    return matrixProps.getFreeTier() != null && matrixProps.getFreeTier().getModels() != null
+        ? matrixProps.getFreeTier().getModels()
+        : java.util.List.of();
+  }
+
+  /**
    * Returns the workhorse model for a given provider from the matrix. Useful for agents that need
    * to reference the current workhorse model (e.g. ConversationAgent building suggestion plans).
    */
