@@ -52,6 +52,9 @@ class AsyncAllowlistTest {
               "MailService#sendPasswordResetEmail",
               "MailService#sendTemporaryPasswordEmail",
               "MailService#sendOrgInviteEmail",
+              // #2b per-session usage summary — primitive args only (toEmail, firstName,
+              // taskCount, costUsd, inputTokens, outputTokens); same safety profile.
+              "MailService#sendSessionSummaryEmail",
               // V175 — external project-collaboration invite. Takes primitive args
               // (toEmail, projectName, inviterEmail, acceptUrl, expiresInDays);
               // Thymeleaf render + SMTP send only; no JPA navigation. Same safety
