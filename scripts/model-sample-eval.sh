@@ -45,6 +45,8 @@ MODELS="${MODELS:-$MODELS_DEFAULT}"
 TS="$(date +%Y%m%d-%H%M%S)"
 JSON="$OUT_DIR/sample-$TS.jsonl"
 MD="$OUT_DIR/sample-$TS.md"
+CONCURRENCY="${CONCURRENCY:-1}"
+RAW="$OUT_DIR/raw-$TS"; mkdir -p "$RAW"
 log(){ printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 
 TOKEN=$(curl -s -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
@@ -67,7 +69,7 @@ run_one(){
     -H 'Content-Type: application/json' -d "$body" | jq -r '.runId // .id // empty')
   if [ -z "$rid" ]; then
     log "$label/$band SUBMIT FAILED"
-    echo "{\"label\":\"$label\",\"band\":\"$band\",\"error\":\"submit_failed\",\"pinned\":\"$model\"}" >> "$JSON"
+    echo "{\"label\":\"$label\",\"band\":\"$band\",\"error\":\"submit_failed\",\"pinned\":\"$model\"}" > "$RAW/${label}-${band}.json"
     return
   fi
   log "$label/$band runId=$rid (pin=${model:-none})"
@@ -96,20 +98,33 @@ run_one(){
       verifiedScore:($rep.verifiedScore),cost:($run.actualCostUsd),
       startedAt:($run.startedAt),completedAt:($run.completedAt),
       durationSec:(($run.completedAt) as $e | ($run.startedAt) as $s | if ($e and $s) then (($e|sub("\\.[0-9]+Z$";"Z")|fromdateiso8601) - ($s|sub("\\.[0-9]+Z$";"Z")|fromdateiso8601)) else null end),
-      workerModelLogged:$worker,actualCalls:$actual,pinOK:$pinok}' >> "$JSON"
+      workerModelLogged:$worker,actualCalls:$actual,pinOK:$pinok}' > "$RAW/${label}-${band}.json"
   log "done $label/$band status=$st score=$(echo "$rep"|jq -r '.verifiedScore//"-"') pinOK=$pinok"
 }
 
-log "models=$(printf '%s\n' "$MODELS" | grep -c '|') bands=$BANDS timeout=${TIMEOUT}s out=$JSON"
+pids=()
+throttle(){
+  while :; do
+    local a=(); if ((${#pids[@]})); then for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && a+=("$p"); done; fi
+    pids=("${a[@]+"${a[@]}"}")
+    (( ${#pids[@]} < CONCURRENCY )) && break
+    sleep 3
+  done
+}
+log "models=$(printf '%s\n' "$MODELS" | grep -c '|') bands=$BANDS concurrency=$CONCURRENCY timeout=${TIMEOUT}s out=$JSON"
 IFS=',' read -ra BARR <<< "$BANDS"
 while IFS='|' read -r label prov model; do
   [ -z "${label// /}" ] && continue
   for band in "${BARR[@]}"; do
     [ -f "$SPEC_DIR/$band.txt" ] || { log "skip $band (no spec)"; continue; }
-    run_one "$label" "$prov" "$model" "$band"
+    throttle
+    run_one "$label" "$prov" "$model" "$band" &
+    pids+=($!)
   done
 done <<< "$MODELS"
+wait
 
+cat "$RAW"/*.json > "$JSON" 2>/dev/null
 {
   echo "# Model sample eval — $TS  (bands: $BANDS)"
   echo

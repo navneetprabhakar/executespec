@@ -49,9 +49,7 @@ public final class OpenRouterModelMapper {
           Map.entry("codestral-2508", "mistralai/codestral-2508"),
           // 2026-06-17 — Top coding-model expansion (OpenRouter, ENTERPRISE BYOK). All verified to
           // expose tools+tool_choice vs the OpenRouter /endpoints API 2026-06-17.
-          // require_parameters
-          // is set on every OpenRouter call (LlmRouter.callOpenRouter) so routing only picks
-          // tool-capable endpoints — some providers silently drop tools on a given endpoint.
+          // OpenRouter's default latency routing handles tool requests for these models.
           Map.entry("minimax-m3", "minimax/minimax-m3"),
           Map.entry("gpt-5.3-codex", "openai/gpt-5.3-codex"),
           Map.entry("grok-4.20", "x-ai/grok-4.20"),
