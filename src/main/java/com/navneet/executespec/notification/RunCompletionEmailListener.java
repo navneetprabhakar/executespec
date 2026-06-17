@@ -69,6 +69,13 @@ public class RunCompletionEmailListener {
         log.warn("RunCompletionEmail: run {} not found, skipping", runId);
         return;
       }
+      // Local-hands runs are tasks inside an interactive local session, not standalone cloud jobs —
+      // the user does NOT want a separate email per task. Suppress the per-run completion mail here;
+      // a per-session summary (tokens + cost) is the intended replacement (tracked separately).
+      if ("LOCAL_EXECUTION".equals(run.getStatusReason())) {
+        log.debug("RunCompletionEmail: skipping per-run mail for local-hands run {}", runId);
+        return;
+      }
       String submitterId = run.getCreatedByUserId();
       if (submitterId == null) {
         // Anonymous run (free-tier sandbox, pre-ownership rows) — no one to email.
