@@ -92,6 +92,10 @@ public class ProjectChatController {
       @PathVariable String projectId,
       @RequestBody ChatRequest body) {
     AppUser user = requireChatAccess(principal, projectId);
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
     if (body == null || body.message == null || body.message.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message required");
     }
@@ -100,7 +104,7 @@ public class ProjectChatController {
     // tools that need it return a clear error in that case.
     ProjectChatMessage reply =
         chatService.send(
-            projectId, user.getOrgId(), user.getId(), body.message, user.getGithubPat());
+            projectId, project.getOrgId(), user.getId(), body.message, user.getGithubPat());
     return ResponseEntity.ok(reply);
   }
 
@@ -161,7 +165,10 @@ public class ProjectChatController {
     if (!orgMatch && !isMember) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
     }
-    String orgId = user.getOrgId();
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
+      return user;
+    }
+    String orgId = project.getOrgId() != null ? project.getOrgId() : user.getOrgId();
     String tier =
         orgId != null
             ? orgRepo.findById(orgId).map(Org::getTier).orElse(user.getTier())

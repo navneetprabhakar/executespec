@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.security;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -31,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 public class RunAccessGuard {
 
   private final StateStore stateStore;
+  private final ProjectMemberRepository projectMemberRepo;
 
   /**
    * Loads the run and asserts the caller may access it.
@@ -94,12 +96,14 @@ public class RunAccessGuard {
         && ("ORG_ADMIN".equals(orgMember.getOrgRole())
             || "BILLING_ADMIN".equals(orgMember.getOrgRole()))) {
       if (user.getOrgId() != null && user.getOrgId().equals(run.getOrgId())) return;
+      if (isProjectMember(user, run)) return;
       throw forbidden(run);
     }
 
     // DEVELOPER — all runs in their org (projects are shared grouping tools)
     if (orgMember != null && "DEVELOPER".equals(orgMember.getOrgRole())) {
       if (user.getOrgId() != null && user.getOrgId().equals(run.getOrgId())) return;
+      if (isProjectMember(user, run)) return;
       throw forbidden(run);
     }
 
@@ -107,11 +111,13 @@ public class RunAccessGuard {
     // Still grant org-scoped access so they can interact with runs in their org.
     if (user.getOrgId() != null) {
       if (user.getOrgId().equals(run.getOrgId())) return;
+      if (isProjectMember(user, run)) return;
       throw forbidden(run);
     }
 
     // FREE user (no org) — own runs only
     if (isOwner(user, run)) return;
+    if (isProjectMember(user, run)) return;
 
     throw forbidden(run);
   }
@@ -149,6 +155,12 @@ public class RunAccessGuard {
 
   private boolean isOwner(AppUser user, PipelineRun run) {
     return user.getId() != null && user.getId().equals(run.getCreatedByUserId());
+  }
+
+  private boolean isProjectMember(AppUser user, PipelineRun run) {
+    return user.getId() != null
+        && run.getProjectId() != null
+        && projectMemberRepo.existsByProjectIdAndUserId(run.getProjectId(), user.getId());
   }
 
   private ResponseStatusException forbidden(PipelineRun run) {

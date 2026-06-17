@@ -29,6 +29,9 @@ public class ProjectArchitectureController {
   // entity (for the github slug + default branch) and the GitHub client
   // (for the actual list + read calls).
   private final com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
+  private final com.navneet.executespec.project.repository.ProjectRepoLinkRepository
+      projectRepoLinkRepo;
+  private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   private final com.navneet.executespec.repo.GitHubRepoService github;
 
   public record ArchDocDto(
@@ -257,11 +260,8 @@ public class ProjectArchitectureController {
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    var repo =
-        projectRepoRepo
-            .findById(repoId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
-    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    var repo = linkedRepo(projectId, repoId);
+    String pat = projectRepoReadPat(projectId, repoId, userDetails);
     String slug = repo.getGithubRepoFullName();
     String branch = repo.getDefaultBranch();
     List<String> files;
@@ -291,11 +291,8 @@ public class ProjectArchitectureController {
     if (path == null || path.isBlank() || path.contains("..") || path.startsWith("/")) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file path");
     }
-    var repo =
-        projectRepoRepo
-            .findById(repoId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
-    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    var repo = linkedRepo(projectId, repoId);
+    String pat = projectRepoReadPat(projectId, repoId, userDetails);
     String slug = repo.getGithubRepoFullName();
     String branch = repo.getDefaultBranch();
     String content = github.readRepoFile("https://github.com/" + slug, path, branch, pat);
@@ -308,5 +305,36 @@ public class ProjectArchitectureController {
           content.substring(0, 1_000_000) + "\n\n// … (truncated; file exceeds 1 MB display cap)";
     }
     return ResponseEntity.ok(new RepoFileDto(slug, branch, path, content, bytes));
+  }
+
+  private com.navneet.executespec.project.entity.ProjectRepo linkedRepo(
+      String projectId, UUID repoId) {
+    projectRepoLinkRepo
+        .findByProjectIdAndRepoId(projectId, repoId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not linked"));
+    return projectRepoRepo
+        .findById(repoId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
+  }
+
+  /**
+   * Project members read host-project source through the actor who linked the repo. External
+   * invitees often do not have direct GitHub access to the host repo, so using their PAT first
+   * makes the project shell visible while the file tree silently comes back empty for private
+   * repos.
+   */
+  private String projectRepoReadPat(
+      String projectId,
+      UUID repoId,
+      com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+    String linkPat =
+        projectRepoLinkRepo
+            .findByProjectIdAndRepoId(projectId, repoId)
+            .flatMap(link -> userRepo.findById(link.getLinkedBy()))
+            .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
+            .filter(pat -> pat != null && !pat.isBlank())
+            .orElse(null);
+    if (linkPat != null) return linkPat;
+    return userDetails != null ? userDetails.getUser().getGithubPat() : null;
   }
 }
