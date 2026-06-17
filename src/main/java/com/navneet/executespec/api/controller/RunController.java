@@ -73,6 +73,7 @@ public class RunController {
   private final UsageTrackingService usageTrackingService;
   private final RunVisibilitySpec runVisibilitySpec;
   private final RunAccessGuard guard;
+  private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
 
   /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
@@ -270,6 +271,12 @@ public class RunController {
     page = Math.max(0, page);
     size = Math.max(1, Math.min(100, size));
     var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
+    boolean realProjectFilter =
+        projectId != null && !projectId.isBlank() && !"__none__".equals(projectId);
+    if (realProjectFilter) {
+      projectAccessGuard.assertCanRead(projectId, userDetails);
+      visSpec = (root, query, cb) -> cb.conjunction();
+    }
 
     // scope=mine  → only the current user's runs
     // scope=org   → only runs in the user's org (useful for SUPER_ADMIN to see org-only view)
