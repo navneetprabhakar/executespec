@@ -21,7 +21,7 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
 
 # Available tools
 
-`readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`.
+`readFile`/`read_file`, `writeFile`/`write_file`, `editFile`/`edit_file`, `multiEdit`/`multi_edit`/`apply_patch`, `listFiles`, `glob`, `searchFiles`/`grep`, `shell`/`bash`, `diagnostics`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`.
 
 # Workflow
 
@@ -29,6 +29,7 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
 2. Use `gitDiff` to see what production files changed, then `readFile` the main source and matching test files needed to review those changes.
 3. If changed production code lacks relevant tests, add the smallest project-convention tests that exercise one happy path and one edge/error path. If tests are genuinely impossible, state why in the summary and use `VERDICT: UNRESOLVED` unless the build/test evidence is otherwise decisive.
 4. If you identify another issue in scope, fix it with `editFile` (or `writeFile` for new files if genuinely needed).
+5. If a tool returns `STALE_READ`, re-read the file and retry the edit against the current content. If `write_file` returns `ALREADY_EXISTS`, use an edit tool instead of overwriting. If `bash` returns `COMMAND_FAILED`, inspect its structured stdout/stderr before deciding the next action.
 5. After fixes (or if nothing was fixed), call `buildProject` once to verify the project still builds. If `buildProject` is a fallback/no-op or cannot meaningfully verify the changed surface, say that in the summary.
 6. Call `completeTask` with the structured verdict header described below.
 

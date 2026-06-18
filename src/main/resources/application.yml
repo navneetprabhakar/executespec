@@ -83,25 +83,36 @@ spring:
 
 model-matrix:
   providers:
+    # RL-2026-06-052 — LIGHTWEIGHT is now a genuinely cheaper model per provider (was all-flagship
+    # since 2026-06-02). It serves the genuinely-light NON-worker agents (classifier / chat
+    # compactors / titles / ledger). The WORKER never lands here: SequentialExecutor.tierConfigFor
+    # routes LOW-complexity worker tasks to WORKHORSE (flagship), so re-tiering LIGHTWEIGHT cheap
+    # does NOT reintroduce the prior cheap-worker eval regression. SpecChatService is bumped to
+    # WORKHORSE in agent-tier-map so the user-facing spec-build chat stays on the flagship.
     anthropic:
       planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
-      lightweight: claude-sonnet-4-6
+      lightweight: claude-haiku-4-5-20251001
     gemini:
       planning: gemini-3.5-flash
       workhorse: gemini-3.5-flash
-      lightweight: gemini-3.5-flash
+      lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4
-      lightweight: gpt-5.4
+      lightweight: gpt-5.4-mini
     openrouter:
-      planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
-      lightweight: claude-sonnet-4-6
+      # RL-2026-06-053: OpenRouter now defaults to DeepSeek (was Claude). deepseek-v4-pro for
+      # planning/workhorse, deepseek-v4-flash for the light tier — all via the OpenRouter gateway.
+      planning: deepseek-v4-pro
+      workhorse: deepseek-v4-pro
+      lightweight: deepseek-v4-flash
     deepseek:
-      planning: deepseek-v4-flash-native
-      workhorse: deepseek-v4-flash-native
+      # RL-2026-06-053: DeepSeek V4 Pro via the native api.deepseek.com route (~3-4x faster than the
+      # OpenRouter hop). Verified live 2026-06-18: Pro works multi-turn with tools on auto, and the
+      # reasoning_content echo is NOT required. Flash-native stays for the cheap light tier.
+      planning: deepseek-v4-pro-native
+      workhorse: deepseek-v4-pro-native
       lightweight: deepseek-v4-flash-native
     fireworks:
       planning: deepseek-v4-pro-fw
@@ -112,18 +123,18 @@ model-matrix:
     claude-opus-4-6:
       provider: anthropic
       chain-tier: ARCHITECT
-      context-limit: 200000
-      max-output-tokens: 32000
+      context-limit: 1048576
+      max-output-tokens: 64000
       display-label: "Claude Opus 4.6"
       pricing:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
-      notes: "Reserved for escalation."
+      notes: "Reserved for escalation. RL-2026-06-052: ctx 200K→1M (real Opus window); max-out 32K→64K (real cap 128K; 64K kept for non-stream safety, matches Sonnet)."
     claude-sonnet-4-6:
       provider: anthropic
       chain-tier: CAPABLE
-      context-limit: 200000
+      context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Sonnet 4.6"
       pricing:
@@ -211,14 +222,25 @@ model-matrix:
     claude-opus-4-7:
       provider: anthropic
       chain-tier: ARCHITECT
-      context-limit: 200000
-      max-output-tokens: 32000
+      context-limit: 1048576
+      max-output-tokens: 64000
       display-label: "Claude Opus 4.7"
       pricing:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
       notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26: $5 in / $0.50 cached / $25 out per 1M."
+    claude-opus-4-8:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      context-limit: 1048576
+      max-output-tokens: 64000
+      display-label: "Claude Opus 4.8"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Anthropic's most capable Opus-tier model (frontier), ENTERPRISE-only pin (Beta). Pricing per Anthropic docs 2026-06-18: $5 in / $0.50 cached / $25 out per 1M. Rejects temperature/top_p/top_k (400) — LlmRouter.callAnthropic drops them via the pre-seeded ANTHROPIC_DEPRECATED_TEMP_MODELS; ctx/out mirror the Opus-family rows (real model supports 1M/128K). Live API smoke 2026-06-18: callable + tool_use verified. (Fable 5 is gated behind Anthropic's Fable/Mythos access program — 404 on our key — so it is intentionally NOT listed.)"
     "[gpt-5.5]":
       provider: openai
       chain-tier: CAPABLE
@@ -264,7 +286,7 @@ model-matrix:
         output-per-1m: 1.10
       notes: |
         DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
-        NOT TIER-ACTIVE YET — Pro is a thinking-mode model and api.deepseek.com requires reasoning_content echo on every follow-up call (mirrors Gemini's thought-signature round-trip). Until OpenAiNativeToolClient captures + replays reasoning_content, use the non-thinking deepseek-v4-flash-native (below) instead. RL-2026-05-052.
+        TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
@@ -297,7 +319,7 @@ model-matrix:
         input-per-1m: 1.74
         cached-input-per-1m: 0.14
         output-per-1m: 3.48
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     deepseek-v4-flash-fw:
       provider: fireworks
       chain-tier: UTILITY
@@ -308,7 +330,7 @@ model-matrix:
         input-per-1m: 0.14
         cached-input-per-1m: 0.03
         output-per-1m: 0.28
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     kimi-k2p6-fw:
       provider: fireworks
       chain-tier: CAPABLE
@@ -330,7 +352,57 @@ model-matrix:
         input-per-1m: 1.40
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
-      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
+    # 2026-06-18 — mirror the Fireworks-available subset of the OpenRouter coding-model
+    # expansion (RL-2026-06-049 follow-up). Each slug was live-probed on api.fireworks.ai:
+    # callable AND tool_choice=required emits a valid tool call (the worker bar). devstral-2 /
+    # codestral-2508 / qwen3-coder* / grok-4.20 / gpt-5.3-codex are NOT on Fireworks (404) so
+    # they are deliberately omitted — an unverified slug would 404 → silent fallback. ENTERPRISE
+    # BYOK (needs the org's own Fireworks key); ctx conservative vs the OpenRouter sibling.
+    "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 202000
+      max-output-tokens: 25344
+      display-label: "GLM 5.2 (Fireworks)"
+      pricing:
+        input-per-1m: 1.40
+        cached-input-per-1m: 0.26
+        output-per-1m: 4.40
+      notes: "Fireworks accounts/fireworks/models/glm-5p2 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18 (GLM-5 band). Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    minimax-m3-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 196608
+      max-output-tokens: 32000
+      display-label: "MiniMax M3 (Fireworks)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.06
+        output-per-1m: 1.20
+      notes: "Fireworks accounts/fireworks/models/minimax-m3 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    "[minimax-m2.7-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 196608
+      max-output-tokens: 32000
+      display-label: "MiniMax M2.7 (Fireworks)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.06
+        output-per-1m: 1.20
+      notes: "Fireworks accounts/fireworks/models/minimax-m2p7 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    "[kimi-k2.7-code-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 16384
+      display-label: "Kimi K2.7 Code (Fireworks)"
+      pricing:
+        input-per-1m: 0.95
+        cached-input-per-1m: 0.19
+        output-per-1m: 4.00
+      notes: "Fireworks accounts/fireworks/models/kimi-k2p7-code Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
@@ -489,6 +561,11 @@ model-matrix:
   free-tier:
     provider: deepseek
     model: deepseek-v4-flash-native
+    # Model-level allow-list for the FREE tier (supersedes `provider`): DeepSeek V4 flash + pro.
+    # Edit this list to tune exactly which models free users may run.
+    models:
+      - deepseek-v4-flash-native
+      - deepseek-v4-pro-fw
 
   agent-tier-map:
     OutlinePlannerAgent: PLANNING
@@ -506,7 +583,7 @@ model-matrix:
     ProjectChatCompiler: PLANNING
     ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
-    SpecChatService: LIGHTWEIGHT
+    SpecChatService: WORKHORSE # RL-2026-06-052: user-facing spec-build chat stays on the flagship after LIGHTWEIGHT dropped to a cheap model
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
     ProjectDocGeneratorService: WORKHORSE

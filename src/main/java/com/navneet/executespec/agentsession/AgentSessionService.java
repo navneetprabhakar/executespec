@@ -8,7 +8,13 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CreateSessionRequest;
@@ -57,6 +63,7 @@ public class AgentSessionService {
   private final AgentActionEventRepository eventRepo;
   private final AgentUsageLedgerRepository usageRepo;
   private final AgentIntentService intentService;
+  private final AgentActionCatalog actionCatalog;
   private final ProjectAccessGuard projectAccessGuard;
   private final RunAccessGuard runAccessGuard;
   private final ProjectRepository projectRepo;
@@ -140,6 +147,117 @@ public class AgentSessionService {
   public List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
     requireSession(sessionId, user);
     return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId);
+  }
+
+  public List<CapabilityTool> capabilities(AppUserDetails user, String surface) {
+    requireOrg(user);
+    return actionCatalog.capabilities(surface, user.getUser().getTier());
+  }
+
+  @Transactional
+  public ActionPlanResponse planAction(
+      String sessionId, ActionPlanRequest request, AppUserDetails user) {
+    AgentSession session = requireSession(sessionId, user);
+    ActionPlanRequest req =
+        request == null ? new ActionPlanRequest("", null, null, null, null) : request;
+    IntentDecision decision =
+        intentService.interpret(
+            new InterpretIntentRequest(
+                sessionId,
+                req.message(),
+                firstNonBlank(req.projectId(), session.getProjectId()),
+                req.repoContext(),
+                req.clientCapabilities()));
+    String actionId = UUID.randomUUID().toString();
+    Instant now = Instant.now();
+    eventRepo.save(
+        AgentActionEvent.builder()
+            .id(UUID.randomUUID().toString())
+            .sessionId(sessionId)
+            .type("ACTION_PLANNED")
+            .payloadJson(
+                writeJson(
+                    java.util.Map.of(
+                        "actionId", actionId,
+                        "surface", firstNonBlank(req.surface(), session.getClientSurface()),
+                        "decision", decision)))
+            .createdAt(now)
+            .build());
+    session.setUpdatedAt(now);
+    sessionRepo.save(session);
+    return new ActionPlanResponse(
+        actionId,
+        sessionId,
+        decision,
+        capabilities(user, firstNonBlank(req.surface(), session.getClientSurface())),
+        now);
+  }
+
+  @Transactional
+  public ActionRecordResponse recordActionEvent(
+      String sessionId, String actionId, ActionEventRequest request, AppUserDetails user) {
+    AgentSession session = requireSession(sessionId, user);
+    Instant now = Instant.now();
+    String type =
+        request == null || request.type() == null || request.type().isBlank()
+            ? "ACTION_EVENT"
+            : request.type();
+    eventRepo.save(
+        AgentActionEvent.builder()
+            .id(UUID.randomUUID().toString())
+            .sessionId(sessionId)
+            .type(type)
+            .payloadJson(
+                writeJson(
+                    java.util.Map.of(
+                        "actionId",
+                        actionId,
+                        "payload",
+                        request == null || request.payload() == null
+                            ? java.util.Map.of()
+                            : request.payload())))
+            .createdAt(now)
+            .build());
+    session.setUpdatedAt(now);
+    sessionRepo.save(session);
+    return new ActionRecordResponse(actionId, sessionId, type, null, now);
+  }
+
+  @Transactional
+  public ActionRecordResponse recordActionResult(
+      String sessionId, String actionId, ActionResultRequest request, AppUserDetails user) {
+    AgentSession session = requireSession(sessionId, user);
+    Instant now = Instant.now();
+    String status =
+        request == null || request.status() == null || request.status().isBlank()
+            ? "UNKNOWN"
+            : request.status().toUpperCase(Locale.ROOT);
+    eventRepo.save(
+        AgentActionEvent.builder()
+            .id(UUID.randomUUID().toString())
+            .sessionId(sessionId)
+            .type("ACTION_RESULT")
+            .payloadJson(
+                writeJson(
+                    java.util.Map.of(
+                        "actionId", actionId,
+                        "status", status,
+                        "summary", request == null ? "" : firstNonBlank(request.summary(), ""),
+                        "runId", request == null ? "" : firstNonBlank(request.runId(), ""),
+                        "touchedFiles",
+                            request == null || request.touchedFiles() == null
+                                ? List.of()
+                                : request.touchedFiles(),
+                        "verification",
+                            request == null || request.verification() == null
+                                ? java.util.Map.of()
+                                : request.verification())))
+            .createdAt(now)
+            .build());
+    session.setUpdatedAt(now);
+    sessionRepo.save(session);
+    return new ActionRecordResponse(
+        actionId, sessionId, status, request == null ? null : request.summary(), now);
   }
 
   @Transactional

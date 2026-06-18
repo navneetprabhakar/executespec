@@ -1,5 +1,7 @@
 package com.navneet.executespec.router;
 
+import java.util.List;
+
 import com.navneet.executespec.auth.service.TierEnforcementService;
 
 import org.springframework.http.HttpStatus;
@@ -22,8 +24,17 @@ public class ModelAccessService {
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
 
-  /** A model is free when it belongs to the configured free-tier provider. */
+  /**
+   * A model is free when it's on the model-level allow-list ({@code
+   * model-matrix.free-tier.models}). When no list is configured we fall back to the legacy provider
+   * lock ({@code free-tier.provider}).
+   */
   public boolean isFreeModel(String modelId) {
+    List<String> freeModels = modelRegistry.freeTierModels();
+    if (!freeModels.isEmpty()) {
+      return freeModels.contains(modelId)
+          || freeModels.contains(modelRegistry.canonicalize(modelId));
+    }
     String provider = modelRegistry.providerFor(modelId);
     return provider != null && provider.equalsIgnoreCase(modelRegistry.freeTierProvider());
   }
@@ -58,11 +69,7 @@ public class ModelAccessService {
     if (!isFreeModel(canonical)) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "Model '"
-              + modelName
-              + "' isn't available on the free tier, which is limited to "
-              + modelRegistry.freeTierProvider()
-              + " models. Upgrade to Pro to use it.");
+          "Model '" + modelName + "' isn't available on the free tier. Upgrade to Pro to use it.");
     }
   }
 

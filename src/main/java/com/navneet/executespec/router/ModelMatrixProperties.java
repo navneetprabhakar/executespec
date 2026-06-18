@@ -93,5 +93,8 @@ public class ModelMatrixProperties {
   public static class FreeTierConfig {
     private String provider;
     private String model;
+
+    /** Model-level allow-list: ids the FREE tier may run (supersedes {@code provider} when set). */
+    private List<String> models;
   }
 }
