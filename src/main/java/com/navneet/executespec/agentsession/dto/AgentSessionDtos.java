@@ -93,6 +93,44 @@ public final class AgentSessionDtos {
       String billingImpact,
       List<String> requiredFields) {}
 
+  public record CapabilityTool(
+      String name,
+      String description,
+      Map<String, Object> inputSchema,
+      Map<String, Object> outputSchema,
+      String requiredTier,
+      List<String> requiredScopes,
+      String sideEffect,
+      boolean confirmationRequired,
+      String billingImpact,
+      List<String> surfaces) {}
+
+  public record ActionPlanRequest(
+      String message,
+      String projectId,
+      RepoContext repoContext,
+      ClientCapabilities clientCapabilities,
+      String surface) {}
+
+  public record ActionPlanResponse(
+      String actionId,
+      String sessionId,
+      IntentDecision decision,
+      List<CapabilityTool> capabilities,
+      Instant createdAt) {}
+
+  public record ActionEventRequest(String type, Map<String, Object> payload) {}
+
+  public record ActionResultRequest(
+      String status,
+      String summary,
+      String runId,
+      List<String> touchedFiles,
+      Map<String, Object> verification) {}
+
+  public record ActionRecordResponse(
+      String actionId, String sessionId, String status, String summary, Instant updatedAt) {}
+
   public record ContextResolveRequest(
       String gitRemote, String repoName, String branch, RepoContext repoContext) {}
 

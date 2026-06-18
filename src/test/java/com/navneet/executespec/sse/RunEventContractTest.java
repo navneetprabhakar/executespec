@@ -41,8 +41,7 @@ class RunEventContractTest {
   @Test
   void toolCallCarriesTypedRemoteToolFieldsWithoutChangingPayloadFrame() {
     RunEvent event =
-        RunEvent.toolCall(
-            "run-1", "task-1", "{\"callId\":\"c1\"}", "c1", "readFile", "{}", "read");
+        RunEvent.toolCall("run-1", "task-1", "{\"callId\":\"c1\"}", "c1", "readFile", "{}", "read");
 
     assertEquals("TOOL_CALL", event.type());
     assertEquals("{\"callId\":\"c1\"}", event.payload());

@@ -105,7 +105,8 @@ class RemoteToolDispatcherTest {
             inv -> {
               RunEvent ev = inv.getArgument(1);
               String callId = om.readTree(ev.payload()).get("callId").asText();
-              dispatcher.complete("r1", callId, "{\"ok\":false,\"kind\":\"INVALID_ARGS\",\"message\":\"unknown\"}");
+              dispatcher.complete(
+                  "r1", callId, "{\"ok\":false,\"kind\":\"INVALID_ARGS\",\"message\":\"unknown\"}");
               return null;
             })
         .when(broadcaster)
