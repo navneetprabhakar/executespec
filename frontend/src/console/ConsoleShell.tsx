@@ -9,6 +9,7 @@ import {useUiStore} from '@/stores/useUiStore';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import {IdeCommandPalette, usePaletteHotkey, type PaletteCmd, statusKind} from '@/ide/IdeKit';
 import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
+import {AnnouncementBanner} from './AnnouncementBanner';
 import {
   WorkspaceIcon,
   RunsIcon,
@@ -194,6 +195,7 @@ export default function ConsoleShell() {
 
   return (
     <div className={shellClasses}>
+      <AnnouncementBanner />
       <header className='con-topbar'>
         <button
           className='con-icon con-only-mobile'

@@ -219,6 +219,17 @@ model-matrix:
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
       notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26: $5 in / $0.50 cached / $25 out per 1M."
+    claude-opus-4-8:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      context-limit: 200000
+      max-output-tokens: 32000
+      display-label: "Claude Opus 4.8"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Anthropic's most capable Opus-tier model (frontier), ENTERPRISE-only pin (Beta). Pricing per Anthropic docs 2026-06-18: $5 in / $0.50 cached / $25 out per 1M. Rejects temperature/top_p/top_k (400) — LlmRouter.callAnthropic drops them via the pre-seeded ANTHROPIC_DEPRECATED_TEMP_MODELS; ctx/out mirror the Opus-family rows (real model supports 1M/128K). Live API smoke 2026-06-18: callable + tool_use verified. (Fable 5 is gated behind Anthropic's Fable/Mythos access program — 404 on our key — so it is intentionally NOT listed.)"
     "[gpt-5.5]":
       provider: openai
       chain-tier: CAPABLE

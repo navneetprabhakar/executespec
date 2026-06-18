@@ -108,6 +108,67 @@
 }
 
 /* ── top bar ─────────────────────────────────────────────────────────────── */
+/* Top announcement banner (RL-2026-06-051) — dismissible strip above the top bar.
+ * Scoped under .con-root so the legacy `.signal-app button` reset can't strip the X. */
+.con-root .con-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  background: var(--ide-list-active);
+  color: var(--ide-fg-bright);
+  border-bottom: 1px solid var(--ide-border);
+}
+.con-root .con-banner-success {
+  background: var(--ide-add);
+}
+.con-root .con-banner-warning {
+  background: color-mix(in srgb, var(--ide-yellow) 16%, var(--ide-bg-widget));
+}
+.con-root .con-banner-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.con-root .con-banner-link {
+  flex-shrink: 0;
+  color: var(--ide-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.con-root .con-banner-link:hover {
+  text-decoration: underline;
+}
+.con-root .con-banner-x {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.con-root .con-banner-x:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+@media (max-width: 640px) {
+  .con-root .con-banner {
+    padding: 7px 12px;
+    font-size: 12px;
+    gap: 8px;
+  }
+}
+
 .con-topbar {
   display: flex;
   align-items: center;

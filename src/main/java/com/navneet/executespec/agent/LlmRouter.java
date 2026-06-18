@@ -551,6 +551,16 @@ public class LlmRouter {
   /** Models whose API has rejected `temperature` with the deprecation error within this JVM. */
   private static final Set<String> ANTHROPIC_DEPRECATED_TEMP_MODELS = ConcurrentHashMap.newKeySet();
 
+  static {
+    // Pre-seed the known frontier Anthropic IDs that reject `temperature`/`top_p`/`top_k` with a
+    // 400 (Opus 4.7 onward — verified live 2026-06-18). Without this, the FIRST pinned call to one
+    // of these models eats one 400 + self-healing retry per JVM; pre-seeding skips `temperature`
+    // directly. The runtime catch in callAnthropic still covers any future model not listed here.
+    // RL-2026-06-051.
+    ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-7");
+    ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-8");
+  }
+
   /**
    * Returns true when the exception chain mentions Anthropic's "temperature is deprecated for this
    * model" 400.
