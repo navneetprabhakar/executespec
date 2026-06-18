@@ -85,8 +85,10 @@ class RemoteToolDispatcherTest {
     JsonNode frame = om.readTree(cap.getValue().payload());
     assertThat(frame.get("runId").asText()).isEqualTo("r1");
     assertThat(frame.get("name").asText()).isEqualTo("readFile");
+    assertThat(frame.get("permissionKind").asText()).isEqualTo("read");
     assertThat(frame.get("args").get("path").asText()).isEqualTo("x");
     assertThat(frame.get("callId").asText()).isNotBlank();
+    assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("read");
   }
 
   @Test

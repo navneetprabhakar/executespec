@@ -99,7 +99,9 @@ public class RemoteToolDispatcher {
     try {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
       broadcaster.emit(
-          runId, RunEvent.toolCall(runId, taskId, frameJson, callId, toolName, argsJson));
+          runId,
+          RunEvent.toolCall(
+              runId, taskId, frameJson, callId, toolName, argsJson, permissionKind(toolName)));
       return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
       return errorEnvelope(
@@ -137,8 +139,45 @@ public class RemoteToolDispatcher {
     node.put("runId", runId);
     if (taskId != null) node.put("taskId", taskId);
     node.put("name", toolName);
+    node.put("permissionKind", permissionKind(toolName));
     node.set("args", parseArgs(argsJson));
     return node.toString();
+  }
+
+  private String permissionKind(String toolName) {
+    if (toolName == null || toolName.isBlank()) return "read";
+    return switch (toolName) {
+      case "writeFile",
+          "write_file",
+          "editFile",
+          "edit_file",
+          "multiEdit",
+          "multi_edit",
+          "applyPatch",
+          "apply_patch",
+          "move",
+          "rename",
+          "delete",
+          "deletePath" -> "edit";
+      case "gitCommit" -> "commit";
+      case "shell",
+          "bash",
+          "executeCommand",
+          "runCommand",
+          "terminalCommand",
+          "backgroundProcess",
+          "background_process",
+          "buildProject",
+          "build",
+          "runBuild",
+          "runTests",
+          "testProject",
+          "installDependencies",
+          "lintProject",
+          "formatProject",
+          "diagnostics" -> "shell";
+      default -> "read";
+    };
   }
 
   private JsonNode parseArgs(String argsJson) {
