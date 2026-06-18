@@ -80,6 +80,10 @@ You are a code-execution agent operating in a sandboxed workspace. You have
 access to filesystem (readFile, writeFile, editFile, listFiles, searchFiles),
 shell, read-only git (status, diff), and buildProject tools. Use the tools
 to complete the task — do not explain or hedge.
+CLI-compatible aliases are also valid when present in the tool schema:
+read_file, write_file, edit_file, glob, grep, bash, multi_edit/apply_patch,
+move/rename, delete, background_process, web_fetch/web_search, diagnostics,
+ast_search. Use only tools actually listed in the current tool schema.
 
 Important rules:
 - The shell runs in the workspace root already. Do NOT `cd /workspace` or use
@@ -89,8 +93,14 @@ Important rules:
   never mutate a tracked file in place through the shell (`sed -i`, `awk -i
   inplace`, or `>`/`>>` over an existing file); that skips the read-before-edit
   check and leaves no reviewable diff (`sed -i`/`awk -i inplace` are blocked).
+- write_file follows the same rule: it never silently clobbers an existing file.
+  If a write returns ALREADY_EXISTS, read the file and use edit_file/editFile.
 - editFile takes an array of {oldStr, newStr} pairs; every oldStr must occur
   exactly once in the current file.
+- edit_file is the single-replacement alias. If it returns STALE_READ, call
+  read_file/readFile again and re-issue the edit against the current content.
+- bash returns JSON {stdout, stderr, exit_code}. If it returns COMMAND_FAILED,
+  read stdout/stderr and fix the cause; do not retry the same command blindly.
 - After making changes, you may call buildProject to verify the project still
   compiles.
 - When the task is fully complete, call completeTask with a brief summary.
@@ -2151,7 +2161,14 @@ to boot — skip it for those.""";
     int n = 0;
     for (String entry : toolLog) {
       if (entry == null) continue;
-      if (entry.startsWith("writeFile") || entry.startsWith("editFile")) n++;
+      if (entry.startsWith("writeFile")
+          || entry.startsWith("write_file")
+          || entry.startsWith("editFile")
+          || entry.startsWith("edit_file")
+          || entry.startsWith("multiEdit")
+          || entry.startsWith("multi_edit")
+          || entry.startsWith("applyPatch")
+          || entry.startsWith("apply_patch")) n++;
     }
     return n;
   }

@@ -7,6 +7,200 @@ import org.springframework.context.annotation.Configuration;
 class CommandToolConfiguration {
 
   @Bean
+  Tool readFileSnakeTool(ReadFileTool readFileTool) {
+    return new ReadFileCompatibilityTool(readFileTool);
+  }
+
+  @Bean
+  Tool writeFileSnakeTool(WriteFileTool writeFileTool) {
+    return new WriteFileCompatibilityTool(writeFileTool);
+  }
+
+  @Bean
+  Tool editFileSnakeTool(EditFileTool editFileTool) {
+    return new EditFileCompatibilityTool(editFileTool);
+  }
+
+  @Bean
+  Tool globTool() {
+    return new GlobTool();
+  }
+
+  @Bean
+  Tool grepTool(SearchFilesTool searchFilesTool) {
+    return new GrepCompatibilityTool(searchFilesTool);
+  }
+
+  @Bean
+  Tool multiEditSnakeTool(EditFileTool editFileTool) {
+    return new MultiEditCompatibilityTool("multi_edit", editFileTool);
+  }
+
+  @Bean
+  Tool multiEditTool(EditFileTool editFileTool) {
+    return new MultiEditCompatibilityTool("multiEdit", editFileTool);
+  }
+
+  @Bean
+  Tool applyPatchSnakeTool(EditFileTool editFileTool) {
+    return new MultiEditCompatibilityTool("apply_patch", editFileTool);
+  }
+
+  @Bean
+  Tool applyPatchTool(EditFileTool editFileTool) {
+    return new MultiEditCompatibilityTool("applyPatch", editFileTool);
+  }
+
+  @Bean
+  Tool moveTool() {
+    return new MovePathTool();
+  }
+
+  @Bean
+  Tool renameTool() {
+    return new CommandAliasTool("rename", "Alias of move.", new MovePathTool());
+  }
+
+  @Bean
+  Tool deleteTool() {
+    return new DeletePathTool();
+  }
+
+  @Bean
+  Tool deletePathTool() {
+    return new CommandAliasTool("deletePath", "Alias of delete.", new DeletePathTool());
+  }
+
+  @Bean
+  Tool bashTool(ShellTool shellTool) {
+    return new BashStructuredTool(shellTool);
+  }
+
+  @Bean
+  Tool backgroundProcessSnakeTool(BackgroundJobTool backgroundJobTool) {
+    return new BackgroundProcessCompatibilityTool(backgroundJobTool);
+  }
+
+  @Bean
+  Tool backgroundProcessTool(BackgroundJobTool backgroundJobTool) {
+    return new CommandAliasTool(
+        "backgroundProcess",
+        "Alias of background_process.",
+        new BackgroundProcessCompatibilityTool(backgroundJobTool));
+  }
+
+  @Bean
+  Tool webFetchSnakeTool() {
+    return new WebFetchTool();
+  }
+
+  @Bean
+  Tool webFetchTool() {
+    return new CommandAliasTool("webFetch", "Alias of web_fetch.", new WebFetchTool());
+  }
+
+  @Bean
+  Tool webSearchSnakeTool() {
+    return new WebSearchTool();
+  }
+
+  @Bean
+  Tool webSearchTool() {
+    return new CommandAliasTool("webSearch", "Alias of web_search.", new WebSearchTool());
+  }
+
+  @Bean
+  Tool diagnosticsTool(ShellTool shellTool) {
+    return new DiagnosticsTool(shellTool);
+  }
+
+  @Bean
+  Tool astSearchSnakeTool(SearchFilesTool searchFilesTool) {
+    return new GrepCompatibilityTool(searchFilesTool) {
+      @Override
+      public String name() {
+        return "ast_search";
+      }
+
+      @Override
+      public String description() {
+        return "Structural search is not wired server-side yet; this falls back to regex content"
+            + " search for local-hands/client parity.";
+      }
+    };
+  }
+
+  @Bean
+  Tool astSearchTool(SearchFilesTool searchFilesTool) {
+    return new CommandAliasTool(
+        "astSearch", "Alias of ast_search.", astSearchSnakeTool(searchFilesTool));
+  }
+
+  @Bean
+  Tool lspTool() {
+    return new UnavailableProtocolTool(
+        "lsp",
+        "LSP definition/references/rename require language-server integration; diagnostics is"
+            + " available separately.");
+  }
+
+  @Bean
+  Tool astEditSnakeTool() {
+    return new UnavailableProtocolTool(
+        "ast_edit", "ast_edit requires a structural rewrite engine; use editFile/edit_file.");
+  }
+
+  @Bean
+  Tool astEditTool() {
+    return new UnavailableProtocolTool(
+        "astEdit", "astEdit requires a structural rewrite engine; use editFile/edit_file.");
+  }
+
+  @Bean
+  Tool mcpClientSnakeTool() {
+    return new UnavailableProtocolTool(
+        "mcp_client",
+        "MCP client support is a client/loop capability and is not wired server-side.");
+  }
+
+  @Bean
+  Tool mcpClientTool() {
+    return new UnavailableProtocolTool(
+        "mcpClient",
+        "MCP client support is a client/loop capability and is not wired server-side.");
+  }
+
+  @Bean
+  Tool spawnSubagentSnakeTool() {
+    return new UnavailableProtocolTool(
+        "spawn_subagent", "Subagents are hosted by the agent loop, not by worker tool execution.");
+  }
+
+  @Bean
+  Tool spawnSubagentTool() {
+    return new UnavailableProtocolTool(
+        "spawnSubagent", "Subagents are hosted by the agent loop, not by worker tool execution.");
+  }
+
+  @Bean
+  Tool updatePlanSnakeTool() {
+    return new UnavailableProtocolTool(
+        "update_plan", "Structured planning is hosted by the client UI/agent loop.");
+  }
+
+  @Bean
+  Tool updatePlanTool() {
+    return new UnavailableProtocolTool(
+        "updatePlan", "Structured planning is hosted by the client UI/agent loop.");
+  }
+
+  @Bean
+  Tool todoTool() {
+    return new UnavailableProtocolTool(
+        "todo", "Structured planning is hosted by the client UI/agent loop.");
+  }
+
+  @Bean
   Tool executeCommandTool(ShellTool shellTool) {
     return new CommandAliasTool(
         "executeCommand",
