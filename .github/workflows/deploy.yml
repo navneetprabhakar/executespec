@@ -372,6 +372,36 @@ jobs:
           echo "Health check FAILED after 20 attempts"
           exit 1
 
+      # ── Provider key verification ────────────────────────────────────────
+      # A deploy that lands without a valid key for the providers it routes to 401s EVERY run —
+      # invisible to the authenticated customer (it surfaces as an opaque upstream auth error, e.g.
+      # "invalid x-api-key"). The app is confirmed UP above; now assert the required provider keys
+      # actually made it into the running config, and FAIL the deploy if not — instead of silently
+      # shipping a keyless backend. Read-only (curl + grep); fails only on an explicit `:false`.
+      - name: Verify provider keys
+        run: |
+          RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE }} \
+            --tunnel-through-iap \
+            --command="curl -s http://localhost:8080/api/health/providers" \
+            2>/dev/null) || RESULT="SSH_FAIL"
+          echo "Provider key presence: $RESULT"
+          # Required providers for this environment — anthropic backs the default chat model. Add any
+          # other provider you route runs to. A run hitting an unconfigured provider 401s at runtime.
+          MISSING=""
+          for p in anthropic; do
+            if echo "$RESULT" | grep -qE "\"$p\"[[:space:]]*:[[:space:]]*false"; then
+              MISSING="$MISSING $p"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Deployed backend is missing API key(s) for:$MISSING — every run routing to them will 401."
+            echo "Fix gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy/config/api-keys and redeploy."
+            exit 1
+          fi
+          echo "Required provider keys present."
+
       # ── Dump logs on failure ─────────────────────────────────────────────
       - name: Dump app logs (on failure)
         if: failure()

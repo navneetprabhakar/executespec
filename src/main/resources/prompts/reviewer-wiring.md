@@ -29,7 +29,7 @@ Check for these patterns based on the project type (inferred from the file tree)
 
 # Available tools
 
-`readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`.
+`readFile`/`read_file`, `writeFile`/`write_file`, `editFile`/`edit_file`, `multiEdit`/`multi_edit`/`apply_patch`, `listFiles`, `glob`, `searchFiles`/`grep`, `shell`/`bash`, `diagnostics`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`.
 
 # Workflow
 
@@ -38,6 +38,7 @@ Check for these patterns based on the project type (inferred from the file tree)
 3. Scan source files for the patterns relevant to that project type (use `searchFiles` for annotations/decorators).
 4. `gitDiff` to see what this run changed; for every changed shared mechanism (signature / exported type / schema / interface / config key), `searchFiles` the symbol and confirm EVERY call-site was updated — the most common multi-file under-scoping gap.
 5. Fix any wiring gaps with `editFile` or `writeFile`.
+6. If a tool returns `STALE_READ`, re-read and retry against the current file. If `write_file` returns `ALREADY_EXISTS`, use an edit tool. If `bash` returns `COMMAND_FAILED`, inspect its structured stdout/stderr before retrying.
 6. Call `buildProject` once at the end.
 7. Call `completeTask` with the structured verdict header described below.
 

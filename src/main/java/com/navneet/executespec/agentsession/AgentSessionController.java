@@ -7,8 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CreateSessionRequest;
@@ -54,6 +60,13 @@ public class AgentSessionController {
     return actionCatalog.list();
   }
 
+  @GetMapping("/v2/capabilities")
+  public List<CapabilityTool> capabilities(
+      @AuthenticationPrincipal AppUserDetails user,
+      @RequestParam(defaultValue = "CLI") String surface) {
+    return sessionService.capabilities(user, surface);
+  }
+
   @PostMapping("/sessions")
   public AgentSessionResponse createSession(
       @AuthenticationPrincipal AppUserDetails user, @RequestBody CreateSessionRequest request) {
@@ -76,6 +89,32 @@ public class AgentSessionController {
   public List<AgentActionEvent> sessionEvents(
       @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
     return sessionService.listEvents(sessionId, user);
+  }
+
+  @PostMapping("/v2/sessions/{sessionId}/actions/plan")
+  public ActionPlanResponse planAction(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody ActionPlanRequest request) {
+    return sessionService.planAction(sessionId, request, user);
+  }
+
+  @PostMapping("/v2/sessions/{sessionId}/actions/{actionId}/events")
+  public ActionRecordResponse actionEvent(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @PathVariable String actionId,
+      @RequestBody ActionEventRequest request) {
+    return sessionService.recordActionEvent(sessionId, actionId, request, user);
+  }
+
+  @PostMapping("/v2/sessions/{sessionId}/actions/{actionId}/result")
+  public ActionRecordResponse actionResult(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @PathVariable String actionId,
+      @RequestBody ActionResultRequest request) {
+    return sessionService.recordActionResult(sessionId, actionId, request, user);
   }
 
   /**

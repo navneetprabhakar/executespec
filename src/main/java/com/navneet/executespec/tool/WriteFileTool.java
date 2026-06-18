@@ -106,7 +106,7 @@ public class WriteFileTool implements Tool {
       }
       if (Files.exists(resolved)) {
         return ToolResult.err(
-            ToolResult.ErrorKind.INVALID_ARGS,
+            ToolResult.ErrorKind.ALREADY_EXISTS,
             "file already exists: " + path + " — use editFile to modify existing files");
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, content);

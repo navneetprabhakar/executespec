@@ -116,8 +116,17 @@ class MultiRepoWorkerPromptTest {
         prompt.contains("Obey explicit file scope exactly"),
         "Local-hands must keep the worker from inventing files outside the user's requested edit.");
     assertTrue(
-        prompt.contains("do not invent tests just because the workspace is empty"),
+        prompt.contains("test requirement is satisfied by producing the requested files correctly"),
         "Content-only local edits should not sprout validation scaffolds.");
+    assertTrue(
+        prompt.contains("Default CLI/local-hands behavior is PROTOTYPE speed"),
+        "CLI local-hands should not inherit production's create-tests-by-default behavior.");
+    assertTrue(
+        prompt.contains("tests only when the user asks for tests"),
+        "Prototype local-hands must not create test files unless explicitly requested.");
+    assertTrue(
+        prompt.contains("review is") && prompt.contains("not part of the default CLI prototype path"),
+        "CLI local-hands must not self-upgrade into review/report workflow.");
     assertTrue(
         prompt.contains("LOCAL-HANDS FINAL OVERRIDE"),
         "The local-hands scope rule must explicitly override the generic test mandate.");
