@@ -83,22 +83,28 @@ spring:
 
 model-matrix:
   providers:
+    # RL-2026-06-052 — LIGHTWEIGHT is now a genuinely cheaper model per provider (was all-flagship
+    # since 2026-06-02). It serves the genuinely-light NON-worker agents (classifier / chat
+    # compactors / titles / ledger). The WORKER never lands here: SequentialExecutor.tierConfigFor
+    # routes LOW-complexity worker tasks to WORKHORSE (flagship), so re-tiering LIGHTWEIGHT cheap
+    # does NOT reintroduce the prior cheap-worker eval regression. SpecChatService is bumped to
+    # WORKHORSE in agent-tier-map so the user-facing spec-build chat stays on the flagship.
     anthropic:
       planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
-      lightweight: claude-sonnet-4-6
+      lightweight: claude-haiku-4-5-20251001
     gemini:
       planning: gemini-3.5-flash
       workhorse: gemini-3.5-flash
-      lightweight: gemini-3.5-flash
+      lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4
-      lightweight: gpt-5.4
+      lightweight: gpt-5.4-mini
     openrouter:
       planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
-      lightweight: claude-sonnet-4-6
+      lightweight: claude-haiku-4-5-20251001
     deepseek:
       planning: deepseek-v4-flash-native
       workhorse: deepseek-v4-flash-native
@@ -112,18 +118,18 @@ model-matrix:
     claude-opus-4-6:
       provider: anthropic
       chain-tier: ARCHITECT
-      context-limit: 200000
-      max-output-tokens: 32000
+      context-limit: 1048576
+      max-output-tokens: 64000
       display-label: "Claude Opus 4.6"
       pricing:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
-      notes: "Reserved for escalation."
+      notes: "Reserved for escalation. RL-2026-06-052: ctx 200K→1M (real Opus window); max-out 32K→64K (real cap 128K; 64K kept for non-stream safety, matches Sonnet)."
     claude-sonnet-4-6:
       provider: anthropic
       chain-tier: CAPABLE
-      context-limit: 200000
+      context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Sonnet 4.6"
       pricing:
@@ -211,8 +217,8 @@ model-matrix:
     claude-opus-4-7:
       provider: anthropic
       chain-tier: ARCHITECT
-      context-limit: 200000
-      max-output-tokens: 32000
+      context-limit: 1048576
+      max-output-tokens: 64000
       display-label: "Claude Opus 4.7"
       pricing:
         input-per-1m: 5.00
@@ -222,8 +228,8 @@ model-matrix:
     claude-opus-4-8:
       provider: anthropic
       chain-tier: ARCHITECT
-      context-limit: 200000
-      max-output-tokens: 32000
+      context-limit: 1048576
+      max-output-tokens: 64000
       display-label: "Claude Opus 4.8"
       pricing:
         input-per-1m: 5.00
@@ -308,7 +314,7 @@ model-matrix:
         input-per-1m: 1.74
         cached-input-per-1m: 0.14
         output-per-1m: 3.48
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     deepseek-v4-flash-fw:
       provider: fireworks
       chain-tier: UTILITY
@@ -319,7 +325,7 @@ model-matrix:
         input-per-1m: 0.14
         cached-input-per-1m: 0.03
         output-per-1m: 0.28
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     kimi-k2p6-fw:
       provider: fireworks
       chain-tier: CAPABLE
@@ -341,7 +347,7 @@ model-matrix:
         input-per-1m: 1.40
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
-      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     # 2026-06-18 — mirror the Fireworks-available subset of the OpenRouter coding-model
     # expansion (RL-2026-06-049 follow-up). Each slug was live-probed on api.fireworks.ai:
     # callable AND tool_choice=required emits a valid tool call (the worker bar). devstral-2 /
@@ -567,7 +573,7 @@ model-matrix:
     ProjectChatCompiler: PLANNING
     ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
-    SpecChatService: LIGHTWEIGHT
+    SpecChatService: WORKHORSE # RL-2026-06-052: user-facing spec-build chat stays on the flagship after LIGHTWEIGHT dropped to a cheap model
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
     ProjectDocGeneratorService: WORKHORSE
