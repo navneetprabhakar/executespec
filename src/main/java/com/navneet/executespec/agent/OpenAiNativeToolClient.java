@@ -101,10 +101,19 @@ public class OpenAiNativeToolClient {
     // exact client; absent an override we use the configured OpenAI default.
     String effectiveBaseUrl =
         (request.baseUrl() != null && !request.baseUrl().isBlank()) ? request.baseUrl() : baseUrl;
+    // Some gateways' base-url already ends in `/v1` (e.g. Fireworks:
+    // https://api.fireworks.ai/inference/v1); appending the full `/v1/chat/completions` would yield
+    // a
+    // 404 on `/v1/v1/chat/completions`. Append only the remainder when the base already carries
+    // `/v1`.
+    String completionsPath =
+        effectiveBaseUrl.replaceAll("/+$", "").endsWith("/v1")
+            ? "/chat/completions"
+            : CHAT_COMPLETIONS_PATH;
     ObjectNode body = buildRequestBody(request);
     log.info(
         "OpenAI-wire POST {} model={} tools={}",
-        effectiveBaseUrl + CHAT_COMPLETIONS_PATH,
+        effectiveBaseUrl + completionsPath,
         request.model(),
         request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
 
@@ -120,7 +129,7 @@ public class OpenAiNativeToolClient {
       response =
           client
               .post()
-              .uri(CHAT_COMPLETIONS_PATH)
+              .uri(completionsPath)
               .contentType(MediaType.APPLICATION_JSON)
               .header("Authorization", "Bearer " + apiKey)
               .body(body)
