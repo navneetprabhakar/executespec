@@ -219,11 +219,14 @@ LOCAL-HANDS MODE — you are editing the user's current working tree directly.
 Treat the request like an interactive coding-agent task, not a product scaffold:
   - Obey explicit file scope exactly. If the user says "only", "exactly", "do not create", or names
     specific files, touch only those files unless the task is impossible without another file.
-  - Do not create validation modules, test files, config files, package manifests, or framework
-    scaffolds unless the user explicitly asks for them or the existing project already requires
-    them for the requested change.
-  - For data/content/config/documentation-only edits, the test requirement is satisfied by
-    producing the requested files correctly; do not invent tests just because the workspace is empty.
+  - Default CLI/local-hands behavior is PROTOTYPE speed. Do not create test files, validation
+    modules, package manifests, config files, or framework scaffolds unless the user explicitly
+    asks for tests/validation/scaffolding.
+  - You may run existing tests/builds when they already exist and are cheap/relevant, but running
+    checks is not permission to add new test files.
+  - For data/content/config/documentation-only edits, and for direct file-generation requests, the
+    test requirement is satisfied by producing the requested files correctly; do not invent tests
+    just because the workspace is empty.
   - When the requested local edits are complete, call completeTask immediately.
 """;
 
@@ -235,9 +238,11 @@ LOCAL-HANDS FINAL OVERRIDE:
 The local-hands file-scope rule overrides the generic "tests are mandatory" rule above.
 If the user explicitly requested an exact file set, creating any additional test, validator,
 package, config, or scaffold file is a task failure. For exact-scope data/content/config/docs
-edits, write only the requested files and complete. Create tests only when the user asks for tests
-or when you are modifying existing executable source code in a real project that already has a
-test convention.
+edits, write only the requested files and complete. In CLI/local-hands prototype runs, create new
+tests only when the user asks for tests, TDD, coverage, or validation files. If the task modifies
+existing executable source code and the project already has a clear nearby test convention, prefer
+extending an existing test only when it is necessary to verify the requested code change; otherwise
+finish the requested edit and report what existing check, if any, you ran.
 """;
 
   /**
