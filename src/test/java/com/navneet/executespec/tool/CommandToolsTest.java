@@ -167,4 +167,135 @@ class CommandToolsTest {
     assertThat(result).isInstanceOf(ToolResult.Ok.class);
     assertThat(((ToolResult.Ok) result).content()).contains("command=printf alias-ok", "alias-ok");
   }
+
+  @Test
+  void readFileAlias_maps_offset_and_limit_to_line_range_and_records_read() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "one\ntwo\nthree\n");
+    ReadFileStateStore readState = new ReadFileStateStore();
+    Tool tool = new ReadFileCompatibilityTool(readFileTool(readState));
+
+    ToolResult result = tool.execute(json("{\"path\":\"a.txt\",\"offset\":1,\"limit\":1}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content()).isEqualTo("two");
+  }
+
+  @Test
+  void writeFileAlias_returns_alreadyExists_for_existing_file() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "old\n");
+    Tool tool =
+        new WriteFileCompatibilityTool(
+            new WriteFileTool(
+                new FileSandboxPolicy(),
+                new com.navneet.executespec.security.CodeAbuseScanner(),
+                mock(com.navneet.executespec.sse.SseBroadcaster.class),
+                new ReadFileStateStore(),
+                null));
+
+    ToolResult result = tool.execute(json("{\"path\":\"a.txt\",\"content\":\"new\\n\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.ALREADY_EXISTS);
+  }
+
+  @Test
+  void editFileAlias_applies_after_read_and_honors_expectedCount() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "one\ntwo\ntwo\n");
+    ReadFileStateStore readState = new ReadFileStateStore();
+    ExecutionContext ctx = ctx();
+    new ReadFileCompatibilityTool(readFileTool(readState))
+        .execute(json("{\"path\":\"a.txt\"}"), ctx);
+    Tool tool = new EditFileCompatibilityTool(editFileTool(readState));
+
+    ToolResult mismatch =
+        tool.execute(
+            json(
+                "{\"path\":\"a.txt\",\"old_str\":\"two\",\"new_str\":\"TWO\","
+                    + "\"expected_count\":1}"),
+            ctx);
+    ToolResult result =
+        tool.execute(
+            json(
+                "{\"path\":\"a.txt\",\"old_str\":\"two\",\"new_str\":\"TWO\","
+                    + "\"expected_count\":2,\"replaceAll\":true}"),
+            ctx);
+
+    assertThat(mismatch).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) mismatch).kind()).isEqualTo(ToolResult.ErrorKind.INVALID_ARGS);
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(Files.readString(root.resolve("a.txt"))).isEqualTo("one\nTWO\nTWO\n");
+  }
+
+  @Test
+  void editFileAlias_returns_staleRead_when_file_was_not_read() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "one\n");
+    Tool tool = new EditFileCompatibilityTool(editFileTool(new ReadFileStateStore()));
+
+    ToolResult result =
+        tool.execute(json("{\"path\":\"a.txt\",\"old_str\":\"one\",\"new_str\":\"two\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.STALE_READ);
+  }
+
+  @Test
+  void glob_respects_basic_gitignore_and_skips_build_dirs() throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Files.createDirectories(root.resolve("target"));
+    Files.writeString(root.resolve(".gitignore"), "ignored/\n");
+    Files.writeString(root.resolve("src/App.java"), "class App {}\n");
+    Files.writeString(root.resolve("target/Generated.java"), "class Generated {}\n");
+    Files.createDirectories(root.resolve("ignored"));
+    Files.writeString(root.resolve("ignored/Hidden.java"), "class Hidden {}\n");
+    Tool tool = new GlobTool();
+
+    ToolResult result = tool.execute(json("{\"pattern\":\"**/*.java\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("src/App.java")
+        .doesNotContain("target/Generated.java", "ignored/Hidden.java");
+  }
+
+  @Test
+  void move_and_delete_are_workspace_confined_filesystem_operations() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "body\n");
+    Tool move = new MovePathTool();
+    Tool delete = new DeletePathTool();
+
+    ToolResult moved = move.execute(json("{\"src\":\"a.txt\",\"dst\":\"dir/b.txt\"}"), ctx());
+    ToolResult deleted = delete.execute(json("{\"path\":\"dir/b.txt\"}"), ctx());
+
+    assertThat(moved).isInstanceOf(ToolResult.Ok.class);
+    assertThat(deleted).isInstanceOf(ToolResult.Ok.class);
+    assertThat(Files.exists(root.resolve("a.txt"))).isFalse();
+    assertThat(Files.exists(root.resolve("dir/b.txt"))).isFalse();
+  }
+
+  @Test
+  void bashAlias_returns_json_for_success_and_commandFailed_for_nonzero() {
+    Tool tool = new BashStructuredTool(new ShellTool(new ShellSandboxPolicy(), null, null));
+
+    ToolResult ok = tool.execute(json("{\"command\":\"echo hi\"}"), ctx());
+    ToolResult failed = tool.execute(json("{\"command\":\"test -f missing-file\"}"), ctx());
+
+    assertThat(ok).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) ok).content()).contains("\"stdout\":\"hi\\n\"", "\"exit_code\":0");
+    assertThat(failed).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) failed).kind()).isEqualTo(ToolResult.ErrorKind.COMMAND_FAILED);
+    assertThat(((ToolResult.Err) failed).message()).contains("\"exit_code\":1");
+  }
+
+  private static ReadFileTool readFileTool(ReadFileStateStore readState) {
+    return new ReadFileTool(null, null, null, null, null, null, readState);
+  }
+
+  private static EditFileTool editFileTool(ReadFileStateStore readState) {
+    return new EditFileTool(
+        new FileSandboxPolicy(),
+        new com.navneet.executespec.security.CodeAbuseScanner(),
+        mock(com.navneet.executespec.sse.SseBroadcaster.class),
+        readState,
+        null);
+  }
 }

@@ -33,12 +33,22 @@ public sealed interface ToolResult {
     INVALID_ARGS,
     /** Target file/directory/resource does not exist. Model may need to listFiles first. */
     NOT_FOUND,
+    /** Target exists and the requested operation refused to overwrite/collide. */
+    ALREADY_EXISTS,
+    /** The file was not read in this session, or changed since the last read. */
+    STALE_READ,
     /** Filesystem or network I/O failed. Often retryable. */
     IO_ERROR,
+    /** HTTP fetch/search failed with a non-2xx response. */
+    HTTP_ERROR,
     /** Operation blocked by sandbox policy or path-escape guard. Not retryable. */
     FORBIDDEN,
+    /** Command ran but exited non-zero. */
+    COMMAND_FAILED,
     /** Operation exceeded its time budget. May be retryable with a smaller scope. */
     TIMEOUT,
+    /** Tool is known to the protocol but not implemented in this backend execution mode. */
+    UNAVAILABLE,
     /** Unclassified internal failure. Treated as non-retryable by default. */
     INTERNAL
   }
