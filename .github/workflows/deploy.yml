@@ -21,6 +21,14 @@ on:
         required: false
         type: string
 
+# 2026-06-18 (CI-minutes pass) — serialize deploys per branch. cancel-in-
+# progress is FALSE here (unlike the PR workflows): a half-cancelled deploy
+# could leave the VM mid-update, so let an in-flight deploy finish and queue
+# the next. See docs/reason-log/2026-06.md.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   JAVA_VERSION: '21'
   DEPLOY_BUCKET_PREFIX: executespec    # Bucket: executespec-{env}-deploy
@@ -73,30 +81,24 @@ jobs:
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
-      # ── Frontend lint gate ───────────────────────────────────────────────
-      # 2026-05-01 — code-style refactor wired prettier + eslint into the
-      # codebase. Format-check is the cheap gate (no compilation needed);
-      # eslint runs after with `--max-warnings 9999` so existing warnings
-      # don't block the build but new errors do (config in
-      # `frontend/.eslintrc.cjs` keeps `react-hooks/rules-of-hooks` and
-      # `no-var` / `eqeqeq` as errors). See docs/design/code-style.md.
-      - name: Frontend format check
-        run: cd frontend && npm run format:check
-      - name: Frontend lint
-        run: cd frontend && npm run lint
-
       # ── Frontend build ────────────────────────────────────────────────────
+      # 2026-06-18 (CI-minutes pass) — the prettier + eslint gate that used to
+      # run here was removed: lint.yml already runs it on every PR and nothing
+      # reaches dev except via PR. `npm run build` still fails loudly on a
+      # broken frontend. See docs/reason-log/2026-06.md.
       - name: Build frontend
         run: cd frontend && npm run build
 
-      # ── Backend build + lint + tests ─────────────────────────────────────
-      # `mvn verify` (vs. earlier `mvn package`) picks up the
-      # spotless-maven-plugin binding (phase=verify) added in the
-      # 2026-05-01 style refactor — so any drift from googleJavaFormat
-      # fails CI before the JAR ships. surefire still runs unit tests with
-      # `e2e,integration,chaos` excluded (pom.xml).
-      - name: Build JAR (lint + run unit tests)
-        run: mvn verify -q
+      # ── Backend build (JAR only — tests + spotless are PR-gated) ──────────
+      # 2026-06-18 (CI-minutes pass) — was `mvn verify` (full unit suite +
+      # spotless). test.yml runs `mvn spotless:check test` on every PR and
+      # there are zero failsafe/integration tests, so `verify` re-ran nothing
+      # new here. `-DskipTests package` just builds the deployable JAR.
+      # NOTE: this assumes every push to dev arrives via a PR that passed the
+      # Test check — enable branch protection (require "Test") to harden that.
+      # See docs/reason-log/2026-06.md.
+      - name: Build JAR (skip tests — PR-gated)
+        run: mvn -B -q -DskipTests package
 
       # ── Authenticate to GCP (Workload Identity Federation — no keys) ─────
       - name: Authenticate to GCP
