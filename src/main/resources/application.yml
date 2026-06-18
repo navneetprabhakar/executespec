@@ -331,6 +331,56 @@ model-matrix:
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
       notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10; live API smoke awaits a real Fireworks key."
+    # 2026-06-18 — mirror the Fireworks-available subset of the OpenRouter coding-model
+    # expansion (RL-2026-06-049 follow-up). Each slug was live-probed on api.fireworks.ai:
+    # callable AND tool_choice=required emits a valid tool call (the worker bar). devstral-2 /
+    # codestral-2508 / qwen3-coder* / grok-4.20 / gpt-5.3-codex are NOT on Fireworks (404) so
+    # they are deliberately omitted — an unverified slug would 404 → silent fallback. ENTERPRISE
+    # BYOK (needs the org's own Fireworks key); ctx conservative vs the OpenRouter sibling.
+    "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 202000
+      max-output-tokens: 25344
+      display-label: "GLM 5.2 (Fireworks)"
+      pricing:
+        input-per-1m: 1.40
+        cached-input-per-1m: 0.26
+        output-per-1m: 4.40
+      notes: "Fireworks accounts/fireworks/models/glm-5p2 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18 (GLM-5 band). Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    minimax-m3-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 196608
+      max-output-tokens: 32000
+      display-label: "MiniMax M3 (Fireworks)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.06
+        output-per-1m: 1.20
+      notes: "Fireworks accounts/fireworks/models/minimax-m3 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    "[minimax-m2.7-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 196608
+      max-output-tokens: 32000
+      display-label: "MiniMax M2.7 (Fireworks)"
+      pricing:
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.06
+        output-per-1m: 1.20
+      notes: "Fireworks accounts/fireworks/models/minimax-m2p7 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
+    "[kimi-k2.7-code-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
+      provider: fireworks
+      chain-tier: CAPABLE
+      context-limit: 262144
+      max-output-tokens: 16384
+      display-label: "Kimi K2.7 Code (Fireworks)"
+      pricing:
+        input-per-1m: 0.95
+        cached-input-per-1m: 0.19
+        output-per-1m: 4.00
+      notes: "Fireworks accounts/fireworks/models/kimi-k2p7-code Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
