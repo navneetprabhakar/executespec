@@ -18,6 +18,15 @@ class FireworksModelMapperTest {
         .isEqualTo("accounts/fireworks/models/kimi-k2p6");
     assertThat(FireworksModelMapper.toSlug("glm-5.1-fw"))
         .isEqualTo("accounts/fireworks/models/glm-5p1");
+    // 2026-06-18 — Fireworks-available subset of the OpenRouter coding models (live-probed).
+    assertThat(FireworksModelMapper.toSlug("glm-5.2-fw"))
+        .isEqualTo("accounts/fireworks/models/glm-5p2");
+    assertThat(FireworksModelMapper.toSlug("minimax-m3-fw"))
+        .isEqualTo("accounts/fireworks/models/minimax-m3");
+    assertThat(FireworksModelMapper.toSlug("minimax-m2.7-fw"))
+        .isEqualTo("accounts/fireworks/models/minimax-m2p7");
+    assertThat(FireworksModelMapper.toSlug("kimi-k2.7-code-fw"))
+        .isEqualTo("accounts/fireworks/models/kimi-k2p7-code");
   }
 
   @Test

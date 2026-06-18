@@ -1191,7 +1191,8 @@ to boot — skip it for those.""";
    * complexity tag.
    *
    * <ul>
-   *   <li>LOW → LIGHTWEIGHT tier, 60 iters, 4096 max tokens
+   *   <li>LOW → WORKHORSE model (flagship; RL-2026-06-052 decouple), LOW caps: 60 iters, 4096 max
+   *       tokens
    *   <li>MEDIUM → WORKHORSE tier, 120 iters, 8192 max tokens
    *   <li>HIGH → PLANNING tier, 180 iters, 16384 max tokens
    * </ul>
@@ -1250,7 +1251,12 @@ to boot — skip it for those.""";
         // (2026-05-08) with empty workspace + 100/100 programbench score (which
         // counted the cleanroom's original binary).
       case LOW -> {
-        tier = AgentTier.LIGHTWEIGHT;
+        // RL-2026-06-052 — the worker stays on the flagship even for LOW tasks. The LIGHTWEIGHT
+        // tier model is now a cheap model (Haiku / -mini / flash) reserved for the genuinely-light
+        // NON-worker agents; routing the worker there reintroduces the prior cheap-tier eval
+        // regression. So LOW keeps its smaller iteration/token caps but resolves the WORKHORSE
+        // (flagship) model — decoupling worker quality from the lightweight-agent cost tier.
+        tier = AgentTier.WORKHORSE;
         // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
         // quality ceiling. The dollar cap and stagnation guard remain the real runaway
         // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.

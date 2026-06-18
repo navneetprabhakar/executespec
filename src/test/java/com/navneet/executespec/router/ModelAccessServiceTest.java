@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+
 import com.navneet.executespec.auth.service.TierEnforcementService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,9 +35,7 @@ class ModelAccessServiceTest {
 
   @BeforeEach
   void setUp() {
-    when(modelRegistry.freeTierProvider()).thenReturn("deepseek");
-    when(modelRegistry.providerFor(FREE_MODEL)).thenReturn("deepseek");
-    when(modelRegistry.providerFor(PREMIUM_MODEL)).thenReturn("anthropic");
+    when(modelRegistry.freeTierModels()).thenReturn(List.of(FREE_MODEL));
     when(modelRegistry.canonicalize(anyString())).thenAnswer(inv -> inv.getArgument(0));
     when(tierService.resolveUserTier("free-user")).thenReturn("FREE");
     when(tierService.resolveUserTier("pro-user")).thenReturn("PRO");

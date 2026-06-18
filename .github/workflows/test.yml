@@ -1,20 +1,19 @@
 name: Test
 
-# 2026-05-29 — Java unit-test gate on PRs.
-# Catches test failures before merge so the deploy pipeline (deploy.yml) never
-# has to fail on a test regression — same rationale as lint.yml. The pom.xml
-# Surefire config sets `<excludedGroups>e2e,integration,chaos</excludedGroups>`,
-# so this job runs the fast in-process unit suite only — no real LLM API calls,
-# no Testcontainers, no real Postgres. The deploy still runs the same `mvn test`
-# as a safety net; this just shifts the feedback loop earlier.
+# 2026-05-29 — Java lint + unit-test gate on PRs.
+# 2026-06-18 (CI-minutes pass) — absorbed the spotless:check job from
+# lint.yml so ONE Java runner does `mvn spotless:check test` in a single
+# invocation (one Maven setup instead of two). See docs/reason-log/2026-06.md.
+# The pom.xml Surefire config sets <excludedGroups>e2e,integration,chaos</…>,
+# so this runs the fast in-process unit suite only — no real LLM API calls,
+# no Testcontainers, no real Postgres.
 #
-# Cost: $0 in LLM tokens — every LlmRouter / provider client in the unit tests
-# is mocked via Mockito (`mock(LlmRouter.class)` in test fixtures). Real-API
-# tests live under @Tag("e2e") and are explicitly excluded by Surefire +
-# require manual `mvn test -Dgroups=e2e` to run.
+# Cost: $0 in LLM tokens — every LlmRouter / provider client in the unit
+# tests is mocked via Mockito. Real-API tests live under @Tag("e2e") and are
+# excluded by Surefire (run manually with `mvn test -Dgroups=e2e`).
 #
 # Triggers:
-#   - Every pull request opened against dev or main
+#   - Every pull request opened against dev, main, or benchmark
 #   - Manual workflow_dispatch for ad-hoc runs
 
 on:
@@ -22,12 +21,17 @@ on:
     branches: [dev, main, benchmark]
   workflow_dispatch:
 
+# 2026-06-18 — cancel superseded runs (see lint.yml for rationale).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 env:
   JAVA_VERSION: '21'
 
 jobs:
   java-test:
-    name: Java · mvn test (unit suite)
+    name: Java · spotless:check + mvn test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -41,11 +45,13 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # `-B` (batch mode) silences the download-progress noise that bloats the
-      # log without losing the failure summaries. Surefire's <excludedGroups>
-      # in pom.xml already keeps e2e/integration/chaos out of this run.
-      - name: Run unit tests
-        run: mvn -B test
+      # One invocation: spotless:check (google-java-format drift) runs first
+      # and fails fast, then the `test` phase runs the unit suite. spotless is
+      # bound only to the `verify` phase in pom.xml, so this explicit goal is
+      # the single spotless run — no double execution. `-B` (batch mode)
+      # silences download-progress noise without losing failure summaries.
+      - name: Run spotless:check + unit tests
+        run: mvn -B spotless:check test
 
       # Upload the Surefire reports on failure so reviewers can see the full
       # per-method stack trace without re-running the workflow locally.
@@ -60,6 +66,7 @@ jobs:
       - name: Failure hint
         if: failure()
         run: |
-          echo "::error::Run 'mvn test' locally to reproduce."
-          echo "::error::Surefire reports uploaded as an artifact above."
-          echo "::error::If a test is a known-pre-existing flake/regression, mark it @Disabled with a clear TODO."
+          echo "::error::Format drift?  Run 'mvn spotless:apply' locally and commit the result."
+          echo "::error::Test failure?  Run 'mvn test' locally to reproduce (Surefire reports uploaded above)."
+          echo "::error::Known pre-existing flake/regression? Mark it @Disabled with a clear TODO."
+          echo "::error::See docs/design/code-style.md for the documented style deviations."
