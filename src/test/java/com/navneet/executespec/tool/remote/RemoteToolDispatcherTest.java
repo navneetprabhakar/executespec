@@ -97,4 +97,26 @@ class RemoteToolDispatcherTest {
     dispatcher.register("r1");
     assertThatCode(() -> dispatcher.complete("r1", "unknown", "{}")).doesNotThrowAnyException();
   }
+
+  @Test
+  void permissionKind_defaultsUnknownToolsToShellForFailClosedClients() throws Exception {
+    dispatcher.register("r1");
+    doAnswer(
+            inv -> {
+              RunEvent ev = inv.getArgument(1);
+              String callId = om.readTree(ev.payload()).get("callId").asText();
+              dispatcher.complete("r1", callId, "{\"ok\":false,\"kind\":\"INVALID_ARGS\",\"message\":\"unknown\"}");
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    dispatcher.dispatch("r1", "t1", "futureDangerousTool", "{}");
+
+    ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
+    verify(broadcaster).emit(eq("r1"), cap.capture());
+    JsonNode frame = om.readTree(cap.getValue().payload());
+    assertThat(frame.get("permissionKind").asText()).isEqualTo("shell");
+    assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("shell");
+  }
 }

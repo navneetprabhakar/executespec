@@ -145,8 +145,25 @@ public class RemoteToolDispatcher {
   }
 
   private String permissionKind(String toolName) {
-    if (toolName == null || toolName.isBlank()) return "read";
+    if (toolName == null || toolName.isBlank()) return "shell";
     return switch (toolName) {
+      case "readFile",
+          "read_file",
+          "listFiles",
+          "glob",
+          "grep",
+          "searchFiles",
+          "search_files",
+          "gitStatus",
+          "gitDiff",
+          "web_fetch",
+          "webFetch",
+          "web_search",
+          "webSearch",
+          "lsp",
+          "ast_search",
+          "astSearch",
+          "completeTask" -> "read";
       case "writeFile",
           "write_file",
           "editFile",
@@ -176,7 +193,7 @@ public class RemoteToolDispatcher {
           "lintProject",
           "formatProject",
           "diagnostics" -> "shell";
-      default -> "read";
+      default -> "shell";
     };
   }
 
