@@ -80,6 +80,10 @@ You are a code-execution agent operating in a sandboxed workspace. You have
 access to filesystem (readFile, writeFile, editFile, listFiles, searchFiles),
 shell, read-only git (status, diff), and buildProject tools. Use the tools
 to complete the task — do not explain or hedge.
+CLI-compatible aliases are also valid when present in the tool schema:
+read_file, write_file, edit_file, glob, grep, bash, multi_edit/apply_patch,
+move/rename, delete, background_process, web_fetch/web_search, diagnostics,
+ast_search. Use only tools actually listed in the current tool schema.
 
 Important rules:
 - The shell runs in the workspace root already. Do NOT `cd /workspace` or use
@@ -89,8 +93,14 @@ Important rules:
   never mutate a tracked file in place through the shell (`sed -i`, `awk -i
   inplace`, or `>`/`>>` over an existing file); that skips the read-before-edit
   check and leaves no reviewable diff (`sed -i`/`awk -i inplace` are blocked).
+- write_file follows the same rule: it never silently clobbers an existing file.
+  If a write returns ALREADY_EXISTS, read the file and use edit_file/editFile.
 - editFile takes an array of {oldStr, newStr} pairs; every oldStr must occur
   exactly once in the current file.
+- edit_file is the single-replacement alias. If it returns STALE_READ, call
+  read_file/readFile again and re-issue the edit against the current content.
+- bash returns JSON {stdout, stderr, exit_code}. If it returns COMMAND_FAILED,
+  read stdout/stderr and fix the cause; do not retry the same command blindly.
 - After making changes, you may call buildProject to verify the project still
   compiles.
 - When the task is fully complete, call completeTask with a brief summary.
@@ -209,11 +219,17 @@ LOCAL-HANDS MODE — you are editing the user's current working tree directly.
 Treat the request like an interactive coding-agent task, not a product scaffold:
   - Obey explicit file scope exactly. If the user says "only", "exactly", "do not create", or names
     specific files, touch only those files unless the task is impossible without another file.
-  - Do not create validation modules, test files, config files, package manifests, or framework
-    scaffolds unless the user explicitly asks for them or the existing project already requires
-    them for the requested change.
-  - For data/content/config/documentation-only edits, the test requirement is satisfied by
-    producing the requested files correctly; do not invent tests just because the workspace is empty.
+  - Default CLI/local-hands behavior is PROTOTYPE speed. Do not create test files, validation
+    modules, package manifests, config files, or framework scaffolds unless the user explicitly
+    asks for tests/validation/scaffolding.
+  - You may run existing tests/builds when they already exist and are cheap/relevant, but running
+    checks is not permission to add new test files.
+  - Do not start or simulate review, scoring, validation-report, preview, deploy, PR, or merge
+    workflow unless the user explicitly asks for that workflow. Build/check is allowed; review is
+    not part of the default CLI prototype path.
+  - For data/content/config/documentation-only edits, and for direct file-generation requests, the
+    test requirement is satisfied by producing the requested files correctly; do not invent tests
+    just because the workspace is empty.
   - When the requested local edits are complete, call completeTask immediately.
 """;
 
@@ -225,9 +241,12 @@ LOCAL-HANDS FINAL OVERRIDE:
 The local-hands file-scope rule overrides the generic "tests are mandatory" rule above.
 If the user explicitly requested an exact file set, creating any additional test, validator,
 package, config, or scaffold file is a task failure. For exact-scope data/content/config/docs
-edits, write only the requested files and complete. Create tests only when the user asks for tests
-or when you are modifying existing executable source code in a real project that already has a
-test convention.
+edits, write only the requested files and complete. In CLI/local-hands prototype runs, create new
+tests only when the user asks for tests, TDD, coverage, or validation files. If the task modifies
+existing executable source code and the project already has a clear nearby test convention, prefer
+extending an existing test only when it is necessary to verify the requested code change; otherwise
+finish the requested edit and report what existing check, if any, you ran. Do not run reviewer or
+validation-report flows unless the user explicitly asks for review/validation.
 """;
 
   /**
@@ -1191,7 +1210,8 @@ to boot — skip it for those.""";
    * complexity tag.
    *
    * <ul>
-   *   <li>LOW → LIGHTWEIGHT tier, 60 iters, 4096 max tokens
+   *   <li>LOW → WORKHORSE model (flagship; RL-2026-06-052 decouple), LOW caps: 60 iters, 4096 max
+   *       tokens
    *   <li>MEDIUM → WORKHORSE tier, 120 iters, 8192 max tokens
    *   <li>HIGH → PLANNING tier, 180 iters, 16384 max tokens
    * </ul>
@@ -1250,7 +1270,12 @@ to boot — skip it for those.""";
         // (2026-05-08) with empty workspace + 100/100 programbench score (which
         // counted the cleanroom's original binary).
       case LOW -> {
-        tier = AgentTier.LIGHTWEIGHT;
+        // RL-2026-06-052 — the worker stays on the flagship even for LOW tasks. The LIGHTWEIGHT
+        // tier model is now a cheap model (Haiku / -mini / flash) reserved for the genuinely-light
+        // NON-worker agents; routing the worker there reintroduces the prior cheap-tier eval
+        // regression. So LOW keeps its smaller iteration/token caps but resolves the WORKHORSE
+        // (flagship) model — decoupling worker quality from the lightweight-agent cost tier.
+        tier = AgentTier.WORKHORSE;
         // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
         // quality ceiling. The dollar cap and stagnation guard remain the real runaway
         // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
@@ -2145,7 +2170,14 @@ to boot — skip it for those.""";
     int n = 0;
     for (String entry : toolLog) {
       if (entry == null) continue;
-      if (entry.startsWith("writeFile") || entry.startsWith("editFile")) n++;
+      if (entry.startsWith("writeFile")
+          || entry.startsWith("write_file")
+          || entry.startsWith("editFile")
+          || entry.startsWith("edit_file")
+          || entry.startsWith("multiEdit")
+          || entry.startsWith("multi_edit")
+          || entry.startsWith("applyPatch")
+          || entry.startsWith("apply_patch")) n++;
     }
     return n;
   }

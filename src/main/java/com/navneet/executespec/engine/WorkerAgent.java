@@ -232,7 +232,16 @@ public class WorkerAgent {
    * source compiled).
    */
   private static final java.util.Set<String> WRITE_CLASS_TOOLS =
-      java.util.Set.of("writeFile", "editFile", "buildProject");
+      java.util.Set.of(
+          "writeFile",
+          "write_file",
+          "editFile",
+          "edit_file",
+          "multiEdit",
+          "multi_edit",
+          "applyPatch",
+          "apply_patch",
+          "buildProject");
 
   /**
    * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
@@ -1029,9 +1038,9 @@ public class WorkerAgent {
           lastBuildPassIter = iter;
         }
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
-        if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+        if (isWriteTool(tc.name())) {
           lastEditIter = iter;
-        } else if ("shell".equals(tc.name())
+        } else if (isShellTool(tc.name())
             || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
             || RUN_TESTS_TOOL_NAME.equals(tc.name())) {
           lastVerifyIter = iter;
@@ -1060,14 +1069,12 @@ public class WorkerAgent {
         // evidence but not progress toward a patch; only an actual write should reset the no-edit
         // watchdog. After the first edit, fall back to the normal progress definition so legitimate
         // edit/build/test cycles still get room to converge.
-        wroteThisIter =
-            calls.stream()
-                .anyMatch(tc -> "writeFile".equals(tc.name()) || "editFile".equals(tc.name()));
+        wroteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
       }
       if (wroteThisIter) {
         itersSinceProgress = 0;
         for (AssistantMessage.ToolCall tc : calls) {
-          if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) totalWriteCalls++;
+          if (isWriteTool(tc.name())) totalWriteCalls++;
         }
       } else {
         itersSinceProgress++;
@@ -1367,7 +1374,7 @@ public class WorkerAgent {
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
-      if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+      if (isWriteTool(tc.name())) {
         // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
         // so the isLast flag is don't-care; pass false for symmetry with the main loop.
         String env = dispatchOne(tc, req, false);
@@ -1548,9 +1555,7 @@ public class WorkerAgent {
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
-      if ("writeFile".equals(tc.name())
-          || "editFile".equals(tc.name())
-          || "shell".equals(tc.name())) {
+      if (isWriteTool(tc.name()) || isShellTool(tc.name())) {
         String env = dispatchOne(tc, req, false);
         boolean ok = env != null && env.startsWith("{\"ok\":true");
         toolLog.add("TERMINAL_FINALIZER " + tc.name() + " -> " + (ok ? "OK" : "ERR"));
@@ -1627,7 +1632,17 @@ public class WorkerAgent {
    * concurrently.
    */
   private static final java.util.Set<String> READ_ONLY_PARALLEL_TOOLS =
-      java.util.Set.of("readFile", "searchFiles", "listFiles", "gitStatus", "gitDiff");
+      java.util.Set.of(
+          "readFile",
+          "read_file",
+          "searchFiles",
+          "grep",
+          "ast_search",
+          "astSearch",
+          "glob",
+          "listFiles",
+          "gitStatus",
+          "gitDiff");
 
   /**
    * W4.1 (C1) — when a single assistant turn emits ONLY read-only tool calls (&ge;2, non-remote),
@@ -1881,9 +1896,10 @@ public class WorkerAgent {
     // user-facing log. Per-tool emoji + concise preview otherwise.
     String emoji;
     switch (name) {
-      case "writeFile" -> emoji = "📝";
-      case "editFile" -> emoji = "✏️ ";
-      case "shell" -> emoji = "💻";
+      case "writeFile", "write_file" -> emoji = "📝";
+      case "editFile", "edit_file", "multiEdit", "multi_edit", "applyPatch", "apply_patch" ->
+          emoji = "✏️ ";
+      case "shell", "bash" -> emoji = "💻";
       case "buildProject" -> emoji = "🔨";
       case "gitCommit" -> emoji = "📦"; // denied for worker, but if it leaks through, show it
       default -> {
@@ -2303,6 +2319,21 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
-    return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && "shell".equals(toolName));
+    return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && isShellTool(toolName));
+  }
+
+  private static boolean isWriteTool(String toolName) {
+    return "writeFile".equals(toolName)
+        || "write_file".equals(toolName)
+        || "editFile".equals(toolName)
+        || "edit_file".equals(toolName)
+        || "multiEdit".equals(toolName)
+        || "multi_edit".equals(toolName)
+        || "applyPatch".equals(toolName)
+        || "apply_patch".equals(toolName);
+  }
+
+  private static boolean isShellTool(String toolName) {
+    return "shell".equals(toolName) || "bash".equals(toolName);
   }
 }

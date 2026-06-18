@@ -63,6 +63,17 @@ public record RunEvent(
       String callId,
       String toolName,
       String argsJson) {
+    return toolCall(runId, taskId, frameJson, callId, toolName, argsJson, null);
+  }
+
+  public static RunEvent toolCall(
+      String runId,
+      String taskId,
+      String frameJson,
+      String callId,
+      String toolName,
+      String argsJson,
+      String permissionKind) {
     return withData(
         "TOOL_CALL",
         runId,
@@ -73,7 +84,9 @@ public record RunEvent(
         "toolName",
         toolName,
         "argsJson",
-        argsJson);
+        argsJson,
+        "permissionKind",
+        permissionKind);
   }
 
   /**

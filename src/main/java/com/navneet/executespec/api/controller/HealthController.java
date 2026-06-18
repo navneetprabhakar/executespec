@@ -3,6 +3,7 @@ package com.navneet.executespec.api.controller;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -12,6 +13,7 @@ import javax.sql.DataSource;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.StateStore.MetricsData;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,6 +51,25 @@ public class HealthController {
   private final DataSource dataSource;
   private final StateStore stateStore;
   private final RedisConnectionFactory redisConnectionFactory;
+
+  // Platform provider keys (field-injected; booleans only ever leave this class, never the values).
+  @Value("${spring.ai.anthropic.api-key:}")
+  private String anthropicKey;
+
+  @Value("${spring.ai.openai.api-key:}")
+  private String openaiKey;
+
+  @Value("${spring.ai.google.genai.api-key:}")
+  private String googleKey;
+
+  @Value("${spring.ai.openrouter.api-key:}")
+  private String openrouterKey;
+
+  @Value("${spring.ai.deepseek.api-key:}")
+  private String deepseekKey;
+
+  @Value("${spring.ai.fireworks.api-key:}")
+  private String fireworksKey;
 
   // Cached state (refreshed every 30s)
   private final AtomicBoolean cachedDbUp = new AtomicBoolean(false);
@@ -101,6 +122,38 @@ public class HealthController {
             "db", dbUp ? "UP" : "DOWN",
             "timestamp", Instant.now().toString());
     return dbUp ? ResponseEntity.ok(body) : ResponseEntity.status(503).body(body);
+  }
+
+  /**
+   * Provider key-presence — which model providers have a non-empty API key configured on THIS
+   * deployment. Booleans only; the key values never leave the server. Lets a deploy be verified
+   * before customers hit it: a provider listed in {@code missing} will 401 every run that routes to
+   * it (the failure surfaces to the customer as an opaque upstream auth error). The CI post-deploy
+   * step gates on this so a keyless/partial deploy fails loudly instead of shipping silently.
+   */
+  @GetMapping("/providers")
+  public ResponseEntity<Map<String, Object>> providers() {
+    Map<String, Boolean> configured = new LinkedHashMap<>();
+    configured.put("anthropic", isSet(anthropicKey));
+    configured.put("openai", isSet(openaiKey));
+    configured.put("google", isSet(googleKey));
+    configured.put("openrouter", isSet(openrouterKey));
+    configured.put("deepseek", isSet(deepseekKey));
+    configured.put("fireworks", isSet(fireworksKey));
+
+    List<String> missing =
+        configured.entrySet().stream().filter(e -> !e.getValue()).map(Map.Entry::getKey).toList();
+
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("configured", configured);
+    body.put("missing", missing);
+    body.put("anyConfigured", configured.values().stream().anyMatch(Boolean::booleanValue));
+    body.put("timestamp", Instant.now().toString());
+    return ResponseEntity.ok(body);
+  }
+
+  private static boolean isSet(String key) {
+    return key != null && !key.isBlank();
   }
 
   private void refreshCacheIfStale() {

@@ -150,7 +150,7 @@ public class EditFileTool implements Tool {
       ReadFileStateStore.Status rbw = readState.check(ctx.runId(), resolved, working);
       if (rbw == ReadFileStateStore.Status.NOT_READ) {
         return ToolResult.err(
-            ToolResult.ErrorKind.INVALID_ARGS,
+            ToolResult.ErrorKind.STALE_READ,
             "read-before-edit: you have not readFile "
                 + path
                 + " in this run. Call readFile "
@@ -159,7 +159,7 @@ public class EditFileTool implements Tool {
       }
       if (rbw == ReadFileStateStore.Status.STALE) {
         return ToolResult.err(
-            ToolResult.ErrorKind.INVALID_ARGS,
+            ToolResult.ErrorKind.STALE_READ,
             path
                 + " changed on disk since you last read it — your view is stale (no changes"
                 + " written). readFile "
