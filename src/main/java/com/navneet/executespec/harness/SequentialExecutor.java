@@ -224,6 +224,9 @@ Treat the request like an interactive coding-agent task, not a product scaffold:
     asks for tests/validation/scaffolding.
   - You may run existing tests/builds when they already exist and are cheap/relevant, but running
     checks is not permission to add new test files.
+  - Do not start or simulate review, scoring, validation-report, preview, deploy, PR, or merge
+    workflow unless the user explicitly asks for that workflow. Build/check is allowed; review is
+    not part of the default CLI prototype path.
   - For data/content/config/documentation-only edits, and for direct file-generation requests, the
     test requirement is satisfied by producing the requested files correctly; do not invent tests
     just because the workspace is empty.
@@ -242,7 +245,8 @@ edits, write only the requested files and complete. In CLI/local-hands prototype
 tests only when the user asks for tests, TDD, coverage, or validation files. If the task modifies
 existing executable source code and the project already has a clear nearby test convention, prefer
 extending an existing test only when it is necessary to verify the requested code change; otherwise
-finish the requested edit and report what existing check, if any, you ran.
+finish the requested edit and report what existing check, if any, you ran. Do not run reviewer or
+validation-report flows unless the user explicitly asks for review/validation.
 """;
 
   /**
