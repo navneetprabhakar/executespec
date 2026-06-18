@@ -102,12 +102,17 @@ model-matrix:
       workhorse: gpt-5.4
       lightweight: gpt-5.4-mini
     openrouter:
-      planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
-      lightweight: claude-haiku-4-5-20251001
+      # RL-2026-06-053: OpenRouter now defaults to DeepSeek (was Claude). deepseek-v4-pro for
+      # planning/workhorse, deepseek-v4-flash for the light tier — all via the OpenRouter gateway.
+      planning: deepseek-v4-pro
+      workhorse: deepseek-v4-pro
+      lightweight: deepseek-v4-flash
     deepseek:
-      planning: deepseek-v4-flash-native
-      workhorse: deepseek-v4-flash-native
+      # RL-2026-06-053: DeepSeek V4 Pro via the native api.deepseek.com route (~3-4x faster than the
+      # OpenRouter hop). Verified live 2026-06-18: Pro works multi-turn with tools on auto, and the
+      # reasoning_content echo is NOT required. Flash-native stays for the cheap light tier.
+      planning: deepseek-v4-pro-native
+      workhorse: deepseek-v4-pro-native
       lightweight: deepseek-v4-flash-native
     fireworks:
       planning: deepseek-v4-pro-fw
@@ -281,7 +286,7 @@ model-matrix:
         output-per-1m: 1.10
       notes: |
         DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
-        NOT TIER-ACTIVE YET — Pro is a thinking-mode model and api.deepseek.com requires reasoning_content echo on every follow-up call (mirrors Gemini's thought-signature round-trip). Until OpenAiNativeToolClient captures + replays reasoning_content, use the non-thinking deepseek-v4-flash-native (below) instead. RL-2026-05-052.
+        TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
