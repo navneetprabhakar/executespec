@@ -16,12 +16,14 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /** Compatibility tools for the CLI/local-hands contract. */
@@ -884,6 +886,416 @@ final class DiagnosticsTool implements Tool {
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     return delegate.execute(args, ctx);
+  }
+}
+
+final class AstEditCompatibilityTool implements Tool {
+  private final String name;
+  private final EditFileCompatibilityTool delegate;
+
+  AstEditCompatibilityTool(String name, EditFileTool editFileTool) {
+    this.name = name;
+    this.delegate = new EditFileCompatibilityTool(editFileTool);
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public String description() {
+    return "Applies a safe exact replacement through the same read-before-edit path as edit_file.";
+  }
+
+  @Override
+  public String inputSchema() {
+    return """
+{"type":"object","properties":{"path":{"type":"string"},"oldString":{"type":"string"},"newString":{"type":"string"},"old_str":{"type":"string"},"new_str":{"type":"string"},"pattern":{"type":"string"},"replacement":{"type":"string"},"replaceAll":{"type":"boolean"},"expected_count":{"type":"integer","minimum":1},"expectedCount":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}
+""";
+  }
+
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    ObjectNode forwarded = JsonSupport.JSON.createObjectNode();
+    forwarded.put("path", args.path("path").asText(null));
+    String oldText = firstText(args, "oldString", "old_str", "pattern");
+    String newText = firstText(args, "newString", "new_str", "replacement");
+    if (oldText == null || newText == null) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.INVALID_ARGS,
+          "ast_edit requires path plus oldString/newString (or pattern/replacement)");
+    }
+    forwarded.put("old_str", oldText);
+    forwarded.put("new_str", newText);
+    if (args.path("replaceAll").asBoolean(false)) forwarded.put("replaceAll", true);
+    if (args.hasNonNull("expected_count"))
+      forwarded.put("expected_count", args.get("expected_count").asInt());
+    if (args.hasNonNull("expectedCount"))
+      forwarded.put("expectedCount", args.get("expectedCount").asInt());
+    return delegate.execute(forwarded, ctx);
+  }
+
+  private static String firstText(JsonNode args, String... names) {
+    for (String name : names) {
+      if (args.hasNonNull(name)) return args.get(name).asText();
+    }
+    return null;
+  }
+}
+
+final class LspFallbackTool implements Tool {
+  @Override
+  public String name() {
+    return "lsp";
+  }
+
+  @Override
+  public String description() {
+    return "Local lightweight LSP fallback: document_symbols, definition, references, diagnostics note.";
+  }
+
+  @Override
+  public String inputSchema() {
+    return """
+{"type":"object","properties":{"action":{"type":"string"},"path":{"type":"string"},"symbol":{"type":"string"},"name":{"type":"string"},"query":{"type":"string"}},"required":["action"],"additionalProperties":false}
+""";
+  }
+
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String action = args.path("action").asText("");
+    try {
+      if ("document_symbols".equals(action)
+          || "documentSymbols".equals(action)
+          || "symbols".equals(action)) {
+        return symbols(args, ctx);
+      }
+      if ("definition".equals(action) || "references".equals(action)) {
+        return references(args, ctx, action);
+      }
+      if ("diagnostics".equals(action)) {
+        ObjectNode node = JsonSupport.JSON.createObjectNode();
+        node.put("note", "Use diagnostics/build/test tools for executable diagnostics.");
+        return ToolResult.ok(node.toString());
+      }
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "unsupported lsp action: " + action);
+    } catch (SecurityException se) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
+    } catch (IOException ioe) {
+      return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+    }
+  }
+
+  private ToolResult symbols(JsonNode args, ExecutionContext ctx) throws IOException {
+    String path = args.path("path").asText(null);
+    if (path == null || path.isBlank()) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "path is required");
+    }
+    Path file = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+    String text = Files.readString(file);
+    ArrayNode arr = JsonSupport.JSON.createArrayNode();
+    Pattern pattern =
+        Pattern.compile(
+            "(?m)^\\s*(?:export\\s+)?(?:async\\s+)?(?:function|class|const|let|var|def)\\s+([A-Za-z_$][\\w$]*)");
+    var matcher = pattern.matcher(text);
+    while (matcher.find() && arr.size() < 200) {
+      ObjectNode item = arr.addObject();
+      item.put("name", matcher.group(1));
+      item.put(
+          "line",
+          1 + (int) text.substring(0, matcher.start()).chars().filter(ch -> ch == '\n').count());
+    }
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.put("path", path);
+    out.set("symbols", arr);
+    return ToolResult.ok(out.toString());
+  }
+
+  private ToolResult references(JsonNode args, ExecutionContext ctx, String action)
+      throws IOException {
+    String symbol = firstText(args, "symbol", "name", "query");
+    if (symbol == null || symbol.isBlank()) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "symbol/name/query is required");
+    }
+    Path root = ctx.workspaceRoot();
+    ArrayNode matches = JsonSupport.JSON.createArrayNode();
+    Pattern token = Pattern.compile("\\b" + Pattern.quote(symbol) + "\\b");
+    try (var stream = Files.walk(root, 8)) {
+      for (Path file : stream.filter(Files::isRegularFile).limit(500).toList()) {
+        String rel = root.relativize(file).toString();
+        if (rel.contains(".git/") || rel.contains("node_modules/") || rel.contains("target/"))
+          continue;
+        String text;
+        try {
+          text = Files.readString(file);
+        } catch (Exception ignored) {
+          continue;
+        }
+        String[] lines = text.split("\\R", -1);
+        for (int i = 0; i < lines.length && matches.size() < 100; i++) {
+          if (token.matcher(lines[i]).find()) {
+            matches.add(rel + ":" + (i + 1) + ": " + lines[i].trim());
+          }
+        }
+      }
+    }
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.put("action", action);
+    out.put("symbol", symbol);
+    out.set("matches", matches);
+    return ToolResult.ok(out.toString());
+  }
+
+  private static String firstText(JsonNode args, String... names) {
+    for (String name : names) {
+      if (args.hasNonNull(name)) return args.get(name).asText();
+    }
+    return null;
+  }
+}
+
+final class PlanStateTool implements Tool {
+  private final String name;
+  private final java.util.concurrent.ConcurrentMap<String, JsonNode> plans =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  PlanStateTool(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public String description() {
+    return "Records structured plan/todo state for the current run and returns the latest plan.";
+  }
+
+  @Override
+  public String inputSchema() {
+    return """
+{"type":"object","properties":{"plan":{"type":"array"},"items":{"type":"array"},"todos":{"type":"array"},"step":{"type":"string"},"status":{"type":"string"}},"additionalProperties":true}
+""";
+  }
+
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    JsonNode plan = args.path("plan");
+    if (plan.isMissingNode() || plan.isNull()) plan = args.path("items");
+    if (plan.isMissingNode() || plan.isNull()) plan = args.path("todos");
+    if (plan.isMissingNode() || plan.isNull()) {
+      ObjectNode single = JsonSupport.JSON.createObjectNode();
+      single.put("step", args.path("step").asText(args.path("content").asText(args.path("task").asText(""))));
+      single.put("status", args.path("status").asText("pending"));
+      ArrayNode arr = JsonSupport.JSON.createArrayNode();
+      arr.add(single);
+      plan = arr;
+    }
+    plans.put(ctx.runId(), plan);
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.set("plan", plan);
+    out.put("count", plan.isArray() ? plan.size() : 1);
+    return ToolResult.ok(out.toString());
+  }
+}
+
+final class SpawnSubagentFallbackTool implements Tool {
+  private final String name;
+
+  SpawnSubagentFallbackTool(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public String description() {
+    return "Performs bounded local repo reconnaissance for the parent agent.";
+  }
+
+  @Override
+  public String inputSchema() {
+    return """
+{"type":"object","properties":{"task":{"type":"string"},"prompt":{"type":"string"},"query":{"type":"string"},"path":{"type":"string"}},"additionalProperties":true}
+""";
+  }
+
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String task = firstText(args, "task", "prompt", "description");
+    if (task == null || task.isBlank()) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "task/prompt is required");
+    }
+    String query = firstText(args, "query", "symbol");
+    String start = args.path("path").asText(".");
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.put("task", task);
+    out.put("mode", "bounded_repo_reconnaissance");
+    ArrayNode matches = out.putArray("matches");
+    try {
+      Path root = PathSafety.safeResolve(ctx.workspaceRoot(), start);
+      try (var stream = Files.walk(root, 6)) {
+        for (Path file : stream.filter(Files::isRegularFile).limit(300).toList()) {
+          String rel = ctx.workspaceRoot().relativize(file).toString();
+          if (rel.contains(".git/") || rel.contains("node_modules/") || rel.contains("target/"))
+            continue;
+          if (query == null || query.isBlank()) {
+            matches.add(rel);
+          } else {
+            String text;
+            try {
+              text = Files.readString(file);
+            } catch (Exception ignored) {
+              continue;
+            }
+            if (text.contains(query)) matches.add(rel);
+          }
+          if (matches.size() >= 40) break;
+        }
+      }
+      return ToolResult.ok(out.toString());
+    } catch (SecurityException se) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
+    } catch (IOException ioe) {
+      return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+    }
+  }
+
+  private static String firstText(JsonNode args, String... names) {
+    for (String name : names) {
+      if (args.hasNonNull(name)) return args.get(name).asText();
+    }
+    return null;
+  }
+}
+
+final class McpClientFallbackTool implements Tool {
+  private final String name;
+
+  McpClientFallbackTool(String name) {
+    this.name = name;
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public String description() {
+    return "Calls an allowlisted MCP stdio server in server mode; local-hands clients may execute local stdio MCP calls.";
+  }
+
+  @Override
+  public String inputSchema() {
+    return """
+{"type":"object","properties":{"command":{"type":"string"},"method":{"type":"string"},"params":{"type":"object"}},"additionalProperties":true}
+""";
+  }
+
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String command = firstText(args, "command");
+    String method = firstText(args, "method");
+    if (method == null || method.isBlank()) method = "tools/list";
+    if (command != null && !command.isBlank()) {
+      if (!isAllowed(command)) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "Backend MCP stdio command is not allowlisted. Set EXECUTESPEC_MCP_ALLOWLIST to an exact command or trusted prefix.");
+      }
+      try {
+        return ToolResult.ok(callStdio(command, method, args.path("params")));
+      } catch (IOException ioe) {
+        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "Interrupted while calling MCP server");
+      }
+    }
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.put("mode", "server_fallback");
+    out.put("method", method);
+    out.put(
+        "note",
+        "No MCP stdio command was provided. Backend command execution is available only for EXECUTESPEC_MCP_ALLOWLIST entries.");
+    out.set("servers", JsonSupport.JSON.createArrayNode());
+    return ToolResult.ok(out.toString());
+  }
+
+  private static boolean isAllowed(String command) {
+    String raw =
+        System.getenv()
+            .getOrDefault(
+                "EXECUTESPEC_MCP_ALLOWLIST",
+                System.getProperty("executespec.mcp.allowlist", ""));
+    return Arrays.stream(raw.split(","))
+        .map(String::trim)
+        .filter(s -> !s.isBlank())
+        .anyMatch(command::startsWith);
+  }
+
+  private static String firstText(JsonNode args, String name) {
+    return args.hasNonNull(name) ? args.get(name).asText() : null;
+  }
+
+  private static String callStdio(String command, String method, JsonNode params)
+      throws IOException, InterruptedException {
+    Process process = new ProcessBuilder("/bin/sh", "-lc", command).start();
+    String initialize =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"executespec-backend\",\"version\":\"1\"}}}";
+    String initialized = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}";
+    String call =
+        JsonSupport.JSON
+            .createObjectNode()
+            .put("jsonrpc", "2.0")
+            .put("id", 2)
+            .put("method", method)
+            .set("params", params != null && params.isObject() ? params : JsonSupport.JSON.createObjectNode())
+            .toString();
+    process
+        .getOutputStream()
+        .write((frame(initialize) + frame(initialized) + frame(call)).getBytes(StandardCharsets.UTF_8));
+    process.getOutputStream().close();
+    boolean done = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+    if (!done) {
+      process.destroyForcibly();
+      throw new IOException("mcp_client timed out after 10000ms");
+    }
+    String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+    ObjectNode out = JsonSupport.JSON.createObjectNode();
+    out.put("mode", "server_allowlisted_stdio");
+    out.put("method", method);
+    out.put("exitCode", process.exitValue());
+    out.put("stderr", stderr);
+    out.set("response", parseResponse(stdout));
+    return out.toString();
+  }
+
+  private static String frame(String json) {
+    return "Content-Length: " + json.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + json;
+  }
+
+  private static JsonNode parseResponse(String stdout) throws IOException {
+    Pattern p = Pattern.compile("(?i)Content-Length:\\s*(\\d+)\\s*\\r?\\n\\r?\\n");
+    java.util.regex.Matcher m = p.matcher(stdout);
+    JsonNode fallback = NullNode.getInstance();
+    while (m.find()) {
+      int length = Integer.parseInt(m.group(1));
+      int start = m.end();
+      int end = Math.min(stdout.length(), start + length);
+      JsonNode node = JsonSupport.JSON.readTree(stdout.substring(start, end));
+      fallback = node;
+      if (node.path("id").asInt(-1) == 2) return node;
+    }
+    return fallback;
   }
 }
 

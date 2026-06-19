@@ -80,10 +80,11 @@ public class DeploymentService {
       Process p =
           new ProcessBuilder(
                   "gcloud", "auth", "list", "--filter=status:ACTIVE", "--format=value(account)")
-              .redirectErrorStream(true)
               .start();
-      String account = new String(p.getInputStream().readAllBytes()).trim();
+      String stdout = new String(p.getInputStream().readAllBytes()).trim();
+      p.getErrorStream().readAllBytes(); // discard gcloud runtime warnings; auth data is stdout
       p.waitFor();
+      String account = firstGcloudValue(stdout);
       if (!account.isBlank()) {
         log.info("✓ GCP auth: {}", account);
       } else {
@@ -92,6 +93,16 @@ public class DeploymentService {
     } catch (Exception e) {
       log.warn("✗ gcloud not available — deploys will fail");
     }
+  }
+
+  private static String firstGcloudValue(String output) {
+    return output.lines()
+        .map(String::trim)
+        .filter(line -> !line.isBlank())
+        .filter(line -> !line.startsWith("WARNING"))
+        .filter(line -> !line.startsWith("ERROR"))
+        .findFirst()
+        .orElse("");
   }
 
   public boolean isEnabled() {
