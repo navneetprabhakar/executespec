@@ -407,7 +407,8 @@ public class CloudRunClient {
 
     if (output.isBlank()) return List.of();
     return java.util.Arrays.stream(output.split("\n"))
-        .filter(line -> !line.isBlank() && !line.startsWith("WARNING") && !line.startsWith("ERROR"))
+        .map(String::trim)
+        .filter(CloudRunClient::isValidCloudRunServiceName)
         .toList();
   }
 
@@ -442,16 +443,17 @@ public class CloudRunClient {
       log.warn("Listing preview services with labels timed out");
       return Map.of();
     }
-    if (process.exitValue() != 0 || output.isBlank() || !output.startsWith("[")) {
+    String json = extractJsonArray(output);
+    if (process.exitValue() != 0 || json.isBlank()) {
       return Map.of();
     }
 
     Map<String, Map<String, String>> result = new java.util.LinkedHashMap<>();
     try {
-      JsonNode arr = objectMapper.readTree(output);
+      JsonNode arr = objectMapper.readTree(json);
       for (JsonNode svc : arr) {
         String name = svc.path("metadata").path("name").asText(null);
-        if (name == null) continue;
+        if (name == null || !isValidCloudRunServiceName(name)) continue;
         Map<String, String> labels = new java.util.HashMap<>();
         JsonNode labelsNode = svc.path("metadata").path("labels");
         labelsNode.fields().forEachRemaining(e -> labels.put(e.getKey(), e.getValue().asText()));
@@ -461,6 +463,22 @@ public class CloudRunClient {
       log.warn("Failed to parse preview services labels: {}", e.getMessage());
     }
     return result;
+  }
+
+  private static boolean isValidCloudRunServiceName(String value) {
+    return value != null && value.matches("[a-z]([-a-z0-9]{0,61}[a-z0-9])?");
+  }
+
+  private static String extractJsonArray(String output) {
+    if (output == null || output.isBlank()) {
+      return "";
+    }
+    int start = output.indexOf('[');
+    int end = output.lastIndexOf(']');
+    if (start < 0 || end < start) {
+      return "";
+    }
+    return output.substring(start, end + 1);
   }
 
   /** Rollback traffic to a specific revision — instant, no rebuild. */

@@ -239,6 +239,94 @@ class CommandToolsTest {
   }
 
   @Test
+  void astEditAlias_applies_through_readBeforeEdit_path() throws Exception {
+    Files.writeString(root.resolve("a.txt"), "alpha\nbeta\n");
+    ReadFileStateStore readState = new ReadFileStateStore();
+    ExecutionContext ctx = ctx();
+    new ReadFileCompatibilityTool(readFileTool(readState)).execute(json("{\"path\":\"a.txt\"}"), ctx);
+    Tool tool = new AstEditCompatibilityTool("ast_edit", editFileTool(readState));
+
+    ToolResult result =
+        tool.execute(
+            json("{\"path\":\"a.txt\",\"pattern\":\"beta\",\"replacement\":\"gamma\"}"), ctx);
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(Files.readString(root.resolve("a.txt"))).isEqualTo("alpha\ngamma\n");
+  }
+
+  @Test
+  void lspFallback_returns_symbols_and_references() throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Files.writeString(
+        root.resolve("src/app.js"),
+        "export function buildThing() { return 1; }\nconst value = buildThing();\n");
+    Tool tool = new LspFallbackTool();
+
+    ToolResult symbols =
+        tool.execute(json("{\"action\":\"document_symbols\",\"path\":\"src/app.js\"}"), ctx());
+    ToolResult refs =
+        tool.execute(json("{\"action\":\"references\",\"symbol\":\"buildThing\"}"), ctx());
+
+    assertThat(symbols).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) symbols).content()).contains("buildThing");
+    assertThat(refs).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) refs).content()).contains("src/app.js", "buildThing");
+  }
+
+  @Test
+  void planSpawnAndMcpFallbackTools_are_operational() {
+    Tool plan = new PlanStateTool("update_plan");
+    Tool spawn = new SpawnSubagentFallbackTool("spawn_subagent");
+    Tool mcp = new McpClientFallbackTool("mcp_client");
+
+    ToolResult planResult =
+        plan.execute(
+            json("{\"plan\":[{\"step\":\"inspect\",\"status\":\"completed\"}]}"), ctx());
+    ToolResult spawnResult =
+        spawn.execute(json("{\"task\":\"find files\",\"query\":\"CommandToolsTest\"}"), ctx());
+    ToolResult mcpResult =
+        mcp.execute(json("{\"method\":\"tools/list\",\"command\":\"node fake.js\"}"), ctx());
+
+    assertThat(planResult).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) planResult).content()).contains("\"count\":1", "inspect");
+    assertThat(spawnResult).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) spawnResult).content()).contains("bounded_repo_reconnaissance");
+    assertThat(mcpResult).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) mcpResult).message()).contains("allowlisted");
+  }
+
+  @Test
+  void mcpClientFallback_calls_allowlisted_stdio_server() throws Exception {
+    String payload =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"backend_tool\"}]}}";
+    Path script = root.resolve("mcp.sh");
+    Files.writeString(
+        script,
+        "#!/bin/sh\n"
+            + "cat >/dev/null\n"
+            + "printf 'Content-Length: "
+            + payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+            + "\\r\\n\\r\\n"
+            + payload.replace("'", "'\"'\"'")
+            + "'\n");
+    script.toFile().setExecutable(true);
+    String command = script.toAbsolutePath().toString();
+    System.setProperty("executespec.mcp.allowlist", command);
+    try {
+      Tool mcp = new McpClientFallbackTool("mcp_client");
+
+      ToolResult result =
+          mcp.execute(json("{\"method\":\"tools/list\",\"command\":\"" + command + "\"}"), ctx());
+
+      assertThat(result).isInstanceOf(ToolResult.Ok.class);
+      assertThat(((ToolResult.Ok) result).content())
+          .contains("server_allowlisted_stdio", "backend_tool");
+    } finally {
+      System.clearProperty("executespec.mcp.allowlist");
+    }
+  }
+
+  @Test
   void glob_respects_basic_gitignore_and_skips_build_dirs() throws Exception {
     Files.createDirectories(root.resolve("src"));
     Files.createDirectories(root.resolve("target"));

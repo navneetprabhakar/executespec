@@ -138,66 +138,52 @@ class CommandToolConfiguration {
 
   @Bean
   Tool lspTool() {
-    return new UnavailableProtocolTool(
-        "lsp",
-        "LSP definition/references/rename require language-server integration; diagnostics is"
-            + " available separately.");
+    return new LspFallbackTool();
   }
 
   @Bean
-  Tool astEditSnakeTool() {
-    return new UnavailableProtocolTool(
-        "ast_edit", "ast_edit requires a structural rewrite engine; use editFile/edit_file.");
+  Tool astEditSnakeTool(EditFileTool editFileTool) {
+    return new AstEditCompatibilityTool("ast_edit", editFileTool);
   }
 
   @Bean
-  Tool astEditTool() {
-    return new UnavailableProtocolTool(
-        "astEdit", "astEdit requires a structural rewrite engine; use editFile/edit_file.");
+  Tool astEditTool(EditFileTool editFileTool) {
+    return new AstEditCompatibilityTool("astEdit", editFileTool);
   }
 
   @Bean
   Tool mcpClientSnakeTool() {
-    return new UnavailableProtocolTool(
-        "mcp_client",
-        "MCP client support is a client/loop capability and is not wired server-side.");
+    return new McpClientFallbackTool("mcp_client");
   }
 
   @Bean
   Tool mcpClientTool() {
-    return new UnavailableProtocolTool(
-        "mcpClient",
-        "MCP client support is a client/loop capability and is not wired server-side.");
+    return new McpClientFallbackTool("mcpClient");
   }
 
   @Bean
   Tool spawnSubagentSnakeTool() {
-    return new UnavailableProtocolTool(
-        "spawn_subagent", "Subagents are hosted by the agent loop, not by worker tool execution.");
+    return new SpawnSubagentFallbackTool("spawn_subagent");
   }
 
   @Bean
   Tool spawnSubagentTool() {
-    return new UnavailableProtocolTool(
-        "spawnSubagent", "Subagents are hosted by the agent loop, not by worker tool execution.");
+    return new SpawnSubagentFallbackTool("spawnSubagent");
   }
 
   @Bean
   Tool updatePlanSnakeTool() {
-    return new UnavailableProtocolTool(
-        "update_plan", "Structured planning is hosted by the client UI/agent loop.");
+    return new PlanStateTool("update_plan");
   }
 
   @Bean
   Tool updatePlanTool() {
-    return new UnavailableProtocolTool(
-        "updatePlan", "Structured planning is hosted by the client UI/agent loop.");
+    return new PlanStateTool("updatePlan");
   }
 
   @Bean
   Tool todoTool() {
-    return new UnavailableProtocolTool(
-        "todo", "Structured planning is hosted by the client UI/agent loop.");
+    return new PlanStateTool("todo");
   }
 
   @Bean
