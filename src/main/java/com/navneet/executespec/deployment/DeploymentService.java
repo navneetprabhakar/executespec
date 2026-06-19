@@ -96,7 +96,8 @@ public class DeploymentService {
   }
 
   private static String firstGcloudValue(String output) {
-    return output.lines()
+    return output
+        .lines()
         .map(String::trim)
         .filter(line -> !line.isBlank())
         .filter(line -> !line.startsWith("WARNING"))

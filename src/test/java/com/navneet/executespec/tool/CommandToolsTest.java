@@ -243,7 +243,8 @@ class CommandToolsTest {
     Files.writeString(root.resolve("a.txt"), "alpha\nbeta\n");
     ReadFileStateStore readState = new ReadFileStateStore();
     ExecutionContext ctx = ctx();
-    new ReadFileCompatibilityTool(readFileTool(readState)).execute(json("{\"path\":\"a.txt\"}"), ctx);
+    new ReadFileCompatibilityTool(readFileTool(readState))
+        .execute(json("{\"path\":\"a.txt\"}"), ctx);
     Tool tool = new AstEditCompatibilityTool("ast_edit", editFileTool(readState));
 
     ToolResult result =
@@ -280,8 +281,7 @@ class CommandToolsTest {
     Tool mcp = new McpClientFallbackTool("mcp_client");
 
     ToolResult planResult =
-        plan.execute(
-            json("{\"plan\":[{\"step\":\"inspect\",\"status\":\"completed\"}]}"), ctx());
+        plan.execute(json("{\"plan\":[{\"step\":\"inspect\",\"status\":\"completed\"}]}"), ctx());
     ToolResult spawnResult =
         spawn.execute(json("{\"task\":\"find files\",\"query\":\"CommandToolsTest\"}"), ctx());
     ToolResult mcpResult =
