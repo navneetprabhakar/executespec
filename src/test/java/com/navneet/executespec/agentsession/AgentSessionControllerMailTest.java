@@ -33,11 +33,10 @@ class AgentSessionControllerMailTest {
 
     var response =
         controller.sessionSummaryEmail(
-            user(),
-            "session-1",
-            new SessionSummaryEmailRequest(2, 0.42, 1000, 500));
+            user(), "session-1", new SessionSummaryEmailRequest(2, 0.42, 1000, 500));
 
-    org.assertj.core.api.Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    org.assertj.core.api.Assertions.assertThat(response.getStatusCode())
+        .isEqualTo(HttpStatus.ACCEPTED);
     verify(mailService, never())
         .sendSessionSummaryEmail(
             anyString(), anyString(), anyInt(), anyDouble(), anyLong(), anyLong());
