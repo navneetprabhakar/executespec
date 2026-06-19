@@ -151,7 +151,7 @@ public class BillingService {
   }
 
   /**
-   * v2.6.1 — seat-aware subscribe. For TEAM tier plans, {@code seats} must be 2-20 (self-serve
+   * v2.6.1 — seat-aware subscribe. For TEAM tier plans, {@code seats} must be 1-20 (self-serve
    * range). For other tiers, {@code seats} is forced to 1 with a warning log. Stripe charges {@code
    * price × seats}; Razorpay flow is unchanged for v1 (seat adjustment post-checkout via the
    * adjust-seats endpoint).

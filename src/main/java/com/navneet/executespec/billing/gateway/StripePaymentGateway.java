@@ -67,7 +67,7 @@ public class StripePaymentGateway implements PaymentGateway {
 
   /**
    * v2.6.0 — seat-aware Stripe checkout. For per-plan tiers (PRO/MAX), call with {@code seats=1}.
-   * For per-seat tiers (TEAM), pass the user's requested seat count (2-20 enforced upstream in
+   * For per-seat tiers (TEAM), pass the user's requested seat count (1-20 enforced upstream in
    * BillingService). Stripe charges {@code price × seats} automatically and records the quantity on
    * the resulting {@code Subscription} — pulled on webhook and written to {@code
    * BillingSubscription.totalSeats}.
@@ -166,7 +166,7 @@ public class StripePaymentGateway implements PaymentGateway {
    * endpoint. Stripe prorates automatically; the next invoice reflects the new quantity × price.
    *
    * <p>Mutates the first subscription item's quantity — fine for the TEAM tier which has exactly
-   * one line item. Caller should pre-validate that {@code newQuantity} is within the TEAM 2-20
+   * one line item. Caller should pre-validate that {@code newQuantity} is within the TEAM 1-20
    * self-serve range.
    *
    * @throws IllegalArgumentException when {@code newQuantity < 1}

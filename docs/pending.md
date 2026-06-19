@@ -19,6 +19,13 @@
 - Build benchmark environment from the deployment plan.
 - Keep official scorer artifacts immutable and separate from app display.
 
+## Product-Line Planning
+
+- Write the DevOps/Governance Agent PRD: Terraform, Docker, deploy workflows, policy checks, environment drift, approval gates, and evidence ledger.
+- Write the Virtual SRE PRD: observability integrations, RCA, issue creation, remediation handoff into ExecuteSpec PRs, and post-incident summaries.
+- Write the Data Pipeline Builder PRD: connector architecture, compute-only boundary, customer-owned source/destination storage, optional managed destination pricing, pipeline validation, lineage, and analysis layer.
+- Decide which expansion line anchors the first investor roadmap story after Core + released terminal CLI.
+
 ## Models And Routing
 
 - Decide whether OpenRouter slug mapping moves from Java allow-list to YAML-declared verified slugs.

@@ -14,9 +14,9 @@ info:
     persistence (V120). YAML keys under `model-matrix` / `failover-order` use
     `gemini`.
 
-    Tier ladder (live): FREE / PRO (HIDDEN — grandfathered) / TEAM ($39/seat,
-    min 2, BYOK) / ENTERPRISE. The Solo / MAX tiers do not exist on dev/main
-    today (V179/V185 retired Solo + the V143 product-split discriminator).
+    Tier ladder (live): FREE (15 runs/month) / PRO ($29, 30 managed runs) /
+    TEAM ($39/seat, from 1 seat, BYOK) / ENTERPRISE. The Solo / MAX tiers do
+    not exist on dev/main today (V185 retired Solo naming; V165 dropped MAX).
 
     Run modes: BUILD (default — full V2 pipeline) and PATCH (single thin-agent
     loop against a failing-test spec; powers the 4 autofix surfaces + SWE-bench
@@ -1830,7 +1830,7 @@ paths:
       summary: Initiate subscription (routed to Razorpay or Stripe)
       description: |
         Returns a gateway-specific checkout payload. Wave 1 (v2.6.1) adds an
-        optional `seats` parameter (2-20) for TEAM tier — Stripe threads it into
+        optional `seats` parameter (1-20) for TEAM tier — Stripe threads it into
         the Checkout Session line_items quantity; Razorpay ignores it.
       requestBody:
         content:
@@ -3976,7 +3976,7 @@ components:
             type: string
         seatCount:
           type: integer
-          description: Wave 1 — purchased TEAM seats (2-20). `null` on non-TEAM tiers.
+          description: Wave 1 — purchased TEAM seats (1-20). `null` on non-TEAM tiers.
           nullable: true
         activeMemberCount:
           type: integer
