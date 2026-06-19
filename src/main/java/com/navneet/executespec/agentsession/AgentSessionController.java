@@ -118,28 +118,19 @@ public class AgentSessionController {
   }
 
   /**
-   * #2b: send the ONE per-session usage summary email at session end. The CLI rolls up local-hands
-   * task cost/tokens client-side and posts the totals here; we email the authenticated user once.
+   * Deprecated compatibility endpoint. Local CLI/VS Code sessions must not send email; newer
+   * clients keep usage/cost visibility in the terminal. Keep the route as a no-op so older clients
+   * can exit cleanly without triggering mail.
    */
   @PostMapping("/sessions/{sessionId}/summary-email")
   public org.springframework.http.ResponseEntity<Void> sessionSummaryEmail(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
       @RequestBody SessionSummaryEmailRequest request) {
-    com.navneet.executespec.auth.entity.AppUser appUser = user.getUser();
-    if (appUser.getEmail() != null && !appUser.getEmail().isBlank()) {
-      mailService.sendSessionSummaryEmail(
-          appUser.getEmail(),
-          appUser.getFirstName(),
-          request.taskCount(),
-          request.costUsd(),
-          request.inputTokens(),
-          request.outputTokens());
-    }
     return org.springframework.http.ResponseEntity.accepted().build();
   }
 
-  /** #2b request body: per-session usage totals rolled up by the CLI. */
+  /** Legacy request body retained for older clients that still POST this route. */
   public record SessionSummaryEmailRequest(
       int taskCount, double costUsd, long inputTokens, long outputTokens) {}
 
