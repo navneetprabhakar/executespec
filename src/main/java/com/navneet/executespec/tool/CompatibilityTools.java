@@ -952,7 +952,8 @@ final class LspFallbackTool implements Tool {
 
   @Override
   public String description() {
-    return "Local lightweight LSP fallback: document_symbols, definition, references, diagnostics note.";
+    return "Local lightweight LSP fallback: document_symbols, definition, references, diagnostics"
+        + " note.";
   }
 
   @Override
@@ -1088,7 +1089,9 @@ final class PlanStateTool implements Tool {
     if (plan.isMissingNode() || plan.isNull()) plan = args.path("todos");
     if (plan.isMissingNode() || plan.isNull()) {
       ObjectNode single = JsonSupport.JSON.createObjectNode();
-      single.put("step", args.path("step").asText(args.path("content").asText(args.path("task").asText(""))));
+      single.put(
+          "step",
+          args.path("step").asText(args.path("content").asText(args.path("task").asText(""))));
       single.put("status", args.path("status").asText("pending"));
       ArrayNode arr = JsonSupport.JSON.createArrayNode();
       arr.add(single);
@@ -1189,7 +1192,8 @@ final class McpClientFallbackTool implements Tool {
 
   @Override
   public String description() {
-    return "Calls an allowlisted MCP stdio server in server mode; local-hands clients may execute local stdio MCP calls.";
+    return "Calls an allowlisted MCP stdio server in server mode; local-hands clients may execute"
+        + " local stdio MCP calls.";
   }
 
   @Override
@@ -1208,7 +1212,8 @@ final class McpClientFallbackTool implements Tool {
       if (!isAllowed(command)) {
         return ToolResult.err(
             ToolResult.ErrorKind.FORBIDDEN,
-            "Backend MCP stdio command is not allowlisted. Set EXECUTESPEC_MCP_ALLOWLIST to an exact command or trusted prefix.");
+            "Backend MCP stdio command is not allowlisted. Set EXECUTESPEC_MCP_ALLOWLIST to an"
+                + " exact command or trusted prefix.");
       }
       try {
         return ToolResult.ok(callStdio(command, method, args.path("params")));
@@ -1216,7 +1221,8 @@ final class McpClientFallbackTool implements Tool {
         return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
       } catch (InterruptedException ie) {
         Thread.currentThread().interrupt();
-        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "Interrupted while calling MCP server");
+        return ToolResult.err(
+            ToolResult.ErrorKind.IO_ERROR, "Interrupted while calling MCP server");
       }
     }
     ObjectNode out = JsonSupport.JSON.createObjectNode();
@@ -1224,7 +1230,8 @@ final class McpClientFallbackTool implements Tool {
     out.put("method", method);
     out.put(
         "note",
-        "No MCP stdio command was provided. Backend command execution is available only for EXECUTESPEC_MCP_ALLOWLIST entries.");
+        "No MCP stdio command was provided. Backend command execution is available only for"
+            + " EXECUTESPEC_MCP_ALLOWLIST entries.");
     out.set("servers", JsonSupport.JSON.createArrayNode());
     return ToolResult.ok(out.toString());
   }
@@ -1233,8 +1240,7 @@ final class McpClientFallbackTool implements Tool {
     String raw =
         System.getenv()
             .getOrDefault(
-                "EXECUTESPEC_MCP_ALLOWLIST",
-                System.getProperty("executespec.mcp.allowlist", ""));
+                "EXECUTESPEC_MCP_ALLOWLIST", System.getProperty("executespec.mcp.allowlist", ""));
     return Arrays.stream(raw.split(","))
         .map(String::trim)
         .filter(s -> !s.isBlank())
@@ -1250,18 +1256,23 @@ final class McpClientFallbackTool implements Tool {
     Process process = new ProcessBuilder("/bin/sh", "-lc", command).start();
     String initialize =
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"executespec-backend\",\"version\":\"1\"}}}";
-    String initialized = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}";
+    String initialized =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}";
     String call =
         JsonSupport.JSON
             .createObjectNode()
             .put("jsonrpc", "2.0")
             .put("id", 2)
             .put("method", method)
-            .set("params", params != null && params.isObject() ? params : JsonSupport.JSON.createObjectNode())
+            .set(
+                "params",
+                params != null && params.isObject() ? params : JsonSupport.JSON.createObjectNode())
             .toString();
     process
         .getOutputStream()
-        .write((frame(initialize) + frame(initialized) + frame(call)).getBytes(StandardCharsets.UTF_8));
+        .write(
+            (frame(initialize) + frame(initialized) + frame(call))
+                .getBytes(StandardCharsets.UTF_8));
     process.getOutputStream().close();
     boolean done = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
     if (!done) {
