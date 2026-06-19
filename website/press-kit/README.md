@@ -85,7 +85,7 @@ The 7 screenshots are from the pre-v3 visual identity. They show v2 dashboard, v
 
 ## Boilerplate (for use in articles, partner listings, etc.)
 
-> ExecuteSpec is an AI coding platform that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready, with a deterministic Ready / Needs review / Failed verdict on every one. Multi-repo project workspaces, plan-approval gate, BYOK for Anthropic / OpenAI / Google. Pricing: Free (5 lifetime runs + 5 per friend), Pro $20/mo (unlimited managed-key runs solo), Team $39/seat/mo BYOK (min 2 seats), Enterprise (SOC 2 + DPA + dedicated infra). Try free at https://executespec.ai or watch a real team's last 30 days at https://dev.executespec.ai/v3/exec-demo.
+> ExecuteSpec is a spec-driven AI coding platform that turns a plain-English requirement into a reviewable pull request. The workflow is plan, approve cost, build, test, review, and open a PR with a deterministic verified score and evidence ledger. Multi-repo project workspaces, plan approval, project memory, PR/code review, and BYOK are built in. Pricing: Free (15 runs/month), Pro ($29/month for 30 managed runs), Team ($39/seat/month from 1 seat, BYOK), Enterprise (custom contract + DPA path). Try free at https://executespec.ai.
 
 ## Press availability
 

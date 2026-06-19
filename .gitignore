@@ -212,6 +212,7 @@ sa-key.json
 # Eval output (generated at runtime)
 eval-reports/
 eval-outputs/
+outputs/
 
 # Temporary/Generated items
 javac.*.args
