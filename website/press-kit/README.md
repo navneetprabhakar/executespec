@@ -56,17 +56,30 @@ website/press-kit/
 │   ├── render.js
 │   ├── og-hero.png                         (1200×630 — re-rendered 2026-04-28 with v3 selling-point)
 │   └── README.md
-├── ss-01-dashboard.png                      (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-02-run-detail.png                     (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-03-project-overview.png               (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-04-architecture-viewer.png            (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-05-validation-report.png              (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-05b-validation-polished.png           (NB: pre-v3 capture; re-shoot scheduled)
-├── ss-extra-score-trend.png                 (NB: pre-v3 capture; re-shoot scheduled)
+├── current/                                 (canonical current Console-era captures)
+│   ├── 01-compose-start.png                 (Start work / spec composer)
+│   ├── 02-console-home.png                  (Console home / decisions)
+│   ├── 03-work-runs.png                     (Work list)
+│   ├── 04-projects.png                      (Projects index)
+│   ├── 05-run-result.png                    (Run result / evidence shell)
+│   ├── 06-billing.png                       (Billing dashboard)
+│   ├── 07-plans.png                         (Plans)
+│   ├── 08-project-detail.png                (Project overview)
+│   ├── 09-project-architecture.png          (Project system map / architecture)
+│   └── contact-sheet-current.png            (QA contact sheet)
+├── ss-01-dashboard.png                      (historical pre-v3 capture; do not use)
+├── ss-02-run-detail.png                     (historical pre-v3 capture; do not use)
+├── ss-03-project-overview.png               (historical pre-v3 capture; do not use)
+├── ss-04-architecture-viewer.png            (historical pre-v3 capture; do not use)
+├── ss-05-validation-report.png              (historical pre-v3 capture; do not use)
+├── ss-05b-validation-polished.png           (historical pre-v3 capture; do not use)
+├── ss-extra-score-trend.png                 (historical pre-v3 capture; do not use)
 └── CAPTURE_GUIDE.md                         (SOP for shooting the next round in v3)
 ```
 
-The 7 screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for context but **not** what the v3 product looks like today. A re-shoot session is queued under a separate work item; in the meantime use the live product at `https://dev.executespec.ai/v3/landing` for any Product Hunt / blog hero imagery.
+The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like.
+
+Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. They should be treated as product-demo screenshots, not real customer data.
 
 ## Brand guidelines (current — to be unified in the color-codes pass)
 

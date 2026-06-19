@@ -94,7 +94,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 ## 6 · Assets status
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
-2. ✅ **Screenshots** — `website/press-kit/` has ss-01…ss-05b + score-trend. Re-capture any that show old pricing/chrome.
+2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
 3. ⬜ **Demo video** — 60-90s. Script: (a) paste spec → plan gate shows tasks + price (10s), (b) approve → watch tasks execute via live log (20s), (c) reviewer passes (10s), (d) verified score + real PR on GitHub (15s), (e) share the verified report link (5s).
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
