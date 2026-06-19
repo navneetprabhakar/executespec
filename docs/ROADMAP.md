@@ -1,78 +1,142 @@
 # ExecuteSpec Roadmap
 
-> Current ordered roadmap after the 2026-06-10 review-driven fix batch and docs cleanup. Detailed open-work inventory lives in [`pending.md`](pending.md).
+> Product-line roadmap refreshed 2026-06-19. Detailed open-work inventory lives in
+> [`pending.md`](pending.md); shipped feature truth lives in `docs/features/`.
 
-## P0 - Prove The Recent Fixes Live
+## Strategic End State
 
-1. Authenticated model-matrix UI/API smoke with real org/user sessions.
-2. VM-side Chinese-model latency A/B: OpenRouter default, OpenRouter latency sort, Fireworks, native DeepSeek.
-3. Real payment sandbox flows: Stripe/Razorpay checkout abandonment, webhook ordering, top-up activation.
-4. Real SCM PATCH autofix run after cancellation/terminal-state hardening.
-5. Benchmark event hooks from live harness runs into `/benchmark`.
+ExecuteSpec should become a combined software foundry: a platform that helps teams
+develop, deploy, govern, observe, and maintain software end to end.
 
-## P1 - Benchmark Server
+The current product is the coding and PR-generation core. The released terminal
+CLI extends that core into the developer's local terminal. The next roadmap
+expands the same agent/tool/evidence platform into three additional product
+lines.
 
-Build the dedicated benchmark environment only after the blocker list in [`plans/benchmark-server-creation-deployment-2026-06-10.md`](plans/benchmark-server-creation-deployment-2026-06-10.md) is closed:
+## Product Lines
 
-- benchmark profile,
-- event ingest,
-- artifact bucket,
-- external harness publishing,
-- operator dashboard,
-- teardown/runbook.
+### 1. ExecuteSpec Core
 
-## P2 - Preview / Verify Runtime
+Current wedge: spec-driven engineering work that ends in a reviewable PR with
+plan approval, cost visibility, tool traces, build/test/reviewer evidence, and a
+verified score.
 
-Continue the preview rebuild and verifyBoot path:
+Near-term priorities:
 
-- implement Phase 0 buildpack/network/least-privilege preview runner,
-- keep egress deny-by-default,
-- make run-recipe execution deterministic,
-- delete old heuristic preview code only when the replacement path passes.
+- keep the released terminal CLI working as the primary developer-local surface,
+- prove payment sandbox flows end to end,
+- complete benchmark event hooks and publish only scorer-backed artifacts,
+- improve preview/verifyBoot reliability,
+- harden tenant isolation, cancellation behavior, and enterprise proof material.
 
-Plans:
+### 2. Data Pipeline Builder
 
-- [`plans/preview-live-environment-rebuild.md`](plans/preview-live-environment-rebuild.md)
-- [`plans/preview-phase1-verifyboot-spec.md`](plans/preview-phase1-verifyboot-spec.md)
+Separate product feature for creating and operating data pipelines across
+structured and unstructured sources.
 
-## P3 - Run Quality And Latency
+Target sources include SQL databases, NoSQL systems, warehouses, lakehouses,
+HDFS, Apache Iceberg, Databricks, Snowflake, and adjacent enterprise stores.
+ExecuteSpec should own the compute and orchestration layer; the customer owns
+source and destination storage by default. A managed or partner-backed
+destination can be offered as a priced add-on.
 
-- Finish verify-before-complete Tiers 2-3.
-- Evaluate context compaction default flips.
-- Revisit per-task build skipping.
-- Reintroduce parallel execution only behind eval proof.
+Required capabilities:
 
-Plans:
+- connector registry for source and destination systems,
+- schema discovery, profiling, and drift detection,
+- pipeline planning, transformation generation, and validation,
+- batch and incremental execution,
+- lineage, governance, access controls, and audit trail,
+- analysis layer for slice-and-dice exploration, visualization, and insights on
+  processed data.
 
-- [`plans/verify-before-complete-design-2026-06-07.md`](plans/verify-before-complete-design-2026-06-07.md)
-- [`plans/latency-reduction-phased.md`](plans/latency-reduction-phased.md)
+This is the largest expansion because connector depth, data governance, and
+runtime reliability will matter more than demo breadth.
 
-## P4 - Remaining Architecture Debt
+### 3. DevOps, Deployment, And Governance Agent
 
-- Code-gen engine observer/cost/SSE seam.
-- V2 batch coordinator wiring and live provider batch smokes.
-- C3 tenant ORM read-isolation.
-- Tiered codemap phases 2-3.
+Distinct product line inside the current ExecuteSpec product. It should use the
+same terminal/web agent foundation, but focus on operational software delivery:
+Terraform, Docker, deployment workflows, release governance, environment drift,
+policy checks, infrastructure PRs, and controlled command execution.
 
-Plans:
+Required capabilities:
 
-- [`plans/codegen-engine-extraction.md`](plans/codegen-engine-extraction.md)
-- [`plans/v2-batch-execution-plan.md`](plans/v2-batch-execution-plan.md)
-- [`plans/c3-tenant-orm-isolation.md`](plans/c3-tenant-orm-isolation.md)
-- [`plans/tiered-codemap-architecture.md`](plans/tiered-codemap-architecture.md)
+- infra-as-code authoring and review,
+- Docker/build/deploy workflow automation,
+- cloud/environment drift detection,
+- policy and standards checks before deploy,
+- evidence-backed deployment runbooks,
+- guarded terminal/web execution with approval boundaries.
 
-## P5 - Product UX
+This is the closest adjacency to the current codebase because previews,
+deployment, standards, contracts, terminal tools, and PR workflows already exist.
 
-- Decide whether Console becomes default control-plane shell.
-- Keep IDE surfaces only where they serve web control-plane workflows.
-- Collapse remaining dead Signal-era frontend branches.
-- Add change-impact guardrail at plan gate when contract/dependency data is reliable enough.
+### 4. Virtual SRE
 
-Plans:
+AI observability and remediation product line. The SRE agent monitors logs,
+metrics, traces, alerts, and service health, identifies likely causes, raises
+issues, and hands confirmed remediation work back to ExecuteSpec Core to create
+a PR for human review.
 
-- [`plans/web-control-plane-reframe.md`](plans/web-control-plane-reframe.md)
-- [`plans/change-impact-guardrail.md`](plans/change-impact-guardrail.md)
+Required capabilities:
+
+- observability integrations for metrics, logs, traces, alerts, and incidents,
+- automated triage, clustering, and RCA,
+- issue creation with evidence and blast-radius context,
+- remediation-plan generation,
+- PR creation through the current ExecuteSpec run pipeline,
+- post-incident summaries and recurring-problem tracking.
+
+This line should not become an auto-mitigation system before issue evidence,
+approval boundaries, and rollback posture are strong.
+
+## Shared Platform Bets
+
+All product lines should reuse the same primitives:
+
+- org/RBAC/billing/BYOK controls,
+- project graph, repo context, docs, memory, and RAG,
+- terminal/web tool runtime,
+- agent-session protocol,
+- model routing and cost ledger,
+- verification evidence ledger,
+- PR and issue lifecycle,
+- connector and integration registry.
+
+The strategic advantage is not four disconnected products. It is one control
+plane where build, deploy, observe, and remediate workflows share context and
+governance.
+
+## Suggested Sequencing
+
+1. **Core + CLI stabilization** - treat terminal CLI as released, then keep
+   server protocol, local-hands, billing, and benchmark proof tight.
+2. **DevOps/Governance agent** - build first because it is closest to the
+   current product and strengthens the foundry narrative.
+3. **Virtual SRE** - build next so production incidents can become evidence-rich
+   ExecuteSpec remediation PRs.
+4. **Data Pipeline Builder** - design in parallel, but build after connector and
+   governance architecture are scoped; it is the broadest product line.
+
+## Active Execution Backlog
+
+The narrower engineering backlog remains:
+
+- authenticated model-matrix UI/API smoke,
+- VM-side Chinese/open-model latency A/B,
+- real Stripe/Razorpay sandbox flows,
+- real SCM PATCH autofix run after cancellation hardening,
+- benchmark event hooks from live harness runs into `/benchmark`,
+- preview Phase 0 and verifyBoot,
+- verify-before-complete Tiers 2-3,
+- context compaction and latency work,
+- C3 tenant ORM read-isolation,
+- dead frontend branch cleanup.
 
 ## Cleanup Rule
 
-Before deleting any plan, check [`plan-disposition-2026-06-10.md`](plan-disposition-2026-06-10.md). Shipped behavior belongs in `docs/features/`; unfinished work belongs in `pending.md` or an active plan.
+Before deleting any plan, check
+[`plan-disposition-2026-06-10.md`](plan-disposition-2026-06-10.md). Shipped
+behavior belongs in `docs/features/`; unfinished work belongs in `pending.md` or
+an active plan.

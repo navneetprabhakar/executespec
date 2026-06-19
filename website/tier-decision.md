@@ -1,13 +1,11 @@
 # Tier Re-assessment — Project View & Platform Features
 
-> **⚠ HISTORICAL REFERENCE (superseded 2026-04-28).** The tier ladder has since
-> consolidated to **FREE / PRO / TEAM / ENTERPRISE** (V141 backend migration on
-> `feature/conversion-redesign`). The "MAX" tier referenced throughout this
-> document was renamed to **TEAM** and re-priced to **$39/seat/month
-> (minimum 2 seats)** with BYOK. The selling-point line is now
-> *"AI that ships pull requests your team will actually merge"* with a
-> ~80% verified score on real runs as the proof number. See `website/llms.txt`,
-> `website/index.html`, and `/v3/exec-demo` for current state.
+> **HISTORICAL REFERENCE (superseded by the 2026-06-19 business packet).** The
+> current ladder is **FREE / PRO / TEAM / ENTERPRISE**: Free 15 runs/month, Pro
+> $29 for 30 managed runs/month, Team $39/seat/month from 1 seat with BYOK, and
+> Enterprise custom. Do not use the MAX tier, 2-seat minimum, or old score claims
+> below for current pricing or investor copy. See `website/llms.txt`,
+> `website/index.html`, and `docs/business/billing-plan-assessment.md`.
 >
 > Original doc kept below for the analytical reasoning that produced the
 > ladder — pricing numbers and tier names are stale.

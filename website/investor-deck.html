@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ExecuteSpec Investor Deck — Software Foundry</title>
+  <link rel="icon" type="image/svg+xml" href="assets/brand/merge-rail/executespec-merge-rail-favicon.svg">
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --surface: #14171c;
+      --surface-2: #1b1f26;
+      --line: rgba(236, 238, 242, 0.13);
+      --ink: #eceef2;
+      --ink-2: #c9d1db;
+      --muted: #8a94a6;
+      --mint: #7ad1c8;
+      --blue: #5b8def;
+      --violet: #a78bfa;
+      --green: #10b981;
+      --amber: #f6c35f;
+      --red: #f87171;
+      --paper: #fbfaf6;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .deck-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11, 13, 16, 0.88);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .brand img { width: 30px; height: 30px; }
+
+    .nav-links {
+      display: flex;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .nav-links a { color: inherit; text-decoration: none; }
+    .nav-links a:hover { color: var(--mint); }
+
+    .slide {
+      min-height: 100vh;
+      display: grid;
+      align-items: center;
+      padding: 72px clamp(24px, 6vw, 88px);
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 84% 16%, rgba(122, 209, 200, 0.08), transparent 28%),
+        var(--bg);
+    }
+
+    .slide-inner {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+      gap: 48px;
+      align-items: center;
+    }
+
+    .kicker {
+      color: var(--mint);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      max-width: 760px;
+      font-size: clamp(48px, 7vw, 84px);
+      line-height: 0.96;
+      letter-spacing: -0.045em;
+    }
+
+    h2 {
+      max-width: 860px;
+      font-size: clamp(36px, 5vw, 58px);
+      line-height: 1;
+      letter-spacing: -0.035em;
+    }
+
+    h3 {
+      font-size: 23px;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+
+    .lead {
+      max-width: 720px;
+      margin-top: 24px;
+      color: var(--ink-2);
+      font-size: 22px;
+      line-height: 1.42;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 34px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 0 13px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      color: var(--mint);
+      background: rgba(122, 209, 200, 0.1);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .pill.blue { color: var(--blue); background: rgba(91, 141, 239, 0.1); }
+    .pill.violet { color: var(--violet); background: rgba(167, 139, 250, 0.1); }
+    .pill.green { color: var(--green); background: rgba(16, 185, 129, 0.1); }
+    .pill.amber { color: var(--amber); background: rgba(246, 195, 95, 0.1); }
+    .pill.red { color: var(--red); background: rgba(248, 113, 113, 0.1); }
+
+    .screenshot {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      box-shadow: 0 28px 72px rgba(0, 0, 0, 0.42);
+      background: var(--surface);
+    }
+
+    .screenshot-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 36px;
+    }
+
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      min-height: 170px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(20, 23, 28, 0.82);
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--ink);
+      font-size: 21px;
+      letter-spacing: -0.02em;
+    }
+
+    .card p {
+      color: var(--ink-2);
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    .rail {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 42px;
+    }
+
+    .rail-step {
+      min-height: 132px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    .rail-step span {
+      color: var(--mint);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .rail-step strong {
+      display: block;
+      margin-top: 18px;
+      font-size: 20px;
+    }
+
+    .rail-step p {
+      margin-top: 8px;
+      color: var(--ink-2);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    table {
+      width: 100%;
+      margin-top: 36px;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    th, td {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink-2);
+      text-align: left;
+      vertical-align: top;
+      font-size: 16px;
+      line-height: 1.38;
+    }
+
+    th {
+      color: var(--ink);
+      background: var(--surface-2);
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .number {
+      color: var(--mint);
+      font-size: 54px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .source-note {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 980px) {
+      .two-col, .grid, .grid.two, .grid.four, .rail {
+        grid-template-columns: 1fr;
+      }
+      .nav-links { display: none; }
+      .slide { min-height: auto; padding-top: 56px; padding-bottom: 56px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="deck-nav">
+    <a class="brand" href="#title">
+      <img src="assets/brand/merge-rail/executespec-merge-rail-app-icon-192.png" alt="">
+      ExecuteSpec
+    </a>
+    <div class="nav-links">
+      <a href="#problem">Problem</a>
+      <a href="#product">Product</a>
+      <a href="#foundry">Foundry</a>
+      <a href="#model">Model</a>
+      <a href="#ask">Ask</a>
+    </div>
+  </nav>
+
+  <section id="title" class="slide">
+    <div class="slide-inner two-col">
+      <div>
+        <div class="kicker">Investor deck · working web version</div>
+        <h1>Software foundry for AI-assisted software delivery</h1>
+        <p class="lead">Spec-to-PR core today. Terminal CLI released. Roadmap expands into DevOps governance, Virtual SRE, and data pipeline workflows.</p>
+        <div class="meta-row">
+          <span class="pill">Current Console screenshots</span>
+          <span class="pill blue">2026-06-19</span>
+        </div>
+      </div>
+      <div class="screenshot-stack">
+        <img class="screenshot" src="press-kit/current/02-console-home.png" alt="ExecuteSpec Console home">
+      </div>
+    </div>
+  </section>
+
+  <section id="problem" class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Problem</div>
+      <h2>AI coding crossed the generation threshold. Team trust has not.</h2>
+      <p class="lead">The buyer does not need another code suggestion surface. They need reviewable, cost-visible, governed output.</p>
+      <div class="grid four">
+        <div class="card"><strong>Merge readiness</strong><p>Diffs still arrive without enough evidence for reviewers to merge confidently.</p></div>
+        <div class="card"><strong>Spend control</strong><p>Autonomy burns tokens before teams understand plan, scope, or cap.</p></div>
+        <div class="card"><strong>System context</strong><p>Multi-repo work needs docs, memory, architecture, and policy in one loop.</p></div>
+        <div class="card"><strong>Verification</strong><p>A model self-rating is not a team acceptance signal.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="product" class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Product today</div>
+      <h2>Current wedge: spec to verified pull request.</h2>
+      <p class="lead">ExecuteSpec is an async control plane for bounded engineering work, not an IDE reskin.</p>
+      <div class="rail">
+        <div class="rail-step"><span>01</span><strong>Spec</strong><p>Natural language requirement.</p></div>
+        <div class="rail-step"><span>02</span><strong>Plan</strong><p>Tasks plus cost estimate.</p></div>
+        <div class="rail-step"><span>03</span><strong>Approve</strong><p>Human gate before spend.</p></div>
+        <div class="rail-step"><span>04</span><strong>Execute</strong><p>Controlled tools change code.</p></div>
+        <div class="rail-step"><span>05</span><strong>Verify</strong><p>Build, tests, reviewer evidence.</p></div>
+        <div class="rail-step"><span>06</span><strong>PR</strong><p>Reviewable output with score.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner two-col">
+      <div>
+        <div class="kicker">Current surface</div>
+        <h2>Console control plane plus terminal workflow.</h2>
+        <p class="lead">The protected app is the current Console shell; route-level surfaces own work, projects, billing, org settings, benchmark tracking, and run evidence.</p>
+      </div>
+      <img class="screenshot" src="press-kit/current/01-compose-start.png" alt="ExecuteSpec Start work screen">
+    </div>
+  </section>
+
+  <section id="foundry" class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Software foundry thesis</div>
+      <h2>One agent platform across build, deploy, observe, and remediate.</h2>
+      <p class="lead">The strategic advantage is shared context and governance, not four disconnected products.</p>
+      <div class="grid four">
+        <div class="card"><span class="pill">Live</span><strong>ExecuteSpec Core</strong><p>Verified PRs with plan, cost, tool traces, build/test/reviewer evidence.</p></div>
+        <div class="card"><span class="pill blue">Next</span><strong>DevOps Governance</strong><p>Terraform, Docker, deployment workflows, drift, policy, and guarded terminal/web operations.</p></div>
+        <div class="card"><span class="pill violet">Roadmap</span><strong>Virtual SRE</strong><p>Observe, triage, raise issues, and route remediation into reviewable PRs.</p></div>
+        <div class="card"><span class="pill green">Roadmap</span><strong>Data Pipeline Builder</strong><p>ETL/ELT across SQL, NoSQL, warehouses, lakehouses, HDFS, Iceberg, Databricks, Snowflake, and unstructured sources.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner two-col">
+      <div>
+        <div class="kicker">Project workbench</div>
+        <h2>Context, evidence, and project memory stay in the same surface.</h2>
+        <p class="lead">Project views carry recent work, architecture/system map, repo setup, code/docs context, and governance surfaces.</p>
+      </div>
+      <div class="screenshot-stack">
+        <img class="screenshot" src="press-kit/current/08-project-detail.png" alt="ExecuteSpec project detail">
+        <img class="screenshot" src="press-kit/current/09-project-architecture.png" alt="ExecuteSpec project architecture">
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner two-col">
+      <div>
+        <div class="kicker">Evidence</div>
+        <h2>The output is a run result, not just a diff.</h2>
+        <p class="lead">Run result carries score, signals, execution details, next actions, and PR handoff. This is the trust layer for reviewers.</p>
+      </div>
+      <img class="screenshot" src="press-kit/current/05-run-result.png" alt="ExecuteSpec run result">
+    </div>
+  </section>
+
+  <section id="model" class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Business model</div>
+      <h2>Managed entry, BYOK expansion.</h2>
+      <p class="lead">Current pricing keeps evaluation simple while making Team and Enterprise the margin-safe path.</p>
+      <table>
+        <thead><tr><th>Tier</th><th>Price</th><th>Commercial role</th></tr></thead>
+        <tbody>
+          <tr><td>Free</td><td>$0</td><td>15 runs/month for evaluation and activation.</td></tr>
+          <tr><td>Pro</td><td>$29/month or $289/year</td><td>30 managed-key runs; solo conversion; cost cap protects margin.</td></tr>
+          <tr><td>Team</td><td>$39/seat/month</td><td>BYOK from one seat; primary self-serve revenue path.</td></tr>
+          <tr><td>Enterprise</td><td>Custom</td><td>Contract, DPA/SLA path, org model controls, provider lanes.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner two-col">
+      <div>
+        <div class="kicker">Billing surface</div>
+        <h2>Pricing and usage are visible in-product.</h2>
+        <p class="lead">The website and deck should describe the same ladder the app renders: Free, Pro, Team BYOK, Enterprise.</p>
+      </div>
+      <div class="screenshot-stack">
+        <img class="screenshot" src="press-kit/current/06-billing.png" alt="ExecuteSpec billing dashboard">
+        <img class="screenshot" src="press-kit/current/07-plans.png" alt="ExecuteSpec plans page">
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Claim discipline</div>
+      <h2>Make the trust story stronger by narrowing the claims.</h2>
+      <div class="grid three">
+        <div class="card"><span class="pill green">Safe</span><strong>Current product</strong><p>Spec-to-plan-to-PR core, terminal CLI released, billing ladder, BYOK, validation evidence.</p></div>
+        <div class="card"><span class="pill amber">Qualify</span><strong>Needs proof</strong><p>Benchmark numbers, payment sandbox proof, enterprise compliance, tenant isolation.</p></div>
+        <div class="card"><span class="pill red">Avoid</span><strong>Do not claim</strong><p>SOC 2 certified, official leaderboard rank, unlimited managed runs, fully autonomous merge.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Wedge</div>
+      <h2>Land with verified PR throughput; expand into operations.</h2>
+      <div class="grid two">
+        <div class="card"><strong>Initial buyer</strong><p>Teams already using AI coding tools but still requiring human PR review. Sell verified throughput and cost control, not engineer replacement.</p></div>
+        <div class="card"><strong>Sequencing</strong><p>Core + CLI → DevOps/Governance → Virtual SRE → Data Pipeline Builder. The first expansion should be adjacent to today's tool/runtime/PR lifecycle.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ask" class="slide">
+    <div class="slide-inner">
+      <div class="kicker">Ask</div>
+      <h2>Decisions before final fundraising copy.</h2>
+      <div class="grid three">
+        <div class="card"><strong>Round story</strong><p>Benchmark-led, enterprise-pilot-led, developer-launch-led, or software-foundry thesis?</p></div>
+        <div class="card"><strong>Pricing posture</strong><p>Keep current ladder or move toward platform fee plus customer provider spend?</p></div>
+        <div class="card"><strong>Expansion anchor</strong><p>Lead with DevOps/Governance, Virtual SRE, or Data Pipeline Builder after Core + CLI?</p></div>
+      </div>
+      <p class="source-note">Screenshots are current Console-era product-demo captures from `website/press-kit/current/`; demo data is synthetic and not customer traction.</p>
+    </div>
+  </section>
+</body>
+</html>

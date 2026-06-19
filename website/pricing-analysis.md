@@ -1,15 +1,15 @@
 # ExecuteSpec — Eval Matrix + Pricing Analysis (v3 — full 3-provider live)
 
-> **⚠ HISTORICAL REFERENCE (superseded 2026-04-28).** Tier names + per-tier
-> pricing in this doc are pre-V141 (the migration that renamed MAX → TEAM and
-> re-priced the BYOK tier to $39/seat with a 2-seat minimum). The
-> credits-per-complexity-band model below still applies to PRO managed-keys
-> top-ups, but PRO itself is now **unlimited managed runs / month for solo
-> developers** rather than a 20-credit cap. Current ladder + selling-point in
+> **HISTORICAL REFERENCE (superseded by `docs/business/billing-plan-assessment.md`,
+> refreshed 2026-06-19).** Tier names + per-tier pricing in this doc are pre-V141
+> and should not be used for current pricing decisions. Current ladder: Free
+> 15 runs/month, Pro $29 for 30 managed runs/month, Team $39/seat/month from
+> 1 seat with BYOK, Enterprise custom. Current public copy lives in
 > `website/index.html` + `website/llms.txt`.
 >
-> Original analysis kept below for the eval-matrix data + the per-provider
-> margin reasoning, which still hold.
+> Original analysis kept below for historical eval-matrix data and old margin
+> reasoning only. Recompute economics from current run-cost ledgers before using
+> it externally.
 
 _Branch: `feature/ux-overhaul-v1` · Date: 2026-04-21_
 _v3 supersedes v2. All 15 cells now have real numbers: Anthropic + OpenAI from the Apr 21 16:29 matrix, Gemini from the Apr 21 19:10 matrix after the GOOGLE → GEMINI enum rename fix._

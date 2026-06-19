@@ -83,7 +83,7 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V243`.
+Migration head in this worktree: `V244`.
 
 Recent relevant migrations:
 
@@ -95,6 +95,7 @@ Recent relevant migrations:
 - `V241`: seed `worker.local-hands.enabled` (default OFF).
 - `V242`: `app_user.preferred_ai_provider` — cross-surface provider preference.
 - `V243`: `run_step_usage` — durable per-call LLM usage (tokens/cache/reasoning/cost/call-index + role/step/retry attribution).
+- `V244`: `worker.local-hands.enabled` default ON — CLI/VS Code local execution no longer fail-closes at submit when using PAT-authenticated local mode.
 
 ## Deprecated / Transitional Areas
 
