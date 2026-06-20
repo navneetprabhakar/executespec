@@ -13,14 +13,10 @@ import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
 import {IdeProjectPulse, IdeProjectRuns, IdeProjectRepos} from '@/ide/IdeProjectTabs';
-import {
-  IdeProjectChat,
-  IdeProjectCode,
-  IdeProjectArchitecture,
-  IdeProjectSetup,
-  IdeProjectMembers,
-  IdeProjectActivity,
-} from '@/ide/IdeProjectMore';
+import {IdeProjectChat, IdeProjectCode, IdeProjectArchitecture} from '@/ide/IdeProjectMore';
+import {IdeProjectSetup} from '@/ide/IdeProjectSetup';
+import {IdeProjectMembers} from '@/ide/IdeProjectMembers';
+import {IdeProjectActivity} from '@/ide/IdeProjectActivity';
 import {IdeProjectSettings} from '@/ide/IdeProjectSettings';
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
