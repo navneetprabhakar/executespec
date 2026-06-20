@@ -82,27 +82,27 @@ final class PreviewSinglePackageFullStackDockerfiles {
         // 1. Inject --host 0.0.0.0 into any vite script
         // 2. If it's a full-stack project but 'dev' only runs vite, create 'dev:all' that runs both
         "RUN node -e \"const fs=require('fs');const"
-        + " p=JSON.parse(fs.readFileSync('package.json','utf8'));if(p.scripts){  for(const[k,v]of"
-        + " Object.entries(p.scripts)){    if(typeof"
-        + " v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){     "
-        + " p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0')    }  }  const"
-        + " hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');"
-        + "  const"
-        + " runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));"
-        + "  if(hasServer && !runsBoth){    const serverCmd=p.scripts.server?'npm run"
-        + " server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node"
-        + " server/server.js':'node server.js'));    p.scripts['dev:all']='concurrently \\\"npm run"
-        + " dev\\\" \\\"'+serverCmd+'\\\"'; "
-        + " }}fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n"
-        + "EXPOSE 5173 3001\n"
-        + "CMD [\"sh\", \"-c\", \"node -e \\\"var"
-        + " s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\""
-        + " && npm run dev:all || npm run dev\"]\n";
+      + " p=JSON.parse(fs.readFileSync('package.json','utf8'));if(p.scripts){  for(const[k,v]of"
+      + " Object.entries(p.scripts)){    if(typeof"
+      + " v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){     "
+      + " p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0')    }  }  const"
+      + " hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');"
+      + "  const"
+      + " runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));"
+      + "  if(hasServer && !runsBoth){    const serverCmd=p.scripts.server?'npm run"
+      + " server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node"
+      + " server/server.js':'node server.js'));    p.scripts['dev:all']='concurrently \\\"npm run"
+      + " dev\\\" \\\"'+serverCmd+'\\\"'; "
+      + " }}fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n"
+      + "EXPOSE 5173 3001\n"
+      + "CMD [\"sh\", \"-c\", \"node -e \\\"var"
+      + " s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\""
+      + " && npm run dev:all || npm run dev\"]\n";
   }
 
   /**
-   * Single-package full-stack: React + Express in same package.json for Cloud Run. Vite hardcoded to
-   * 8080 (Cloud Run's exposed port). Backend gets PORT=3001 so Express reads 3001 and doesn't
+   * Single-package full-stack: React + Express in same package.json for Cloud Run. Vite hardcoded
+   * to 8080 (Cloud Run's exposed port). Backend gets PORT=3001 so Express reads 3001 and doesn't
    * compete with Vite for 8080.
    */
   static String cloudRun(Path workspace) {
