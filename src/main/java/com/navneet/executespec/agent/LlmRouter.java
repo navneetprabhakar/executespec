@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.observability.Metrics;
@@ -29,7 +30,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -97,6 +98,9 @@ public class LlmRouter {
   private final AnthropicForcedToolClient anthropicForcedToolClient;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  private final ManagedAiUsageService managedAiUsageService;
+
+  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
@@ -127,9 +131,6 @@ public class LlmRouter {
   // Auto-configured Spring AI bean for Anthropic (the one provider whose native
   // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
   // Spring AI 1.1.4 bugs and go through our own wrappers instead.
-  @Autowired(required = false)
-  @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
-
   // OpenRouter (Enterprise) — OpenAI-wire-compatible gateway, so it reuses OpenAiNativeToolClient
   // with a per-call base-URL + the verified slug map. Org BYOK keys flow through
   // RunKeyContext.keyFor("openrouter") like every other provider; this is the system fallback.
@@ -193,6 +194,29 @@ public class LlmRouter {
     // even when the run has BYOK configured for *another* provider.
     if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
 
+    ManagedAiUsageService.CallAuthorization authorization =
+        managedAiUsageService.authorizeCall(
+            request.context().runId(),
+            request.provider(),
+            request.model(),
+            request.agentRole(),
+            keys,
+            source);
+    if (authorization.modelChanged()) {
+      request =
+          request.toBuilder()
+              .provider(authorization.provider())
+              .model(authorization.model())
+              .build();
+      resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+      source = (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
+      broadcaster.emit(
+          request.context().runId(),
+          RunEvent.log(
+              request.context().runId(), request.context().taskId(), authorization.reason()));
+    }
+
     log.info(
         "LlmRouter -> {} {} keySource={} (tools={}, messages={})",
         request.provider(),
@@ -201,7 +225,7 @@ public class LlmRouter {
         tools.size(),
         request.messages().size());
     try {
-      return dispatchWithRetry(request, tools, resolvedKey, source);
+      return dispatchWithRetry(request, tools, resolvedKey, source, keys);
     } catch (RuntimeException primaryError) {
       ChatResponse failed = maybeFailover(request, tools, keys, source, primaryError);
       if (failed != null) return failed;
@@ -218,7 +242,8 @@ public class LlmRouter {
       LlmRequest request,
       List<ToolCallback> tools,
       String resolvedKey,
-      RunKeyContext.Source source) {
+      RunKeyContext.Source source,
+      RunKeyContext keys) {
     RuntimeException lastError = null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
       long start = System.currentTimeMillis();
@@ -241,6 +266,16 @@ public class LlmRouter {
             request.provider(),
             request.model(),
             callUsage);
+        managedAiUsageService.recordSuccessfulCall(
+            runId,
+            taskId,
+            request.agentRole(),
+            request.stepId(),
+            request.provider(),
+            request.model(),
+            callUsage,
+            keys,
+            source);
         RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
         broadcaster.emit(
             runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
@@ -360,8 +395,30 @@ public class LlmRouter {
               .model(altModel)
               .retryOf(attributionKey(request))
               .build();
+      ManagedAiUsageService.CallAuthorization authorization =
+          managedAiUsageService.authorizeCall(
+              altRequest.context().runId(),
+              altRequest.provider(),
+              altRequest.model(),
+              altRequest.agentRole(),
+              keys,
+              altSource);
+      if (authorization.modelChanged()) {
+        altRequest =
+            altRequest.toBuilder()
+                .provider(authorization.provider())
+                .model(authorization.model())
+                .build();
+        altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
+        altSource =
+            (altKey == null || keys == null)
+                ? RunKeyContext.Source.PLATFORM
+                : keys.sourceFor(altRequest.provider());
+        broadcaster.emit(
+            runId, RunEvent.log(runId, altRequest.context().taskId(), authorization.reason()));
+      }
       try {
-        return dispatchWithRetry(altRequest, tools, altKey, altSource);
+        return dispatchWithRetry(altRequest, tools, altKey, altSource, keys);
       } catch (RuntimeException altError) {
         log.warn(
             "LlmRouter failover target {} also failed: {}", altProvider, altError.getMessage());
@@ -449,7 +506,9 @@ public class LlmRouter {
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
     AnthropicChatModel model =
-        (apiKey != null && !apiKey.isBlank()) ? perKeyAnthropicModel(apiKey) : anthropicModel;
+        (apiKey != null && !apiKey.isBlank())
+            ? perKeyAnthropicModel(apiKey)
+            : anthropicModelProvider.getIfAvailable();
     if (model == null) throw new IllegalStateException("Anthropic model not configured");
     // RL-2026-05-059 — FORCED tool-choice salvage. Spring AI's AnthropicChatOptions can't set
     // tool_choice, so when the WorkerAgent Lever-B salvage requests it (toolChoice="required"),

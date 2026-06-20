@@ -36,6 +36,7 @@ type NavItem = {path: string; Icon: (p: IconProps) => React.ReactElement; label:
 const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 const NAV: NavItem[] = [
   {path: '/compose', Icon: PlusIcon, label: 'Start'},
+  {path: '/agent', Icon: CommandIcon, label: 'Agent'},
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
   {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
   {path: '/org-members', Icon: AccountIcon, label: 'Team'},
@@ -139,6 +140,7 @@ export default function ConsoleShell() {
         path.startsWith('/live') ||
         path.startsWith('/result')
       );
+    if (p === '/agent') return path.startsWith('/agent');
     if (p === '/org-members') return path.startsWith('/org-members');
     if (p === '/setup')
       return (
@@ -163,6 +165,7 @@ export default function ConsoleShell() {
   const commands: PaletteCmd[] = [
     {id: 'start', label: 'Go: Start', hint: 'Start', run: () => navigate('/compose')},
     {id: 'compose', label: 'Start work', hint: '＋', run: () => navigate('/compose')},
+    {id: 'agent', label: 'Open agent', hint: 'chat', run: () => navigate('/agent')},
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},

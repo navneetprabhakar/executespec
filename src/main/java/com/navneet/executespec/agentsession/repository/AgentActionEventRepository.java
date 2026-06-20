@@ -9,4 +9,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AgentActionEventRepository extends JpaRepository<AgentActionEvent, String> {
 
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
+
+  List<AgentActionEvent> findByTurnIdOrderByCreatedAtAsc(String turnId);
 }

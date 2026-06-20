@@ -1,10 +1,7 @@
-/* IDE-native port of the Signal SETTINGS cluster:
- *   - IdeApiKeys     ← signal/pages/account/MiscAccountPages.tsx ApiKeysPage    (/api-keys)
- *   - IdeOrgMembers  ← signal/pages/account/MiscAccountPages.tsx OrgMembersPage (/org-members)
- *   - IdeOrgSettings ← signal/pages/LegalPages.tsx OrgSettingsPage              (/org/settings)
+/* IDE-native settings cluster. The old Signal settings pages were retired; this
+ * file is the route owner for provider keys, org members, and org settings.
  *
- * Data/API/actions/validation mirror the Signal originals EXACTLY — only the
- * presentation is re-rendered in the IDE visual language. Keys are write-only
+ * Keys are write-only
  * (Connected / Not-set pills, blank input = leave unchanged); secrets are never
  * echoed back. Destructive confirms route through ConfirmModal (no window.confirm).
  */
@@ -16,19 +13,25 @@ import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/u
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal} from '@/signal/components/Modal';
-
-type UserKeyProvider = 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'DEEPSEEK' | 'FIREWORKS';
-
-// TIER-3 — per-provider key-format examples for the input placeholders (the
-// old copy showed "(sk-…)" for every provider, wrong for 3 of the 5).
-const KEY_PLACEHOLDER: Record<UserKeyProvider, string> = {
-  ANTHROPIC: 'sk-ant-…',
-  OPENAI: 'sk-…',
-  GEMINI: 'AIza…',
-  DEEPSEEK: 'sk-…',
-  FIREWORKS: 'fw_…',
-};
-type OrgKeyProvider = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks';
+import {
+  domainListFromEmail,
+  formatUsd,
+  isSamlConfigOnly,
+  KEY_PLACEHOLDER,
+  matrixModelLabel,
+  matrixProviderRows,
+  normalizedOrgTier,
+  orgDisplayName,
+  orgKeyRows as buildOrgKeyRows,
+  orgMemberDisplayName,
+  orgMemberId,
+  orgMemberInitials,
+  orgSeatCount,
+  orgSeatValue,
+  parseDomainList,
+  type OrgKeyProvider,
+  type UserKeyProvider,
+} from '@/ide/orgUtils';
 
 // Inline error / success banner — colours map to the IDE token set (mirrors
 // IdeProjectMore's Banner). Renders nothing when both are empty.
@@ -282,13 +285,8 @@ export function IdeOrgMembers() {
 
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
   const canInvite = user?.orgRole === 'ORG_ADMIN' || isSuperAdmin;
-  const orgTier = (org?.tier || tier || '').toUpperCase();
-  const seatCount = org?.seatCount ?? (org as unknown as {seats?: number})?.seats ?? 1;
-  const seatValue =
-    orgTier === 'ENTERPRISE'
-      ? `${members.length} active · contract-managed`
-      : `${members.length} / ${seatCount}`;
-  const orgAny = (org || {}) as unknown as {name?: string};
+  const orgTier = normalizedOrgTier(org, tier);
+  const seatValue = orgSeatValue(org as api.OrgDto & {seats?: number}, tier, members.length);
 
   async function invite() {
     const email = inviteEmail.trim();
@@ -367,8 +365,8 @@ export function IdeOrgMembers() {
     <div className='ide-pane' style={{maxWidth: 820}}>
       <div className='ide-h1'>Team access</div>
       <div className='ide-sub'>
-        Manage organization members, roles, and work-domain invites for{' '}
-        {orgAny.name || 'Personal org'} · {members.length} member
+        Manage organization members, roles, and work-domain invites for {orgDisplayName(org)} ·{' '}
+        {members.length} member
         {members.length === 1 ? '' : 's'} · {tier}
       </div>
 
@@ -473,17 +471,12 @@ export function IdeOrgMembers() {
               orgRole?: string;
               lastSeen?: string;
             };
-            const isMe = mAny.userId === user?.id;
-            const av = (
-              (mAny.firstName?.[0] ?? '') + (mAny.lastName?.[0] ?? '') ||
-              (mAny.email?.slice(0, 2) ?? 'EX')
-            ).toUpperCase();
-            const uid = mAny.userId || mAny.id || '';
+            const uid = orgMemberId(mAny);
+            const isMe = uid === user?.id;
+            const av = orgMemberInitials(mAny);
             const roleBusy = rowBusy === `role-${uid}`;
             const removeBusy = rowBusy === `remove-${uid}`;
-            const displayName =
-              ((mAny.firstName || mAny.email?.split('@')[0]) ?? '—') +
-              (mAny.lastName ? ` ${mAny.lastName}` : '');
+            const displayName = orgMemberDisplayName(mAny);
             return (
               <div
                 key={mAny.id || mAny.userId}
@@ -513,7 +506,7 @@ export function IdeOrgMembers() {
                 </div>
                 <div style={{minWidth: 0, flex: 1}}>
                   <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                    {(mAny.firstName || mAny.email?.split('@')[0]) ?? '—'} {mAny.lastName ?? ''}{' '}
+                    {displayName}{' '}
                     {isMe && (
                       <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}>· you</span>
                     )}
@@ -679,14 +672,6 @@ export function IdeOrgMembers() {
   );
 }
 
-function domainListFromEmail(email?: string | null): string[] {
-  const domain = email?.split('@')[1]?.trim().toLowerCase();
-  if (!domain || ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(domain)) {
-    return [];
-  }
-  return [domain];
-}
-
 function CreateOrgPanel({
   org,
   onCreated,
@@ -706,10 +691,7 @@ function CreateOrgPanel({
   const showCreateAction = canCreate || !org;
 
   async function submit() {
-    const parsedDomains = domains
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean);
+    const parsedDomains = parseDomainList(domains);
     if (!name.trim()) {
       setErr('Enter an organization name.');
       return;
@@ -862,6 +844,7 @@ export function IdeOrgSettings() {
   const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
   const [matrixOverrides, setMatrixOverrides] = useState<Record<string, string>>({});
   const [matrixBusy, setMatrixBusy] = useState(false);
+  const [managedAiPolicy, setManagedAiPolicy] = useState<api.ManagedAiPolicy | null>(null);
   // TIER-4 — matrix saves affect every run the org submits, so the Save button
   // routes through a ConfirmModal.
   const [confirmMatrixSave, setConfirmMatrixSave] = useState(false);
@@ -881,8 +864,9 @@ export function IdeOrgSettings() {
       api.getMyOrg(),
       api.getSsoConfig(),
       api.getOrgModelMatrix(),
+      api.getManagedAiPolicy().catch(() => null),
       api.getOrgMembers(),
-    ]).then(([o, s, m, mem]) => {
+    ]).then(([o, s, m, managed, mem]) => {
       if (o.status === 'fulfilled') {
         setOrg(o.value);
         setName(o.value.name || '');
@@ -900,6 +884,7 @@ export function IdeOrgSettings() {
         setMatrix(m.value);
         setMatrixOverrides(m.value.overrides || {});
       }
+      if (managed.status === 'fulfilled' && managed.value) setManagedAiPolicy(managed.value);
       if (mem.status === 'fulfilled') setMembers(mem.value);
       else setMembers([]);
       setOrgLoaded(true);
@@ -929,12 +914,7 @@ export function IdeOrgSettings() {
     try {
       await api.updateOrg({
         name: name.trim() || undefined,
-        domains: domains
-          ? domains
-              .split(',')
-              .map((d) => d.trim())
-              .filter(Boolean)
-          : undefined,
+        domains: domains ? parseDomainList(domains) : undefined,
       });
       setMsg('Org saved.');
     } catch (e: unknown) {
@@ -1073,30 +1053,11 @@ export function IdeOrgSettings() {
     );
   }
 
-  // OpenRouter is an Enterprise-only gateway — only offer it when the org
-  // qualifies (the backend rejects the key with 403 otherwise).
-  const isEnterprise = (org.tier || '').toUpperCase() === 'ENTERPRISE';
-  const orgKeyRows: {
-    provider: OrgKeyProvider;
-    label: string;
-    connected: boolean;
-  }[] = [
-    {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
-    {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
-    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
-    ...(isEnterprise
-      ? [
-          {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},
-          {provider: 'deepseek' as const, label: 'DeepSeek', connected: !!org.hasDeepSeekKey},
-          {provider: 'fireworks' as const, label: 'Fireworks', connected: !!org.hasFireworksKey},
-        ]
-      : []),
-  ];
-
-  const orgTier = (org.tier || '').toUpperCase();
+  const orgKeyRows = buildOrgKeyRows(org);
+  const orgTier = normalizedOrgTier(org);
   const isTeamTier = orgTier === 'TEAM';
-  const seatCount = org.seatCount ?? (org as unknown as {seats?: number}).seats ?? 1;
-  const ssoProviderConfigOnly = ssoProvider === 'OKTA_SAML' || ssoProvider === 'AZURE_AD_SAML';
+  const seatCount = orgSeatCount(org as api.OrgDto & {seats?: number});
+  const ssoProviderConfigOnly = isSamlConfigOnly(ssoProvider);
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
@@ -1214,7 +1175,7 @@ export function IdeOrgSettings() {
         <Field label='Provider'>
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             {(['GOOGLE_OIDC', 'OKTA_SAML', 'AZURE_AD_SAML'] as api.SsoProvider[]).map((p) => {
-              const samlConfigOnly = p === 'OKTA_SAML' || p === 'AZURE_AD_SAML';
+              const samlConfigOnly = isSamlConfigOnly(p);
               return (
                 <button
                   key={p}
@@ -1223,7 +1184,7 @@ export function IdeOrgSettings() {
                     canEdit
                       ? () => {
                           setSsoProvider(p);
-                          if (p === 'OKTA_SAML' || p === 'AZURE_AD_SAML') setSsoEnforced(false);
+                          if (isSamlConfigOnly(p)) setSsoEnforced(false);
                         }
                       : undefined
                   }
@@ -1379,6 +1340,71 @@ export function IdeOrgSettings() {
           </>
         )}
       </InfoCard>
+      <div className='ide-card' style={{marginBottom: 12}}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            marginBottom: 10,
+          }}
+        >
+          <div>
+            <div style={{fontSize: 13.5, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
+              Managed AI policy
+            </div>
+            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+              Effective server policy for this account. Enforcement is backend-side and can step
+              models up or down during execution.
+            </div>
+          </div>
+          {managedAiPolicy && (
+            <IdeBadge kind={managedAiPolicy.enabled ? 'ok' : 'warn'}>
+              {managedAiPolicy.enabled ? 'Enabled' : 'Disabled'}
+            </IdeBadge>
+          )}
+        </div>
+        {managedAiPolicy ? (
+          <>
+            <div className='ide-kv'>
+              <span>Tier</span>
+              <span>{managedAiPolicy.tier}</span>
+            </div>
+            <div className='ide-kv'>
+              <span>Included credits</span>
+              <span>{managedAiPolicy.includedCredits} ES AI credits</span>
+            </div>
+            <div className='ide-kv'>
+              <span>Raw COGS cap</span>
+              <span>{formatUsd(managedAiPolicy.hardStopAfterRawUsd)}</span>
+            </div>
+            <div className='ide-kv'>
+              <span>Frontier cap</span>
+              <span>{formatUsd(managedAiPolicy.frontierRawCapUsd)}</span>
+            </div>
+            <div className='ide-kv'>
+              <span>Step-down thresholds</span>
+              <span>
+                value {formatUsd(managedAiPolicy.valueModeAfterRawUsd)} · cheap-only{' '}
+                {formatUsd(managedAiPolicy.cheapOnlyAfterRawUsd)}
+              </span>
+            </div>
+            <div className='ide-kv' style={{borderBottom: 'none'}}>
+              <span>Concurrency / rate limits</span>
+              <span>
+                {managedAiPolicy.concurrencyEnforced ? 'concurrency on' : 'concurrency off'} ·{' '}
+                {managedAiPolicy.rateLimitsEnabled ? 'rate limits on' : 'rate limits off'}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>
+            Managed-AI policy is unavailable on this server profile.
+          </div>
+        )}
+      </div>
       {matrix &&
         matrix.tiers.map((t) => (
           <div className='ide-card' key={t} style={{marginBottom: 10}}>
@@ -1393,57 +1419,50 @@ export function IdeOrgSettings() {
             >
               {t}
             </div>
-            {matrix.providers
-              .filter((p) => matrix.defaults[`${p}:${t}`])
-              .map((p) => {
-                const key = `${p}:${t}`;
-                const def = matrix.defaults[key];
-                const val = matrixOverrides[key] ?? '';
-                return (
-                  <div
-                    key={key}
-                    style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
-                  >
-                    <div
-                      style={{
-                        width: 92,
-                        flexShrink: 0,
-                        fontSize: 12.5,
-                        color: 'var(--ide-fg-muted)',
-                        textTransform: 'capitalize',
-                      }}
-                    >
-                      {p}
-                    </div>
-                    <select
-                      className='ide-select'
-                      value={val}
-                      disabled={!canEdit || !matrix.editable}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMatrixOverrides((prev) => {
-                          const nextO = {...prev};
-                          if (!v) delete nextO[key];
-                          else nextO[key] = v;
-                          return nextO;
-                        });
-                      }}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        cursor: !canEdit || !matrix.editable ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      <option value=''>Default · {def}</option>
-                      {(matrix.modelsByProvider[p] ?? []).map((mdl) => (
-                        <option key={mdl} value={mdl}>
-                          {matrix.modelLabels?.[mdl] || mdl}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
+            {matrixProviderRows(matrix, t, matrixOverrides).map((row) => (
+              <div
+                key={row.key}
+                style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
+              >
+                <div
+                  style={{
+                    width: 92,
+                    flexShrink: 0,
+                    fontSize: 12.5,
+                    color: 'var(--ide-fg-muted)',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {row.provider}
+                </div>
+                <select
+                  className='ide-select'
+                  value={row.selectedOverride}
+                  disabled={!canEdit || !matrix.editable}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMatrixOverrides((prev) => {
+                      const nextO = {...prev};
+                      if (!v) delete nextO[row.key];
+                      else nextO[row.key] = v;
+                      return nextO;
+                    });
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    cursor: !canEdit || !matrix.editable ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <option value=''>Default · {row.defaultModel}</option>
+                  {row.models.map((mdl) => (
+                    <option key={mdl} value={mdl}>
+                      {matrixModelLabel(matrix, mdl)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
           </div>
         ))}
       {matrix && matrix.editable && canEdit && (
@@ -1559,7 +1578,7 @@ export function IdeOrgSettings() {
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {members.map((m, i) => {
-            const mName = [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || m.email;
+            const mName = orgMemberDisplayName(m);
             const isSelf = m.userId === user?.id;
             return (
               <div

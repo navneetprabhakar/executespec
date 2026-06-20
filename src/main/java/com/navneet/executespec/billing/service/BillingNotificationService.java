@@ -84,6 +84,23 @@ public class BillingNotificationService {
   }
 
   @Async
+  public void sendManagedAiRoutingStateChanged(String email, String routingState, String body) {
+    send(
+        email,
+        "ExecuteSpec — Managed AI routing update",
+        """
+        %s
+
+        Current routing state: %s
+
+        View your usage: %s/billing
+
+        — ExecuteSpec
+        """
+            .formatted(body, routingState, dashboardUrl));
+  }
+
+  @Async
   public void sendCancellationConfirmed(String email, String planName, String periodEnd) {
     send(
         email,

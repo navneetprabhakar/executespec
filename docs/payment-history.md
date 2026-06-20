@@ -30,7 +30,7 @@ Gateway webhooks must verify signatures before mutating subscription state:
 - Razorpay verifies HMAC in the Razorpay gateway path.
 - Billing services write audit rows for state changes and payment events.
 
-The review batch added/verified tests around webhook ordering and payment state, but live gateway sandbox proof is still a pending task in `docs/pending.md`.
+The review batch added/verified tests around webhook ordering and payment state, but live gateway sandbox proof remains an open release task.
 
 ## Operational Reconciliation
 

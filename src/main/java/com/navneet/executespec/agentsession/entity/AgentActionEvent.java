@@ -32,6 +32,9 @@ public class AgentActionEvent {
   @Column(name = "turn_id")
   private String turnId;
 
+  @Column(name = "action_id")
+  private String actionId;
+
   @Column(nullable = false, length = 48)
   private String type;
 

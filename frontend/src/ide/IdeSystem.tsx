@@ -5,13 +5,39 @@ import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/u
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor} from '@/signal/lib/runUtils';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
+import {
+  activeProjects,
+  auditAccessErrorMessage,
+  auditAction,
+  auditActor,
+  auditCsvText,
+  auditTarget,
+  auditTimestamp,
+  buildSearchHits,
+  filterAuditLogs,
+  filterNotifications,
+  isNotificationUnread,
+  markAllNotificationsReadLocal,
+  markNotificationReadLocal,
+  notificationDotColor,
+  notificationTarget,
+  SEARCH_QUICK_ACTIONS,
+  setupAccountRows,
+  setupEssentialRows,
+  setupOperationRows,
+  setupWorkspaceRows,
+  unreadNotificationCount,
+  type AuditFilter,
+  type MoreRow,
+  type NotifFilter,
+  type SearchHit,
+} from './systemUtils';
 
-// IDE-native versions of the remaining Signal "system" surfaces (notifications,
-// search, audit, empty-project, more menu). These mirror the data/API/actions of
-// the Signal originals (signal/pages/MiscPages.tsx + ExtraPages.tsx) re-rendered
-// in the VS Code-style IDE visual language. Conventions cribbed from
-// IdeMore.tsx + IdeProjectMore.tsx (.ide-pane / .ide-h1 / .ide-sub / .ide-card /
-// .ide-h2 / .ide-empty / .ide-rtabs / .ide-btn + IdeKit IdeLoader/IdeBadge).
+// IDE-native system surfaces (notifications, search, audit, empty-project, more
+// menu). The old Signal exports were retired; this file owns the route behavior.
+// Conventions follow IdeMore.tsx + IdeProjectMore.tsx (.ide-pane / .ide-h1 /
+// .ide-sub / .ide-card / .ide-h2 / .ide-empty / .ide-rtabs / .ide-btn + IdeKit
+// IdeLoader/IdeBadge).
 
 // Shared row-link style used by the notification + audit + search lists. Matches
 // the IdeRuns list-row treatment (flex row, 11px/16px padding, bottom border).
@@ -46,8 +72,6 @@ function ErrCard({msg, onRetry}: {msg: string; onRetry?: () => void}) {
   );
 }
 
-type NotifFilter = 'all' | 'run' | 'team' | 'billing' | 'system';
-
 export default function IdeNotifications() {
   const navigate = useNavigate();
   const [items, setItems] = useState<api.NotificationItem[] | null>(null);
@@ -70,39 +94,14 @@ export default function IdeNotifications() {
     void refresh();
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!items) return [];
-    if (filter === 'all') return items;
-    return items.filter((n) => {
-      const t = (
-        (n as unknown as {category?: string; type?: string}).category ||
-        (n as unknown as {type?: string}).type ||
-        ''
-      ).toLowerCase();
-      if (filter === 'run') return t.includes('run') || t.includes('plan');
-      if (filter === 'team') return t.includes('member') || t.includes('invite');
-      if (filter === 'billing')
-        return t.includes('billing') || t.includes('quota') || t.includes('cap');
-      if (filter === 'system')
-        return t.includes('system') || t.includes('flag') || t.includes('release');
-      return true;
-    });
-  }, [items, filter]);
+  const filtered = useMemo(() => filterNotifications(items, filter), [items, filter]);
 
-  const unreadCount = (items || []).filter(
-    (n) =>
-      !(n as unknown as {read?: boolean; readAt?: string}).read &&
-      !(n as unknown as {readAt?: string}).readAt,
-  ).length;
+  const unreadCount = unreadNotificationCount(items);
 
   async function readOne(id: string) {
     try {
       await api.markNotificationRead(id);
-      setItems(
-        (prev) =>
-          prev?.map((n) => ((n as unknown as {id?: string}).id === id ? {...n, read: true} : n)) ||
-          prev,
-      );
+      setItems((prev) => markNotificationReadLocal(prev, id));
     } catch {
       /* ignore */
     }
@@ -112,7 +111,7 @@ export default function IdeNotifications() {
     setMarkBusy(true);
     try {
       await api.markAllNotificationsRead();
-      setItems((prev) => prev?.map((n) => ({...n, read: true})) || prev);
+      setItems((prev) => markAllNotificationsReadLocal(prev));
     } catch {
       /* ignore */
     } finally {
@@ -180,27 +179,9 @@ export default function IdeNotifications() {
               createdAt?: string;
               severity?: string;
             };
-            const unread = !nAny.read && !nAny.readAt;
-            const dot =
-              nAny.severity === 'error'
-                ? 'var(--ide-red)'
-                : nAny.severity === 'warn'
-                  ? 'var(--ide-yellow)'
-                  : 'var(--ide-green)';
-            // Deep-link target: prefer the backend-provided `link`, else route by
-            // event type. Falls through to Start so clicks never dead-end.
-            const t = (nAny.type || nAny.category || '').toUpperCase();
-            const linkTarget = nAny.link
-              ? nAny.link
-              : t.includes('PLAN_READY') || t.includes('RUN')
-                ? '/runs'
-                : t.includes('PR')
-                  ? '/runs'
-                  : t.includes('BILLING') || t.includes('QUOTA') || t.includes('CAP')
-                    ? '/billing'
-                    : t.includes('MEMBER') || t.includes('INVITE')
-                      ? '/org-members'
-                      : '/compose';
+            const unread = isNotificationUnread(n);
+            const dot = notificationDotColor(n);
+            const linkTarget = notificationTarget(n);
             const ts = nAny.createdAt ? new Date(nAny.createdAt).toLocaleString() : '';
             return (
               <div
@@ -270,22 +251,6 @@ export default function IdeNotifications() {
   );
 }
 
-interface SearchHit {
-  id: string;
-  kind: 'run' | 'project';
-  title: string;
-  subtitle: string;
-  to: string;
-}
-
-const LIVE_SEARCH_STATUSES = new Set([
-  'CLASSIFYING',
-  'PLANNING',
-  'EXECUTING',
-  'AWAITING_APPROVAL',
-  'RUNNING',
-]);
-
 export function IdeSearch() {
   const [q, setQ] = useState('');
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
@@ -313,39 +278,7 @@ export function IdeSearch() {
     };
   }, []);
 
-  const hits: SearchHit[] = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return [];
-    const out: SearchHit[] = [];
-    for (const r of runs) {
-      const txt =
-        `${(r as unknown as {userRequest?: string}).userRequest ?? ''} ${r.runId}`.toLowerCase();
-      if (txt.includes(needle)) {
-        const s = (r.status || '').toUpperCase();
-        const isLive = LIVE_SEARCH_STATUSES.has(s);
-        out.push({
-          id: r.runId,
-          kind: 'run',
-          title: runTitleFor(r),
-          subtitle: `R-${r.runId.slice(0, 6)} · ${s.toLowerCase()}`,
-          to: isLive ? `/live/${r.runId}` : `/result/${r.runId}`,
-        });
-      }
-    }
-    for (const p of projects) {
-      const txt = `${p.name} ${p.id}`.toLowerCase();
-      if (txt.includes(needle)) {
-        out.push({
-          id: p.id,
-          kind: 'project',
-          title: p.name,
-          subtitle: `${(p as unknown as {repoCount?: number}).repoCount ?? 0} repos · ${(p as unknown as {totalRuns?: number}).totalRuns ?? 0} work items`,
-          to: `/projects/${p.id}`,
-        });
-      }
-    }
-    return out.slice(0, 30);
-  }, [q, runs, projects]);
+  const hits: SearchHit[] = useMemo(() => buildSearchHits(q, runs, projects), [q, runs, projects]);
 
   const recent = runs.slice(0, 5);
 
@@ -417,11 +350,7 @@ export function IdeSearch() {
             Quick actions
           </div>
           <div className='ide-card' style={{padding: 0}}>
-            {[
-              {to: '/compose', label: 'Start work', sub: 'Draft a request'},
-              {to: '/projects', label: 'Browse projects', sub: 'All your active projects'},
-              {to: '/runs', label: 'Work', sub: 'Filter and browse'},
-            ].map((row, i, arr) => (
+            {SEARCH_QUICK_ACTIONS.map((row, i, arr) => (
               <Link key={row.to} to={row.to} style={rowStyle(i >= arr.length - 1)}>
                 <span style={{flex: 1, minWidth: 0}}>
                   <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
@@ -509,8 +438,6 @@ export function IdeSearch() {
   );
 }
 
-type AuditFilter = 'all' | 'auth' | 'billing' | 'members' | 'admin';
-
 export function IdeAudit() {
   const tier = useAuthStore(selectNormalizedTier);
   const user = useAuthStore((s) => s.user);
@@ -534,21 +461,7 @@ export function IdeAudit() {
         //   - TEAM+ but not ORG_ADMIN → "ask your org admin"
         //   - TEAM+ ORG_ADMIN → org-level flag isn't on yet; point to Org Settings
         const msg = e instanceof Error ? e.message : 'Failed to load audit log.';
-        if (/403|permission|forbidden/i.test(msg)) {
-          if (tier === 'FREE' || tier === 'PRO') {
-            setErr('Audit log is a TEAM+ feature. Upgrade your plan to enable it.');
-          } else if (!isOrgAdmin) {
-            setErr(
-              'Audit log is restricted to org admins. Ask your org admin to grant you access.',
-            );
-          } else {
-            setErr(
-              "Audit log isn't enabled for your org yet. Open Org Settings → Compliance to turn it on, or contact support if the toggle isn't visible.",
-            );
-          }
-        } else {
-          setErr(msg);
-        }
+        setErr(auditAccessErrorMessage(msg, tier, isOrgAdmin));
         setLogs([]); // exit the null/loading state so the empty UI renders
       });
     return () => {
@@ -556,46 +469,10 @@ export function IdeAudit() {
     };
   }, [tier, isOrgAdmin]);
 
-  const filtered = (logs || []).filter((l) => {
-    if (filter === 'all') return true;
-    const t = (
-      (l as unknown as {action?: string; eventType?: string}).action ||
-      (l as unknown as {eventType?: string}).eventType ||
-      ''
-    ).toLowerCase();
-    if (filter === 'auth')
-      return (
-        t.includes('login') || t.includes('oauth') || t.includes('logout') || t.includes('password')
-      );
-    if (filter === 'billing')
-      return (
-        t.includes('billing') ||
-        t.includes('subscription') ||
-        t.includes('payment') ||
-        t.includes('invoice')
-      );
-    if (filter === 'members')
-      return t.includes('member') || t.includes('invite') || t.includes('seat');
-    if (filter === 'admin') return t.includes('admin') || t.includes('tier') || t.includes('flag');
-    return true;
-  });
+  const filtered = filterAuditLogs(logs, filter);
 
   function exportCsv() {
-    const rows = ['action,actor,target,createdAt'];
-    for (const l of filtered) {
-      const lAny = l as unknown as {
-        action?: string;
-        eventType?: string;
-        actorEmail?: string;
-        targetId?: string;
-        createdAt?: string;
-        occurredAt?: string;
-      };
-      rows.push(
-        `${lAny.action || lAny.eventType || ''},${lAny.actorEmail || ''},${lAny.targetId || ''},${lAny.createdAt || lAny.occurredAt || ''}`,
-      );
-    }
-    const blob = new Blob([rows.join('\n')], {type: 'text/csv'});
+    const blob = new Blob([auditCsvText(filtered)], {type: 'text/csv'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -649,19 +526,11 @@ export function IdeAudit() {
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {filtered.map((l, i) => {
-            const lAny = l as unknown as {
-              id?: string;
-              action?: string;
-              eventType?: string;
-              actorEmail?: string;
-              actorUserId?: string;
-              targetId?: string;
-              createdAt?: string;
-              occurredAt?: string;
-            };
-            const action = lAny.action || lAny.eventType || 'event';
-            const ts = lAny.createdAt || lAny.occurredAt;
-            const actor = lAny.actorEmail || lAny.actorUserId;
+            const lAny = l as unknown as {id?: string};
+            const action = auditAction(l);
+            const ts = auditTimestamp(l);
+            const actor = auditActor(l);
+            const target = auditTarget(l);
             return (
               <div key={lAny.id || `${i}-${ts}`} style={rowStyle(i >= filtered.length - 1)}>
                 <span style={{flex: 1, minWidth: 0}}>
@@ -679,8 +548,8 @@ export function IdeAudit() {
                   </span>
                   <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                     {actor && <span className='ide-mono'>{actor}</span>}
-                    {actor && lAny.targetId ? ' · ' : ''}
-                    {lAny.targetId}
+                    {actor && target ? ' · ' : ''}
+                    {target}
                   </span>
                 </span>
                 <span
@@ -752,10 +621,6 @@ export function IdeEmptyProject() {
   );
 }
 
-// Named IdeMoreMenu to avoid clashing with IdeMore (the account-surface file).
-// User-facing route is now /setup; /more redirects here for old links.
-type MoreRow = {to: string; label: string; sub: string};
-
 function MoreSection({title, rows}: {title: string; rows: MoreRow[]}) {
   return (
     <>
@@ -796,7 +661,7 @@ export function IdeMoreMenu() {
     ]).then(([u, p, r]) => {
       if (cancelled) return;
       if (u.status === 'fulfilled') setUnread(u.value.count);
-      if (p.status === 'fulfilled') setProjects(p.value.filter((x) => !x.archivedAt));
+      if (p.status === 'fulfilled') setProjects(activeProjects(p.value));
       if (r.status === 'fulfilled')
         setRunCount(
           (r.value as unknown as {totalElements?: number}).totalElements ?? r.value.content.length,
@@ -815,44 +680,9 @@ export function IdeMoreMenu() {
         billing.
       </div>
 
-      <MoreSection
-        title='Essentials'
-        rows={[
-          {
-            to: '/org-members',
-            label: 'Invite teammates',
-            sub: 'Add people and assign roles',
-          },
-          {
-            to: '/integrations',
-            label: 'Connect repositories',
-            sub: 'GitHub, Bitbucket, and issue trackers',
-          },
-          {to: '/provider-keys', label: 'Model provider', sub: 'Default provider and BYOK keys'},
-          {to: '/billing', label: 'Billing', sub: `${tier} tier`},
-        ]}
-      />
+      <MoreSection title='Essentials' rows={setupEssentialRows(tier)} />
 
-      <MoreSection
-        title='Workspace'
-        rows={[
-          {
-            to: '/projects',
-            label: 'Projects',
-            sub: `${projects.length} active project${projects.length === 1 ? '' : 's'}`,
-          },
-          {
-            to: '/runs',
-            label: 'Work',
-            sub: runCount != null ? `${runCount} items` : 'Loading…',
-          },
-          {
-            to: '/notifications',
-            label: 'Notifications',
-            sub: unread != null ? `${unread} unread` : '—',
-          },
-        ]}
-      />
+      <MoreSection title='Workspace' rows={setupWorkspaceRows(projects, runCount, unread)} />
 
       <div className='ide-setup-advanced'>
         <button
@@ -865,30 +695,8 @@ export function IdeMoreMenu() {
         </button>
         {advancedOpen && (
           <>
-            <MoreSection
-              title='Account'
-              rows={[
-                {to: '/account', label: 'Account', sub: user?.email || '—'},
-                {to: '/plans', label: 'Plans and pricing', sub: 'Compare tiers'},
-                {
-                  to: '/org/settings',
-                  label: 'Org settings',
-                  sub: 'Domains, seats, SSO, model matrix',
-                },
-              ]}
-            />
-            <MoreSection
-              title='Operations'
-              rows={[
-                {to: '/search', label: 'Search', sub: 'Work, projects, files'},
-                {to: '/insights', label: 'Insights', sub: 'Usage and outcomes'},
-                ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
-                  ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
-                  : []),
-                {to: '/deployments', label: 'Deployments', sub: 'Cloud Run / Docker'},
-                {to: '/trust', label: 'Trust and security', sub: 'Compliance, SOC2'},
-              ]}
-            />
+            <MoreSection title='Account' rows={setupAccountRows(user?.email)} />
+            <MoreSection title='Operations' rows={setupOperationRows(tier, isSuperAdmin)} />
           </>
         )}
       </div>

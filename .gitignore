@@ -40,6 +40,13 @@ test-workspace-e2e/
 
 scripts/*.md
 scripts/*.json
+scripts/agent-control-plane-smoke-results/
+scripts/managed-ai-email-smoke-results/
+scripts/model-sample-results/
+scripts/orchestrator-routing-eval-results/
+scripts/tier-eval-v2-results/
+scripts/v2-eval-results/
+scripts/web-agent-browser-smoke-results/
 
 # Frontend build outputs (rebuilt by npm run build)
 frontend/dist/

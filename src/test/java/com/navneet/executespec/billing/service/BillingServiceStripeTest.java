@@ -40,8 +40,6 @@ import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.repository.BillingWebhookEventRepository;
 import com.navneet.executespec.billing.repository.RunTopupRepository;
 import com.navneet.executespec.billing.security.WebhookSignatureVerifier;
-import com.navneet.executespec.execution.repository.ExecutionRunRepository;
-import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
 
@@ -62,13 +60,13 @@ class BillingServiceStripeTest {
   private final WebhookSignatureVerifier signatureVerifier = mock(WebhookSignatureVerifier.class);
   private final RunTopupRepository runTopupRepo = mock(RunTopupRepository.class);
   private final InvoiceService invoiceService = mock(InvoiceService.class);
+  private final TierConfigRepository tierConfigRepository = mock(TierConfigRepository.class);
   private final BillingService service =
       new BillingService(
           razorpayGateway,
           planRepo,
           mock(BillingPlanLimitRepository.class),
           subRepo,
-          webhookRepo,
           usageService,
           signatureVerifier,
           new ObjectMapper(),
@@ -79,13 +77,18 @@ class BillingServiceStripeTest {
           invoiceService,
           mock(InvoiceEmailService.class),
           mock(MailService.class),
-          mock(PipelineRunRepository.class),
-          mock(ExecutionRunRepository.class),
           gatewayRouter,
           billingEntityResolver,
           paymentAuditService,
           mock(TierEnforcementService.class),
-          mock(TierConfigRepository.class));
+          new BillingSubscriptionPolicy(tierConfigRepository),
+          mock(BillingSpendService.class),
+          mock(BillingStatusUsageService.class),
+          new BillingPeriodService(),
+          new BillingTierBridgeService(
+              userRepo, mock(OrgRepository.class), planRepo, subRepo, notificationService),
+          new BillingSubscriptionWriter(subRepo),
+          new BillingWebhookEventRecorder(webhookRepo));
 
   @Test
   void stripeCheckoutCompletedRewritesCheckoutSessionIdToSubscriptionId() {

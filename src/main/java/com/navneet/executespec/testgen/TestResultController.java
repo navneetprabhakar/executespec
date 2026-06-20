@@ -21,8 +21,7 @@ import com.navneet.executespec.testgen.model.TestResultStatus;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestResultRepository;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -47,8 +46,11 @@ public class TestResultController {
 
   private final TestPreviewCoordinator testPreviewCoordinator;
 
-  /** Lazy to break circular dependency: PreviewService → TestPreviewCoordinator → PreviewService */
-  @Lazy @Autowired private PreviewService previewService;
+  /**
+   * Provider breaks the circular dependency: PreviewService → TestPreviewCoordinator →
+   * TestResultController → PreviewService.
+   */
+  private final ObjectProvider<PreviewService> previewServiceProvider;
 
   /** Get full test report for a run. */
   @GetMapping("/runs/{runId}/test-report")
@@ -186,7 +188,7 @@ public class TestResultController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
     // Check preview is running
-    var preview = previewService.getStatus(runId);
+    var preview = previewServiceProvider.getObject().getStatus(runId);
     if (preview == null || preview.status() != PreviewStatus.RUNNING) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Preview is not running — start the preview first");

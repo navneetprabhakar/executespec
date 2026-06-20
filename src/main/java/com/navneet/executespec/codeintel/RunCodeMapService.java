@@ -16,7 +16,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +48,7 @@ public class RunCodeMapService {
   private final ProjectCodeMapRepository projectCodeMapRepo;
   private final ProjectRepoRepository projectRepoRepo;
 
-  @Autowired(required = false)
-  @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
+  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   public boolean isEligible(String userTier) {
     return userTier != null && ELIGIBLE_TIERS.contains(userTier.toUpperCase());
@@ -111,9 +110,10 @@ public class RunCodeMapService {
 
     String summary = null;
     int inputTokens = 0, outputTokens = 0;
+    AnthropicChatModel anthropicModel = anthropicModelProvider.getIfAvailable();
     if (anthropicModel != null) {
       try {
-        String[] llm = summarise(repoFullName, raw.markdown());
+        String[] llm = summarise(anthropicModel, repoFullName, raw.markdown());
         summary = llm[0];
         inputTokens = Integer.parseInt(llm[1]);
         outputTokens = Integer.parseInt(llm[2]);
@@ -216,7 +216,8 @@ public class RunCodeMapService {
    * the cleanest path; left as a follow-up because it changes failure semantics for code-map
    * summarisation across all eligible tiers.
    */
-  private String[] summarise(String repoFullName, String rawMarkdown) {
+  private String[] summarise(
+      AnthropicChatModel anthropicModel, String repoFullName, String rawMarkdown) {
     String system =
         """
         You are a senior engineer summarising a code map for use as planner context.

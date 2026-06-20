@@ -3,6 +3,7 @@ package com.navneet.executespec.run;
 import java.time.Duration;
 import java.util.Optional;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -38,9 +39,16 @@ public class RunIdempotencyService {
   private static final Duration TTL = Duration.ofHours(24);
   private static final String KEY_PREFIX = "run:idem:";
 
-  // Optional so missing Redis config (e.g. unit tests) doesn't crash startup or block submits.
-  @Autowired(required = false)
-  private StringRedisTemplate redis;
+  private final StringRedisTemplate redis;
+
+  @Autowired
+  public RunIdempotencyService(ObjectProvider<StringRedisTemplate> redisProvider) {
+    this(redisProvider.getIfAvailable());
+  }
+
+  RunIdempotencyService(StringRedisTemplate redis) {
+    this.redis = redis;
+  }
 
   /** The runId previously created for this {@code (user, key)}, if any (and Redis is up). */
   public Optional<String> lookup(String userId, String idempotencyKey) {

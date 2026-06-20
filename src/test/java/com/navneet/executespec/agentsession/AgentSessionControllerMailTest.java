@@ -12,8 +12,6 @@ import com.navneet.executespec.agentsession.AgentSessionController.SessionSummar
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.MailService;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
-import com.navneet.executespec.specchat.SpecChatService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -27,9 +25,7 @@ class AgentSessionControllerMailTest {
         new AgentSessionController(
             mock(AgentSessionService.class),
             mock(AgentActionCatalog.class),
-            mock(SpecChatService.class),
-            mock(FeatureFlagService.class),
-            mailService);
+            mock(AgentStreamTurnRunner.class));
 
     var response =
         controller.sessionSummaryEmail(

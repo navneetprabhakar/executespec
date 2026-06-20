@@ -14,7 +14,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Pins the fail-open + user/key-scoping contract of {@link RunIdempotencyService} (RL-2026-06-005).
@@ -27,7 +26,7 @@ class RunIdempotencyServiceTest {
 
   @Test
   void failsOpenWhenRedisAbsent() {
-    RunIdempotencyService svc = new RunIdempotencyService(); // redis field stays null
+    RunIdempotencyService svc = new RunIdempotencyService((StringRedisTemplate) null);
     assertThat(svc.lookup("u1", "k1")).isEmpty();
     assertThatCode(() -> svc.record("u1", "k1", "run-1")).doesNotThrowAnyException();
   }
@@ -74,8 +73,6 @@ class RunIdempotencyServiceTest {
   }
 
   private RunIdempotencyService withRedis() {
-    RunIdempotencyService svc = new RunIdempotencyService();
-    ReflectionTestUtils.setField(svc, "redis", redis);
-    return svc;
+    return new RunIdempotencyService(redis);
   }
 }

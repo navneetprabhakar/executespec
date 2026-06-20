@@ -20,8 +20,8 @@ import {
   IdeProjectSetup,
   IdeProjectMembers,
   IdeProjectActivity,
-  IdeProjectSettings,
 } from '@/ide/IdeProjectMore';
+import {IdeProjectSettings} from '@/ide/IdeProjectSettings';
 import IdePlan from '@/ide/IdePlan';
 import {IdeRuns, IdeAccount, IdeDeployments} from '@/ide/IdeMore';
 import IdeNotifications, {IdeSearch, IdeAudit, IdeEmptyProject, IdeMoreMenu} from '@/ide/IdeSystem';
@@ -46,6 +46,7 @@ const IdeOrgSettings = lazy(() =>
 const IdeBilling = lazy(() => import('@/ide/IdeBilling').then((m) => ({default: m.IdeBilling})));
 const IdePlans = lazy(() => import('@/ide/IdeBilling').then((m) => ({default: m.IdePlans})));
 const IdeBenchmark = lazy(() => import('@/ide/IdeBenchmark'));
+const IdeAgent = lazy(() => import('@/ide/IdeAgent'));
 
 // Auth + onboarding
 import {LoginPage, SignupPage, VerifyPage, WelcomePage} from '@/signal/pages/AuthPages';
@@ -53,14 +54,13 @@ import AuthCallbackPage from '@/signal/pages/AuthCallbackPage';
 import CliLoginPage from '@/signal/pages/CliLoginPage';
 
 // Admin sub-routes + public share pages are the only Signal pages that survive
-// inside the router (no IDE-native surface by design); AdminPage also backs the
-// /admin/* deep links. Lazy: AdminPage is operator-only and ExtraPages is a
-// 2,700-line god-file — neither belongs in the entry chunk.
+// inside the router (no IDE-native surface by design). Keep them in separate
+// lazy modules so public share links do not pull in the operator admin console.
 const AdminPage = lazy(() =>
   import('@/signal/pages/MiscPages').then((m) => ({default: m.AdminPage})),
 );
 const SharedPage = lazy(() =>
-  import('@/signal/pages/MiscPages').then((m) => ({default: m.SharedPage})),
+  import('@/signal/pages/SharedPages').then((m) => ({default: m.SharedPage})),
 );
 
 // Standalone public pages (auth / marketing / legal) — no IDE chrome.
@@ -71,10 +71,10 @@ const PublicPricingPage = lazy(() =>
   import('@/signal/pages/ExtraPages').then((m) => ({default: m.PublicPricingPage})),
 );
 const ForgotPasswordPage = lazy(() =>
-  import('@/signal/pages/ExtraPages').then((m) => ({default: m.ForgotPasswordPage})),
+  import('@/signal/pages/AuthRecoveryPages').then((m) => ({default: m.ForgotPasswordPage})),
 );
 const ResetPasswordPage = lazy(() =>
-  import('@/signal/pages/ExtraPages').then((m) => ({default: m.ResetPasswordPage})),
+  import('@/signal/pages/AuthRecoveryPages').then((m) => ({default: m.ResetPasswordPage})),
 );
 const AcceptInvitePage = lazy(() =>
   import('@/signal/pages/ExtraPages').then((m) => ({default: m.AcceptInvitePage})),
@@ -138,6 +138,9 @@ function protectedChildren() {
       <Route path='/home' element={<ConsoleHome />} />
       <Route path='/decisions' element={<ConsoleDecisions />} />
       <Route path='/runs' element={<IdeRuns />} />
+      <Route path='/agent' element={<IdeAgent />} />
+      <Route path='/projects/:projectId/agent' element={<IdeAgent />} />
+      <Route path='/runs/:runId/agent' element={<IdeAgent />} />
       <Route path='/compose' element={<IdeCompose />} />
       <Route path='/plan' element={<IdePlan />} />
       <Route path='/plan/:runId' element={<IdePlan />} />

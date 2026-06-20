@@ -3,7 +3,7 @@
 **Branch:** `feature/pricing-v2-launch`  
 **Worktree:** `.claude/worktrees/pricing-v2-launch`  
 **Final commit:** `962aaa9d`  
-**Status:** Complete + verified. **NOT pushed.** Awaiting founder approval to push + PR.
+**Status:** Historical handoff from another worktree. The branch/session claimed complete + verified and not pushed; verify current branch state before using it as launch truth.
 
 ---
 
@@ -16,15 +16,15 @@ A single continuous session that moved through four distinct phases:
 3. **Decision-making + delegation** — Founder converges on the locked sheet via mid-session calls.
 4. **Full implementation** — V239–V241 migrations, coupon wiring, all public surfaces updated.
 
-The session docs are all in `docs/` and `docs/reports/`:
+The session referenced docs in `docs/` and `docs/reports/`, but several generated artifacts are not present in this worktree. Treat this as a historical handoff, not a live artifact index.
 
 | Document | What it is |
 |---|---|
-| [`docs/business-feasibility-2026-06-11.md`](business-feasibility-2026-06-11.md) | Full feasibility assessment (+ PDF/HTML in `docs/reports/`) |
-| [`docs/pricing-strategy-2026-06-11.md`](pricing-strategy-2026-06-11.md) | Canonical v2 pricing record: principles, ladder, projections, D1–D12 decisions, M1–M9 mistake register |
-| `docs/reports/investor-slide-2026-06-11.{pdf,png}` | Single-page investor slide (house format, JetBrains Mono) |
-| `docs/reports/pricing-strategy-2026-06-11.pdf` | Full strategy doc as styled PDF |
-| `docs/reports/business-feasibility-2026-06-11.pdf` | Feasibility as styled PDF |
+| `docs/business-feasibility-2026-06-11.md` | Referenced by the handoff, not present in this worktree. |
+| `docs/pricing-strategy-2026-06-11.md` | Referenced by the handoff, not present in this worktree. |
+| `docs/reports/investor-slide-2026-06-11.{pdf,png}` | Referenced by the handoff, not present in this worktree. |
+| `docs/reports/pricing-strategy-2026-06-11.pdf` | Referenced by the handoff, not present in this worktree. |
+| `docs/reports/business-feasibility-2026-06-11.pdf` | Referenced by the handoff, not present in this worktree. |
 
 ---
 
@@ -65,7 +65,7 @@ Built from code-true sources only: `application.yml` model-matrix rates, Flyway-
 
 ### What was built
 
-**Strategy document** (`docs/pricing-strategy-2026-06-11.md` / PDF) covers:
+**Strategy document** referenced by the historical session, not present in this worktree, covered:
 - **Diagnosis**: the ladder was ~80% right; three specific gaps (power rung, value story, DS dividend allocation)
 - **5 pricing principles**: run = value metric; price ≠ cost; discount with levers never list; BYOK is trust wedge not lost revenue; spend DS dividend on quality + funnel
 - **The locked ladder** (see §03)
@@ -90,7 +90,7 @@ Scenarios: conservative $511k ARR / 85% GM · upside w/ PRO+ $1.22M ARR / 90% GM
 
 **$20 reprice cost**: ~$71k ARR vs the $29 ladder at identical mix. Break-even: conversion runs ~1.2× better at the $20 anchor.
 
-**Investor slide** (`docs/reports/investor-slide-2026-06-11.pdf/png`) — single page, house format (dark exec-brief, JetBrains Mono), contains: product thesis + moat, unit economics, the 1,000-paid base model, DS dividend story, round ask placeholder.
+**Investor slide** referenced by the historical session, not present in this worktree, was described as a single page containing product thesis, moat, unit economics, the 1,000-paid base model, the DS dividend story, and a round-ask placeholder.
 
 ---
 
@@ -146,7 +146,7 @@ The session went through three rounds of founder input:
 
 ## 04 · The locked pricing sheet (D1–D12 canonical record)
 
-Full record in `docs/pricing-strategy-2026-06-11.md` §08. Summary:
+The historical session said the full record lived in a pricing-strategy doc that is not present in this worktree. Summary:
 
 | Tier | USD | INR | Quota | Notes |
 |---|---|---|---|---|
@@ -197,7 +197,7 @@ Full record in `docs/pricing-strategy-2026-06-11.md` §08. Summary:
 | `frontend/src/signal/pages/ExtraPages.tsx` | Tier cards, runs-language intro, TEAM annual line. |
 | `frontend/src/ide/IdePlan.tsx` | Plan gate copy at v2 runs-language. |
 | `frontend/src/signal/pages/AuthPages.tsx` | "10 runs" copy. |
-| `frontend/src/ide/UsageMeter.tsx` + `UpgradeModal.tsx` | Comments 15→10. |
+| `frontend/src/ide/UsageMeter.tsx` + `UpgradeModal.tsx` | Historical note from this handoff; these files are not present in the current worktree. |
 
 **Website + docs**
 
@@ -205,7 +205,7 @@ Full record in `docs/pricing-strategy-2026-06-11.md` §08. Summary:
 |---|---|
 | `website/index.html` | Price cards ($20/₹1,899, $199/yr, TEAM $389/yr), Credit glossary rewritten to $5 truth, FAQ schema updated, Product schema price corrected, "10 free runs" in hero, library cards "N credits"→"N runs". |
 | `website/llms.txt` | 3 blocks at v2 sheet (incl. TEAM "$389/seat/year — 17% off"). |
-| `CLAUDE.md` | Migration head V241; tier-ladder at v2. |
+| `CLAUDE.md` | Migration head now V247 in the current worktree; tier-ladder at v2. |
 | `docs/reason-log/2026-05.md` | RL-2026-06-022 entry. |
 | `docs/document_map.md` | New rows; playbook row annotated "pre-date pricing v2". |
 
