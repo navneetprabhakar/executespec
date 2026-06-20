@@ -7,7 +7,6 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Pins the multi-repo listing helper introduced for Fix E (run a076c876 architecture=0 diagnosis,
@@ -31,11 +30,9 @@ import org.springframework.test.util.ReflectionTestUtils;
  */
 class FileSystemToolPerRepoListingTest {
 
-  /** Build a FileSystemTool pointed at {@code workspaceRoot} via reflection field injection. */
+  /** Build a FileSystemTool pointed at {@code workspaceRoot}. */
   private FileSystemTool toolFor(Path workspaceRoot) {
-    FileSystemTool tool = new FileSystemTool();
-    ReflectionTestUtils.setField(tool, "workspaceRoot", workspaceRoot.toString());
-    return tool;
+    return new FileSystemTool(workspaceRoot.toString(), (FileLockTool) null, null);
   }
 
   /** Make a runId-rooted workspace with {@code repos/<each>/} populated. */

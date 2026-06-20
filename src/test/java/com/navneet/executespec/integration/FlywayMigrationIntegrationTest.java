@@ -2,7 +2,11 @@ package com.navneet.executespec.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
@@ -14,16 +18,32 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @DisplayName("Flyway migrations (Integration)")
 class FlywayMigrationIntegrationTest extends PostgresIntegrationBase {
 
-  @Autowired private Flyway flyway;
+  private static final Path MIGRATION_DIR = Path.of("src/main/resources/db/migration");
+  private static final Pattern MIGRATION_FILE = Pattern.compile("^V\\d+(?:_\\d+)?__.*\\.sql$");
 
-  @Autowired private JdbcTemplate jdbc;
+  private final Flyway flyway;
+  private final JdbcTemplate jdbc;
+
+  @Autowired
+  FlywayMigrationIntegrationTest(Flyway flyway, JdbcTemplate jdbc) {
+    this.flyway = flyway;
+    this.jdbc = jdbc;
+  }
 
   @Test
-  @DisplayName("all migrations succeed and flyway_schema_history has 2 entries")
-  void migrationCount() {
+  @DisplayName("all migrations succeed and flyway_schema_history reaches current head")
+  void migrationCount() throws IOException {
     var info = flyway.info().applied();
-    // V1 baseline + V2 add_tenant_id (plus possibly the baseline marker itself)
-    assertThat(info.length).isGreaterThanOrEqualTo(2);
+    assertThat(info.length).isEqualTo(sourceMigrationCount());
+  }
+
+  private static long sourceMigrationCount() throws IOException {
+    try (var stream = Files.list(MIGRATION_DIR)) {
+      return stream
+          .map(path -> path.getFileName().toString())
+          .filter(name -> MIGRATION_FILE.matcher(name).matches())
+          .count();
+    }
   }
 
   @Test

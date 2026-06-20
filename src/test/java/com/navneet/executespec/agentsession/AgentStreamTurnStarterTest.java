@@ -1,0 +1,142 @@
+package com.navneet.executespec.agentsession;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnRequest;
+import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.entity.AgentSession;
+import com.navneet.executespec.agentsession.entity.AgentTurn;
+import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
+import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class AgentStreamTurnStarterTest {
+
+  @Mock AgentTurnRepository turnRepo;
+  @Mock AgentActionEventRepository eventRepo;
+  @Mock AgentSessionRepository sessionRepo;
+  @Mock AiProviderPreferenceService aiProviderPreferenceService;
+
+  private AgentStreamTurnStarter starter;
+
+  @BeforeEach
+  void setUp() {
+    ObjectMapper objectMapper = new ObjectMapper();
+    AgentEventRecorder eventRecorder = new AgentEventRecorder(eventRepo, objectMapper);
+    starter =
+        new AgentStreamTurnStarter(
+            new AgentIntentService(),
+            new AgentTurnRecorder(turnRepo, objectMapper),
+            eventRecorder,
+            new AgentTracePayloadFactory(),
+            sessionRepo,
+            aiProviderPreferenceService);
+    when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
+  }
+
+  @Test
+  void startsStreamTurnPersistsTraceAndUpdatesProviderOverride() {
+    AgentSession session = session();
+    when(turnRepo.countBySessionId("s1")).thenReturn(2L);
+    when(aiProviderPreferenceService.updatePreferredProvider(
+            any(AppUserDetails.class), eq("DEEPSEEK")))
+        .thenReturn("DEEPSEEK");
+
+    var ctx =
+        starter.begin(
+            session,
+            "s1",
+            new StreamTurnRequest(
+                "Find the auth bug",
+                List.of(),
+                null,
+                new ClientCapabilities(false, true, true, true),
+                "DEEPSEEK"),
+            user());
+
+    assertThat(ctx.sessionId()).isEqualTo("s1");
+    assertThat(ctx.sequence()).isEqualTo(3);
+    assertThat(ctx.provider()).isEqualTo("DEEPSEEK");
+    assertThat(ctx.projectId()).isEqualTo("p1");
+    assertThat(ctx.runId()).isEqualTo("run-session");
+    assertThat(ctx.decision().route()).isEqualTo("READ_ONLY_CODE_HELP");
+    assertThat(session.getDefaultProvider()).isEqualTo("DEEPSEEK");
+    assertThat(session.getTitle()).isEqualTo("Find the auth bug");
+    verify(sessionRepo).save(session);
+
+    var turn = ArgumentCaptor.forClass(AgentTurn.class);
+    verify(turnRepo).save(turn.capture());
+    assertThat(turn.getValue().getStatus()).isEqualTo("STREAMING");
+    assertThat(turn.getValue().getIntentType()).isEqualTo("READ_ONLY_CODE_HELP");
+    assertThat(turn.getValue().getSequence()).isEqualTo(3);
+
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getType()).isEqualTo("STREAM_STARTED");
+    assertThat(event.getValue().getTurnId()).isEqualTo(ctx.turnId());
+    assertThat(event.getValue().getPayloadJson()).contains("READ_ONLY_CODE_HELP");
+    assertThat(event.getValue().getPayloadJson()).contains("runApiAllowed");
+    assertThat(event.getValue().getPayloadJson()).contains("false");
+  }
+
+  @Test
+  void fallsBackToSessionDefaultProviderWhenPreferenceIsMissing() {
+    AgentSession session = session();
+    session.setTitle("Existing title");
+    session.setDefaultProvider("ANTHROPIC");
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(aiProviderPreferenceService.preferredProvider(any(AppUserDetails.class))).thenReturn(null);
+
+    var ctx =
+        starter.begin(session, "s1", new StreamTurnRequest("", null, null, null, null), user());
+
+    assertThat(ctx.provider()).isEqualTo("ANTHROPIC");
+    assertThat(session.getDefaultProvider()).isEqualTo("ANTHROPIC");
+    assertThat(session.getTitle()).isEqualTo("Existing title");
+    assertThat(ctx.sequence()).isEqualTo(1);
+  }
+
+  private static AgentSession session() {
+    return AgentSession.builder()
+        .id("s1")
+        .orgId("org-1")
+        .userId("u1")
+        .projectId("p1")
+        .runId("run-session")
+        .clientSurface("CLI")
+        .title("New ExecuteSpec session")
+        .defaultModel("deepseek-v4-flash-native")
+        .build();
+  }
+
+  private static AppUserDetails user() {
+    AppUser user = new AppUser();
+    user.setId("u1");
+    user.setOrgId("org-1");
+    user.setGlobalRole("USER");
+    user.setTier("PRO");
+    user.setEmail("u1@example.com");
+    return new AppUserDetails(user, null);
+  }
+}

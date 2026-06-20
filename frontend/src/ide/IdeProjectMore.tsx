@@ -5,157 +5,49 @@ import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
-import {Markdown} from '@/signal/components/Markdown';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
-import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
+import {streamWebAgentChatReply} from '@/ide/agentChatStream';
+import {ArchDocView} from '@/ide/projectArchitecturePanels';
+import {
+  agentTurnToChatBubbles,
+  sortAgentChatBubbles,
+  type AgentChatBubble,
+} from '@/ide/agentChatHistory';
+import {
+  availableOrgMembers,
+  contractDetectorSummary,
+  docStamp,
+  filterProjectFiles,
+  invariantViolationCounts,
+  isExternalProjectMember,
+  looksLikeArtifact,
+  memberDisplayName,
+  techDebtCategories,
+} from '@/ide/projectMoreUtils';
+import {
+  formatProjectList,
+  formatProjectRunList,
+  resolveProjectChatSlashAction,
+} from '@/ide/projectChatUtils';
+import {
+  ProjectBanner as Banner,
+  ProjectChatMessageCard as ChatMessageCard,
+  ProjectMetaLabel as MetaLabel,
+  ProjectRouteTabs as RTabs,
+} from '@/ide/projectUi';
 
-const tok = () => localStorage.getItem('access_token') ?? '';
-
-// shared sub-tab + banner helpers
-
-type SubTab = {key: string; label: string};
-
-// Sub-tab strip inside a surface (mirrors the Signal TabsStrip). Reuses the IDE
-// result-page tab classes so it reads native in both themes.
-function RTabs({
-  tabs,
-  active,
-  onSelect,
-}: {
-  tabs: SubTab[];
-  active: string;
-  onSelect: (k: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const activeTab = tabs.find((t) => t.key === active) ?? tabs[0];
-  function choose(key: string) {
-    onSelect(key);
-    setOpen(false);
-  }
-  return (
-    <>
-      <div className='ide-local-mobile-nav'>
-        <button
-          type='button'
-          className='ide-project-mobile-trigger'
-          aria-haspopup='menu'
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span>{activeTab?.label ?? 'Section'}</span>
-          <span aria-hidden='true'>⌄</span>
-        </button>
-        {open && (
-          <div className='ide-project-mobile-menu' role='menu'>
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                type='button'
-                className={`ide-project-mobile-item${active === t.key ? ' active' : ''}`}
-                role='menuitem'
-                onClick={() => choose(t.key)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className='ide-rtabs ide-local-tabs' style={{marginBottom: 16, borderRadius: 4}}>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type='button'
-            className={`ide-rtab${active === t.key ? ' active' : ''}`}
-            onClick={() => onSelect(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-
-// Inline error / success banners — colours map to the IDE token set.
-function Banner({err, msg}: {err?: string; msg?: string}) {
-  if (!err && !msg) return null;
-  return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 13,
-        color: err ? 'var(--ide-red)' : 'var(--ide-green)',
-        borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
-      }}
-    >
-      {err || msg}
-    </div>
-  );
-}
-
-// Small uppercase metric label used inside the health / browse grids.
-function MetaLabel({children}: {children: React.ReactNode}) {
-  return (
-    <div
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        color: 'var(--ide-fg-muted)',
-        letterSpacing: '0.1em',
-        textTransform: 'uppercase',
-        marginBottom: 4,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-type ChatBubble = {role: 'user' | 'assistant'; content: string; ts?: string};
+type ChatBubble = AgentChatBubble;
 type ChatPanel = 'chat' | 'artifacts' | 'memory';
-
-function looksLikeArtifact(content: string): boolean {
-  return content.length > 1200 || /```|^#{2,}\s|\|.+\|/m.test(content);
-}
-
-function ChatMessageCard({message}: {message: ChatBubble}) {
-  const artifact = message.role === 'assistant' && looksLikeArtifact(message.content);
-  const [open, setOpen] = useState(!artifact);
-  const visible = open ? message.content : `${message.content.slice(0, 520).trim()}…`;
-
-  return (
-    <div
-      className={`ide-card ide-project-chat-message ${artifact ? 'artifact' : ''}`}
-      style={{
-        borderColor: message.role === 'user' ? 'var(--ide-accent)' : undefined,
-      }}
-    >
-      <div className='ide-project-chat-message-meta'>
-        <span>
-          {message.role === 'user' ? 'You' : artifact ? 'Assistant artifact' : 'Assistant'}
-        </span>
-        {message.ts && <span> · {new Date(message.ts).toLocaleTimeString()}</span>}
-        {artifact && (
-          <button type='button' onClick={() => setOpen((v) => !v)}>
-            {open ? 'Collapse' : 'Expand'}
-          </button>
-        )}
-      </div>
-      <div className='signal-md' style={{fontSize: 13.5}}>
-        <Markdown>{visible}</Markdown>
-      </div>
-    </div>
-  );
-}
 
 export function IdeProjectChat() {
   const {projectId = ''} = useParams();
   const navigate = useNavigate();
   const [msgs, setMsgs] = useState<ChatBubble[] | null>(null);
+  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
   const [memory, setMemory] = useState<api.ProjectMemoryResponse | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -175,6 +67,14 @@ export function IdeProjectChat() {
     if (!projectId) return;
     let cancelled = false;
     let memTimer: number | undefined;
+    async function loadAgentTurns() {
+      const sessions = await api.listAgentSessions(100);
+      const session = selectScopedAgentSession(sessions, {projectId});
+      if (!session) return [] as ChatBubble[];
+      if (!cancelled) setAgentSessionId(session.id);
+      const turns = await api.listAgentTurns(session.id, {limit: 50});
+      return turns.flatMap(agentTurnToChatBubbles);
+    }
     api
       .getProjectChatInfo(projectId)
       .then(() => {
@@ -184,17 +84,15 @@ export function IdeProjectChat() {
         const m = e instanceof Error ? e.message : '';
         if (!cancelled && /403|forbidden|team or enterprise/i.test(m)) setGated(true);
       });
-    api
-      .getProjectChatHistory(projectId)
-      .then((rows) => {
+    Promise.all([api.getProjectChatHistory(projectId), loadAgentTurns().catch(() => [])])
+      .then(([rows, agentRows]) => {
         if (cancelled) return;
-        setMsgs(
-          rows.map((r) => ({
-            role: r.role === 'USER' ? 'user' : 'assistant',
-            content: r.content,
-            ts: r.createdAt,
-          })),
-        );
+        const legacyRows = rows.map((r) => ({
+          role: r.role === 'USER' ? 'user' : 'assistant',
+          content: r.content,
+          ts: r.createdAt,
+        })) satisfies ChatBubble[];
+        setMsgs([...legacyRows, ...agentRows].sort(sortAgentChatBubbles));
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -235,29 +133,43 @@ export function IdeProjectChat() {
         ...(prev ?? []),
         {role: 'user', content: m, ts: new Date().toISOString()},
       ]);
-      const r = await fetch(`/api/projects/${projectId}/chat`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', Authorization: `Bearer ${tok()}`},
-        body: JSON.stringify({message: m}),
+      const session = await ensureProjectAgentSession();
+      const reply = await streamWebAgentChatReply(session.id, m, {
+        label: 'project agent',
+        href: `/projects/${projectId}/agent`,
       });
-      if (!r.ok) throw new Error(`Chat failed (${r.status}).`);
-      const data = (await r.json()) as {
-        reply?: string;
-        message?: string;
-        content?: string;
-        assistantMessage?: string;
-      };
-      const reply =
-        data.reply || data.message || data.content || data.assistantMessage || '(no reply)';
       setMsgs((prev) => [
         ...(prev ?? []),
-        {role: 'assistant', content: reply, ts: new Date().toISOString()},
+        {
+          role: 'assistant',
+          content: reply,
+          ts: new Date().toISOString(),
+        },
       ]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Chat failed.');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function ensureProjectAgentSession(): Promise<api.AgentSessionResponse> {
+    if (agentSessionId) {
+      try {
+        return await api.getAgentSession(agentSessionId);
+      } catch {
+        setAgentSessionId(null);
+      }
+    }
+    const sessions = await api.listAgentSessions(100);
+    const existing = selectScopedAgentSession(sessions, {projectId});
+    if (existing) {
+      setAgentSessionId(existing.id);
+      return existing;
+    }
+    const created = await api.createAgentSession(webAgentSessionRequest({projectId}));
+    setAgentSessionId(created.id);
+    return created;
   }
 
   // Compile-to-spec handoff: stash the spec + navigate to the project composer.
@@ -286,6 +198,8 @@ export function IdeProjectChat() {
     setErr('');
     try {
       await api.clearProjectChat(projectId);
+      const created = await api.createAgentSession(webAgentSessionRequest({projectId}));
+      setAgentSessionId(created.id);
       setMsgs([]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Clear failed.');
@@ -307,74 +221,51 @@ export function IdeProjectChat() {
   }
 
   async function handleSlashCommand(raw: string): Promise<boolean> {
-    if (!raw.startsWith('/')) return false;
-    const [cmd, arg] = raw.split(/\s+/, 2);
-    if (cmd === '/help') {
-      note(uiSlashHelp('project'));
-      return true;
-    }
-    if (cmd === '/team' || cmd === '/invite') {
-      navigate('/org-members');
-      return true;
-    }
-    if (cmd === '/clear') {
-      await clearAll();
-      return true;
-    }
-    if (cmd === '/compile') {
-      await compile();
-      return true;
-    }
-    if (cmd === '/compact') {
-      await compact();
-      return true;
-    }
-    if (cmd === '/memory') {
-      setMobilePanel('memory');
-      setMemOpen(true);
-      note(memDigest || 'No project memory has been generated yet.');
-      return true;
-    }
-    if (cmd === '/projects') {
-      const projects = await api.getProjects();
-      note(
-        projects.length
-          ? projects
-              .slice(0, 8)
-              .map((p) => `${p.name} · ${p.id}`)
-              .join('\n')
-          : 'No projects found.',
-      );
-      return true;
-    }
-    if (cmd === '/runs') {
-      const runs = await api.getRuns({scope: 'mine', projectId, size: 8});
-      note(
-        runs.content.length
-          ? runs.content
-              .map((r) => `${r.status} · ${r.runId.slice(0, 8)} · ${r.userRequest || 'Untitled'}`)
-              .join('\n')
-          : 'No recent work found for this project.',
-      );
-      return true;
-    }
-    if (cmd === '/status') {
-      note(
-        `Project chat · ${projectId} · ${memRuns} completed work item${memRuns === 1 ? '' : 's'}`,
-      );
-      return true;
-    }
-    if (cmd === '/provider') {
-      const provider = normalizeUiProvider(arg);
-      if (!provider) {
-        note('Usage: /provider anthropic|openai|gemini|deepseek');
+    const action = resolveProjectChatSlashAction(raw, {projectId, memRuns, memDigest});
+    switch (action.kind) {
+      case 'none':
+        return false;
+      case 'note':
+        note(action.content);
+        return true;
+      case 'navigate':
+        navigate(action.to);
+        return true;
+      case 'clear':
+        await clearAll();
+        return true;
+      case 'compile':
+        await compile();
+        return true;
+      case 'compact':
+        await compact();
+        return true;
+      case 'memory':
+        setMobilePanel('memory');
+        setMemOpen(true);
+        note(action.content);
+        return true;
+      case 'list-projects': {
+        const projects = await api.getProjects();
+        note(formatProjectList(projects));
         return true;
       }
-      const saved = await api.updateProviderPreference(provider);
-      note(`Provider preference saved: ${saved.provider}`);
-      return true;
+      case 'list-runs': {
+        const runs = await api.getRuns({scope: 'mine', projectId, size: 8});
+        note(formatProjectRunList(runs.content));
+        return true;
+      }
+      case 'provider': {
+        const saved = await api.updateProviderPreference(action.provider);
+        note(`Provider preference saved: ${saved.provider}`);
+        return true;
+      }
+      case 'provider-usage':
+        note(action.content);
+        return true;
+      default:
+        return false;
     }
-    return false;
   }
 
   return (
@@ -616,11 +507,6 @@ export function IdeProjectChat() {
 // Code (Files · Issues · Review · Repo health · Standards · Generated docs)
 type CodeSub = 'browse' | 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
-// Change-detection stamp for a generated doc — the row carries no status
-// field, so a fresh generation is detected by version/generatedAt moving.
-const docStamp = (row: api.GeneratedDocRow | null | undefined): string =>
-  row ? `${row.version}·${row.generatedAt}` : '';
-
 export function IdeProjectCode() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
@@ -801,12 +687,7 @@ export function IdeProjectCode() {
   }
 
   // Tech-debt rollup is keyed by category (Record<string, count>).
-  const debtCats = useMemo(() => {
-    if (!debt) return [] as Array<{name: string; count: number}>;
-    return Object.entries(debt.issuesByCategory || {})
-      .map(([name, count]) => ({name, count}))
-      .sort((a, b) => b.count - a.count);
-  }, [debt]);
+  const debtCats = useMemo(() => techDebtCategories(debt), [debt]);
 
   // Code-review target — the repo currently chosen in the shared header
   // <select> (falls back to the first linked repo). The full review surface
@@ -818,11 +699,7 @@ export function IdeProjectCode() {
   );
 
   const browseIsSplit = sub === 'browse';
-  const mobileTreeFiles = useMemo(() => {
-    if (!files) return [];
-    const q = fileQuery.trim().toLowerCase();
-    return q ? files.filter((f) => f.toLowerCase().includes(q)) : files;
-  }, [files, fileQuery]);
+  const mobileTreeFiles = useMemo(() => filterProjectFiles(files, fileQuery), [files, fileQuery]);
 
   return (
     <div
@@ -1254,117 +1131,6 @@ export function IdeProjectCode() {
 // System map (Current map · History · Rules · Decisions · Contracts)
 type ArchSub = 'current' | 'versions' | 'invariants' | 'adrs' | 'contracts';
 
-// Split a markdown doc into a preamble (text before the first `##`) + top-level (`##`) sections.
-// Heading text is lifted out so the section header can be a clickable disclosure; the body keeps
-// everything else (incl. `###` subsections, code, tables) for Markdown.
-function parseArchDoc(md: string): {preamble: string; sections: {heading: string; body: string}[]} {
-  const sections: {heading: string; body: string[]}[] = [];
-  const preamble: string[] = [];
-  for (const line of md.split('\n')) {
-    const m = /^##\s+(.*)$/.exec(line);
-    if (m) sections.push({heading: m[1].trim(), body: []});
-    else if (sections.length > 0) sections[sections.length - 1].body.push(line);
-    else preamble.push(line);
-  }
-  return {
-    preamble: preamble.join('\n'),
-    sections: sections.map((s) => ({heading: s.heading, body: s.body.join('\n')})),
-  };
-}
-
-// Architecture-doc viewer — lazy + section-collapsible so the browser is never handed one giant
-// markdown blob. Small docs (<40k chars, ≤10 sections) render fully expanded (no behaviour change);
-// larger docs collapse all but the first section and mount each section's Markdown only on expand.
-// Keyed by version at the call site, so it re-inits cleanly when a new doc loads.
-function ArchDocView({md}: {md: string}) {
-  const {preamble, sections} = useMemo(() => parseArchDoc(md), [md]);
-  const large = md.length > 40_000 || sections.length > 10;
-  const [open, setOpen] = useState<Set<number>>(
-    () => new Set(large ? [0] : sections.map((_, i) => i)),
-  );
-  const toggle = (i: number) =>
-    setOpen((s) => {
-      const n = new Set(s);
-      if (n.has(i)) n.delete(i);
-      else n.add(i);
-      return n;
-    });
-  const allOpen = sections.length > 0 && open.size === sections.length;
-
-  // No top-level headings — fall back to a single Markdown render.
-  if (sections.length === 0) {
-    return (
-      <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6}}>
-        <Markdown>{md}</Markdown>
-      </div>
-    );
-  }
-  return (
-    <div>
-      {preamble.trim() && (
-        <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6, marginBottom: 8}}>
-          <Markdown>{preamble}</Markdown>
-        </div>
-      )}
-      {sections.length > 1 && (
-        <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 6}}>
-          <button
-            type='button'
-            className='ide-btn ghost'
-            style={{padding: '3px 10px', fontSize: 12}}
-            onClick={() => setOpen(allOpen ? new Set() : new Set(sections.map((_, i) => i)))}
-          >
-            {allOpen ? 'Collapse all' : 'Expand all'}
-          </button>
-        </div>
-      )}
-      {sections.map((s, i) => {
-        const isOpen = open.has(i);
-        return (
-          <div
-            key={i}
-            className='ide-card'
-            style={{padding: 0, marginBottom: 8, overflow: 'hidden'}}
-          >
-            <button
-              type='button'
-              onClick={() => toggle(i)}
-              aria-expanded={isOpen}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '10px 14px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                textAlign: 'left',
-                color: 'var(--ide-fg-bright)',
-                fontWeight: 600,
-                fontSize: 13.5,
-              }}
-            >
-              <span className='ide-tree-chev' style={{color: 'var(--ide-fg-muted)'}}>
-                {isOpen ? '▾' : '▸'}
-              </span>
-              <span>{s.heading}</span>
-            </button>
-            {isOpen && (
-              <div
-                className='signal-md'
-                style={{padding: '0 14px 12px', fontSize: 13.5, lineHeight: 1.6}}
-              >
-                <Markdown>{s.body}</Markdown>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export function IdeProjectArchitecture() {
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<ArchSub>('current');
@@ -1533,13 +1299,7 @@ export function IdeProjectArchitecture() {
     }
   }
 
-  const violByInv = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const v of violations) {
-      if (v.invariantUuid) m.set(v.invariantUuid, (m.get(v.invariantUuid) ?? 0) + 1);
-    }
-    return m;
-  }, [violations]);
+  const violByInv = useMemo(() => invariantViolationCounts(violations), [violations]);
 
   const docMd = arch?.content || '';
 
@@ -1841,15 +1601,8 @@ export function IdeProjectArchitecture() {
               const cov = coverage[repoId];
               const detectors = cov?.scans ?? [];
               const gaps = cov?.knownGaps ?? [];
-              const scanned = detectors.filter((d) => d.status === 'SCANNED').length;
-              const failed = detectors.filter((d) => d.status === 'FAILED').length;
-              const totalContracts = detectors.reduce(
-                (a, d) => a + (d.contractIds?.length ?? 0),
-                0,
-              );
-              const driftIds = Array.from(
-                new Set(detectors.flatMap((d) => d.contractIds ?? [])),
-              ).slice(0, 1);
+              const detectorSummary = contractDetectorSummary(detectors);
+              const driftIds = detectorSummary.driftCandidateIds.slice(0, 1);
               return (
                 <div key={repoId} className='ide-card' style={{marginBottom: 8}}>
                   <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
@@ -1858,7 +1611,7 @@ export function IdeProjectArchitecture() {
                       <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                         {cov == null
                           ? 'No coverage data — start a scan'
-                          : `${scanned} detector${scanned === 1 ? '' : 's'} scanned${failed > 0 ? ` · ${failed} failed` : ''} · ${totalContracts} contract${totalContracts === 1 ? '' : 's'}`}
+                          : `${detectorSummary.scanned} detector${detectorSummary.scanned === 1 ? '' : 's'} scanned${detectorSummary.failed > 0 ? ` · ${detectorSummary.failed} failed` : ''} · ${detectorSummary.totalContracts} contract${detectorSummary.totalContracts === 1 ? '' : 's'}`}
                       </div>
                     </div>
                     <button
@@ -2195,8 +1948,7 @@ export function IdeProjectMembers() {
     }
   }
 
-  const projectMemberIds = new Set((members ?? []).map((m) => m.userId));
-  const availableOrgMembers = orgMembers.filter((m) => !projectMemberIds.has(m.userId));
+  const selectableOrgMembers = availableOrgMembers(orgMembers, members);
 
   return (
     <div className='ide-pane'>
@@ -2212,7 +1964,9 @@ export function IdeProjectMembers() {
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {members.map((m, i) => {
-            const isExternal = (m as unknown as {external?: boolean}).external === true;
+            const isExternal = isExternalProjectMember(
+              m as api.ProjectMemberDto & {external?: boolean},
+            );
             const isMe = m.userId === user?.id;
             const role = m.projectRole || 'PROJECT_DEVELOPER';
             return (
@@ -2227,7 +1981,7 @@ export function IdeProjectMembers() {
                 }}
               >
                 <span style={{flex: 1, fontWeight: 500}}>
-                  {[m.firstName, m.lastName].filter(Boolean).join(' ') || m.email}
+                  {memberDisplayName(m)}
                   {isMe && <span style={{color: 'var(--ide-fg-muted)'}}> · you</span>}
                   {isExternal && (
                     <span
@@ -2264,7 +2018,7 @@ export function IdeProjectMembers() {
         </div>
       )}
 
-      {canManage && availableOrgMembers.length > 0 && (
+      {canManage && selectableOrgMembers.length > 0 && (
         <>
           <div className='ide-h2'>Add org member</div>
           <div className='ide-card'>
@@ -2279,10 +2033,9 @@ export function IdeProjectMembers() {
               style={{marginBottom: 8}}
             >
               <option value=''>Select org member…</option>
-              {availableOrgMembers.map((member) => (
+              {selectableOrgMembers.map((member) => (
                 <option key={member.userId} value={member.userId}>
-                  {[member.firstName, member.lastName].filter(Boolean).join(' ') || member.email} ·{' '}
-                  {member.email}
+                  {memberDisplayName(member)} · {member.email}
                 </option>
               ))}
             </select>
@@ -2630,493 +2383,6 @@ export function IdeProjectActivity() {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// Settings (Settings · Documents (RAG) · Memory)
-type SettingsSub = 'settings' | 'documents' | 'memory';
-
-export function IdeProjectSettings() {
-  const {projectId = ''} = useParams();
-  const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const canEdit = user?.globalRole === 'SUPER_ADMIN' || user?.orgRole === 'ORG_ADMIN';
-
-  const [sub, setSub] = useState<SettingsSub>('settings');
-  const [project, setProject] = useState<api.ProjectDto | null>(null);
-  const [busy, setBusy] = useState('');
-  const [err, setErr] = useState('');
-  const [msg, setMsg] = useState('');
-  const [deleteDocFor, setDeleteDocFor] = useState<{docId: string; label: string} | null>(null);
-  // Danger-zone project action awaiting confirmation.
-  const [projectAction, setProjectAction] = useState<'archive' | 'delete' | null>(null);
-
-  // Settings form
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [targetBranch, setTargetBranch] = useState('');
-  const [branchNaming, setBranchNaming] = useState('');
-  const [githubOwner, setGithubOwner] = useState('');
-  const [provider, setProvider] = useState('ANTHROPIC');
-
-  // Documents (RAG)
-  const [docs, setDocs] = useState<api.ProjectDocumentRow[] | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-
-  // Memory
-  const [memory, setMemory] = useState<api.ProjectMemoryResponse | null>(null);
-
-  useEffect(() => {
-    if (!projectId) return;
-    api
-      .getProject(projectId)
-      .then((p) => {
-        setProject(p);
-        setName(p.name || '');
-        setDescription(p.description || '');
-        setTargetBranch(p.targetBranch || 'main');
-        setBranchNaming(p.branchNamingPattern || 'execspec/{slug}-{date}');
-        setGithubOwner(p.githubOwner || '');
-        if (p.aiProvider) setProvider(p.aiProvider.toUpperCase());
-      })
-      .catch(() => {});
-    refreshDocs();
-    api
-      .getProjectMemory(projectId)
-      .then(setMemory)
-      .catch(() => setMemory(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
-  function refreshDocs() {
-    api
-      .listProjectDocuments(projectId)
-      .then(setDocs)
-      .catch(() => setDocs([]));
-  }
-
-  // §3.4 Docs (P1) — RAG indexing (UPLOADED → EXTRACTING → EMBEDDING) showed a
-  // frozen status badge. Poll every 3s while any doc is in flight (max 60
-  // polls), skipped while the tab is hidden; stops on terminal/unmount.
-  const indexing = (docs ?? []).some((d) =>
-    ['UPLOADED', 'EXTRACTING', 'EMBEDDING'].includes((d.status || '').toUpperCase()),
-  );
-  const docPollsRef = useRef(0);
-  useEffect(() => {
-    if (!indexing) {
-      docPollsRef.current = 0;
-      return;
-    }
-    const id = window.setInterval(() => {
-      if (document.hidden) return;
-      docPollsRef.current += 1;
-      if (docPollsRef.current > 60) {
-        window.clearInterval(id);
-        return;
-      }
-      refreshDocs();
-    }, 3000);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indexing]);
-
-  async function saveSettings() {
-    setBusy('save');
-    setErr('');
-    setMsg('');
-    try {
-      // Backend PATCH /projects/{id}/settings (same endpoint updateProjectSettings hits)
-      // accepts the extended field set. Raw fetch for the fuller payload — no new api fn.
-      const r = await fetch(`/api/projects/${projectId}/settings`, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json', Authorization: `Bearer ${tok()}`},
-        body: JSON.stringify({
-          name: name.trim() || undefined,
-          description: description.trim() || undefined,
-          targetBranch: targetBranch.trim() || undefined,
-          branchNamingPattern: branchNaming.trim() || undefined,
-          githubOwner: githubOwner.trim() || undefined,
-          aiProvider: provider,
-        }),
-      });
-      if (!r.ok) throw new Error(`Save failed (${r.status}).`);
-      setMsg('Settings saved.');
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Save failed.');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy('upload');
-    setErr('');
-    setMsg('');
-    try {
-      await api.uploadProjectDocument(projectId, file);
-      setMsg(`Uploaded ${file.name}. Indexing has started.`);
-      refreshDocs();
-    } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : 'Upload failed.');
-    } finally {
-      setBusy('');
-      if (fileInput.current) fileInput.current.value = '';
-    }
-  }
-
-  async function deleteDoc(docId: string) {
-    try {
-      await api.deleteProjectDocument(projectId, docId);
-      refreshDocs();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Delete failed.');
-    }
-  }
-
-  async function compactMemory() {
-    setBusy('compact');
-    setErr('');
-    setMsg('');
-    try {
-      await api.compactProjectMemory(projectId);
-      setMemory(await api.getProjectMemory(projectId));
-      setMsg('Memory compacted.');
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Compact failed.');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  return (
-    <div className='ide-pane' style={{maxWidth: 820}}>
-      <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Settings</div>
-      {!project ? (
-        <IdeLoader label='Loading settings…' />
-      ) : (
-        <>
-          <RTabs
-            active={sub}
-            onSelect={(k) => setSub(k as SettingsSub)}
-            tabs={[
-              {key: 'settings', label: 'Settings'},
-              {key: 'documents', label: `Reference docs · ${docs?.length ?? '—'}`},
-              {key: 'memory', label: 'Project context'},
-            ]}
-          />
-          <Banner err={err} msg={msg} />
-
-          {/* ── Settings ── */}
-          {sub === 'settings' && (
-            <>
-              <div className='ide-card'>
-                <Field label='Project name'>
-                  <input
-                    className='ide-input'
-                    value={name}
-                    disabled={!canEdit}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </Field>
-                <Field label='Description'>
-                  <textarea
-                    className='ide-textarea'
-                    value={description}
-                    disabled={!canEdit}
-                    rows={3}
-                    onChange={(e) => setDescription(e.target.value)}
-                  />
-                </Field>
-                <Field label='Default AI provider'>
-                  <select
-                    className='ide-select'
-                    value={provider}
-                    disabled={!canEdit}
-                    onChange={(e) => setProvider(e.target.value)}
-                  >
-                    <option value='ANTHROPIC'>Anthropic</option>
-                    <option value='OPENAI'>OpenAI</option>
-                    <option value='GEMINI'>Gemini</option>
-                    <option value='DEEPSEEK'>DeepSeek</option>
-                  </select>
-                </Field>
-                <Field label='Target branch'>
-                  <input
-                    className='ide-input'
-                    value={targetBranch}
-                    disabled={!canEdit}
-                    onChange={(e) => setTargetBranch(e.target.value)}
-                  />
-                </Field>
-                <Field label='Branch naming pattern'>
-                  <input
-                    className='ide-input'
-                    value={branchNaming}
-                    disabled={!canEdit}
-                    onChange={(e) => setBranchNaming(e.target.value)}
-                  />
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                    Variables: {'{slug}'}, {'{date}'}, {'{runId}'}
-                    <br />
-                    Example: execspec/{'{slug}'}-{'{date}'} →
-                    execspec/add-health-endpoint-2026-06-11
-                  </div>
-                </Field>
-                <Field label='Default GitHub owner'>
-                  <input
-                    className='ide-input'
-                    value={githubOwner}
-                    disabled={!canEdit}
-                    placeholder='e.g. acme-co'
-                    onChange={(e) => setGithubOwner(e.target.value)}
-                  />
-                </Field>
-                {canEdit && (
-                  <button
-                    className='ide-btn'
-                    style={{marginTop: 6}}
-                    disabled={busy === 'save'}
-                    onClick={saveSettings}
-                  >
-                    {busy === 'save' ? 'Saving…' : 'Save settings'}
-                  </button>
-                )}
-              </div>
-
-              <div className='ide-h2'>Metadata</div>
-              <div className='ide-card'>
-                <div className='ide-kv'>
-                  <span>Project ID</span>
-                  <span className='ide-mono'>{project.id}</span>
-                </div>
-                <div className='ide-kv'>
-                  <span>Org ID</span>
-                  <span className='ide-mono'>{project.orgId || '—'}</span>
-                </div>
-                <div className='ide-kv'>
-                  <span>Status</span>
-                  <span>{project.status || '—'}</span>
-                </div>
-                <div className='ide-kv' style={{borderBottom: 'none'}}>
-                  <span>Created</span>
-                  <span>
-                    {project.createdAt ? new Date(project.createdAt).toLocaleString() : '—'}
-                  </span>
-                </div>
-              </div>
-
-              <div className='ide-h2'>Danger zone</div>
-              <div className='ide-card' style={{display: 'flex', gap: 8}}>
-                <button className='ide-btn ghost' onClick={() => setProjectAction('archive')}>
-                  Archive
-                </button>
-                <button
-                  className='ide-btn ghost'
-                  style={{color: 'var(--ide-red)'}}
-                  onClick={() => setProjectAction('delete')}
-                >
-                  Delete
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ── Documents (RAG) ── */}
-          {sub === 'documents' && (
-            <>
-              <div className='ide-card' style={{marginBottom: 12, borderColor: 'var(--ide-blue)'}}>
-                <div style={{fontSize: 13, lineHeight: 1.55}}>
-                  Upload markdown, PDF, or plain-text docs to give future work and project chat
-                  extra context.
-                </div>
-              </div>
-              <input
-                ref={fileInput}
-                type='file'
-                accept='.md,.txt,.pdf,.markdown,.rst'
-                style={{display: 'none'}}
-                onChange={onPickFile}
-              />
-              <button
-                className='ide-btn'
-                style={{marginBottom: 12}}
-                disabled={busy === 'upload'}
-                onClick={() => fileInput.current?.click()}
-              >
-                {busy === 'upload' ? 'Uploading…' : 'Upload document'}
-              </button>
-              {docs === null ? (
-                <IdeLoader label='Loading documents…' />
-              ) : docs.length === 0 ? (
-                <div className='ide-empty'>No documents yet. Upload one above to start.</div>
-              ) : (
-                <div className='ide-card' style={{padding: 0}}>
-                  {docs.map((d, i) => {
-                    const status = (d.status || 'READY').toUpperCase();
-                    const sizeKb = d.sizeBytes ? `${(d.sizeBytes / 1024).toFixed(1)} KB` : '—';
-                    const label = d.filename || d.pathRelative || `Document ${d.id.slice(0, 6)}`;
-                    return (
-                      <div
-                        key={d.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          padding: '11px 16px',
-                          borderBottom:
-                            i < docs.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                        }}
-                      >
-                        <div style={{flex: 1, minWidth: 0}}>
-                          <div
-                            style={{
-                              fontWeight: 500,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {label}
-                          </div>
-                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                            {sizeKb}
-                            {d.mimeType ? ` · ${d.mimeType}` : ''}
-                          </div>
-                        </div>
-                        <IdeBadge
-                          kind={status === 'READY' ? 'ok' : status === 'FAILED' ? 'bad' : 'warn'}
-                        >
-                          {status}
-                        </IdeBadge>
-                        <button
-                          className='ide-btn ghost'
-                          style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                          onClick={() => setDeleteDocFor({docId: d.id, label})}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* ── Memory ── */}
-          {sub === 'memory' && (
-            <>
-              <div className='ide-card'>
-                <div className='ide-h2' style={{marginTop: 0}}>
-                  Project context
-                </div>
-                <div className='ide-kv'>
-                  <span>Completed work in context</span>
-                  <span>{memory?.stats?.totalRuns ?? '—'}</span>
-                </div>
-                <div className='ide-kv'>
-                  <span>Snapshot version</span>
-                  <span>{memory?.stats?.snapshotVersion ?? '—'}</span>
-                </div>
-                <div className='ide-kv'>
-                  <span>Recent entries</span>
-                  <span>{memory?.stats?.recentEntryCount ?? '—'}</span>
-                </div>
-                <div className='ide-kv' style={{borderBottom: 'none'}}>
-                  <span>Tokens / budget</span>
-                  <span>
-                    {memory?.stats
-                      ? `${memory.stats.currentTokens} / ${memory.stats.tokenBudget}`
-                      : '—'}
-                  </span>
-                </div>
-                <button
-                  className='ide-btn ghost'
-                  style={{marginTop: 12}}
-                  disabled={busy === 'compact'}
-                  onClick={compactMemory}
-                >
-                  {busy === 'compact' ? 'Compacting…' : 'Compact context'}
-                </button>
-              </div>
-
-              <div className='ide-h2'>What ExecuteSpec remembers</div>
-              <div className='ide-card'>
-                <div style={{fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap'}}>
-                  {memory?.fullContext?.trim() ||
-                    'No context snapshot yet. ExecuteSpec builds this after the first few completed work items.'}
-                </div>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      <ConfirmModal
-        open={!!deleteDocFor}
-        title='Delete document'
-        body={deleteDocFor ? `Delete "${deleteDocFor.label}" from project reference docs?` : ''}
-        confirmLabel='Delete'
-        danger
-        onConfirm={async () => {
-          const d = deleteDocFor;
-          if (d) await deleteDoc(d.docId);
-        }}
-        onClose={() => setDeleteDocFor(null)}
-      />
-      <ConfirmModal
-        open={projectAction === 'archive'}
-        title='Archive project'
-        body='Archive this project?'
-        confirmLabel='Archive'
-        onConfirm={() => {
-          setProjectAction(null);
-          api
-            .archiveProject(projectId)
-            .then(() => navigate('/projects'))
-            .catch((e) => setErr(e instanceof Error ? e.message : 'Archive failed.'));
-        }}
-        onClose={() => setProjectAction(null)}
-      />
-      <ConfirmModal
-        open={projectAction === 'delete'}
-        title='Delete project'
-        body='Delete this project? This cannot be undone.'
-        confirmLabel='Delete'
-        danger
-        onConfirm={() => {
-          setProjectAction(null);
-          api
-            .deleteProject(projectId)
-            .then(() => navigate('/projects'))
-            .catch((e) => setErr(e instanceof Error ? e.message : 'Delete failed.'));
-        }}
-        onClose={() => setProjectAction(null)}
-      />
-    </div>
-  );
-}
-
-function Field({label, children}: {label: string; children: React.ReactNode}) {
-  return (
-    <div style={{marginBottom: 14}}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--ide-fg-muted)',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </div>
-      {children}
     </div>
   );
 }

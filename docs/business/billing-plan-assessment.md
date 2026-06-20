@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | Fallback quotas in `TierEnforcementService` still used stale Free=5 and Pro=20 if `tier_config` lookup failed. | Medium | Updated fallbacks to Free=15 and Pro=30. Runtime normally reads DB, but fallback should not contradict current product. |
 | Several code comments and DTO comments still said Team requires 2-20 seats. | Low | Updated comments to 1-20. Enforcement was already correct. |
-| Core docs still said migration head V243 while current worktree has V244. | Low | Updated docs to V244. |
+| Core docs had stale migration-head references while the current worktree is V247. | Low | Updated active docs to V247. |
 | `docs/billing-workflows.html` still described PRO as hidden/grandfathered. | Medium | Needs HTML refresh or replacement; do not use as current pricing truth until updated. |
 | `website/pricing-analysis.md` is explicitly pre-V141 and contains old MAX/Pro economics. | Medium | Treat as historical. Current assessment supersedes it for business planning. |
 

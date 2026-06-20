@@ -7,9 +7,9 @@
 
 | Path | What |
 |------|------|
-| **[COMPARISON.md](COMPARISON.md)** | ⭐ 3-way design+approach comparison: **ExecuteSpec vs Claude Code vs opencode** + the consolidated adoption plan. Start here. |
+| **[COMPARISON.md](COMPARISON.md)** | ⭐ 3-way design+approach comparison: **ExecuteSpec vs Claude Code vs oss-agent** + the consolidated adoption plan. Start here. |
 | [claude-code/](claude-code/) | Anthropic **Claude Code** (from a deobfuscated source dump): README · CODING-TASKS · FEATURES · CODEMAP |
-| [opencode/](opencode/) | Open-source **opencode** (anomalyco/opencode): README · CODING-TASKS · FEATURES · CODEMAP |
+| [oss-agent/](oss-agent/) | Open-source **oss-agent** (anomalyco/oss-agent): README · CODING-TASKS · FEATURES · CODEMAP |
 
 ## The 30-second verdict
 
@@ -19,10 +19,10 @@
 - **Adopt into the harness:** read-before-write + output-budget (done) · fuzzy edit cascade +
   LSP-diagnostics-in-result · compaction-as-a-loop-task · doom-loop detector · permission ruleset
   (agent = a permission profile) · per-model prompts · cache-boundary discipline.
-- **opencode validates the engine-extraction plan:** it IS "core engine as an HTTP server + thin
+- **oss-agent validates the engine-extraction plan:** it IS "core engine as an HTTP server + thin
   clients" (OpenAPI-generated SDK, in-process-or-remote, workspace adapters).
 - **Our differentiation:** the product layer (plan gate, multi-repo PRs, governance, scoring, memory)
   + **multi-provider per-task routing** (union 19/30 > 16/13 single-provider) — a lever neither has.
 
 > These describe external code for our internal design reference — patterns + decisions, not code to
-> copy. Claude Code is Anthropic proprietary; opencode is open-source (MIT).
+> copy. Claude Code is Anthropic proprietary; oss-agent is open-source (MIT).

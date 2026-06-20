@@ -4,22 +4,14 @@ import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {RunTimeline} from '@/ide/RunTimeline';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
-
-const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
-const EXEC = ['EXECUTING', 'RUNNING', 'REVIEWING', 'BUILDING'];
-const TERM = ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED', 'ERROR', 'CANCELLED'];
-
-// Human phrase for a non-AWAITING status so the gate page explains itself
-// instead of rendering a bare badge (review/11 IdePlan).
-function planStatusPhrase(s: string): string {
-  if (TERM.includes(s)) return 'finished — see the result page';
-  if (s === 'REVIEWING') return 'in review';
-  if (s === 'WORKING' || s === 'EXECUTING' || s === 'RUNNING' || s === 'BUILDING')
-    return 'executing';
-  if (s === 'PLANNING' || s === 'CLASSIFYING' || s === 'PENDING' || s === 'SUBMITTED' || s === '')
-    return 'being planned';
-  return 'in progress';
-}
+import {
+  formatManagedAiPlanMessage,
+  formatPlanUsd,
+  isPlanExecutingStatus,
+  isPlanTerminalStatus,
+  managedAiBadgeKind,
+  planStatusPhrase,
+} from '@/ide/planUtils';
 
 // Plan-approval gate. Polls the work item; auto-routes to Live (executing) or Result
 // (terminal). When AWAITING_APPROVAL, shows the plan + credits/cap + Approve.
@@ -32,6 +24,7 @@ export default function IdePlan() {
   const [err, setErr] = useState('');
   const [feedback, setFeedback] = useState('');
   const [editing, setEditing] = useState(false);
+  const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -43,8 +36,8 @@ export default function IdePlan() {
           if (stop) return;
           setRun(r);
           const s = (r.status || '').toUpperCase();
-          if (EXEC.includes(s)) navigate(`/live/${runId}`, {replace: true});
-          else if (TERM.includes(s)) navigate(`/result/${runId}`, {replace: true});
+          if (isPlanExecutingStatus(s)) navigate(`/live/${runId}`, {replace: true});
+          else if (isPlanTerminalStatus(s)) navigate(`/result/${runId}`, {replace: true});
         })
         .catch(() => {});
     poll();
@@ -54,6 +47,13 @@ export default function IdePlan() {
       clearInterval(t);
     };
   }, [runId, navigate]);
+
+  useEffect(() => {
+    api
+      .getManagedAiBalance()
+      .then(setManagedAi)
+      .catch(() => setManagedAi(null));
+  }, []);
 
   async function approve() {
     setBusy('a');
@@ -143,13 +143,13 @@ export default function IdePlan() {
               <span>Estimate</span>
               <span>
                 {run.costEstimateLow != null
-                  ? `${usd(run.costEstimateLow)} – ${usd(run.costEstimateHigh)}`
+                  ? `${formatPlanUsd(run.costEstimateLow)} – ${formatPlanUsd(run.costEstimateHigh)}`
                   : '—'}
               </span>
             </div>
             <div className='ide-kv'>
               <span>Spend cap</span>
-              <span>{usd(run.hardCapUsd)}</span>
+              <span>{formatPlanUsd(run.hardCapUsd)}</span>
             </div>
             <div
               style={{
@@ -166,6 +166,35 @@ export default function IdePlan() {
               (build broken or execution errored). Cancelling before completion refunds unspent
               credit. Spend never exceeds the hard cap.
             </div>
+          </div>
+
+          <div className='ide-card' style={{fontSize: 12.5, lineHeight: 1.5}}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                marginBottom: 8,
+              }}
+            >
+              <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI</strong>
+              {managedAi && (
+                <IdeBadge kind={managedAiBadgeKind(managedAi.routingState)}>
+                  {managedAi.routingState}
+                </IdeBadge>
+              )}
+            </div>
+            {managedAi ? (
+              <div style={{color: 'var(--ide-fg-muted)'}}>
+                {formatManagedAiPlanMessage(managedAi)}
+              </div>
+            ) : (
+              <div style={{color: 'var(--ide-fg-muted)'}}>
+                Run credits are charged at approval; managed-AI debit details are unavailable on
+                this server profile.
+              </div>
+            )}
           </div>
 
           <div className='ide-h2'>

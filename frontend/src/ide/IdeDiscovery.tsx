@@ -1,9 +1,8 @@
-/* IDE-native discovery surfaces — ported 1:1 from the Signal originals in
-   `signal/pages/ExtraPages.tsx` (InsightsPage / LibraryPage / LibraryDetailPage /
-   MigrationsPage / MigrationDetailPage / SpecTemplatesPage). Same data, same
-   `@/lib/api` calls, same actions — re-rendered in the VS Code-style IDE visual
-   language (`.ide-*` tokens, IdeKit loaders/badges, the signal Modal/Markdown
-   primitives that bridge onto the `--ide-*` palette). */
+/* IDE-native discovery surfaces. The old Signal discovery exports were retired;
+   this file is the route owner for insights, library, migrations, and templates.
+   Keep data/API/action changes here with the discoveryUtils tests and the IDE
+   visual language (`.ide-*` tokens, IdeKit loaders/badges, and signal
+   Modal/Markdown primitives bridged onto the `--ide-*` palette). */
 
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
@@ -11,6 +10,31 @@ import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {ConfirmModal, PromptModal, Modal} from '@/signal/components/Modal';
+import {
+  activeProjectName,
+  activeProjects,
+  applicabilityBadge,
+  applicabilityLabel,
+  categoryTotal,
+  creditsLabel,
+  dryRunCostLabel,
+  dryRunFilesLabel,
+  estimatedFilesLabel,
+  insightCards,
+  libraryCategories,
+  librarySubtitle,
+  migrationCardMeta,
+  migrationDescription,
+  outcomePercent,
+  providerRows,
+  resolvedVariantMessage,
+  solutionDescription,
+  sourceLabel,
+  splitTags,
+  templatePreview,
+  topUserLabel,
+  variantLabel,
+} from './discoveryUtils';
 
 // Inline error banner — red-bordered ide-card. Mirrors the Banner in IdeProjectMore.
 function ErrBanner({msg}: {msg?: string}) {
@@ -141,29 +165,6 @@ function Tag({children}: {children: React.ReactNode}) {
   );
 }
 
-// shared formatting helpers (ported verbatim)
-
-function splitTags(tags: string | null | undefined): string[] {
-  if (!tags) return [];
-  return tags
-    .split(/[,|]/)
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
-function creditsLabel(
-  low: string | null | undefined,
-  high: string | null | undefined,
-): string | null {
-  const l = low != null && low !== '' ? Number(low) : null;
-  const h = high != null && high !== '' ? Number(high) : null;
-  if (l == null && h == null) return null;
-  if (l != null && h != null && l !== h) return `${l}–${h} credits`;
-  const n = l ?? h;
-  return `${n} credit${n === 1 ? '' : 's'}`;
-}
-
 // shared project + repo picker (ported from useProjectRepoPicker)
 // Loads active projects on first open, auto-selects the first, reloads its
 // linked repos on project change, pre-selects all repos. Uses the canonical
@@ -181,7 +182,7 @@ function useProjectRepoPicker(open: boolean) {
       .getProjects()
       .then((p) => {
         if (cancelled) return;
-        const active = p.filter((x) => !x.archivedAt && !x.deletedAt);
+        const active = activeProjects(p);
         setProjects(active);
         setProjectId((cur) => cur ?? active[0]?.id ?? null);
       })
@@ -315,7 +316,7 @@ function ProjectRepoPickerBody({
 }
 
 // Insights (analytics)
-// ← Signal InsightsPage. Route /insights. api: getMetrics, getModelComparison, getUserRunsSummary.
+// Route /insights. api: getMetrics, getModelComparison, getUserRunsSummary.
 export function IdeInsights() {
   const [days, setDays] = useState(30);
   const [metrics, setMetrics] = useState<api.MetricsResponse | null>(null);
@@ -336,50 +337,9 @@ export function IdeInsights() {
     });
   }, [days]);
 
-  const mAny = (metrics || {}) as unknown as {
-    totalRuns?: number;
-    avgVerifiedScore?: number;
-    avgDurationMs?: number;
-    totalSpend?: number;
-    shipped?: number;
-    needs?: number;
-    failed?: number;
-  };
-  const total = mAny.totalRuns ?? 0;
-  const shipped = mAny.shipped ?? 0;
-  const needs = mAny.needs ?? 0;
-  const failed = mAny.failed ?? 0;
-  // Distinguish "metrics not loaded yet" (show —) from a genuine 0 (show 0).
-  const metricsLoaded = metrics != null;
-  const avgScore =
-    mAny.avgVerifiedScore != null
-      ? `${mAny.avgVerifiedScore.toFixed(1)}%`
-      : metricsLoaded
-        ? '0%'
-        : '—';
-  const avgDuration = (() => {
-    if (mAny.avgDurationMs != null) {
-      const m = Math.floor(mAny.avgDurationMs / 60000);
-      const s = Math.floor((mAny.avgDurationMs % 60000) / 1000);
-      return `${m}m ${s}s`;
-    }
-    return metricsLoaded ? '0m 0s' : '—';
-  })();
-  const spend =
-    mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(2)}` : metricsLoaded ? '$0.00' : '—';
-  const mcAny = (byProvider || {}) as unknown as {
-    byProvider?: Array<{provider?: string; spend?: number; cacheHitRate?: number}>;
-  };
-  const providers = mcAny.byProvider || [];
-  const topUser = (summary?.users || [])[0] as unknown as
-    | {
-        firstName?: string;
-        lastName?: string;
-        email?: string;
-        runCount?: number;
-        successRate?: number;
-      }
-    | undefined;
+  const insights = insightCards(metrics);
+  const providers = providerRows(byProvider);
+  const topUser = topUserLabel(summary);
 
   const RANGES: Array<{label: string; n: number}> = [
     {label: '30d', n: 30},
@@ -387,14 +347,15 @@ export function IdeInsights() {
     {label: 'YTD', n: 365},
   ];
   const cards = [
-    {label: 'Avg score', value: avgScore},
-    {label: 'Avg run time', value: avgDuration},
-    {label: 'Total spend', value: spend},
+    {label: 'Avg score', value: insights.avgScore},
+    {label: 'Avg run time', value: insights.avgDuration},
+    {label: 'Total spend', value: insights.spend},
     {
       label: 'Runs completed',
       value: (
         <>
-          {shipped} <span style={{color: 'var(--ide-fg-muted)', fontSize: 13}}>of {total}</span>
+          {insights.shipped}{' '}
+          <span style={{color: 'var(--ide-fg-muted)', fontSize: 13}}>of {insights.total}</span>
         </>
       ),
     },
@@ -451,8 +412,8 @@ export function IdeInsights() {
         ) : (
           <KvRows
             pairs={providers.map((p) => ({
-              k: p.provider ?? '—',
-              v: `${p.spend != null ? `$${p.spend.toFixed(2)}` : '—'}${p.cacheHitRate != null ? ` (${Math.round(p.cacheHitRate * 100)}% cache)` : ''}`,
+              k: p.provider,
+              v: p.value,
             }))}
           />
         )}
@@ -470,23 +431,23 @@ export function IdeInsights() {
             marginBottom: 14,
           }}
         >
-          <div style={{flex: shipped, background: 'var(--ide-green)'}} />
-          <div style={{flex: needs, background: 'var(--ide-yellow)'}} />
-          <div style={{flex: failed, background: 'var(--ide-red)'}} />
+          <div style={{flex: insights.shipped, background: 'var(--ide-green)'}} />
+          <div style={{flex: insights.needs, background: 'var(--ide-yellow)'}} />
+          <div style={{flex: insights.failed, background: 'var(--ide-red)'}} />
         </div>
         <KvRows
           pairs={[
             {
               k: <span style={{color: 'var(--ide-green)'}}>● Shipped</span>,
-              v: `${shipped} (${total > 0 ? Math.round((shipped / total) * 100) : 0}%)`,
+              v: `${insights.shipped} (${outcomePercent(insights.shipped, insights.total)}%)`,
             },
             {
               k: <span style={{color: 'var(--ide-yellow)'}}>● Needs review</span>,
-              v: `${needs} (${total > 0 ? Math.round((needs / total) * 100) : 0}%)`,
+              v: `${insights.needs} (${outcomePercent(insights.needs, insights.total)}%)`,
             },
             {
               k: <span style={{color: 'var(--ide-red)'}}>● Failed / cancelled</span>,
-              v: `${failed} (${total > 0 ? Math.round((failed / total) * 100) : 0}%)`,
+              v: `${insights.failed} (${outcomePercent(insights.failed, insights.total)}%)`,
             },
           ]}
         />
@@ -497,12 +458,10 @@ export function IdeInsights() {
           <SectionLabel>Most active user</SectionLabel>
           <div className='ide-card'>
             <div style={{fontSize: 13.5, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-              {topUser.email ||
-                `${topUser.firstName ?? ''} ${topUser.lastName ?? ''}`.trim() ||
-                '—'}
+              {topUser.name}
             </div>
             <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-              {topUser.runCount ?? 0} runs
+              {topUser.runCount} runs
               {topUser.successRate != null
                 ? ` · ${Math.round(topUser.successRate * 100)}% success`
                 : ''}
@@ -515,7 +474,7 @@ export function IdeInsights() {
 }
 
 // Library (readymade solutions)
-// ← Signal LibraryPage. Route /library. api: getLibraryFacets, listLibrary.
+// Route /library. api: getLibraryFacets, listLibrary.
 export function IdeLibrary() {
   const [items, setItems] = useState<api.ReadymadeListItem[] | null>(null);
   const [facets, setFacets] = useState<api.LibraryFacets | null>(null);
@@ -556,8 +515,8 @@ export function IdeLibrary() {
     };
   }, [category]);
 
-  const categories = Object.entries(facets?.categories ?? {}).sort((a, b) => b[1] - a[1]);
-  const totalCount = categories.reduce((sum, [, n]) => sum + n, 0);
+  const categories = libraryCategories(facets);
+  const totalCount = categoryTotal(categories);
 
   return (
     <div className='ide-pane'>
@@ -759,11 +718,7 @@ export function IdeLibraryDetail() {
           <div className='ide-h1' style={{marginTop: 4}}>
             {s?.name || 'Library solution'}
           </div>
-          <div className='ide-sub'>
-            {s
-              ? [s.category, credits].filter(Boolean).join(' · ') || 'Library solution'
-              : 'Library solution'}
-          </div>
+          <div className='ide-sub'>{s ? librarySubtitle(s, credits) : 'Library solution'}</div>
         </div>
         {detail && (
           <button
@@ -803,7 +758,7 @@ export function IdeLibraryDetail() {
               What you'll get
             </div>
             <div style={{fontSize: 14, color: 'var(--ide-fg)', lineHeight: 1.55}}>
-              {s?.description || s?.tagline || 'A readymade, spec-driven solution.'}
+              {solutionDescription(s)}
             </div>
             {splitTags(s?.tags).length > 0 && (
               <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12}}>
@@ -836,7 +791,7 @@ export function IdeLibraryDetail() {
                       setSpec(v.specTemplate || '');
                     }}
                   >
-                    {[v.language, v.framework].filter(Boolean).join(' · ') || 'variant'}
+                    {variantLabel(v)}
                   </Pill>
                 ))}
               </div>
@@ -904,7 +859,7 @@ export function IdeLibraryDetail() {
               pairs={[
                 {k: 'Category', v: s?.category || '—'},
                 {k: 'Kind', v: s?.kind || '—'},
-                {k: 'Source', v: s?.source === 'FIRST_PARTY' ? 'First-party' : 'Community'},
+                {k: 'Source', v: sourceLabel(s?.source)},
                 {k: 'Plan', v: s?.tier || '—'},
                 ...(s?.samplePrUrl
                   ? [
@@ -1017,13 +972,7 @@ function LibraryInstantiateModal({
 
       {resolved && (
         <div style={{marginTop: 12, fontSize: 12.5, color: 'var(--ide-fg-muted)'}}>
-          {resolved.bestMatch
-            ? `Detected ${[resolved.detectedLanguage, resolved.detectedFramework].filter(Boolean).join(' / ') || 'a matching stack'} — using the best-fit variant.`
-            : resolved.reason === 'STACK_NOT_DETECTED'
-              ? "Couldn't detect the repo's stack — running the default variant."
-              : resolved.reason === 'NO_VARIANT_FOR_STACK'
-                ? 'No variant matches this stack — running the default variant.'
-                : 'Running the default variant.'}
+          {resolved.bestMatch ? resolvedVariantMessage(resolved) : ''}
         </div>
       )}
 
@@ -1045,7 +994,7 @@ function LibraryInstantiateModal({
   );
 }
 
-// ← Signal MigrationsPage. Route /migrations. api: listMigrations.
+// Route /migrations. api: listMigrations.
 export function IdeMigrations() {
   const [items, setItems] = useState<api.MigrationListItem[] | null>(null);
   const [err, setErr] = useState('');
@@ -1091,11 +1040,7 @@ export function IdeMigrations() {
         <div className='ide-grid'>
           {items.map((item) => {
             const m = item.recipe;
-            const credits = creditsLabel(m.estCreditsLow, m.estCreditsHigh);
-            const fileMeta =
-              m.estFilesLow != null || m.estFilesHigh != null
-                ? `~${m.estFilesLow ?? m.estFilesHigh}${m.estFilesHigh != null && m.estFilesHigh !== m.estFilesLow ? `–${m.estFilesHigh}` : ''} files`
-                : null;
+            const {credits, fileMeta} = migrationCardMeta(m);
             return (
               <Link
                 key={m.slug}
@@ -1222,9 +1167,7 @@ export function IdeMigrationDetail() {
               What it does
             </div>
             <div style={{fontSize: 14, color: 'var(--ide-fg)', lineHeight: 1.55}}>
-              {r?.description ||
-                r?.tagline ||
-                `Migrate from ${r?.sourceStack} to ${r?.targetStack}.`}
+              {migrationDescription(r)}
             </div>
           </div>
 
@@ -1251,7 +1194,7 @@ export function IdeMigrationDetail() {
                   k: 'Est files',
                   v:
                     r?.estFilesLow != null || r?.estFilesHigh != null
-                      ? `${r?.estFilesLow ?? r?.estFilesHigh}${r?.estFilesHigh != null && r?.estFilesHigh !== r?.estFilesLow ? `–${r?.estFilesHigh}` : ''}`
+                      ? estimatedFilesLabel(r?.estFilesLow, r?.estFilesHigh)
                       : '—',
                 },
                 {k: 'Est cost', v: credits || '—'},
@@ -1370,24 +1313,18 @@ function MigrationDryRunModal({
               pairs={[
                 {
                   k: 'Est files',
-                  v:
-                    result.estFilesLowTotal != null || result.estFilesHighTotal != null
-                      ? `${result.estFilesLowTotal ?? result.estFilesHighTotal}–${result.estFilesHighTotal ?? result.estFilesLowTotal}`
-                      : '—',
+                  v: dryRunFilesLabel(result),
                 },
                 {
                   k: 'Est cost',
-                  v:
-                    result.estCostLowTotal != null || result.estCostHighTotal != null
-                      ? `$${result.estCostLowTotal ?? result.estCostHighTotal} – $${result.estCostHighTotal ?? result.estCostLowTotal}`
-                      : '—',
+                  v: dryRunCostLabel(result),
                 },
               ]}
             />
           </div>
           <div style={{marginTop: 12, display: 'grid', gap: 6}}>
             {result.perRepo.map((pr) => {
-              const ok = pr.status === 'APPLICABLE';
+              const badge = applicabilityBadge(pr.status);
               return (
                 <div
                   key={pr.repoId}
@@ -1405,7 +1342,7 @@ function MigrationDryRunModal({
                       height: 8,
                       borderRadius: '50%',
                       flexShrink: 0,
-                      background: ok ? 'var(--ide-green)' : 'var(--ide-red)',
+                      background: badge.ok ? 'var(--ide-green)' : 'var(--ide-red)',
                     }}
                   />
                   <span style={{flex: 1, minWidth: 0}}>
@@ -1413,12 +1350,10 @@ function MigrationDryRunModal({
                       {pr.fullName || pr.repoId.slice(0, 8)}
                     </span>
                     <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                      {pr.reason || pr.status.replace(/_/g, ' ').toLowerCase()}
+                      {applicabilityLabel(pr.status, pr.reason)}
                     </span>
                   </span>
-                  <IdeBadge kind={ok ? 'ok' : 'bad'}>
-                    {ok ? 'applicable' : pr.status.replace(/_/g, ' ').toLowerCase()}
-                  </IdeBadge>
+                  <IdeBadge kind={badge.ok ? 'ok' : 'bad'}>{badge.label}</IdeBadge>
                 </div>
               );
             })}
@@ -1508,7 +1443,7 @@ function MigrationApplyModal({
   );
 }
 
-// ← Signal SpecTemplatesPage. Route /templates. api: getProjects,
+// Route /templates. api: getProjects,
 // listSpecTemplates, createProjectSpecTemplate, deleteSpecTemplate.
 export function IdeSpecTemplates() {
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
@@ -1524,7 +1459,7 @@ export function IdeSpecTemplates() {
     api
       .getProjects()
       .then((p) => {
-        const active = p.filter((x) => !x.archivedAt);
+        const active = activeProjects(p);
         setProjects(active);
         if (active.length > 0) setProjectId((cur) => cur ?? active[0].id);
       })
@@ -1587,12 +1522,12 @@ export function IdeSpecTemplates() {
     window.location.href = '/compose';
   }
 
-  const activeProjectName = projects.find((p) => p.id === projectId)?.name;
+  const selectedProjectName = activeProjectName(projects, projectId);
 
   return (
     <div className='ide-pane'>
       <div className='ide-h1'>Spec templates</div>
-      <div className='ide-sub'>{activeProjectName || 'Saved templates'}</div>
+      <div className='ide-sub'>{selectedProjectName || 'Saved templates'}</div>
 
       <NoteCard tone='blue'>Save specs you reuse. Templates pre-fill the composer.</NoteCard>
 
@@ -1629,7 +1564,7 @@ export function IdeSpecTemplates() {
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {templates.map((t, i) => {
-            const preview = (t.description || t.requirementTemplate || '').slice(0, 60);
+            const preview = templatePreview(t);
             return (
               <div
                 key={t.id}

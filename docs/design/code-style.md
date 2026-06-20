@@ -126,10 +126,10 @@ specific lines in our config that encode the deviation.
 
 | Construct                            | Convention            | Examples                                                                |
 | ------------------------------------ | --------------------- | ----------------------------------------------------------------------- |
-| React component file                 | `UpperCamelCase.tsx`  | `FileIcon.tsx`, `Primitives.tsx`, `Shell.tsx`                            |
-| React component export               | `UpperCamelCase`      | `function FileIcon({ filename }: Props) { ... }`                         |
-| Hook file                            | `useThing.ts`         | `useSignalTheme.ts`, `useProjectMeta.ts`                                 |
-| Hook export                          | `useThing`            | `export function useSignalTheme(rootRef) { ... }`                        |
+| React component file                 | `UpperCamelCase.tsx`  | `Primitives.tsx`, `AuthLayout.tsx`, `ConsoleShell.tsx`                   |
+| React component export               | `UpperCamelCase`      | `function ConsoleShell() { ... }`                                        |
+| Hook file                            | `useThing.ts`         | `useIsMobile.ts`, `useDocumentTitle.ts`                                  |
+| Hook export                          | `useThing`            | `export function useIsMobile() { ... }`                                  |
 | Zustand store file                   | `xxxStore.ts`         | `authStore.ts`, `uiStore.ts`                                             |
 | Zustand store hook export            | `useXxxStore`         | `useAuthStore`, `useUiStore`                                             |
 | Plain helper module                  | `lowerCamelCase.ts`   | `runUtils.ts`, `telemetry.ts`, `api.ts`                                  |
@@ -150,7 +150,7 @@ frontend/src/
 │   ├── signal.css         #   Signal-scoped CSS — every component class
 │   ├── components/        #   Reusable primitives (Card, Row, Chip, Button, Modal, ...)
 │   ├── pages/             #   Route-level pages (HomePage, ResultPage, ProjectComposePage, ...)
-│   ├── hooks/             #   Signal-scoped hooks (useSignalTheme, useProjectMeta, ...)
+│   ├── hooks/             #   Signal-scoped hooks when a public page needs one
 │   ├── icons/             #   Inline-SVG icon set (icons.tsx)
 │   └── lib/               #   Signal-scoped helpers (runUtils.ts)
 ├── design-system/         # Cross-cutting design assets — primitives.css, contrast.ts
@@ -177,7 +177,7 @@ Rules of thumb:
 
   ```ts
   import { Outlet } from 'react-router-dom';
-  import { useSignalTheme } from '@/signal/hooks/useSignalTheme';
+  import { useUiStore } from '@/stores/useUiStore';
 
   import '@/signal/signal.css';
   ```
@@ -194,8 +194,8 @@ Rules of thumb:
   (`frontend/src/stores/*`) only when the state is genuinely cross-page.
 - Memoization (`useMemo` / `useCallback`) is opt-in, not default. Add it when a render profile
   shows it matters — don't sprinkle it.
-- Side effects (network calls, subscriptions) go in `useEffect`. Cleanup the subscription with
-  the returned function — see `useSignalTheme.ts` for the canonical pattern.
+- Side effects (network calls, subscriptions) go in `useEffect`. Cleanup subscriptions with
+  the returned function and keep cross-shell theme writes centralized in `useUiStore.ts`.
 
 ### Mobile-first responsive
 
