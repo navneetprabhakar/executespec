@@ -15,7 +15,14 @@ public enum LlmProvider {
   // 2026-06-09 — Fireworks AI (api.fireworks.ai), OpenAI-wire-compatible route for Chinese open
   // models (DeepSeek / Kimi / GLM). Added to A/B against OpenRouter latency on Chinese models.
   // ENTERPRISE BYOK; not in the failover chain (deliberate operator route).
-  FIREWORKS("Fast-US");
+  FIREWORKS("Fast-US"),
+  // 2026-06-21 — Sarvam AI (api.sarvam.ai), OpenAI-wire-compatible Indian-language provider
+  // (sarvam-105b / sarvam-30b). Native tool calling + JSON + reasoning_content (verified live
+  // 2026-06-21: Bearer auth → 200, tool_calls emitted in OpenAI schema). India-market /
+  // sovereign-AI
+  // + eval/benchmark route; ENTERPRISE/BYOK, intentionally NOT in the failover chain (deliberate
+  // operator route, like deepseek/openrouter/fireworks).
+  SARVAM("Indic");
 
   private final String tag;
 

@@ -53,6 +53,12 @@ public class AvailableProviderResolver {
   @Value("${spring.ai.fireworks.api-key:}")
   private String systemFireworksKey;
 
+  // 2026-06-21 — Sarvam AI system key. BYOK (user/org) lanes are deferred until the eval justifies
+  // a
+  // customer-facing surface, so Sarvam availability is system-key-only for now.
+  @Value("${spring.ai.sarvam.api-key:}")
+  private String systemSarvamKey;
+
   /**
    * Determine which providers are available for a given run. Uses the already-resolved keys from
    * {@link RunKeyStore}.
@@ -78,6 +84,7 @@ public class AvailableProviderResolver {
       if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
       if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
       if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
+      if (isPresent(systemSarvamKey)) available.add(LlmProvider.SARVAM);
     }
 
     if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
@@ -118,6 +125,7 @@ public class AvailableProviderResolver {
     if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
     if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
+    if (isPresent(systemSarvamKey)) providers.add(LlmProvider.SARVAM);
 
     if (providers.isEmpty()) {
       // Last resort: assume Anthropic is available (system default)
@@ -134,6 +142,7 @@ public class AvailableProviderResolver {
       case OPENROUTER -> "openrouter";
       case DEEPSEEK -> "deepseek";
       case FIREWORKS -> "fireworks";
+      case SARVAM -> "sarvam";
     };
   }
 
