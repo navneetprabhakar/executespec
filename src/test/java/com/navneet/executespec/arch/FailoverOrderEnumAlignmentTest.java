@@ -132,7 +132,7 @@ class FailoverOrderEnumAlignmentTest {
     // tests should keep passing — but if someone REMOVES one, the
     // failover-order test above will catch it via the yaml check.
     assertEquals(
-        6,
+        7,
         LlmProvider.values().length,
         "Unexpected LlmProvider enum size — if you added a new provider, update application.yml's"
             + " failover-order + model-matrix.providers to include it. If you removed one, update"
@@ -142,7 +142,9 @@ class FailoverOrderEnumAlignmentTest {
             + " model-matrix.providers.deepseek is set; native api.deepseek.com route, Enterprise"
             + " BYOK, intentionally NOT in failover-order.) (FIREWORKS added 2026-06-10 —"
             + " model-matrix.providers.fireworks is set; aggregator route, Enterprise BYOK,"
-            + " intentionally NOT in failover-order.) (agent.provider-pools was removed"
+            + " intentionally NOT in failover-order.) (SARVAM added 2026-06-21 —"
+            + " model-matrix.providers.sarvam is set; Sarvam AI api.sarvam.ai route, India-market /"
+            + " eval BYOK, intentionally NOT in failover-order.) (agent.provider-pools was removed"
             + " 2026-05-26, RL-2026-05-041 — no longer a section to update.)");
   }
 }
