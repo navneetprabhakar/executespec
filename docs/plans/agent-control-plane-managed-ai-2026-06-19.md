@@ -97,11 +97,20 @@ es_ai_credits_charged = ceil(raw_provider_cost_usd * retail_multiplier * 100)
 Initial Pro launch policy:
 
 ```text
-Pro price: $20/month
-Included allowance: 2,000 ES AI credits
+Pro price: $29/month   (launch price on /plans)
+Included allowance: 2,000 ES AI credits  (≈ $20 managed-AI face value)
 Internal raw LLM COGS cap: $16
 Retail multiplier: 1.25x
 ```
+
+Note on price vs. credit grant: the $29 subscription is intentionally above the
+$20 managed-AI face value of the 2,000-credit grant. The delta covers the platform
+(PR review, projects, library, governance) — subscription = platform + included
+AI usage. The credit grant is price-independent (the backend grants 2,000 credits
+regardless of the displayed price), so $29 yields ~45% gross margin on the AI
+portion ($29 − $16 COGS) vs. ~20% at the earlier $20 target. Keep the grant at
+2,000 credits; do not raise it to chase price parity (that would lift the COGS
+cap and erode margin).
 
 ### Managed-AI Routing States
 
@@ -869,3 +878,43 @@ with DeepSeek (`eval-20260620-223022.md`, 0 schema failures, 0 run false positiv
 accuracy). The remaining external live smoke is deployed Gmail OAuth transition-email delivery;
 local dispatch accepts the request and backend logs show the expected Gmail-unavailable fallback for
 the managed-AI transition email (`managed-ai-email-smoke-20260620-223052.md`).
+
+---
+
+## Addendum 2026-06-22 — Governance policy read endpoint (read side of T26)
+
+Until now the control plane only *enforced* governance — the free-tier model lock
+(`ModelAccessService`), the per-org cost-approval threshold (M-032), the GitHub-owner allowlist
+(M-039), and managed-AI credit gating — but there was no read API for a client to see the *effective*
+policy before acting. The CLI's `policy` / `doctor` surfaces had to infer it. This addendum adds a
+read-only endpoint so clients show the real policy instead of guessing.
+
+**Endpoint:** `GET /api/v3/governance-policy` (auth required; mirrors `/api/v3/entitlements`).
+
+**Response (`GovernancePolicyResponse`):**
+
+```text
+tier                       effective tier (reuses EntitlementResolver.resolveTier)
+modelPolicy {
+  freeTierLocked           true for FREE — only free-tier models may run
+  freeTierProvider         the locked provider (e.g. deepseek) when locked, else null
+  freeModels               explicit free-tier model allow-list (may be empty)
+  note                     human-readable summary
+}
+toolPolicy {
+  enforced                 false today — there is no per-tool gating system yet
+  note                     "all tools available subject to approval + permission rules"
+}
+costApprovalThresholdUsd   org M-032 require_admin_approval_above_usd (null = none)
+allowedGithubOwners        org M-039 allowlist parsed to a list (empty = allow-all)
+superAdminBypass           true when the caller is SUPER_ADMIN (governance guards are bypassed)
+```
+
+Honesty constraint: `toolPolicy.enforced` is `false` because no per-tool policy exists in the backend
+yet. The endpoint surfaces only what is actually enforced; it does not fabricate a tool-policy system.
+When per-tool gating lands, `toolPolicy` gains the real rules and `enforced` flips to `true` — the
+contract is forward-compatible.
+
+The resolver is pure-read and reuses existing sources (EntitlementResolver for tier, ModelRegistry for
+the free-tier lock, OrgRepository for the M-032/M-039 columns), so it adds no new state and cannot
+drift from the enforcement guards.
