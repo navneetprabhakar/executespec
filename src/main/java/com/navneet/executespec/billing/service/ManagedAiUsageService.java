@@ -15,8 +15,10 @@ import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.cost.RunCostTracker;
 
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -166,6 +168,70 @@ public class ManagedAiUsageService {
     periodService.syncState(period, state);
     return usageMapper.toBalanceResponse(period, policy, managed, state);
   }
+
+  /**
+   * Run-count retirement (2026-06-22): submission-time managed-AI spend gate. Replaces
+   * {@code TierEnforcementService.assertAndIncrementRunCount} + {@code UsageTrackingService}'s
+   * "RUNS" quota at run submission. Throws 402 only when the user's tier is managed (FREE/PRO),
+   * they are not pure BYOK ({@code ownKeysMode} — own-key spend is cap-exempt and never accrues raw
+   * COGS), and their routing state is {@link #EXHAUSTED}. Per-call {@link #authorizeCall} stays the
+   * mid-run source of truth; this is the fail-fast pre-flight so a run does not start only to die on
+   * its first managed call.
+   */
+  @Transactional
+  public void assertCanStartRun(AppUserDetails userDetails, boolean ownKeysMode) {
+    if (!properties.isEnabled() || ownKeysMode) return;
+    String userId = userDetails.getUser().getId();
+    ManagedAiUserContext user =
+        new ManagedAiUserContext(
+            userId,
+            userDetails.getUser().getOrgId(),
+            tierEnforcementService.resolveUserTier(userId));
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
+    if (!isManaged(policy)) return;
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
+    String state = routingPolicy.recomputeState(period);
+    periodService.syncState(period, state);
+    if (EXHAUSTED.equals(state)) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYMENT_REQUIRED,
+          "Your ES AI credits are exhausted for this billing period. Add your own provider keys"
+              + " (BYOK) or upgrade your plan to keep running.");
+    }
+  }
+
+  /**
+   * Read-only ES-credit rollup for the v3 entitlements surface (no period creation). Returns
+   * {@code managed=false} (ungated) for TEAM/ENTERPRISE/own-key tiers; for managed tiers it reflects
+   * the live period when one exists, else the policy grant with zero usage.
+   */
+  @Transactional(readOnly = true)
+  public CreditSummary creditSummary(String userId, String tier) {
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(tier);
+    if (!properties.isEnabled() || !isManaged(policy)) {
+      return new CreditSummary(false, FULL, -1, 0, -1);
+    }
+    return periodService
+        .findCurrent(userId, Instant.now())
+        .map(
+            p -> {
+              long included = p.getIncludedAiCredits();
+              long used = p.getAiCreditsUsed();
+              return new CreditSummary(
+                  true, routingPolicy.recomputeState(p), included, used, Math.max(0, included - used));
+            })
+        .orElseGet(
+            () ->
+                new CreditSummary(
+                    true, FULL, policy.getIncludedCredits(), 0, policy.getIncludedCredits()));
+  }
+
+  public record CreditSummary(
+      boolean managed,
+      String routingState,
+      long creditsIncluded,
+      long creditsUsed,
+      long creditsRemaining) {}
 
   @Transactional(readOnly = true)
   public List<ManagedAiUsageEventResponse> currentEvents(AppUserDetails userDetails, int limit) {

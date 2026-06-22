@@ -24,6 +24,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
@@ -50,6 +51,7 @@ class AgentRunSubmissionGateTest {
   @Mock TierEnforcementService tierEnforcementService;
   @Mock UsageTrackingService usageTrackingService;
   @Mock ApiKeyResolver apiKeyResolver;
+  @Mock ManagedAiUsageService managedAiUsageService;
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock RunIdempotencyService runIdempotencyService;
   @Mock StateStore stateStore;
@@ -67,6 +69,7 @@ class AgentRunSubmissionGateTest {
             tierEnforcementService,
             usageTrackingService,
             apiKeyResolver,
+            managedAiUsageService,
             aiProviderPreferenceService,
             runIdempotencyService,
             stateStore);

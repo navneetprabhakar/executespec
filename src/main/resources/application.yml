@@ -87,16 +87,19 @@ spring:
 managed-ai:
   enabled: true
   tiers:
+    # Run-count retirement (2026-06-22): FREE is gated by a small managed ES-credit
+    # grant instead of a monthly run cap. 200 credits == $2.00 raw COGS at 1.00x.
     FREE:
-      included-credits: 0
-      raw-cogs-cap-usd: 0.00
-      frontier-raw-cap-usd: 0.00
-      value-mode-after-raw-usd: 0.00
-      cheap-only-after-raw-usd: 0.00
-      hard-stop-after-raw-usd: 0.00
+      included-credits: 200
+      raw-cogs-cap-usd: 2.00
+      frontier-raw-cap-usd: 0.50
+      value-mode-after-raw-usd: 0.50
+      cheap-only-after-raw-usd: 1.50
+      hard-stop-after-raw-usd: 2.00
       retail-multiplier: 1.00
       concurrency-enforced: false
       rate-limits-enabled: false
+      notification-thresholds-pct: [50, 75, 90, 100]
     PRO:
       included-credits: 2000
       raw-cogs-cap-usd: 16.00

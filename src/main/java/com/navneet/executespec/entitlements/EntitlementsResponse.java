@@ -24,5 +24,12 @@ public record EntitlementsResponse(
     Double currentPeriodCostUsd,
     String billingCycleAnchor, // ISO instant or null
     int lifetimeRunCreditBalance, // -1 for paid tiers
-    int lifetimeRunCreditCap // -1 for paid tiers
+    int lifetimeRunCreditCap, // -1 for paid tiers
+    // Run-count retirement (2026-06-22): managed ES AI credit gate — the v3 spend authority.
+    // `runLimitMonthly` above is retained for back-compat but advisory only; spend is gated here.
+    boolean managedAiGated, // true for FREE/PRO; false for TEAM/ENTERPRISE (own-keys / unlimited)
+    long managedAiCreditsIncluded, // ES AI credit grant this period; -1 when ungated
+    long managedAiCreditsUsed,
+    long managedAiCreditsRemaining, // -1 when ungated
+    String managedAiRoutingState // FULL / VALUE_MODE / FRONTIER_LOCKED / CHEAP_ONLY / EXHAUSTED
     ) {}
