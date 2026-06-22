@@ -57,5 +57,5 @@ export function formatManagedAiPlanMessage(input: {
   frontierRawCapUsd?: number | null;
   cheapOnlyAfterRawUsd?: number | null;
 }): string {
-  return `${input.aiCreditsRemaining} ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls can step down automatically after ${formatPlanUsd(input.frontierRawCapUsd)} raw frontier spend or ${formatPlanUsd(input.cheapOnlyAfterRawUsd)} total raw spend.`;
+  return `${input.aiCreditsRemaining} ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.`;
 }

@@ -44,7 +44,7 @@ describe('planUtils', () => {
         cheapOnlyAfterRawUsd: 12,
       }),
     ).toBe(
-      '1200 ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls can step down automatically after $4.00 raw frontier spend or $12.00 total raw spend.',
+      '1200 ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.',
     );
   });
 });
