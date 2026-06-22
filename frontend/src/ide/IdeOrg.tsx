@@ -15,7 +15,6 @@ import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {
   domainListFromEmail,
-  formatUsd,
   isSamlConfigOnly,
   KEY_PLACEHOLDER,
   matrixModelLabel,
@@ -1377,19 +1376,8 @@ export function IdeOrgSettings() {
               <span>{managedAiPolicy.includedCredits} ES AI credits</span>
             </div>
             <div className='ide-kv'>
-              <span>Raw COGS cap</span>
-              <span>{formatUsd(managedAiPolicy.hardStopAfterRawUsd)}</span>
-            </div>
-            <div className='ide-kv'>
-              <span>Frontier cap</span>
-              <span>{formatUsd(managedAiPolicy.frontierRawCapUsd)}</span>
-            </div>
-            <div className='ide-kv'>
-              <span>Step-down thresholds</span>
-              <span>
-                value {formatUsd(managedAiPolicy.valueModeAfterRawUsd)} · cheap-only{' '}
-                {formatUsd(managedAiPolicy.cheapOnlyAfterRawUsd)}
-              </span>
+              <span>Step-down</span>
+              <span>automatic near the managed-AI cap</span>
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
               <span>Concurrency / rate limits</span>

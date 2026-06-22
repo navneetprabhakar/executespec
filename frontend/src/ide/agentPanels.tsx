@@ -5,7 +5,6 @@ import {CommandIcon, PlusIcon, StatusDot} from '@/ide/IdeIcons';
 import {
   actionLabel,
   asText,
-  currency,
   pct,
   sessionTitle,
   type AgentAction,
@@ -439,16 +438,8 @@ export function AgentRightRail({
               />
             </div>
             <div className='agent-kv-row'>
-              <span>Raw COGS</span>
-              <code>
-                {currency(managedAi.rawCogsUsedUsd)} / {currency(managedAi.hardStopAfterRawUsd)}
-              </code>
-            </div>
-            <div className='agent-kv-row'>
-              <span>Frontier cap</span>
-              <code>
-                {currency(managedAi.frontierRawUsedUsd)} / {currency(managedAi.frontierRawCapUsd)}
-              </code>
+              <span>Credits left</span>
+              <code>{managedAi.aiCreditsRemaining}</code>
             </div>
           </>
         ) : (

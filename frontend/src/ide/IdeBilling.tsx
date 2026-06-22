@@ -25,7 +25,6 @@ import {
   FALLBACK_PLAN_CARDS,
   invoiceDisplay,
   managedKind,
-  money,
   planCardsFrom,
   planMoney,
   PLAN_FEATURES,
@@ -275,18 +274,6 @@ export function IdeBilling() {
                     value={`${managedAi.aiCreditsUsed} / ${managedAi.includedAiCredits}`}
                   />
                   <Stat label='Credits left' value={managedAi.aiCreditsRemaining} />
-                  <Stat
-                    label='Raw COGS'
-                    value={`${money(managedAi.rawCogsUsedUsd)} / ${money(
-                      managedAi.hardStopAfterRawUsd,
-                    )}`}
-                  />
-                  <Stat
-                    label='Frontier spend'
-                    value={`${money(managedAi.frontierRawUsedUsd)} / ${money(
-                      managedAi.frontierRawCapUsd,
-                    )}`}
-                  />
                 </div>
                 {managedAiEvents.length > 0 && (
                   <div style={{marginTop: 14, borderTop: '1px solid var(--ide-border)'}}>
@@ -309,7 +296,7 @@ export function IdeBilling() {
                           {event.model || event.provider || 'model call'}
                         </span>
                         <span className='ide-mono' style={{flexShrink: 0}}>
-                          {event.aiCreditsCharged} cr · {money(event.rawCostUsd)}
+                          {event.aiCreditsCharged} cr
                         </span>
                       </div>
                     ))}
@@ -341,7 +328,7 @@ export function IdeBilling() {
               >
                 <div>
                   <strong style={{color: 'var(--ide-fg-bright)'}}>
-                    Bring your own provider keys, bypass the $3 cap.
+                    Bring your own provider keys, bypass the managed-AI cap.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
                     Upgrade to TEAM and use your own Anthropic / OpenAI / Gemini / DeepSeek /
