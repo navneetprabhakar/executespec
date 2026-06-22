@@ -122,6 +122,41 @@ Initial Pro thresholds:
 | `$12-$16` | Cheap/balanced models only                                   |
 |    `$16+` | Managed-key calls stop                                       |
 
+### Per-Tier Managed-AI Policies — Run-Count Retirement (2026-06-22)
+
+Decision (2026-06-22): retire run-count rate limiting as the spend gate and gate
+managed-AI usage on ES AI credits / raw-COGS caps instead. This supersedes the
+first-build non-goal "do not remove existing run credits yet" — the managed-AI
+ledger, per-call debit, and step-down/step-up policy are now live, so the run
+counter is no longer needed as a gate.
+
+| Tier         | Included ES credits | Raw COGS cap | Frontier cap | Value-mode after | Cheap-only after | Retail mult | Gating model                                    |
+| ------------ | ------------------: | -----------: | -----------: | ---------------: | ---------------: | ----------: | ----------------------------------------------- |
+| `FREE`       |                 200 |       $2.00  |       $0.50  |          $0.50   |          $1.50   |      1.00x  | Managed grant → `EXHAUSTED` → upgrade/BYOK       |
+| `PRO`        |               2,000 |      $16.00  |       $4.00  |          $4.00   |         $12.00   |      1.25x  | Managed (launch policy)                         |
+| `TEAM`       |                   — |           —  |           —  |              —   |              —   |          —  | BYOK (own keys); no managed cap (per-seat, V165) |
+| `ENTERPRISE` |                   — |           —  |           —  |              —   |              —   |          —  | Negotiated unlimited; no managed cap            |
+
+Rules:
+
+- **Run-count columns kept, not enforced.** `app_user.personal_run_count` /
+  `org.monthly_run_count` (and `MonthlyRunCounterResetJob`, `RunQuotaRefundListener`)
+  remain for analytics; they no longer gate submission.
+- **Submission pre-flight.** A synchronous `ManagedAiUsageService.assertCanStartRun(userId)`
+  throws `402` with an "ES AI credits exhausted — upgrade or add your own provider key"
+  message when the user's routing state is `EXHAUSTED` and they are not on own keys.
+  It replaces `TierEnforcementService.assertAndIncrementRunCount` +
+  `UsageTrackingService.assertWithinLimits(..., "RUNS")` at `RunController` and
+  `AgentRunSubmissionGate`.
+- **Per-call gate unchanged.** `LlmRouter` still authorizes against the live budget and
+  debits raw COGS + ES credits after each successful managed call (mid-run step-down/up).
+- **BYOK bypass.** Own-key calls never debit managed credits and are never blocked by
+  `EXHAUSTED` (per managed-AI plan §7).
+- **Entitlements surface.** `/api/v3/entitlements` adds `includedAiCredits`,
+  `aiCreditsUsed`, `aiCreditsRemaining`, `routingState`, `rawCogsCapUsd`,
+  `rawCogsUsedUsd`; `runLimitMonthly` is retained for back-compat but advisory only.
+  CLI + web show "ES credits used/remaining + routing state" in place of "X of Y runs".
+
 ## Unified Architecture
 
 ```mermaid
