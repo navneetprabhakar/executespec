@@ -377,6 +377,18 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void creditSummaryReflectsCurrentPolicyGrantWhenPeriodSnapshotIsStale() {
+    ManagedAiUsagePeriod stale = period();
+    stale.setIncludedAiCredits(0); // period created under an older 0-credit policy
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(stale));
+
+    ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "PRO");
+
+    assertThat(cs.creditsIncluded()).isEqualTo(2000); // current PRO policy grant, not the stale 0
+    assertThat(cs.creditsRemaining()).isEqualTo(2000);
+  }
+
+  @Test
   void creditSummaryReportsUngatedForEnterprise() {
     ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "ENTERPRISE");
 

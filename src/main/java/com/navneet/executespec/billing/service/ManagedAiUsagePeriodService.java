@@ -33,10 +33,56 @@ class ManagedAiUsagePeriodService {
       ManagedAiProperties.TierPolicy policy,
       Instant now,
       boolean locked) {
-    return (locked
+    Optional<ManagedAiUsagePeriod> existing =
+        locked
             ? periodRepository.findCurrentForUpdate(user.userId(), now)
-            : periodRepository.findCurrent(user.userId(), now))
-        .orElseGet(() -> periodRepository.save(newPeriod(user, policy, now)));
+            : periodRepository.findCurrent(user.userId(), now);
+    if (existing.isPresent()) {
+      ManagedAiUsagePeriod period = existing.get();
+      // Run-count retirement (2026-06-22): policy-derived caps are snapshotted onto the period at
+      // creation. Refresh them from the CURRENT policy so a tier policy change (e.g. the new FREE
+      // grant) reaches users mid-period without resetting their usage counters.
+      if (refreshPolicyCaps(period, policy)) {
+        period.setUpdatedAt(now);
+        periodRepository.save(period);
+      }
+      return period;
+    }
+    return periodRepository.save(newPeriod(user, policy, now));
+  }
+
+  /**
+   * Re-apply the current tier policy's caps onto an existing period. Returns true if anything
+   * changed. Usage fields ({@code *UsedUsd}, {@code aiCreditsUsed}) are intentionally preserved.
+   */
+  private static boolean refreshPolicyCaps(
+      ManagedAiUsagePeriod p, ManagedAiProperties.TierPolicy policy) {
+    boolean changed = false;
+    if (p.getIncludedAiCredits() != policy.getIncludedCredits()) {
+      p.setIncludedAiCredits(policy.getIncludedCredits());
+      changed = true;
+    }
+    if (p.getRawCogsCapUsd() != policy.getRawCogsCapUsd()) {
+      p.setRawCogsCapUsd(policy.getRawCogsCapUsd());
+      changed = true;
+    }
+    if (p.getFrontierRawCapUsd() != policy.getFrontierRawCapUsd()) {
+      p.setFrontierRawCapUsd(policy.getFrontierRawCapUsd());
+      changed = true;
+    }
+    if (p.getValueModeAfterRawUsd() != policy.getValueModeAfterRawUsd()) {
+      p.setValueModeAfterRawUsd(policy.getValueModeAfterRawUsd());
+      changed = true;
+    }
+    if (p.getCheapOnlyAfterRawUsd() != policy.getCheapOnlyAfterRawUsd()) {
+      p.setCheapOnlyAfterRawUsd(policy.getCheapOnlyAfterRawUsd());
+      changed = true;
+    }
+    if (p.getHardStopAfterRawUsd() != policy.effectiveHardStopUsd()) {
+      p.setHardStopAfterRawUsd(policy.effectiveHardStopUsd());
+      changed = true;
+    }
+    return changed;
   }
 
   Optional<ManagedAiUsagePeriod> findCurrent(String userId, Instant now) {
