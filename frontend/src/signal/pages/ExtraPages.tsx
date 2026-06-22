@@ -133,7 +133,7 @@ export function PublicPricingPage() {
               features: [
                 '200 ES AI credits / month',
                 'Small specs only',
-                '$2 managed-AI cap',
+                'Managed-AI cap',
                 '1 project · 1 repo',
                 'Email support',
               ],
@@ -148,7 +148,7 @@ export function PublicPricingPage() {
                 'Managed keys — Anthropic · OpenAI · Gemini',
                 'PR review + code review (4 scans/mo)',
                 '2 projects · 2 repos each',
-                '$16 managed-AI cap — add your own key to lift it',
+                'Managed-AI cap — add your own key to lift it',
               ],
             },
             {
