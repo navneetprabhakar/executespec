@@ -19,8 +19,8 @@ The selling-point line: **"AI that ships pull requests your team will actually m
 
 ## Pricing (2026)
 
-- **Free** ($0/month): 200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, $2 managed-AI cap, verified 0–100 score on every run.
-- **Pro** ($29/month or $289/year — 17% off): 2,000 ES AI credits/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, $16 managed-AI cap (bring your own key to lift it), readymade library + migration recipes.
+- **Free** ($0/month): 200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, a managed-AI cap, verified 0–100 score on every run.
+- **Pro** ($29/month or $289/year — 17% off): 2,000 ES AI credits/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, a managed-AI cap (bring your own key to lift it), readymade library + migration recipes.
 - **Team** ($39/seat/month, from 1 seat, up to 20): BYOK — unlimited on your own Anthropic / OpenAI / Google keys with zero markup (the seat fee covers the platform). Org governance: per-project spend caps, plan-approval thresholds, repo allowlists. Cross-repo runs, sharing, unlimited code reviews, autofix surfaces, audit log, shared spec templates.
 - **Enterprise** (custom): everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, JIRA + Confluence integration, priority support.
 
