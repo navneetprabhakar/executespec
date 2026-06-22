@@ -73,12 +73,12 @@ function isLiveStatus(s?: string | null): boolean {
 // the "0 / ∞ runs" jargon, and "this cycle" became "this month".
 function quotaSubtitle(
   tier: string,
-  permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
+  _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
 ): string {
-  if (!permissions) return tier;
-  return permissions.monthlyRunLimit === -1
-    ? `${tier} · no run limit`
-    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this month · ${tier}`;
+  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed ES AI
+  // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
+  // The subtitle stays at the tier so it never shows a stale run cap.
+  return tier;
 }
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
@@ -605,11 +605,6 @@ export function IdeCompose() {
     );
   }
 
-  const isAtCap =
-    permissions != null &&
-    permissions.monthlyRunLimit !== -1 &&
-    permissions.currentRunCount >= permissions.monthlyRunLimit;
-
   async function submit() {
     if (!spec.trim()) {
       setErr('Describe what to build first.');
@@ -671,28 +666,6 @@ export function IdeCompose() {
           </button>
         ))}
       </div>
-
-      {isAtCap && (
-        <div
-          className='ide-card'
-          style={{
-            borderColor: 'var(--ide-yellow)',
-            marginBottom: 12,
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          You've used all {permissions?.monthlyRunLimit} runs in this billing cycle.{' '}
-          <Link to='/topup' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            Top up credits →
-          </Link>{' '}
-          or{' '}
-          <Link to='/plans' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            upgrade your plan →
-          </Link>
-          .
-        </div>
-      )}
 
       <div className='ide-compose-layout'>
         <div className='ide-compose-main'>
@@ -1117,7 +1090,7 @@ export function IdeCompose() {
               <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
             )}
             <div className='ide-run-action'>
-              <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+              <button className='ide-btn' onClick={submit} disabled={busy}>
                 {busy ? 'Submitting...' : 'Create plan'}
               </button>
             </div>
@@ -1145,7 +1118,7 @@ export function IdeCompose() {
             Next
           </button>
         ) : (
-          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+          <button className='ide-btn' onClick={submit} disabled={busy}>
             {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}
