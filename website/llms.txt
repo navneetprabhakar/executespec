@@ -1,6 +1,6 @@
 # ExecuteSpec
 
-> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 15 runs/month, no credit card), Pro ($29/mo or $289/yr — 30 managed runs/month), Team ($39/seat/mo from 1 seat — BYOK, unlimited runs on your own keys), Enterprise (custom contract + signed DPA). App: https://dev.executespec.ai
+> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 200 ES AI credits/month, no credit card), Pro ($29/mo or $289/yr — 2,000 ES AI credits/month on managed keys), Team ($39/seat/mo from 1 seat — BYOK, unlimited on your own keys), Enterprise (custom contract + signed DPA). App: https://dev.executespec.ai
 
 ## What it is
 
@@ -11,17 +11,17 @@ The selling-point line: **"AI that ships pull requests your team will actually m
 ## Key concepts
 
 - **Verified score (0–100)**: additive weighted score across five slots — code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5) — averaged over the slots that actually fired. The tests slot runs your project's own test suite in the workspace. The verdict pill (Ready / Needs review / Failed) is derived from the score.
-- **Plan-approval gate (Production mode)**: the planner emits a structured plan + cost estimate that you approve before any code is written. Credits are charged at approval and refunded if the run fails. No surprise PRs, no surprise bills.
-- **Credits**: 1 credit ≈ $5 of model spend. A run costs 1–N credits proportional to its estimated LLM cost.
+- **Plan-approval gate (Production mode)**: the planner emits a structured plan + cost estimate that you approve before any code is written. Managed-AI usage then meters in ES AI credits as the run works; failed calls are not charged. No surprise PRs, no surprise bills.
+- **ES AI credits**: $1 = 100 ES AI credits. Managed-AI LLM calls debit credits from your monthly grant at real model cost; frontier models step down automatically near your cap and failed calls are not charged. BYOK (Team/Enterprise) bypasses the grant entirely.
 - **Project workspace**: per-project container linking one or more GitHub repos, with per-repo codemaps, a combined architecture doc, a tech-debt panel, a project memory ledger (compacted every 10 runs), and RAG-powered project chat.
-- **BYOK** (Bring Your Own Keys): standard on Team and Enterprise (your own Anthropic / OpenAI / Google keys, zero per-run markup — pay your LLM provider directly); optional on Pro to lift the per-run cost cap.
+- **BYOK** (Bring Your Own Keys): standard on Team and Enterprise (your own Anthropic / OpenAI / Google keys, zero per-run markup — pay your LLM provider directly); optional on Pro to lift the managed-AI cap.
 - **Autofix surfaces**: one-click patch runs from PR review comments, tech-debt categories, and code-review findings — each opens its own PR.
 
 ## Pricing (2026)
 
-- **Free** ($0/month): 15 runs per month, no credit card. 1 project, 1 repo, managed keys, small (1-credit) specs, $3 per-run cost cap, verified 0–100 score on every run.
-- **Pro** ($29/month or $289/year — 17% off): 30 runs/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, $5 per-run cost cap (bring your own key to lift it), readymade library + migration recipes.
-- **Team** ($39/seat/month, from 1 seat, up to 20): BYOK — unlimited runs on your own Anthropic / OpenAI / Google keys with zero per-run markup (the seat fee covers the platform). Org governance: per-project spend caps, plan-approval thresholds, repo allowlists. Cross-repo runs, sharing, unlimited code reviews, autofix surfaces, audit log, shared spec templates.
+- **Free** ($0/month): 200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, $2 managed-AI cap, verified 0–100 score on every run.
+- **Pro** ($29/month or $289/year — 17% off): 2,000 ES AI credits/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, $16 managed-AI cap (bring your own key to lift it), readymade library + migration recipes.
+- **Team** ($39/seat/month, from 1 seat, up to 20): BYOK — unlimited on your own Anthropic / OpenAI / Google keys with zero markup (the seat fee covers the platform). Org governance: per-project spend caps, plan-approval thresholds, repo allowlists. Cross-repo runs, sharing, unlimited code reviews, autofix surfaces, audit log, shared spec templates.
 - **Enterprise** (custom): everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, JIRA + Confluence integration, priority support.
 
 ## Why this beats each competitor

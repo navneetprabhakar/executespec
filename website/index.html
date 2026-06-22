@@ -20,7 +20,7 @@
     </script>
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
-    <meta name="description" content="Write a spec in plain English. ExecuteSpec plans it, codes it across one repo or twenty, runs your tests, reviews it, and opens a pull request with a deterministic Ready / Needs review / Failed verdict. Free 15 runs/mo · Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
+    <meta name="description" content="Write a spec in plain English. ExecuteSpec plans it, codes it across one repo or twenty, runs your tests, reviews it, and opens a pull request with a deterministic Ready / Needs review / Failed verdict. Free 200 ES AI credits/mo · Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
     <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
@@ -160,7 +160,7 @@
         "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited runs with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Pro tier ($29/mo) uses managed keys — we pay the LLM costs and you get 30 managed runs per month. The Free tier (15 runs per month, no credit card) uses our system credits."
+          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited managed-AI usage with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Pro tier ($29/mo) uses managed keys — we pay the LLM costs and you get 2,000 ES AI credits per month. The Free tier (200 ES AI credits per month, no credit card) uses our managed-AI grant."
         }
       }, {
         "@type": "Question",
@@ -309,7 +309,7 @@
       "@context": "https://schema.org",
       "@type": "Product",
       "name": "ExecuteSpec",
-      "description": "AI coding platform that ships pull requests your team will actually merge. Four tiers — Free (15 runs/month, no card), Pro $29/mo (30 managed runs/month), Team $39/seat (from 1 seat, BYOK + per-seat collaboration + audit trail), Enterprise (custom contract + signed DPA).",
+      "description": "AI coding platform that ships pull requests your team will actually merge. Four tiers — Free (200 ES AI credits/month, no card), Pro $29/mo (2,000 ES AI credits/month), Team $39/seat (from 1 seat, BYOK + per-seat collaboration + audit trail), Enterprise (custom contract + signed DPA).",
       "brand": { "@id": "https://executespec.ai/#organization" },
       "category": "Developer Tools",
       "image": "https://executespec.ai/images/og-hero.png",
@@ -317,7 +317,7 @@
         {
           "@type": "Offer",
           "name": "Free",
-          "description": "15 runs per month, no credit card. 1 project, 1 repo, managed keys, small (1-credit) specs, verified 0-100 score on every run.",
+          "description": "200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, verified 0-100 score on every run.",
           "price": "0",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -333,7 +333,7 @@
         {
           "@type": "Offer",
           "name": "Pro",
-          "description": "30 managed runs per month for one developer. Managed keys (we pay the LLM), all providers, 2 projects, 2 repos per project, plan & review gate, priority email support.",
+          "description": "2,000 ES AI credits per month for one developer. Managed keys (we pay the LLM), all providers, 2 projects, 2 repos per project, plan & review gate, priority email support.",
           "price": "29",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -437,8 +437,8 @@
         },
         {
           "@type": "DefinedTerm",
-          "name": "Credit",
-          "description": "The unit of run allocation on ExecuteSpec. $1 = 1 credit across subscription and top-up pricing. Credits per run scale by spec complexity: LOW and MEDIUM specs cost 1 credit, HIGH specs cost 4 credits, React Native + Expo mobile specs cost 2 credits. The exact cost is shown at plan approval before any work starts.",
+          "name": "ES AI Credit",
+          "description": "The unit of managed-AI allowance on ExecuteSpec. $1 = 100 ES AI credits. Managed-AI LLM calls debit credits from your monthly grant at real model cost; frontier models step down automatically near your cap and failed calls are not charged. Free includes 200 credits/month, Pro 2,000; Team and Enterprise are BYOK and bypass the grant.",
           "inDefinedTermSet": "https://executespec.ai/#glossary"
         },
         {
@@ -1316,7 +1316,7 @@
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
             </a>
             <a class='btn secondary' href='https://dev.executespec.ai/welcome'>Try the sandbox</a>
-            <span class='pip'>No card required · 15 runs / mo</span>
+            <span class='pip'>No card required · 200 ES AI credits / mo</span>
         </div>
 
         <div class='hero-stats'>
@@ -1463,37 +1463,37 @@
                 <div class='icon m'>⚡</div>
                 <h4>Stripe checkout</h4>
                 <p>Subscription + one-time + webhook signature verify</p>
-                <div class='meta'>~6m · 4 credits</div>
+                <div class='meta'>~6m</div>
             </div>
             <div class='lib-card'>
                 <div class='icon s'>🔐</div>
                 <h4>OAuth login</h4>
                 <p>Google + GitHub + email-password fallback</p>
-                <div class='meta'>~4m · 2 credits</div>
+                <div class='meta'>~4m</div>
             </div>
             <div class='lib-card'>
                 <div class='icon c'>🧠</div>
                 <h4>RAG with pgvector</h4>
                 <p>Tika extraction → embeddings → retrieval</p>
-                <div class='meta'>~9m · 6 credits</div>
+                <div class='meta'>~9m</div>
             </div>
             <div class='lib-card'>
                 <div class='icon l'>🛠</div>
                 <h4>GitHub Actions CI</h4>
                 <p>Build · test · lint · containerize · push</p>
-                <div class='meta'>~3m · 2 credits</div>
+                <div class='meta'>~3m</div>
             </div>
             <div class='lib-card'>
                 <div class='icon m'>📦</div>
                 <h4>Docker compose dev</h4>
                 <p>Postgres + Redis + app · hot reload</p>
-                <div class='meta'>~2m · 1 credit</div>
+                <div class='meta'>~2m</div>
             </div>
             <div class='lib-card'>
                 <div class='icon s'>💳</div>
                 <h4>Razorpay checkout</h4>
                 <p>India payments · UPI · cards · auth webhooks</p>
-                <div class='meta'>~5m · 3 credits</div>
+                <div class='meta'>~5m</div>
             </div>
         </div>
 
@@ -1514,7 +1514,7 @@
         <div class='section-eyebrow signal'>Pricing</div>
         <h2>Simple. Start free. Scale up.</h2>
         <p class='lede'>
-            Credits are charged only when you approve a plan — failed runs are refunded. BYOK removes the cost cap entirely. Cancel any time. Pro annual saves 17%.
+            Managed AI is metered in ES AI credits as your run works — failed calls aren't charged. BYOK removes the managed-AI cap entirely. Cancel any time. Pro annual saves 17%.
         </p>
 
         <div class='cur-wrap'>
@@ -1530,9 +1530,9 @@
                 <div class='price'><span class='cur usd'>$0</span><span class='cur inr'>₹0</span></div>
                 <div class='sub'>No card required</div>
                 <ul>
-                    <li>15 runs / month</li>
-                    <li>Small specs (1 credit)</li>
-                    <li>$3 per-run cost cap</li>
+                    <li>200 ES AI credits / month</li>
+                    <li>Small specs only</li>
+                    <li>$2 managed-AI cap</li>
                     <li>1 project · 1 repo</li>
                     <li>Email support</li>
                 </ul>
@@ -1543,11 +1543,11 @@
                 <div class='price'><span class='cur usd'>$29<span class='unit'>/mo</span></span><span class='cur inr'>₹2,499<span class='unit'>/mo</span></span></div>
                 <div class='sub'>Indie devs · $289/yr (save 17%)</div>
                 <ul>
-                    <li>30 runs / month</li>
+                    <li>2,000 ES AI credits / month</li>
                     <li>Managed keys — Anthropic · OpenAI · Gemini</li>
                     <li>PR review + code review (4 scans/mo)</li>
                     <li>2 projects · 2 repos each</li>
-                    <li>$5 per-run cap · BYOK lifts it</li>
+                    <li>$16 managed-AI cap · BYOK lifts it</li>
                     <li>Library + migrations</li>
                 </ul>
                 <a class='btn' href='https://dev.executespec.ai/signup'>Get started</a>
@@ -1558,8 +1558,8 @@
                 <div class='price'><span class='cur usd'>$39<span class='unit'>/seat/mo</span></span><span class='cur inr'>₹3,399<span class='unit'>/seat/mo</span></span></div>
                 <div class='sub'>From 1 seat · monthly</div>
                 <ul>
-                    <li>Unlimited runs on your keys</li>
-                    <li>No platform cost cap · zero markup</li>
+                    <li>Unlimited on your own keys (BYOK)</li>
+                    <li>No managed-AI cap · zero markup</li>
                     <li>BYOK — Anthropic · OpenAI · Gemini</li>
                     <li>Org spend caps + approval thresholds</li>
                     <li>Cross-repo + sharing</li>
@@ -1572,7 +1572,7 @@
                 <div class='price'>Custom</div>
                 <div class='sub'>Custom contract · DPA</div>
                 <ul>
-                    <li>Unlimited runs · no cost cap</li>
+                    <li>Unlimited · no managed-AI cap</li>
                     <li>BYOK + OpenRouter gateway</li>
                     <li>Model matrix override + per-run pin</li>
                     <li>Standards · Contracts · ADRs</li>
@@ -1649,7 +1649,7 @@
             <details class='faq-item'>
                 <summary>What does "Bring Your Own Keys (BYOK)" mean?</summary>
                 <div class='answer'>
-                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Runs against your keys bypass our cost cap entirely (we still track cache-hit rates for optimization). Your keys are encrypted at rest, never logged, and can be replaced any time from org settings.
+                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Calls against your keys bypass the managed-AI cap entirely (we still track cache-hit rates for optimization). Your keys are encrypted at rest, never logged, and can be replaced any time from org settings.
                 </div>
             </details>
             <details class='faq-item'>
@@ -1686,7 +1686,7 @@
 
         <div class='cta-block'>
             <h2>Stop reviewing diffs. <em>Start merging PRs.</em></h2>
-            <p>15 free runs a month. No card. Five minutes to your first verified PR.</p>
+            <p>200 free ES AI credits a month. No card. Five minutes to your first verified PR.</p>
             <a class='btn-cta' href='https://dev.executespec.ai/signup'>
                 Start free
                 <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>

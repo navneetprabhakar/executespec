@@ -132,7 +132,7 @@ export function IdeBilling() {
   // endpoint reports a stale per-org plan/limit (e.g. it returns FREE/5 even for
   // an ENTERPRISE org), so we use it ONLY for gateway + renewal date + invoices,
   // never for the run cap or plan status.
-  const {periodRuns, runCap, totalSpend, planStatus} = billingUsageSummary(
+  const {periodRuns, totalSpend, planStatus} = billingUsageSummary(
     usage,
     permissions,
     tier,
@@ -220,14 +220,7 @@ export function IdeBilling() {
                 borderTop: '1px solid var(--ide-border)',
               }}
             >
-              <Stat
-                label='Work items'
-                value={
-                  <>
-                    {periodRuns} / {runCap}
-                  </>
-                }
-              />
+              <Stat label='Work runs' value={<>{periodRuns}</>} />
               <Stat label='Spent' value={`$${totalSpend.toFixed(2)}`} />
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
@@ -379,7 +372,7 @@ export function IdeBilling() {
                 marginBottom: 8,
               }}
             >
-              Work used
+              Work runs this cycle
             </div>
             <div
               style={{
@@ -394,29 +387,9 @@ export function IdeBilling() {
               {periodRuns}
               <span style={{fontSize: 18, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
                 {' '}
-                / {runCap}
+                runs
               </span>
             </div>
-            {typeof runCap === 'number' && runCap > 0 && (
-              <div
-                style={{
-                  height: 6,
-                  background: 'var(--ide-bg-tab-inactive)',
-                  borderRadius: 3,
-                  overflow: 'hidden',
-                  marginBottom: 14,
-                }}
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${Math.min(100, (periodRuns / runCap) * 100)}%`,
-                    background: 'var(--ide-accent)',
-                    borderRadius: 3,
-                  }}
-                />
-              </div>
-            )}
             <div className='ide-kv'>
               <span>Tier</span>
               <span>{tier}</span>
