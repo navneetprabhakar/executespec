@@ -215,7 +215,10 @@ public class ManagedAiUsageService {
         .findCurrent(userId, Instant.now())
         .map(
             p -> {
-              long included = p.getIncludedAiCredits();
+              // Grant is policy-derived; the period snapshot may predate a policy bump. The write
+              // path (currentOrCreate) refreshes the period's caps, but reads must still reflect the
+              // current grant immediately.
+              long included = policy.getIncludedCredits();
               long used = p.getAiCreditsUsed();
               return new CreditSummary(
                   true, routingPolicy.recomputeState(p), included, used, Math.max(0, included - used));
