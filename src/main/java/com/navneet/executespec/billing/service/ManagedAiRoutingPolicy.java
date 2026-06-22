@@ -17,24 +17,42 @@ class ManagedAiRoutingPolicy {
   static final String CHEAP_ONLY = "CHEAP_ONLY";
   static final String EXHAUSTED = "EXHAUSTED";
 
+  /**
+   * Run-count retirement (2026-06-22): the customer-facing spend limit is the ES AI credit grant,
+   * not a raw-$ cap. EXHAUSTED and the credit step-downs are denominated in CREDITS
+   * ({@code aiCreditsUsed} vs {@code includedAiCredits}), so a top-up — which raises
+   * {@code includedAiCredits} — lifts the gate. Step-down thresholds keep their configured shape by
+   * scaling the grant by the raw-COGS proportion (e.g. cheap-only at $12 of a $16 cap → 75% of the
+   * grant). The frontier sub-cap stays an internal raw-COGS guardrail (margin control on the most
+   * expensive models), independent of the customer credit limit.
+   */
   String recomputeState(ManagedAiUsagePeriod period) {
-    double raw = period.getRawCogsUsedUsd();
-    double hard =
+    long included = period.getIncludedAiCredits();
+    long usedCredits = period.getAiCreditsUsed();
+    if (included > 0 && usedCredits >= included) return EXHAUSTED;
+    double hardRaw =
         period.getHardStopAfterRawUsd() > 0
             ? period.getHardStopAfterRawUsd()
             : period.getRawCogsCapUsd();
-    if (hard > 0 && raw >= hard) return EXHAUSTED;
-    if (period.getCheapOnlyAfterRawUsd() > 0 && raw >= period.getCheapOnlyAfterRawUsd()) {
-      return CHEAP_ONLY;
-    }
+    long cheapOnly = creditThreshold(included, period.getCheapOnlyAfterRawUsd(), hardRaw);
+    if (cheapOnly > 0 && usedCredits >= cheapOnly) return CHEAP_ONLY;
     if (period.getFrontierRawCapUsd() > 0
         && period.getFrontierRawUsedUsd() >= period.getFrontierRawCapUsd()) {
       return FRONTIER_LOCKED;
     }
-    if (period.getValueModeAfterRawUsd() > 0 && raw >= period.getValueModeAfterRawUsd()) {
-      return VALUE_MODE;
-    }
+    long valueMode = creditThreshold(included, period.getValueModeAfterRawUsd(), hardRaw);
+    if (valueMode > 0 && usedCredits >= valueMode) return VALUE_MODE;
     return FULL;
+  }
+
+  /**
+   * Credit-denominated step-down threshold = the credit grant scaled by the configured raw-COGS
+   * proportion ({@code thresholdRaw / hardRaw}). Keeps the policy's configured shape while gating on
+   * credits. Returns 0 (disabled) when any input is non-positive.
+   */
+  private static long creditThreshold(long includedCredits, double thresholdRaw, double hardRaw) {
+    if (includedCredits <= 0 || thresholdRaw <= 0 || hardRaw <= 0) return 0;
+    return Math.round(includedCredits * (thresholdRaw / hardRaw));
   }
 
   boolean isAllowed(String state, String costClass, String agentRole) {
