@@ -119,9 +119,9 @@ export function PublicPricingPage() {
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
         <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
-          Runs are metered in credits — <b>1 credit ≈ $5 of model spend</b>. Credits are charged
-          only when you approve a plan, and refunded if the run fails. Pro bills monthly or yearly;
-          Team is monthly, per seat.
+          Managed AI is metered in <b>ES AI credits</b> — $1 = 100 credits, charged from real model
+          cost as your run works. Frontier models step down automatically near your monthly cap;
+          bring your own keys (Team) to remove it. Pro bills monthly or yearly; Team is monthly, per seat.
         </Card>
 
         <div className='signal-grid cols-2 cols-4-xl'>
@@ -131,9 +131,9 @@ export function PublicPricingPage() {
               price: '$0',
               sub: 'No card required',
               features: [
-                '15 runs / month',
-                'Small specs (1 credit)',
-                '$3 per-run cost cap',
+                '200 ES AI credits / month',
+                'Small specs only',
+                '$2 managed-AI cap',
                 '1 project · 1 repo',
                 'Email support',
               ],
@@ -144,11 +144,11 @@ export function PublicPricingPage() {
               unit: '/mo',
               sub: 'For individuals · $289/yr (save 17%)',
               features: [
-                '30 runs / month',
+                '2,000 ES AI credits / month',
                 'Managed keys — Anthropic · OpenAI · Gemini',
                 'PR review + code review (4 scans/mo)',
                 '2 projects · 2 repos each',
-                '$5 per-run cap — add your own key to lift it',
+                '$16 managed-AI cap — add your own key to lift it',
               ],
             },
             {
@@ -157,8 +157,8 @@ export function PublicPricingPage() {
               unit: '/seat/mo',
               sub: 'From 1 seat · bring your own API keys',
               features: [
-                'Unlimited runs on your keys',
-                'No platform cost cap',
+                'Unlimited on your own keys (BYOK)',
+                'No managed-AI cap',
                 'Org spend caps + approval thresholds',
                 '5 projects · cross-repo runs',
                 'Unlimited code reviews + sharing',
@@ -171,7 +171,7 @@ export function PublicPricingPage() {
               price: 'Custom',
               sub: 'Custom contract · DPA',
               features: [
-                'Unlimited runs · no cost cap',
+                'Unlimited · no managed-AI cap',
                 'Model matrix override + per-run model pins',
                 'OpenRouter gateway models',
                 'Standards · Contracts · ADRs',
