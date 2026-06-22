@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.RunKeyContext;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.entity.ManagedAiUsageEvent;
@@ -34,6 +36,7 @@ class ManagedAiUsageServiceTest {
   private ManagedAiUsageEventRepository eventRepo;
   private ManagedAiModelClassifier modelClassifier;
   private ManagedAiNotificationService notificationService;
+  private TierEnforcementService tierService;
   private ManagedAiUsageService service;
 
   @BeforeEach
@@ -42,7 +45,7 @@ class ManagedAiUsageServiceTest {
     eventRepo = mock(ManagedAiUsageEventRepository.class);
     modelClassifier = mock(ManagedAiModelClassifier.class);
     notificationService = mock(ManagedAiNotificationService.class);
-    TierEnforcementService tierService = mock(TierEnforcementService.class);
+    tierService = mock(TierEnforcementService.class);
     PipelineRunRepository pipelineRunRepository = mock(PipelineRunRepository.class);
     when(tierService.resolveUserTier("u1")).thenReturn("PRO");
 
@@ -321,6 +324,72 @@ class ManagedAiUsageServiceTest {
     assertThat(auth.provider()).isEqualTo("deepseek");
     assertThat(auth.model()).isEqualTo("deepseek-v4-flash-native");
     assertThat(auth.reason()).contains("stepped down");
+  }
+
+  // ---- Run-count retirement (2026-06-22): submission-time credit gate + entitlements summary ----
+
+  @Test
+  void assertCanStartRunThrows402WhenExhausted() {
+    ManagedAiUsagePeriod period = period();
+    period.setRawCogsUsedUsd(16.0); // at the hard stop -> EXHAUSTED
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.assertCanStartRun(userDetails(), false))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("exhausted");
+  }
+
+  @Test
+  void assertCanStartRunAllowsWhenBudgetRemains() {
+    ManagedAiUsagePeriod period = period();
+    period.setRawCogsUsedUsd(1.0); // well under caps -> FULL
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+
+    service.assertCanStartRun(userDetails(), false); // no throw
+  }
+
+  @Test
+  void assertCanStartRunBypassesGateForOwnKeys() {
+    service.assertCanStartRun(userDetails(), true); // pure BYOK -> exempt, no period lookup
+    verify(periodRepo, never()).findCurrent(anyString(), any());
+  }
+
+  @Test
+  void assertCanStartRunAllowsUngatedTier() {
+    when(tierService.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
+    service.assertCanStartRun(userDetails(), false); // ungated -> no throw
+    verify(periodRepo, never()).findCurrent(anyString(), any());
+  }
+
+  @Test
+  void creditSummaryReportsManagedBalanceForManagedTier() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(500);
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+
+    ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "PRO");
+
+    assertThat(cs.managed()).isTrue();
+    assertThat(cs.creditsIncluded()).isEqualTo(2000);
+    assertThat(cs.creditsUsed()).isEqualTo(500);
+    assertThat(cs.creditsRemaining()).isEqualTo(1500);
+  }
+
+  @Test
+  void creditSummaryReportsUngatedForEnterprise() {
+    ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "ENTERPRISE");
+
+    assertThat(cs.managed()).isFalse();
+    assertThat(cs.creditsRemaining()).isEqualTo(-1);
+  }
+
+  private static AppUserDetails userDetails() {
+    AppUser u = new AppUser();
+    u.setId("u1");
+    u.setOrgId("o1");
+    u.setTier("PRO");
+    return new AppUserDetails(u, null);
   }
 
   private static RunKeyContext keys() {

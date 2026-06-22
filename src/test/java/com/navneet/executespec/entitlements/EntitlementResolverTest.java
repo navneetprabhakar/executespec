@@ -13,6 +13,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.credit.LifetimeCreditService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ class EntitlementResolverTest {
   private ProjectMemberRepository projectMemberRepo;
   private TierConfigRepository tierRepo;
   private LifetimeCreditService credit;
+  private ManagedAiUsageService managedAi;
   private EntitlementResolver resolver;
 
   @BeforeEach
@@ -34,7 +36,11 @@ class EntitlementResolverTest {
     projectMemberRepo = mock(ProjectMemberRepository.class);
     tierRepo = mock(TierConfigRepository.class);
     credit = mock(LifetimeCreditService.class);
-    resolver = new EntitlementResolver(userRepo, orgRepo, projectMemberRepo, tierRepo, credit);
+    managedAi = mock(ManagedAiUsageService.class);
+    when(managedAi.creditSummary(anyString(), anyString()))
+        .thenReturn(new ManagedAiUsageService.CreditSummary(false, "FULL", -1, 0, -1));
+    resolver =
+        new EntitlementResolver(userRepo, orgRepo, projectMemberRepo, tierRepo, credit, managedAi);
   }
 
   private TierConfig tierCfg(String key, String display, int monthlyLimit) {

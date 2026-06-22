@@ -9,6 +9,7 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
@@ -43,6 +44,7 @@ public class AgentRunSubmissionGate {
   private final TierEnforcementService tierEnforcementService;
   private final UsageTrackingService usageTrackingService;
   private final ApiKeyResolver apiKeyResolver;
+  private final ManagedAiUsageService managedAiUsageService;
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final RunIdempotencyService runIdempotencyService;
   private final StateStore stateStore;
@@ -103,8 +105,10 @@ public class AgentRunSubmissionGate {
 
     String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
-    tierEnforcementService.assertAndIncrementRunCount(user.getUser().getId());
-    usageTrackingService.assertWithinLimits(user.getUser().getId(), "RUNS");
+    // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
+    managedAiUsageService.assertCanStartRun(
+        user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
+    tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
     apiKeyResolver.validateKeyAvailability(user.getUser().getId());
 
     String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
