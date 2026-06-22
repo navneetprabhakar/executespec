@@ -19,16 +19,32 @@ class ManagedAiRoutingPolicyTest {
 
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.FULL);
 
-    period.setRawCogsUsedUsd(4.0);
+    // Credit-denominated now: VALUE_MODE at 25% of the 2000 grant ($4 of a $16 cap).
+    period.setAiCreditsUsed(500);
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.VALUE_MODE);
 
+    // Frontier sub-cap remains an internal raw-COGS guardrail.
     period.setFrontierRawUsedUsd(4.0);
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.FRONTIER_LOCKED);
 
-    period.setRawCogsUsedUsd(12.0);
+    // CHEAP_ONLY at 75% of the grant ($12 of $16).
+    period.setAiCreditsUsed(1500);
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.CHEAP_ONLY);
 
-    period.setRawCogsUsedUsd(16.0);
+    // EXHAUSTED when the credit grant is fully spent.
+    period.setAiCreditsUsed(2000);
+    assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+  }
+
+  @Test
+  void creditGrantTopUpRaisesTheGate() {
+    // The whole point of gating on credits: a top-up raises includedAiCredits and lifts the gate,
+    // even though the raw-$ cap ($16) is unchanged.
+    ManagedAiUsagePeriod period = period();
+    period.setIncludedAiCredits(4000); // topped up from 2000
+    period.setAiCreditsUsed(2500); // past the original 2000 grant …
+    assertThat(policy.recomputeState(period)).isNotEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+    period.setAiCreditsUsed(4000); // … exhausted only at the topped-up grant
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
   }
 

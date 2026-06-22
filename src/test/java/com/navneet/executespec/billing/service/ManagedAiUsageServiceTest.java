@@ -130,7 +130,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void cheapOnlyStateStepsDownToSameProviderCheapModel() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(12.0);
+    period.setAiCreditsUsed(1500); // CHEAP_ONLY = 75% of the 2000 grant
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
     when(modelClassifier.costClass("deepseek-v4-flash-native")).thenReturn("CHEAP");
@@ -156,7 +156,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void valueModeStepsCriticalPlannerUpToSameProviderFrontierModel() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(4.0);
+    period.setAiCreditsUsed(500); // VALUE_MODE = 25% of the 2000 grant
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
     when(modelClassifier.costClass("claude-opus-4-6")).thenReturn("FRONTIER");
@@ -182,7 +182,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void valueModeDoesNotStepWorkerUpToFrontier() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(4.0);
+    period.setAiCreditsUsed(500); // VALUE_MODE = 25% of the 2000 grant
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
 
@@ -204,6 +204,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionToValueModeNotifiesAndNextCriticalPlannerStepsUpMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(3.95);
+    period.setAiCreditsUsed(487); // +1 call (13 cr) crosses VALUE_MODE at 500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
@@ -224,7 +225,7 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isCloseTo(4.05, offset(0.000001));
-    assertThat(period.getAiCreditsUsed()).isEqualTo(13);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(500);
     assertThat(period.getRoutingState()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
     verify(notificationService)
         .notifyTransition(period, ManagedAiUsageService.FULL, ManagedAiUsageService.VALUE_MODE);
@@ -253,7 +254,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void exhaustedStateBlocksBeforeProviderCall() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(16.0);
+    period.setAiCreditsUsed(2000); // EXHAUSTED — grant fully spent
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
     when(modelClassifier.sameProviderStepDown(anyString(), anyString()))
@@ -277,6 +278,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);
+    period.setAiCreditsUsed(1487); // +1 call (13 cr) crosses CHEAP_ONLY at 1500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
@@ -331,7 +333,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void assertCanStartRunThrows402WhenExhausted() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(16.0); // at the hard stop -> EXHAUSTED
+    period.setAiCreditsUsed(2000); // grant fully spent -> EXHAUSTED
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -343,7 +345,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void assertCanStartRunAllowsWhenBudgetRemains() {
     ManagedAiUsagePeriod period = period();
-    period.setRawCogsUsedUsd(1.0); // well under caps -> FULL
+    period.setAiCreditsUsed(50); // well under thresholds -> FULL
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
 
     service.assertCanStartRun(userDetails(), false); // no throw
