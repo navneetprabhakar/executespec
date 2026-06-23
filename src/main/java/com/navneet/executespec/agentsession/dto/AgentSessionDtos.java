@@ -56,7 +56,27 @@ public final class AgentSessionDtos {
       List<Map<String, Object>> conversation,
       RepoContext repoContext,
       ClientCapabilities clientCapabilities,
-      String providerOverride) {}
+      String providerOverride,
+      List<String> attachmentIds) {
+    /** Back-compat constructor for callers that predate server-side attachments. */
+    public StreamTurnRequest(
+        String message,
+        List<Map<String, Object>> conversation,
+        RepoContext repoContext,
+        ClientCapabilities clientCapabilities,
+        String providerOverride) {
+      this(message, conversation, repoContext, clientCapabilities, providerOverride, null);
+    }
+  }
+
+  /** Metadata returned after a chat upload is validated, extracted, sanitized, and stored. */
+  public record AttachmentResponse(
+      String attachmentId,
+      String filename,
+      String mimeType,
+      long sizeBytes,
+      int extractedChars,
+      String preview) {}
 
   public record InterpretIntentRequest(
       String sessionId,

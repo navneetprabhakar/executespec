@@ -269,7 +269,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Create a cloud run?');
     expect(host.textContent).toContain('Add billing audit logs');
     expect(host.textContent).toContain('Run API');
-    expect(host.textContent).toContain('allowed after confirmation');
+    expect(host.textContent).toContain('after confirm');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
   });
 });

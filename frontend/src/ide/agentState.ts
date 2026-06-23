@@ -42,6 +42,13 @@ export type RoutingState = {
   runApiAllowed: boolean;
 } | null;
 
+export type AgentAttachmentLite = {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  extractedChars: number;
+};
+
 export type AgentState = {
   status: AgentUiState;
   sessions: api.AgentSessionResponse[];
@@ -57,6 +64,8 @@ export type AgentState = {
   activeRun: string | null;
   routingState: RoutingState;
   managedAi: api.ManagedAiBalance | null;
+  attachments: AgentAttachmentLite[];
+  sessionsCollapsed: boolean;
   error: string | null;
 };
 
@@ -86,6 +95,9 @@ export type AgentAction =
   | {type: 'stream:stop'}
   | {type: 'action:clear'}
   | {type: 'run:submitted'; runId: string}
+  | {type: 'attachment:add'; attachment: AgentAttachmentLite}
+  | {type: 'attachment:remove'; attachmentId: string}
+  | {type: 'sessions:toggle'}
   | {type: 'error'; error: string};
 
 export const initialAgentState: AgentState = {
@@ -103,6 +115,10 @@ export const initialAgentState: AgentState = {
   activeRun: null,
   routingState: null,
   managedAi: null,
+  attachments: [],
+  sessionsCollapsed:
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('es:agent:sessions-collapsed') === '1',
   error: null,
 };
 
@@ -132,6 +148,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         pendingAction: null,
         streamEvents: [],
         routingState: null,
+        attachments: [],
       };
     case 'turns:set':
       return {...state, turns: action.turns};
@@ -151,6 +168,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         streamEvents: [],
         pendingAction: null,
         routingState: null,
+        attachments: [],
         error: null,
       };
     case 'stream:ack':
@@ -229,6 +247,20 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return {...state, pendingAction: null, status: 'idle'};
     case 'run:submitted':
       return {...state, activeRun: action.runId, pendingAction: null, status: 'runStreaming'};
+    case 'attachment:add':
+      return {...state, attachments: [...state.attachments, action.attachment]};
+    case 'attachment:remove':
+      return {
+        ...state,
+        attachments: state.attachments.filter((a) => a.attachmentId !== action.attachmentId),
+      };
+    case 'sessions:toggle': {
+      const next = !state.sessionsCollapsed;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('es:agent:sessions-collapsed', next ? '1' : '0');
+      }
+      return {...state, sessionsCollapsed: next};
+    }
     case 'error':
       return {...state, status: 'error', error: action.error};
     default:

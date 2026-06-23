@@ -259,6 +259,50 @@
 .con-side-brand {
   display: none;
 }
+/* Collapsible desktop sidebar. Mobile keeps the drawer model untouched. */
+.con-side-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 28px;
+  margin-bottom: 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+}
+.con-side-collapse:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+.con-only-desktop {
+  display: flex;
+}
+@media (min-width: 861px) {
+  .con-root.nav-collapsed .con-side {
+    width: 56px;
+    padding: 12px 6px;
+  }
+  .con-root.nav-collapsed .con-navitem,
+  .con-root.nav-collapsed .con-runitem {
+    justify-content: center;
+    padding: 8px;
+  }
+  .con-root.nav-collapsed .con-navitem > span,
+  .con-root.nav-collapsed .con-side-details,
+  .con-root.nav-collapsed .con-side-section,
+  .con-root.nav-collapsed .con-side-tier,
+  .con-root.nav-collapsed .con-runitem-label {
+    display: none;
+  }
+}
+@media (max-width: 860px) {
+  .con-only-desktop {
+    display: none !important;
+  }
+}
 .con-navitem {
   display: flex;
   align-items: center;

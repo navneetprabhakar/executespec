@@ -8,6 +8,7 @@ import {
   pct,
   sessionTitle,
   type AgentAction,
+  type AgentAttachmentLite,
   type AgentUiState,
   type LocalMessage,
   type PendingAction,
@@ -230,11 +231,13 @@ export function AgentLeftRail({
   sessions,
   selectedId,
   status,
+  onToggle,
   dispatch,
 }: {
   sessions: api.AgentSessionResponse[];
   selectedId: string | null;
   status: AgentUiState;
+  onToggle: () => void;
   dispatch: Dispatch<AgentAction>;
 }) {
   return (
@@ -242,7 +245,16 @@ export function AgentLeftRail({
       <div className='ide-card agent-panel'>
         <div className='agent-panel-head'>
           <span>Sessions</span>
+          <span style={{flex: 1}} />
           <IdeBadge kind='warn'>{sessions.length}</IdeBadge>
+          <button
+            className='agent-rail-collapse'
+            onClick={onToggle}
+            title='Hide sessions'
+            aria-label='Hide sessions'
+          >
+            ‹
+          </button>
         </div>
         {status === 'loadingSession' ? (
           <div className='agent-muted'>Loading sessions...</div>
@@ -298,6 +310,12 @@ export function AgentMainPanel({
   projectId,
   runId,
   endRef,
+  attachments,
+  uploading,
+  sessionsCollapsed,
+  onAddFiles,
+  onRemoveAttachment,
+  onToggleSessions,
   dispatch,
   onConfirmAction,
   onSend,
@@ -314,6 +332,12 @@ export function AgentMainPanel({
   projectId?: string;
   runId?: string;
   endRef: RefObject<HTMLDivElement>;
+  attachments: AgentAttachmentLite[];
+  uploading: boolean;
+  sessionsCollapsed: boolean;
+  onAddFiles: (files: FileList | null) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
+  onToggleSessions: () => void;
   dispatch: Dispatch<AgentAction>;
   onConfirmAction: (pending: PendingAction) => void;
   onSend: () => void;
@@ -322,6 +346,16 @@ export function AgentMainPanel({
   return (
     <section className='ide-card agent-main'>
       <div className='agent-main-head'>
+        {sessionsCollapsed && (
+          <button
+            className='agent-rail-show'
+            onClick={onToggleSessions}
+            title='Show sessions'
+            aria-label='Show sessions'
+          >
+            ☰
+          </button>
+        )}
         <div>
           <strong>{selected ? sessionTitle(selected) : 'No session selected'}</strong>
           <span>{selected?.id ?? 'Create a session to start.'}</span>
@@ -356,20 +390,44 @@ export function AgentMainPanel({
         <div ref={endRef} />
       </div>
 
-      <div className='agent-composer'>
-        <div className='agent-context-chips'>
-          {projectId && <span>Project</span>}
-          {runId && <span>Run</span>}
-          <span>Architecture</span>
-          <span>Memory</span>
-          <span>Docs</span>
-          <span>Gate</span>
-        </div>
+      <div
+        className='agent-composer'
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          onAddFiles(e.dataTransfer.files);
+        }}
+      >
+        {(projectId || runId) && (
+          <div className='agent-context-chips'>
+            {projectId && <span>Project</span>}
+            {runId && <span>Run</span>}
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div className='agent-attachments'>
+            {attachments.map((a) => (
+              <span
+                key={a.attachmentId}
+                className='agent-attach-chip'
+                title={`${a.mimeType} · ${a.extractedChars} chars extracted`}
+              >
+                <span className='agent-attach-chip-name'>📎 {a.filename}</span>
+                <button
+                  onClick={() => onRemoveAttachment(a.attachmentId)}
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           className='ide-input'
           rows={3}
           value={input}
-          placeholder='Ask, inspect gates, or create a gated cloud run...'
+          placeholder='Ask, search the web, attach a file, or create a gated cloud run...'
           onChange={(e) => dispatch({type: 'input:set', input: e.target.value})}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -380,16 +438,32 @@ export function AgentMainPanel({
           disabled={isBusy}
         />
         <div className='agent-composer-actions'>
-          <span>Enter sends. Mutations render cards before execution.</span>
-          {isBusy ? (
-            <button className='ide-btn' onClick={onStop}>
-              Stop
-            </button>
-          ) : (
-            <button className='ide-btn' onClick={onSend} disabled={!input.trim()}>
-              Send
-            </button>
-          )}
+          <span>Enter sends · attach PDF/Markdown/text for grounding.</span>
+          <div className='agent-composer-buttons'>
+            <label className='ide-btn ghost agent-upload-btn' title='Attach PDF, Markdown, or text'>
+              {uploading ? 'Uploading…' : '📎 Attach'}
+              <input
+                type='file'
+                accept='.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
+                multiple
+                style={{display: 'none'}}
+                disabled={uploading || isBusy}
+                onChange={(e) => {
+                  onAddFiles(e.target.files);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+            {isBusy ? (
+              <button className='ide-btn' onClick={onStop}>
+                Stop
+              </button>
+            ) : (
+              <button className='ide-btn' onClick={onSend} disabled={!input.trim()}>
+                Send
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>
@@ -421,13 +495,13 @@ export function AgentRightRail({
     <aside className='agent-rail right'>
       <div className='ide-card agent-panel'>
         <div className='agent-panel-head'>
-          <span>Managed AI</span>
-          <IdeBadge kind={managedBadge}>{managedAi?.routingState || 'n/a'}</IdeBadge>
+          <span>Status</span>
+          <IdeBadge kind={routeBadge}>{routingState?.route || 'idle'}</IdeBadge>
         </div>
         {managedAi ? (
           <>
             <div className='agent-kv-row'>
-              <span>Credits</span>
+              <span>ES AI credits</span>
               <code>
                 {managedAi.aiCreditsUsed} / {managedAi.includedAiCredits}
               </code>
@@ -437,28 +511,21 @@ export function AgentRightRail({
                 style={{width: `${pct(managedAi.aiCreditsUsed, managedAi.includedAiCredits)}%`}}
               />
             </div>
-            <div className='agent-kv-row'>
-              <span>Credits left</span>
-              <code>{managedAi.aiCreditsRemaining}</code>
-            </div>
           </>
         ) : (
           <div className='agent-muted'>Usage unavailable.</div>
         )}
-      </div>
-
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Routing state</span>
-          <IdeBadge kind={routeBadge}>{routingState?.route || 'idle'}</IdeBadge>
-        </div>
         <div className='agent-kv-row'>
           <span>Confidence</span>
           <code>{routingState ? `${Math.round(routingState.confidence * 100)}%` : 'n/a'}</code>
         </div>
         <div className='agent-kv-row'>
           <span>Run API</span>
-          <code>{routingState?.runApiAllowed ? 'allowed after confirmation' : 'blocked'}</code>
+          <code>{routingState?.runApiAllowed ? 'after confirm' : 'blocked'}</code>
+        </div>
+        <div className='agent-kv-row'>
+          <span>Managed AI</span>
+          <IdeBadge kind={managedBadge}>{managedAi?.routingState || 'n/a'}</IdeBadge>
         </div>
       </div>
 
@@ -485,20 +552,20 @@ export function AgentRightRail({
         )}
       </div>
 
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>WEB capabilities</span>
+      <details className='ide-card agent-panel agent-cap-details'>
+        <summary className='agent-panel-head'>
+          <span>Capabilities</span>
           <IdeBadge kind='ok'>{capabilities.length}</IdeBadge>
-        </div>
+        </summary>
         <div className='agent-capabilities'>
-          {capabilities.slice(0, 12).map((capability) => (
+          {capabilities.slice(0, 16).map((capability) => (
             <span key={capability.name}>
               <StatusDot kind={capability.confirmationRequired ? 'warn' : 'ok'} size={7} />
               {capability.name}
             </span>
           ))}
         </div>
-      </div>
+      </details>
     </aside>
   );
 }
