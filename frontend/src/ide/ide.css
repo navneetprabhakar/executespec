@@ -1242,6 +1242,83 @@
   max-height: 100%;
 }
 
+.agent-shell.three.no-left {
+  grid-template-columns: minmax(420px, 1fr) 340px;
+}
+.agent-rail-collapse,
+.agent-rail-show {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--ide-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-rail-collapse:hover,
+.agent-rail-show:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+.agent-rail-show {
+  margin-right: 8px;
+}
+.agent-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.agent-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--ide-border);
+  border-radius: 999px;
+  background: var(--ide-bg-sidebar);
+  color: var(--ide-fg);
+  font-size: 11px;
+  max-width: 220px;
+}
+.agent-attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-attach-chip > button {
+  border: none;
+  background: transparent;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.agent-attach-chip > button:hover {
+  color: var(--ide-red);
+}
+.agent-composer-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-upload-btn {
+  cursor: pointer;
+}
+.agent-cap-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.agent-cap-details > summary::-webkit-details-marker {
+  display: none;
+}
+
 .agent-top-strip {
   display: flex;
   flex-wrap: wrap;

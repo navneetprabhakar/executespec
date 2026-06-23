@@ -130,8 +130,21 @@ class SpecChatServiceTest {
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(10, 5, 0, 0, 0.01, 1));
     RunKeyContextStore keyContextStore = mock(RunKeyContextStore.class);
 
+    com.navneet.executespec.security.ContextSanitizer contextSanitizer =
+        mock(com.navneet.executespec.security.ContextSanitizer.class);
+    when(contextSanitizer.sanitizeInput(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+    WebSearchChatTools webSearchChatTools =
+        new WebSearchChatTools(new com.fasterxml.jackson.databind.ObjectMapper(), contextSanitizer);
+
     return new SpecChatService(
-        router, modelResolver, actionTools, projectTools, props, costTracker, keyContextStore);
+        router,
+        modelResolver,
+        actionTools,
+        webSearchChatTools,
+        projectTools,
+        props,
+        costTracker,
+        keyContextStore);
   }
 
   @Test

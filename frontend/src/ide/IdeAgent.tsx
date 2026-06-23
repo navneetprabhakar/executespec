@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useReducer, useRef} from 'react';
+import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {
@@ -23,6 +23,7 @@ export default function IdeAgent() {
   const [state, dispatch] = useReducer(agentReducer, initialAgentState);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   const selected = useMemo(
     () => state.sessions.find((session) => session.id === state.selectedId) ?? null,
@@ -129,6 +130,30 @@ export default function IdeAgent() {
     return createSession();
   }
 
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const session = await ensureSession();
+      for (const file of Array.from(files)) {
+        const meta = await api.uploadAgentAttachment(session.id, file);
+        dispatch({
+          type: 'attachment:add',
+          attachment: {
+            attachmentId: meta.attachmentId,
+            filename: meta.filename,
+            mimeType: meta.mimeType,
+            extractedChars: meta.extractedChars,
+          },
+        });
+      }
+    } catch (e) {
+      dispatch({type: 'error', error: e instanceof Error ? e.message : 'Upload failed.'});
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function refreshAfterMutation(sessionId?: string) {
     const [sessions, gates] = await Promise.all([
       loadSessions(),
@@ -143,6 +168,7 @@ export default function IdeAgent() {
   async function send(seed?: string) {
     const message = (seed ?? state.input).trim();
     if (!message || state.status === 'streaming' || state.status === 'toolRunning') return;
+    const attachmentIds = state.attachments.map((a) => a.attachmentId);
     dispatch({type: 'stream:start', message});
     const abort = new AbortController();
     abortRef.current = abort;
@@ -152,6 +178,7 @@ export default function IdeAgent() {
         session.id,
         {
           message: runId ? `[Run ${runId}] ${message}` : message,
+          attachmentIds,
           clientCapabilities: {
             localTools: false,
             interactive: true,
@@ -289,13 +316,16 @@ export default function IdeAgent() {
         </div>
       )}
 
-      <div className='agent-shell three'>
-        <AgentLeftRail
-          sessions={state.sessions}
-          selectedId={state.selectedId}
-          status={state.status}
-          dispatch={dispatch}
-        />
+      <div className={`agent-shell three${state.sessionsCollapsed ? ' no-left' : ''}`}>
+        {!state.sessionsCollapsed && (
+          <AgentLeftRail
+            sessions={state.sessions}
+            selectedId={state.selectedId}
+            status={state.status}
+            onToggle={() => dispatch({type: 'sessions:toggle'})}
+            dispatch={dispatch}
+          />
+        )}
         <AgentMainPanel
           selected={selected}
           status={state.status}
@@ -308,6 +338,12 @@ export default function IdeAgent() {
           projectId={projectId}
           runId={runId}
           endRef={endRef}
+          attachments={state.attachments}
+          uploading={uploading}
+          sessionsCollapsed={state.sessionsCollapsed}
+          onAddFiles={(files) => void handleFiles(files)}
+          onRemoveAttachment={(id) => dispatch({type: 'attachment:remove', attachmentId: id})}
+          onToggleSessions={() => dispatch({type: 'sessions:toggle'})}
           dispatch={dispatch}
           onConfirmAction={(pending) => void confirmAction(pending)}
           onSend={() => void send()}

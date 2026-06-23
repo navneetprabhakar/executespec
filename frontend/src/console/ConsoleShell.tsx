@@ -59,6 +59,14 @@ export default function ConsoleShell() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const tier = useAuthStore(selectNormalizedTier);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(
+    () => localStorage.getItem('es:nav:collapsed') === '1',
+  );
+  const toggleNav = () =>
+    setNavCollapsed((v) => {
+      localStorage.setItem('es:nav:collapsed', v ? '0' : '1');
+      return !v;
+    });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
@@ -125,6 +133,7 @@ export default function ConsoleShell() {
     'ide-root',
     'con-root',
     drawerOpen ? 'drawer-active' : '',
+    navCollapsed ? 'nav-collapsed' : '',
     path.startsWith('/compose') ? 'compose-active' : '',
   ]
     .filter(Boolean)
@@ -296,11 +305,36 @@ export default function ConsoleShell() {
             <img src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
             <span>ExecuteSpec</span>
           </div>
+          <button
+            className='con-side-collapse con-only-desktop'
+            onClick={toggleNav}
+            title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <svg
+              width='16'
+              height='16'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              aria-hidden='true'
+            >
+              {navCollapsed ? (
+                <polyline points='9 18 15 12 9 6' />
+              ) : (
+                <polyline points='15 18 9 12 15 6' />
+              )}
+            </svg>
+          </button>
           {NAV.map((n) => (
             <NavLink
               key={n.path}
               to={n.path}
               className={`con-navitem${navActive(n.path) ? ' active' : ''}`}
+              title={n.label}
             >
               <n.Icon size={18} />
               <span>{n.label}</span>
