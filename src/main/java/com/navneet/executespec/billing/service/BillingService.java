@@ -1,9 +1,7 @@
 package com.navneet.executespec.billing.service;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -42,7 +40,6 @@ public class BillingService {
   private final BillingPlanRepository planRepo;
   private final BillingPlanLimitRepository limitRepo;
   private final BillingSubscriptionRepository subRepo;
-  private final BillingWebhookEventRepository webhookRepo;
   private final UsageTrackingService usageService;
   private final WebhookSignatureVerifier signatureVerifier;
   private final ObjectMapper objectMapper;
@@ -64,11 +61,6 @@ public class BillingService {
   // Email service for welcome/upgrade emails
   private final MailService mailService;
 
-  /** v2.5.8 — LLM $ spent aggregation for BillingStatusResponse.spentUsd. */
-  private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-
-  private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
-
   // Multi-gateway router (Stripe + Razorpay)
   private final PaymentGatewayRouter gatewayRouter;
 
@@ -81,22 +73,16 @@ public class BillingService {
   // Tier resolution (org tier > user tier, SUPER_ADMIN → ENTERPRISE)
   private final TierEnforcementService tierEnforcementService;
 
-  /** v2.6.0 — used to filter non-LISTED tiers from public listPlans + block subscribe. */
-  private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
-
-  @Value("${billing.terms-version:2026-03-v1}")
-  private String currentTermsVersion;
+  private final BillingSubscriptionPolicy subscriptionPolicy;
+  private final BillingSpendService spendService;
+  private final BillingStatusUsageService statusUsageService;
+  private final BillingPeriodService periodService;
+  private final BillingTierBridgeService tierBridgeService;
+  private final BillingSubscriptionWriter subscriptionWriter;
+  private final BillingWebhookEventRecorder webhookEventRecorder;
 
   @Value("${billing.founder-pricing.max-slots:100}")
   private int founderMaxSlots;
-
-  /** Tier rank for upgrade/downgrade detection. Higher = better. V165 dropped MAX. */
-  private static final Map<String, Integer> TIER_RANK =
-      Map.of("FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "ENTERPRISE", 4);
-
-  private static int tierRank(String tier) {
-    return TIER_RANK.getOrDefault(tier, 0);
-  }
 
   // LIST PLANS (for pricing page)
 
@@ -131,11 +117,7 @@ public class BillingService {
   }
 
   private boolean tierIsListed(String tier) {
-    if (tier == null) return true;
-    return tierConfigRepo
-        .findById(tier)
-        .map(tc -> "LISTED".equals(tc.getLifecycleState()))
-        .orElse(true); // missing row → default to LISTED so we never over-hide
+    return subscriptionPolicy.tierIsListed(tier);
   }
 
   // CREATE SUBSCRIPTION
@@ -169,37 +151,8 @@ public class BillingService {
     BillingPlan plan =
         planRepo.findById(planId).orElseThrow(() -> new IllegalArgumentException("Plan not found"));
 
-    // v2.6.1 — seat validation per tier
-    int effectiveSeats;
-    if ("TEAM".equals(plan.getTier())) {
-      // 2026-05-22 — TEAM no longer requires a 2-seat minimum; single-seat TEAM is allowed.
-      if (seats < 1 || seats > 20) {
-        throw new BillingException(
-            "TEAM tier requires 1-20 seats (got " + seats + "). Contact sales for larger orgs.");
-      }
-      effectiveSeats = seats;
-    } else {
-      if (seats != 1) {
-        log.warn("seats={} ignored for non-TEAM tier={} — forcing 1", seats, plan.getTier());
-      }
-      effectiveSeats = 1;
-    }
-
-    if (!plan.isActive()) {
-      throw new BillingException("This plan is no longer available.");
-    }
-
-    // v2.6.0 — lifecycle gate. Reject new subscriptions on HIDDEN or
-    // SUNSETTING plans (existing subscribers continue renewing). SUPER_ADMIN
-    // can still trigger subscribes via the internal admin path if needed;
-    // standard user flow has no bypass.
-    if (!"LISTED".equals(plan.getLifecycleState()) || !tierIsListed(plan.getTier())) {
-      throw new BillingException("This plan is not available for new subscriptions.");
-    }
-
-    if ("FREE".equals(plan.getTier())) {
-      throw new BillingException("Cannot subscribe to the free plan via checkout.");
-    }
+    int effectiveSeats = subscriptionPolicy.effectiveSeats(plan, seats);
+    subscriptionPolicy.requireNewSubscriptionAvailable(plan);
 
     // Check for existing active subscription — allow upgrades, block same-tier/downgrade
     subRepo
@@ -218,12 +171,7 @@ public class BillingService {
                   planRepo.findById(existing.getBillingPlanId()).orElse(null);
               String existingTier = existingPlan != null ? existingPlan.getTier() : "FREE";
 
-              if (tierRank(plan.getTier()) <= tierRank(existingTier)) {
-                throw new BillingException(
-                    "You already have an active "
-                        + existingTier
-                        + " subscription. Cancel it first to switch plans.");
-              }
+              subscriptionPolicy.requireUpgrade(plan.getTier(), existingTier);
 
               // Upgrade checkout path: keep the existing subscription active until the new checkout
               // is paid. Successful activation retires the old subscription immediately before the
@@ -239,11 +187,9 @@ public class BillingService {
     // Check founder pricing availability
     boolean isFounder = false;
     if (plan.isFounderPricing()) {
-      long currentFounders = subRepo.countActiveFounderSubscriptions();
-      if (currentFounders >= founderMaxSlots) {
-        throw new BillingException("Founder pricing is no longer available (all slots taken).");
-      }
-      isFounder = true;
+      isFounder =
+          subscriptionPolicy.founderPricingAvailable(
+              plan, subRepo.countActiveFounderSubscriptions(), founderMaxSlots);
     }
 
     // Resolve billing entity and gateway
@@ -281,7 +227,7 @@ public class BillingService {
               checkout.url(),
               checkout.sessionId());
 
-      persistSubscription(
+      subscriptionWriter.createPending(
           userId, user.getOrgId(), plan, "STRIPE", checkout.sessionId(), null, isFounder);
 
     } else {
@@ -291,7 +237,7 @@ public class BillingService {
           razorpayGateway.createSubscription(
               userId, userName, user.getEmail(), user.getOrgId(), plan, effectiveSeats);
 
-      persistSubscription(
+      subscriptionWriter.createPending(
           userId,
           user.getOrgId(),
           plan,
@@ -361,11 +307,11 @@ public class BillingService {
     // Activate
     sub.setStatus("ACTIVE");
     sub.setCurrentPeriodStart(Instant.now());
-    sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
+    sub.setCurrentPeriodEnd(periodService.periodEnd(plan.getPeriod()));
     subRepo.save(sub);
 
     // *** CRITICAL: Bridge to existing auth system ***
-    upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
+    tierBridgeService.upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
 
     log.info(
         "Subscription activated: user={}, plan={}, tier={}, entityId={}",
@@ -513,70 +459,21 @@ public class BillingService {
             : new BillingStatusResponse.SubscriptionInfo(
                 null, displayTier, "NONE", null, 1, 0, false, false, null);
 
-    // Build usage info
-    List<BillingUsage> usageList = usageService.getCurrentUsage(userId);
     List<BillingPlanLimit> limits =
         plan != null ? limitRepo.findByBillingPlanId(plan.getId()) : List.of();
 
-    List<BillingStatusResponse.UsageInfo> usageInfo =
-        limits.stream()
-            .map(
-                limit -> {
-                  long current =
-                      usageList.stream()
-                          .filter(u -> u.getMetric().equals(limit.getMetric()))
-                          .findFirst()
-                          .map(BillingUsage::getCurrentValue)
-                          .orElse(0L);
-                  double pct =
-                      limit.getMaxValue() > 0 ? (double) current / limit.getMaxValue() * 100 : 0;
-                  return new BillingStatusResponse.UsageInfo(
-                      limit.getMetric(), current, limit.getMaxValue(), pct);
-                })
-            .collect(Collectors.toList());
-
     PlanResponse planResponse = plan != null ? PlanResponse.from(plan, limits) : null;
 
-    // Build bonus runs info and adjust usage
-    BillingStatusResponse.BonusRunsInfo bonusRunsInfo = buildBonusRunsInfo(userId);
-    long totalBonus = bonusRunsInfo != null ? bonusRunsInfo.available() : 0;
-
-    // Adjust RUNS usage max to include bonus
+    BillingStatusResponse.BonusRunsInfo bonusRunsInfo = statusUsageService.bonusRunsInfo(userId);
     List<BillingStatusResponse.UsageInfo> adjustedUsage =
-        usageInfo.stream()
-            .map(
-                u -> {
-                  if ("RUNS".equals(u.metric()) && totalBonus > 0) {
-                    long effectiveMax = u.max() + totalBonus;
-                    double pct = effectiveMax > 0 ? (double) u.current() / effectiveMax * 100 : 0;
-                    return new BillingStatusResponse.UsageInfo(
-                        u.metric(), u.current(), effectiveMax, pct);
-                  }
-                  return u;
-                })
-            .collect(Collectors.toList());
+        statusUsageService.usageInfo(userId, limits, bonusRunsInfo);
 
     // v2.5.8 — compute real $ spent this billing period so the Billing page
     // can surface actual LLM cost instead of just the run-count quota.
     // Period start defaults to the beginning of the current subscription
     // window, or 30 days ago if no subscription is active.
-    java.time.Instant periodStart =
-        sub != null && sub.getCurrentPeriodEnd() != null
-            ? sub.getCurrentPeriodEnd().minus(30, java.time.temporal.ChronoUnit.DAYS)
-            : java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
-    double pipelineSpent = 0.0;
-    double execSpent = 0.0;
-    try {
-      Double p = pipelineRunRepo.sumActualCostByUserAndSince(userId, periodStart);
-      pipelineSpent = p == null ? 0.0 : p;
-    } catch (Exception ignore) {
-    }
-    try {
-      Double e = execRunRepo.sumTotalCostByUserAndSince(userId, periodStart);
-      execSpent = e == null ? 0.0 : e;
-    } catch (Exception ignore) {
-    }
-    double spentUsd = pipelineSpent + execSpent;
+    Instant periodStart = periodService.statusSpendWindowStart(sub);
+    double spentUsd = spendService.spentUsdSince(userId, periodStart);
 
     return new BillingStatusResponse(subInfo, planResponse, adjustedUsage, bonusRunsInfo, spentUsd);
   }
@@ -619,29 +516,13 @@ public class BillingService {
               : String.valueOf(System.currentTimeMillis());
       String eventId = eventType + "_" + subEntityId + "_" + createdAt;
 
-      // 2. Idempotency check
-      if (webhookRepo.existsByGatewayAndEventId("RAZORPAY", eventId)) {
-        log.debug("Duplicate webhook skipped: {}", eventId);
-        return;
-      }
+      var event = webhookEventRecorder.recordStart("RAZORPAY", eventId, eventType, rawPayload);
+      if (event.isEmpty()) return;
 
-      // 3. Store raw event
-      BillingWebhookEvent event =
-          BillingWebhookEvent.builder()
-              .gateway("RAZORPAY")
-              .eventId(eventId)
-              .eventType(eventType)
-              .rawPayload(rawPayload)
-              .processed(false)
-              .build();
-      webhookRepo.save(event);
-
-      // 4. Process
+      // 2. Process
       processWebhookEvent(eventType, subEntityId, payload);
 
-      event.setProcessed(true);
-      event.setProcessedAt(Instant.now());
-      webhookRepo.save(event);
+      webhookEventRecorder.markProcessed(event.get());
 
     } catch (SecurityException e) {
       throw e; // re-throw signature failures
@@ -681,12 +562,12 @@ public class BillingService {
         deactivateFreeSubscription(sub.getUserId(), sub.getId());
         BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElseThrow();
         sub.setCurrentPeriodStart(Instant.now());
-        sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
+        sub.setCurrentPeriodEnd(periodService.periodEnd(plan.getPeriod()));
         sub.setStatus("ACTIVE");
         subRepo.save(sub);
 
         // Ensure tier is correct (in case of previous PAST_DUE)
-        upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
+        tierBridgeService.upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
 
         log.info(
             "Webhook: subscription charged and extended, user={}, periodEnd={}",
@@ -723,7 +604,7 @@ public class BillingService {
       }
       case "subscription.halted" -> {
         // *** ALL RETRIES EXHAUSTED — DOWNGRADE TO FREE ***
-        downgradeToFree(sub);
+        tierBridgeService.downgradeToFree(sub);
         log.warn("Webhook: subscription halted → downgraded to free, user={}", sub.getUserId());
       }
       case "subscription.cancelled" -> {
@@ -734,12 +615,12 @@ public class BillingService {
         // If past period end already, downgrade now
         if (sub.getCurrentPeriodEnd() != null
             && sub.getCurrentPeriodEnd().isBefore(Instant.now())) {
-          downgradeToFree(sub);
+          tierBridgeService.downgradeToFree(sub);
         }
         log.info("Webhook: subscription cancelled, user={}", sub.getUserId());
       }
       case "subscription.completed" -> {
-        downgradeToFree(sub);
+        tierBridgeService.downgradeToFree(sub);
         log.info("Webhook: subscription completed → downgraded, user={}", sub.getUserId());
       }
       default -> log.debug("Webhook: unhandled event type: {}", eventType);
@@ -822,22 +703,8 @@ public class BillingService {
       String eventId =
           payload.has("id") ? payload.get("id").asText() : "stripe_" + System.currentTimeMillis();
 
-      // Idempotency check
-      if (webhookRepo.existsByGatewayAndEventId("STRIPE", eventId)) {
-        log.debug("Duplicate Stripe webhook skipped: {}", eventId);
-        return;
-      }
-
-      // Store raw event
-      BillingWebhookEvent event =
-          BillingWebhookEvent.builder()
-              .gateway("STRIPE")
-              .eventId(eventId)
-              .eventType(eventType)
-              .rawPayload(rawPayload)
-              .processed(false)
-              .build();
-      webhookRepo.save(event);
+      var event = webhookEventRecorder.recordStart("STRIPE", eventId, eventType, rawPayload);
+      if (event.isEmpty()) return;
 
       // Process based on event type
       JsonNode dataObject = payload.path("data").path("object");
@@ -850,9 +717,7 @@ public class BillingService {
         default -> log.debug("Stripe webhook: unhandled event type: {}", eventType);
       }
 
-      event.setProcessed(true);
-      event.setProcessedAt(Instant.now());
-      webhookRepo.save(event);
+      webhookEventRecorder.markProcessed(event.get());
 
     } catch (Exception e) {
       log.error("Stripe webhook processing error: {}", e.getMessage(), e);
@@ -1022,11 +887,11 @@ public class BillingService {
     }
     sub.setStatus("ACTIVE");
     sub.setCurrentPeriodStart(Instant.now());
-    sub.setCurrentPeriodEnd(computePeriodEnd(plan.getPeriod()));
+    sub.setCurrentPeriodEnd(periodService.periodEnd(plan.getPeriod()));
     subRepo.save(sub);
 
     // Ensure tier is correct
-    upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
+    tierBridgeService.upgradeTier(sub.getUserId(), sub.getOrgId(), plan);
 
     // Generate invoice with Stripe references and email it
     try {
@@ -1082,60 +947,11 @@ public class BillingService {
       return;
     }
 
-    downgradeToFree(sub);
+    tierBridgeService.downgradeToFree(sub);
     log.info(
         "Stripe subscription deleted → downgraded to free: subId={}, user={}",
         stripeSubscriptionId,
         sub.getUserId());
-  }
-
-  // TIER BRIDGE (billing → existing auth system)
-
-  private void upgradeTier(String userId, String orgId, BillingPlan plan) {
-    AppUser user = userRepo.findById(userId).orElseThrow();
-
-    String authTier =
-        switch (plan.getTier()) {
-          case "STARTER" -> "FREE"; // Legacy — billing controls run limit
-          case "PRO" -> "PRO";
-          case "TEAM" -> "TEAM";
-          case "ENTERPRISE" -> "ENTERPRISE";
-            // V165 — MAX deprecated; legacy MAX subscriptions roll up to TEAM.
-          case "MAX" -> "TEAM";
-          default -> "FREE";
-        };
-    user.setTier(authTier);
-    userRepo.save(user);
-
-    // SDET 2026-05-16 (BUG-009) — set both org.tier AND org.key_source_mode here. The previous
-    // implementation only wrote `key_source_mode` to the org; `user.tier` got the upgrade but
-    // `org.tier` stayed on its initial value (typically FREE) so the Plans page + billing surface
-    // continued to render "Currently on FREE" for a TEAM-tier user. Two sources of truth diverged.
-    // Backfill of legacy rows lives in `V199__sync_org_tier_with_subscription_tier.sql`.
-    if (orgId != null) {
-      orgRepo
-          .findById(orgId)
-          .ifPresent(
-              org -> {
-                String keyMode =
-                    switch (plan.getKeyMode()) {
-                      case "BYOK" -> "OWN_KEYS";
-                      case "MANAGED", "PLATFORM" -> "SYSTEM";
-                      default -> "HYBRID";
-                    };
-                org.setKeySourceMode(keyMode);
-                org.setTier(authTier);
-                orgRepo.save(org);
-              });
-    }
-
-    log.info(
-        "Tier upgraded: user={}, authTier={}, planTier={}, keyMode={}",
-        userId,
-        authTier,
-        plan.getTier(),
-        plan.getKeyMode());
-    // Note: subscription activation email sent by activateSubscription() — no duplicate here
   }
 
   /**
@@ -1277,37 +1093,6 @@ public class BillingService {
     }
   }
 
-  private void downgradeToFree(BillingSubscription sub) {
-    sub.setStatus("DOWNGRADED");
-    sub.setDowngradedAt(Instant.now());
-    subRepo.save(sub);
-
-    AppUser user = userRepo.findById(sub.getUserId()).orElseThrow();
-    user.setTier("FREE");
-    userRepo.save(user);
-
-    // SDET 2026-05-16 (BUG-009) — mirror the downgrade to org.tier so it doesn't get stuck on the
-    // previous paid tier. Same root cause as the upgrade path.
-    if (sub.getOrgId() != null) {
-      orgRepo
-          .findById(sub.getOrgId())
-          .ifPresent(
-              org -> {
-                org.setKeySourceMode("SYSTEM");
-                org.setTier("FREE");
-                orgRepo.save(org);
-              });
-    }
-
-    log.warn(
-        "Downgraded to free: user={}, previousPlan={}", sub.getUserId(), sub.getBillingPlanId());
-
-    // V1.1: Downgrade notification
-    BillingPlan downgradedPlan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
-    notificationService.sendDowngradedToFree(
-        user.getEmail(), downgradedPlan != null ? downgradedPlan.getName() : "");
-  }
-
   // HELPERS
 
   /**
@@ -1350,7 +1135,7 @@ public class BillingService {
               BillingPlan existingPlan =
                   planRepo.findById(existing.getBillingPlanId()).orElse(null);
               String existingTier = existingPlan != null ? existingPlan.getTier() : "FREE";
-              if (tierRank(activatingPlan.getTier()) <= tierRank(existingTier)) {
+              if (!subscriptionPolicy.isStrictUpgrade(activatingPlan.getTier(), existingTier)) {
                 throw new BillingException(
                     "Cannot activate "
                         + activatingPlan.getTier()
@@ -1400,70 +1185,5 @@ public class BillingService {
                   activatingSub.getUserId(),
                   activatingSub.getOrgId());
             });
-  }
-
-  private void persistSubscription(
-      String userId,
-      String orgId,
-      BillingPlan plan,
-      String paymentGateway,
-      String gatewaySubscriptionId,
-      String gatewayCustomerId,
-      boolean isFounder) {
-    BillingSubscription sub =
-        BillingSubscription.builder()
-            .userId(userId)
-            .orgId(orgId)
-            .billingPlanId(plan.getId())
-            .paymentGateway(paymentGateway)
-            .gatewaySubscriptionId(gatewaySubscriptionId)
-            .gatewayCustomerId(gatewayCustomerId)
-            .status("CREATED")
-            .totalSeats(plan.getIncludedSeats())
-            .extraSeats(0)
-            .cancelAtPeriodEnd(false)
-            .termsAcceptedAt(Instant.now())
-            .termsVersion(currentTermsVersion)
-            .founderPricing(isFounder)
-            .build();
-    subRepo.save(sub);
-  }
-
-  private BillingStatusResponse.BonusRunsInfo buildBonusRunsInfo(String userId) {
-    Instant now = Instant.now();
-    long userBonus = runTopupRepo.sumRemainingByUserId(userId, now);
-    // Also include org bonus if user is in an org
-    AppUser statusUser = userRepo.findById(userId).orElse(null);
-    long orgBonus =
-        statusUser != null && statusUser.getOrgId() != null
-            ? runTopupRepo.sumRemainingByOrgId(statusUser.getOrgId(), now)
-            : 0;
-    long totalBonus = userBonus + orgBonus;
-
-    List<RunTopup> activeTopups = runTopupRepo.findActiveByUserId(userId, now);
-    List<BillingStatusResponse.TopupInfo> topupInfos =
-        activeTopups.stream()
-            .map(
-                t ->
-                    new BillingStatusResponse.TopupInfo(
-                        t.getId(),
-                        t.getQuantity(),
-                        t.getRemaining(),
-                        t.getSource(),
-                        t.getStatus(),
-                        t.getExpiresAt(),
-                        t.getCreatedAt()))
-            .collect(Collectors.toList());
-
-    return totalBonus > 0 || !topupInfos.isEmpty()
-        ? new BillingStatusResponse.BonusRunsInfo(totalBonus, topupInfos)
-        : null;
-  }
-
-  private Instant computePeriodEnd(String period) {
-    return switch (period) {
-      case "ANNUAL" -> Instant.now().plus(365, ChronoUnit.DAYS);
-      default -> Instant.now().plus(30, ChronoUnit.DAYS); // MONTHLY
-    };
   }
 }

@@ -21,7 +21,7 @@ Two parallel theme attributes coexist:
 | Attribute           | Scope                                     | Values            | Where it's set                                                                                                           |
 | ------------------- | ----------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `data-theme`        | Root `tokens.css` selectors               | `light` (or none) | `tokens.css` defaults to dark via `:root`; `[data-theme='light']` flips it.                                              |
-| `data-signal-theme` | `signal.css` (scoped under `.signal-app`) | `light`, `dark`   | `frontend/src/signal/hooks/useSignalTheme.ts` — written to BOTH the shell root and `<html>` so public routes get themed. |
+| `data-signal-theme` | `signal.css` (scoped under `.signal-app`) | `light`, `dark`   | `frontend/src/stores/useUiStore.ts` — written with `data-theme` so public and protected routes resolve the same theme. |
 
 `frontend/src/main.tsx` also sets the `.signal-app` class on `<html>` and reads
 `localStorage['signal:theme']` on first paint to avoid a flash of wrong theme. Tailwind's `dark:`
@@ -360,7 +360,7 @@ inputs, and selects to `min-height: 40px` minimum.
 
 ## Breakpoints
 
-Declared in `tokens.css` and consumed by the `useBreakpoint()` hook:
+Declared in `tokens.css` for CSS media-query alignment:
 
 | Token          | Value    |
 | -------------- | -------- |
@@ -617,7 +617,7 @@ function statusToDot(
 
 ## File-icon palette
 
-`frontend/src/signal/components/FileIcon.tsx` ships VS Code / IntelliJ-style inline SVG icons.
+`frontend/src/ide/IdeKit.tsx` ships the live VS Code / IntelliJ-style inline SVG icons.
 Each icon is a small hand-rolled SVG (avoids a third-party dependency). The dispatcher walks
 extension/name rules to pick:
 
@@ -648,15 +648,14 @@ extension/name rules to pick:
 | `FolderIcon`     | (any folder; `open` shifts the path)                                                                                                  | `#5B8DEF` (signal blue)        |
 | `DefaultIcon`    | fallback                                                                                                                              | `#888`                         |
 
-The dispatch order matters: test files match before language, dotfiles before language,
-`Dockerfile` before any general extension. New rules go in the same `FileIcon` dispatcher.
+The dispatch order matters in `frontend/src/ide/IdeKit.tsx`: test files match before language,
+dotfiles before language, `Dockerfile` before any general extension.
 
 ---
 
 ## Code viewer palette
 
-`frontend/src/signal/components/CodeView.tsx` is a regex-tokenised code viewer (replaces Monaco
-to save ~600KB of bundle). Syntax colours:
+`frontend/src/ide/IdeKit.tsx` includes the live regex-tokenised code viewer. Syntax colours:
 
 | Concept  | Colour    | Reasoning                                        |
 | -------- | --------- | ------------------------------------------------ |

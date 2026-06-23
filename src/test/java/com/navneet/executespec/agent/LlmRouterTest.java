@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
@@ -31,10 +32,12 @@ import com.navneet.executespec.tool.ToolRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.beans.factory.ObjectProvider;
 
 @DisplayName("LlmRouter dispatch / retry / failover")
 class LlmRouterTest {
@@ -44,7 +47,9 @@ class LlmRouterTest {
   private RunKeyContextStore keyStore;
   private ModelRegistry registry;
   private FeatureFlagService flags;
+  private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
+  private ManagedAiUsageService managedAiUsageService;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
@@ -53,13 +58,13 @@ class LlmRouterTest {
     openai = mock(OpenAiNativeToolClient.class);
     gemini = mock(GeminiNativeToolClient.class);
     Metrics metrics = mock(Metrics.class);
-    RunCostTracker cost = mock(RunCostTracker.class);
+    costTracker = mock(RunCostTracker.class);
     stepUsageRecorder = mock(RunStepUsageRecorder.class);
     lenient()
-        .when(cost.record(anyString(), anyString(), anyString(), anyString(), any()))
+        .when(costTracker.record(anyString(), anyString(), anyString(), anyString(), any()))
         .thenReturn(new RunCostTracker.CallUsage("openai", "gpt-x", 1, 2, 0, 0, 0.01, 1, 0));
     lenient()
-        .when(cost.snapshot(anyString()))
+        .when(costTracker.snapshot(anyString()))
         .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
@@ -67,19 +72,33 @@ class LlmRouterTest {
     AnthropicForcedToolClient forced = mock(AnthropicForcedToolClient.class);
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
+    managedAiUsageService = mock(ManagedAiUsageService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<AnthropicChatModel> anthropicModelProvider = mock(ObjectProvider.class);
+    lenient().when(anthropicModelProvider.getIfAvailable()).thenReturn(null);
+    lenient()
+        .when(
+            managedAiUsageService.authorizeCall(
+                anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenAnswer(
+            inv ->
+                ManagedAiUsageService.CallAuthorization.allowed(
+                    inv.getArgument(1), inv.getArgument(2), ManagedAiUsageService.FULL));
     LlmRouter real =
         new LlmRouter(
             toolRegistry,
             openai,
             gemini,
             metrics,
-            cost,
+            costTracker,
             stepUsageRecorder,
             broadcaster,
             keyStore,
             forced,
             registry,
-            flags);
+            flags,
+            managedAiUsageService,
+            anthropicModelProvider);
     router = spy(real);
     doNothing().when(router).backoffSleep(anyLong()); // keep retry tests fast
     return router;
@@ -112,6 +131,48 @@ class LlmRouterTest {
     when(openai.call(any())).thenReturn(ok());
     assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
     verify(openai, times(1)).call(any());
+  }
+
+  @Test
+  void managedAiAuthorizationCanStepDownModelBeforeDispatchAndDebitAdjustedModel() {
+    build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "openai", "gpt-mini", ManagedAiUsageService.CHEAP_ONLY, true, "step down"));
+    when(costTracker.record(eq("run-1"), eq("T1"), eq("openai"), eq("gpt-mini"), any()))
+        .thenReturn(new RunCostTracker.CallUsage("openai", "gpt-mini", 1, 2, 0, 0, 0.01, 1, 0));
+    when(openai.call(any())).thenReturn(ok());
+
+    router.call(attributedReq("openai", "gpt-x"));
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> captor =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai).call(captor.capture());
+    assertThat(captor.getValue().model()).isEqualTo("gpt-mini");
+    verify(costTracker).record(eq("run-1"), eq("T1"), eq("openai"), eq("gpt-mini"), any());
+    verify(stepUsageRecorder)
+        .record(
+            eq("run-1"),
+            eq("T1"),
+            eq("WorkerAgent"),
+            eq("worker.iteration-1"),
+            eq(null),
+            eq("openai"),
+            eq("gpt-mini"),
+            any());
+    verify(managedAiUsageService)
+        .recordSuccessfulCall(
+            eq("run-1"),
+            eq("T1"),
+            eq("WorkerAgent"),
+            eq("worker.iteration-1"),
+            eq("openai"),
+            eq("gpt-mini"),
+            any(),
+            any(),
+            eq(RunKeyContext.Source.PLATFORM));
   }
 
   @Test
@@ -192,6 +253,58 @@ class LlmRouterTest {
             eq("gemini"),
             eq("gem-x"),
             any());
+  }
+
+  @Test
+  void managedAiAuthorizationCanStepDownFailoverTargetBeforeDebit() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(anyString()))
+        .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-pro"}));
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+    when(gemini.call(any())).thenReturn(ok());
+    when(managedAiUsageService.authorizeCall(
+            anyString(), eq("gemini"), eq("gem-pro"), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "gemini", "gem-flash", ManagedAiUsageService.CHEAP_ONLY, true, "step down"));
+    when(costTracker.record(eq("run-1"), eq("T1"), eq("gemini"), eq("gem-flash"), any()))
+        .thenReturn(new RunCostTracker.CallUsage("gemini", "gem-flash", 1, 2, 0, 0, 0.01, 1, 0));
+
+    LlmRequest request =
+        req("openai", "gpt-x").toBuilder()
+            .agentRole("OutlinePlannerAgent")
+            .stepId("planner.outline")
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    ArgumentCaptor<GeminiNativeToolClient.GeminiToolCallRequest> captor =
+        ArgumentCaptor.forClass(GeminiNativeToolClient.GeminiToolCallRequest.class);
+    verify(gemini).call(captor.capture());
+    assertThat(captor.getValue().model()).isEqualTo("gem-flash");
+    verify(costTracker).record(eq("run-1"), eq("T1"), eq("gemini"), eq("gem-flash"), any());
+    verify(stepUsageRecorder)
+        .record(
+            eq("run-1"),
+            eq("T1"),
+            eq("OutlinePlannerAgent"),
+            eq("planner.outline"),
+            eq("OutlinePlannerAgent:planner.outline"),
+            eq("gemini"),
+            eq("gem-flash"),
+            any());
+    verify(managedAiUsageService)
+        .recordSuccessfulCall(
+            eq("run-1"),
+            eq("T1"),
+            eq("OutlinePlannerAgent"),
+            eq("planner.outline"),
+            eq("gemini"),
+            eq("gem-flash"),
+            any(),
+            any(),
+            eq(RunKeyContext.Source.PLATFORM));
   }
 
   @Test

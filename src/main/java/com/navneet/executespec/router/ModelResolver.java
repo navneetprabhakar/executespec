@@ -4,12 +4,12 @@ import java.util.List;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -23,7 +23,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ModelResolver {
 
   /**
@@ -40,13 +39,47 @@ public class ModelResolver {
   private final ProviderHealthTracker healthTracker;
   private final ModelPerformanceTracker modelPerfTracker;
   private final MeterRegistry meterRegistry;
+  private final FeatureFlagService featureFlagService;
 
   /**
-   * Optional — only used to gate {@link #FLAG_ADAPTIVE_ROUTING}. Tests use the no-arg constructor
-   * variant where this is null and adaptive routing is always disabled.
+   * Optional — only used to gate {@link #FLAG_ADAPTIVE_ROUTING}. Tests use the constructor variant
+   * where this is null and adaptive routing is always disabled.
    */
-  @Autowired(required = false)
-  private FeatureFlagService featureFlagService;
+  @Autowired
+  public ModelResolver(
+      ModelMatrixProperties matrixProps,
+      ProviderHealthTracker healthTracker,
+      ModelPerformanceTracker modelPerfTracker,
+      MeterRegistry meterRegistry,
+      ObjectProvider<FeatureFlagService> featureFlagServiceProvider) {
+    this(
+        matrixProps,
+        healthTracker,
+        modelPerfTracker,
+        meterRegistry,
+        featureFlagServiceProvider.getIfAvailable());
+  }
+
+  ModelResolver(
+      ModelMatrixProperties matrixProps,
+      ProviderHealthTracker healthTracker,
+      ModelPerformanceTracker modelPerfTracker,
+      MeterRegistry meterRegistry) {
+    this(matrixProps, healthTracker, modelPerfTracker, meterRegistry, (FeatureFlagService) null);
+  }
+
+  ModelResolver(
+      ModelMatrixProperties matrixProps,
+      ProviderHealthTracker healthTracker,
+      ModelPerformanceTracker modelPerfTracker,
+      MeterRegistry meterRegistry,
+      FeatureFlagService featureFlagService) {
+    this.matrixProps = matrixProps;
+    this.healthTracker = healthTracker;
+    this.modelPerfTracker = modelPerfTracker;
+    this.meterRegistry = meterRegistry;
+    this.featureFlagService = featureFlagService;
+  }
 
   /**
    * Resolves the model for a given agent within the user's selected provider. Falls back to next

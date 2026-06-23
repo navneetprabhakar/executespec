@@ -59,6 +59,12 @@ const FALLBACK_PROVIDER_OPTIONS: api.ProviderEntry[] = [
   {id: 'DEEPSEEK', label: 'DeepSeek', models: []},
 ];
 const ENTERPRISE_PROVIDER_IDS = new Set(['OPENROUTER', 'FIREWORKS']);
+function managedKind(state?: string | null): 'ok' | 'warn' | 'bad' {
+  if (state === 'EXHAUSTED') return 'bad';
+  if (state === 'CHEAP_ONLY' || state === 'FRONTIER_LOCKED' || state === 'VALUE_MODE')
+    return 'warn';
+  return 'ok';
+}
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
 }
@@ -67,12 +73,12 @@ function isLiveStatus(s?: string | null): boolean {
 // the "0 / ∞ runs" jargon, and "this cycle" became "this month".
 function quotaSubtitle(
   tier: string,
-  permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
+  _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
 ): string {
-  if (!permissions) return tier;
-  return permissions.monthlyRunLimit === -1
-    ? `${tier} · no run limit`
-    : `${permissions.currentRunCount} / ${permissions.monthlyRunLimit} runs this month · ${tier}`;
+  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed ES AI
+  // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
+  // The subtitle stays at the tier so it never shows a stale run cap.
+  return tier;
 }
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
@@ -329,6 +335,7 @@ export function IdeCompose() {
   // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). '' = Default (org/system
   // matrix), i.e. send no modelName. modelsByProvider keys are lowercase provider names.
   const [modelName, setModelName] = useState('');
+  const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
   const [providerOptions, setProviderOptions] = useState<api.ProviderEntry[]>([]);
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
@@ -389,6 +396,13 @@ export function IdeCompose() {
       .getAvailableModels()
       .then((m) => setProviderOptions(m.providers || []))
       .catch(() => setProviderOptions([]));
+  }, []);
+
+  useEffect(() => {
+    api
+      .getManagedAiBalance()
+      .then(setManagedAi)
+      .catch(() => setManagedAi(null));
   }, []);
 
   // Onboarding sample specs — a quick "start from a sample" row.
@@ -566,6 +580,18 @@ export function IdeCompose() {
   }, [modelLabels, providerOptions]);
 
   const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+  const managedAiMessage =
+    managedAi?.routingState === 'EXHAUSTED'
+      ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
+      : managedAi?.routingState === 'CHEAP_ONLY'
+        ? 'Cheap-only mode is active. Frontier and balanced calls can step down during execution.'
+        : managedAi?.routingState === 'FRONTIER_LOCKED'
+          ? 'Frontier models are paused for this cycle; lower-cost routed models remain available.'
+          : managedAi?.routingState === 'VALUE_MODE'
+            ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
+            : managedAi
+              ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
+              : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {
     setProjectId(id);
@@ -578,11 +604,6 @@ export function IdeCompose() {
       prev.includes(repoId) ? prev.filter((x) => x !== repoId) : [...prev, repoId],
     );
   }
-
-  const isAtCap =
-    permissions != null &&
-    permissions.monthlyRunLimit !== -1 &&
-    permissions.currentRunCount >= permissions.monthlyRunLimit;
 
   async function submit() {
     if (!spec.trim()) {
@@ -645,28 +666,6 @@ export function IdeCompose() {
           </button>
         ))}
       </div>
-
-      {isAtCap && (
-        <div
-          className='ide-card'
-          style={{
-            borderColor: 'var(--ide-yellow)',
-            marginBottom: 12,
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          You've used all {permissions?.monthlyRunLimit} runs in this billing cycle.{' '}
-          <Link to='/topup' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            Top up credits →
-          </Link>{' '}
-          or{' '}
-          <Link to='/plans' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-            upgrade your plan →
-          </Link>
-          .
-        </div>
-      )}
 
       <div className='ide-compose-layout'>
         <div className='ide-compose-main'>
@@ -935,6 +934,36 @@ export function IdeCompose() {
                 </div>
               </div>
 
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  border: '1px solid var(--ide-border)',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  background: 'color-mix(in srgb, var(--ide-bg-tab-inactive) 55%, transparent)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    marginBottom: 4,
+                  }}
+                >
+                  <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI routing</strong>
+                  {managedAi && (
+                    <IdeBadge kind={managedKind(managedAi.routingState)}>
+                      {managedAi.routingState}
+                    </IdeBadge>
+                  )}
+                </div>
+                <div style={{color: 'var(--ide-fg-muted)'}}>{managedAiMessage}</div>
+              </div>
+
               <details className='ide-compose-advanced'>
                 <summary>Advanced options</summary>
                 <div className='ide-compose-options'>
@@ -1061,7 +1090,7 @@ export function IdeCompose() {
               <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
             )}
             <div className='ide-run-action'>
-              <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+              <button className='ide-btn' onClick={submit} disabled={busy}>
                 {busy ? 'Submitting...' : 'Create plan'}
               </button>
             </div>
@@ -1089,7 +1118,7 @@ export function IdeCompose() {
             Next
           </button>
         ) : (
-          <button className='ide-btn' onClick={submit} disabled={busy || isAtCap}>
+          <button className='ide-btn' onClick={submit} disabled={busy}>
             {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}

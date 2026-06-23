@@ -1,7 +1,7 @@
 # ExecuteSpec Roadmap
 
-> Product-line roadmap refreshed 2026-06-19. Detailed open-work inventory lives in
-> [`pending.md`](pending.md); shipped feature truth lives in `docs/features/`.
+> Product-line roadmap refreshed 2026-06-19. Shipped feature truth lives in
+> `docs/features/`; active plan work lives under `docs/plans/`.
 
 ## Strategic End State
 
@@ -136,7 +136,6 @@ The narrower engineering backlog remains:
 
 ## Cleanup Rule
 
-Before deleting any plan, check
-[`plan-disposition-2026-06-10.md`](plan-disposition-2026-06-10.md). Shipped
-behavior belongs in `docs/features/`; unfinished work belongs in `pending.md` or
-an active plan.
+Before deleting any plan, confirm the shipped behavior is represented in
+`docs/features/`, `docs/ROADMAP.md`, or a current reason-log entry. Unfinished
+work should stay in an active plan.

@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.OpenAiNativeToolClient;
 import com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest;
 
@@ -18,7 +17,7 @@ import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,7 +25,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -46,31 +44,31 @@ import lombok.extern.slf4j.Slf4j;
 @org.springframework.context.annotation.Profile({"local", "dev"})
 @RestController
 @RequestMapping("/api/v2/test")
-@RequiredArgsConstructor
 @Slf4j
 public class NativeToolsTestController {
 
-  private final ObjectMapper objectMapper;
   private final OpenAiNativeToolClient openAiNativeToolClient;
+  private final AnthropicChatModel anthropicModel;
+  private final GoogleGenAiChatModel geminiModel;
+  private final String openAiModelName;
 
   // Inject all three model beans by their default qualifiers (defined in AgentModelConfig).
   // These may be null if the provider's API key is not configured — handled per-request.
-  @Autowired(required = false)
-  @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
-
   // OpenAI: do NOT use the auto-configured bean — its defaults (max-tokens: 16384 from
   // application.yml) get merged into call-time options and Spring AI 1.1.4 serializes the
   // legacy max_tokens field into extra_body for gpt-5.x reasoning models, which the
   // chat-completions endpoint rejects. Build a fresh model inline with cleared defaults
   // (mirrors V1 FallbackLlmRouter.buildOpenAiModel pattern at FallbackLlmRouter.java:613-621).
-  @Value("${spring.ai.openai.api-key:}")
-  private String openAiApiKey;
-
-  @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}")
-  private String openAiModelName;
-
-  @Autowired(required = false)
-  @Qualifier("googleGenAiChatModel") private GoogleGenAiChatModel geminiModel;
+  public NativeToolsTestController(
+      OpenAiNativeToolClient openAiNativeToolClient,
+      @Qualifier("anthropicChatModel") ObjectProvider<AnthropicChatModel> anthropicModelProvider,
+      @Qualifier("googleGenAiChatModel") ObjectProvider<GoogleGenAiChatModel> geminiModelProvider,
+      @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}") String openAiModelName) {
+    this.openAiNativeToolClient = openAiNativeToolClient;
+    this.anthropicModel = anthropicModelProvider.getIfAvailable();
+    this.geminiModel = geminiModelProvider.getIfAvailable();
+    this.openAiModelName = openAiModelName;
+  }
 
   @GetMapping("/native-tools")
   public Map<String, Object> testNativeTools(

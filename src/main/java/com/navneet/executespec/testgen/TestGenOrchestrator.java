@@ -12,9 +12,8 @@ import com.navneet.executespec.testgen.model.*;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -47,10 +46,10 @@ public class TestGenOrchestrator {
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
 
   /**
-   * Lazy to avoid circular dependency: PreviewService → TestPreviewCoordinator →
-   * TestGenOrchestrator
+   * Provider avoids the circular dependency: PreviewService → TestPreviewCoordinator →
+   * TestGenOrchestrator → PreviewService.
    */
-  @Lazy @Autowired private PreviewService previewService;
+  private final ObjectProvider<PreviewService> previewServiceProvider;
 
   /**
    * Entry point — triggered when plan is approved. Runs on a virtual thread, parallel to code gen.
@@ -88,7 +87,7 @@ public class TestGenOrchestrator {
       // 5. Probe preview if already running (auto-started by RunOrchestrator after COMPLETE)
       String apiProbeResults = "";
       try {
-        var existingPreview = previewService.getStatus(runId);
+        var existingPreview = previewServiceProvider.getObject().getStatus(runId);
         if (existingPreview != null
             && existingPreview.status() == PreviewStatus.RUNNING
             && existingPreview.url() != null) {

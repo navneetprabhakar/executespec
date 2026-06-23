@@ -15,7 +15,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-web": "^0.63.0",
     "@opentelemetry/context-zone": "^2.7.1",
@@ -31,7 +30,6 @@
     "framer-motion": "^11.0.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.344.0",
-    "posthog-js": "^1.373.5",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

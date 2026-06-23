@@ -1,19 +1,14 @@
 package com.navneet.executespec.agentsession;
 
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveResponse;
@@ -21,32 +16,19 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CreateSessionRe
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.GateDecisionCard;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.IntentDecision;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
-import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ProjectMatch;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
-import com.navneet.executespec.agentsession.entity.AgentTurn;
-import com.navneet.executespec.agentsession.entity.AgentUsageLedger;
-import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
-import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
-import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
-import com.navneet.executespec.agentsession.repository.AgentUsageLedgerRepository;
-import com.navneet.executespec.auth.entity.Project;
-import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.auth.security.RunAccessGuard;
-import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.cost.RunCostTracker;
-import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
-import com.navneet.executespec.project.repository.ProjectRepoRepository;
-import com.navneet.executespec.project.security.ProjectAccessGuard;
-import com.navneet.executespec.router.ModelAccessService;
-import com.navneet.executespec.state.entity.PipelineRun;
-import com.navneet.executespec.state.repository.PipelineRunRepository;
 
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,95 +40,44 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AgentSessionService {
 
-  private final AgentSessionRepository sessionRepo;
-  private final AgentTurnRepository turnRepo;
-  private final AgentActionEventRepository eventRepo;
-  private final AgentUsageLedgerRepository usageRepo;
   private final AgentIntentService intentService;
   private final AgentActionCatalog actionCatalog;
-  private final ProjectAccessGuard projectAccessGuard;
-  private final RunAccessGuard runAccessGuard;
-  private final ProjectRepository projectRepo;
-  private final ProjectRepoRepository projectRepoRepo;
-  private final ProjectRepoLinkRepository projectRepoLinkRepo;
-  private final PipelineRunRepository pipelineRunRepo;
-  private final ObjectMapper objectMapper;
-  private final AiProviderPreferenceService aiProviderPreferenceService;
-  private final ModelAccessService modelAccessService;
+  private final AgentSessionReadService sessionReadService;
+  private final AgentSessionCreationService sessionCreationService;
+  private final AgentActionLifecycleService actionLifecycleService;
+  private final AgentGateReadService gateReadService;
+  private final AgentOrchestratorTurnService orchestratorTurnService;
+  private final AgentRunConfirmationService runConfirmationService;
+  private final AgentRecordedTurnService recordedTurnService;
+  private final AgentStreamTurnStarter streamTurnStarter;
+  private final AgentStreamTurnLifecycle streamTurnLifecycle;
+  private final AgentContextResolver contextResolver;
 
   @Transactional
   public AgentSessionResponse createSession(CreateSessionRequest request, AppUserDetails user) {
     String orgId = requireOrg(user);
-    CreateSessionRequest req =
-        request == null
-            ? new CreateSessionRequest(
-                null, null, null, null, null, null, null, null, null, null, null)
-            : request;
-    String requestedId = blankToNull(req.id());
-    if (requestedId != null) {
-      var existing = sessionRepo.findById(requestedId);
-      if (existing.isPresent()) {
-        AgentSession session = existing.get();
-        if (!user.getUser().getId().equals(session.getUserId())) {
-          throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
-        }
-        return toResponse(session);
-      }
-    }
-    if (req.projectId() != null && !req.projectId().isBlank()) {
-      projectAccessGuard.assertCanRead(req.projectId(), user);
-    }
-    String requestedProvider = blankToNull(req.defaultProvider());
-    String effectiveProvider =
-        requestedProvider != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, requestedProvider)
-            : aiProviderPreferenceService.preferredProvider(user);
-    // Tier gate: reject a free-tier session that pins a premium default model (selectable
-    // client-side).
-    modelAccessService.assertModelAllowed(user.getUser().getId(), blankToNull(req.defaultModel()));
-    Instant now = Instant.now();
-    AgentSession session =
-        AgentSession.builder()
-            .id(firstNonBlank(requestedId, UUID.randomUUID().toString()))
-            .orgId(orgId)
-            .userId(user.getUser().getId())
-            .projectId(blankToNull(req.projectId()))
-            .repoRemote(
-                blankToNull(
-                    firstNonBlank(
-                        req.repoRemote(),
-                        req.repoContext() == null ? null : req.repoContext().gitRemote())))
-            .repoRootHash(blankToNull(req.repoRootHash()))
-            .clientSurface(normalize(req.surface(), "CLI"))
-            .title(firstNonBlank(req.title(), "New ExecuteSpec session"))
-            .defaultProvider(effectiveProvider)
-            .defaultModel(blankToNull(req.defaultModel()))
-            .defaultExecutionMode(normalize(req.defaultExecutionMode(), "LOCAL"))
-            .approvalPolicy(normalize(req.approvalPolicy(), "PLAN"))
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    return toResponse(sessionRepo.save(session));
+    return sessionReadService.toResponse(sessionCreationService.create(request, user, orgId));
   }
 
   public List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
     requireOrg(user);
-    int capped = Math.max(1, Math.min(100, limit));
-    return sessionRepo
-        .findByUserIdAndStatusOrderByUpdatedAtDesc(
-            user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped))
-        .stream()
-        .map(this::toResponse)
-        .toList();
+    return sessionReadService.listSessions(user, limit);
   }
 
   public AgentSessionResponse getSession(String sessionId, AppUserDetails user) {
-    return toResponse(requireSession(sessionId, user));
+    requireOrg(user);
+    return sessionReadService.getSession(sessionId, user);
   }
 
   public List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
-    requireSession(sessionId, user);
-    return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId);
+    requireOrg(user);
+    return sessionReadService.listEvents(sessionId, user);
+  }
+
+  public List<AgentTurnResponse> listTurns(
+      String sessionId, String beforeTurnId, int limit, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.listTurns(sessionId, beforeTurnId, limit, user);
   }
 
   public List<CapabilityTool> capabilities(AppUserDetails user, String surface) {
@@ -160,297 +91,91 @@ public class AgentSessionService {
     AgentSession session = requireSession(sessionId, user);
     ActionPlanRequest req =
         request == null ? new ActionPlanRequest("", null, null, null, null) : request;
-    IntentDecision decision =
-        intentService.interpret(
-            new InterpretIntentRequest(
-                sessionId,
-                req.message(),
-                firstNonBlank(req.projectId(), session.getProjectId()),
-                req.repoContext(),
-                req.clientCapabilities()));
-    String actionId = UUID.randomUUID().toString();
-    Instant now = Instant.now();
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .type("ACTION_PLANNED")
-            .payloadJson(
-                writeJson(
-                    java.util.Map.of(
-                        "actionId", actionId,
-                        "surface", firstNonBlank(req.surface(), session.getClientSurface()),
-                        "decision", decision)))
-            .createdAt(now)
-            .build());
-    session.setUpdatedAt(now);
-    sessionRepo.save(session);
+    var planned =
+        actionLifecycleService.plan(
+            session,
+            req,
+            capabilities(user, AgentText.firstNonBlank(req.surface(), session.getClientSurface())));
     return new ActionPlanResponse(
-        actionId,
-        sessionId,
-        decision,
-        capabilities(user, firstNonBlank(req.surface(), session.getClientSurface())),
-        now);
+        planned.actionId(),
+        planned.sessionId(),
+        planned.decision(),
+        planned.capabilities(),
+        planned.createdAt());
+  }
+
+  @Transactional
+  public OrchestratorTurnResponse orchestrateTurn(
+      OrchestratorTurnRequest request, AppUserDetails user) {
+    if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
+    }
+    AgentSession session = requireSession(request.sessionId(), user);
+    return orchestratorTurnService.orchestrate(session, request, user);
+  }
+
+  @Transactional
+  public OrchestratorRunConfirmationResponse confirmRunSubmission(
+      OrchestratorRunConfirmationRequest request, AppUserDetails user) {
+    if (request == null
+        || request.sessionId() == null
+        || request.sessionId().isBlank()
+        || request.turnId() == null
+        || request.turnId().isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "sessionId and turnId are required");
+    }
+    AgentSession session = requireSession(request.sessionId(), user);
+    return runConfirmationService.confirm(session, request, user);
   }
 
   @Transactional
   public ActionRecordResponse recordActionEvent(
       String sessionId, String actionId, ActionEventRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    Instant now = Instant.now();
-    String type =
-        request == null || request.type() == null || request.type().isBlank()
-            ? "ACTION_EVENT"
-            : request.type();
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .type(type)
-            .payloadJson(
-                writeJson(
-                    java.util.Map.of(
-                        "actionId",
-                        actionId,
-                        "payload",
-                        request == null || request.payload() == null
-                            ? java.util.Map.of()
-                            : request.payload())))
-            .createdAt(now)
-            .build());
-    session.setUpdatedAt(now);
-    sessionRepo.save(session);
-    return new ActionRecordResponse(actionId, sessionId, type, null, now);
+    return actionLifecycleService.recordEvent(session, actionId, request);
   }
 
   @Transactional
   public ActionRecordResponse recordActionResult(
       String sessionId, String actionId, ActionResultRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    Instant now = Instant.now();
-    String status =
-        request == null || request.status() == null || request.status().isBlank()
-            ? "UNKNOWN"
-            : request.status().toUpperCase(Locale.ROOT);
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .type("ACTION_RESULT")
-            .payloadJson(
-                writeJson(
-                    java.util.Map.of(
-                        "actionId", actionId,
-                        "status", status,
-                        "summary", request == null ? "" : firstNonBlank(request.summary(), ""),
-                        "runId", request == null ? "" : firstNonBlank(request.runId(), ""),
-                        "touchedFiles",
-                            request == null || request.touchedFiles() == null
-                                ? List.of()
-                                : request.touchedFiles(),
-                        "verification",
-                            request == null || request.verification() == null
-                                ? java.util.Map.of()
-                                : request.verification())))
-            .createdAt(now)
-            .build());
-    session.setUpdatedAt(now);
-    sessionRepo.save(session);
-    return new ActionRecordResponse(
-        actionId, sessionId, status, request == null ? null : request.summary(), now);
+    return actionLifecycleService.recordResult(session, actionId, request);
   }
 
   @Transactional
   public TurnResponse recordTurn(String sessionId, TurnRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    String message = request == null ? "" : request.message();
-    IntentDecision decision =
-        intentService.interpret(
-            new InterpretIntentRequest(
-                sessionId,
-                message,
-                session.getProjectId(),
-                request == null ? null : request.repoContext(),
-                request == null ? null : request.clientCapabilities()));
-
-    int sequence = Math.toIntExact(turnRepo.countBySessionId(sessionId) + 1);
-    AgentTurn turn =
-        AgentTurn.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .orgId(session.getOrgId())
-            .userId(session.getUserId())
-            .sequence(sequence)
-            .userMessage(message)
-            .assistantSummary(decision.response())
-            .intentType(decision.intent())
-            .intentConfidence(decision.confidence())
-            .actionType(decision.proposedAction() == null ? null : decision.proposedAction().type())
-            .proposedActionJson(writeJson(decision.proposedAction()))
-            .status(decision.needsConfirmation() ? "NEEDS_CONFIRMATION" : "OK")
-            .createdAt(Instant.now())
-            .build();
-    turnRepo.save(turn);
-
-    session.setUpdatedAt(Instant.now());
-    if (message != null
-        && !message.isBlank()
-        && "New ExecuteSpec session".equals(session.getTitle())) {
-      session.setTitle(message.length() > 80 ? message.substring(0, 80) : message);
-    }
-    sessionRepo.save(session);
-
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .turnId(turn.getId())
-            .type("INTENT")
-            .payloadJson(writeJson(decision))
-            .createdAt(Instant.now())
-            .build());
-
-    return new TurnResponse(
-        turn.getId(), sessionId, sequence, decision, turn.getStatus(), turn.getCreatedAt());
+    return recordedTurnService.record(session, sessionId, request);
   }
 
   @Transactional
   public StreamTurnContext beginStreamTurn(
       String sessionId, StreamTurnRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    String message = request == null ? "" : request.message();
-    IntentDecision decision =
-        intentService.interpret(
-            new InterpretIntentRequest(
-                sessionId,
-                message,
-                session.getProjectId(),
-                request == null ? null : request.repoContext(),
-                request == null ? null : request.clientCapabilities()));
-    int sequence = Math.toIntExact(turnRepo.countBySessionId(sessionId) + 1);
-    AgentTurn turn =
-        AgentTurn.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .orgId(session.getOrgId())
-            .userId(session.getUserId())
-            .sequence(sequence)
-            .userMessage(message)
-            .assistantSummary(decision.response())
-            .intentType(decision.intent())
-            .intentConfidence(decision.confidence())
-            .actionType(decision.proposedAction() == null ? null : decision.proposedAction().type())
-            .proposedActionJson(writeJson(decision.proposedAction()))
-            .status("STREAMING")
-            .createdAt(Instant.now())
-            .build();
-    turnRepo.save(turn);
-
-    session.setUpdatedAt(Instant.now());
-    String explicitProvider = request == null ? null : blankToNull(request.providerOverride());
-    String effectiveProvider =
-        explicitProvider != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
-            : aiProviderPreferenceService.preferredProvider(user);
-    if (effectiveProvider == null) {
-      effectiveProvider = session.getDefaultProvider();
-    }
-    if (effectiveProvider != null) {
-      session.setDefaultProvider(effectiveProvider);
-    }
-    if (message != null
-        && !message.isBlank()
-        && "New ExecuteSpec session".equals(session.getTitle())) {
-      session.setTitle(message.length() > 80 ? message.substring(0, 80) : message);
-    }
-    sessionRepo.save(session);
-
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(sessionId)
-            .turnId(turn.getId())
-            .type("STREAM_STARTED")
-            .payloadJson(writeJson(decision))
-            .createdAt(Instant.now())
-            .build());
-
-    return new StreamTurnContext(
-        sessionId,
-        turn.getId(),
-        sequence,
-        session.getProjectId(),
-        session.getOrgId(),
-        String.valueOf(session.getUserId()),
-        effectiveProvider,
-        session.getDefaultModel(),
-        decision);
+    return streamTurnStarter.begin(session, sessionId, request, user);
   }
 
   @Transactional
   public void completeStreamTurn(
       StreamTurnContext ctx, String assistantSummary, RunCostTracker.Snapshot cost) {
-    AgentTurn turn =
-        turnRepo
-            .findById(ctx.turnId())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "turn not found"));
-    turn.setAssistantSummary(firstNonBlank(assistantSummary, turn.getAssistantSummary()));
-    turn.setInputTokens(cost == null ? 0 : cost.inputTokens());
-    turn.setOutputTokens(cost == null ? 0 : cost.outputTokens());
-    turn.setReasoningTokens(cost == null ? 0 : cost.reasoningTokens());
-    turn.setCostUsd(cost == null ? 0.0 : cost.costUsd());
-    turn.setStatus("OK");
-    turnRepo.save(turn);
+    completeStreamTurn(ctx, assistantSummary, cost, "OK");
+  }
 
-    usageRepo.save(
-        AgentUsageLedger.builder()
-            .id(UUID.randomUUID().toString())
-            .orgId(ctx.orgId())
-            .userId(ctx.userId())
-            .sourceType("AGENT_TURN")
-            .sourceId(ctx.turnId())
-            .provider(ctx.provider())
-            .model(ctx.model())
-            .inputTokens(cost == null ? 0 : cost.inputTokens())
-            .outputTokens(cost == null ? 0 : cost.outputTokens())
-            .reasoningTokens(cost == null ? 0 : cost.reasoningTokens())
-            .cacheReadTokens(cost == null ? 0 : cost.cacheReadTokens())
-            .costUsd(cost == null ? 0.0 : cost.costUsd())
-            .billableUnits(0)
-            .billingPolicy("INCLUDED")
-            .createdAt(Instant.now())
-            .build());
-
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(ctx.sessionId())
-            .turnId(ctx.turnId())
-            .type("STREAM_COMPLETED")
-            .payloadJson(writeJson(cost))
-            .createdAt(Instant.now())
-            .build());
+  @Transactional
+  public void completeStreamTurn(
+      StreamTurnContext ctx, String assistantSummary, RunCostTracker.Snapshot cost, String status) {
+    streamTurnLifecycle.complete(ctx, assistantSummary, cost, status);
   }
 
   @Transactional
   public void failStreamTurn(StreamTurnContext ctx, String message) {
-    turnRepo
-        .findById(ctx.turnId())
-        .ifPresent(
-            turn -> {
-              turn.setStatus("ERROR");
-              turn.setAssistantSummary(firstNonBlank(message, turn.getAssistantSummary()));
-              turnRepo.save(turn);
-            });
-    eventRepo.save(
-        AgentActionEvent.builder()
-            .id(UUID.randomUUID().toString())
-            .sessionId(ctx.sessionId())
-            .turnId(ctx.turnId())
-            .type("STREAM_FAILED")
-            .payloadJson(writeJson(java.util.Map.of("message", message == null ? "" : message)))
-            .createdAt(Instant.now())
-            .build());
+    streamTurnLifecycle.fail(ctx, message);
+  }
+
+  @Transactional
+  public void disconnectStreamTurn(StreamTurnContext ctx) {
+    streamTurnLifecycle.disconnect(ctx);
   }
 
   public IntentDecision interpret(InterpretIntentRequest request) {
@@ -459,63 +184,21 @@ public class AgentSessionService {
 
   public ContextResolveResponse resolveContext(ContextResolveRequest request, AppUserDetails user) {
     requireOrg(user);
-    String repoFullName =
-        normalizeRepoFullName(
-            firstNonBlank(
-                request.gitRemote(),
-                request.repoContext() == null ? null : request.repoContext().gitRemote()),
-            request.repoName());
-    if (repoFullName == null) {
-      return new ContextResolveResponse(null, "no git remote or repository name was provided");
-    }
-
-    for (var repo : projectRepoRepo.findByGithubRepoFullNameIgnoreCase(repoFullName)) {
-      for (var link : projectRepoLinkRepo.findByRepoId(repo.getId())) {
-        try {
-          Project project = projectAccessGuard.assertCanRead(link.getProjectId(), user);
-          return new ContextResolveResponse(
-              new ProjectMatch(
-                  project.getId(), project.getName(), String.valueOf(repo.getId()), repoFullName),
-              "repo remote matches linked project repo " + repoFullName);
-        } catch (ResponseStatusException ignored) {
-          // Another org/user's link; keep looking without leaking it.
-        }
-      }
-    }
-    return new ContextResolveResponse(
-        null, "no accessible project is linked to repo " + repoFullName);
+    return contextResolver.resolve(request, user);
   }
 
   public List<GateDecisionCard> listGates(AppUserDetails user, int limit) {
     requireOrg(user);
-    int capped = Math.max(1, Math.min(50, limit));
-    return pipelineRunRepo
-        .findByCreatedByUserIdAndStatusOrderByStartedAtDesc(
-            user.getUser().getId(), "AWAITING_APPROVAL", PageRequest.of(0, capped))
-        .stream()
-        .map(this::toGateCard)
-        .toList();
+    return gateReadService.list(user, limit);
   }
 
   public GateDecisionCard getGate(String runId, AppUserDetails user) {
-    PipelineRun run = runAccessGuard.requireRunAccess(runId, user);
-    if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, "run is not awaiting approval");
-    }
-    return toGateCard(run);
+    return gateReadService.get(runId, user);
   }
 
   private AgentSession requireSession(String sessionId, AppUserDetails user) {
     requireOrg(user);
-    AgentSession session =
-        sessionRepo
-            .findById(sessionId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found"));
-    if (!user.getUser().getId().equals(session.getUserId())) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
-    }
-    return session;
+    return sessionReadService.requireSession(sessionId, user);
   }
 
   private String requireOrg(AppUserDetails user) {
@@ -533,123 +216,15 @@ public class AgentSessionService {
     return orgId;
   }
 
-  private AgentSessionResponse toResponse(AgentSession s) {
-    return new AgentSessionResponse(
-        s.getId(),
-        s.getProjectId(),
-        s.getRepoRemote(),
-        s.getClientSurface(),
-        s.getTitle(),
-        s.getStatus(),
-        s.getDefaultProvider(),
-        s.getDefaultModel(),
-        s.getDefaultExecutionMode(),
-        s.getApprovalPolicy(),
-        s.getCreatedAt(),
-        s.getUpdatedAt());
-  }
-
-  private GateDecisionCard toGateCard(PipelineRun run) {
-    Project project =
-        run.getProjectId() == null ? null : projectRepo.findById(run.getProjectId()).orElse(null);
-    return new GateDecisionCard(
-        run.getRunId(),
-        run.getProjectId(),
-        project == null ? null : project.getName(),
-        firstNonBlank(run.getRunTitle(), trim(run.getUserRequest(), 80), "Untitled run"),
-        run.getStatus(),
-        run.getStartedAt(),
-        run.getAiProvider(),
-        firstNonBlank(run.getPlannerActualModel(), run.getPlannerModel(), run.getWorkerModel()),
-        run.getCostEstimateHigh(),
-        run.getHardCapUsd(),
-        run.getCreditsCharged(),
-        inferRisk(run).toUpperCase(Locale.ROOT),
-        firstNonBlank(run.getRunSummary(), trim(run.getUserRequest(), 220)),
-        "Review and approve if the plan, cost, and changed areas match the requested work.",
-        parseTasks(run.getPlanJson()));
-  }
-
-  private List<String> parseTasks(String planJson) {
-    if (planJson == null || planJson.isBlank()) return List.of();
-    try {
-      JsonNode root = objectMapper.readTree(planJson);
-      JsonNode tasks = root.path("tasks");
-      if (!tasks.isArray()) tasks = root.path("plan").path("tasks");
-      if (!tasks.isArray()) return List.of();
-      List<String> out = new ArrayList<>();
-      for (JsonNode t : tasks) {
-        String title = firstNonBlank(t.path("title").asText(null), t.path("name").asText(null));
-        if (title != null) out.add(title);
-        if (out.size() >= 8) break;
-      }
-      return out;
-    } catch (Exception ignored) {
-      return List.of();
-    }
-  }
-
-  private String inferRisk(PipelineRun run) {
-    int tasks = parseTasks(run.getPlanJson()).size();
-    if (tasks >= 6) return "high";
-    if (tasks >= 3) return "medium";
-    return "low";
-  }
-
-  private String writeJson(Object value) {
-    if (value == null) return null;
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (Exception e) {
-      return "{\"error\":\"json serialization failed\"}";
-    }
-  }
-
-  private static String normalizeRepoFullName(String remote, String repoName) {
-    String candidate = firstNonBlank(remote, repoName);
-    if (candidate == null) return null;
-    String s = candidate.trim();
-    if (s.endsWith(".git")) s = s.substring(0, s.length() - 4);
-    int github = s.indexOf("github.com");
-    if (github >= 0) {
-      s = s.substring(github + "github.com".length());
-    }
-    s = s.replace(':', '/');
-    while (s.startsWith("/")) s = s.substring(1);
-    String[] parts = s.split("/");
-    if (parts.length < 2) return null;
-    return (parts[parts.length - 2] + "/" + parts[parts.length - 1]).toLowerCase(Locale.ROOT);
-  }
-
-  private static String normalize(String value, String fallback) {
-    String v = blankToNull(value);
-    return v == null ? fallback : v.trim().toUpperCase(Locale.ROOT);
-  }
-
-  private static String blankToNull(String v) {
-    return v == null || v.isBlank() ? null : v.trim();
-  }
-
-  private static String firstNonBlank(String... values) {
-    for (String v : values) {
-      if (v != null && !v.isBlank()) return v;
-    }
-    return null;
-  }
-
-  private static String trim(String v, int max) {
-    if (v == null) return null;
-    return v.length() <= max ? v : v.substring(0, max - 1) + "…";
-  }
-
   public record StreamTurnContext(
       String sessionId,
       String turnId,
       int sequence,
       String projectId,
+      String runId,
       String orgId,
       String userId,
       String provider,
       String model,
-      IntentDecision decision) {}
+      OrchestratorDecision decision) {}
 }

@@ -80,6 +80,57 @@ spring:
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
       api-key: ""
+    sarvam:
+      base-url: https://api.sarvam.ai/v1
+      api-key: ""
+
+managed-ai:
+  enabled: true
+  tiers:
+    # Run-count retirement (2026-06-22): FREE is gated by a small managed ES-credit
+    # grant instead of a monthly run cap. 200 credits == $2.00 raw COGS at 1.00x.
+    FREE:
+      included-credits: 200
+      raw-cogs-cap-usd: 2.00
+      frontier-raw-cap-usd: 0.50
+      value-mode-after-raw-usd: 0.50
+      cheap-only-after-raw-usd: 1.50
+      hard-stop-after-raw-usd: 2.00
+      retail-multiplier: 1.00
+      concurrency-enforced: false
+      rate-limits-enabled: false
+      notification-thresholds-pct: [50, 75, 90, 100]
+    PRO:
+      included-credits: 2000
+      raw-cogs-cap-usd: 16.00
+      frontier-raw-cap-usd: 4.00
+      value-mode-after-raw-usd: 4.00
+      cheap-only-after-raw-usd: 12.00
+      hard-stop-after-raw-usd: 16.00
+      retail-multiplier: 1.25
+      concurrency-enforced: false
+      rate-limits-enabled: false
+      notification-thresholds-pct: [50, 75, 90, 100]
+    TEAM:
+      included-credits: 0
+      raw-cogs-cap-usd: 0.00
+      frontier-raw-cap-usd: 0.00
+      value-mode-after-raw-usd: 0.00
+      cheap-only-after-raw-usd: 0.00
+      hard-stop-after-raw-usd: 0.00
+      retail-multiplier: 1.00
+      concurrency-enforced: false
+      rate-limits-enabled: false
+    ENTERPRISE:
+      included-credits: 0
+      raw-cogs-cap-usd: 0.00
+      frontier-raw-cap-usd: 0.00
+      value-mode-after-raw-usd: 0.00
+      cheap-only-after-raw-usd: 0.00
+      hard-stop-after-raw-usd: 0.00
+      retail-multiplier: 1.00
+      concurrency-enforced: false
+      rate-limits-enabled: false
 
 model-matrix:
   providers:
@@ -118,11 +169,22 @@ model-matrix:
       planning: deepseek-v4-pro-fw
       workhorse: deepseek-v4-pro-fw
       lightweight: deepseek-v4-flash-fw
+    sarvam:
+      # 2026-06-21 — Sarvam AI (api.sarvam.ai), OpenAI-wire-compatible Indian-language provider.
+      # sarvam-105b for planning/workhorse, sarvam-30b for the light tier. Eval/benchmark + India-
+      # market BYOK route; intentionally NOT in failover-order (operator-picked, like deepseek).
+      planning: sarvam-105b
+      workhorse: sarvam-105b
+      lightweight: sarvam-30b
 
   models:
     claude-opus-4-6:
       provider: anthropic
       chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 90
       context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Opus 4.6"
@@ -134,6 +196,10 @@ model-matrix:
     claude-sonnet-4-6:
       provider: anthropic
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 30
       context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Sonnet 4.6"
@@ -145,6 +211,10 @@ model-matrix:
     claude-haiku-4-5-20251001:
       provider: anthropic
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 10
       context-limit: 200000
       max-output-tokens: 8192
       display-label: "Claude Haiku 4.5"
@@ -167,6 +237,10 @@ model-matrix:
     "[gemini-3-flash-preview]":
       provider: gemini
       chain-tier: CAPABLE
+      cost-class: CHEAP
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 10
       context-limit: 1048576
       max-output-tokens: 65536
       display-label: "Gemini 3 Flash Preview"
@@ -178,6 +252,10 @@ model-matrix:
     "[gemini-3-pro-preview]":
       provider: gemini
       chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 90
       context-limit: 1048576
       max-output-tokens: 65536
       display-label: "Gemini 3 Pro Preview"
@@ -189,6 +267,10 @@ model-matrix:
     "[gemini-3.5-flash]":
       provider: gemini
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 20
       context-limit: 1048576
       max-output-tokens: 65536
       display-label: "Gemini 3.5 Flash"
@@ -200,6 +282,10 @@ model-matrix:
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 30
       context-limit: 200000
       max-output-tokens: 16384
       display-label: "GPT-5.4"
@@ -211,6 +297,10 @@ model-matrix:
     "[gpt-5.4-mini]":
       provider: openai
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 10
       context-limit: 200000
       max-output-tokens: 16384
       display-label: "GPT-5.4 Mini"
@@ -222,6 +312,10 @@ model-matrix:
     claude-opus-4-7:
       provider: anthropic
       chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 95
       context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Opus 4.7"
@@ -233,6 +327,10 @@ model-matrix:
     claude-opus-4-8:
       provider: anthropic
       chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 100
       context-limit: 1048576
       max-output-tokens: 64000
       display-label: "Claude Opus 4.8"
@@ -244,6 +342,10 @@ model-matrix:
     "[gpt-5.5]":
       provider: openai
       chain-tier: CAPABLE
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 90
       context-limit: 200000
       max-output-tokens: 16384
       display-label: "GPT-5.5"
@@ -255,6 +357,10 @@ model-matrix:
     "[gpt-5.5-mini]":
       provider: openai
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 10
       context-limit: 200000
       max-output-tokens: 16384
       display-label: "GPT-5.5 Mini"
@@ -266,6 +372,10 @@ model-matrix:
     deepseek-v4-pro:
       provider: openrouter
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 20
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "DeepSeek V4 Pro (OpenRouter)"
@@ -277,6 +387,10 @@ model-matrix:
     deepseek-v4-pro-native:
       provider: deepseek
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 20
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "DeepSeek V4 Pro (Native)"
@@ -290,6 +404,10 @@ model-matrix:
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 5
       context-limit: 1048576
       max-output-tokens: 16384
       display-label: "DeepSeek V4 Flash (Native)"
@@ -298,9 +416,48 @@ model-matrix:
         cached-input-per-1m: 0.02
         output-per-1m: 0.20
       notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
+    sarvam-105b:
+      provider: sarvam
+      chain-tier: CAPABLE
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: false
+      step-down-priority: 8
+      context-limit: 131072
+      max-output-tokens: 16384
+      display-label: "Sarvam 105B"
+      pricing:
+        input-per-1m: 0.047
+        cached-input-per-1m: 0.029
+        output-per-1m: 0.188
+      notes: |
+        Sarvam AI api.sarvam.ai flagship (105B, 128K ctx) — OpenAI-wire-compatible, native tool calling + JSON + reasoning_content (verified live 2026-06-21: Bearer->200, tool_calls in OpenAI schema). India-market / sovereign-AI + eval/benchmark route; ENTERPRISE/BYOK, NOT in failover-order.
+        managed-ai-enabled:false so benchmark calls on the system key bypass the ES-AI-credit ledger (ManagedAiUsageService.authorizeCall passes through non-managed models).
+        Pricing converted from Sarvam INR rates (Rs4 in / Rs2.5 cached / Rs16 out per 1M) at ~Rs85/$ (2026-06). Independent capability is sub-frontier (Artificial Analysis Intelligence Index v4.1 ~= 12; agentic ~= 25) — benchmark before routing real worker traffic.
+        VERIFY: max_tokens ceiling (docs default 2048; sent via extraBody), cache-token reporting (usage.prompt_tokens_details was null on the 2026-06-21 smoke).
+    sarvam-30b:
+      provider: sarvam
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: false
+      step-down-priority: 3
+      context-limit: 65536
+      max-output-tokens: 8192
+      display-label: "Sarvam 30B"
+      pricing:
+        input-per-1m: 0.029
+        cached-input-per-1m: 0.018
+        output-per-1m: 0.118
+      notes: |
+        Sarvam AI api.sarvam.ai (30B, 64K ctx) — OpenAI-wire-compatible, native tool calling. Light-tier / cheap-fast lane (~167 t/s). Pricing from INR (Rs2.5 in / Rs1.5 cached / Rs10 out per 1M) at ~Rs85/$. ENTERPRISE/BYOK, NOT in failover-order, managed-ai-enabled:false.
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 5
       context-limit: 1048576
       max-output-tokens: 16384
       display-label: "DeepSeek V4 Flash (OpenRouter)"
@@ -312,6 +469,10 @@ model-matrix:
     deepseek-v4-pro-fw:
       provider: fireworks
       chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 20
       context-limit: 1048576
       max-output-tokens: 131072
       display-label: "DeepSeek V4 Pro (Fireworks)"
@@ -323,6 +484,10 @@ model-matrix:
     deepseek-v4-flash-fw:
       provider: fireworks
       chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 5
       context-limit: 1048576
       max-output-tokens: 131072
       display-label: "DeepSeek V4 Flash (Fireworks)"

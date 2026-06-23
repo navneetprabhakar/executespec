@@ -15,3 +15,4 @@ export * from './sharing';
 export * from './notifications';
 export * from './discovery';
 export * from './benchmark';
+export * from './agent';

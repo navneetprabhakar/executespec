@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+import {createRequire} from 'node:module';
+import {createServer} from 'node:net';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawn} from 'node:child_process';
+
+const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(__dirname, '..');
+const outDir = path.join(root, 'scripts', 'web-agent-browser-smoke-results');
+const backendUrl = process.env.BASE_URL || process.env.BACKEND_URL || 'http://localhost:8080';
+const chromePath =
+  process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const runtimeNodeModules =
+  process.env.CODEX_RUNTIME_NODE_MODULES ||
+  '/Users/navneetprabhakar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
+
+function loadPlaywright() {
+  try {
+    return require('playwright');
+  } catch {
+    return require(path.join(runtimeNodeModules, 'playwright'));
+  }
+}
+
+async function isPortFree(port) {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') resolve(false);
+      else reject(error);
+    });
+    server.listen(port, 'localhost', () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function findFrontendPort() {
+  const explicit = process.env.FRONTEND_PORT ? Number(process.env.FRONTEND_PORT) : null;
+  const candidates = explicit ? [explicit] : [5173, 5174];
+  for (const port of candidates) {
+    if (await isPortFree(port)) return port;
+  }
+  throw new Error(
+    `No allowed frontend smoke port is free (${candidates.join(', ')}). Backend CORS only allows the normal local dev origins.`,
+  );
+}
+
+async function waitFor(url, label, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = '';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return res;
+      lastError = `HTTP ${res.status}`;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`${label} was not ready at ${url}: ${lastError}`);
+}
+
+async function readLocalCredentials() {
+  const email = process.env.EMAIL || process.env.EXECUTESPEC_SMOKE_EMAIL;
+  const password = process.env.PASSWORD || process.env.EXECUTESPEC_SMOKE_PASSWORD;
+  if (email && password) return {email, password};
+
+  const credsPath =
+    process.env.LOCAL_CREDS_FILE || '/Users/navneetprabhakar/Desktop/local_creds.txt';
+  const text = await readFile(credsPath, 'utf8');
+  const line = text
+    .split(/\r?\n/)
+    .find((row) => row.startsWith('revalidate-ent@test.local'));
+  if (!line) throw new Error(`Enterprise local credential row not found in ${credsPath}`);
+  const [account, pass] = line.split(/\s+/);
+  return {email: account, password: pass};
+}
+
+async function login() {
+  const {email, password} = await readLocalCredentials();
+  const res = await fetch(`${backendUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email, password}),
+  });
+  if (!res.ok) {
+    throw new Error(`Login failed: HTTP ${res.status} ${await res.text()}`);
+  }
+  const json = await res.json();
+  if (!json.accessToken) throw new Error('Login response did not include accessToken.');
+  return {email, token: json.accessToken};
+}
+
+function startVite(port) {
+  const child = spawn(
+    'npm',
+    ['--prefix', 'frontend', 'run', 'dev', '--', '--host', 'localhost', '--port', String(port)],
+    {
+      cwd: root,
+      env: {...process.env, VITE_BACKEND_URL: backendUrl},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  let output = '';
+  child.stdout.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on('data', (chunk) => {
+    output += chunk.toString();
+  });
+  return {child, getOutput: () => output};
+}
+
+async function main() {
+  await mkdir(outDir, {recursive: true});
+  await waitFor(`${backendUrl}/actuator/health`, 'backend health');
+  const auth = await login();
+  const port = await findFrontendPort();
+  const frontendUrl = `http://localhost:${port}`;
+  const vite = startVite(port);
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '');
+  const screenshot = path.join(outDir, `web-agent-browser-smoke-${timestamp}.png`);
+  const report = path.join(outDir, `web-agent-browser-smoke-${timestamp}.md`);
+  const results = [];
+  const consoleMessages = [];
+  const failedResponses = [];
+  const requestFailures = [];
+  const pageErrors = [];
+  let page;
+  let browser;
+
+  try {
+    await waitFor(frontendUrl, 'vite frontend');
+    const {chromium} = loadPlaywright();
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: existsSync(chromePath) ? chromePath : undefined,
+    });
+    page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+    page.on('console', (msg) => {
+      if (['error', 'warning'].includes(msg.type())) {
+        consoleMessages.push(`${msg.type()}: ${msg.text()}`);
+      }
+    });
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.stack || error.message);
+    });
+    page.on('requestfailed', (request) => {
+      requestFailures.push(`${request.failure()?.errorText || 'failed'} ${request.url()}`);
+    });
+    page.on('response', async (response) => {
+      if (response.status() >= 400) {
+        let body = '';
+        if (/\/api\/agent|\/api\/orchestrator|\/api\/runs/.test(response.url())) {
+          body = await response.text().catch(() => '');
+        }
+        failedResponses.push(`${response.status()} ${response.url()}${body ? ` :: ${body.slice(0, 500)}` : ''}`);
+      }
+    });
+    await page.addInitScript((token) => {
+      localStorage.setItem('access_token', token);
+    }, auth.token);
+
+    await page.goto(`${frontendUrl}/agent`, {waitUntil: 'networkidle'});
+    await page.getByText('Control plane').waitFor({timeout: 20_000});
+    await page.getByText('Managed AI').waitFor({timeout: 20_000});
+    await page.getByText('Pending gates').waitFor({timeout: 20_000});
+    await page.getByText('WEB capabilities').waitFor({timeout: 20_000});
+    results.push(['PASS', 'agent shell rails', 'Control plane, Managed AI, gates, WEB capabilities rendered']);
+
+    await page.getByRole('button', {name: 'New session'}).click();
+    await page.getByText('Create a session to start.').waitFor({timeout: 5_000}).catch(() => {});
+    results.push(['PASS', 'fresh session', 'New WEB agent session requested before prompt smoke']);
+
+    const webCapabilitiesText = await page.locator('.agent-capabilities').innerText();
+    if (/local_code_task|local_git_|shell/i.test(webCapabilitiesText)) {
+      throw new Error(`WEB capabilities leaked local-only actions: ${webCapabilitiesText}`);
+    }
+    results.push(['PASS', 'WEB capability boundary', webCapabilitiesText.replace(/\s+/g, ', ')]);
+
+    await page.locator('textarea').fill('commit all files and push to git');
+    await page.getByRole('button', {name: 'Send'}).click();
+    await page.getByText('LOCAL_TOOL_ACTION', {exact: true}).first().waitFor({timeout: 30_000});
+    await page.getByText('Continue with local hands').waitFor({timeout: 30_000});
+    await page.getByText('Run API').waitFor({timeout: 30_000});
+    await page.getByText('blocked').waitFor({timeout: 30_000});
+    results.push([
+      'PASS',
+      'local git prompt route',
+      'LOCAL_TOOL_ACTION rendered as local-hands handoff with Run API blocked',
+    ]);
+
+    await page.screenshot({path: screenshot, fullPage: true});
+    results.push(['PASS', 'screenshot', screenshot]);
+
+    const noisyConsole = consoleMessages.filter(
+      (line) => !/Download the React DevTools|favicon/i.test(line),
+    );
+    if (noisyConsole.length) {
+      throw new Error(`Browser console warnings/errors: ${noisyConsole.join(' | ')}`);
+    }
+    const relevantFailures = failedResponses.filter(
+      (line) => !/\/favicon\.ico|chrome-extension:/.test(line),
+    );
+    if (relevantFailures.length) {
+      throw new Error(`HTTP failures observed: ${relevantFailures.join(' | ')}`);
+    }
+    results.push(['PASS', 'browser console/network', 'No console errors/warnings or HTTP 4xx/5xx']);
+
+    const rows = results
+      .map(([status, check, observed]) => `| ${status} | ${check} | ${observed} |`)
+      .join('\n');
+    await writeFile(
+      report,
+      `# Web Agent Browser Smoke - ${timestamp}
+
+- Backend: \`${backendUrl}\`
+- Frontend: \`${frontendUrl}\`
+- Account: \`${auth.email}\`
+- Screenshot: \`${screenshot}\`
+- Summary: ${results.length} pass, 0 fail
+
+| Status | Check | Observed |
+| --- | --- | --- |
+${rows}
+`,
+    );
+    console.log(`Report: ${report}`);
+  } catch (e) {
+    const message = e instanceof Error ? e.stack || e.message : String(e);
+    const failureScreenshot = screenshot.replace(/\.png$/, '-failure.png');
+    let pageText = '';
+    if (page) {
+      await page.screenshot({path: failureScreenshot, fullPage: true}).catch(() => {});
+      pageText = await page.locator('body').innerText({timeout: 2_000}).catch(() => '');
+    }
+    const rows = results
+      .map(([status, check, observed]) => `| ${status} | ${check} | ${observed} |`)
+      .join('\n');
+    await writeFile(
+      report,
+      `# Web Agent Browser Smoke - ${timestamp}
+
+- Backend: \`${backendUrl}\`
+- Frontend: \`${frontendUrl}\`
+- Account: \`${auth.email}\`
+- Failure screenshot: \`${failureScreenshot}\`
+- Summary: FAILED
+- Console warnings/errors: ${consoleMessages.length ? consoleMessages.map((line) => `\`${line.replace(/`/g, "'")}\``).join(', ') : 'none'}
+- Page errors: ${pageErrors.length ? pageErrors.map((line) => `\`${line.replace(/`/g, "'").slice(0, 500)}\``).join(', ') : 'none'}
+- Request failures: ${requestFailures.length ? requestFailures.map((line) => `\`${line.replace(/`/g, "'").slice(0, 500)}\``).join(', ') : 'none'}
+- HTTP failures: ${failedResponses.length ? failedResponses.map((line) => `\`${line.replace(/`/g, "'").slice(0, 500)}\``).join(', ') : 'none'}
+- Page text excerpt: \`${pageText.replace(/\s+/g, ' ').replace(/`/g, "'").slice(0, 1500)}\`
+
+| Status | Check | Observed |
+| --- | --- | --- |
+${rows}
+| FAIL | smoke failure | ${message.replace(/\n/g, '<br>')} |
+`,
+    );
+    console.error(`Report: ${report}`);
+    throw e;
+  } finally {
+    if (browser) await browser.close();
+    vite.child.kill('SIGTERM');
+    setTimeout(() => vite.child.kill('SIGKILL'), 2_000).unref();
+  }
+}
+
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+});

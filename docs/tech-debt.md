@@ -26,7 +26,7 @@
 
 | Item | Risk | Next action |
 | --- | --- | --- |
-| Plan-doc sprawl | Many `docs/plans` files are partially shipped. | Follow `plan-disposition-2026-06-10.md`. |
+| Plan-doc sprawl | Many `docs/plans` files are partially shipped; execution-only review/cleanup artifacts were removed from `docs/plans` on 2026-06-20. | Keep shipped behavior in `docs/features/` or reason-log entries, and delete stale plans only after a link scan. |
 | Root doc churn | Some operational docs may still mention historical tiers/paths. | Refresh opportunistically when touching that area. |
 | Branch hygiene | Old remote branches can obscure active work. | Prune after merge/audit. |
 

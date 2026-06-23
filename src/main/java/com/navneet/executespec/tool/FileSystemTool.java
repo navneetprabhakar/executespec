@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -20,14 +21,29 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class FileSystemTool {
 
-  @Value("${agent.workspace}")
-  private String workspaceRoot;
+  private final String workspaceRoot;
+  private final FileLockTool lockTool;
+  private final com.navneet.executespec.security.CodeAbuseScanner codeAbuseScanner;
 
-  @Autowired(required = false)
-  private FileLockTool lockTool;
+  @Autowired
+  public FileSystemTool(
+      @Value("${agent.workspace}") String workspaceRoot,
+      ObjectProvider<FileLockTool> lockToolProvider,
+      ObjectProvider<com.navneet.executespec.security.CodeAbuseScanner> codeAbuseScannerProvider) {
+    this(
+        workspaceRoot,
+        lockToolProvider.getIfAvailable(),
+        codeAbuseScannerProvider.getIfAvailable());
+  }
 
-  @Autowired(required = false)
-  private com.navneet.executespec.security.CodeAbuseScanner codeAbuseScanner;
+  FileSystemTool(
+      String workspaceRoot,
+      FileLockTool lockTool,
+      com.navneet.executespec.security.CodeAbuseScanner codeAbuseScanner) {
+    this.workspaceRoot = workspaceRoot;
+    this.lockTool = lockTool;
+    this.codeAbuseScanner = codeAbuseScanner;
+  }
 
   // File names that trigger a WARN log when written (potential secret leakage).
   // NOT blocked — agents legitimately write these for generated projects.

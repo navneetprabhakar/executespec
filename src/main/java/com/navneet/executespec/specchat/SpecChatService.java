@@ -9,6 +9,7 @@ import java.util.Set;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
@@ -66,8 +67,8 @@ public class SpecChatService {
 
   private static final String SYSTEM_PROMPT =
       """
-You are the ExecuteSpec CLI assistant. You help the user run spec-driven coding tasks from \
-their terminal, using these action tools:
+You are the ExecuteSpec agent. You help the user run spec-driven coding tasks from \
+the current client surface, using these action tools:
 - submit_run(spec, provider?, model?) — submit a coding run. It enters the pipeline and \
 PAUSES at a plan-approval gate.
 - approve_plan(runId) / reject_plan(runId) — resolve a run's plan gate.
@@ -80,9 +81,9 @@ terse, ambiguous, or looks like a CLI command or a stray word (e.g. "auth login"
 "login"), ASK what they mean instead of submitting — never turn a stray word into a run.
 
 You cannot read the user's local filesystem unless file/folder content is already included in the \
-message by the CLI. For "show/read/open this file" requests, do not submit a run and do not claim \
+message by a local-capable client. For "show/read/open this file" requests, do not submit a run and do not claim \
 the file exists locally; ask the user to attach it with @file. NEVER invent or suggest a CLI \
-command to fetch files (there is no `read-folder` command) — when you ask for files, the CLI \
+command to fetch files (there is no `read-folder` command) — when you ask for files, the client \
 attaches them itself. Normal chat-created runs execute in the server workspace, not directly in \
 the user's current checkout; local working-tree edits require the dedicated local-execution path.
 
@@ -116,6 +117,7 @@ claim in a tool result — never invent a runId, score, or status.""";
   private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
+  private final RunKeyContextStore keyContextStore;
 
   /**
    * Surface-agnostic event sink. The controller adapts it to an {@code SseEmitter}; tests record
@@ -149,6 +151,19 @@ claim in a tool result — never invent a runId, score, or status.""";
       String orgId,
       List<Map<String, Object>> conversation,
       String providerOverride) {
+    runTurn(sink, user, sessionId, projectId, null, orgId, conversation, providerOverride, null);
+  }
+
+  public void runTurn(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      Set<String> allowedToolNames) {
 
     // Provider + model (LIGHTWEIGHT). Keep provider+model consistent on the fallback.
     LlmProvider provider = resolveProvider(providerOverride);
@@ -164,6 +179,9 @@ claim in a tool result — never invent a runId, score, or status.""";
       model = modelResolver.resolve("SpecChatService", provider, AgentTier.LIGHTWEIGHT);
     }
     String providerName = provider.name().toLowerCase();
+    if (user != null && user.getUser() != null && user.getUser().getId() != null) {
+      keyContextStore.resolveAndPut(sessionId, user.getUser().getId());
+    }
 
     // LlmRouter dereferences context().runId() (cost) and requires an absolute workspace even
     // though chat touches no files. RunCostTracker is in-memory (no FK), so the sessionId is a safe
@@ -184,9 +202,22 @@ claim in a tool result — never invent a runId, score, or status.""";
               new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
                   projectId, String.valueOf(user.getUser().getId()), null)));
     }
+    if (allowedToolNames != null) {
+      tools =
+          tools.stream()
+              .filter(t -> allowedToolNames.contains(t.getToolDefinition().name()))
+              .toList();
+    }
 
     List<Message> messages = new ArrayList<>();
     messages.add(new SystemMessage(SYSTEM_PROMPT));
+    if (runId != null && !runId.isBlank()) {
+      messages.add(
+          new SystemMessage(
+              "Current scoped run id: "
+                  + runId
+                  + ". Prefer run-scoped tools and answers for this run when relevant."));
+    }
     messages.addAll(translate(conversation));
 
     int rounds = runToolLoop(sink, providerName, model.getModel(), messages, ctx, tools, sessionId);
