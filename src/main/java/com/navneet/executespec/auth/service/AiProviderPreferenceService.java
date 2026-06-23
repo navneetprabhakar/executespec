@@ -7,6 +7,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelAccessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -59,6 +60,7 @@ public class AiProviderPreferenceService {
     if ("GOOGLE".equals(normalized)) normalized = "GEMINI";
     try {
       LlmProvider.valueOf(normalized);
+      ModelAccessService.assertProviderEnabled(normalized);
       return normalized;
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown provider: " + provider);

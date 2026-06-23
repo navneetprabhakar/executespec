@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,6 +54,16 @@ public class WebSearchChatTools {
 
   private static final int MAX_CHARS = 8_000;
   private static final int MAX_QUERY = 400;
+  private static final int MAX_URL = 2_048;
+  private static final int MAX_URL_QUERY = 256;
+  private static final Pattern SECRET_EGRESS_PATTERN =
+      Pattern.compile(
+          "(?i)(es_pat_|sk-[a-z0-9_-]{16,}|ghp_[a-z0-9_]{20,}|github_pat_|"
+              + "AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+              + "(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret)"
+              + "\\s*[=:])");
+  private static final Pattern HIGH_ENTROPY_TOKEN_PATTERN =
+      Pattern.compile("(?i)[a-z0-9_./+=-]{80,}");
 
   private final ObjectMapper json;
   private final ContextSanitizer contextSanitizer;
@@ -91,6 +102,9 @@ public class WebSearchChatTools {
           String query = textOrNull(args, "query");
           if (query == null) return errorEnvelope("query is required");
           if (query.length() > MAX_QUERY) query = query.substring(0, MAX_QUERY);
+          if (looksUnsafeForEgress(query)) {
+            return errorEnvelope("query looks like it may contain credentials or copied secrets");
+          }
           String url =
               "https://duckduckgo.com/html/?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
           FetchOutcome out = safeFetch(url);
@@ -140,6 +154,8 @@ public class WebSearchChatTools {
   }
 
   private FetchOutcome safeFetch(String rawUrl) {
+    if (rawUrl == null || rawUrl.isBlank()) return FetchOutcome.err("url is required");
+    if (rawUrl.length() > MAX_URL) return FetchOutcome.err("URL is too long");
     URI uri;
     try {
       uri = URI.create(rawUrl.trim());
@@ -149,6 +165,14 @@ public class WebSearchChatTools {
     String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
     if (!scheme.equals("http") && !scheme.equals("https")) {
       return FetchOutcome.err("only http/https URLs are allowed");
+    }
+    if (uri.getUserInfo() != null) return FetchOutcome.err("URL credentials are not allowed");
+    if (uri.getFragment() != null) return FetchOutcome.err("URL fragments are not allowed");
+    if (uri.getRawQuery() != null && uri.getRawQuery().length() > MAX_URL_QUERY) {
+      return FetchOutcome.err("URL query string is too long");
+    }
+    if (looksUnsafeForEgress(rawUrl)) {
+      return FetchOutcome.err("URL looks like it may contain credentials or copied secrets");
     }
     String host = uri.getHost();
     if (host == null || host.isBlank()) return FetchOutcome.err("URL has no host");
@@ -193,6 +217,11 @@ public class WebSearchChatTools {
         || h.equals("metadata")
         || h.equals("metadata.google.internal")
         || h.endsWith(".internal");
+  }
+
+  private static boolean looksUnsafeForEgress(String value) {
+    String v = value == null ? "" : value;
+    return SECRET_EGRESS_PATTERN.matcher(v).find() || HIGH_ENTROPY_TOKEN_PATTERN.matcher(v).find();
   }
 
   private static boolean isBlockedAddress(InetAddress addr) {

@@ -28,6 +28,7 @@ class ModelAccessServiceTest {
 
   private static final String FREE_MODEL = "deepseek-v4-flash-native";
   private static final String PREMIUM_MODEL = "claude-opus-4-8";
+  private static final String DISABLED_MODEL = "sarvam-105b";
 
   @Mock private ModelRegistry modelRegistry;
   @Mock private TierEnforcementService tierService;
@@ -37,6 +38,7 @@ class ModelAccessServiceTest {
   void setUp() {
     when(modelRegistry.freeTierModels()).thenReturn(List.of(FREE_MODEL));
     when(modelRegistry.canonicalize(anyString())).thenAnswer(inv -> inv.getArgument(0));
+    when(modelRegistry.providerFor(DISABLED_MODEL)).thenReturn("sarvam");
     when(tierService.resolveUserTier("free-user")).thenReturn("FREE");
     when(tierService.resolveUserTier("pro-user")).thenReturn("PRO");
   }
@@ -59,6 +61,18 @@ class ModelAccessServiceTest {
   void paidTiersMayRunEverything() {
     assertTrue(service.isAllowed("pro-user", PREMIUM_MODEL));
     assertTrue(service.isAllowed("pro-user", FREE_MODEL));
+  }
+
+  @Test
+  void disabledProviderModelsAreUnavailableForEveryTier() {
+    assertFalse(service.isAllowed("free-user", DISABLED_MODEL));
+    assertFalse(service.isAllowed("pro-user", DISABLED_MODEL));
+    assertEquals("DISABLED", service.minTierFor(DISABLED_MODEL));
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.assertModelAllowed("pro-user", DISABLED_MODEL));
+    assertEquals(400, ex.getStatusCode().value());
   }
 
   @Test
