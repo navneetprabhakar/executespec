@@ -131,11 +131,7 @@ export function IdeBilling() {
   // endpoint reports a stale per-org plan/limit (e.g. it returns FREE/5 even for
   // an ENTERPRISE org), so we use it ONLY for gateway + renewal date + invoices,
   // never for the run cap or plan status.
-  const {periodRuns, totalSpend, planStatus} = billingUsageSummary(
-    usage,
-    permissions,
-    tier,
-  );
+  const {periodRuns, totalSpend, planStatus} = billingUsageSummary(usage, permissions, tier);
   const next = billing?.nextBillingDate || '';
 
   if (!user?.orgId) {
