@@ -80,7 +80,7 @@ fi
 
 # gcloud's bundled python prints a noisy 3.9 deprecation warning; keep it off stdout.
 GC() { gcloud "$@" 2>/dev/null; }
-SSH_BASE=(compute ssh "$INSTANCE" --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no)
+SSH_BASE=(gcloud compute ssh "$INSTANCE" --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no)
 
 echo "── deploy-local ──────────────────────────────────────────"
 echo "  mode=$MODE  env=$ENVNAME  sha=$SHA"
