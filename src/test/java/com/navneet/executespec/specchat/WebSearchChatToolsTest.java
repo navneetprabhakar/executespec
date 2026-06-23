@@ -70,6 +70,24 @@ class WebSearchChatToolsTest {
   }
 
   @Test
+  void webFetchRejectsCredentialBearingUrlsBeforeNetwork() {
+    assertThat(
+            call(
+                "web_fetch",
+                "{\"url\":\"https://example.com/?access_token=sk-abcdefghijklmnopqrstuvwxyz\"}"))
+        .contains("\"ok\":false")
+        .contains("credentials");
+  }
+
+  @Test
+  void webFetchRejectsVeryLongQueryStringsBeforeNetwork() {
+    String longQuery = "a".repeat(300);
+    assertThat(call("web_fetch", "{\"url\":\"https://example.com/?" + longQuery + "\"}"))
+        .contains("\"ok\":false")
+        .contains("query string is too long");
+  }
+
+  @Test
   void webFetchRequiresUrl() {
     assertThat(call("web_fetch", "{}")).contains("\"ok\":false");
   }
