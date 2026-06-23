@@ -40,8 +40,8 @@ public class EntitlementsController {
 
   /**
    * Read side of T26 — the effective governance/model/tool policy for the caller. The CLI {@code
-   * policy} / {@code doctor} surfaces consume this so they show the real policy instead of inferring
-   * it. Pure-read; reflects only what the enforcement guards actually apply.
+   * policy} / {@code doctor} surfaces consume this so they show the real policy instead of
+   * inferring it. Pure-read; reflects only what the enforcement guards actually apply.
    */
   @GetMapping("/governance-policy")
   public ResponseEntity<GovernancePolicyResponse> governancePolicy(

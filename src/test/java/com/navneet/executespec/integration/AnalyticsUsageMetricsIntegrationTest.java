@@ -16,10 +16,10 @@ import org.springframework.beans.factory.annotation.Autowired;
  * BadSqlGrammarException} → HTTP 500 on {@code /api/admin/analytics/usage} for every tier, blanking
  * the billing usage panel.
  *
- * <p>The pre-existing {@code AdminAnalyticsControllerTest} mocks {@code AnalyticsService}, so it never
- * ran the SQL and the bug shipped. This exercises the real queries against a real, Flyway-migrated
- * Postgres schema so any column/schema drift fails the build instead of reaching billing. Run with:
- * {@code mvn test -Dgroups=integration}.
+ * <p>The pre-existing {@code AdminAnalyticsControllerTest} mocks {@code AnalyticsService}, so it
+ * never ran the SQL and the bug shipped. This exercises the real queries against a real,
+ * Flyway-migrated Postgres schema so any column/schema drift fails the build instead of reaching
+ * billing. Run with: {@code mvn test -Dgroups=integration}.
  */
 class AnalyticsUsageMetricsIntegrationTest extends PostgresIntegrationBase {
 
@@ -33,7 +33,8 @@ class AnalyticsUsageMetricsIntegrationTest extends PostgresIntegrationBase {
     assertEquals(0, org.totalRuns());
     assertNotNull(org.runsByDay());
 
-    var user = assertDoesNotThrow(() -> analyticsService.getUsageMetrics("USER", "user-absent", 30));
+    var user =
+        assertDoesNotThrow(() -> analyticsService.getUsageMetrics("USER", "user-absent", 30));
     assertNotNull(user);
     assertEquals(0, user.totalRuns());
 

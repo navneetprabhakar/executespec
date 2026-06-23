@@ -15,17 +15,18 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Read side of T26 — assembles {@link GovernancePolicyResponse} from the live enforcement sources. No
- * new state: it reuses {@link EntitlementResolver#resolveTier} (so the read can never disagree with
- * the tier the guards see), {@link ModelRegistry} for the free-tier lock, and the org's M-032/M-039
- * columns for the cost-approval threshold and GitHub-owner allowlist.
+ * Read side of T26 — assembles {@link GovernancePolicyResponse} from the live enforcement sources.
+ * No new state: it reuses {@link EntitlementResolver#resolveTier} (so the read can never disagree
+ * with the tier the guards see), {@link ModelRegistry} for the free-tier lock, and the org's
+ * M-032/M-039 columns for the cost-approval threshold and GitHub-owner allowlist.
  */
 @Service
 @RequiredArgsConstructor
 public class GovernancePolicyResolver {
 
   private static final String TOOL_POLICY_NOTE =
-      "All tools available subject to approval + permission rules; no per-tool gating enforced yet.";
+      "All tools available subject to approval + permission rules; no per-tool gating enforced"
+          + " yet.";
 
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;

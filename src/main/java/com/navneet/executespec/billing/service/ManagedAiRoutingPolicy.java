@@ -19,9 +19,9 @@ class ManagedAiRoutingPolicy {
 
   /**
    * Run-count retirement (2026-06-22): the customer-facing spend limit is the ES AI credit grant,
-   * not a raw-$ cap. EXHAUSTED and the credit step-downs are denominated in CREDITS
-   * ({@code aiCreditsUsed} vs {@code includedAiCredits}), so a top-up — which raises
-   * {@code includedAiCredits} — lifts the gate. Step-down thresholds keep their configured shape by
+   * not a raw-$ cap. EXHAUSTED and the credit step-downs are denominated in CREDITS ({@code
+   * aiCreditsUsed} vs {@code includedAiCredits}), so a top-up — which raises {@code
+   * includedAiCredits} — lifts the gate. Step-down thresholds keep their configured shape by
    * scaling the grant by the raw-COGS proportion (e.g. cheap-only at $12 of a $16 cap → 75% of the
    * grant). The frontier sub-cap stays an internal raw-COGS guardrail (margin control on the most
    * expensive models), independent of the customer credit limit.
@@ -47,8 +47,8 @@ class ManagedAiRoutingPolicy {
 
   /**
    * Credit-denominated step-down threshold = the credit grant scaled by the configured raw-COGS
-   * proportion ({@code thresholdRaw / hardRaw}). Keeps the policy's configured shape while gating on
-   * credits. Returns 0 (disabled) when any input is non-positive.
+   * proportion ({@code thresholdRaw / hardRaw}). Keeps the policy's configured shape while gating
+   * on credits. Returns 0 (disabled) when any input is non-positive.
    */
   private static long creditThreshold(long includedCredits, double thresholdRaw, double hardRaw) {
     if (includedCredits <= 0 || thresholdRaw <= 0 || hardRaw <= 0) return 0;
