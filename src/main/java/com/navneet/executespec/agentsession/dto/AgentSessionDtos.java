@@ -20,11 +20,13 @@ public final class AgentSessionDtos {
       String defaultProvider,
       String defaultModel,
       String defaultExecutionMode,
-      String approvalPolicy) {}
+      String approvalPolicy,
+      String runId) {}
 
   public record AgentSessionResponse(
       String id,
       String projectId,
+      String runId,
       String repoRemote,
       String surface,
       String title,
@@ -70,6 +72,90 @@ public final class AgentSessionDtos {
       String billingImpact,
       String confirmationPrompt) {}
 
+  public record OrchestratorPolicy(
+      boolean runApiAllowed, boolean confirmationRequiredBeforeSubmit, String reason) {}
+
+  public record OrchestratorDecision(
+      String route,
+      double confidence,
+      String reasonCode,
+      boolean requiresUserConfirmation,
+      String assistantReply,
+      TypedAction proposedAction,
+      OrchestratorPolicy policy,
+      String traceId) {}
+
+  public record OrchestratorRepoContext(
+      String gitRoot,
+      String branch,
+      Boolean hasUncommittedChanges,
+      List<String> changedFiles,
+      List<InstructionFile> instructionFiles,
+      String gitRemote,
+      String cwdName,
+      List<String> detectedStack) {}
+
+  public record InstructionFile(String path, String sha256) {}
+
+  public record OrchestratorClientCapabilities(
+      boolean supportsLocalHands,
+      boolean supportsLocalReadContext,
+      boolean supportsRunConfirmation,
+      boolean supportsPlanGate,
+      boolean supportsEvidence,
+      boolean supportsDiff,
+      boolean supportsRevert,
+      boolean supportsStreaming) {}
+
+  public record OrchestratorMode(
+      String permissionMode,
+      String requestedExecutionMode,
+      boolean requiresConfirmationByDefault) {}
+
+  public record OrchestratorAttachment(
+      String kind, String path, String contentSha256, boolean truncated) {}
+
+  public record OrchestratorTurnRequest(
+      String sessionId,
+      String turnId,
+      String message,
+      String surface,
+      String clientVersion,
+      String projectId,
+      String cwd,
+      OrchestratorRepoContext repoContext,
+      OrchestratorClientCapabilities clientCapabilities,
+      OrchestratorMode mode,
+      List<OrchestratorAttachment> attachments) {}
+
+  public record OrchestratorTurnResponse(
+      String turnId,
+      String route,
+      double confidence,
+      String reasonCode,
+      boolean requiresUserConfirmation,
+      String assistantReply,
+      TypedAction proposedAction,
+      OrchestratorPolicy policy,
+      String traceId) {}
+
+  public record OrchestratorRunConfirmationRequest(
+      String sessionId,
+      String turnId,
+      Boolean confirmed,
+      String aiProvider,
+      String modelName,
+      Double userCostCap) {}
+
+  public record OrchestratorRunConfirmationResponse(
+      String sessionId,
+      String turnId,
+      String runId,
+      String route,
+      boolean calledRunApi,
+      String traceId,
+      String status) {}
+
   public record IntentDecision(
       String intent,
       double confidence,
@@ -83,6 +169,26 @@ public final class AgentSessionDtos {
       String sessionId,
       int sequence,
       IntentDecision decision,
+      String status,
+      Instant createdAt) {}
+
+  public record AgentTurnResponse(
+      String turnId,
+      String sessionId,
+      int sequence,
+      String userMessage,
+      String assistantSummary,
+      String intentType,
+      double intentConfidence,
+      String route,
+      String reasonCode,
+      String actionType,
+      String proposedActionJson,
+      String linkedRunId,
+      long inputTokens,
+      long outputTokens,
+      long reasoningTokens,
+      double costUsd,
       String status,
       Instant createdAt) {}
 

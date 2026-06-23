@@ -8,7 +8,7 @@ public record CreateSubscriptionRequest(
     String successUrl, // Stripe: redirect URL on success
     String cancelUrl, // Stripe: redirect URL on cancel
     /**
-     * v2.6.1 — seat count for per-seat-priced TEAM tier (2-20 self-serve). Null or 1 for PRO/MAX
+     * v2.6.1 — seat count for per-seat-priced TEAM tier (1-20 self-serve). Null or 1 for PRO/MAX
      * (per-plan priced). Values on non-TEAM plans are logged-and-ignored.
      */
     Integer seats) {

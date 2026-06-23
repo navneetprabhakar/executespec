@@ -3,6 +3,8 @@ package com.navneet.executespec.api;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.entitlements.EntitlementResolver;
 import com.navneet.executespec.entitlements.EntitlementsResponse;
+import com.navneet.executespec.entitlements.GovernancePolicyResolver;
+import com.navneet.executespec.entitlements.GovernancePolicyResponse;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class EntitlementsController {
 
   private final EntitlementResolver resolver;
+  private final GovernancePolicyResolver governancePolicyResolver;
 
   @GetMapping("/entitlements")
   public ResponseEntity<EntitlementsResponse> me(
@@ -33,5 +36,19 @@ public class EntitlementsController {
       return ResponseEntity.status(401).build();
     }
     return ResponseEntity.ok(resolver.resolve(userDetails.getUser().getId()));
+  }
+
+  /**
+   * Read side of T26 — the effective governance/model/tool policy for the caller. The CLI {@code
+   * policy} / {@code doctor} surfaces consume this so they show the real policy instead of
+   * inferring it. Pure-read; reflects only what the enforcement guards actually apply.
+   */
+  @GetMapping("/governance-policy")
+  public ResponseEntity<GovernancePolicyResponse> governancePolicy(
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    if (userDetails == null) {
+      return ResponseEntity.status(401).build();
+    }
+    return ResponseEntity.ok(governancePolicyResolver.resolve(userDetails.getUser().getId()));
   }
 }

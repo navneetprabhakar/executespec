@@ -13,6 +13,7 @@ import com.navneet.executespec.integration.slack.model.OrgSlackIntegration;
 import com.navneet.executespec.integration.slack.model.OrgSlackIntegrationRepository;
 import com.navneet.executespec.integration.slack.model.ProjectSlackChannelRepository;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -33,18 +34,39 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/integrations")
 public class IntegrationStatusController {
 
-  @Autowired(required = false)
-  private IntegrationManager manager;
+  private final IntegrationManager manager;
+  private final RunAccessGuard guard;
+  private final OrgService orgService;
+  private final OrgSlackIntegrationRepository slackIntegrationRepo;
+  private final ProjectSlackChannelRepository slackChannelRepo;
 
-  @Autowired private RunAccessGuard guard;
+  @Autowired
+  public IntegrationStatusController(
+      ObjectProvider<IntegrationManager> managerProvider,
+      RunAccessGuard guard,
+      OrgService orgService,
+      ObjectProvider<OrgSlackIntegrationRepository> slackIntegrationRepoProvider,
+      ObjectProvider<ProjectSlackChannelRepository> slackChannelRepoProvider) {
+    this(
+        managerProvider.getIfAvailable(),
+        guard,
+        orgService,
+        slackIntegrationRepoProvider.getIfAvailable(),
+        slackChannelRepoProvider.getIfAvailable());
+  }
 
-  @Autowired private OrgService orgService;
-
-  @Autowired(required = false)
-  private OrgSlackIntegrationRepository slackIntegrationRepo;
-
-  @Autowired(required = false)
-  private ProjectSlackChannelRepository slackChannelRepo;
+  IntegrationStatusController(
+      IntegrationManager manager,
+      RunAccessGuard guard,
+      OrgService orgService,
+      OrgSlackIntegrationRepository slackIntegrationRepo,
+      ProjectSlackChannelRepository slackChannelRepo) {
+    this.manager = manager;
+    this.guard = guard;
+    this.orgService = orgService;
+    this.slackIntegrationRepo = slackIntegrationRepo;
+    this.slackChannelRepo = slackChannelRepo;
+  }
 
   /** Returns which integrations are enabled for the current user's org. */
   @GetMapping("/status")

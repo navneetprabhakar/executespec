@@ -10,6 +10,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.credit.LifetimeCreditService;
 
 import org.springframework.stereotype.Service;
@@ -73,6 +74,7 @@ public class EntitlementResolver {
   private final ProjectMemberRepository projectMemberRepo;
   private final TierConfigRepository tierConfigRepo;
   private final LifetimeCreditService lifetimeCredit;
+  private final ManagedAiUsageService managedAiUsageService;
 
   /** Resolve entitlements for the given user. */
   public EntitlementsResponse resolve(String userId) {
@@ -117,6 +119,9 @@ public class EntitlementResolver {
     int lifetimeBalance = rawBalance >= MAX_DISPLAYABLE_BALANCE ? -1 : rawBalance;
     int lifetimeCap = effectivePaid ? -1 : user.getLifetimeRunCreditCap();
 
+    ManagedAiUsageService.CreditSummary credits =
+        managedAiUsageService.creditSummary(userId, tierKey);
+
     return new EntitlementsResponse(
         tierKey,
         displayName,
@@ -130,7 +135,12 @@ public class EntitlementResolver {
         currentSpend,
         /* billingCycleAnchor */ null,
         lifetimeBalance,
-        lifetimeCap);
+        lifetimeCap,
+        credits.managed(),
+        credits.creditsIncluded(),
+        credits.creditsUsed(),
+        credits.creditsRemaining(),
+        credits.routingState());
   }
 
   /**

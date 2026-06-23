@@ -83,7 +83,7 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V243`.
+Migration head in this worktree: `V247`.
 
 Recent relevant migrations:
 
@@ -95,9 +95,13 @@ Recent relevant migrations:
 - `V241`: seed `worker.local-hands.enabled` (default OFF).
 - `V242`: `app_user.preferred_ai_provider` — cross-surface provider preference.
 - `V243`: `run_step_usage` — durable per-call LLM usage (tokens/cache/reasoning/cost/call-index + role/step/retry attribution).
+- `V244`: `worker.local-hands.enabled` default ON — CLI/VS Code local execution no longer fail-closes at submit when using PAT-authenticated local mode.
+- `V245`: `managed_ai_usage_period`, `managed_ai_usage_event`, and `managed_ai_state_notification` — ES AI credit ledger, raw-COGS caps, step-down/step-up routing state, and notification dedupe.
+- `V246`: `agent_session.run_id` — durable run-scoped web agent sessions.
+- `V247`: `agent_action_event.action_id` — first-class action/result correlation id for agent clients.
 
 ## Deprecated / Transitional Areas
 
 - `FallbackLlmRouter` remains for legacy non-tool agents only.
 - `push-github` endpoint remains for compatibility; prefer SCM-neutral push paths.
-- Several plan docs describe partially shipped flag-gated work; use [`plan-disposition-2026-06-10.md`](plan-disposition-2026-06-10.md) before deleting or relying on them.
+- Several plan docs describe partially shipped flag-gated work; use `docs/document_map.md`, feature docs, and a link scan before deleting or relying on them.

@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "required": [
+    "route",
+    "confidence",
+    "reasonCode",
+    "requiresUserConfirmation",
+    "negativeEvidence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "route": {
+      "type": "string",
+      "enum": [
+        "CHAT_ONLY",
+        "READ_ONLY_CODE_HELP",
+        "PLAN_ONLY",
+        "REVIEW_ONLY",
+        "CLARIFY",
+        "RUN_LIFECYCLE_ACTION",
+        "LOCAL_TOOL_ACTION",
+        "IMPLEMENTATION_PROPOSAL",
+        "CODE_RUN_REQUIRED",
+        "SECURITY_REJECT"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reasonCode": {
+      "type": "string"
+    },
+    "requiresUserConfirmation": {
+      "type": "boolean"
+    },
+    "negativeEvidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

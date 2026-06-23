@@ -52,4 +52,26 @@ class AgentActionCatalogTest {
     assertThat(approve.billingImpact()).isEqualTo("run_credit");
     assertThat(approve.inputSchema()).containsKey("required");
   }
+
+  @Test
+  void actionDescriptorsStayAlignedWithCapabilityMetadata() {
+    var capabilitiesByName =
+        catalog.allCapabilities().stream()
+            .collect(java.util.stream.Collectors.toMap(c -> c.name(), c -> c));
+
+    for (var descriptor : catalog.list()) {
+      var capability = capabilitiesByName.get(descriptor.type());
+
+      assertThat(capability).as("capability for %s", descriptor.type()).isNotNull();
+      assertThat(capability.confirmationRequired())
+          .as("confirmation for %s", descriptor.type())
+          .isEqualTo(descriptor.requiresConfirmation());
+      assertThat(capability.billingImpact())
+          .as("billing impact for %s", descriptor.type())
+          .isEqualTo(descriptor.billingImpact());
+      assertThat(capability.inputSchema())
+          .as("required fields for %s", descriptor.type())
+          .containsEntry("required", descriptor.requiredFields());
+    }
+  }
 }

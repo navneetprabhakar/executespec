@@ -57,6 +57,14 @@ export default function ProtectedRoute() {
       // user's typed spec for post-auth hydration.
       return <Navigate to={`/login${location.search}`} replace />;
     }
+    if (location.pathname === '/plans') {
+      // F4 (QA, 2026-06-23) — keep the signed-out public surface consistent.
+      // `/pricing` is a public page, but the in-app `/plans` lives behind this
+      // auth wall. Rather than bouncing anonymous "compare plans" visitors to
+      // /login (a dead end that loses intent), send them to the public pricing
+      // page, which carries the same tier comparison.
+      return <Navigate to='/pricing' replace />;
+    }
     return <Navigate to='/login' state={{from: location}} replace />;
   }
 

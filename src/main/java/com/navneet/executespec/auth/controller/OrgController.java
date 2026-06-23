@@ -500,7 +500,7 @@ public class OrgController {
    * <p>Rejects reducing seats below current active member count (400) — admin must remove members
    * first.
    *
-   * <p>Rejects seats outside 2-20 range (400) — larger orgs route to ENTERPRISE sales.
+   * <p>Rejects seats outside 1-20 range (400) — larger orgs route to ENTERPRISE sales.
    *
    * <p>Returns 402 if no active TEAM subscription found (the org isn't on a seat-priced tier).
    */

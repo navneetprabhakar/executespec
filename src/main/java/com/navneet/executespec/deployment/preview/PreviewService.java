@@ -33,6 +33,7 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -82,33 +83,21 @@ public class PreviewService {
   private final MeterRegistry meterRegistry;
   private final GlobalPreviewLimiter globalPreviewLimiter;
 
-  /** Optional — only present when preview.proxy.enabled=true (VM with Caddy). */
-  @Autowired(required = false)
-  private CaddyProxyManager caddyProxy;
-
-  /** Optional — for Cloud Run preview mode. */
-  @Autowired(required = false)
-  private ArtifactRegistryClient artifactRegistryClient;
-
-  /** Optional — for Cloud Run preview mode. */
-  @Autowired(required = false)
-  private CloudRunClient cloudRunClient;
-
-  /** Notifies the test execution pipeline that the preview is ready. */
-  @Autowired(required = false)
-  private com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator;
-
-  /** Optional — for VM-based preview mode. */
-  @Autowired(required = false)
-  private PreviewDeploymentService vmPreviewService;
-
   /**
    * Optional — when {@code preview.engine.route-via=true}, dispatches the "build → push → hand off
    * to preview-engine" flow instead of the legacy docker-compose path. Bean only present when
    * preview-engine classes are on the classpath (always true in this repo after integration lands).
    */
-  @Autowired(required = false)
-  private com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff engineHandoff;
+  private final ObjectProvider<CaddyProxyManager> caddyProxyProvider;
+
+  private final ObjectProvider<ArtifactRegistryClient> artifactRegistryClientProvider;
+  private final ObjectProvider<CloudRunClient> cloudRunClientProvider;
+  private final ObjectProvider<com.navneet.executespec.testgen.TestPreviewCoordinator>
+      testPreviewCoordinatorProvider;
+  private final ObjectProvider<PreviewDeploymentService> vmPreviewServiceProvider;
+  private final ObjectProvider<
+          com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff>
+      engineHandoffProvider;
 
   /** runId → preview-engine preview id, set when we hand off through the engine. */
   private final ConcurrentHashMap<String, String> enginePreviewIds = new ConcurrentHashMap<>();
@@ -144,6 +133,7 @@ public class PreviewService {
                   .HTTP_1_1) // Force HTTP/1.1 — dev servers (Vite, Flask) may not support HTTP/2
           .build();
 
+  @Autowired
   public PreviewService(
       DevDockerfileGenerator dockerfileGen,
       DatabaseDetector databaseDetector,
@@ -158,7 +148,15 @@ public class PreviewService {
       TierConfigRepository tierConfigRepo,
       WorkspaceRestoreService restoreService,
       MeterRegistry meterRegistry,
-      GlobalPreviewLimiter globalPreviewLimiter) {
+      GlobalPreviewLimiter globalPreviewLimiter,
+      ObjectProvider<CaddyProxyManager> caddyProxyProvider,
+      ObjectProvider<ArtifactRegistryClient> artifactRegistryClientProvider,
+      ObjectProvider<CloudRunClient> cloudRunClientProvider,
+      ObjectProvider<com.navneet.executespec.testgen.TestPreviewCoordinator>
+          testPreviewCoordinatorProvider,
+      ObjectProvider<PreviewDeploymentService> vmPreviewServiceProvider,
+      ObjectProvider<com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff>
+          engineHandoffProvider) {
     this.dockerfileGen = dockerfileGen;
     this.databaseDetector = databaseDetector;
     this.envVarDetector = envVarDetector;
@@ -173,6 +171,98 @@ public class PreviewService {
     this.restoreService = restoreService;
     this.meterRegistry = meterRegistry;
     this.globalPreviewLimiter = globalPreviewLimiter;
+    this.caddyProxyProvider = caddyProxyProvider;
+    this.artifactRegistryClientProvider = artifactRegistryClientProvider;
+    this.cloudRunClientProvider = cloudRunClientProvider;
+    this.testPreviewCoordinatorProvider = testPreviewCoordinatorProvider;
+    this.vmPreviewServiceProvider = vmPreviewServiceProvider;
+    this.engineHandoffProvider = engineHandoffProvider;
+  }
+
+  PreviewService(
+      DevDockerfileGenerator dockerfileGen,
+      DatabaseDetector databaseDetector,
+      EnvVarDetector envVarDetector,
+      ComposeFileGenerator composeFileGen,
+      ComposeExecutor composeExecutor,
+      PreviewPortPool portPool,
+      PreviewProperties props,
+      SseBroadcaster broadcaster,
+      StateStore stateStore,
+      AgentProperties agentProps,
+      TierConfigRepository tierConfigRepo,
+      WorkspaceRestoreService restoreService,
+      MeterRegistry meterRegistry,
+      GlobalPreviewLimiter globalPreviewLimiter) {
+    this(
+        dockerfileGen,
+        databaseDetector,
+        envVarDetector,
+        composeFileGen,
+        composeExecutor,
+        portPool,
+        props,
+        broadcaster,
+        stateStore,
+        agentProps,
+        tierConfigRepo,
+        restoreService,
+        meterRegistry,
+        globalPreviewLimiter,
+        emptyProvider(),
+        emptyProvider(),
+        emptyProvider(),
+        emptyProvider(),
+        emptyProvider(),
+        emptyProvider());
+  }
+
+  private static <T> ObjectProvider<T> emptyProvider() {
+    return new ObjectProvider<>() {
+      @Override
+      public T getObject(Object... args) {
+        return null;
+      }
+
+      @Override
+      public T getIfAvailable() {
+        return null;
+      }
+
+      @Override
+      public T getIfUnique() {
+        return null;
+      }
+
+      @Override
+      public T getObject() {
+        return null;
+      }
+    };
+  }
+
+  private CaddyProxyManager caddyProxy() {
+    return caddyProxyProvider.getIfAvailable();
+  }
+
+  private ArtifactRegistryClient artifactRegistryClient() {
+    return artifactRegistryClientProvider.getIfAvailable();
+  }
+
+  private CloudRunClient cloudRunClient() {
+    return cloudRunClientProvider.getIfAvailable();
+  }
+
+  private com.navneet.executespec.testgen.TestPreviewCoordinator testPreviewCoordinator() {
+    return testPreviewCoordinatorProvider.getIfAvailable();
+  }
+
+  private PreviewDeploymentService vmPreviewService() {
+    return vmPreviewServiceProvider.getIfAvailable();
+  }
+
+  private com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff engineHandoff() {
+    return engineHandoffProvider.getIfAvailable();
   }
 
   /** Analyze workspace for database and env var requirements (pre-start step). */
@@ -229,9 +319,9 @@ public class PreviewService {
         if (existing.status() == PreviewStatus.FAILED
             || existing.status() == PreviewStatus.TIMED_OUT) {
           // Clean up stale failed session so retry starts fresh
-          if (isVmMode() && vmPreviewService != null && existing.composeProjectName() != null) {
+          if (isVmMode() && vmPreviewService() != null && existing.composeProjectName() != null) {
             try {
-              vmPreviewService.teardown(existing.composeProjectName());
+              vmPreviewService().teardown(existing.composeProjectName());
             } catch (Exception ignored) {
               /* best-effort cleanup */
             }
@@ -362,7 +452,7 @@ public class PreviewService {
     if (isVmMode()) {
       // Check VM capacity before spawning the thread — if at capacity, queue this
       // request and return a QUEUED session immediately rather than failing later.
-      if (vmPreviewService != null && !vmPreviewService.hasCapacity()) {
+      if (vmPreviewService() != null && !vmPreviewService().hasCapacity()) {
         log.info("VM preview at capacity for run {} — queuing (user={})", runId, user.getId());
         previewQueue.add(new QueuedPreview(runId, user, safeEnvVars));
         Metrics.ACTIVE_PREVIEWS.decrementAndGet(); // undo the increment above; not active yet
@@ -402,7 +492,7 @@ public class PreviewService {
                   () ->
                       buildAndStartCloudRun(
                           runId, workspace, type, mode, projectName, safeEnvVars)));
-    } else if (engineHandoff != null && props.getEngine().isRouteVia()) {
+    } else if (engineHandoff() != null && props.getEngine().isRouteVia()) {
       // Route via preview-engine: main app builds + pushes, preview-engine runs.
       String tierName = user.getTier() == null ? "LOCAL" : String.valueOf(user.getTier());
       String userId = String.valueOf(user.getId());
@@ -455,18 +545,18 @@ public class PreviewService {
 
     String mode;
     String enginePreviewId = enginePreviewIds.remove(runId);
-    if (enginePreviewId != null && engineHandoff != null) {
+    if (enginePreviewId != null && engineHandoff() != null) {
       // Preview-engine owns the container — ask it to stop.
       try {
-        engineHandoff.stop(enginePreviewId);
+        engineHandoff().stop(enginePreviewId);
       } catch (Exception e) {
         log.warn("preview-engine stop for {} failed: {}", runId, e.getMessage());
       }
       mode = "preview-engine";
-    } else if (isVmMode() && vmPreviewService != null && session.composeProjectName() != null) {
+    } else if (isVmMode() && vmPreviewService() != null && session.composeProjectName() != null) {
       // VM mode: teardown via SSH on the preview VM
       try {
-        vmPreviewService.teardown(session.composeProjectName());
+        vmPreviewService().teardown(session.composeProjectName());
       } catch (Exception e) {
         log.warn("VM preview teardown failed for run {}: {}", runId, e.getMessage());
       }
@@ -626,7 +716,7 @@ public class PreviewService {
 
   /** Fetch Cloud Run service logs via gcloud CLI. */
   private String getCloudRunLogs(String serviceName, int tailLines) {
-    if (cloudRunClient == null) return "Cloud Run client not available.";
+    if (cloudRunClient() == null) return "Cloud Run client not available.";
     try {
       ProcessBuilder pb =
           new ProcessBuilder(
@@ -670,7 +760,7 @@ public class PreviewService {
 
   private void buildAndStartVm(
       String runId, Path workspace, PreviewProjectType type, PreviewMode mode, String projectName) {
-    if (vmPreviewService == null) {
+    if (vmPreviewService() == null) {
       fail(
           runId,
           "VM preview mode configured but PreviewDeploymentService is not available. "
@@ -719,7 +809,7 @@ public class PreviewService {
 
       // Phase 3: SCP + deploy to VM
       broadcaster.emit(runId, RunEvent.log(runId, null, "Deploying preview to VM..."));
-      PreviewVmResult result = vmPreviewService.deploy(projectName, runId, workspace);
+      PreviewVmResult result = vmPreviewService().deploy(projectName, runId, workspace);
 
       String previewUrl = result.getUrl();
       log.info("VM preview deployed for run {}: {}", runId, previewUrl);
@@ -746,9 +836,9 @@ public class PreviewService {
           runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
 
       // Notify test execution pipeline
-      if (testPreviewCoordinator != null) {
+      if (testPreviewCoordinator() != null) {
         try {
-          testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+          testPreviewCoordinator().onPreviewReady(runId, previewUrl);
         } catch (Exception e) {
           log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
         }
@@ -797,7 +887,7 @@ public class PreviewService {
     String imageUri = null;
 
     try {
-      if (artifactRegistryClient == null || cloudRunClient == null) {
+      if (artifactRegistryClient() == null || cloudRunClient() == null) {
         fail(
             runId,
             "Cloud Run preview mode requires ArtifactRegistryClient and CloudRunClient beans. "
@@ -852,7 +942,7 @@ public class PreviewService {
           runId,
           new RunEvent("PREVIEW_BUILDING", runId, null, "Building Docker image...", Instant.now()));
 
-      var buildResult = artifactRegistryClient.buildImage(workspace, "preview-" + shortId);
+      var buildResult = artifactRegistryClient().buildImage(workspace, "preview-" + shortId);
       imageUri = buildResult.imageTag();
       // Store build output in session for copilot/frontend diagnostics on failure
       final String buildOutput =
@@ -887,7 +977,7 @@ public class PreviewService {
           runId,
           new RunEvent(
               "PREVIEW_BUILDING", runId, null, "Pushing image to registry...", Instant.now()));
-      artifactRegistryClient.pushImage(imageUri);
+      artifactRegistryClient().pushImage(imageUri);
 
       // Phase 4: Deploy to Cloud Run (preserve buildOutput/dockerfile in session)
       updateSession(
@@ -916,7 +1006,7 @@ public class PreviewService {
 
       // Cloud Run always uses port 8080 — generateForCloudRun() normalizes all ports to 8080
       CloudRunClient.DeployResult deployResult =
-          cloudRunClient.deployPreview(serviceName, imageUri, "1", "512Mi", envVars, 8080);
+          cloudRunClient().deployPreview(serviceName, imageUri, "1", "512Mi", envVars, 8080);
 
       String previewUrl = deployResult.serviceUrl();
       if (previewUrl == null || previewUrl.isBlank()) {
@@ -935,7 +1025,7 @@ public class PreviewService {
               "Waiting for Cloud Run service to be ready...",
               Instant.now()));
 
-      boolean healthy = cloudRunClient.healthCheck(previewUrl);
+      boolean healthy = cloudRunClient().healthCheck(previewUrl);
       if (!healthy) {
         // Fetch Cloud Run logs to include in the error for diagnostics
         String crLogs = getCloudRunLogs(serviceName, 30);
@@ -982,9 +1072,9 @@ public class PreviewService {
           runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
 
       // Notify test execution pipeline
-      if (testPreviewCoordinator != null) {
+      if (testPreviewCoordinator() != null) {
         try {
-          testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+          testPreviewCoordinator().onPreviewReady(runId, previewUrl);
         } catch (Exception e) {
           log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
         }
@@ -1049,17 +1139,17 @@ public class PreviewService {
   }
 
   private void cleanupCloudRun(String serviceName, String imageUri) {
-    if (cloudRunClient == null) return;
+    if (cloudRunClient() == null) return;
     try {
       if (serviceName != null) {
-        cloudRunClient.deleteService(serviceName);
+        cloudRunClient().deleteService(serviceName);
       }
     } catch (Exception e) {
       log.warn("Failed to cleanup Cloud Run service {}: {}", serviceName, e.getMessage());
     }
     try {
       if (imageUri != null) {
-        cloudRunClient.deleteImage(imageUri);
+        cloudRunClient().deleteImage(imageUri);
       }
     } catch (Exception e) {
       log.warn("Failed to cleanup image {}: {}", imageUri, e.getMessage());
@@ -1114,8 +1204,16 @@ public class PreviewService {
           "[{}] preview-engine handoff starting — workspace={}, type={}", runId, workspace, type);
 
       var result =
-          engineHandoff.start(
-              runId, workspace, dockerfilePath, type, ownerUserId, ownerTier, ttlSeconds, envVars);
+          engineHandoff()
+              .start(
+                  runId,
+                  workspace,
+                  dockerfilePath,
+                  type,
+                  ownerUserId,
+                  ownerTier,
+                  ttlSeconds,
+                  envVars);
 
       enginePreviewIds.put(runId, result.previewId());
       updateSession(
@@ -1333,15 +1431,15 @@ public class PreviewService {
       // Phase 5: Build preview URL
       // Priority: Caddy proxy → Spring Boot proxy (PreviewProxyFilter) → fallback host → localhost
       String previewUrl;
-      if (caddyProxy != null) {
+      if (caddyProxy() != null) {
         try {
-          caddyProxy.addRoute(runId, hostPort);
+          caddyProxy().addRoute(runId, hostPort);
         } catch (PreviewException e) {
           log.error("Caddy route creation failed for preview {}: {}", runId, e.getMessage());
           fail(runId, "Proxy route creation failed: " + e.getMessage(), hostPort);
           return;
         }
-        previewUrl = caddyProxy.buildUrl(runId);
+        previewUrl = caddyProxy().buildUrl(runId);
       } else if (props.getProxy().isEnabled()) {
         // Spring Boot preview proxy mode — PreviewProxyFilter handles preview-*.executespec.ai
         // Traffic flows: LB → Spring Boot :8080 → PreviewProxyFilter → localhost:{port}
@@ -1441,9 +1539,9 @@ public class PreviewService {
           runId, new RunEvent("PREVIEW_READY", runId, null, previewUrl, Instant.now()));
 
       // Notify test execution pipeline that preview is ready
-      if (testPreviewCoordinator != null) {
+      if (testPreviewCoordinator() != null) {
         try {
-          testPreviewCoordinator.onPreviewReady(runId, previewUrl);
+          testPreviewCoordinator().onPreviewReady(runId, previewUrl);
         } catch (Exception e) {
           log.warn("Failed to notify test coordinator for run {}: {}", runId, e.getMessage());
         }
@@ -1685,8 +1783,8 @@ public class PreviewService {
     }
 
     // Remove Caddy route
-    if (caddyProxy != null) {
-      caddyProxy.removeRoute(session.runId());
+    if (caddyProxy() != null) {
+      caddyProxy().removeRoute(session.runId());
     }
 
     // Release port
@@ -1701,8 +1799,8 @@ public class PreviewService {
         log.debug("Cleanup: failed to stop compose project {}: {}", projectName, e.getMessage());
       }
     }
-    if (caddyProxy != null) {
-      caddyProxy.removeRoute(runId);
+    if (caddyProxy() != null) {
+      caddyProxy().removeRoute(runId);
     }
     if (hostPort > 0) {
       portPool.release(runId);
@@ -1773,9 +1871,9 @@ public class PreviewService {
     }
 
     // Cloud Run orphans
-    if (cloudRunClient != null) {
+    if (cloudRunClient() != null) {
       try {
-        List<String> services = cloudRunClient.listPreviewServices();
+        List<String> services = cloudRunClient().listPreviewServices();
         Set<String> activeServices = ConcurrentHashMap.newKeySet();
         active.values().stream()
             .filter(s -> s.cloudRunServiceName() != null)
@@ -1784,7 +1882,7 @@ public class PreviewService {
         for (String service : services) {
           if (!activeServices.contains(service)) {
             log.info("Deleting orphaned Cloud Run preview service: {}", service);
-            cloudRunClient.deleteService(service);
+            cloudRunClient().deleteService(service);
           }
         }
       } catch (Exception e) {

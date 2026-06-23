@@ -6,7 +6,7 @@ and trace a request from the React composer to the GitHub pull request it eventu
 produces.
 
 `Version`: `1.0.0-M1` (single source: [`Version`](../Version) / [`VERSION`](../VERSION) /
-`pom.xml`). DB head in the current worktree: `V243`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
+`pom.xml`). DB head in the current worktree: `V247`. Stack: Java 21, Spring Boot 3.5.14, Spring AI 1.1.6,
 PostgreSQL + Redis. Frontend: React 18 + Vite + Tailwind v4. The backend ships as a
 single Spring Boot JAR; the frontend build is served from `static/`.
 
@@ -74,7 +74,7 @@ Substrate                                Side-cars (off the hot path)
                                          ┌───────────────────────────┐
    ┌───────────────────────┐             │  integration/scm/         │
    │ PostgreSQL (Cloud SQL)│             │   ScmPushService          │
-   │ Flyway V1..V243       │             │   → GitHub / Bitbucket    │
+   │ Flyway V1..V247       │             │   → GitHub / Bitbucket    │
    │ 127 entity/table cls  │             ├───────────────────────────┤
    └───────────────────────┘             │  cleanroom containers     │
                                          │   docker exec --rm        │
@@ -580,7 +580,7 @@ Console components live under [`frontend/src/console/`](../frontend/src/console/
 surfaces live under [`frontend/src/ide/`](../frontend/src/ide/): `IdeSurfaces`,
 `IdeRunResult`, `IdePlan`, `IdeProject*`, `IdeSystem`, `IdeDiscovery`,
 `IdeBilling`, `IdeOrg`, and `IdeSettings`. Shared
-Signal-era primitives such as `Markdown`, `CodeView`, `FileTree`, review panels,
+Signal-era primitives such as `Markdown`, review panels,
 modals, auth layout, and public-page CSS remain in `frontend/src/signal/`.
 
 ### Telemetry
@@ -603,7 +603,7 @@ target floors (44px mobile, 32px desktop).
 
 ### PostgreSQL (Cloud SQL in prod)
 
-Schema is managed by Flyway. Migration head in the current worktree is `V243`. All migrations live in
+Schema is managed by Flyway. Migration head in the current worktree is `V247`. All migrations live in
 [`src/main/resources/db/migration/V*.sql`](../src/main/resources/db/migration/).
 Hibernate is configured with `ddl-auto=validate` — Flyway is the single source of
 truth.

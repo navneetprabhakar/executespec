@@ -12,6 +12,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
@@ -127,9 +128,10 @@ class SpecChatServiceTest {
 
     RunCostTracker costTracker = mock(RunCostTracker.class);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(10, 5, 0, 0, 0.01, 1));
+    RunKeyContextStore keyContextStore = mock(RunKeyContextStore.class);
 
     return new SpecChatService(
-        router, modelResolver, actionTools, projectTools, props, costTracker);
+        router, modelResolver, actionTools, projectTools, props, costTracker, keyContextStore);
   }
 
   @Test

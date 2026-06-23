@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.observability.Metrics;
@@ -29,7 +30,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -97,6 +98,9 @@ public class LlmRouter {
   private final AnthropicForcedToolClient anthropicForcedToolClient;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  private final ManagedAiUsageService managedAiUsageService;
+
+  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
@@ -127,9 +131,6 @@ public class LlmRouter {
   // Auto-configured Spring AI bean for Anthropic (the one provider whose native
   // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
   // Spring AI 1.1.4 bugs and go through our own wrappers instead.
-  @Autowired(required = false)
-  @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
-
   // OpenRouter (Enterprise) — OpenAI-wire-compatible gateway, so it reuses OpenAiNativeToolClient
   // with a per-call base-URL + the verified slug map. Org BYOK keys flow through
   // RunKeyContext.keyFor("openrouter") like every other provider; this is the system fallback.
@@ -156,6 +157,17 @@ public class LlmRouter {
 
   @Value("${spring.ai.fireworks.base-url:https://api.fireworks.ai/inference/v1}")
   private String fireworksBaseUrl;
+
+  // 2026-06-21 — Sarvam AI: OpenAI-wire-compatible Indian-language provider (api.sarvam.ai). Same
+  // per-call base-URL plumbing as DeepSeek/Fireworks. Sarvam accepts `Authorization: Bearer` (its
+  // docs note this is for OpenAI-compatible tooling; verified live 2026-06-21), so
+  // OpenAiNativeToolClient works unchanged. System fallback key; org BYOK deferred (eval/benchmark
+  // provider for now). NOT in the failover chain (deliberate operator/BYOK route).
+  @Value("${spring.ai.sarvam.api-key:}")
+  private String sarvamApiKey;
+
+  @Value("${spring.ai.sarvam.base-url:https://api.sarvam.ai/v1}")
+  private String sarvamBaseUrl;
 
   /**
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
@@ -193,6 +205,29 @@ public class LlmRouter {
     // even when the run has BYOK configured for *another* provider.
     if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
 
+    ManagedAiUsageService.CallAuthorization authorization =
+        managedAiUsageService.authorizeCall(
+            request.context().runId(),
+            request.provider(),
+            request.model(),
+            request.agentRole(),
+            keys,
+            source);
+    if (authorization.modelChanged()) {
+      request =
+          request.toBuilder()
+              .provider(authorization.provider())
+              .model(authorization.model())
+              .build();
+      resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+      source = (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
+      broadcaster.emit(
+          request.context().runId(),
+          RunEvent.log(
+              request.context().runId(), request.context().taskId(), authorization.reason()));
+    }
+
     log.info(
         "LlmRouter -> {} {} keySource={} (tools={}, messages={})",
         request.provider(),
@@ -201,7 +236,7 @@ public class LlmRouter {
         tools.size(),
         request.messages().size());
     try {
-      return dispatchWithRetry(request, tools, resolvedKey, source);
+      return dispatchWithRetry(request, tools, resolvedKey, source, keys);
     } catch (RuntimeException primaryError) {
       ChatResponse failed = maybeFailover(request, tools, keys, source, primaryError);
       if (failed != null) return failed;
@@ -218,7 +253,8 @@ public class LlmRouter {
       LlmRequest request,
       List<ToolCallback> tools,
       String resolvedKey,
-      RunKeyContext.Source source) {
+      RunKeyContext.Source source,
+      RunKeyContext keys) {
     RuntimeException lastError = null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
       long start = System.currentTimeMillis();
@@ -241,6 +277,16 @@ public class LlmRouter {
             request.provider(),
             request.model(),
             callUsage);
+        managedAiUsageService.recordSuccessfulCall(
+            runId,
+            taskId,
+            request.agentRole(),
+            request.stepId(),
+            request.provider(),
+            request.model(),
+            callUsage,
+            keys,
+            source);
         RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
         broadcaster.emit(
             runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
@@ -360,8 +406,30 @@ public class LlmRouter {
               .model(altModel)
               .retryOf(attributionKey(request))
               .build();
+      ManagedAiUsageService.CallAuthorization authorization =
+          managedAiUsageService.authorizeCall(
+              altRequest.context().runId(),
+              altRequest.provider(),
+              altRequest.model(),
+              altRequest.agentRole(),
+              keys,
+              altSource);
+      if (authorization.modelChanged()) {
+        altRequest =
+            altRequest.toBuilder()
+                .provider(authorization.provider())
+                .model(authorization.model())
+                .build();
+        altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
+        altSource =
+            (altKey == null || keys == null)
+                ? RunKeyContext.Source.PLATFORM
+                : keys.sourceFor(altRequest.provider());
+        broadcaster.emit(
+            runId, RunEvent.log(runId, altRequest.context().taskId(), authorization.reason()));
+      }
       try {
-        return dispatchWithRetry(altRequest, tools, altKey, altSource);
+        return dispatchWithRetry(altRequest, tools, altKey, altSource, keys);
       } catch (RuntimeException altError) {
         log.warn(
             "LlmRouter failover target {} also failed: {}", altProvider, altError.getMessage());
@@ -436,11 +504,12 @@ public class LlmRouter {
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
       case "fireworks" -> callFireworks(request, tools, apiKey);
+      case "sarvam" -> callSarvam(request, tools, apiKey);
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
                   + request.provider()
-                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks)");
+                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks|sarvam)");
     };
   }
 
@@ -449,7 +518,9 @@ public class LlmRouter {
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
     AnthropicChatModel model =
-        (apiKey != null && !apiKey.isBlank()) ? perKeyAnthropicModel(apiKey) : anthropicModel;
+        (apiKey != null && !apiKey.isBlank())
+            ? perKeyAnthropicModel(apiKey)
+            : anthropicModelProvider.getIfAvailable();
     if (model == null) throw new IllegalStateException("Anthropic model not configured");
     // RL-2026-05-059 — FORCED tool-choice salvage. Spring AI's AnthropicChatOptions can't set
     // tool_choice, so when the WorkerAgent Lever-B salvage requests it (toolChoice="required"),
@@ -697,6 +768,40 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(fireworksBaseUrl)
+            .build());
+  }
+
+  /**
+   * Sarvam AI dispatcher (2026-06-21). OpenAI-wire-compatible Indian-language provider
+   * (api.sarvam.ai). Reuses {@link OpenAiNativeToolClient} with a per-call base-URL like
+   * DeepSeek/Fireworks; Sarvam's model ids ({@code sarvam-105b} / {@code sarvam-30b}) are its own
+   * API names, so they pass straight through (no slug map).
+   *
+   * <p>Sarvam documents {@code max_tokens} (not OpenAI's newer {@code max_completion_tokens}), so
+   * the output budget is sent via {@code extraBody.max_tokens} — otherwise Sarvam falls back to its
+   * 2048-token default and truncates worker file writes. Verified live 2026-06-21: Bearer auth →
+   * 200, native tool_calls in OpenAI schema, {@code max_tokens} + {@code tool_choice:"auto"}
+   * accepted, and Sarvam returns {@code reasoning_content} (already captured + round-tripped by
+   * OpenAiNativeToolClient). ENTERPRISE/eval BYOK; system fallback key.
+   */
+  private ChatResponse callSarvam(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : sarvamApiKey;
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException(
+          "Sarvam api-key not configured (org BYOK key or spring.ai.sarvam.api-key)");
+    }
+    Map<String, Object> extra =
+        (r.maxTokens() != null) ? Map.of("max_tokens", r.maxTokens()) : Map.of();
+    return openAiNativeToolClient.call(
+        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+            .model(r.model())
+            .messages(r.messages())
+            .tools(tools)
+            .temperature(r.temperature())
+            .toolChoice(r.toolChoice())
+            .apiKey(key)
+            .baseUrl(sarvamBaseUrl)
+            .extraBody(extra)
             .build());
   }
 
