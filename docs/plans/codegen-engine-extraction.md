@@ -3,7 +3,7 @@
 > Founder directive (2026-05-27): isolate code-generation as a **core engine**, with the pipeline
 > (classifier / planner / reviewer / scoring / governance) as **upstream / downstream** layers, so we
 > can improve the engine continuously + keep the product moat intact, across multiple providers.
-> Validated by the competitive analysis: **opencode is literally "core engine as a server + thin
+> Validated by the competitive analysis: **oss-agent is literally "core engine as a server + thin
 > clients"** (see `docs/competitive-analysis/COMPARISON.md §7`). RL-2026-05-051.
 
 ## 1. Why (the case, in one paragraph)
@@ -47,7 +47,7 @@ Properties:
   Anthropic/OpenAI/Gemini/OpenRouter). Per-task model routing (our union-19/30 lever) stays a caller
   concern OR an engine option.
 - **Tool-pluggable:** `toolset` is injected (mirrors `ToolRegistry.bindForWorker` today). Permissions
-  become a declarative ruleset on the toolset (the opencode `evaluate()` pattern), so "plan mode =
+  become a declarative ruleset on the toolset (the oss-agent `evaluate()` pattern), so "plan mode =
   deny edits", "BYOK", "guardrail level" are *data*, not code branches.
 - **No side effects beyond the workspace:** no DB writes, no SSE, no push. The caller wires those.
   (Today `WorkerAgent` emits SSE + writes cost — those move to a thin adapter the caller passes.)
@@ -87,7 +87,7 @@ Do NOT big-bang rewrite `RunOrchestrator`. Phases, each shippable + green:
    prompts), #7 (compaction-as-a-loop-task), #8 (fork-sub-agents), #9 (permission ruleset + hooks).
    These are engine-architecture; they belong here, built once.
 7. **(Optional, later) Engine-as-a-service** — expose the engine behind the existing REST/OpenAPI so a
-   thin client (CLI / VS Code) can run it in-process or remote, per opencode's `serve` + generated-SDK
+   thin client (CLI / VS Code) can run it in-process or remote, per oss-agent's `serve` + generated-SDK
    + swappable-transport model.
 
 ## 5. Risk controls

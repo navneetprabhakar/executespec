@@ -95,6 +95,7 @@ class AsyncAllowlistTest {
               "BillingNotificationService#sendTopupCredited",
               "BillingNotificationService#sendUpgradeRefund",
               "BillingNotificationService#sendUsageWarning",
+              "BillingNotificationService#sendManagedAiRoutingStateChanged",
               "InvoiceEmailService#sendInvoice",
               "RunQuotaRefundListener#onRunFailed",
               // PR-G (2026-05-13) — cost-outlier detector. Reads scalar fields on PipelineRun

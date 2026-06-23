@@ -66,7 +66,7 @@ public class AnalyticsService {
                        FILTER (WHERE status = 'COMPLETE'), 0)                    AS avg_time,
               COALESCE(SUM(actual_cost_usd), 0)                                  AS total_cost
           FROM pipeline_run
-          WHERE org_id = ? AND created_at > ?
+          WHERE org_id = ? AND started_at > ?
           """;
       countParams = new Object[] {entityId, Timestamp.from(since)};
     } else {
@@ -81,7 +81,7 @@ public class AnalyticsService {
                        FILTER (WHERE status = 'COMPLETE'), 0)                    AS avg_time,
               COALESCE(SUM(actual_cost_usd), 0)                                  AS total_cost
           FROM pipeline_run
-          WHERE created_by_user_id = ? AND created_at > ?
+          WHERE created_by_user_id = ? AND started_at > ?
           """;
       countParams = new Object[] {entityId, Timestamp.from(since)};
     }
@@ -106,21 +106,21 @@ public class AnalyticsService {
     if ("ORG".equals(entityType)) {
       dailySql =
           """
-          SELECT DATE(created_at) AS day, COUNT(*) AS total,
+          SELECT DATE(started_at) AS day, COUNT(*) AS total,
                  SUM(CASE WHEN status='COMPLETE' THEN 1 ELSE 0 END) AS success
           FROM pipeline_run
-          WHERE org_id = ? AND created_at > ?
-          GROUP BY DATE(created_at) ORDER BY day
+          WHERE org_id = ? AND started_at > ?
+          GROUP BY DATE(started_at) ORDER BY day
           """;
       dailyParams = new Object[] {entityId, Timestamp.from(since)};
     } else {
       dailySql =
           """
-          SELECT DATE(created_at) AS day, COUNT(*) AS total,
+          SELECT DATE(started_at) AS day, COUNT(*) AS total,
                  SUM(CASE WHEN status='COMPLETE' THEN 1 ELSE 0 END) AS success
           FROM pipeline_run
-          WHERE created_by_user_id = ? AND created_at > ?
-          GROUP BY DATE(created_at) ORDER BY day
+          WHERE created_by_user_id = ? AND started_at > ?
+          GROUP BY DATE(started_at) ORDER BY day
           """;
       dailyParams = new Object[] {entityId, Timestamp.from(since)};
     }
@@ -146,7 +146,7 @@ public class AnalyticsService {
           SELECT COALESCE(p.name, 'No Project') AS project_name, COUNT(*) AS cnt
           FROM pipeline_run r
           LEFT JOIN project p ON r.project_id = p.id
-          WHERE r.org_id = ? AND r.created_at > ?
+          WHERE r.org_id = ? AND r.started_at > ?
           GROUP BY project_name ORDER BY cnt DESC LIMIT 20
           """;
       projectParams = new Object[] {entityId, Timestamp.from(since)};
@@ -156,7 +156,7 @@ public class AnalyticsService {
           SELECT COALESCE(p.name, 'No Project') AS project_name, COUNT(*) AS cnt
           FROM pipeline_run r
           LEFT JOIN project p ON r.project_id = p.id
-          WHERE r.created_by_user_id = ? AND r.created_at > ?
+          WHERE r.created_by_user_id = ? AND r.started_at > ?
           GROUP BY project_name ORDER BY cnt DESC LIMIT 20
           """;
       projectParams = new Object[] {entityId, Timestamp.from(since)};
@@ -230,10 +230,10 @@ GROUP BY m.model_name ORDER BY calls DESC
         SELECT u.id, u.first_name, u.last_name, u.email,
                COUNT(r.run_id) AS runs,
                SUM(CASE WHEN r.status = 'COMPLETE' THEN 1 ELSE 0 END) AS success,
-               MAX(r.created_at) AS last_run
+               MAX(r.started_at) AS last_run
         FROM app_user u
         LEFT JOIN pipeline_run r ON r.created_by_user_id = u.id
-            AND r.org_id = ? AND r.created_at > ?
+            AND r.org_id = ? AND r.started_at > ?
         WHERE u.org_id = ? AND u.status = 'ACTIVE'
         GROUP BY u.id, u.first_name, u.last_name, u.email
         ORDER BY runs DESC

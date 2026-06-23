@@ -7,56 +7,34 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
+import {
+  accountDisplayName,
+  accountEmail,
+  billingRows,
+  costOf,
+  developerRows,
+  filterRuns,
+  isLiveStatus,
+  limitRows,
+  notificationChannelLabel,
+  notificationPreferenceLabel,
+  organizationRows,
+  PAGE_SIZE,
+  runCounts,
+  runDetailPath,
+  runFilterTabs,
+  scoreColor,
+  scoreOf,
+  searchRuns,
+  usageLabel,
+  type LinkRow,
+  type RunFilter,
+} from './moreUtils';
 
 // Relative timestamps everywhere (review/11 #8) — absolute locale strings were
 // ambiguous (DD/MM vs MM/DD + seconds noise) and inconsistent with Console.
 function fmtWhen(iso?: string | null): string {
   return relTime(iso);
-}
-
-const PAGE_SIZE = 30;
-const LIVE_STATUSES = new Set([
-  'CLASSIFYING',
-  'PLANNING',
-  'EXECUTING',
-  'AWAITING_APPROVAL',
-  'RUNNING',
-  'PROVIDER_SWITCHING',
-  'REVIEWING',
-  'PAUSED',
-]);
-const isLiveStatus = (s?: string | null) => LIVE_STATUSES.has((s || '').toUpperCase());
-// verifiedScore is hydrated by the list endpoint since RL-2026-06-019 (it was a
-// cast against a wire field that never existed — every row showed "—").
-const scoreOf = (r: api.RunSummary) => r.verifiedScore;
-const costOf = (r: api.RunSummary) =>
-  r.actualCostUsd ??
-  (r as unknown as {actualCost?: number}).actualCost ??
-  (r as unknown as {totalCost?: number}).totalCost;
-
-type RunFilter = 'all' | 'live' | 'shipped' | 'needs' | 'done' | 'failed';
-
-// C6 (review/11) — every run lands in exactly ONE bucket, so the filter chips
-// sum to All by construction. "Done" = terminal success without a verified
-// score (PATCH/bench/legacy runs); "Failed" is the terminal catch-all
-// (FAILED / ERROR / CANCELLED / unknown).
-function bucketOf(r: api.RunSummary): Exclude<RunFilter, 'all'> {
-  const s = (r.status || '').toUpperCase();
-  if (isLiveStatus(s)) return 'live';
-  const score = scoreOf(r);
-  const success = s === 'COMPLETED' || s === 'COMPLETE';
-  if (success && score != null && score >= 85) return 'shipped';
-  if (s === 'PARTIAL' || (success && score != null && score < 85)) return 'needs';
-  if (success) return 'done';
-  return 'failed';
-}
-
-// Score → IDE band colour (≥85 shippable / 70-84 needs review / <70 failed).
-function scoreColor(score?: number | null): string {
-  if (score == null) return 'var(--ide-fg-muted)';
-  if (score >= 85) return 'var(--ide-green)';
-  if (score >= 70) return 'var(--ide-yellow)';
-  return 'var(--ide-red)';
 }
 
 // Work list. Internally this still reads runs; the Console IA presents them as
@@ -108,38 +86,13 @@ export function IdeRuns() {
   // Text filter first (title / userRequest / R-id substring), then bucket the
   // surviving runs ONCE — counts and the visible list come from the same pass,
   // so Live + Shipped + Needs review + Done + Failed always sums to All.
-  const searched = useMemo(() => {
-    const list = runs ?? [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return list;
-    const idNeedle = needle.startsWith('r-') ? needle.slice(2) : needle;
-    return list.filter(
-      (r) =>
-        (r.runTitle || '').toLowerCase().includes(needle) ||
-        (r.userRequest || '').toLowerCase().includes(needle) ||
-        r.runId.toLowerCase().includes(idNeedle),
-    );
-  }, [runs, q]);
+  const searched = useMemo(() => searchRuns(runs, q), [runs, q]);
 
-  const counts = useMemo(() => {
-    const c = {all: searched.length, live: 0, shipped: 0, needs: 0, done: 0, failed: 0};
-    for (const r of searched) c[bucketOf(r)]++;
-    return c;
-  }, [searched]);
+  const counts = useMemo(() => runCounts(searched), [searched]);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? searched : searched.filter((r) => bucketOf(r) === filter)),
-    [searched, filter],
-  );
+  const filtered = useMemo(() => filterRuns(searched, filter), [searched, filter]);
 
-  const TABS: Array<{key: RunFilter; label: string; n: number}> = [
-    {key: 'all', label: 'All', n: counts.all},
-    {key: 'live', label: 'Live', n: counts.live},
-    {key: 'shipped', label: 'Shipped', n: counts.shipped},
-    {key: 'needs', label: 'Needs review', n: counts.needs},
-    {key: 'done', label: 'Done', n: counts.done},
-    {key: 'failed', label: 'Failed', n: counts.failed},
-  ];
+  const TABS = runFilterTabs(counts);
 
   return (
     <div className='ide-pane'>
@@ -212,13 +165,12 @@ export function IdeRuns() {
         <>
           <div className='ide-card' style={{padding: 0}}>
             {filtered.map((r, i) => {
-              const live = isLiveStatus(r.status);
               const score = scoreOf(r);
               const cost = costOf(r);
               return (
                 <Link
                   key={r.runId}
-                  to={live ? `/live/${r.runId}` : `/result/${r.runId}`}
+                  to={runDetailPath(r)}
                   className='ide-work-row'
                   style={{
                     borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
@@ -238,7 +190,11 @@ export function IdeRuns() {
                   )}
                   <span className='ide-work-score'>
                     <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
-                      {score != null ? `${Math.round(score)}%` : live ? 'live' : '—'}
+                      {score != null
+                        ? `${Math.round(score)}%`
+                        : isLiveStatus(r.status)
+                          ? 'live'
+                          : '—'}
                     </span>
                     {cost != null && (
                       <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
@@ -266,7 +222,7 @@ export function IdeRuns() {
 
 // Linked-row list card shared by the Account management groups (review/11 —
 // the flat "Manage" list became three labeled groups).
-function LinkRows({rows}: {rows: Array<{to: string; label: string; sub: string}>}) {
+function LinkRows({rows}: {rows: LinkRow[]}) {
   return (
     <div className='ide-card' style={{padding: 0}}>
       {rows.map((row, i, arr) => (
@@ -443,42 +399,10 @@ export function IdeAccount() {
     }
   }
 
-  const email = user?.email || '—';
-  const name =
-    [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || email.split('@')[0];
-  const usage = permissions
-    ? `${permissions.currentRunCount} / ${permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit}`
-    : '— / —';
-
-  // Plan-limits rows from the permissions object (mirrors AccountPage's KvList).
-  const limitRows: Array<{k: string; v: string}> = [
-    {
-      k: 'Monthly work cap',
-      v: permissions
-        ? permissions.monthlyRunLimit === -1
-          ? 'Unlimited'
-          : String(permissions.monthlyRunLimit)
-        : '—',
-    },
-    {k: 'Work used', v: permissions ? String(permissions.currentRunCount) : '—'},
-    {
-      k: 'Max org seats',
-      v: permissions
-        ? permissions.maxOrgMembers === -1
-          ? 'Unlimited'
-          : String(permissions.maxOrgMembers)
-        : '—',
-    },
-    {k: 'Live log access', v: permissions?.canViewLiveLog ? 'Enabled' : 'PRO+'},
-    {k: 'Provider keys', v: permissions?.canManageAiKeys ? 'Enabled' : 'PRO+'},
-    {k: 'Audit log', v: permissions?.canViewAudit ? 'Enabled' : 'TEAM+'},
-    {
-      k: 'Deploy engine',
-      v: permissions?.canDeploy
-        ? `Up to ${permissions.maxDeployments === -1 ? '∞' : permissions.maxDeployments}`
-        : 'PRO+',
-    },
-  ];
+  const email = accountEmail(user);
+  const name = accountDisplayName(user);
+  const usage = usageLabel(permissions);
+  const limits = limitRows(permissions);
 
   function Seg({
     on,
@@ -616,39 +540,21 @@ export function IdeAccount() {
       )}
 
       <div className='ide-h2'>Plan &amp; billing</div>
-      <LinkRows
-        rows={[
-          {to: '/billing', label: 'Usage & billing', sub: `${tier} tier`},
-          {to: '/plans', label: 'Compare plans', sub: ''},
-        ]}
-      />
+      <LinkRows rows={billingRows(tier)} />
 
       <div className='ide-h2'>Organization</div>
-      <LinkRows
-        rows={[
-          {to: '/org-members', label: 'Team access', sub: 'Invite teammates and assign roles'},
-          ...(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
-            ? [{to: '/org/settings', label: 'Org settings', sub: 'SSO · keys · model matrix'}]
-            : []),
-        ]}
-      />
+      <LinkRows rows={organizationRows(user)} />
 
       <div className='ide-h2'>Developer</div>
-      <LinkRows
-        rows={[
-          {to: '/integrations', label: 'Repository access', sub: 'GitHub token / app'},
-          {to: '/api-keys', label: 'Model provider keys', sub: 'BYOK credentials'},
-          {to: '/deployments', label: 'Deployments', sub: 'Cloud Run services'},
-        ]}
-      />
+      <LinkRows rows={developerRows()} />
 
       <div className='ide-h2'>Plan limits</div>
       <div className='ide-card'>
-        {limitRows.map((row, i) => (
+        {limits.map((row, i) => (
           <div
             key={row.k}
             className='ide-kv'
-            style={i === limitRows.length - 1 ? {borderBottom: 'none'} : undefined}
+            style={i === limits.length - 1 ? {borderBottom: 'none'} : undefined}
           >
             <span>{row.k}</span>
             <span style={{color: 'var(--ide-fg-bright)'}}>{row.v}</span>
@@ -698,10 +604,10 @@ export function IdeAccount() {
               >
                 <span style={{minWidth: 0, flex: 1}}>
                   <span style={{display: 'block', fontSize: 13, color: 'var(--ide-fg-bright)'}}>
-                    {row.eventType.replace(/_/g, ' ').toLowerCase()}
+                    {notificationPreferenceLabel(row.eventType)}
                   </span>
                   <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                    {row.channel.toLowerCase()} channel
+                    {notificationChannelLabel(row.channel)}
                   </span>
                 </span>
                 <button
@@ -846,9 +752,8 @@ export function IdeAccount() {
 }
 
 // Deployments (list + lifecycle)
-// Permanent Cloud Run deployments promoted from runs. Mirrors the Signal
-// DeploymentsPage (list + rollback + delete); the deploy itself is initiated
-// from a run's result page ("Deploy to Cloud Run").
+// Permanent Cloud Run deployments promoted from runs; the deploy itself is
+// initiated from a run's result page ("Deploy to Cloud Run").
 export function IdeDeployments() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [busy, setBusy] = useState('');

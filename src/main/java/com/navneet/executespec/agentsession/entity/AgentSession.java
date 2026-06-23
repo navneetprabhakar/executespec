@@ -37,6 +37,9 @@ public class AgentSession {
   @Column(name = "project_id")
   private String projectId;
 
+  @Column(name = "run_id")
+  private String runId;
+
   @Column(name = "repo_remote", columnDefinition = "TEXT")
   private String repoRemote;
 

@@ -15,7 +15,6 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -67,12 +66,10 @@ class ModelResolverAdaptiveOptInTest {
     matrixProps.setProviders(providers);
     matrixProps.setFailoverOrder(Map.of("anthropic", java.util.List.of("gemini")));
 
-    ModelResolver r =
-        new ModelResolver(matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry());
-    if (wireFeatureFlag) {
-      ReflectionTestUtils.setField(r, "featureFlagService", featureFlagService);
-    }
-    return r;
+    return wireFeatureFlag
+        ? new ModelResolver(
+            matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry(), featureFlagService)
+        : new ModelResolver(matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry());
   }
 
   @Test

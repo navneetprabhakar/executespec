@@ -21,7 +21,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -51,8 +51,7 @@ public class FeatureAssessmentService {
   private final ObjectMapper objectMapper;
   private final RunCostTracker costTracker;
 
-  @Autowired(required = false)
-  @Qualifier("anthropicChatModel") private AnthropicChatModel anthropicModel;
+  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   // B2 (audit 2026-05-29) — the assessment LLM call records its cost against the run via
   // RunCostTracker.record so the (flag-gated) path no longer escapes cost attribution. Label
@@ -69,12 +68,14 @@ public class FeatureAssessmentService {
     // LLM path — when feature flag is on AND we have arch context AND the
     // anthropic bean is available. Any failure quietly falls through to
     // the heuristic so the user never blocks on assessment.
+    AnthropicChatModel anthropicModel = anthropicModelProvider.getIfAvailable();
     if (featureFlags.isEnabled(FLAG_LLM_ENABLED)
         && anthropicModel != null
         && projectId != null
         && !repoNames.isEmpty()) {
       try {
-        AssessmentResult llm = assessViaLlm(runId, projectId, userRequest, repoNames);
+        AssessmentResult llm =
+            assessViaLlm(anthropicModel, runId, projectId, userRequest, repoNames);
         if (llm != null) return llm;
       } catch (Exception e) {
         log.warn(
@@ -97,7 +98,12 @@ public class FeatureAssessmentService {
   }
 
   private AssessmentResult assessViaLlm(
-      String runId, String projectId, String userRequest, List<String> repoNames) throws Exception {
+      AnthropicChatModel anthropicModel,
+      String runId,
+      String projectId,
+      String userRequest,
+      List<String> repoNames)
+      throws Exception {
     ProjectArchitectureDoc arch = archService.latest(projectId).orElse(null);
     String archMd = arch == null ? "" : arch.getContent();
     String annotations =

@@ -85,7 +85,7 @@ docker exec executespec-pg pg_isready -U postgres        # expect: accepting con
 docker exec executespec-redis redis-cli ping             # expect: PONG
 ```
 
-Flyway will run on backend boot. Migration head is `V230` in the current worktree; locations are
+Flyway will run on backend boot. Migration head is `V247` in the current worktree; locations are
 `classpath:db/migration` per `application.yml`
 (`spring.flyway.locations=classpath:db/migration`). The base profile carries
 `baseline-on-migrate=true`, `baseline-version=0`, and

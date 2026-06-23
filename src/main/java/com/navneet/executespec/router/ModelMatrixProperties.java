@@ -55,6 +55,20 @@ public class ModelMatrixProperties {
     /** Fallback chain tier: ARCHITECT, CAPABLE, UTILITY. */
     private String chainTier;
 
+    /** Managed-AI cost class: CHEAP, BALANCED, FRONTIER. Defaults from chainTier when unset. */
+    private String costClass;
+
+    /**
+     * Managed-AI quality class: BASIC, STANDARD, HIGH, PREMIUM. Defaults from chainTier when unset.
+     */
+    private String qualityClass;
+
+    /** Whether system-managed AI credits may be spent on this model. */
+    private Boolean managedAiEnabled;
+
+    /** Lower values are preferred as step-down candidates within the same provider/class. */
+    private Integer stepDownPriority;
+
     /** Context window limit in tokens. */
     private int contextLimit = 200_000;
 

@@ -113,14 +113,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterRequest'
+              $ref: "#/components/schemas/RegisterRequest"
       responses:
-        '201':
+        "201":
           description: User created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/login:
     post:
@@ -132,14 +132,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginRequest'
+              $ref: "#/components/schemas/LoginRequest"
       responses:
-        '200':
+        "200":
           description: JWT issued. Sets httpOnly refresh_token cookie.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: "#/components/schemas/LoginResponse"
 
   /auth/refresh:
     post:
@@ -148,18 +148,18 @@ paths:
       description: Uses httpOnly refresh_token cookie
       security: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: "#/components/schemas/LoginResponse"
 
   /auth/logout:
     delete:
       tags: [Auth]
       summary: Logout
       responses:
-        '204':
+        "204":
           description: Session cleared
 
   /auth/verify-email:
@@ -174,11 +174,11 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /auth/resend-verification:
     post:
@@ -195,11 +195,11 @@ paths:
                   type: string
                   format: email
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /auth/forgot-password:
     post:
@@ -216,11 +216,11 @@ paths:
                   type: string
                   format: email
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /auth/reset-password:
     post:
@@ -239,11 +239,11 @@ paths:
                 newPassword:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /auth/change-password:
     post:
@@ -262,33 +262,33 @@ paths:
                 newPassword:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /auth/me:
     get:
       tags: [Auth]
       summary: Get current user profile
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/me/permissions:
     get:
       tags: [Auth]
       summary: Get tier-based permissions
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TierPermissions'
+                $ref: "#/components/schemas/TierPermissions"
 
   /auth/me/provider-preference:
     get:
@@ -299,11 +299,11 @@ paths:
         shared by web, CLI, and VS Code. `provider` is null when no preference has been set
         (callers then fall back to project / YAML defaults).
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProviderPreferenceResponse'
+                $ref: "#/components/schemas/ProviderPreferenceResponse"
     put:
       tags: [Auth]
       summary: Set cross-surface AI provider preference (V242)
@@ -316,14 +316,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProviderPreferenceRequest'
+              $ref: "#/components/schemas/ProviderPreferenceRequest"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProviderPreferenceResponse'
-        '400':
+                $ref: "#/components/schemas/ProviderPreferenceResponse"
+        "400":
           description: provider is required or unknown
 
   /auth/me/tokens:
@@ -342,15 +342,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreatePatRequest'
+              $ref: "#/components/schemas/CreatePatRequest"
       responses:
-        '201':
+        "201":
           description: Token created — plaintext returned once in `token`
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreatePatResponse'
-        '400':
+                $ref: "#/components/schemas/CreatePatResponse"
+        "400":
           description: Token name is required or expiresInDays must be positive
     get:
       tags: [Auth]
@@ -359,13 +359,13 @@ paths:
         Lists the authenticated user's Personal Access Tokens, newest first. Secret-free — the
         plaintext is never returned after creation; includes revoked rows.
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/PatDto'
+                  $ref: "#/components/schemas/PatDto"
 
   /auth/me/tokens/{tokenId}:
     delete:
@@ -379,9 +379,9 @@ paths:
           schema:
             type: string
       responses:
-        '204':
+        "204":
           description: Token revoked
-        '404':
+        "404":
           description: Token not found
 
   # ──────────────────────────────────────────────────
@@ -402,11 +402,11 @@ paths:
                 githubOwner:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/settings/github/validate:
     post:
@@ -424,11 +424,11 @@ paths:
                 owner:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationResult'
+                $ref: "#/components/schemas/ValidationResult"
 
   /auth/settings/ai-keys:
     put:
@@ -451,11 +451,11 @@ paths:
                 fireworksApiKey:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/settings/jira:
     put:
@@ -474,11 +474,11 @@ paths:
                 jiraApiToken:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/settings/jira/validate:
     post:
@@ -498,11 +498,11 @@ paths:
                 apiToken:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationResult'
+                $ref: "#/components/schemas/ValidationResult"
 
   /auth/settings/confluence:
     put:
@@ -521,11 +521,11 @@ paths:
                 confluenceApiToken:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   /auth/settings/confluence/validate:
     post:
@@ -545,11 +545,11 @@ paths:
                 apiToken:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationResult'
+                $ref: "#/components/schemas/ValidationResult"
 
   /auth/settings/view-mode:
     put:
@@ -565,11 +565,11 @@ paths:
                   type: string
                   enum: [vibe, pro]
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDto'
+                $ref: "#/components/schemas/UserDto"
 
   # ──────────────────────────────────────────────────
   # RUNS
@@ -603,11 +603,11 @@ paths:
             type: integer
             default: 20
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PagedRunResponse'
+                $ref: "#/components/schemas/PagedRunResponse"
     post:
       tags: [Runs]
       summary: Submit new run
@@ -630,17 +630,17 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RunRequest'
+              $ref: "#/components/schemas/RunRequest"
       responses:
-        '202':
+        "202":
           description: Run accepted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RunSummary'
-        '403':
+                $ref: "#/components/schemas/RunSummary"
+        "403":
           description: localExecution=true requires a PAT (CLI / VS Code) session
-        '409':
+        "409":
           description: localExecution=true but worker.local-hands.enabled is off
 
   /runs/{runId}:
@@ -648,20 +648,20 @@ paths:
       tags: [Runs]
       summary: Get run details
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RunDetail'
+                $ref: "#/components/schemas/RunDetail"
     delete:
       tags: [Runs]
       summary: Cancel/delete run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '204':
+        "204":
           description: Run deleted
 
   /runs/{runId}/approve:
@@ -669,7 +669,7 @@ paths:
       tags: [Runs]
       summary: Approve or reject plan
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -682,7 +682,7 @@ paths:
                 comment:
                   type: string
       responses:
-        '200':
+        "200":
           description: Decision recorded
 
   /runs/{runId}/clarify:
@@ -690,7 +690,7 @@ paths:
       tags: [Runs]
       summary: Provide clarification to planner
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -701,7 +701,7 @@ paths:
                 response:
                   type: string
       responses:
-        '200':
+        "200":
           description: Clarification sent
 
   /runs/{runId}/merge:
@@ -709,7 +709,7 @@ paths:
       tags: [Runs]
       summary: Approve or reject merge (legacy)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -720,7 +720,7 @@ paths:
                 approved:
                   type: boolean
       responses:
-        '200':
+        "200":
           description: Decision recorded
 
   /runs/{runId}/retry:
@@ -728,22 +728,22 @@ paths:
       tags: [Runs]
       summary: Retry entire run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '202':
+        "202":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RunSummary'
+                $ref: "#/components/schemas/RunSummary"
 
   /runs/{runId}/pause:
     post:
       tags: [Runs]
       summary: Pause running pipeline
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           description: Run paused
 
   /runs/{runId}/resume:
@@ -751,9 +751,9 @@ paths:
       tags: [Runs]
       summary: Resume paused run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           description: Run resumed
 
   /runs/{runId}/rework:
@@ -761,9 +761,9 @@ paths:
       tags: [Runs]
       summary: Rework failed run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           description: Rework started
 
   /runs/{runId}/edit-and-restart:
@@ -771,7 +771,7 @@ paths:
       tags: [Runs]
       summary: Edit goal and restart
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -782,25 +782,25 @@ paths:
                 userRequest:
                   type: string
       responses:
-        '202':
+        "202":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RunSummary'
+                $ref: "#/components/schemas/RunSummary"
 
   /runs/{runId}/tasks/{taskId}/retry:
     post:
       tags: [Runs]
       summary: Retry individual task
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: taskId
           in: path
           required: true
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: Task retry started
 
   /runs/{runId}/archive:
@@ -808,9 +808,9 @@ paths:
       tags: [Runs]
       summary: Archive run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           description: Run archived
 
   /runs/{runId}/cost:
@@ -823,9 +823,9 @@ paths:
         `RunCostTracker`; terminal (`source=stored_total`) and legacy (`source=legacy_estimator`)
         responses return null for those fields. `schemaVersion` is always present.
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -869,7 +869,7 @@ paths:
       tags: [Runs]
       summary: Update project association
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -880,18 +880,18 @@ paths:
                   type: string
                   nullable: true
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RunSummary'
+                $ref: "#/components/schemas/RunSummary"
 
   /runs/{runId}/edit-plan:
     post:
       tags: [Runs]
       summary: Edit run plan with feedback
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -902,7 +902,7 @@ paths:
                 feedback:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -918,9 +918,9 @@ paths:
       tags: [Runs]
       summary: Get all plan versions
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -936,20 +936,20 @@ paths:
       tags: [Run Chat]
       summary: Get chat history
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ChatMessage'
+                  $ref: "#/components/schemas/ChatMessage"
     post:
       tags: [Run Chat]
       summary: Send chat message (PRO+, COMPLETE runs only)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -960,7 +960,7 @@ paths:
                 message:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -972,7 +972,7 @@ paths:
                     type: integer
                   maxMessages:
                     type: integer
-        '429':
+        "429":
           description: Chat message limit reached
 
   /runs/{runId}/apply:
@@ -980,7 +980,7 @@ paths:
       tags: [Run Chat]
       summary: Apply copilot suggestion (PRO+, COMPLETE runs only)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -994,7 +994,7 @@ paths:
                   type: string
                   enum: [COPILOT, REVIEW]
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1006,7 +1006,7 @@ paths:
                     type: array
                     items:
                       type: object
-        '422':
+        "422":
           description: Suggestion too large
 
   /runs/{runId}/iterate:
@@ -1014,7 +1014,7 @@ paths:
       tags: [Run Chat]
       summary: Create iteration run from source run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -1025,7 +1025,7 @@ paths:
                 userRequest:
                   type: string
       responses:
-        '202':
+        "202":
           content:
             application/json:
               schema:
@@ -1042,9 +1042,9 @@ paths:
       tags: [Run Content]
       summary: List workspace files
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1057,14 +1057,14 @@ paths:
       tags: [Run Content]
       summary: Get single file content
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: path
           in: query
           required: true
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             text/plain:
               schema:
@@ -1075,9 +1075,9 @@ paths:
       tags: [Run Content]
       summary: Download workspace as ZIP
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/zip:
               schema:
@@ -1089,9 +1089,9 @@ paths:
       tags: [Run Content]
       summary: Get agent message history
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1104,9 +1104,9 @@ paths:
       tags: [Run Content]
       summary: Get generated OpenAPI spec
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             text/plain:
               schema:
@@ -1117,9 +1117,9 @@ paths:
       tags: [Run Content]
       summary: Get run timeline (Gantt chart data)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1130,9 +1130,9 @@ paths:
       tags: [Run Content]
       summary: Get task dependency graph
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1162,7 +1162,7 @@ paths:
         TEST_COMPILATION_FAILED, TEST_EXECUTION_STARTED, TEST_EXECUTION_SKIPPED,
         TEST_REPORT_READY, TEST_PIPELINE_FAILED, BUDGET_EXCEEDED
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: token
           in: query
           required: true
@@ -1170,7 +1170,7 @@ paths:
             type: string
           description: Scoped SSE token from GET /runs/{runId}/sse-token
       responses:
-        '200':
+        "200":
           description: Server-Sent Events stream
           content:
             text/event-stream:
@@ -1183,9 +1183,9 @@ paths:
       summary: Get scoped SSE token (5-min TTL)
       description: Returns a short-lived token scoped to a specific runId for use with the SSE event stream.
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1211,13 +1211,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateSessionRequest'
+              $ref: "#/components/schemas/CreateSessionRequest"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentSessionResponse'
+                $ref: "#/components/schemas/AgentSessionResponse"
     get:
       tags: [Agent Sessions]
       summary: List the caller's agent sessions
@@ -1229,26 +1229,26 @@ paths:
             type: integer
             default: 20
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/AgentSessionResponse'
+                  $ref: "#/components/schemas/AgentSessionResponse"
 
   /agent/sessions/{sessionId}:
     get:
       tags: [Agent Sessions]
       summary: Get one agent session
       parameters:
-        - $ref: '#/components/parameters/sessionId'
+        - $ref: "#/components/parameters/sessionId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentSessionResponse'
+                $ref: "#/components/schemas/AgentSessionResponse"
 
   /agent/sessions/{sessionId}/events:
     get:
@@ -1259,17 +1259,44 @@ paths:
         history). This is a plain JSON list, not an SSE stream — live token / tool streaming is on
         `POST /agent/sessions/{sessionId}/turns/stream`.
       parameters:
-        - $ref: '#/components/parameters/sessionId'
+        - $ref: "#/components/parameters/sessionId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/AgentActionEvent'
+                  $ref: "#/components/schemas/AgentActionEvent"
 
   /agent/sessions/{sessionId}/turns:
+    get:
+      tags: [Agent Sessions]
+      summary: List persisted turns for one agent session
+      description: >
+        Reloadable transcript endpoint for web, CLI, and VS Code agent sessions. Results are
+        returned newest-window style with optional `before` pagination and ownership checks.
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentTurnResponse"
     post:
       tags: [Agent Sessions]
       summary: Record a conversational turn (non-streaming)
@@ -1278,19 +1305,38 @@ paths:
         or destructive proposals (create/approve a run, local code task) are returned as typed
         confirmation-required actions and are never executed implicitly from ambiguous chat text.
       parameters:
-        - $ref: '#/components/parameters/sessionId'
+        - $ref: "#/components/parameters/sessionId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TurnRequest'
+              $ref: "#/components/schemas/TurnRequest"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TurnResponse'
+                $ref: "#/components/schemas/TurnResponse"
+
+  /agent/sessions/{sessionId}/summary-email:
+    post:
+      tags: [Agent Sessions]
+      summary: Deprecated no-op session summary email route
+      description: >
+        Compatibility endpoint for older local clients. New CLI / VS Code sessions keep usage and
+        cost visibility locally and this route returns 202 without sending email.
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionSummaryEmailRequest"
+      responses:
+        "202":
+          description: Accepted no-op
 
   /agent/sessions/{sessionId}/turns/stream:
     post:
@@ -1306,20 +1352,230 @@ paths:
         `tool_result` ({id, result}), `done` ({session_id, turn_id, turn_count, cost_usd,
         input_tokens, output_tokens, reasoning_tokens}), `error` ({session_id, turn_id, message}).
       parameters:
-        - $ref: '#/components/parameters/sessionId'
+        - $ref: "#/components/parameters/sessionId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StreamTurnRequest'
+              $ref: "#/components/schemas/StreamTurnRequest"
       responses:
-        '200':
+        "200":
           description: Server-Sent Events stream
           content:
             text/event-stream:
               schema:
                 type: string
+
+  /agent/v2/capabilities:
+    get:
+      tags: [Agent Sessions]
+      summary: List capability tools for the current surface
+      description: >
+        Returns the executable/readable agent tool contract visible to the caller. WEB responses
+        intentionally exclude CLI/VS Code-only local-hands capabilities.
+      parameters:
+        - name: surface
+          in: query
+          required: false
+          schema:
+            type: string
+            default: CLI
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CapabilityTool"
+
+  /agent/v2/sessions/{sessionId}/actions/plan:
+    post:
+      tags: [Agent Sessions]
+      summary: Plan one typed agent action
+      description: Persists the proposed action lifecycle row and returns the matching capability metadata.
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionPlanRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionPlanResponse"
+
+  /agent/v2/sessions/{sessionId}/actions/{actionId}/events:
+    post:
+      tags: [Agent Sessions]
+      summary: Append an action lifecycle event
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionEventRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionRecordResponse"
+
+  /agent/v2/sessions/{sessionId}/actions/{actionId}/result:
+    post:
+      tags: [Agent Sessions]
+      summary: Record a typed action result
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionResultRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionRecordResponse"
+
+  /orchestrator/turn:
+    post:
+      tags: [Agent Sessions]
+      summary: Route one conversational turn without creating a run
+      description: >
+        Primary structured orchestrator endpoint for CLI, VS Code, and web agent turns. It
+        authenticates the session, applies deterministic routing and policy gates, persists an
+        `ORCHESTRATOR_DECISION` trace event, and returns the route/proposed action. It never
+        submits a new run; clients must explicitly confirm any returned execution proposal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestratorTurnRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestratorTurnResponse"
+
+  /orchestrator/turn/confirm:
+    post:
+      tags: [Agent Sessions]
+      summary: Confirm a stored orchestrator run proposal
+      description: >
+        Explicit confirmation endpoint for a prior `CODE_RUN_REQUIRED` decision. The server replays
+        the stored `ORCHESTRATOR_DECISION`, rejects non-run routes and missing confirmation, then
+        submits through the confirmed run-submission gate exactly once and links the agent turn to
+        the created run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestratorRunConfirmationRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestratorRunConfirmationResponse"
+
+  /admin/eval/orchestrator-routing/run:
+    post:
+      tags: [Admin]
+      summary: Run optional live model-prompt eval for orchestrator routing
+      description: >
+        SUPER_ADMIN-only operator endpoint. Runs the routing JSONL corpus against selected provider
+        prompts through live model calls. The deterministic corpus test remains the CI gate; this
+        endpoint is for credentialed model-prompt evals and returns both structured JSON results
+        and a Markdown report artifact.
+      parameters:
+        - name: providers
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated provider list, e.g. openai,anthropic,gemini,deepseek.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: Optional row limit for smoke runs.
+      responses:
+        "200":
+          description: Routing eval report
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+
+  /admin/test-managed-ai-email:
+    post:
+      tags: [Admin]
+      summary: Dispatch a managed-AI routing email smoke
+      description: >
+        SUPER_ADMIN-only operator endpoint for deployed Gmail OAuth validation. Sends through the
+        same BillingNotificationService path used by managed-AI routing-state transition emails,
+        but does not create usage ledger rows or notification dedupe records.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  format: email
+                routingState:
+                  type: string
+                  enum: [FRONTIER_LOCKED, CHEAP_ONLY, EXHAUSTED]
+                  default: CHEAP_ONLY
+      responses:
+        "200":
+          description: Email dispatch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
 
   /agent/actions:
     get:
@@ -1330,13 +1586,13 @@ paths:
         `list_gates`, `inspect_gate`, `approve_run`, `reject_run`, `create_run`, `local_code_task`,
         `resolve_project`).
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/AgentActionDescriptor'
+                  $ref: "#/components/schemas/AgentActionDescriptor"
 
   /agent/intent/interpret:
     post:
@@ -1351,13 +1607,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterpretIntentRequest'
+              $ref: "#/components/schemas/InterpretIntentRequest"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IntentDecision'
+                $ref: "#/components/schemas/IntentDecision"
 
   /agent/context/resolve:
     post:
@@ -1369,13 +1625,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ContextResolveRequest'
+              $ref: "#/components/schemas/ContextResolveRequest"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContextResolveResponse'
+                $ref: "#/components/schemas/ContextResolveResponse"
 
   /agent/gates:
     get:
@@ -1390,26 +1646,26 @@ paths:
             type: integer
             default: 20
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/GateDecisionCard'
+                  $ref: "#/components/schemas/GateDecisionCard"
 
   /agent/gates/{runId}:
     get:
       tags: [Agent Sessions]
       summary: Get the plan-gate decision card for one run
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GateDecisionCard'
+                $ref: "#/components/schemas/GateDecisionCard"
 
   # ──────────────────────────────────────────────────
   # PREVIEW
@@ -1419,9 +1675,9 @@ paths:
       tags: [Preview]
       summary: Analyze preview requirements
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1441,20 +1697,20 @@ paths:
       tags: [Preview]
       summary: Get preview status
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PreviewStatus'
+                $ref: "#/components/schemas/PreviewStatus"
 
   /runs/{runId}/preview/start:
     post:
       tags: [Preview]
       summary: Start preview container
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       requestBody:
         content:
           application/json:
@@ -1466,20 +1722,20 @@ paths:
                   additionalProperties:
                     type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PreviewStatus'
+                $ref: "#/components/schemas/PreviewStatus"
 
   /runs/{runId}/preview/stop:
     delete:
       tags: [Preview]
       summary: Stop preview container
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           description: Preview stopped
 
   /runs/{runId}/preview/logs:
@@ -1487,7 +1743,7 @@ paths:
       tags: [Preview]
       summary: Get preview container logs
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: lines
           in: query
           schema:
@@ -1499,7 +1755,7 @@ paths:
             type: string
             enum: [all, backend, frontend, db]
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1517,9 +1773,9 @@ paths:
       tags: [Preview]
       summary: Probe for OpenAPI/Swagger docs
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1537,7 +1793,7 @@ paths:
       tags: [Deployment]
       summary: Push workspace to GitHub (creates branch + PR)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: repoUrl
           in: query
           schema:
@@ -1549,7 +1805,7 @@ paths:
             enum: [NEW, EXISTING]
             default: NEW
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1573,13 +1829,13 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/DeploymentSummary'
+                  $ref: "#/components/schemas/DeploymentSummary"
     post:
       tags: [Deployment]
       summary: Create deployment
@@ -1595,11 +1851,11 @@ paths:
                 strategy:
                   type: string
       responses:
-        '202':
+        "202":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentSummary'
+                $ref: "#/components/schemas/DeploymentSummary"
 
   /deployments/{id}:
     get:
@@ -1612,11 +1868,11 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentSummary'
+                $ref: "#/components/schemas/DeploymentSummary"
     delete:
       tags: [Deployment]
       summary: Delete deployment
@@ -1627,7 +1883,7 @@ paths:
           schema:
             type: string
       responses:
-        '204':
+        "204":
           description: Deleted
 
   /deployments/analyze:
@@ -1641,7 +1897,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1682,11 +1938,11 @@ paths:
                 appPort:
                   type: integer
       responses:
-        '202':
+        "202":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeploymentSummary'
+                $ref: "#/components/schemas/DeploymentSummary"
 
   # ──────────────────────────────────────────────────
   # GCP CREDENTIALS
@@ -1707,7 +1963,7 @@ paths:
               type: object
               description: Raw GCP service account JSON
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1721,7 +1977,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1736,18 +1992,18 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /credentials/gcp/all:
     get:
       tags: [GCP Credentials]
       summary: List all credentials
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1765,7 +2021,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1784,7 +2040,7 @@ paths:
       summary: List required GCP roles
       security: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1805,24 +2061,73 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/BillingPlan'
+                  $ref: "#/components/schemas/BillingPlan"
 
   /billing/status:
     get:
       tags: [Billing]
       summary: Current subscription status
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BillingStatus'
+                $ref: "#/components/schemas/BillingStatus"
+
+  /billing/managed-ai/balance:
+    get:
+      tags: [Billing]
+      summary: Current managed AI balance and routing state
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedAiBalance"
+
+  /billing/managed-ai/events:
+    get:
+      tags: [Billing]
+      summary: Current-period managed AI usage events
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [current]
+            default: current
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ManagedAiUsageEvent"
+
+  /billing/managed-ai/policy:
+    get:
+      tags: [Billing]
+      summary: Effective managed AI policy for the current user
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedAiPolicy"
 
   /billing/subscribe:
     post:
@@ -1854,7 +2159,7 @@ paths:
                   maximum: 20
                   description: TEAM tier only. Omit for per-seat-quantity=1 (PRO/MAX).
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1886,7 +2191,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [razorpaySubscriptionId, razorpayPaymentId, razorpaySignature]
+              required:
+                [razorpaySubscriptionId, razorpayPaymentId, razorpaySignature]
               properties:
                 razorpaySubscriptionId:
                   type: string
@@ -1895,18 +2201,18 @@ paths:
                 razorpaySignature:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BillingStatus'
+                $ref: "#/components/schemas/BillingStatus"
 
   /billing/cancel:
     post:
       tags: [Billing]
       summary: Cancel subscription
       responses:
-        '200':
+        "200":
           description: Cancelled at period end
 
   /billing/seats:
@@ -1923,18 +2229,18 @@ paths:
                 totalSeats:
                   type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BillingStatus'
+                $ref: "#/components/schemas/BillingStatus"
 
   /billing/topup/packages:
     get:
       tags: [Billing]
       summary: List run top-up packages
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1956,7 +2262,7 @@ paths:
                 packageId:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -1987,11 +2293,11 @@ paths:
                 razorpaySignature:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BillingStatus'
+                $ref: "#/components/schemas/BillingStatus"
 
   # ──────────────────────────────────────────────────
   # INVOICES
@@ -2001,7 +2307,7 @@ paths:
       tags: [Invoices]
       summary: Get billing profile
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2015,7 +2321,7 @@ paths:
             schema:
               type: object
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2035,7 +2341,7 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2052,7 +2358,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2069,7 +2375,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/pdf:
               schema:
@@ -2093,21 +2399,21 @@ paths:
         claims are deterministic, LLM-assessed, LLM-assisted counts, or internal
         score summaries.
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: object
                 nullable: true
                 properties:
-                  id: {type: string}
-                  runId: {type: string, format: uuid}
-                  filesGenerated: {type: integer}
+                  id: { type: string }
+                  runId: { type: string, format: uuid }
+                  filesGenerated: { type: integer }
                   languages:
                     type: array
-                    items: {type: string}
+                    items: { type: string }
                   pipelineResult:
                     type: string
                     enum: [PASSED, PASSED_WITH_FIXES, NEEDS_ATTENTION, FAILED]
@@ -2119,12 +2425,12 @@ paths:
                     type: string
                     nullable: true
                     enum: [A, B, C, D, F]
-                  codeQualityScore: {type: integer, nullable: true}
-                  testCoverageScore: {type: integer, nullable: true}
-                  architectureScore: {type: integer, nullable: true}
-                  securityScore: {type: integer, nullable: true}
-                  performanceScore: {type: integer, nullable: true}
-                  designComplianceScore: {type: integer, nullable: true}
+                  codeQualityScore: { type: integer, nullable: true }
+                  testCoverageScore: { type: integer, nullable: true }
+                  architectureScore: { type: integer, nullable: true }
+                  securityScore: { type: integer, nullable: true }
+                  performanceScore: { type: integer, nullable: true }
+                  designComplianceScore: { type: integer, nullable: true }
                   finalBuildPassed:
                     type: boolean
                     nullable: true
@@ -2140,7 +2446,8 @@ paths:
                   reviewerVerdict:
                     type: string
                     nullable: true
-                    enum: [CLEAN, FIXED_ISSUES, UNRESOLVED_ISSUES, REVIEW_FAILED]
+                    enum:
+                      [CLEAN, FIXED_ISSUES, UNRESOLVED_ISSUES, REVIEW_FAILED]
                     description: "v2.5.10 (V106) — ReviewerResult.Overall enum name at terminal time."
                   verifiedScore:
                     type: integer
@@ -2204,9 +2511,9 @@ paths:
       tags: [Validation Report]
       summary: Generate share link
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2222,9 +2529,9 @@ paths:
       tags: [Validation Report]
       summary: Download report PDF
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/pdf:
               schema:
@@ -2243,7 +2550,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2257,9 +2564,9 @@ paths:
       tags: [Test Gen]
       summary: Get test plan
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2271,9 +2578,9 @@ paths:
       tags: [Test Gen]
       summary: Get test execution graph
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2285,9 +2592,9 @@ paths:
       tags: [Test Gen]
       summary: Get test execution report
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2299,14 +2606,14 @@ paths:
       tags: [Test Gen]
       summary: Apply test fix suggestions
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
         - name: signature
           in: query
           required: true
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2324,9 +2631,9 @@ paths:
       tags: [Test Gen]
       summary: Manually trigger test execution (Beta, requires preview RUNNING)
       parameters:
-        - $ref: '#/components/parameters/runId'
+        - $ref: "#/components/parameters/runId"
       responses:
-        '202':
+        "202":
           description: Test execution started
           content:
             application/json:
@@ -2339,9 +2646,9 @@ paths:
                     type: integer
                   previewUrl:
                     type: string
-        '404':
+        "404":
           description: Run not found
-        '409':
+        "409":
           description: Preview not running or no compiled test plan
 
   # ──────────────────────────────────────────────────
@@ -2359,7 +2666,7 @@ paths:
             default: 0
           description: 0 = all-time
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2392,7 +2699,7 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2408,7 +2715,7 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2437,22 +2744,22 @@ paths:
                 adminEmail:
                   type: string
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgDto'
+                $ref: "#/components/schemas/OrgDto"
 
   /org/me:
     get:
       tags: [Organization]
       summary: Get current org
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgDto'
+                $ref: "#/components/schemas/OrgDto"
     put:
       tags: [Organization]
       summary: Update org settings (ORG_ADMIN+)
@@ -2469,18 +2776,18 @@ paths:
                   items:
                     type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgDto'
+                $ref: "#/components/schemas/OrgDto"
 
   /org/me/members:
     get:
       tags: [Organization]
       summary: List org members
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2499,7 +2806,7 @@ paths:
           schema:
             type: string
       responses:
-        '204':
+        "204":
           description: Removed
 
   /org/me/members/{userId}/role:
@@ -2522,7 +2829,7 @@ paths:
                 role:
                   type: string
       responses:
-        '204':
+        "204":
           description: Role updated
 
   /org/me/members/{userId}/suspend:
@@ -2545,7 +2852,7 @@ paths:
                 suspended:
                   type: boolean
       responses:
-        '204':
+        "204":
           description: Updated
 
   /org/invite:
@@ -2569,7 +2876,7 @@ paths:
                   items:
                     type: string
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
@@ -2585,7 +2892,7 @@ paths:
       tags: [Organization]
       summary: List pending invitations (ORG_ADMIN+)
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2604,11 +2911,11 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   /org/me/settings/key-source:
     put:
@@ -2627,11 +2934,11 @@ paths:
                   items:
                     type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgDto'
+                $ref: "#/components/schemas/OrgDto"
 
   /org/me/settings/ai-keys:
     put:
@@ -2656,11 +2963,11 @@ paths:
                 fireworksApiKey:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrgDto'
+                $ref: "#/components/schemas/OrgDto"
 
   /org/me/model-matrix:
     get:
@@ -2671,7 +2978,7 @@ paths:
         and `modelLabels` keyed by canonical model id. Non-ENTERPRISE orgs may read
         the grid but receive `editable=false`.
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2726,7 +3033,7 @@ paths:
                   additionalProperties:
                     type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2740,13 +3047,13 @@ paths:
       tags: [Projects]
       summary: List projects
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ProjectDto'
+                  $ref: "#/components/schemas/ProjectDto"
     post:
       tags: [Projects]
       summary: Create project
@@ -2763,13 +3070,22 @@ paths:
                   type: string
                 aiProvider:
                   type: string
-                  enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
+                  enum:
+                    [
+                      ANTHROPIC,
+                      GEMINI,
+                      OPENAI,
+                      GOOGLE,
+                      OPENROUTER,
+                      DEEPSEEK,
+                      FIREWORKS,
+                    ]
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectDto'
+                $ref: "#/components/schemas/ProjectDto"
 
   /projects/{id}/settings:
     patch:
@@ -2789,13 +3105,22 @@ paths:
               properties:
                 aiProvider:
                   type: string
-                  enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
+                  enum:
+                    [
+                      ANTHROPIC,
+                      GEMINI,
+                      OPENAI,
+                      GOOGLE,
+                      OPENROUTER,
+                      DEEPSEEK,
+                      FIREWORKS,
+                    ]
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectDto'
+                $ref: "#/components/schemas/ProjectDto"
 
   # ──────────────────────────────────────────────────
   # INTEGRATIONS
@@ -2805,7 +3130,7 @@ paths:
       tags: [Integrations]
       summary: List enabled integrations
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2821,7 +3146,7 @@ paths:
       tags: [Integrations]
       summary: Get Slack connection status
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2841,7 +3166,7 @@ paths:
       tags: [Integrations]
       summary: Get Slack OAuth install URL
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2855,7 +3180,7 @@ paths:
       tags: [Integrations]
       summary: Disconnect Slack workspace
       responses:
-        '200':
+        "200":
           description: Disconnected
 
   /integrations/slack/channels:
@@ -2863,7 +3188,7 @@ paths:
       tags: [Integrations]
       summary: List Slack channels
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2882,7 +3207,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2912,7 +3237,7 @@ paths:
                 verbosity:
                   type: string
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
@@ -2931,11 +3256,11 @@ paths:
                 channelId:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: "#/components/schemas/MessageResponse"
 
   # ──────────────────────────────────────────────────
   # CONVERSATION (Pre-run)
@@ -2961,7 +3286,7 @@ paths:
                       content:
                         type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2979,7 +3304,7 @@ paths:
       summary: List available AI models
       security: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -2990,7 +3315,7 @@ paths:
       tags: [Models]
       summary: List all model pricing
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3019,7 +3344,7 @@ paths:
                 budgetUsd:
                   type: number
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3034,7 +3359,7 @@ paths:
       summary: Liveness probe
       security: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3064,7 +3389,7 @@ paths:
       summary: Readiness probe
       security: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3077,7 +3402,7 @@ paths:
                   timestamp:
                     type: string
                     format: date-time
-        '503':
+        "503":
           description: Database not reachable
 
   # ──────────────────────────────────────────────────
@@ -3094,7 +3419,7 @@ paths:
             schema:
               type: object
       responses:
-        '200':
+        "200":
           description: Webhook processed
 
   /webhooks/stripe:
@@ -3108,7 +3433,7 @@ paths:
             schema:
               type: string
       responses:
-        '200':
+        "200":
           description: Webhook processed
 
   # ──────────────────────────────────────────────────
@@ -3140,7 +3465,7 @@ paths:
                   type: boolean
                   description: When true, compute changes without saving rows.
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3168,7 +3493,7 @@ paths:
       tags: [Admin]
       summary: List all feature flags (SUPER_ADMIN)
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3213,7 +3538,7 @@ paths:
                 value:
                   type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3238,7 +3563,7 @@ paths:
             type: integer
             default: 20
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3249,7 +3574,7 @@ paths:
       tags: [Admin]
       summary: Export payment audit as CSV (SUPER_ADMIN)
       responses:
-        '200':
+        "200":
           content:
             text/csv:
               schema:
@@ -3279,7 +3604,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3299,7 +3624,7 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
@@ -3321,7 +3646,7 @@ paths:
             type: string
             enum: [google, github]
       responses:
-        '302':
+        "302":
           description: Redirect to OAuth2 provider
 
   /auth/oauth2/callback/{provider}:
@@ -3342,12 +3667,12 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: JWT issued on success
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: "#/components/schemas/LoginResponse"
 
   # ──────────────────────────────────────────────────
   # ONBOARDING (Wave 2)
@@ -3358,7 +3683,7 @@ paths:
       summary: List onboarding sample specs
       description: Returns the curated sample-spec catalog (web-api / frontend / cli) used by the post-signup welcome flow.
       responses:
-        '200':
+        "200":
           description: Sample specs
           content:
             application/json:
@@ -3369,7 +3694,8 @@ paths:
                   properties:
                     id: { type: string }
                     title: { type: string }
-                    surface: { type: string, enum: [HTTP, CLI, STATIC_WEB, LIBRARY] }
+                    surface:
+                      { type: string, enum: [HTTP, CLI, STATIC_WEB, LIBRARY] }
                     description: { type: string }
                     expectedTimeMinutes: { type: integer }
                     tags:
@@ -3391,7 +3717,7 @@ paths:
               properties:
                 sampleId: { type: string }
       responses:
-        '202':
+        "202":
           description: Run submitted
           content:
             application/json:
@@ -3406,7 +3732,7 @@ paths:
       tags: [Onboarding]
       summary: Return the caller's sandbox project status
       responses:
-        '200':
+        "200":
           description: Sandbox status
           content:
             application/json:
@@ -3415,7 +3741,8 @@ paths:
                 properties:
                   provisioned: { type: boolean }
                   projectId: { type: string, format: uuid, nullable: true }
-                  lastActivity: { type: string, format: date-time, nullable: true }
+                  lastActivity:
+                    { type: string, format: date-time, nullable: true }
                   expiresAt: { type: string, format: date-time, nullable: true }
 
   # ──────────────────────────────────────────────────
@@ -3426,7 +3753,7 @@ paths:
       tags: [Tier Lifecycle]
       summary: List tiers with lifecycle state
       responses:
-        '200':
+        "200":
           description: Tier lifecycle rows
           content:
             application/json:
@@ -3436,7 +3763,7 @@ paths:
                   tiers:
                     type: array
                     items:
-                      $ref: '#/components/schemas/TierLifecycleRow'
+                      $ref: "#/components/schemas/TierLifecycleRow"
 
   /admin/tiers/{tier}:
     put:
@@ -3465,13 +3792,13 @@ paths:
                 reason: { type: string }
                 observationDays: { type: integer, minimum: 0 }
       responses:
-        '200':
+        "200":
           description: Updated lifecycle row
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TierLifecycleRow'
-        '409':
+                $ref: "#/components/schemas/TierLifecycleRow"
+        "409":
           description: Transition rejected (e.g. SUNSETTING before 14-day HIDDEN window elapses)
 
   # ──────────────────────────────────────────────────
@@ -3494,7 +3821,7 @@ paths:
                 intendedSeats: { type: integer, minimum: 2, maximum: 20 }
                 notes: { type: string }
       responses:
-        '201':
+        "201":
           description: Trial request accepted
           content:
             application/json:
@@ -3572,7 +3899,7 @@ components:
       type: object
       properties:
         user:
-          $ref: '#/components/schemas/UserDto'
+          $ref: "#/components/schemas/UserDto"
         accessToken:
           type: string
 
@@ -3661,7 +3988,8 @@ components:
         provider:
           type: string
           description: "Canonical values ANTHROPIC / OPENAI / GEMINI (plus the BYOK routes OPENROUTER / DEEPSEEK / FIREWORKS). GOOGLE is accepted as input and rewritten to GEMINI before persistence."
-          enum: [ANTHROPIC, OPENAI, GEMINI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
+          enum:
+            [ANTHROPIC, OPENAI, GEMINI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
 
     ProviderPreferenceResponse:
       type: object
@@ -3692,7 +4020,7 @@ components:
           type: string
           description: The plaintext credential (`es_pat_…`). Returned exactly once, here, and never retrievable again.
         meta:
-          $ref: '#/components/schemas/PatDto'
+          $ref: "#/components/schemas/PatDto"
 
     PatDto:
       type: object
@@ -3740,7 +4068,8 @@ components:
         aiProvider:
           type: string
           description: "Canonical value is GEMINI; GOOGLE still accepted as back-compat input alias (rewritten to GEMINI on persist). OpenRouter, DeepSeek, and Fireworks are BYOK/aggregator routes."
-          enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
+          enum:
+            [ANTHROPIC, GEMINI, OPENAI, GOOGLE, OPENROUTER, DEEPSEEK, FIREWORKS]
         projectId:
           type: string
           format: uuid
@@ -3765,7 +4094,23 @@ components:
           format: uuid
         status:
           type: string
-          enum: [QUEUED, PLANNING, AWAITING_APPROVAL, AWAITING_CLARIFICATION, WORKING, COMPILING, MERGING, REVIEWING, TESTING, COMPLETE, PARTIAL, FAILED, CANCELLED, PAUSED]
+          enum:
+            [
+              QUEUED,
+              PLANNING,
+              AWAITING_APPROVAL,
+              AWAITING_CLARIFICATION,
+              WORKING,
+              COMPILING,
+              MERGING,
+              REVIEWING,
+              TESTING,
+              COMPLETE,
+              PARTIAL,
+              FAILED,
+              CANCELLED,
+              PAUSED,
+            ]
         statusReason:
           type: string
           nullable: true
@@ -3853,7 +4198,7 @@ components:
         content:
           type: array
           items:
-            $ref: '#/components/schemas/RunSummary'
+            $ref: "#/components/schemas/RunSummary"
         page:
           type: integer
         size:
@@ -3941,7 +4286,7 @@ components:
           type: object
           nullable: true
         plan:
-          $ref: '#/components/schemas/BillingPlan'
+          $ref: "#/components/schemas/BillingPlan"
         usage:
           type: array
           items:
@@ -3949,6 +4294,151 @@ components:
         bonusRuns:
           type: integer
         tier:
+          type: string
+
+    ManagedAiBalance:
+      type: object
+      properties:
+        userId:
+          type: string
+        orgId:
+          type: string
+          nullable: true
+        tier:
+          type: string
+        routingState:
+          type: string
+          enum: [FULL, VALUE_MODE, FRONTIER_LOCKED, CHEAP_ONLY, EXHAUSTED]
+        periodStart:
+          type: string
+          format: date-time
+        periodEnd:
+          type: string
+          format: date-time
+        includedAiCredits:
+          type: integer
+          format: int64
+        aiCreditsUsed:
+          type: integer
+          format: int64
+        aiCreditsRemaining:
+          type: integer
+          format: int64
+        rawCogsCapUsd:
+          type: number
+        rawCogsUsedUsd:
+          type: number
+        rawCogsRemainingUsd:
+          type: number
+        frontierRawCapUsd:
+          type: number
+        frontierRawUsedUsd:
+          type: number
+        frontierRawRemainingUsd:
+          type: number
+        valueModeAfterRawUsd:
+          type: number
+        cheapOnlyAfterRawUsd:
+          type: number
+        hardStopAfterRawUsd:
+          type: number
+        managed:
+          type: boolean
+        retailMultiplier:
+          type: number
+
+    ManagedAiUsageEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        periodId:
+          type: string
+        runId:
+          type: string
+          nullable: true
+        agentSessionId:
+          type: string
+          nullable: true
+        sourceType:
+          type: string
+          enum: [PLATFORM, BYOK]
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        modelClass:
+          type: string
+          nullable: true
+        agentRole:
+          type: string
+          nullable: true
+        stepId:
+          type: string
+          nullable: true
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
+        cacheReadTokens:
+          type: integer
+          format: int64
+        cacheWriteTokens:
+          type: integer
+          format: int64
+        reasoningTokens:
+          type: integer
+          format: int64
+        rawCostUsd:
+          type: number
+        retailMultiplier:
+          type: number
+        aiCreditsCharged:
+          type: integer
+          format: int64
+        routingStateBefore:
+          type: string
+        routingStateAfter:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ManagedAiPolicy:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        tier:
+          type: string
+        includedCredits:
+          type: integer
+          format: int64
+        rawCogsCapUsd:
+          type: number
+        frontierRawCapUsd:
+          type: number
+        valueModeAfterRawUsd:
+          type: number
+        cheapOnlyAfterRawUsd:
+          type: number
+        hardStopAfterRawUsd:
+          type: number
+        retailMultiplier:
+          type: number
+        concurrencyEnforced:
+          type: boolean
+        rateLimitsEnabled:
+          type: boolean
+        notificationThresholdsPct:
+          type: array
+          items:
+            type: integer
+        creditDefinition:
           type: string
 
     OrgDto:
@@ -4087,12 +4577,17 @@ components:
           description: Optional client-supplied session id.
         projectId:
           type: string
+          nullable: true
+        runId:
+          type: string
+          nullable: true
+          description: Optional run scope. Server validates access and derives projectId from the run when omitted.
         repoRemote:
           type: string
         repoRootHash:
           type: string
         repoContext:
-          $ref: '#/components/schemas/RepoContext'
+          $ref: "#/components/schemas/RepoContext"
         surface:
           type: string
           description: Client surface, e.g. CLI or VSCODE.
@@ -4116,6 +4611,9 @@ components:
         id:
           type: string
         projectId:
+          type: string
+          nullable: true
+        runId:
           type: string
           nullable: true
         repoRemote:
@@ -4171,9 +4669,9 @@ components:
         message:
           type: string
         repoContext:
-          $ref: '#/components/schemas/RepoContext'
+          $ref: "#/components/schemas/RepoContext"
         clientCapabilities:
-          $ref: '#/components/schemas/ClientCapabilities'
+          $ref: "#/components/schemas/ClientCapabilities"
 
     StreamTurnRequest:
       type: object
@@ -4187,9 +4685,9 @@ components:
             type: object
             additionalProperties: true
         repoContext:
-          $ref: '#/components/schemas/RepoContext'
+          $ref: "#/components/schemas/RepoContext"
         clientCapabilities:
-          $ref: '#/components/schemas/ClientCapabilities'
+          $ref: "#/components/schemas/ClientCapabilities"
         providerOverride:
           type: string
 
@@ -4209,6 +4707,196 @@ components:
           type: string
           nullable: true
 
+    OrchestratorPolicy:
+      type: object
+      properties:
+        runApiAllowed:
+          type: boolean
+        confirmationRequiredBeforeSubmit:
+          type: boolean
+        reason:
+          type: string
+
+    OrchestratorClientCapabilities:
+      type: object
+      properties:
+        supportsLocalHands:
+          type: boolean
+        supportsLocalReadContext:
+          type: boolean
+        supportsRunConfirmation:
+          type: boolean
+        supportsPlanGate:
+          type: boolean
+        supportsEvidence:
+          type: boolean
+        supportsDiff:
+          type: boolean
+        supportsRevert:
+          type: boolean
+        supportsStreaming:
+          type: boolean
+
+    OrchestratorMode:
+      type: object
+      properties:
+        permissionMode:
+          type: string
+          enum: [read_only, auto, full_access, custom]
+        requestedExecutionMode:
+          type: string
+          enum: [auto, local, remote, server]
+        requiresConfirmationByDefault:
+          type: boolean
+
+    OrchestratorRepoContext:
+      type: object
+      properties:
+        gitRoot:
+          type: string
+        gitRemote:
+          type: string
+        cwdName:
+          type: string
+        branch:
+          type: string
+        hasUncommittedChanges:
+          type: boolean
+        changedFiles:
+          type: array
+          items:
+            type: string
+        detectedStack:
+          type: array
+          items:
+            type: string
+        instructionFiles:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              sha256:
+                type: string
+
+    OrchestratorTurnRequest:
+      type: object
+      required: [sessionId, message]
+      properties:
+        sessionId:
+          type: string
+        turnId:
+          type: string
+          description: Client-generated idempotency key. Reusing it replays the original decision.
+        message:
+          type: string
+        surface:
+          type: string
+          description: e.g. cli, vscode, web.
+        clientVersion:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        cwd:
+          type: string
+          nullable: true
+        repoContext:
+          $ref: "#/components/schemas/OrchestratorRepoContext"
+        clientCapabilities:
+          $ref: "#/components/schemas/OrchestratorClientCapabilities"
+        mode:
+          $ref: "#/components/schemas/OrchestratorMode"
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+              path:
+                type: string
+              contentSha256:
+                type: string
+              truncated:
+                type: boolean
+
+    OrchestratorTurnResponse:
+      type: object
+      properties:
+        turnId:
+          type: string
+        route:
+          type: string
+          enum:
+            - CHAT_ONLY
+            - READ_ONLY_CODE_HELP
+            - PLAN_ONLY
+            - REVIEW_ONLY
+            - CLARIFY
+            - RUN_LIFECYCLE_ACTION
+            - LOCAL_TOOL_ACTION
+            - IMPLEMENTATION_PROPOSAL
+            - CODE_RUN_REQUIRED
+            - SECURITY_REJECT
+        confidence:
+          type: number
+          format: double
+        reasonCode:
+          type: string
+        requiresUserConfirmation:
+          type: boolean
+        assistantReply:
+          type: string
+          nullable: true
+        proposedAction:
+          $ref: "#/components/schemas/TypedAction"
+        policy:
+          $ref: "#/components/schemas/OrchestratorPolicy"
+        traceId:
+          type: string
+
+    OrchestratorRunConfirmationRequest:
+      type: object
+      required: [sessionId, turnId, confirmed]
+      properties:
+        sessionId:
+          type: string
+        turnId:
+          type: string
+          description: Existing agent turn whose stored decision proposed `create_cloud_run`.
+        confirmed:
+          type: boolean
+        aiProvider:
+          type: string
+          nullable: true
+        modelName:
+          type: string
+          nullable: true
+        userCostCap:
+          type: number
+          format: double
+          nullable: true
+
+    OrchestratorRunConfirmationResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        turnId:
+          type: string
+        runId:
+          type: string
+        route:
+          type: string
+        calledRunApi:
+          type: boolean
+        traceId:
+          type: string
+        status:
+          type: string
+
     IntentDecision:
       type: object
       properties:
@@ -4223,7 +4911,7 @@ components:
           type: string
           nullable: true
         proposedAction:
-          $ref: '#/components/schemas/TypedAction'
+          $ref: "#/components/schemas/TypedAction"
         response:
           type: string
           nullable: true
@@ -4238,7 +4926,60 @@ components:
         sequence:
           type: integer
         decision:
-          $ref: '#/components/schemas/IntentDecision'
+          $ref: "#/components/schemas/IntentDecision"
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AgentTurnResponse:
+      type: object
+      properties:
+        turnId:
+          type: string
+        sessionId:
+          type: string
+        sequence:
+          type: integer
+        userMessage:
+          type: string
+        assistantSummary:
+          type: string
+          nullable: true
+        intentType:
+          type: string
+          nullable: true
+        intentConfidence:
+          type: number
+          format: double
+        route:
+          type: string
+          nullable: true
+        reasonCode:
+          type: string
+          nullable: true
+        actionType:
+          type: string
+          nullable: true
+        proposedActionJson:
+          type: string
+          nullable: true
+        linkedRunId:
+          type: string
+          nullable: true
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
+        reasoningTokens:
+          type: integer
+          format: int64
+        costUsd:
+          type: number
+          format: double
         status:
           type: string
         createdAt:
@@ -4261,6 +5002,37 @@ components:
           items:
             type: string
 
+    CapabilityTool:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        inputSchema:
+          type: object
+          additionalProperties: true
+        outputSchema:
+          type: object
+          additionalProperties: true
+        requiredTier:
+          type: string
+          nullable: true
+        requiredScopes:
+          type: array
+          items:
+            type: string
+        sideEffect:
+          type: string
+        confirmationRequired:
+          type: boolean
+        billingImpact:
+          type: string
+        surfaces:
+          type: array
+          items:
+            type: string
+
     InterpretIntentRequest:
       type: object
       properties:
@@ -4271,9 +5043,99 @@ components:
         projectId:
           type: string
         repoContext:
-          $ref: '#/components/schemas/RepoContext'
+          $ref: "#/components/schemas/RepoContext"
         clientCapabilities:
-          $ref: '#/components/schemas/ClientCapabilities'
+          $ref: "#/components/schemas/ClientCapabilities"
+
+    ActionPlanRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        repoContext:
+          $ref: "#/components/schemas/RepoContext"
+        clientCapabilities:
+          $ref: "#/components/schemas/ClientCapabilities"
+        surface:
+          type: string
+
+    ActionPlanResponse:
+      type: object
+      properties:
+        actionId:
+          type: string
+        sessionId:
+          type: string
+        decision:
+          $ref: "#/components/schemas/IntentDecision"
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityTool"
+        createdAt:
+          type: string
+          format: date-time
+
+    ActionEventRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+
+    ActionResultRequest:
+      type: object
+      properties:
+        status:
+          type: string
+        summary:
+          type: string
+        runId:
+          type: string
+          nullable: true
+        touchedFiles:
+          type: array
+          items:
+            type: string
+        verification:
+          type: object
+          additionalProperties: true
+
+    ActionRecordResponse:
+      type: object
+      properties:
+        actionId:
+          type: string
+        sessionId:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+    SessionSummaryEmailRequest:
+      type: object
+      properties:
+        taskCount:
+          type: integer
+        costUsd:
+          type: number
+          format: double
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
 
     ContextResolveRequest:
       type: object
@@ -4285,7 +5147,7 @@ components:
         branch:
           type: string
         repoContext:
-          $ref: '#/components/schemas/RepoContext'
+          $ref: "#/components/schemas/RepoContext"
 
     ProjectMatch:
       type: object
@@ -4303,7 +5165,7 @@ components:
       type: object
       properties:
         project:
-          $ref: '#/components/schemas/ProjectMatch'
+          $ref: "#/components/schemas/ProjectMatch"
         reason:
           type: string
 

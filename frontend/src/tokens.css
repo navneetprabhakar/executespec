@@ -226,7 +226,7 @@
   --radius-card: 14px;
   --radius-pill: 9999px;
 
-  /* Breakpoints — single source of truth shared with useBreakpoint(). */
+  /* Breakpoints — single source of truth for CSS media-query alignment. */
   --bp-phone: 480px;
   --bp-tablet: 768px;
   --bp-desktop: 1024px;

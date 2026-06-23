@@ -20,6 +20,18 @@ import {fetchPlans, type BillingPlan} from '@/lib/billing-api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {
+  billingUsageSummary,
+  FALLBACK_PLAN_CARDS,
+  invoiceDisplay,
+  managedKind,
+  planCardsFrom,
+  planMoney,
+  PLAN_FEATURES,
+  PLAN_SUBCOPY,
+  type PaymentRowLite,
+  type PlanCard,
+} from '@/ide/billingUtils';
 
 function SectionTitle({children}: {children: React.ReactNode}) {
   return <div className='ide-h2'>{children}</div>;
@@ -55,18 +67,6 @@ function Stat({label, value}: {label: string; value: React.ReactNode}) {
 
 // Billing dashboard — /billing
 
-interface PaymentRowLite {
-  id?: string | number;
-  invoiceNumber?: string;
-  number?: string;
-  amount?: number;
-  currency?: string;
-  status?: string;
-  gateway?: string;
-  createdAt?: string;
-  paidAt?: string;
-}
-
 export function IdeBilling() {
   useDocumentTitle('Billing');
   const user = useAuthStore((s) => s.user);
@@ -74,6 +74,8 @@ export function IdeBilling() {
   const permissions = useAuthStore((s) => s.permissions);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
+  const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
+  const [managedAiEvents, setManagedAiEvents] = useState<api.ManagedAiUsageEvent[]>([]);
   const [payments, setPayments] = useState<PaymentRowLite[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -83,6 +85,8 @@ export function IdeBilling() {
     Promise.allSettled([
       api.getAnalyticsBilling('org', user.orgId).catch(() => null),
       api.getAnalyticsUsage('org', user.orgId, 30).catch(() => null),
+      api.getManagedAiBalance().catch(() => null),
+      api.getManagedAiEvents(5).catch(() => []),
       // Best-effort: paymentHistory may not return a typed shape; fail soft —
       // identical to the Signal BillingPage fetch.
       (async () => {
@@ -106,10 +110,14 @@ export function IdeBilling() {
           return [];
         }
       })(),
-    ]).then(([b, u, p]) => {
+    ]).then(([b, u, managed, managedEvents, p]) => {
       if (cancelled) return;
       if (b.status === 'fulfilled' && b.value) setBilling(b.value);
       if (u.status === 'fulfilled' && u.value) setUsage(u.value);
+      if (managed.status === 'fulfilled' && managed.value) setManagedAi(managed.value);
+      if (managedEvents.status === 'fulfilled' && Array.isArray(managedEvents.value)) {
+        setManagedAiEvents(managedEvents.value);
+      }
       if (p.status === 'fulfilled' && Array.isArray(p.value)) setPayments(p.value);
       setLoaded(true);
     });
@@ -123,12 +131,8 @@ export function IdeBilling() {
   // endpoint reports a stale per-org plan/limit (e.g. it returns FREE/5 even for
   // an ENTERPRISE org), so we use it ONLY for gateway + renewal date + invoices,
   // never for the run cap or plan status.
-  const periodRuns = usage?.totalRuns ?? permissions?.currentRunCount ?? 0;
-  const rawCap = permissions?.monthlyRunLimit ?? -1;
-  const runCap: number | '∞' = rawCap && rawCap !== -1 ? rawCap : '∞';
-  const totalSpend = usage?.totalCost ?? 0;
+  const {periodRuns, totalSpend, planStatus} = billingUsageSummary(usage, permissions, tier);
   const next = billing?.nextBillingDate || '';
-  const planStatus = tier === 'FREE' ? 'No subscription' : 'Subscription active';
 
   if (!user?.orgId) {
     return (
@@ -211,17 +215,95 @@ export function IdeBilling() {
                 borderTop: '1px solid var(--ide-border)',
               }}
             >
-              <Stat
-                label='Work items'
-                value={
-                  <>
-                    {periodRuns} / {runCap}
-                  </>
-                }
-              />
+              <Stat label='Work runs' value={<>{periodRuns}</>} />
               <Stat label='Spent' value={`$${totalSpend.toFixed(2)}`} />
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
+          </div>
+
+          {/* Managed-AI usage is separate from run credits: run credits reserve work at
+              approval, while ES AI credits debit per successful model call. */}
+          <SectionTitle>Managed AI</SectionTitle>
+          <div className='ide-card'>
+            {managedAi ? (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                    marginBottom: 12,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 700,
+                        color: 'var(--ide-fg-bright)',
+                      }}
+                    >
+                      ES AI credits
+                    </div>
+                    <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                      $1 = 100 ES AI credits. Frontier calls step down automatically near policy
+                      thresholds.
+                    </div>
+                  </div>
+                  <IdeBadge kind={managedKind(managedAi.routingState)}>
+                    {managedAi.routingState}
+                  </IdeBadge>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: 12,
+                    paddingTop: 12,
+                    borderTop: '1px solid var(--ide-border)',
+                  }}
+                >
+                  <Stat
+                    label='Credits used'
+                    value={`${managedAi.aiCreditsUsed} / ${managedAi.includedAiCredits}`}
+                  />
+                  <Stat label='Credits left' value={managedAi.aiCreditsRemaining} />
+                </div>
+                {managedAiEvents.length > 0 && (
+                  <div style={{marginTop: 14, borderTop: '1px solid var(--ide-border)'}}>
+                    {managedAiEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          paddingTop: 10,
+                          fontSize: 12,
+                          color: 'var(--ide-fg-muted)',
+                        }}
+                      >
+                        <span style={{minWidth: 0}}>
+                          <span style={{color: 'var(--ide-fg-bright)'}}>
+                            {event.agentRole || event.sourceType}
+                          </span>{' '}
+                          {event.model || event.provider || 'model call'}
+                        </span>
+                        <span className='ide-mono' style={{flexShrink: 0}}>
+                          {event.aiCreditsCharged} cr
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>
+                Managed-AI usage is unavailable for this account or server profile.
+              </div>
+            )}
           </div>
 
           {/* FREE → BYOK upsell (TIER-2) — targets TEAM (the BYOK tier that is
@@ -242,7 +324,7 @@ export function IdeBilling() {
               >
                 <div>
                   <strong style={{color: 'var(--ide-fg-bright)'}}>
-                    Bring your own provider keys, bypass the $3 cap.
+                    Bring your own provider keys, bypass the managed-AI cap.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
                     Upgrade to TEAM and use your own Anthropic / OpenAI / Gemini / DeepSeek /
@@ -273,7 +355,7 @@ export function IdeBilling() {
                 marginBottom: 8,
               }}
             >
-              Work used
+              Work runs this cycle
             </div>
             <div
               style={{
@@ -288,29 +370,9 @@ export function IdeBilling() {
               {periodRuns}
               <span style={{fontSize: 18, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
                 {' '}
-                / {runCap}
+                runs
               </span>
             </div>
-            {typeof runCap === 'number' && runCap > 0 && (
-              <div
-                style={{
-                  height: 6,
-                  background: 'var(--ide-bg-tab-inactive)',
-                  borderRadius: 3,
-                  overflow: 'hidden',
-                  marginBottom: 14,
-                }}
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${Math.min(100, (periodRuns / runCap) * 100)}%`,
-                    background: 'var(--ide-accent)',
-                    borderRadius: 3,
-                  }}
-                />
-              </div>
-            )}
             <div className='ide-kv'>
               <span>Tier</span>
               <span>{tier}</span>
@@ -342,13 +404,10 @@ export function IdeBilling() {
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {payments.slice(0, 6).map((p, i) => {
-                const num = p.invoiceNumber || p.number || (p.id != null ? `INV-${p.id}` : 'INV-—');
-                const amount =
-                  p.amount != null ? `${p.currency || 'USD'} ${p.amount.toFixed(2)}` : '—';
-                const paid = (p.status || '').toLowerCase() === 'paid' || !!p.paidAt;
+                const invoice = invoiceDisplay(p);
                 return (
                   <div
-                    key={String(p.id || num)}
+                    key={String(p.id || invoice.number)}
                     className='ide-invoice-row'
                     style={{
                       padding: '11px 16px',
@@ -366,9 +425,9 @@ export function IdeBilling() {
                         className='ide-invoice-title'
                         style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}
                       >
-                        <span className='ide-invoice-number'>{num}</span>
+                        <span className='ide-invoice-number'>{invoice.number}</span>
                         <span className='ide-invoice-sep'> — </span>
-                        <span>{amount}</span>
+                        <span>{invoice.amount}</span>
                       </div>
                       <div
                         style={{
@@ -381,7 +440,7 @@ export function IdeBilling() {
                       >
                         <span className='ide-mono'>{p.gateway || 'card'}</span>
                         <span>·</span>
-                        <span>{paid ? 'Paid' : p.status || 'pending'}</span>
+                        <span>{invoice.statusLabel}</span>
                         {p.createdAt && (
                           <>
                             <span>·</span>
@@ -390,7 +449,9 @@ export function IdeBilling() {
                         )}
                       </div>
                     </div>
-                    <IdeBadge kind={paid ? 'ok' : 'warn'}>{paid ? 'Paid' : 'Pending'}</IdeBadge>
+                    <IdeBadge kind={invoice.paid ? 'ok' : 'warn'}>
+                      {invoice.paid ? 'Paid' : 'Pending'}
+                    </IdeBadge>
                   </div>
                 );
               })}
@@ -416,205 +477,6 @@ export function IdeBilling() {
  * billing_plan rows). Prices/cadence/yearly availability are the API's call;
  * the maps below carry only product truths (caps, seats, feature bullets),
  * which mirror tier_config + the truth-passed public /pricing page. */
-
-// Feature bullets by tier. ✓ = included, ○ = constraint (rendered muted).
-const FEATURES: Record<string, string[]> = {
-  FREE: [
-    '✓ 15 work items / month',
-    '✓ Small specs (1 credit)',
-    '✓ Email support',
-    '○ $3 per-work cost cap',
-    '○ 1 project · 1 repo',
-  ],
-  PRO: [
-    '✓ 30 work items / month on managed keys',
-    '✓ Anthropic · OpenAI · Gemini',
-    '✓ PR review + code review (4 scans/mo)',
-    '✓ 2 projects · 2 repos each',
-    '○ $5 per-work cap — provider keys lift it',
-  ],
-  TEAM: [
-    '✓ Unlimited work on your keys',
-    '✓ No platform cost cap',
-    '✓ Org spend caps + approval thresholds',
-    '✓ 5 projects · cross-repo work',
-    '✓ Unlimited code reviews + sharing',
-    '✓ Autofix: PR review · tech debt · code scans',
-  ],
-  ENTERPRISE: [
-    '✓ Unlimited work · no cost cap',
-    '✓ Model matrix override + per-run model pins',
-    '✓ OpenRouter gateway models',
-    '✓ Standards · Contracts · ADRs',
-    '✓ Governance: audit trail · repo allowlists',
-    '✓ Dedicated support',
-  ],
-};
-
-// Card sub-copy — product truths (runs/caps/seats), not prices.
-const SUBCOPY: Record<string, string> = {
-  FREE: 'For solo developers · 15 work items/month · $3/work cap',
-  PRO: 'For individuals · 30 work items/month on our keys · $5/work cap · provider keys lift the cap',
-  TEAM: 'Unlimited work on your own keys · 1–20 seats · no per-work cap',
-  ENTERPRISE: 'SSO · SLA · custom models · dedicated support',
-};
-
-interface PlanCard {
-  tier: string;
-  /** Monthly price in display units (dollars / rupees); null ⇒ "Custom". */
-  monthly: number | null;
-  /** Yearly total in display units; null ⇒ the tier has no yearly plan row. */
-  yearly: number | null;
-  /** Discount % for the yearly line (shown only when > 0). */
-  yearlySavePct: number | null;
-  currency: string;
-  perSeat: boolean;
-  recommended?: boolean;
-}
-
-const TIER_ORDER = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
-
-// Used ONLY when GET /api/billing/plans fails or returns nothing. Mirrors the
-// live DB ladder — PRO $29/mo + $289/yr at 17% off (V176/V177), TEAM $39/seat
-// monthly-only (V165/V206) — so even the degraded page can't resurrect the old
-// invented pricing.
-const FALLBACK_CARDS: PlanCard[] = [
-  {tier: 'FREE', monthly: 0, yearly: null, yearlySavePct: null, currency: 'USD', perSeat: false},
-  {tier: 'PRO', monthly: 29, yearly: 289, yearlySavePct: 17, currency: 'USD', perSeat: false},
-  {
-    tier: 'TEAM',
-    monthly: 39,
-    yearly: null,
-    yearlySavePct: null,
-    currency: 'USD',
-    perSeat: true,
-    recommended: true,
-  },
-  {
-    tier: 'ENTERPRISE',
-    monthly: null,
-    yearly: null,
-    yearlySavePct: null,
-    currency: 'USD',
-    perSeat: false,
-  },
-];
-
-function fmtMoney(amount: number | null, currency: string): string {
-  if (amount == null) return 'Custom';
-  if (amount === 0) return 'Free';
-  const symbol = currency === 'USD' ? '$' : currency === 'INR' ? '₹' : `${currency} `;
-  return `${symbol}${amount}`;
-}
-
-/**
- * Group raw /api/billing/plans rows (one row per tier × period × currency —
- * USD amounts in cents, INR in paise; the other currency's columns are 0)
- * into one card per tier. USD rows win when both currencies exist. FREE +
- * ENTERPRISE render even without a row (nothing to buy — $0 / talk to sales);
- * PRO / TEAM presence is deliberately API-driven so lifecycle changes in the
- * DB (LISTED/HIDDEN) flow straight through.
- */
-function planCardsFrom(rows: BillingPlan[]): PlanCard[] {
-  interface Bucket {
-    monthly: number | null;
-    yearly: number | null;
-    savePct: number | null;
-    monthlyPerSeat: boolean | null;
-    yearlyPerSeat: boolean | null;
-  }
-  const buckets = new Map<string, Bucket>();
-  const apiTierOrder: string[] = [];
-
-  for (const row of rows) {
-    if (!row || row.active === false) continue;
-    const tier = (row.tier || '').toUpperCase();
-    if (!tier) continue;
-    const seatUsd = row.perSeatUsd ?? 0;
-    const baseUsd = row.baseAmountUsd ?? 0;
-    const seatInr = row.perSeatInr ?? 0;
-    const baseInr = row.baseAmountInr ?? 0;
-    let currency: 'USD' | 'INR';
-    let perSeat: boolean;
-    let amount: number;
-    if (seatUsd > 0 || baseUsd > 0) {
-      currency = 'USD';
-      perSeat = seatUsd > 0;
-      amount = (perSeat ? seatUsd : baseUsd) / 100;
-    } else if (seatInr > 0 || baseInr > 0) {
-      currency = 'INR';
-      perSeat = seatInr > 0;
-      amount = (perSeat ? seatInr : baseInr) / 100;
-    } else {
-      continue; // zero-amount row (e.g. a FREE placeholder) — synthesized below
-    }
-    const period = (row.period || '').toUpperCase();
-    const isYearly = period === 'YEARLY' || period === 'ANNUAL';
-    if (!isYearly && period !== 'MONTHLY') continue;
-    const key = `${tier}:${currency}`;
-    let b = buckets.get(key);
-    if (!b) {
-      b = {monthly: null, yearly: null, savePct: null, monthlyPerSeat: null, yearlyPerSeat: null};
-      buckets.set(key, b);
-    }
-    // First row per slot wins — V207 guarantees one canonical active plan per
-    // tier/period/currency, so dupes here mean stale rows we shouldn't prefer.
-    if (isYearly) {
-      if (b.yearly == null) {
-        b.yearly = amount;
-        b.yearlyPerSeat = perSeat;
-        const pct = row.annualDiscountPct ?? 0;
-        if (pct > 0) b.savePct = pct;
-      }
-    } else if (b.monthly == null) {
-      b.monthly = amount;
-      b.monthlyPerSeat = perSeat;
-    }
-    if (!apiTierOrder.includes(tier)) apiTierOrder.push(tier);
-  }
-
-  const tiers = [...TIER_ORDER, ...apiTierOrder.filter((t) => !TIER_ORDER.includes(t))];
-  const cards: PlanCard[] = [];
-  for (const tier of tiers) {
-    const usd = buckets.get(`${tier}:USD`);
-    const b = usd ?? buckets.get(`${tier}:INR`);
-    if (b) {
-      let savePct = b.savePct;
-      if (savePct == null && b.monthly != null && b.monthly > 0 && b.yearly != null) {
-        const computed = Math.round((1 - b.yearly / (b.monthly * 12)) * 100);
-        if (computed > 0) savePct = computed;
-      }
-      cards.push({
-        tier,
-        monthly: b.monthly,
-        yearly: b.yearly,
-        yearlySavePct: savePct,
-        currency: usd ? 'USD' : 'INR',
-        perSeat: b.monthlyPerSeat ?? b.yearlyPerSeat ?? false,
-        recommended: tier === 'TEAM',
-      });
-    } else if (tier === 'FREE') {
-      cards.push({
-        tier,
-        monthly: 0,
-        yearly: null,
-        yearlySavePct: null,
-        currency: 'USD',
-        perSeat: false,
-      });
-    } else if (tier === 'ENTERPRISE') {
-      cards.push({
-        tier,
-        monthly: null,
-        yearly: null,
-        yearlySavePct: null,
-        currency: 'USD',
-        perSeat: false,
-      });
-    }
-  }
-  return cards;
-}
 
 export function IdePlans() {
   useDocumentTitle('Plans');
@@ -645,11 +507,11 @@ export function IdePlans() {
   }, []);
 
   const plans: PlanCard[] = useMemo(() => {
-    if (plansFailed) return FALLBACK_CARDS;
+    if (plansFailed) return FALLBACK_PLAN_CARDS;
     if (planRows === null) return []; // still loading
     // An empty 200 is indistinguishable from a misconfigured plan table —
     // degrade to the known ladder rather than selling nothing.
-    if (planRows.length === 0) return FALLBACK_CARDS;
+    if (planRows.length === 0) return FALLBACK_PLAN_CARDS;
     return planCardsFrom(planRows);
   }, [planRows, plansFailed]);
 
@@ -719,7 +581,7 @@ export function IdePlans() {
           }}
         >
           {plans.map((p) => {
-            const features = FEATURES[p.tier] || ['—'];
+            const features = PLAN_FEATURES[p.tier] || ['—'];
             const isCurrent = p.tier === tier;
             const isHighlight = p.tier === highlightTier && !isCurrent;
             const monthlyKnown = p.monthly != null;
@@ -789,7 +651,7 @@ export function IdePlans() {
                         color: 'var(--ide-fg-bright)',
                       }}
                     >
-                      {fmtMoney(headlineAmount, p.currency)}
+                      {planMoney(headlineAmount, p.currency)}
                     </span>
                     {headlineUnit && (
                       <span style={{fontSize: 13, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
@@ -809,7 +671,7 @@ export function IdePlans() {
                       marginBottom: 6,
                     }}
                   >
-                    or {fmtMoney(p.yearly, p.currency)}/yr
+                    or {planMoney(p.yearly, p.currency)}/yr
                     {p.yearlySavePct != null && p.yearlySavePct > 0
                       ? ` · save ${p.yearlySavePct}%`
                       : ''}
@@ -822,7 +684,7 @@ export function IdePlans() {
                     marginBottom: p.recommended ? 4 : 14,
                   }}
                 >
-                  {SUBCOPY[p.tier] || ''}
+                  {PLAN_SUBCOPY[p.tier] || ''}
                 </div>
                 {p.recommended && (
                   <div

@@ -40,8 +40,8 @@ the web app keeps using the split `frontend/src/lib/api/` client.
 
 ## 3. The primary flows (make these unmissable)
 
-The activation funnel is already instrumented (`lib/analytics.ts` — events mirror the backend
-`getActivationFunnel()` 6-stage funnel): SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED →
+The activation funnel is tracked by the backend `getActivationFunnel()` 6-stage funnel:
+SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED →
 RUN_COMPLETE → PR_MERGED. The reframe optimizes the chrome around exactly this path:
 
 1. **Start a run** — a hero CTA on Home (not a peer icon). Routes to `/compose` (`IdeCompose`).

@@ -218,6 +218,33 @@ public class TierEnforcementService {
     }
   }
 
+  /**
+   * Run-count retirement (2026-06-22): increment the monthly run counter for ANALYTICS ONLY, with
+   * no quota enforcement. Replaces {@code assertAndIncrementRunCount} at the submission choke
+   * points now that managed ES AI credits gate spend. Keeps {@code personal_run_count} / {@code
+   * monthly_run_count} and their billing-cycle resets meaningful for dashboards without ever
+   * throwing.
+   */
+  @Transactional
+  public void incrementRunCountForAnalytics(String userId) {
+    AppUser user = userRepo.findByIdForUpdate(userId).orElse(null);
+    if (user == null || "SUPER_ADMIN".equals(user.getGlobalRole())) return;
+    if (user.getOrgId() != null) {
+      orgRepo
+          .findByIdForUpdate(user.getOrgId())
+          .ifPresent(
+              org -> {
+                maybeResetOrgCounter(org);
+                org.setMonthlyRunCount(org.getMonthlyRunCount() + 1);
+                orgRepo.save(org);
+              });
+      return;
+    }
+    maybeResetUserCounter(user);
+    user.setPersonalRunCount(user.getPersonalRunCount() + 1);
+    userRepo.save(user);
+  }
+
   /** Assert the given user can submit another run. Throws 429 if quota exceeded. */
   public void assertCanSubmitRun(String userId) {
     AppUser user =

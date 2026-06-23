@@ -336,7 +336,7 @@ export function IdeIntegrations() {
 }
 
 // Canonical activation funnel — label + the stage key returned by
-// /admin/activation-funnel (mirrors analytics.ts's 6-event funnel).
+// /admin/activation-funnel.
 const FUNNEL_STAGES: Array<[string, string]> = [
   ['Signups', 'SIGNUP'],
   ['Projects', 'PROJECT_CREATED'],

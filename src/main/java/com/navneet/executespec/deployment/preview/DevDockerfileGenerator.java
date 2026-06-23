@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,31 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 public class DevDockerfileGenerator {
 
   private static final ObjectMapper mapper = new ObjectMapper();
-  private static final long MAX_FILE_SIZE = 50 * 1024; // 50 KB
-  private static final int MAX_PYTHON_FILES =
-      20; // Cap Python file scanning to avoid slow detection on large workspaces
-
-  private static final Set<String> NODE_BACKEND_DEPS =
-      Set.of("express", "fastify", "koa", "hono", "@nestjs/core");
-
-  private static final Set<String> FRONTEND_FRAMEWORK_DEPS =
-      Set.of(
-          "react",
-          "vue",
-          "svelte",
-          "@sveltejs/kit",
-          "next",
-          "nuxt",
-          "solid-js",
-          "preact",
-          "lit",
-          "angular",
-          "@angular/core");
-
-  private static final Set<String> FRONTEND_DIR_NAMES =
-      Set.of("frontend", "client", "web", "app", "ui");
-  private static final Set<String> BACKEND_DIR_NAMES =
-      Set.of("backend", "server", "api", "service");
 
   /** Captures the layout of a full-stack project with separate frontend/backend subdirectories. */
   record FullStackLayout(
@@ -67,68 +42,9 @@ public class DevDockerfileGenerator {
     if (Files.exists(projectJson)) {
       try {
         JsonNode node = mapper.readTree(projectJson.toFile());
-        String declared = node.path("project_type").asText(null);
-        if (declared != null && !declared.isBlank() && !"UNKNOWN".equalsIgnoreCase(declared)) {
-          // Planners (esp. V2) sometimes write lowercase / hyphenated forms like "node-backend".
-          // Normalize to the enum's canonical UPPER_SNAKE form before valueOf().
-          String normalized = declared.trim().toUpperCase().replace('-', '_');
-          // Planner prompt (prompts/planner.md) emits values like "java-spring-boot"
-          // and "cli" that don't 1:1 map to PreviewProjectType. Map the aliases so
-          // we don't fall through to heuristic detection — which wrongly picks
-          // FULL_STACK when the worker generated an unused frontend/ sibling.
-          normalized =
-              switch (normalized) {
-                case "JAVA_SPRING_BOOT" -> "SPRING_BOOT";
-                case "SPRING" -> "SPRING_BOOT";
-                case "NODEJS_BACKEND", "NODE_JS_BACKEND" -> "NODE_BACKEND";
-                case "NODEJS_FRONTEND", "NODE_JS_FRONTEND", "REACT", "VUE", "VITE" ->
-                    "NODE_FRONTEND";
-                case "CLI" -> "JAVA"; // no CLI enum; JAVA template is closest (no preview anyway)
-                case "STATIC", "HTML" -> "STATIC_HTML";
-                default -> normalized;
-              };
-          PreviewProjectType fromPlan = PreviewProjectType.valueOf(normalized);
-          // Audit 2026-05-12 review item C #26 — defense-in-depth: validate that the workspace
-          // contents are CONSISTENT with the planner-declared type before trusting the JSON.
-          // The JSON is written by the worker tool and not cryptographically signed; a malicious
-          // / hallucinating planner could declare STATIC_HTML on a workspace full of Java files
-          // to skip security heuristics.
-          if (requiresPackageJson(fromPlan) && !Files.exists(workspace.resolve("package.json"))) {
-            log.warn(
-                "[Detect] Planner declared {} but no package.json found — falling back to"
-                    + " detection",
-                fromPlan);
-          } else if (fromPlan == PreviewProjectType.STATIC_HTML && !hasStaticHtml(workspace)) {
-            log.warn(
-                "[Detect] Planner declared STATIC_HTML but workspace has no .html files —"
-                    + " refusing to trust the declaration, falling back to file-based detection");
-          } else {
-            // Planner taxonomy (planner.md line 82) has no explicit "full-stack" value —
-            // specs with Java backend + React frontend come through as
-            // `java-spring-boot`. Upgrade to FULL_STACK when the workspace actually
-            // has both a backend/*pom* AND a frontend/package.json, so the preview
-            // dockerfile runs Vite alongside Spring Boot instead of backend-only.
-            if (fromPlan == PreviewProjectType.SPRING_BOOT
-                && Files.exists(workspace.resolve("backend/pom.xml"))
-                && Files.exists(workspace.resolve("frontend/package.json"))) {
-              log.info(
-                  "[Detect] Planner said {}, but workspace has backend/ + frontend/ — upgrading to"
-                      + " FULL_STACK",
-                  fromPlan);
-              return PreviewProjectType.FULL_STACK;
-            }
-            if (fromPlan == PreviewProjectType.NODE_BACKEND
-                && Files.exists(workspace.resolve("frontend/package.json"))) {
-              log.info(
-                  "[Detect] Planner said {}, but frontend/package.json exists — upgrading to"
-                      + " FULL_STACK",
-                  fromPlan);
-              return PreviewProjectType.FULL_STACK;
-            }
-            log.info("[Detect] Using planner-declared project type: {}", fromPlan);
-            return fromPlan;
-          }
-        }
+        Optional<PreviewProjectType> fromPlan =
+            DeclaredPreviewProjectTypeResolver.resolve(workspace, node);
+        if (fromPlan.isPresent()) return fromPlan.get();
       } catch (IllegalArgumentException e) {
         log.warn(
             "[Detect] Invalid planner-declared project type in project.json — falling back to"
@@ -140,18 +56,21 @@ public class DevDockerfileGenerator {
 
     // 1. Spring Boot — Maven or Gradle (check before package.json in case both exist)
     Path pomXml = workspace.resolve("pom.xml");
-    if (Files.exists(pomXml) && fileContainsPattern(pomXml, "spring-boot-starter")) {
+    if (Files.exists(pomXml)
+        && PreviewFileSignals.fileContainsPattern(pomXml, "spring-boot-starter")) {
       return PreviewProjectType.SPRING_BOOT;
     }
     Path buildGradle = workspace.resolve("build.gradle");
     Path buildGradleKts = workspace.resolve("build.gradle.kts");
-    if ((Files.exists(buildGradle) && fileContainsPattern(buildGradle, "spring-boot"))
-        || (Files.exists(buildGradleKts) && fileContainsPattern(buildGradleKts, "spring-boot"))) {
+    if ((Files.exists(buildGradle)
+            && PreviewFileSignals.fileContainsPattern(buildGradle, "spring-boot"))
+        || (Files.exists(buildGradleKts)
+            && PreviewFileSignals.fileContainsPattern(buildGradleKts, "spring-boot"))) {
       return PreviewProjectType.SPRING_BOOT;
     }
 
     // 1b. Java CLI
-    if (hasJavaFiles(workspace)) {
+    if (PreviewFileSignals.hasJavaFiles(workspace)) {
       return PreviewProjectType.JAVA;
     }
 
@@ -197,14 +116,8 @@ public class DevDockerfileGenerator {
         for (String field : List.of("dependencies", "devDependencies")) {
           JsonNode deps = pkg.get(field);
           if (deps != null) {
-            for (String backendDep : NODE_BACKEND_DEPS) {
-              if (deps.has(backendDep)) hasBackendDep = true;
-            }
-            for (String frontendDep : FRONTEND_FRAMEWORK_DEPS) {
-              if (deps.has(frontendDep)) hasFrontendDep = true;
-            }
-            // Also check for vite/webpack as frontend indicators
-            if (deps.has("vite") || deps.has("webpack")) hasFrontendDep = true;
+            if (PreviewDependencySignals.hasBackendDependency(deps)) hasBackendDep = true;
+            if (PreviewDependencySignals.hasFrontendDependency(deps)) hasFrontendDep = true;
           }
         }
 
@@ -234,12 +147,12 @@ public class DevDockerfileGenerator {
 
     // 2b. Static HTML — check BEFORE loose JS/TS fallback.
     // A static site with script.js must not be misdetected as NODE_BACKEND.
-    if (hasStaticHtml(workspace)) {
+    if (PreviewFileSignals.hasStaticHtml(workspace)) {
       return PreviewProjectType.STATIC_HTML;
     }
 
     // 2c. Bare JS/TS files (no package.json, no HTML) — likely a Node script/server
-    if (hasJsOrTsFiles(workspace)) {
+    if (PreviewFileSignals.hasJsOrTsFiles(workspace)) {
       return PreviewProjectType.NODE_BACKEND;
     }
 
@@ -339,7 +252,7 @@ public class DevDockerfileGenerator {
     // Only injects if the Dockerfile uses a Node base image (vite is irrelevant for Go/Rust/Java).
     if (dockerfile.contains("node:")
         && (type == PreviewProjectType.NODE_FRONTEND || type == PreviewProjectType.FULL_STACK)) {
-      dockerfile = injectBeforeCmd(dockerfile, crViteAllowedHostsPatch());
+      dockerfile = injectBeforeCmd(dockerfile, PreviewDockerfileSnippets.viteAllowedHostsPatch());
     }
 
     return injectNonRootUser(dockerfile, type);
@@ -369,84 +282,6 @@ public class DevDockerfileGenerator {
     };
   }
 
-  /** Non-root user block: RUN adduser + USER app. Alpine vs Debian syntax. */
-  private String crNonRootUser(boolean alpine) {
-    if (alpine) {
-      return "RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app\n"
-          + "USER app\n";
-    }
-    return "RUN groupadd -r app && useradd -r -g app -s /sbin/nologin app && chown -R app:app"
-        + " /app\n"
-        + "USER app\n";
-  }
-
-  /**
-   * Vite 5.4+ allowedHosts patch — RUN node -e that sets server.allowedHosts:true in vite config.
-   * Handles 5 config patterns (server:{}, export default{}, defineConfig({), arrow function,
-   * plugins: fallback).
-   *
-   * <p><strong>Audit 2026-05-12 review item N #72:</strong> the multi-line {@code node -e}
-   * fragments below are embedded as Java string literals which is an escape-level hazard — one
-   * stray quote or backslash breaks Dockerfile generation silently. The cleaner fix is to write the
-   * node patch script to {@code .agent-context/vite-allowed-hosts-patch.js} in the workspace at
-   * generation time and emit a {@code RUN node .agent-context/vite-allowed-hosts-patch.js} in the
-   * Dockerfile, so the script lives in a real file with proper syntax highlighting. Deferred
-   * because the change affects multiple Dockerfile templates and needs end-to-end preview
-   * verification on Vite 5.4+ / 6.0+ across all 9 PreviewProjectType variants.
-   */
-  private String crViteAllowedHostsPatch() {
-    return "RUN node -e \"const fs=require('fs'),path=require('path');const"
-               + " dirs=['.','frontend','client','src','app','web'];const"
-               + " names=['vite.config.js','vite.config.ts','vite.config.mjs'];let"
-               + " found=false;for(const d of dirs){  for(const n of names){    const"
-               + " f=path.join(d,n);    if(fs.existsSync(f)){      found=true;      let"
-               + " c=fs.readFileSync(f,'utf8');      if(!c.includes('allowedHosts')){       "
-               + " c=c.replace(/server\\\\s*:\\\\s*\\\\{/,'server:{allowedHosts:true,');       "
-               + " if(!c.includes('allowedHosts'))c=c.replace(/export\\\\s+default\\\\s*\\\\{/,'export"
-               + " default{server:{allowedHosts:true},');       "
-               + " if(!c.includes('allowedHosts'))c=c.replace(/defineConfig\\\\s*\\\\(\\\\s*\\\\{/,'defineConfig({server:{allowedHosts:true},');"
-               + "       "
-               + " if(!c.includes('allowedHosts'))c=c.replace(/=>\\\\s*\\\\(\\\\s*\\\\{/,'=>({server:{allowedHosts:true},');"
-               + "       "
-               + " if(!c.includes('allowedHosts'))c=c.replace(/plugins\\\\s*:/,'server:{allowedHosts:true},plugins:');"
-               + "        fs.writeFileSync(f,c);      }      break;    }  } "
-               + " if(found)break;}if(!found){  const"
-               + " feDir=['frontend','client'].find(d=>fs.existsSync(path.join(d,'package.json')))||'.';"
-        // Audit 2026-05-12 review item O #76: only write a vite.config.js when the
-        // customer's package.json actually declares vite as a direct dep — otherwise we
-        // create a config that doesn't match their build system (webpack/parcel/rspack
-        // with vite as transitive devDep).
-        + "  const pkgPath=path.join(feDir,'package.json');  let hasViteDirect=false;  try{const"
-        + " p=JSON.parse(fs.readFileSync(pkgPath,'utf8'));hasViteDirect=!!((p.dependencies&&p.dependencies.vite)||(p.devDependencies&&p.devDependencies.vite));}catch(e){}"
-        + "  if(hasViteDirect){   "
-        + " fs.writeFileSync(path.join(feDir,'vite.config.js'),'import{defineConfig}from\\\\\"vite\\\\\";export"
-        + " default defineConfig({server:{allowedHosts:true}});');  }}\"\n";
-  }
-
-  /** Vite proxy patch — rewrites localhost:NNNN → localhost:{port} in vite config. */
-  private String crViteProxyPatch(int port) {
-    return "RUN node -e \""
-        + "const fs=require('fs'),path=require('path');"
-        + "const dirs=['.','frontend','client','src','app','web'];"
-        + "const names=['vite.config.js','vite.config.ts','vite.config.mjs'];"
-        + "for(const d of dirs){"
-        + "  for(const n of names){"
-        + "    const f=path.join(d,n);"
-        + "    if(fs.existsSync(f)){"
-        + "      let c=fs.readFileSync(f,'utf8');"
-        + "      c=c.replace(/localhost:\\\\d{4}/g,'localhost:"
-        + port
-        + "');"
-        + "      c=c.replace(/127\\\\.0\\\\.0\\\\.1:\\\\d{4}/g,'127.0.0.1:"
-        + port
-        + "');"
-        + "      fs.writeFileSync(f,c);"
-        + "      process.exit(0);"
-        + "    }"
-        + "  }"
-        + "}\"\n";
-  }
-
   /**
    * Detect missing vite/react deps and return an `npm install -D ...` suffix string. Returns empty
    * string if all deps present.
@@ -455,15 +290,19 @@ public class DevDockerfileGenerator {
     StringBuilder missing = new StringBuilder();
     Path pkgJson = workspace.resolve("package.json");
     if (!Files.exists(pkgJson)) return "";
-    if (!fileContainsPattern(pkgJson, "\"vite\"")) missing.append(" vite");
-    if (!fileContainsPattern(pkgJson, "\"@vitejs/plugin-react\""))
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"vite\"")) missing.append(" vite");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"@vitejs/plugin-react\""))
       missing.append(" @vitejs/plugin-react");
-    if (!fileContainsPattern(pkgJson, "\"react\"")) missing.append(" react");
-    if (!fileContainsPattern(pkgJson, "\"react-dom\"")) missing.append(" react-dom");
-    if (!fileContainsPattern(pkgJson, "\"prop-types\"")) missing.append(" prop-types");
-    if (!fileContainsPattern(pkgJson, "\"lucide-react\"")) missing.append(" lucide-react");
-    if (!fileContainsPattern(pkgJson, "\"clsx\"")) missing.append(" clsx");
-    if (!fileContainsPattern(pkgJson, "\"tailwind-merge\"")) missing.append(" tailwind-merge");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"react\"")) missing.append(" react");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"react-dom\""))
+      missing.append(" react-dom");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"prop-types\""))
+      missing.append(" prop-types");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"lucide-react\""))
+      missing.append(" lucide-react");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"clsx\"")) missing.append(" clsx");
+    if (!PreviewFileSignals.fileContainsPattern(pkgJson, "\"tailwind-merge\""))
+      missing.append(" tailwind-merge");
     if (missing.isEmpty()) return "";
     return " && npm install -D" + missing + " --legacy-peer-deps";
   }
@@ -473,61 +312,7 @@ public class DevDockerfileGenerator {
    * python manage.py runserver 0.0.0.0:${PORT:-8080}".
    */
   private String crDetectPythonCmd(Path workspace, String portExpr) {
-    if (Files.exists(workspace.resolve("manage.py"))) {
-      return "CMD python manage.py runserver 0.0.0.0:" + portExpr;
-    }
-    String fastApiFile =
-        findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
-    if (fastApiFile != null) {
-      String module = fastApiFile.replace(".py", "");
-      return "CMD uvicorn " + module + ":app --host 0.0.0.0 --port " + portExpr;
-    }
-    if (hasDependency(workspace, "fastapi")) {
-      return "CMD uvicorn main:app --host 0.0.0.0 --port " + portExpr;
-    }
-    String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
-    if (flaskFile != null) {
-      return "CMD FLASK_APP=" + flaskFile + " flask run --host 0.0.0.0 --port " + portExpr;
-    }
-    if (hasDependency(workspace, "flask")) {
-      return "CMD flask run --host 0.0.0.0 --port " + portExpr;
-    }
-    // Fallback: check source files
-    String fallbackFastApi = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi");
-    if (fallbackFastApi != null) {
-      String module = fallbackFastApi.replace(".py", "");
-      return "CMD uvicorn " + module + ":app --host 0.0.0.0 --port " + portExpr;
-    }
-    String fallbackFlask = findPythonFileWithPattern(workspace, "from flask", "import flask");
-    if (fallbackFlask != null) {
-      return "CMD FLASK_APP=" + fallbackFlask + " flask run --host 0.0.0.0 --port " + portExpr;
-    }
-    String entryFile = findPythonEntryPoint(workspace);
-    return "CMD python " + entryFile;
-  }
-
-  /**
-   * Single-package full-stack vite script patch: RUN node -e that injects --host 0.0.0.0 into vite
-   * scripts, and creates dev:all script if both FE and BE are detected. For Cloud Run, also injects
-   * --port {vitePort} into the vite command.
-   */
-  private String crViteDevScriptPatch(int vitePort) {
-    return "RUN node -e \""
-        + "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));"
-        + "if(p.scripts){"
-        + "  for(const[k,v]of Object.entries(p.scripts)){"
-        + "    if(typeof v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){"
-        + "      p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0 --port "
-        + vitePort
-        + "')    }  }  const"
-        + " hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');"
-        + "  const"
-        + " runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));"
-        + "  if(hasServer && !runsBoth){    const serverCmd=p.scripts.server?'npm run"
-        + " server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node"
-        + " server/server.js':'node server.js'));    p.scripts['dev:all']='concurrently \\\"npm run"
-        + " dev\\\" \\\"'+serverCmd+'\\\"'; "
-        + " }}fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n";
+    return PreviewPythonSignals.cloudRunCommand(workspace, portExpr);
   }
 
   private String cloudRun_NodeFrontend(Path workspace) {
@@ -556,10 +341,10 @@ public class DevDockerfileGenerator {
     sb.append("RUN npm install --legacy-peer-deps").append(viteInstall).append("\n");
     sb.append("COPY . .\n");
     if (usesVite) {
-      sb.append(crViteAllowedHostsPatch());
+      sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
     }
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(true));
     sb.append(cmd).append("\n");
     return sb.toString();
   }
@@ -586,45 +371,13 @@ public class DevDockerfileGenerator {
     sb.append("RUN npm install --legacy-peer-deps\n");
     sb.append("COPY . .\n");
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(true));
     sb.append(cmd).append("\n");
     return sb.toString();
   }
 
   private String cloudRun_SpringBoot(Path workspace) {
-    boolean isGradle =
-        Files.exists(workspace.resolve("build.gradle"))
-            || Files.exists(workspace.resolve("build.gradle.kts"));
-
-    var sb = new StringBuilder();
-    sb.append("FROM eclipse-temurin:21\n");
-    sb.append("WORKDIR /app\n");
-    sb.append("LABEL preview=true\n");
-    sb.append("ENV PORT=8080\n");
-    sb.append("ENV SERVER_ADDRESS=0.0.0.0\n");
-
-    if (isGradle) {
-      sb.append("COPY . .\n");
-      sb.append("RUN chmod +x gradlew 2>/dev/null || true\n");
-      sb.append("EXPOSE 8080\n");
-      sb.append(crNonRootUser(false));
-      sb.append("CMD sh -c \"SERVER_PORT=${PORT:-8080} ");
-      sb.append(
-          "$(if [ -f gradlew ]; then echo './gradlew bootRun --no-daemon'; else echo 'gradle"
-              + " bootRun --no-daemon'; fi)\"\n");
-    } else {
-      sb.append("RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*\n");
-      sb.append("COPY pom.xml .\n");
-      sb.append("RUN mvn dependency:go-offline -q -B || true\n");
-      sb.append("COPY . .\n");
-      sb.append("RUN mvn compile -DskipTests -q -B\n");
-      sb.append("EXPOSE 8080\n");
-      sb.append(crNonRootUser(false));
-      sb.append(
-          "CMD SERVER_PORT=${PORT:-8080} mvn -Dmaven.repo.local=/app/.m2 spring-boot:run"
-              + " -DskipTests -q\n");
-    }
-    return sb.toString();
+    return PreviewSpringBootDockerfiles.cloudRun(workspace);
   }
 
   private String cloudRun_Python(Path workspace) {
@@ -634,7 +387,8 @@ public class DevDockerfileGenerator {
       // Add uvicorn if FastAPI detected but not in requirements
       if (findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(") != null
           || hasDependency(workspace, "fastapi")) {
-        if (!fileContainsPattern(workspace.resolve("requirements.txt"), "uvicorn")) {
+        if (!PreviewFileSignals.fileContainsPattern(
+            workspace.resolve("requirements.txt"), "uvicorn")) {
           installStep += " uvicorn";
         }
       }
@@ -656,97 +410,25 @@ public class DevDockerfileGenerator {
     sb.append(installStep).append("\n");
     sb.append("COPY . .\n");
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(false));
     sb.append(cmd).append("\n");
     return sb.toString();
   }
 
   private String cloudRun_Go(Path workspace) {
-    var sb = new StringBuilder();
-    sb.append("FROM golang:1.22-alpine\n");
-    sb.append("WORKDIR /app\n");
-    sb.append("LABEL preview=true\n");
-    sb.append("ENV HOST=0.0.0.0\n");
-    sb.append("ENV PORT=8080\n");
-    sb.append("COPY go.mod go.sum* ./\n");
-    sb.append("RUN go mod download 2>/dev/null || true\n");
-    sb.append("COPY . .\n");
-    sb.append("RUN go build -o server . 2>/dev/null || true\n");
-    sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
-    sb.append("CMD sh -c \"if [ -f server ]; then ./server; else go run .; fi\"\n");
-    return sb.toString();
+    return PreviewStandaloneDockerfiles.cloudRunGo();
   }
 
   private String cloudRun_Rust(Path workspace) {
-    var sb = new StringBuilder();
-    sb.append("FROM rust:1.77-slim\n");
-    sb.append(
-        "RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf"
-            + " /var/lib/apt/lists/*\n");
-    sb.append("WORKDIR /app\n");
-    sb.append("LABEL preview=true\n");
-    sb.append("ENV PORT=8080\n");
-    sb.append("COPY Cargo.toml Cargo.lock* ./\n");
-    sb.append(
-        "RUN mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null"
-            + " || true && rm -rf src\n");
-    sb.append("COPY . .\n");
-    sb.append("RUN cargo build --release 2>/dev/null || true\n");
-    sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
-    sb.append(
-        "CMD sh -c \"bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if ["
-            + " -n \\\"$bin\\\" ]; then exec \\\"$bin\\\"; else cargo run --release; fi\"\n");
-    return sb.toString();
+    return PreviewStandaloneDockerfiles.cloudRunRust();
   }
 
   private String cloudRun_StaticHtml() {
-    return """
-FROM nginx:alpine
-WORKDIR /usr/share/nginx/html
-LABEL preview=true
-ENV PORT=8080
-COPY . .
-RUN rm -f /etc/nginx/conf.d/default.conf \
-    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
-       > /etc/nginx/conf.d/default.conf \
-    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d \
-    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
-EXPOSE 8080
-USER nginx
-CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
-""";
+    return PreviewStandaloneDockerfiles.cloudRunStaticHtml();
   }
 
   private String cloudRun_Java(Path workspace) {
-    String mainClass = "Main";
-    try (Stream<Path> stream = Files.walk(workspace, 3)) {
-      Path mainFile =
-          stream
-              .filter(p -> p.toString().endsWith(".java"))
-              .filter(p -> fileContainsPattern(p, "public static void main"))
-              .findFirst()
-              .orElse(null);
-      if (mainFile != null) {
-        String filename = mainFile.getFileName().toString();
-        mainClass = filename.substring(0, filename.length() - 5);
-      }
-    } catch (IOException e) {
-      /* ignore */
-    }
-
-    var sb = new StringBuilder();
-    sb.append("FROM eclipse-temurin:21\n");
-    sb.append("WORKDIR /app\n");
-    sb.append("LABEL preview=true\n");
-    sb.append("ENV PORT=8080\n");
-    sb.append("COPY . .\n");
-    sb.append("RUN javac *.java 2>/dev/null || true\n");
-    sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
-    sb.append("CMD java ").append(mainClass).append("\n");
-    return sb.toString();
+    return PreviewStandaloneDockerfiles.cloudRunJava(workspace);
   }
 
   /** Full-stack dispatcher for Cloud Run. Detects sub-type and delegates. */
@@ -805,7 +487,7 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
           feIsRoot
               ? workspace.resolve("package.json")
               : workspace.resolve(fe).resolve("package.json");
-      if (Files.exists(fePkg) && !fileContainsPattern(fePkg, "\"vite\"")) {
+      if (Files.exists(fePkg) && !PreviewFileSignals.fileContainsPattern(fePkg, "\"vite\"")) {
         sb.append(" && npm install vite --legacy-peer-deps");
       }
       sb.append("\n");
@@ -822,11 +504,11 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     sb.append("COPY . .\n");
 
     // Vite patches (runs as root, before USER)
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
 
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(true));
 
     // CMD: backend on 8081, frontend (vite) on PORT (8080)
     String feCmd = feIsRoot ? "/app" : "/app/" + fe;
@@ -883,11 +565,11 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     sb.append("COPY . .\n");
 
     // Vite patches (node is available via apt)
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
 
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(false));
 
     if (fe != null && be != null) {
       sb.append("CMD sh -c \"(cd /app/")
@@ -949,8 +631,8 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     sb.append("COPY . .\n");
 
     // Vite patches (node is available via apt)
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
 
     sb.append("EXPOSE 8080\n");
 
@@ -961,7 +643,7 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
       pythonCmd = crDetectPythonCmd(beDir, "8081").replace("CMD ", "");
     }
 
-    sb.append(crNonRootUser(false));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(false));
 
     if (fe != null && be != null) {
       sb.append("CMD sh -c \"(cd /app/")
@@ -1010,10 +692,10 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     }
 
     sb.append("COPY . .\n");
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(true));
 
     if (fe != null && be != null) {
       sb.append("CMD sh -c \"(cd /app/")
@@ -1070,10 +752,10 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
       sb.append("RUN cd ").append(be).append(" && cargo build --release 2>/dev/null || true\n");
     }
 
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(false));
 
     if (fe != null && be != null) {
       sb.append("CMD sh -c \"(cd /app/")
@@ -1105,7 +787,7 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
         Path mainFile =
             stream
                 .filter(p -> p.toString().endsWith(".java"))
-                .filter(p -> fileContainsPattern(p, "public static void main"))
+                .filter(p -> PreviewFileSignals.fileContainsPattern(p, "public static void main"))
                 .findFirst()
                 .orElse(null);
         if (mainFile != null) {
@@ -1138,10 +820,10 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
       sb.append("RUN cd ").append(be).append(" && javac *.java 2>/dev/null || true\n");
     }
 
-    sb.append(crViteAllowedHostsPatch());
-    sb.append(crViteProxyPatch(8081));
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(false));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(false));
 
     if (fe != null && be != null) {
       sb.append("CMD sh -c \"(cd /app/")
@@ -1338,7 +1020,7 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
           Path mainFile =
               stream
                   .filter(p -> p.toString().endsWith(".java"))
-                  .filter(p -> fileContainsPattern(p, "public static void main"))
+                  .filter(p -> PreviewFileSignals.fileContainsPattern(p, "public static void main"))
                   .findFirst()
                   .orElse(null);
           if (mainFile != null) {
@@ -1359,44 +1041,7 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
    * compete with Vite for 8080.
    */
   private String cloudRun_SinglePkgFullStack(Path workspace) {
-    String viteInstall = crInstallMissingViteDeps(workspace);
-    // Also ensure concurrently is available
-    if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\"")) {
-      viteInstall +=
-          (viteInstall.isEmpty() ? " && npm install -D" : "") + " concurrently --legacy-peer-deps";
-      if (viteInstall.startsWith(" concurrently")) {
-        viteInstall = " && npm install -D concurrently --legacy-peer-deps";
-      }
-    }
-
-    var sb = new StringBuilder();
-    sb.append("FROM node:20-alpine\n");
-    sb.append("WORKDIR /app\n");
-    sb.append("LABEL preview=true\n");
-    sb.append("ENV HOST=0.0.0.0\n");
-    sb.append("ENV PORT=3001\n"); // Backend reads PORT=3001, Vite hardcoded to 8080
-    sb.append("COPY package*.json ./\n");
-    sb.append("RUN npm install --legacy-peer-deps").append(viteInstall).append("\n");
-    sb.append("COPY . .\n");
-
-    // Patch vite scripts to --host 0.0.0.0 --port 8080 and create dev:all
-    sb.append(crViteDevScriptPatch(8080));
-
-    // Patch vite allowedHosts
-    sb.append(crViteAllowedHostsPatch());
-
-    // Patch vite proxy to forward to backend on 3001
-    sb.append(crViteProxyPatch(3001));
-
-    sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
-
-    // CMD: try dev:all first (runs concurrently), fallback to dev
-    sb.append(
-        "CMD sh -c \"node -e \\\"var"
-            + " s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\""
-            + " && npm run dev:all || npm run dev\"\n");
-    return sb.toString();
+    return PreviewSinglePackageFullStackDockerfiles.cloudRun(workspace);
   }
 
   /** Monorepo (npm workspaces) — Cloud Run. */
@@ -1435,19 +1080,8 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
         JsonNode pkg = mapper.readTree(wsPkg.toFile());
         JsonNode deps = pkg.get("dependencies");
         JsonNode devDeps = pkg.get("devDependencies");
-        boolean isFrontend =
-            (deps != null && (deps.has("react") || deps.has("vue") || deps.has("svelte")))
-                || (devDeps != null
-                    && (devDeps.has("vite") || devDeps.has("@vitejs/plugin-react")));
-        boolean isBackend = false;
-        if (deps != null) {
-          for (String backendDep : NODE_BACKEND_DEPS) {
-            if (deps.has(backendDep)) {
-              isBackend = true;
-              break;
-            }
-          }
-        }
+        boolean isFrontend = PreviewDependencySignals.hasMonorepoFrontendSignal(deps, devDeps);
+        boolean isBackend = PreviewDependencySignals.hasBackendDependency(deps);
         if (isFrontend && frontendWs == null) frontendWs = wsName;
         if (isBackend && backendWs == null) backendWs = wsName;
       } catch (IOException e) {
@@ -1456,13 +1090,13 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     }
 
     // Vite patches
-    sb.append(crViteAllowedHostsPatch());
+    sb.append(PreviewDockerfileSnippets.viteAllowedHostsPatch());
     if (backendWs != null) {
-      sb.append(crViteProxyPatch(8081));
+      sb.append(PreviewDockerfileSnippets.viteProxyPatch(8081));
     }
 
     sb.append("EXPOSE 8080\n");
-    sb.append(crNonRootUser(true));
+    sb.append(PreviewDockerfileSnippets.cloudRunNonRootUser(true));
 
     if (frontendWs != null && backendWs != null) {
       sb.append("CMD sh -c \"(PORT=8081 npm run dev --prefix ")
@@ -1628,21 +1262,23 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
     String viteInstall = "";
     if (cmd.contains("vite")) {
       StringBuilder missing = new StringBuilder();
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\""))
+      if (!PreviewFileSignals.fileContainsPattern(workspace.resolve("package.json"), "\"vite\""))
         missing.append(" vite");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\""))
+      if (!PreviewFileSignals.fileContainsPattern(
+          workspace.resolve("package.json"), "\"@vitejs/plugin-react\""))
         missing.append(" @vitejs/plugin-react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"react\""))
+      if (!PreviewFileSignals.fileContainsPattern(workspace.resolve("package.json"), "\"react\""))
         missing.append(" react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"react-dom\""))
-        missing.append(" react-dom");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"prop-types\""))
-        missing.append(" prop-types");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\""))
-        missing.append(" lucide-react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\""))
+      if (!PreviewFileSignals.fileContainsPattern(
+          workspace.resolve("package.json"), "\"react-dom\"")) missing.append(" react-dom");
+      if (!PreviewFileSignals.fileContainsPattern(
+          workspace.resolve("package.json"), "\"prop-types\"")) missing.append(" prop-types");
+      if (!PreviewFileSignals.fileContainsPattern(
+          workspace.resolve("package.json"), "\"lucide-react\"")) missing.append(" lucide-react");
+      if (!PreviewFileSignals.fileContainsPattern(workspace.resolve("package.json"), "\"clsx\""))
         missing.append(" clsx");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\""))
+      if (!PreviewFileSignals.fileContainsPattern(
+          workspace.resolve("package.json"), "\"tailwind-merge\""))
         missing.append(" tailwind-merge");
 
       if (missing.length() > 0) {
@@ -1707,220 +1343,18 @@ CMD sh -c "sed -i 's/listen 8080/listen '${PORT:-8080}'/' /etc/nginx/conf.d/defa
    * available, falling back to "dev" or "start".
    */
   private String singlePackageFullStackDockerfile(Path workspace) {
-    JsonNode pkg = parsePackageJson(workspace);
-    boolean hasViteConfig =
-        Files.exists(workspace.resolve("vite.config.js"))
-            || Files.exists(workspace.resolve("vite.config.ts"));
-
-    boolean usesVite = hasViteConfig;
-
-    if (pkg != null && pkg.has("scripts")) {
-      JsonNode scripts = pkg.get("scripts");
-      // Prioritize scripts that likely run both FE and BE
-      List<String> fullStackCandidates =
-          List.of("dev:full", "start:full", "server:full", "all", "dev", "start");
-      for (String candidate : fullStackCandidates) {
-        if (scripts.has(candidate)) {
-          String scriptVal = scripts.get(candidate).asText("");
-          if (scriptVal.contains("vite")) usesVite = true;
-          break;
-        }
-      }
-    }
-
-    // Always ensure concurrently is available — dev:all script uses it regardless of Vite
-    StringBuilder missing = new StringBuilder();
-    if (!fileContainsPattern(workspace.resolve("package.json"), "\"concurrently\""))
-      missing.append(" concurrently");
-
-    // Also install Vite-related deps if this is a Vite project
-    if (usesVite) {
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"vite\""))
-        missing.append(" vite");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"@vitejs/plugin-react\""))
-        missing.append(" @vitejs/plugin-react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"react\""))
-        missing.append(" react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"react-dom\""))
-        missing.append(" react-dom");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"prop-types\""))
-        missing.append(" prop-types");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"lucide-react\""))
-        missing.append(" lucide-react");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"clsx\""))
-        missing.append(" clsx");
-      if (!fileContainsPattern(workspace.resolve("package.json"), "\"tailwind-merge\""))
-        missing.append(" tailwind-merge");
-    }
-
-    String viteInstall =
-        missing.length() > 0 ? " && npm install -D" + missing + " --legacy-peer-deps" : "";
-
-    return """
-           FROM node:20-alpine
-           WORKDIR /app
-           LABEL preview=true
-           ENV HOST=0.0.0.0
-           COPY package*.json ./
-           RUN npm install --legacy-peer-deps"""
-        + viteInstall
-        + "\n"
-        + "COPY . .\n"
-        +
-        // Patch package.json:
-        // 1. Inject --host 0.0.0.0 into any vite script
-        // 2. If it's a full-stack project but 'dev' only runs vite, create 'dev:all' that runs both
-        "RUN node -e \"const fs=require('fs');const"
-      + " p=JSON.parse(fs.readFileSync('package.json','utf8'));if(p.scripts){  for(const[k,v]of"
-      + " Object.entries(p.scripts)){    if(typeof"
-      + " v==='string'&&/\\\\bvite\\\\b/.test(v)&&!v.includes('--host')){     "
-      + " p.scripts[k]=v.replace(/\\\\bvite\\\\b/g,'vite --host 0.0.0.0')    }  }  const"
-      + " hasServer=p.scripts.server||p.scripts.backend||fs.existsSync('server/server.js')||fs.existsSync('server.js');"
-      + "  const"
-      + " runsBoth=Object.values(p.scripts).some(v=>v.includes('concurrently')||(v.includes('vite')&&v.includes('node')));"
-      + "  if(hasServer && !runsBoth){    const serverCmd=p.scripts.server?'npm run"
-      + " server':(p.scripts.backend?'npm run backend':(fs.existsSync('server/server.js')?'node"
-      + " server/server.js':'node server.js'));    p.scripts['dev:all']='concurrently \\\"npm run"
-      + " dev\\\" \\\"'+serverCmd+'\\\"'; "
-      + " }}fs.writeFileSync('package.json',JSON.stringify(p,null,2));\"\n"
-      + "EXPOSE 5173 3001\n"
-      + "CMD [\"sh\", \"-c\", \"node -e \\\"var"
-      + " s=JSON.parse(require('fs').readFileSync('package.json')).scripts;process.exit(s['dev:all']?0:1)\\\""
-      + " && npm run dev:all || npm run dev\"]\n";
+    return PreviewSinglePackageFullStackDockerfiles.dockerfile(workspace);
   }
 
   private String springBootDockerfile(Path workspace) {
-    // The Spring Boot project might be at workspace root OR in a `backend/`
-    // subdirectory (common when the worker scaffolded a repo that intended
-    // to be full-stack, but the frontend ended up unused — we still
-    // classify SPRING_BOOT here and only want to run the Java app).
-    boolean inBackendSubdir =
-        !Files.exists(workspace.resolve("pom.xml"))
-            && !Files.exists(workspace.resolve("build.gradle"))
-            && !Files.exists(workspace.resolve("build.gradle.kts"))
-            && (Files.exists(workspace.resolve("backend/pom.xml"))
-                || Files.exists(workspace.resolve("backend/build.gradle"))
-                || Files.exists(workspace.resolve("backend/build.gradle.kts")));
-
-    Path pomDir = inBackendSubdir ? workspace.resolve("backend") : workspace;
-    boolean isGradle =
-        Files.exists(pomDir.resolve("build.gradle"))
-            || Files.exists(pomDir.resolve("build.gradle.kts"));
-
-    if (inBackendSubdir) {
-      if (isGradle) {
-        return """
-FROM eclipse-temurin:21
-WORKDIR /app
-LABEL preview=true
-ENV SERVER_ADDRESS=0.0.0.0
-ENV SERVER_PORT=8080
-COPY . .
-WORKDIR /app/backend
-RUN chmod +x gradlew 2>/dev/null || true
-EXPOSE 8080
-CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gradle bootRun --no-daemon; fi"]
-""";
-      }
-      return """
-             FROM eclipse-temurin:21
-             WORKDIR /app
-             LABEL preview=true
-             ENV SERVER_ADDRESS=0.0.0.0
-             ENV SERVER_PORT=8080
-             RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
-             COPY backend/pom.xml ./backend/pom.xml
-             RUN cd backend && mvn dependency:go-offline -q -B || true
-             COPY . .
-             RUN cd backend && mvn compile -DskipTests -q -B
-             EXPOSE 8080
-             WORKDIR /app/backend
-             CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
-             """;
-    }
-
-    // Root-level pom.xml (original behaviour)
-    if (isGradle) {
-      return """
-FROM eclipse-temurin:21
-WORKDIR /app
-LABEL preview=true
-ENV SERVER_ADDRESS=0.0.0.0
-ENV SERVER_PORT=8080
-COPY . .
-RUN chmod +x gradlew 2>/dev/null || true
-EXPOSE 8080
-CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gradle bootRun --no-daemon; fi"]
-""";
-    }
-
-    return """
-           FROM eclipse-temurin:21
-           WORKDIR /app
-           LABEL preview=true
-           ENV SERVER_ADDRESS=0.0.0.0
-           ENV SERVER_PORT=8080
-           RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
-           COPY pom.xml .
-           RUN mvn dependency:go-offline -q -B || true
-           COPY . .
-           RUN mvn compile -DskipTests -q -B
-           EXPOSE 8080
-           CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
-           """;
+    return PreviewSpringBootDockerfiles.dockerfile(workspace);
   }
 
   private String pythonDockerfile(Path workspace) {
-    // Resolve CMD
-    String cmd;
-    String envLine = "";
-
-    if (Files.exists(workspace.resolve("manage.py"))) {
-      // Django
-      cmd =
-          """
-          CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]""";
-    } else if (hasDependency(workspace, "fastapi")) {
-      // FastAPI — check requirements.txt first, then scan source files
-      String fastApiFile =
-          findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
-      String module = (fastApiFile != null) ? fastApiFile.replace(".py", "") : "main";
-      cmd =
-          "CMD [\"uvicorn\", \""
-              + module
-              + ":app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]";
-    } else if (hasDependency(workspace, "flask")) {
-      // Flask — check requirements.txt first, then scan source files
-      String flaskFile =
-          findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
-      if (flaskFile != null) {
-        envLine = "ENV FLASK_APP=" + flaskFile + "\n";
-      }
-      cmd =
-          """
-          CMD ["flask", "run", "--host", "0.0.0.0", "--port", "8000"]""";
-    } else {
-      // Check source files as fallback (framework not in requirements)
-      String fastApiFile = findPythonFileWithPattern(workspace, "from fastapi", "import fastapi");
-      if (fastApiFile != null) {
-        String module = fastApiFile.replace(".py", "");
-        cmd =
-            "CMD [\"uvicorn\", \""
-                + module
-                + ":app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]";
-      } else {
-        String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask");
-        if (flaskFile != null) {
-          envLine = "ENV FLASK_APP=" + flaskFile + "\n";
-          cmd =
-              """
-              CMD ["flask", "run", "--host", "0.0.0.0", "--port", "8000"]""";
-        } else {
-          String entryFile = findPythonEntryPoint(workspace);
-          cmd = "CMD [\"python\", \"" + entryFile + "\"]";
-        }
-      }
-    }
+    PreviewPythonSignals.DockerCommand pythonCommand =
+        PreviewPythonSignals.dockerCommand(workspace);
+    String cmd = pythonCommand.command();
+    String envLine = pythonCommand.envLine();
 
     // Safety net: set ALL common host/port env vars for Python web frameworks.
     // Different apps read different env var names:
@@ -1980,19 +1414,19 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
         String name = dir.getFileName().toString().toLowerCase();
 
         // Check frontend directories
-        if (frontendDir == null && FRONTEND_DIR_NAMES.contains(name)) {
+        if (frontendDir == null && PreviewDependencySignals.isFrontendDirName(name)) {
           PreviewProjectType detected = detectSingleDir(dir);
           if (detected == PreviewProjectType.NODE_FRONTEND) {
             frontendDir = dir.getFileName().toString();
             frontendType = detected;
-          } else if (detected == null && hasStaticHtml(dir)) {
+          } else if (detected == null && PreviewFileSignals.hasStaticHtml(dir)) {
             frontendDir = dir.getFileName().toString();
             frontendType = PreviewProjectType.STATIC_HTML;
           }
         }
 
         // Check backend directories
-        if (backendDir == null && BACKEND_DIR_NAMES.contains(name)) {
+        if (backendDir == null && PreviewDependencySignals.isBackendDirName(name)) {
           PreviewProjectType detected = detectSingleDir(dir);
           if (detected != null && detected != PreviewProjectType.NODE_FRONTEND) {
             backendDir = dir.getFileName().toString();
@@ -2014,15 +1448,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
           boolean rootIsFrontend = false;
           for (String field : List.of("dependencies", "devDependencies")) {
             JsonNode deps = pkg != null ? pkg.get(field) : null;
-            if (deps != null) {
-              for (String feDep : FRONTEND_FRAMEWORK_DEPS) {
-                if (deps.has(feDep)) {
-                  rootIsFrontend = true;
-                  break;
-                }
-              }
-              if (deps.has("vite") || deps.has("webpack")) rootIsFrontend = true;
-            }
+            if (PreviewDependencySignals.hasFrontendDependency(deps)) rootIsFrontend = true;
             if (rootIsFrontend) break;
           }
           if (rootIsFrontend) {
@@ -2036,7 +1462,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
       // Static HTML fallback: root has .html files but no package.json
       if (frontendDir == null
           && !Files.exists(workspace.resolve("package.json"))
-          && hasStaticHtml(workspace)) {
+          && PreviewFileSignals.hasStaticHtml(workspace)) {
         frontendDir = ".";
         frontendType = PreviewProjectType.STATIC_HTML;
         log.info("[Detect] Root is static HTML frontend, backend in {}/", backendDir);
@@ -2051,7 +1477,8 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
   private PreviewProjectType detectSingleDir(Path dir) {
     // Spring Boot
     Path pomXml = dir.resolve("pom.xml");
-    if (Files.exists(pomXml) && fileContainsPattern(pomXml, "spring-boot-starter")) {
+    if (Files.exists(pomXml)
+        && PreviewFileSignals.fileContainsPattern(pomXml, "spring-boot-starter")) {
       return PreviewProjectType.SPRING_BOOT;
     }
 
@@ -2066,10 +1493,8 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
       if (pkg != null) {
         for (String field : List.of("dependencies", "devDependencies")) {
           JsonNode deps = pkg.get(field);
-          if (deps != null) {
-            for (String backendDep : NODE_BACKEND_DEPS) {
-              if (deps.has(backendDep)) return PreviewProjectType.NODE_BACKEND;
-            }
+          if (PreviewDependencySignals.hasBackendDependency(deps)) {
+            return PreviewProjectType.NODE_BACKEND;
           }
         }
       }
@@ -2079,7 +1504,8 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
     // Node — no package.json but has JS/TS files (backend code lives in subdir,
     // deps are in root package.json). Scan for server-like files.
     String dirName = dir.getFileName().toString().toLowerCase();
-    if (BACKEND_DIR_NAMES.contains(dirName) && hasJsOrTsFiles(dir)) {
+    if (PreviewDependencySignals.isBackendDirName(dirName)
+        && PreviewFileSignals.hasJsOrTsFiles(dir)) {
       // Check for server indicators: express patterns, http.createServer, app.listen
       try (Stream<Path> files = Files.walk(dir, 2)) {
         boolean hasServerCode =
@@ -2087,7 +1513,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
                 .filter(f -> f.toString().endsWith(".js") || f.toString().endsWith(".ts"))
                 .anyMatch(
                     f ->
-                        fileContainsPattern(
+                        PreviewFileSignals.fileContainsPattern(
                             f, "express\\(|createServer|app\\.listen|fastify|new Hono|Koa\\("));
         if (hasServerCode) return PreviewProjectType.NODE_BACKEND;
       } catch (IOException ignored) {
@@ -2118,7 +1544,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
     }
 
     // Java (plain) — .java files without any build tool (e.g., javac-only projects)
-    if (hasJavaFiles(dir)) {
+    if (PreviewFileSignals.hasJavaFiles(dir)) {
       return PreviewProjectType.JAVA;
     }
 
@@ -2182,7 +1608,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
           feIsRoot
               ? workspace.resolve("package.json")
               : workspace.resolve(fe).resolve("package.json");
-      if (Files.exists(fePkg) && !fileContainsPattern(fePkg, "\"vite\"")) {
+      if (Files.exists(fePkg) && !PreviewFileSignals.fileContainsPattern(fePkg, "\"vite\"")) {
         sb.append(" && npm install vite");
       }
       sb.append("\n");
@@ -2468,7 +1894,7 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
         Path mainFile =
             stream
                 .filter(p -> p.toString().endsWith(".java"))
-                .filter(p -> fileContainsPattern(p, "public static void main"))
+                .filter(p -> PreviewFileSignals.fileContainsPattern(p, "public static void main"))
                 .findFirst()
                 .orElse(null);
         if (mainFile != null) {
@@ -2675,25 +2101,11 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
         JsonNode pkg = mapper.readTree(wsPkg.toFile());
         JsonNode deps = pkg.get("dependencies");
         if (deps != null) {
-          // Check for frontend frameworks
-          if (deps.has("react")
-              || deps.has("vue")
-              || deps.has("svelte")
-              || deps.has("vite")
-              || deps.has("next")
-              || deps.has("@angular/core")) {
-            hasFrontend = true;
-          }
-          // Check for backend frameworks
-          for (String backendDep : NODE_BACKEND_DEPS) {
-            if (deps.has(backendDep)) {
-              hasBackend = true;
-              break;
-            }
-          }
+          if (PreviewDependencySignals.hasFrontendDependency(deps)) hasFrontend = true;
+          if (PreviewDependencySignals.hasBackendDependency(deps)) hasBackend = true;
         }
         JsonNode devDeps = pkg.get("devDependencies");
-        if (devDeps != null && (devDeps.has("vite") || devDeps.has("@vitejs/plugin-react"))) {
+        if (PreviewDependencySignals.hasMonorepoFrontendSignal(null, devDeps)) {
           hasFrontend = true;
         }
       } catch (IOException e) {
@@ -2756,19 +2168,8 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
         JsonNode deps = pkg.get("dependencies");
         JsonNode devDeps = pkg.get("devDependencies");
 
-        boolean isFrontend =
-            (deps != null && (deps.has("react") || deps.has("vue") || deps.has("svelte")))
-                || (devDeps != null
-                    && (devDeps.has("vite") || devDeps.has("@vitejs/plugin-react")));
-        boolean isBackend = false;
-        if (deps != null) {
-          for (String backendDep : NODE_BACKEND_DEPS) {
-            if (deps.has(backendDep)) {
-              isBackend = true;
-              break;
-            }
-          }
-        }
+        boolean isFrontend = PreviewDependencySignals.hasMonorepoFrontendSignal(deps, devDeps);
+        boolean isBackend = PreviewDependencySignals.hasBackendDependency(deps);
 
         if (isFrontend && frontendWs == null) {
           frontendWs = wsName;
@@ -2822,71 +2223,15 @@ CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gr
 
   /** Try to detect the port a backend server listens on by scanning its main file. */
   private int detectBackendPort(Path wsDir, JsonNode pkg) {
-    Path mainFile = null;
-    if (pkg.has("main")) {
-      mainFile = wsDir.resolve(pkg.get("main").asText());
-    }
-    if (mainFile == null || !Files.exists(mainFile)) {
-      mainFile = wsDir.resolve("server.js");
-    }
-    if (!Files.exists(mainFile)) {
-      mainFile = wsDir.resolve("index.js");
-    }
-    if (Files.exists(mainFile)) {
-      try {
-        String content = Files.readString(mainFile);
-        // Match patterns like: PORT || 3001, PORT || 3000, listen(3001
-        var matcher =
-            java.util.regex.Pattern.compile("(?:PORT\\s*\\|\\|\\s*(\\d{4})|listen\\((\\d{4}))")
-                .matcher(content);
-        if (matcher.find()) {
-          String port = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
-          return Integer.parseInt(port);
-        }
-      } catch (IOException e) {
-        log.debug("Failed to read backend main file: {}", e.getMessage());
-      }
-    }
-    return 3000;
-  }
-
-  private boolean hasStaticHtml(Path workspace) {
-    try (Stream<Path> files = Files.list(workspace)) {
-      return files.anyMatch(p -> p.getFileName().toString().toLowerCase().endsWith(".html"));
-    } catch (IOException e) {
-      return false;
-    }
+    return PreviewNodeSignals.detectBackendPort(wsDir, pkg);
   }
 
   private String goDockerfile(Path workspace) {
-    return """
-           FROM golang:1.22-alpine
-           WORKDIR /app
-           LABEL preview=true
-           ENV HOST=0.0.0.0
-           ENV PORT=8080
-           COPY go.mod go.sum* ./
-           RUN go mod download 2>/dev/null || true
-           COPY . .
-           RUN go build -o server . 2>/dev/null || true
-           EXPOSE 8080
-           CMD ["sh", "-c", "if [ -f server ]; then ./server; else go run .; fi"]
-           """;
+    return PreviewStandaloneDockerfiles.go();
   }
 
   private String rustDockerfile(Path workspace) {
-    return """
-FROM rust:1.77-slim
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-LABEL preview=true
-COPY Cargo.toml Cargo.lock* ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src
-COPY . .
-RUN cargo build --release 2>/dev/null || true
-EXPOSE 8080
-CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec \\"$bin\\"; else cargo run --release; fi"]
-""";
+    return PreviewStandaloneDockerfiles.rust();
   }
 
   /**
@@ -2906,66 +2251,11 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
    * layer across previews.
    */
   private String reactNativeExpoDockerfile() {
-    return """
-FROM node:20-alpine AS builder
-WORKDIR /app
-LABEL preview=true
-COPY package.json package-lock.json* ./
-# Install deps. Falls back to npm install if package-lock.json wasn't
-# committed (common when the worker writes the scaffold from scratch
-# and never invoked `npm install` in its sandbox).
-RUN (npm ci --legacy-peer-deps 2>/dev/null) || npm install --legacy-peer-deps
-# hermes-compiler guard. Expo SDK 55 / RN 0.80 under-declares this
-# transitive dep — `expo export` fails with
-# "Cannot find module 'hermes-compiler/package.json'" if it's missing.
-# If the worker's package.json didn't include it, add it now so the
-# bundle succeeds. No-op when already present.
-RUN node -e "const p=require('./package.json');const deps=(p.dependencies||{});process.exit(deps['hermes-compiler']?0:1)" \\
-    || npm install --no-save --legacy-peer-deps hermes-compiler@latest
-COPY . .
-RUN npx expo export --platform android --output-dir /app/dist \\
-    && echo '<!doctype html><html><head><meta charset="utf-8"><title>Mobile Preview</title>' \\
-       '<style>body{font-family:system-ui;margin:40px;max-width:640px}h1{color:#1f2937}' \\
-       '.card{background:#f3f4f6;padding:16px;border-radius:8px;margin:16px 0}' \\
-       'code{background:#e5e7eb;padding:2px 6px;border-radius:4px}</style></head>' \\
-       '<body><h1>React Native preview bundled</h1>' \\
-       '<p>Your mobile app compiled cleanly (Metro bundle + Hermes bytecode).</p>' \\
-       '<div class="card"><b>Next steps:</b><ol>' \\
-       '<li>Install <a href="https://expo.dev/client" target="_blank">Expo Go</a> on your phone.</li>' \\
-       '<li>Full Expo Go QR pairing is a v2 follow-up. For now, download the bundle below or run the project locally with <code>npx expo start</code>.</li>' \\
-       '</ol></div>' \\
-       '<p><a href="/_expo/static/js/android/">Download the Hermes bundle</a> | ' \\
-       '<a href="/metadata.json">View manifest (metadata.json)</a></p>' \\
-       '</body></html>' > /app/dist/index.html
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-RUN rm -f /etc/nginx/conf.d/default.conf \\
-    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html; location / { try_files $uri $uri/ =404; } }' \\
-       > /etc/nginx/conf.d/default.conf \\
-    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \\
-    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
-EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
-""";
+    return PreviewStandaloneDockerfiles.reactNativeExpo();
   }
 
   private String staticHtmlDockerfile() {
-    // Use echo with proper escaping. printf '\$uri' produces literal \$uri (bug).
-    // echo '...$uri...' with single quotes preserves $uri correctly.
-    // Pre-chown nginx dirs so nginx can run with cap_drop:ALL (no runtime chown needed).
-    return """
-FROM nginx:alpine
-WORKDIR /usr/share/nginx/html
-LABEL preview=true
-COPY . .
-RUN rm -f /etc/nginx/conf.d/default.conf \
-    && echo 'server { listen 8080; root /usr/share/nginx/html; index index.html index.htm; location / { try_files $uri $uri/ /index.html =404; } }' \
-       > /etc/nginx/conf.d/default.conf \
-    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx \
-    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
-EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
-""";
+    return PreviewStandaloneDockerfiles.staticHtml();
   }
 
   /**
@@ -2973,130 +2263,7 @@ CMD ["nginx", "-g", "daemon off;"]
    * ttyd), or an MCP server (wrapped by Inspector).
    */
   public PreviewMode detectMode(PreviewProjectType type, Path workspace) {
-    if (type == PreviewProjectType.REACT_NATIVE_EXPO) return PreviewMode.MOBILE_EXPO_GO;
-    if (isMcpProject(type, workspace)) return PreviewMode.MCP_INSPECTOR;
-    if (isCliProject(type, workspace)) return PreviewMode.CLI_TERMINAL;
-
-    if (type == PreviewProjectType.FULL_STACK
-        || type == PreviewProjectType.NODE_FRONTEND
-        || type == PreviewProjectType.STATIC_HTML) {
-      return PreviewMode.FULL_STACK;
-    }
-    return PreviewMode.REST;
-  }
-
-  private boolean isMcpProject(PreviewProjectType type, Path workspace) {
-    // Node: check package.json for MCP SDK
-    if (type == PreviewProjectType.NODE_BACKEND || type == PreviewProjectType.NODE_FRONTEND) {
-      JsonNode pkg = parsePackageJson(workspace);
-      if (pkg != null) {
-        for (String field : List.of("dependencies", "devDependencies")) {
-          JsonNode deps = pkg.get(field);
-          if (deps != null && (deps.has("@modelcontextprotocol/sdk") || deps.has("mcp"))) {
-            return true;
-          }
-        }
-      }
-    }
-    // Python: check requirements.txt / pyproject.toml for mcp package
-    if (type == PreviewProjectType.PYTHON) {
-      return hasDependency(workspace, "mcp") || hasDependency(workspace, "modelcontextprotocol");
-    }
-    return false;
-  }
-
-  private boolean isCliProject(PreviewProjectType type, Path workspace) {
-    return switch (type) {
-      case PYTHON -> {
-        // Django project → not CLI
-        if (Files.exists(workspace.resolve("manage.py"))) yield false;
-        // Web framework in deps → not CLI
-        if (hasDependency(workspace, "fastapi")
-            || hasDependency(workspace, "flask")
-            || hasDependency(workspace, "uvicorn")
-            || hasDependency(workspace, "django")) {
-          yield false;
-        }
-        // Web framework in source → not CLI
-        if (findPythonFileWithPattern(
-                workspace,
-                "from fastapi",
-                "import fastapi",
-                "from flask",
-                "import flask",
-                "from django")
-            != null) {
-          yield false;
-        }
-        yield true;
-      }
-      case GO -> !hasGoWebImports(workspace);
-      case RUST -> {
-        Path cargo = workspace.resolve("Cargo.toml");
-        if (Files.exists(cargo)) {
-          yield !fileContainsPattern(cargo, "actix-web", "rocket", "axum", "warp", "hyper");
-        }
-        yield true;
-      }
-      case NODE_BACKEND -> {
-        JsonNode pkg = parsePackageJson(workspace);
-        if (pkg != null) {
-          for (String field : List.of("dependencies", "devDependencies")) {
-            JsonNode deps = pkg.get(field);
-            if (deps != null) {
-              for (String backendDep : NODE_BACKEND_DEPS) {
-                if (deps.has(backendDep)) yield false;
-              }
-            }
-          }
-        }
-        yield true; // No web framework detected -> CLI script
-      }
-      case NODE_FRONTEND, SPRING_BOOT, FULL_STACK, STATIC_HTML, REACT_NATIVE_EXPO -> false;
-      case JAVA -> true;
-    };
-  }
-
-  private boolean hasGoWebImports(Path workspace) {
-    try (Stream<Path> files = Files.list(workspace)) {
-      for (Path f : files.filter(p -> p.toString().endsWith(".go")).limit(20).toList()) {
-        if (fileContainsPattern(
-            f,
-            "net/http",
-            "gin-gonic",
-            "gofiber/fiber",
-            "labstack/echo",
-            "go-chi/chi",
-            "gorilla/mux")) {
-          return true;
-        }
-      }
-    } catch (IOException e) {
-      /* ignore */
-    }
-    // Also check cmd/ and internal/ subdirectories
-    for (String sub : new String[] {"cmd", "internal", "pkg"}) {
-      Path subDir = workspace.resolve(sub);
-      if (Files.isDirectory(subDir)) {
-        try (Stream<Path> files = Files.walk(subDir, 2)) {
-          for (Path f : files.filter(p -> p.toString().endsWith(".go")).limit(20).toList()) {
-            if (fileContainsPattern(
-                f,
-                "net/http",
-                "gin-gonic",
-                "gofiber/fiber",
-                "labstack/echo",
-                "go-chi/chi",
-                "gorilla/mux")) {
-              return true;
-            }
-          }
-        } catch (IOException e) {
-          /* ignore */
-        }
-      }
-    }
-    return false;
+    return PreviewModeDetector.detect(type, workspace);
   }
 
   /** Generate Dockerfile content for the given project type and preview mode. */
@@ -3145,7 +2312,7 @@ CMD ["nginx", "-g", "daemon off;"]
       Path mainFile =
           stream
               .filter(p -> p.toString().endsWith(".java"))
-              .filter(p -> fileContainsPattern(p, "public static void main"))
+              .filter(p -> PreviewFileSignals.fileContainsPattern(p, "public static void main"))
               .findFirst()
               .orElse(null);
       if (mainFile != null) {
@@ -3202,35 +2369,11 @@ COPY requirements.txt* pyproject.toml* ./
   }
 
   private String cliGoDockerfile() {
-    return """
-FROM golang:1.22-alpine
-WORKDIR /app
-LABEL preview=true
-RUN apk add --no-cache ttyd
-COPY go.mod go.sum* ./
-RUN go mod download 2>/dev/null || true
-COPY . .
-RUN go build -o app . 2>/dev/null || true
-EXPOSE 8080
-CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080 --writable ./app; else ttyd --port 8080 --writable go run .; fi"]
-""";
+    return PreviewStandaloneDockerfiles.cliGo();
   }
 
   private String cliRustDockerfile() {
-    return """
-FROM rust:1.77-slim
-RUN apt-get update && apt-get install -y pkg-config libssl-dev wget && rm -rf /var/lib/apt/lists/* \\
-    && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
-    && chmod +x /usr/local/bin/ttyd
-WORKDIR /app
-LABEL preview=true
-COPY Cargo.toml Cargo.lock* ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/dev/null || true && rm -rf src
-COPY . .
-RUN cargo build --release 2>/dev/null || true
-EXPOSE 8080
-CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080 --writable \\"$bin\\"; else ttyd --port 8080 --writable cargo run --release; fi"]
-""";
+    return PreviewStandaloneDockerfiles.cliRust();
   }
 
   private String mcpDockerfile(PreviewProjectType type, Path workspace) {
@@ -3305,67 +2448,7 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
   }
 
   private JsonNode parsePackageJson(Path workspace) {
-    Path file = workspace.resolve("package.json");
-    if (!Files.exists(file)) return null;
-    try {
-      return mapper.readTree(file.toFile());
-    } catch (IOException e) {
-      log.debug("Failed to parse package.json at {}: {}", file, e.getMessage());
-      return null;
-    }
-  }
-
-  private boolean requiresPackageJson(PreviewProjectType type) {
-    return type == PreviewProjectType.NODE_FRONTEND
-        || type == PreviewProjectType.NODE_BACKEND
-        || type == PreviewProjectType.FULL_STACK
-        || type == PreviewProjectType.REACT_NATIVE_EXPO;
-  }
-
-  /**
-   * Returns true if {@code file} (within MAX_FILE_SIZE) contains any of the given LITERAL
-   * substrings. NOT a regex match — do NOT pass pipe-alternated patterns like {@code "a|b"}; use
-   * the varargs form {@code fileContainsPattern(file, "a", "b")} for OR semantics.
-   *
-   * <p>Audit: 2026-05-12 line-by-line review item N #71 — clarified literal-substring semantics to
-   * prevent future drift into regex confusion.
-   */
-  private boolean fileContainsPattern(Path file, String... patterns) {
-    try {
-      if (Files.size(file) > MAX_FILE_SIZE) return false;
-      String content = Files.readString(file);
-      for (String pattern : patterns) {
-        // Sanity assert in dev — pipe-alternated patterns indicate a caller bug, never matches.
-        assert pattern.indexOf('|') < 0
-            : "fileContainsPattern pattern '"
-                + pattern
-                + "' contains '|' — use varargs OR semantics instead";
-        if (content.contains(pattern)) return true;
-      }
-    } catch (IOException e) {
-      log.debug("Failed to read file {}: {}", file, e.getMessage());
-    }
-    return false;
-  }
-
-  private boolean hasJsOrTsFiles(Path workspace) {
-    try (Stream<Path> stream = Files.list(workspace)) {
-      return stream.anyMatch(
-          p -> {
-            String s = p.toString();
-            return s.endsWith(".js") || s.endsWith(".ts") || s.endsWith(".mjs");
-          });
-    } catch (IOException e) {
-      return false;
-    }
-  }
-
-  private boolean hasJavaFiles(Path workspace) {
-    try (Stream<Path> stream = Files.list(workspace)) {
-      return stream.anyMatch(p -> p.toString().endsWith(".java"));
-    } catch (IOException e) {
-      return false;
-    }
+    return PreviewNodeSignals.parsePackageJson(workspace);
   }
 
   /**
@@ -3373,31 +2456,11 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
    * scanning source files (catches package imports in subdirectories).
    */
   private boolean hasDependency(Path workspace, String packageName) {
-    Path reqFile = workspace.resolve("requirements.txt");
-    if (Files.exists(reqFile) && fileContainsPattern(reqFile, packageName)) {
-      return true;
-    }
-    Path pyproject = workspace.resolve("pyproject.toml");
-    return Files.exists(pyproject) && fileContainsPattern(pyproject, packageName);
+    return PreviewPythonSignals.hasDependency(workspace, packageName);
   }
 
   private List<Path> findPythonFiles(Path workspace) {
-    try (Stream<Path> stream = Files.list(workspace)) {
-      return stream
-          .filter(p -> p.toString().endsWith(".py"))
-          .filter(
-              p -> {
-                try {
-                  return Files.size(p) <= MAX_FILE_SIZE;
-                } catch (IOException e) {
-                  return false;
-                }
-              })
-          .limit(MAX_PYTHON_FILES)
-          .toList();
-    } catch (IOException e) {
-      return List.of();
-    }
+    return PreviewPythonSignals.findPythonFiles(workspace);
   }
 
   /**
@@ -3405,58 +2468,12 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
    * the filename (e.g. "app.py"), or null if none found.
    */
   private String findPythonFileWithPattern(Path workspace, String... patterns) {
-    for (Path pyFile : findPythonFiles(workspace)) {
-      if (fileContainsPattern(pyFile, patterns)) {
-        return pyFile.getFileName().toString();
-      }
-    }
-    return null;
+    return PreviewPythonSignals.findPythonFileWithPattern(workspace, patterns);
   }
 
   /** Find the Node.js entry point file. Checks common names in priority order. */
   private String findNodeEntryPoint(Path workspace) {
-    // Check package.json "main" field first
-    JsonNode pkg = parsePackageJson(workspace);
-    if (pkg != null && pkg.has("main")) {
-      String mainField = pkg.get("main").asText("");
-      if (!mainField.isBlank() && Files.exists(workspace.resolve(mainField))) {
-        return mainField;
-      }
-    }
-
-    String[] candidates = {
-      "index.js",
-      "server.js",
-      "app.js",
-      "main.js",
-      "index.mjs",
-      "server.mjs",
-      "app.mjs",
-      "src/index.js",
-      "src/server.js",
-      "src/app.js",
-      "src/index.mjs",
-      "src/server.mjs"
-    };
-    for (String name : candidates) {
-      if (Files.exists(workspace.resolve(name))) return name;
-    }
-
-    // Scan for any .js or .mjs file at workspace root (last resort, pick first alphabetically)
-    try (var stream = Files.list(workspace)) {
-      return stream
-          .filter(
-              p -> {
-                String fn = p.getFileName().toString();
-                return fn.endsWith(".js") || fn.endsWith(".mjs");
-              })
-          .map(p -> p.getFileName().toString())
-          .sorted()
-          .findFirst()
-          .orElse("index.js");
-    } catch (Exception e) {
-      return "index.js";
-    }
+    return PreviewNodeSignals.findEntryPoint(workspace);
   }
 
   /**
@@ -3464,35 +2481,7 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
    * subdirectories that may lack their own package.json.
    */
   private String findNodeEntryPointInDir(Path dir) {
-    String[] candidates = {
-      "index.js",
-      "server.js",
-      "app.js",
-      "main.js",
-      "index.mjs",
-      "server.mjs",
-      "app.mjs",
-      "src/index.js",
-      "src/server.js",
-      "src/app.js"
-    };
-    for (String name : candidates) {
-      if (Files.exists(dir.resolve(name))) return name;
-    }
-    try (var stream = Files.list(dir)) {
-      return stream
-          .filter(
-              p -> {
-                String fn = p.getFileName().toString();
-                return fn.endsWith(".js") || fn.endsWith(".mjs");
-              })
-          .map(p -> p.getFileName().toString())
-          .sorted()
-          .findFirst()
-          .orElse("index.js");
-    } catch (Exception e) {
-      return "index.js";
-    }
+    return PreviewNodeSignals.findEntryPointInDir(dir);
   }
 
   /**
@@ -3500,15 +2489,6 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
    * {@code if __name__}.
    */
   private String findPythonEntryPoint(Path workspace) {
-    // Priority order of common entry point names
-    String[] candidates = {"main.py", "app.py", "run.py", "server.py", "wsgi.py", "index.py"};
-    for (String name : candidates) {
-      if (Files.exists(workspace.resolve(name))) return name;
-    }
-    // Scan for any .py with if __name__ == "__main__"
-    String mainFile = findPythonFileWithPattern(workspace, "if __name__");
-    if (mainFile != null) return mainFile;
-    // Last resort
-    return "app.py";
+    return PreviewPythonSignals.findEntryPoint(workspace);
   }
 }

@@ -9,6 +9,9 @@ import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
 import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
+import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
+import {streamWebAgentChatReply} from '@/ide/agentChatStream';
 import {
   IdeBadge,
   IdeCodeViewer,
@@ -18,155 +21,23 @@ import {
   ResizeHandle,
   type DiffLine,
 } from '@/ide/IdeKit';
-
-type Verdict = {label: string; kind: 'ok' | 'warn' | 'bad'};
-function verdictFor(score: number | null | undefined, status?: string | null): Verdict {
-  const s = (status || '').toUpperCase();
-  if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') return {label: 'Failed', kind: 'bad'};
-  if (score == null) return {label: s === 'COMPLETE' ? 'Complete' : 'In progress', kind: 'warn'};
-  if (score >= 85) return {label: 'Shippable', kind: 'ok'};
-  if (score >= 70) return {label: 'Needs review', kind: 'warn'};
-  return {label: 'Failed', kind: 'bad'};
-}
-const SEV: Record<string, {l: string; k: 'ok' | 'warn' | 'bad'}> = {
-  WOULD_BREAK_BUILD: {l: 'BUILD', k: 'bad'},
-  WOULD_FAIL_REVIEW: {l: 'REVIEW', k: 'warn'},
-  WOULD_CAUSE_BUG: {l: 'BUG', k: 'warn'},
-  WOULD_FAIL_LINT: {l: 'LINT', k: 'ok'},
-};
-const evidenceKind = (status?: string): 'ok' | 'warn' | 'bad' =>
-  status === 'PASS' ? 'ok' : status === 'FAIL' ? 'bad' : 'warn';
-const confidenceColor = (confidence?: string) =>
-  confidence === 'HIGH'
-    ? 'var(--ide-green)'
-    : confidence === 'LOW'
-      ? 'var(--ide-red)'
-      : 'var(--ide-yellow)';
-const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
-const num = (n?: number | null) => (n == null ? '—' : n.toLocaleString());
-
-// Split file text into lines for diffing (drops a single trailing newline so an
-// empty last "line" doesn't render as a phantom row).
-function toLines(s: string): string[] {
-  return (s || '').replace(/\n$/, '').split('\n');
-}
-
-/**
- * LCS line diff: `base` (old) → `head` (new) into a flat DiffLine[] where
- * unchanged lines are ' ', deletions '-', and additions '+'. Deletions in a
- * hunk are emitted before the additions that replace them (standard diff
- * grouping). Used for MODIFIED files where the backend gives us both sides.
- */
-function lineDiff(base: string, head: string): DiffLine[] {
-  const a = toLines(base);
-  const b = toLines(head);
-  const n = a.length;
-  const m = b.length;
-  // LCS length table (n+1 × m+1).
-  const lcs: number[][] = Array.from({length: n + 1}, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    }
-  }
-  const out: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      out.push({sign: ' ', text: a[i]});
-      i++;
-      j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      out.push({sign: '-', text: a[i]});
-      i++;
-    } else {
-      out.push({sign: '+', text: b[j]});
-      j++;
-    }
-  }
-  while (i < n) out.push({sign: '-', text: a[i++]});
-  while (j < m) out.push({sign: '+', text: b[j++]});
-  return out;
-}
-function fmtDur(ms?: number | null) {
-  if (!ms) return '—';
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-// RL-2026-05-046 — Logs tab formatting. Map a run-event type to an icon + pull a readable message
-// from either the flat replay shape ({type, line, status, …}) or the live SSE shape ({type, data}).
-function logIcon(type?: string): string {
-  const t = (type || '').toUpperCase();
-  if (t.includes('TOOL')) return '🔧';
-  if (t.includes('LLM') || t.includes('COMPLETION')) return '💬';
-  if (t.includes('FILE')) return '✏️';
-  if (t.includes('BUILD') || t.includes('COMPILE')) return '🔨';
-  if (t.includes('TEST')) return '🧪';
-  if (t.includes('GATE')) return '⏸️';
-  if (t.includes('COST') || t.includes('TOKEN')) return '💰';
-  if (t.includes('COMPLETE')) return '✅';
-  if (t.includes('FAIL') || t.includes('ERROR')) return '❌';
-  if (t.includes('WARN')) return '⚠️';
-  if (t.includes('PROVIDER')) return '🔀';
-  if (t.includes('CONTEXT')) return '🧭';
-  if (t.includes('RECOVERY')) return '♻️';
-  if (t.includes('STATUS')) return '●';
-  return '·';
-}
-// Noisy event types whose payload is a whole object dump, not a human line — the
-// persisted-replay log must skip them exactly as the live path (hooks/useSse.ts)
-// does, or the Logs tab renders the entire run-detail JSON as one giant row
-// (founder report #4, 2026-05-29).
-function isNoisyLogEvent(ev: api.RunLogEvent): boolean {
-  return (ev.type || '').toUpperCase().includes('RUN_DETAIL');
-}
-function logMessage(ev: api.RunLogEvent): string {
-  const d = (ev.data && typeof ev.data === 'object' ? ev.data : ev) as Record<string, unknown>;
-  const raw =
-    d.message ??
-    d.line ??
-    d.payload ??
-    d.summary ??
-    d.relativePath ??
-    d.status ??
-    d.reason ??
-    d.prompt;
-  const body =
-    raw != null && String(raw).length
-      ? String(raw)
-      : (ev.type || '').toLowerCase().replace(/_/g, ' ');
-  // Defensive cap — even after filtering RUN_DETAIL, any single event that carries a
-  // large payload (a TOKEN_USAGE blob, a multi-KB prompt) shouldn't blow out the row.
-  return body.length > 280 ? `${body.slice(0, 280)}…` : body;
-}
-
-const TABS = [
-  'Overview',
-  'Code',
-  'Tasks',
-  'Timeline',
-  'Logs',
-  'Validation',
-  'Cost',
-  'PR',
-  'Tests',
-  'Chat',
-] as const;
-type Tab = (typeof TABS)[number];
-const TAB_LABEL: Record<Tab, string> = {
-  Overview: 'Overview',
-  Code: 'Code',
-  Tasks: 'Steps',
-  Timeline: 'Timeline',
-  Logs: 'Activity log',
-  Validation: 'Evidence',
-  Cost: 'Cost',
-  PR: 'Pull request',
-  Tests: 'Tests',
-  Chat: 'Ask',
-};
+import {
+  confidenceColor,
+  evidenceKind,
+  fmtDur,
+  isNoisyLogEvent,
+  lineDiff,
+  logIcon,
+  logMessage,
+  num,
+  SEV,
+  TABS,
+  TAB_LABEL,
+  type Tab,
+  toLines,
+  usd,
+  verdictFor,
+} from '@/ide/runResultUtils';
 
 function Kv({k, v}: {k: string; v: React.ReactNode}) {
   return (
@@ -212,6 +83,7 @@ export default function IdeRunResult() {
   // Timeline + Chat — IDE parity with Signal ResultPage.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [chat, setChat] = useState<api.RunChatMessage[] | null>(null);
+  const [runAgentSessionId, setRunAgentSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -294,11 +166,7 @@ export default function IdeRunResult() {
         .getRunEventLog(runId)
         .then(setEventLog)
         .catch(() => setEventLog([]));
-    if (tab === 'Chat' && !chat)
-      api
-        .getRunChat(runId)
-        .then(setChat)
-        .catch(() => setChat([]));
+    if (tab === 'Chat' && !chat) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -432,7 +300,49 @@ export default function IdeRunResult() {
     }
   }
 
-  // Run-scoped chat: append the user message optimistically, then the reply.
+  async function loadRunChat() {
+    if (!runId) return;
+    try {
+      const [legacy, sessions] = await Promise.all([
+        api.getRunChat(runId).catch(() => []),
+        api.listAgentSessions(100).catch(() => []),
+      ]);
+      const session = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
+      if (session) {
+        setRunAgentSessionId(session.id);
+        const turns = await api.listAgentTurns(session.id, {limit: 50}).catch(() => []);
+        setChat([...legacy, ...turns.flatMap(agentTurnToRunChatMessages)]);
+        return;
+      }
+      setChat(legacy);
+    } catch {
+      setChat([]);
+    }
+  }
+
+  async function ensureRunAgentSession(): Promise<api.AgentSessionResponse> {
+    if (runAgentSessionId) {
+      try {
+        return await api.getAgentSession(runAgentSessionId);
+      } catch {
+        setRunAgentSessionId(null);
+      }
+    }
+    const sessions = await api.listAgentSessions(100);
+    const existing = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
+    if (existing) {
+      setRunAgentSessionId(existing.id);
+      return existing;
+    }
+    const created = await api.createAgentSession(
+      webAgentSessionRequest({projectId: run?.projectId, runId}),
+    );
+    setRunAgentSessionId(created.id);
+    return created;
+  }
+
+  // Run-scoped chat: append the user message optimistically, then stream the reply through
+  // the durable agent-session protocol. Legacy /runs/{id}/chat remains read-only history.
   async function sendChat() {
     if (!runId || !chatInput.trim() || chatBusy) return;
     const text = chatInput.trim();
@@ -441,8 +351,18 @@ export default function IdeRunResult() {
     try {
       if (await handleRunSlash(text)) return;
       setChat((prev) => [...(prev || []), {role: 'user', content: text}]);
-      const resp = await api.sendRunChatMessage(runId, text);
-      setChat((prev) => [...(prev || []), {role: 'assistant', content: resp.reply || ''}]);
+      const session = await ensureRunAgentSession();
+      const reply = await streamWebAgentChatReply(session.id, text, {
+        label: 'run agent',
+        href: `/runs/${runId}/agent`,
+      });
+      setChat((prev) => [
+        ...(prev || []),
+        {
+          role: 'assistant',
+          content: reply,
+        },
+      ]);
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Chat failed.');
     } finally {
@@ -468,6 +388,10 @@ export default function IdeRunResult() {
       return true;
     }
     if (cmd === '/clear') {
+      const created = await api.createAgentSession(
+        webAgentSessionRequest({projectId: run?.projectId, runId}),
+      );
+      setRunAgentSessionId(created.id);
       setChat([]);
       return true;
     }

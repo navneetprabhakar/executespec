@@ -1,11 +1,6 @@
 package com.navneet.executespec.agentsession;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
@@ -14,6 +9,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordRes
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveResponse;
@@ -26,11 +22,9 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
-import com.navneet.executespec.cost.RunCostTracker;
-import com.navneet.executespec.specchat.SpecChatService;
 
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,9 +45,7 @@ public class AgentSessionController {
 
   private final AgentSessionService sessionService;
   private final AgentActionCatalog actionCatalog;
-  private final SpecChatService specChatService;
-  private final FeatureFlagService featureFlags;
-  private final com.navneet.executespec.auth.service.MailService mailService;
+  private final AgentStreamTurnRunner streamTurnRunner;
 
   @GetMapping("/actions")
   public List<AgentActionDescriptor> actions() {
@@ -91,6 +83,15 @@ public class AgentSessionController {
     return sessionService.listEvents(sessionId, user);
   }
 
+  @GetMapping("/sessions/{sessionId}/turns")
+  public List<AgentTurnResponse> sessionTurns(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(required = false) String before) {
+    return sessionService.listTurns(sessionId, before, limit, user);
+  }
+
   @PostMapping("/v2/sessions/{sessionId}/actions/plan")
   public ActionPlanResponse planAction(
       @AuthenticationPrincipal AppUserDetails user,
@@ -123,11 +124,11 @@ public class AgentSessionController {
    * can exit cleanly without triggering mail.
    */
   @PostMapping("/sessions/{sessionId}/summary-email")
-  public org.springframework.http.ResponseEntity<Void> sessionSummaryEmail(
+  public ResponseEntity<Void> sessionSummaryEmail(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
       @RequestBody SessionSummaryEmailRequest request) {
-    return org.springframework.http.ResponseEntity.accepted().build();
+    return ResponseEntity.accepted().build();
   }
 
   /** Legacy request body retained for older clients that still POST this route. */
@@ -155,65 +156,8 @@ public class AgentSessionController {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()
         .name("agent-turn-" + ctx.turnId())
-        .start(snapshot.wrap(() -> runStreamTurn(emitter, ctx, user, request)));
+        .start(snapshot.wrap(() -> streamTurnRunner.run(emitter, ctx, user, request)));
     return emitter;
-  }
-
-  private void runStreamTurn(
-      SseEmitter emitter,
-      AgentSessionService.StreamTurnContext ctx,
-      AppUserDetails user,
-      StreamTurnRequest request) {
-    try {
-      send(
-          emitter,
-          "ack",
-          Map.of(
-              "session_id", ctx.sessionId(),
-              "turn_id", ctx.turnId(),
-              "sequence", ctx.sequence()));
-
-      if (!featureFlags.isEnabled("spec.chat.enabled")) {
-        String note = "spec.chat.enabled is OFF";
-        sessionService.completeStreamTurn(
-            ctx, note, new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
-        send(
-            emitter,
-            "done",
-            Map.of(
-                "session_id", ctx.sessionId(),
-                "turn_id", ctx.turnId(),
-                "turn_count", ctx.sequence(),
-                "note", note));
-        emitter.complete();
-        return;
-      }
-
-      AccumulatingSink sink = new AccumulatingSink(emitter, sessionService, ctx);
-      specChatService.runTurn(
-          sink,
-          user,
-          ctx.sessionId(),
-          ctx.projectId(),
-          ctx.orgId(),
-          conversationOrCurrentMessage(request),
-          ctx.provider());
-      emitter.complete();
-    } catch (Exception e) {
-      sessionService.failStreamTurn(ctx, e.getMessage());
-      try {
-        send(
-            emitter,
-            "error",
-            Map.of(
-                "session_id", ctx.sessionId(),
-                "turn_id", ctx.turnId(),
-                "message", e.getMessage() == null ? "agent stream failed" : e.getMessage()));
-      } catch (Exception ignored) {
-        // emitter is already broken
-      }
-      emitter.completeWithError(e);
-    }
   }
 
   @PostMapping("/intent/interpret")
@@ -237,78 +181,5 @@ public class AgentSessionController {
   public GateDecisionCard gate(
       @AuthenticationPrincipal AppUserDetails user, @PathVariable String runId) {
     return sessionService.getGate(runId, user);
-  }
-
-  private static List<Map<String, Object>> conversationOrCurrentMessage(StreamTurnRequest request) {
-    if (request != null && request.conversation() != null && !request.conversation().isEmpty()) {
-      return request.conversation();
-    }
-    Map<String, Object> message = new LinkedHashMap<>();
-    message.put("role", "user");
-    message.put("content", request == null ? "" : request.message());
-    return List.of(message);
-  }
-
-  private static void send(SseEmitter emitter, String event, Object data) {
-    try {
-      emitter.send(SseEmitter.event().name(event).data(data));
-    } catch (IOException io) {
-      throw new UncheckedIOException(io);
-    }
-  }
-
-  private static final class AccumulatingSink implements SpecChatService.Sink {
-    private final SseEmitter emitter;
-    private final AgentSessionService sessionService;
-    private final AgentSessionService.StreamTurnContext ctx;
-    private final List<String> tokens = new ArrayList<>();
-
-    private AccumulatingSink(
-        SseEmitter emitter,
-        AgentSessionService sessionService,
-        AgentSessionService.StreamTurnContext ctx) {
-      this.emitter = emitter;
-      this.sessionService = sessionService;
-      this.ctx = ctx;
-    }
-
-    @Override
-    public void token(String delta) {
-      tokens.add(delta == null ? "" : delta);
-      send(emitter, "token", Map.of("delta", delta == null ? "" : delta));
-    }
-
-    @Override
-    public void toolCall(String tool, String argsJson, String id) {
-      send(
-          emitter,
-          "tool_call",
-          Map.of(
-              "tool", tool == null ? "" : tool,
-              "args", argsJson == null ? "" : argsJson,
-              "id", id == null ? "" : id));
-    }
-
-    @Override
-    public void toolResult(String id, String resultJson) {
-      send(
-          emitter,
-          "tool_result",
-          Map.of("id", id == null ? "" : id, "result", resultJson == null ? "" : resultJson));
-    }
-
-    @Override
-    public void done(int turnCount, RunCostTracker.Snapshot cost) {
-      sessionService.completeStreamTurn(ctx, String.join("\n", tokens), cost);
-      Map<String, Object> data = new LinkedHashMap<>();
-      data.put("session_id", ctx.sessionId());
-      data.put("turn_id", ctx.turnId());
-      data.put("turn_count", turnCount);
-      data.put("cost_usd", cost == null ? 0.0 : cost.costUsd());
-      data.put("input_tokens", cost == null ? 0 : cost.inputTokens());
-      data.put("output_tokens", cost == null ? 0 : cost.outputTokens());
-      data.put("reasoning_tokens", cost == null ? 0 : cost.reasoningTokens());
-      send(emitter, "done", data);
-    }
   }
 }
