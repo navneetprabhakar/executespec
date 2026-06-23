@@ -121,7 +121,8 @@ export function PublicPricingPage() {
         <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
           Managed AI is metered in <b>ES AI credits</b> — $1 = 100 credits, charged from real model
           cost as your run works. Frontier models step down automatically near your monthly cap;
-          bring your own keys (Team) to remove it. Pro bills monthly or yearly; Team is monthly, per seat.
+          bring your own keys (Team) to remove it. Pro bills monthly or yearly; Team is monthly, per
+          seat.
         </Card>
 
         <div className='signal-grid cols-2 cols-4-xl'>
