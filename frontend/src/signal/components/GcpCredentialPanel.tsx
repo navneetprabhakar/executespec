@@ -12,7 +12,7 @@ import * as api from '@/lib/api';
  * BYOK-style). We never echo the raw key back — `CredentialSummary` only
  * carries the SA email + GCP project, so the secret is never re-displayed.
  *
- * Shared by the Signal DeploymentsPage + the IDE deployments surface;
+ * Shared by public Signal-compatible surfaces and the IDE deployments surface;
  * `variant` switches styling so each chrome stays native.
  */
 export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {

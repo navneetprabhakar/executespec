@@ -5,7 +5,7 @@
 > **Owner:** RL-2026-05-052 (client track)
 > **Deciders:** founder (re-confirmation required on the three revised Shape B decisions — see §6)
 > **Amends:** [`docs/design/cli-plugin-spec-shape-b-2026-05-28.md`](../design/cli-plugin-spec-shape-b-2026-05-28.md)
-> **Implemented by:** [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) (design); execution tracked in [`docs/pending.md`](../pending.md) §J1 (the standalone execution plan was removed 2026-06-09 with the `executespec-cli` split)
+> **Implemented by:** [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) (design); client-side execution moved to the standalone `executespec-cli` repo.
 
 > **ADR convention (first entry):** This is the repo's first Architecture Decision Record. ADRs live under `docs/adr/`, numbered `ADR-NNNN-slug.md`, and capture a single significant, hard-to-reverse decision: its context, the decision, and its consequences (good and bad). They are immutable once **Accepted** — a later ADR supersedes an earlier one rather than editing it. Design docs (`docs/design/`) and execution plans (`docs/plans/`) carry the detail; the ADR carries the *why*.
 
@@ -24,7 +24,7 @@ Two designs now exist in the tree, and they are **in tension**:
 The Shape B design framed the choice as **chat-first REPL vs. "subcommand maze."** Reviewing the code and the competitive analysis (`docs/competitive-analysis/`), we judge that framing to be a **false binary**. The reference products do not choose one:
 
 - **Claude Code** is simultaneously a rich streaming chat REPL, a slash-command surface, *and* headless-scriptable (`claude -p …`).
-- **opencode** is a headless engine + many thin clients over one OpenAPI SDK; the same SDK runs in-process or remote. Its lesson is *engine-as-service + thin clients*, not *one UI shape wins*.
+- **oss-agent** is a headless engine + many thin clients over one OpenAPI SDK; the same SDK runs in-process or remote. Its lesson is *engine-as-service + thin clients*, not *one UI shape wins*.
 
 Separately, the competitive analysis identifies **prompt-cache discipline** as the single largest cost/efficiency lever for the single-loop incumbents — which is in direct tension with Shape B's locked "server is stateless for chat; client re-sends full history every turn."
 
@@ -93,7 +93,7 @@ Shape B locked five decisions (founder, 2026-05-28). This ADR's stance on each:
 - **B. Verbs-only (cancel the chat pivot; ship gen-1).** Rejected: loses the agentic authoring UX that the market expects; under-differentiates against Claude Code/Cursor; founder has already endorsed chat-first as the default.
 - **C. Two independent codebases (a CLI team and a VS Code team).** Rejected outright: guarantees feature drift, the exact failure the parity constraint exists to prevent; doubles cost.
 - **D. Full-fat client with a local agent loop (move the brain to the client).** Rejected: surrenders the moat (prompts/planner/scoring), kills server-side observability/billing/governance, and is not what local-hands/remote-brain means.
-- **E. Generate the client SDK from an OpenAPI spec (opencode's approach).** *Deferred, not rejected.* Attractive for drift-prevention but ExecuteSpec has no OpenAPI surface today; adopting it is a separate, larger investment. The hand-maintained typed `core` is the interim; an OpenAPI-generated `core` is a future ADR.
+- **E. Generate the client SDK from an OpenAPI spec (oss-agent's approach).** *Deferred, not rejected.* Attractive for drift-prevention but ExecuteSpec has no OpenAPI surface today; adopting it is a separate, larger investment. The hand-maintained typed `core` is the interim; an OpenAPI-generated `core` is a future ADR.
 
 ## 8. How we'll know it's right
 
@@ -107,6 +107,6 @@ Shape B locked five decisions (founder, 2026-05-28). This ADR's stance on each:
 
 - [`docs/design/cli-vscode-unified-client-2026-05-30.md`](../design/cli-vscode-unified-client-2026-05-30.md) — full technical design + Feature Matrix.
 - [`docs/design/cli-plugin-spec-shape-b-2026-05-28.md`](../design/cli-plugin-spec-shape-b-2026-05-28.md) — the amended Shape B lock.
-- [`docs/pending.md`](../pending.md) §J — open CLI/VS Code + Terminal-Bench work (folded in from the prior CLI/Terminal-Bench handoff, deleted 2026-06-03).
-- [`docs/competitive-analysis/COMPARISON.md`](../competitive-analysis/COMPARISON.md) — Claude Code / opencode shape analysis.
+- Standalone `executespec-cli` repo — open CLI/VS Code work after the client split.
+- [`docs/competitive-analysis/COMPARISON.md`](../competitive-analysis/COMPARISON.md) — Claude Code / oss-agent shape analysis.
 - RL-2026-05-043 (CLI/VS Code + PAT), RL-2026-05-052 (Shape B) in [`docs/reason-log/2026-05.md`](../reason-log/2026-05.md).

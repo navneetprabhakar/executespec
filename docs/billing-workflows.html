@@ -78,7 +78,7 @@
 <div class="container">
 
 <h1>ExecuteSpec — Billing & Payment Workflows</h1>
-<p class="subtitle">All user journeys for subscription, upgrade, topup, and cancellation flows. Last reviewed 2026-05-12 (1.0.0-M1). Tier ladder: FREE / PRO (HIDDEN — grandfathered) / TEAM ($39/seat, BYOK) / ENTERPRISE.</p>
+<p class="subtitle">All user journeys for subscription, upgrade, topup, and cancellation flows. Last reviewed 2026-06-19 (1.0.0-M1). Tier ladder: FREE (15 runs/month) / PRO ($29, 30 managed runs) / TEAM ($39/seat, from 1 seat, BYOK) / ENTERPRISE.</p>
 
 <div class="legend">
   <div class="legend-item"><div class="legend-dot frontend"></div> Frontend</div>
@@ -105,12 +105,12 @@
     <div class="arrow">&rarr;</div>
     <div class="step"><div class="step-label l-sideeffect">Email</div><div class="step-box sideeffect">Verification<br>email sent</div></div>
   </div>
-  <div class="note"><strong>Run limit:</strong> FREE tier = 5 runs/month (lifetime, never resets)</div>
+  <div class="note"><strong>Run limit:</strong> FREE tier = 15 runs/month, calendar-month reset for users without a paid subscription</div>
 </div>
 
-<!-- 1b. FREE → PRO/MAX (Razorpay) -->
+<!-- 1b. FREE → PRO/TEAM (Razorpay or Stripe) -->
 <div class="flow">
-  <div class="flow-title">1b. FREE &rarr; PRO or MAX <span class="badge badge-razorpay">Razorpay INR</span> <span class="badge badge-stripe">Stripe USD</span></div>
+  <div class="flow-title">1b. FREE &rarr; PRO or TEAM <span class="badge badge-razorpay">Razorpay INR</span> <span class="badge badge-stripe">Stripe USD</span></div>
   <div class="steps">
     <div class="step"><div class="step-label l-frontend">Frontend</div><div class="step-box frontend">/plans<br>Select plan<br>Accept T&C</div></div>
     <div class="arrow">&rarr;</div>

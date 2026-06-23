@@ -5,7 +5,7 @@
 > Companions: [`launch-readiness-2026-06-10.md`](launch-readiness-2026-06-10.md) (ops checklist
 > detail) · `review/07` + `review/11` (positioning + UX verdicts, local) ·
 > [`website/product-hunt-launch.md`](../website/product-hunt-launch.md) (PH kit, refreshed).
-> A styled PDF of this doc lives at `docs/reports/launch-playbook-2026-06-11.pdf`.
+> The styled PDF was cleared from `docs/reports/`; regenerate it from this source if needed.
 
 ---
 

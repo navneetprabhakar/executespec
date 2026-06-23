@@ -13,48 +13,152 @@ import org.springframework.stereotype.Component;
 @Component
 public class AgentActionCatalog {
 
+  private static final List<String> ALL_SURFACES = List.of("WEB", "CLI", "VSCODE");
+  private static final List<String> LOCAL_SURFACES = List.of("CLI", "VSCODE");
+  private static final List<String> AUTHENTICATED_SCOPE = List.of("authenticated");
+
+  private static final List<ActionDefinition> ACTIONS =
+      List.of(
+          action(
+              "chat_answer",
+              "Answer a non-mutating question in the current session.",
+              "FREE",
+              "read",
+              false,
+              "conversation_usage",
+              ALL_SURFACES,
+              true,
+              "message"),
+          action(
+              "list_gates",
+              "List plan gates awaiting explicit approval.",
+              "FREE",
+              "read",
+              false,
+              "none",
+              ALL_SURFACES,
+              true),
+          action(
+              "inspect_gate",
+              "Return the decision card for one awaiting-approval run.",
+              "FREE",
+              "read",
+              false,
+              "none",
+              ALL_SURFACES,
+              true,
+              "runId"),
+          action(
+              "approve_run",
+              "Approve a run plan gate through the existing guarded approval path.",
+              "FREE",
+              "billable",
+              true,
+              "run_credit",
+              ALL_SURFACES,
+              true,
+              "runId",
+              "creditsConfirmed"),
+          action(
+              "reject_run",
+              "Reject a run plan gate.",
+              "FREE",
+              "write",
+              true,
+              "none",
+              ALL_SURFACES,
+              true,
+              "runId"),
+          action(
+              "create_cloud_run",
+              "Create a gated cloud run from a natural-language spec.",
+              "FREE",
+              "billable",
+              true,
+              "run_credit_on_plan_approval",
+              ALL_SURFACES,
+              true,
+              "spec",
+              "projectId"),
+          action(
+              "local_code_task",
+              "Ask a local-capable client to handle a coding task in the working tree.",
+              "FREE",
+              "write",
+              true,
+              "conversation_usage",
+              LOCAL_SURFACES,
+              true,
+              "spec"),
+          action(
+              "local_git_diff",
+              "Read local working-tree diff from a client workspace.",
+              "FREE",
+              "read",
+              false,
+              "none",
+              LOCAL_SURFACES,
+              false,
+              "path"),
+          action(
+              "local_git_status",
+              "Read local working-tree status from a client workspace.",
+              "FREE",
+              "read",
+              false,
+              "none",
+              LOCAL_SURFACES,
+              false),
+          action(
+              "resolve_project",
+              "Resolve the current repository to a linked ExecuteSpec project.",
+              "FREE",
+              "read",
+              false,
+              "none",
+              LOCAL_SURFACES,
+              true,
+              "gitRemote"),
+          action(
+              "generate_architecture_doc",
+              "Generate or refresh project architecture documentation.",
+              "FREE",
+              "write",
+              true,
+              "conversation_usage",
+              ALL_SURFACES,
+              false,
+              "projectId",
+              "targetPath"),
+          action(
+              "run_code_review",
+              "Run the paid code review workflow available from the Web UI.",
+              "PRO",
+              "billable",
+              true,
+              "subscription",
+              ALL_SURFACES,
+              false,
+              "projectId",
+              "scope"),
+          action(
+              "manage_org_model_overrides",
+              "Read or update Enterprise model-routing overrides.",
+              "ENTERPRISE",
+              "destructive",
+              true,
+              "none",
+              ALL_SURFACES,
+              false,
+              "provider",
+              "tier",
+              "model"));
+
   public List<AgentActionDescriptor> list() {
-    return List.of(
-        new AgentActionDescriptor(
-            "chat_answer",
-            "Answer a non-mutating question in the current session.",
-            false,
-            "conversation_usage",
-            List.of("message")),
-        new AgentActionDescriptor(
-            "list_gates", "List plan gates awaiting explicit approval.", false, "none", List.of()),
-        new AgentActionDescriptor(
-            "inspect_gate",
-            "Return the decision card for one awaiting-approval run.",
-            false,
-            "none",
-            List.of("runId")),
-        new AgentActionDescriptor(
-            "approve_run",
-            "Approve a run plan gate. Credits are charged by the existing run approval path.",
-            true,
-            "run_credit",
-            List.of("runId", "creditsConfirmed")),
-        new AgentActionDescriptor(
-            "reject_run", "Reject a run plan gate.", true, "none", List.of("runId")),
-        new AgentActionDescriptor(
-            "create_run",
-            "Create a gated cloud run from a natural-language spec.",
-            true,
-            "run_credit_on_plan_approval",
-            List.of("spec", "projectId")),
-        new AgentActionDescriptor(
-            "local_code_task",
-            "Ask a local-capable client to handle a coding task in the working tree.",
-            true,
-            "conversation_usage",
-            List.of("spec")),
-        new AgentActionDescriptor(
-            "resolve_project",
-            "Resolve the current repository to a linked ExecuteSpec project.",
-            false,
-            "none",
-            List.of("gitRemote")));
+    return ACTIONS.stream()
+        .filter(ActionDefinition::descriptor)
+        .map(ActionDefinition::toDescriptor)
+        .toList();
   }
 
   public List<CapabilityTool> capabilities(String surface, String tier) {
@@ -67,140 +171,29 @@ public class AgentActionCatalog {
   }
 
   public List<CapabilityTool> allCapabilities() {
-    return List.of(
-        cap(
-            "chat_answer",
-            "Answer a non-mutating question in the current session.",
-            "FREE",
-            "read",
-            false,
-            "conversation_usage",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("message")),
-        cap(
-            "list_gates",
-            "List plan gates awaiting explicit approval.",
-            "FREE",
-            "read",
-            false,
-            "none",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of()),
-        cap(
-            "inspect_gate",
-            "Return the decision card for one awaiting-approval run.",
-            "FREE",
-            "read",
-            false,
-            "none",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("runId")),
-        cap(
-            "approve_run",
-            "Approve a run plan gate through the existing guarded approval path.",
-            "FREE",
-            "billable",
-            true,
-            "run_credit",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("runId", "creditsConfirmed")),
-        cap(
-            "reject_run",
-            "Reject a run plan gate.",
-            "FREE",
-            "write",
-            true,
-            "none",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("runId")),
-        cap(
-            "create_cloud_run",
-            "Create a gated cloud run from a natural-language spec.",
-            "FREE",
-            "billable",
-            true,
-            "run_credit_on_plan_approval",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("spec", "projectId")),
-        cap(
-            "local_code_task",
-            "Ask a local-capable client to handle a coding task in the working tree.",
-            "FREE",
-            "write",
-            true,
-            "conversation_usage",
-            List.of("CLI", "VSCODE"),
-            List.of("spec")),
-        cap(
-            "local_git_diff",
-            "Read local working-tree diff from a client workspace.",
-            "FREE",
-            "read",
-            false,
-            "none",
-            List.of("CLI", "VSCODE"),
-            List.of("path")),
-        cap(
-            "local_git_status",
-            "Read local working-tree status from a client workspace.",
-            "FREE",
-            "read",
-            false,
-            "none",
-            List.of("CLI", "VSCODE"),
-            List.of()),
-        cap(
-            "generate_architecture_doc",
-            "Generate or refresh project architecture documentation.",
-            "FREE",
-            "write",
-            true,
-            "conversation_usage",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("projectId", "targetPath")),
-        cap(
-            "run_code_review",
-            "Run the paid code review workflow available from the Web UI.",
-            "PRO",
-            "billable",
-            true,
-            "subscription",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("projectId", "scope")),
-        cap(
-            "manage_org_model_overrides",
-            "Read or update Enterprise model-routing overrides.",
-            "ENTERPRISE",
-            "destructive",
-            true,
-            "none",
-            List.of("WEB", "CLI", "VSCODE"),
-            List.of("provider", "tier", "model")));
+    return ACTIONS.stream().map(ActionDefinition::toCapability).toList();
   }
 
-  private static CapabilityTool cap(
-      String name,
+  private static ActionDefinition action(
+      String type,
       String description,
       String requiredTier,
       String sideEffect,
       boolean confirmationRequired,
       String billingImpact,
       List<String> surfaces,
-      List<String> requiredFields) {
-    Map<String, Object> inputSchema =
-        Map.of("type", "object", "required", requiredFields, "additionalProperties", true);
-    Map<String, Object> outputSchema = Map.of("type", "object", "additionalProperties", true);
-    return new CapabilityTool(
-        name,
+      boolean descriptor,
+      String... requiredFields) {
+    return new ActionDefinition(
+        type,
         description,
-        inputSchema,
-        outputSchema,
         requiredTier,
-        List.of("authenticated"),
         sideEffect,
         confirmationRequired,
         billingImpact,
-        surfaces);
+        surfaces,
+        List.of(requiredFields),
+        descriptor);
   }
 
   private static boolean tierAllows(String userTier, String requiredTier) {
@@ -218,5 +211,39 @@ public class AgentActionCatalog {
 
   private static String normalize(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value.trim().toUpperCase(Locale.ROOT);
+  }
+
+  private record ActionDefinition(
+      String type,
+      String description,
+      String requiredTier,
+      String sideEffect,
+      boolean confirmationRequired,
+      String billingImpact,
+      List<String> surfaces,
+      List<String> requiredFields,
+      boolean descriptor) {
+
+    AgentActionDescriptor toDescriptor() {
+      return new AgentActionDescriptor(
+          type, description, confirmationRequired, billingImpact, requiredFields);
+    }
+
+    CapabilityTool toCapability() {
+      Map<String, Object> inputSchema =
+          Map.of("type", "object", "required", requiredFields, "additionalProperties", true);
+      Map<String, Object> outputSchema = Map.of("type", "object", "additionalProperties", true);
+      return new CapabilityTool(
+          type,
+          description,
+          inputSchema,
+          outputSchema,
+          requiredTier,
+          AUTHENTICATED_SCOPE,
+          sideEffect,
+          confirmationRequired,
+          billingImpact,
+          surfaces);
+    }
   }
 }

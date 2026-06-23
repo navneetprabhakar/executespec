@@ -31,7 +31,7 @@ PATCH mode is the thin-worker path used by SWE-bench, ProgramBench, and the four
 | Pause/resume | Flag-gated | `v2.pause.enabled` |
 | Verify-before-complete | Flag-gated default OFF | `worker.verify-before-complete.enabled`, `engine/WorkerAgent.java` |
 | Worker background jobs | Flag-gated default OFF | `tool/BackgroundJobTool.java`, `tool/JobRegistry.java` |
-| Local-hands run submit (`localExecution=true`) | Flag-gated default OFF, PAT-only | `worker.local-hands.enabled` (V241), `RunController.submit`, `JwtAuthenticationFilter` |
+| Local-hands run submit (`localExecution=true`) | Default ON after V244, PAT-only | `worker.local-hands.enabled`, `RunController.submit`, `JwtAuthenticationFilter` |
 | Live cost snapshot with cache/reasoning/call fields | Live | `/api/runs/{id}/cost`, `cost/RunCostTracker` |
 | Durable per-call LLM usage ledger | Live | `cost/RunStepUsageRecorder`, `run_step_usage` (V243) |
 
@@ -62,7 +62,7 @@ Billing boundary: run credits are charged only through the plan-approval path. S
 - Run ownership is stamped before async work starts.
 - A high `verifiedScore` must be backed by the ledger; failed reviewer/build/test
   signals cap the headline even when other slots are strong.
-- `localExecution=true` fails closed: rejected entirely while `worker.local-hands.enabled` is OFF, and accepted only from PAT-authenticated (CLI/VS Code) requests, never browser/JWT sessions. Accepted summaries echo `localExecutionAccepted=true`.
+- `localExecution=true` is accepted only from PAT-authenticated (CLI/VS Code) requests, never browser/JWT sessions. If an operator turns `worker.local-hands.enabled` OFF, local execution fails closed before quota/billing. Accepted summaries echo `localExecutionAccepted=true`.
 
 ## Current Proof Level
 

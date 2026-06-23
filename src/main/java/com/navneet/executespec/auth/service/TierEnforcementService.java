@@ -59,14 +59,11 @@ public class TierEnforcementService {
   private static final double QUOTA_WARNING_THRESHOLD = 0.80;
 
   /** Safe fallback limits if tier_config rows are missing. */
-  /**
-   * V167 (2026-05-04 — held at 5) — matches tier_config.FREE.monthly_run_limit. The V145 bump 5 →
-   * 10 was reverted as a positioning decision ("free tier will always remain 5").
-   */
-  private static final int FALLBACK_FREE = 5;
+  /** Fallback only. Canonical FREE quota lives in tier_config and was bumped to 15 by V200. */
+  private static final int FALLBACK_FREE = 15;
 
-  /** V140 — matches tier_config.PRO.monthly_run_limit (was 50, now 20 per the website). */
-  private static final int FALLBACK_PRO = 20;
+  /** Fallback only. Canonical PRO quota lives in tier_config and was bumped to 30 by V176. */
+  private static final int FALLBACK_PRO = 30;
 
   /**
    * V165 — TEAM consolidated at $39/seat with BYOK-or-managed keys; runs unlimited against the
@@ -219,6 +216,33 @@ public class TierEnforcementService {
       log.warn(
           "Failed to publish QuotaWarning for user={} org={}: {}", userId, orgId, e.getMessage());
     }
+  }
+
+  /**
+   * Run-count retirement (2026-06-22): increment the monthly run counter for ANALYTICS ONLY, with
+   * no quota enforcement. Replaces {@code assertAndIncrementRunCount} at the submission choke
+   * points now that managed ES AI credits gate spend. Keeps {@code personal_run_count} / {@code
+   * monthly_run_count} and their billing-cycle resets meaningful for dashboards without ever
+   * throwing.
+   */
+  @Transactional
+  public void incrementRunCountForAnalytics(String userId) {
+    AppUser user = userRepo.findByIdForUpdate(userId).orElse(null);
+    if (user == null || "SUPER_ADMIN".equals(user.getGlobalRole())) return;
+    if (user.getOrgId() != null) {
+      orgRepo
+          .findByIdForUpdate(user.getOrgId())
+          .ifPresent(
+              org -> {
+                maybeResetOrgCounter(org);
+                org.setMonthlyRunCount(org.getMonthlyRunCount() + 1);
+                orgRepo.save(org);
+              });
+      return;
+    }
+    maybeResetUserCounter(user);
+    user.setPersonalRunCount(user.getPersonalRunCount() + 1);
+    userRepo.save(user);
   }
 
   /** Assert the given user can submit another run. Throws 429 if quota exceeded. */
@@ -582,7 +606,7 @@ public class TierEnforcementService {
             HttpStatus.PAYMENT_REQUIRED,
             "You've used all "
                 + limit
-                + " free runs this month. Upgrade to Pro for 20 credits/month or Team for"
+                + " free runs this month. Upgrade to Pro for 30 credits/month or Team for"
                 + " unlimited runs against your own provider keys.");
       }
       return;

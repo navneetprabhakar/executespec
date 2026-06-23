@@ -77,6 +77,7 @@ public class RunController {
   private final RunAccessGuard guard;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
+  private final com.navneet.executespec.billing.service.ManagedAiUsageService managedAiUsageService;
 
   /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
   private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
@@ -171,17 +172,13 @@ public class RunController {
     // rejected model never burns the user's monthly quota.
     modelAccessService.assertModelAllowed(userId, req.modelName());
 
-    // SDET 2026-05-16 (BUG-006) — increment monthly counter at submit-time. The previous
-    // `assertCanSubmitRun` was a non-incrementing probe; combined with
-    // `executionMode=PROTOTYPE+skipApproval=true` which bypasses the plan gate,
-    // the FREE-tier 5-runs/month cap was effectively unenforced (the rate-limiter
-    // alone gated by an N-second window, so a FREE user could submit forever).
-    // `assertAndIncrementRunCount` atomically checks the quota AND increments
-    // the counter under a pessimistic lock (TOCTOU-safe). Refunds happen at
-    // terminal-FAILURE via `decrementRunCount` so a failed run doesn't burn quota.
-    tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
-    // Enforce billing usage limits (throws 402 if limit exceeded)
-    usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
+    // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly run
+    // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
+    // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
+    // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
+    // the mid-run source of truth.
+    managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
+    tierEnforcementService.incrementRunCountForAnalytics(userId);
     // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
     apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
 

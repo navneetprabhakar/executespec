@@ -97,7 +97,7 @@ function resolveSystemTheme(): 'dark' | 'light' {
 /**
  * T1 (UI/UX review 2026-06-11) — single theme owner. The app historically ran
  * TWO theme systems: this store wrote `data-theme` (tokens.css/ide.css/console.css)
- * while main.tsx + the now-deleted useSignalTheme wrote `data-signal-theme`
+ * while the retired Signal hook wrote `data-signal-theme`
  * (every `.signal-*` component style). They desynced — public pages could render
  * dark cards on a light page. Every apply now writes BOTH attributes with the
  * same resolved value; `signal.css` keeps its selector until the follow-up

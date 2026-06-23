@@ -2,7 +2,7 @@
 
 > **Date:** 2026-05-30 · **Status:** Proposed · **Owner:** RL-2026-05-052 (client track)
 > **Decision record:** [`docs/adr/ADR-0001-unified-spec-client.md`](../adr/ADR-0001-unified-spec-client.md)
-> **Execution tracking:** [`docs/pending.md`](../pending.md) §J1 — the standalone phased execution plan was removed 2026-06-09 once the client split to the `executespec-cli` repo.
+> **Execution tracking:** client-side execution moved to the standalone `executespec-cli` repo; this repo keeps only the server contract and historical design.
 > **Amends:** [`cli-plugin-spec-shape-b-2026-05-28.md`](cli-plugin-spec-shape-b-2026-05-28.md)
 
 This document specifies *what* the unified `spec` client is and *how* it is built. The organizing constraint, from ADR-0001, is **feature parity: every capability is reachable from both the CLI and the VS Code extension, backed by one shared core.**

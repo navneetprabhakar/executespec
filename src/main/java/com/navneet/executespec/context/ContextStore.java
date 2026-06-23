@@ -19,11 +19,11 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -47,7 +47,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class ContextStore {
 
   /** TTL for saved contexts. Matches the spec in {@code v2.context.package-info}. */
@@ -56,12 +55,23 @@ public class ContextStore {
   /** Key prefix — namespace the store so it can't collide with V1 or other apps. */
   public static final String KEY_PREFIX = "v2:agent-ctx:";
 
-  // Optional so missing Redis config (e.g. in unit tests) doesn't crash startup.
-  @Autowired(required = false)
-  private StringRedisTemplate redis;
-
+  private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
+
+  @Autowired
+  public ContextStore(
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      ObjectProvider<StringRedisTemplate> redisProvider) {
+    this(objectMapper, metrics, redisProvider.getIfAvailable());
+  }
+
+  ContextStore(ObjectMapper objectMapper, Metrics metrics, StringRedisTemplate redis) {
+    this.objectMapper = objectMapper;
+    this.metrics = metrics;
+    this.redis = redis;
+  }
 
   /** Compose the Redis key for a given ExecutionContext. */
   public static String keyFor(String runId, String taskId) {

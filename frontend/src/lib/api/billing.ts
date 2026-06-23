@@ -37,6 +37,76 @@ export const getAnalyticsBilling = (entityType: string, entityId: string) =>
     `/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`,
   );
 
+export type ManagedAiBalance = {
+  userId: string;
+  orgId: string | null;
+  tier: string;
+  routingState: string;
+  periodStart: string;
+  periodEnd: string;
+  includedAiCredits: number;
+  aiCreditsUsed: number;
+  aiCreditsRemaining: number;
+  rawCogsCapUsd: number;
+  rawCogsUsedUsd: number;
+  rawCogsRemainingUsd: number;
+  frontierRawCapUsd: number;
+  frontierRawUsedUsd: number;
+  frontierRawRemainingUsd: number;
+  valueModeAfterRawUsd: number;
+  cheapOnlyAfterRawUsd: number;
+  hardStopAfterRawUsd: number;
+  managed: boolean;
+  retailMultiplier: number;
+};
+
+export type ManagedAiUsageEvent = {
+  id: string;
+  periodId: string;
+  runId: string | null;
+  agentSessionId: string | null;
+  sourceType: string;
+  provider: string | null;
+  model: string | null;
+  modelClass: string | null;
+  agentRole: string | null;
+  stepId: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  rawCostUsd: number;
+  retailMultiplier: number;
+  aiCreditsCharged: number;
+  routingStateBefore: string;
+  routingStateAfter: string;
+  createdAt: string;
+};
+
+export type ManagedAiPolicy = {
+  enabled: boolean;
+  tier: string;
+  includedCredits: number;
+  rawCogsCapUsd: number;
+  frontierRawCapUsd: number;
+  valueModeAfterRawUsd: number;
+  cheapOnlyAfterRawUsd: number;
+  hardStopAfterRawUsd: number;
+  retailMultiplier: number;
+  concurrencyEnforced: boolean;
+  rateLimitsEnabled: boolean;
+  notificationThresholdsPct: number[];
+  creditDefinition: string;
+};
+
+export const getManagedAiBalance = () => req<ManagedAiBalance>('/billing/managed-ai/balance');
+
+export const getManagedAiEvents = (limit = 25) =>
+  req<ManagedAiUsageEvent[]>(`/billing/managed-ai/events?period=current&limit=${limit}`);
+
+export const getManagedAiPolicy = () => req<ManagedAiPolicy>('/billing/managed-ai/policy');
+
 export const updateModelPricing = (
   provider: string,
   model: string,
