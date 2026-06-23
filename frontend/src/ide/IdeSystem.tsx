@@ -1,7 +1,12 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
+import {
+  useAuthStore,
+  selectIsSuperAdmin,
+  selectIsOrgAdmin,
+  selectNormalizedTier,
+} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor} from '@/signal/lib/runUtils';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
@@ -440,13 +445,17 @@ export function IdeSearch() {
 
 export function IdeAudit() {
   const tier = useAuthStore(selectNormalizedTier);
-  const user = useAuthStore((s) => s.user);
-  const isOrgAdmin = user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN';
+  // F2 (QA, 2026-06-23) — the audit panel is for ORG_ADMIN + SUPER_ADMIN only.
+  // selectIsOrgAdmin already returns true for SUPER_ADMIN || ORG_ADMIN, so it
+  // is the single gate: non-admins never reach the fetch below (the server 403s
+  // them anyway, but firing the request just to render a broken table is wrong).
+  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
   const [logs, setLogs] = useState<api.AuditLogEntry[] | null>(null);
   const [filter, setFilter] = useState<AuditFilter>('all');
   const [err, setErr] = useState('');
 
   useEffect(() => {
+    if (!isOrgAdmin) return;
     let cancelled = false;
     api
       .getAuditLogs({page: 0, size: 100})
@@ -488,6 +497,18 @@ export function IdeAudit() {
     {key: 'members', label: 'Members'},
     {key: 'admin', label: 'Admin'},
   ];
+
+  // F2 (QA, 2026-06-23) — non-admins get a clear empty state instead of the
+  // table + a 403 error. No /api/admin/audit-logs request fires for them.
+  if (!isOrgAdmin) {
+    return (
+      <div className='ide-pane' style={{maxWidth: 760}}>
+        <div className='ide-h1'>Audit log</div>
+        <div className='ide-sub'>Compliance trail.</div>
+        <div className='ide-empty'>Audit log is available to organization admins only.</div>
+      </div>
+    );
+  }
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
