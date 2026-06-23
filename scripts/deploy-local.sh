@@ -59,6 +59,12 @@ case "$ENVNAME" in
   *)          PUBLIC_URL="https://dev.executespec.ai" ;;
 esac
 
+# Pin the project for THIS script's gcloud + gsutil calls. Your interactive `gcloud config`
+# default may point elsewhere (e.g. ppl-ai-488614) — exporting it here overrides the active
+# project for this process only, so NO `gcloud config set project` and NO re-login is needed.
+# (The authenticated account must still have access to $GCP_PROJECT; the dry-run verifies that.)
+export CLOUDSDK_CORE_PROJECT="$GCP_PROJECT"
+
 # gcloud's bundled python prints a noisy 3.9 deprecation warning; keep it off stdout.
 GC() { gcloud "$@" 2>/dev/null; }
 SSH_BASE=(compute ssh "$INSTANCE" --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no)
@@ -67,6 +73,7 @@ echo "── deploy-local ──────────────────
 echo "  mode=$MODE  env=$ENVNAME  sha=$SHA"
 echo "  project=$GCP_PROJECT  zone=$GCE_ZONE  instance=$INSTANCE"
 echo "  bucket=$BUCKET  public_url=$PUBLIC_URL"
+echo "  gcloud account=$(gcloud config get-value account 2>/dev/null)  (global default project=$(gcloud config get-value project 2>/dev/null), overridden to $GCP_PROJECT for this run)"
 echo "──────────────────────────────────────────────────────────"
 
 # ── 0. Read-only preflight (always; also IS the dry-run) ──────────────────────
