@@ -131,11 +131,14 @@ export default function IdeAgent() {
   }
 
   async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+    // Snapshot synchronously: the picker's onChange resets input.value right after this call,
+    // which empties the live FileList before the awaits below would otherwise read it.
+    const list = files ? Array.from(files) : [];
+    if (list.length === 0) return;
     setUploading(true);
     try {
       const session = await ensureSession();
-      for (const file of Array.from(files)) {
+      for (const file of list) {
         const meta = await api.uploadAgentAttachment(session.id, file);
         dispatch({
           type: 'attachment:add',
