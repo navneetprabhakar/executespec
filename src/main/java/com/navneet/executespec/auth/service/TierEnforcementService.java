@@ -220,9 +220,9 @@ public class TierEnforcementService {
 
   /**
    * Run-count retirement (2026-06-22): increment the monthly run counter for ANALYTICS ONLY, with
-   * no quota enforcement. Replaces {@code assertAndIncrementRunCount} at the submission choke points
-   * now that managed ES AI credits gate spend. Keeps {@code personal_run_count} /
-   * {@code monthly_run_count} and their billing-cycle resets meaningful for dashboards without ever
+   * no quota enforcement. Replaces {@code assertAndIncrementRunCount} at the submission choke
+   * points now that managed ES AI credits gate spend. Keeps {@code personal_run_count} / {@code
+   * monthly_run_count} and their billing-cycle resets meaningful for dashboards without ever
    * throwing.
    */
   @Transactional

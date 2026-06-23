@@ -170,13 +170,13 @@ public class ManagedAiUsageService {
   }
 
   /**
-   * Run-count retirement (2026-06-22): submission-time managed-AI spend gate. Replaces
-   * {@code TierEnforcementService.assertAndIncrementRunCount} + {@code UsageTrackingService}'s
-   * "RUNS" quota at run submission. Throws 402 only when the user's tier is managed (FREE/PRO),
-   * they are not pure BYOK ({@code ownKeysMode} — own-key spend is cap-exempt and never accrues raw
-   * COGS), and their routing state is {@link #EXHAUSTED}. Per-call {@link #authorizeCall} stays the
-   * mid-run source of truth; this is the fail-fast pre-flight so a run does not start only to die on
-   * its first managed call.
+   * Run-count retirement (2026-06-22): submission-time managed-AI spend gate. Replaces {@code
+   * TierEnforcementService.assertAndIncrementRunCount} + {@code UsageTrackingService}'s "RUNS"
+   * quota at run submission. Throws 402 only when the user's tier is managed (FREE/PRO), they are
+   * not pure BYOK ({@code ownKeysMode} — own-key spend is cap-exempt and never accrues raw COGS),
+   * and their routing state is {@link #EXHAUSTED}. Per-call {@link #authorizeCall} stays the
+   * mid-run source of truth; this is the fail-fast pre-flight so a run does not start only to die
+   * on its first managed call.
    */
   @Transactional
   public void assertCanStartRun(AppUserDetails userDetails, boolean ownKeysMode) {
@@ -201,9 +201,9 @@ public class ManagedAiUsageService {
   }
 
   /**
-   * Read-only ES-credit rollup for the v3 entitlements surface (no period creation). Returns
-   * {@code managed=false} (ungated) for TEAM/ENTERPRISE/own-key tiers; for managed tiers it reflects
-   * the live period when one exists, else the policy grant with zero usage.
+   * Read-only ES-credit rollup for the v3 entitlements surface (no period creation). Returns {@code
+   * managed=false} (ungated) for TEAM/ENTERPRISE/own-key tiers; for managed tiers it reflects the
+   * live period when one exists, else the policy grant with zero usage.
    */
   @Transactional(readOnly = true)
   public CreditSummary creditSummary(String userId, String tier) {
@@ -216,12 +216,17 @@ public class ManagedAiUsageService {
         .map(
             p -> {
               // Grant is policy-derived; the period snapshot may predate a policy bump. The write
-              // path (currentOrCreate) refreshes the period's caps, but reads must still reflect the
+              // path (currentOrCreate) refreshes the period's caps, but reads must still reflect
+              // the
               // current grant immediately.
               long included = policy.getIncludedCredits();
               long used = p.getAiCreditsUsed();
               return new CreditSummary(
-                  true, routingPolicy.recomputeState(p), included, used, Math.max(0, included - used));
+                  true,
+                  routingPolicy.recomputeState(p),
+                  included,
+                  used,
+                  Math.max(0, included - used));
             })
         .orElseGet(
             () ->
