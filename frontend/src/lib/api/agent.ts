@@ -216,6 +216,45 @@ export const listAgentCapabilities = (surface: 'WEB' | 'CLI' | 'VSCODE' | string
 export const createAgentSession = (body: CreateAgentSessionRequest) =>
   req<AgentSessionResponse>('/agent/sessions', {method: 'POST', body: JSON.stringify(body)});
 
+export interface AgentAttachment {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  extractedChars: number;
+  preview: string;
+}
+
+/**
+ * Upload a chat attachment. The server validates type (magic-byte), size, extracts + sanitizes the
+ * text, runs the injection/abuse scan, and stores it for the next turn — returning metadata only.
+ * Mirrors uploadProjectDocument's auth pattern (multipart + Bearer from access_token).
+ */
+export const uploadAgentAttachment = async (
+  sessionId: string,
+  file: File,
+): Promise<AgentAttachment> => {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('access_token');
+  const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/attachments`, {
+    method: 'POST',
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+    body: form,
+  });
+  if (!res.ok) {
+    let msg = `Upload failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body && (body.message || body.error)) msg = body.message || body.error;
+    } catch {
+      // non-JSON error body — keep the status-based message
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+};
+
 export const listAgentSessions = (limit = 20) =>
   req<AgentSessionResponse[]>(`/agent/sessions?limit=${encodeURIComponent(String(limit))}`);
 

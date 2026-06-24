@@ -32,6 +32,13 @@ turns separately from runs.
   turn path binds `ProjectChatTools` through `SpecChatService` so CLI and VS Code can answer
   project/code questions with the same architecture, memory, document, tech-debt, and source-search
   tools used by web project chat.
+- The read-only chat tool surface also includes `web_search` / `web_fetch` (from
+  `specchat/WebSearchChatTools`, SSRF-hardened, content returned `untrusted`-flagged) so the agent
+  can ground answers in public web pages. The worker-only `tool/` web tools stay out of chat. Chat
+  uploads go through `AgentAttachmentService` (`POST /api/agent/sessions/{id}/attachments`): every
+  file is type/size/extract/injection-validated and stored sanitized in `AgentAttachmentStore`
+  (Redis), then injected server-side as untrusted-delimited context via
+  `StreamTurnRequest.attachmentIds` — never the raw bytes, never client-controlled delimiting.
 - Run-scoped web agent sessions persist `agent_session.run_id` (V246). Creation must validate the
   run through `RunAccessGuard`; if the caller also sends `projectId`, it must match the run's
   project. Streaming turns pass the scoped run id into `SpecChatService` as context instead of
@@ -66,7 +73,9 @@ turns separately from runs.
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
 | `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior.                                                                                                |
 | `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect.                       |
-| `AgentStreamTurnSupport.java`              | Package-local stream support policy: read-only tool allowlist, conversation fallback, and client-disconnect detection.                                                                                              |
+| `AgentStreamTurnSupport.java`              | Package-local stream support policy: read-only tool allowlist (incl. `web_search`/`web_fetch`), conversation fallback, server-side attachment-block injection, and client-disconnect detection.                     |
+| `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
+| `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
 | `AgentText.java`                           | Package-local string helper for repeated blank, fallback, trim, and path-leaf handling across agent-session services.                                                                                               |
 | `AgentIntentService.java`                  | Conservative deterministic pre-router. LLM intent routing can replace/augment this later, but must preserve typed routes, policy, typed actions, and confirmations.                                                 |
 | `AgentIntentDecisions.java`                | Package-local decision/policy construction and billing-impact mapping helper for deterministic route outputs.                                                                                                       |
@@ -145,7 +154,12 @@ turns separately from runs.
 - `AgentRunSubmissionGateTest` pins that only stored, confirmed `CODE_RUN_REQUIRED` decisions reach
   `RunOrchestrator.submitRun`; non-run routes and missing confirmation fail before a run is created.
 - `AgentActionCatalogTest` pins surface/tier filtering and descriptor/capability metadata alignment
-  so local-only tools stay out of WEB and action billing/confirmation fields do not drift.
+  so local-only tools stay out of WEB and action billing/confirmation fields do not drift, and pins
+  `web_search`/`web_fetch` exposure on every surface.
+- `AgentAttachmentServiceTest` pins the upload gate: clean text is accepted/extracted/stored, image
+  and oversize/empty files are rejected, and an `InputSanitizer` injection hit propagates as 400 with
+  no store write. `specchat/WebSearchChatToolsTest` pins the `web_fetch` SSRF guards (scheme,
+  localhost/`*.internal`, loopback/link-local/metadata IPs) and required-arg rejection.
 - `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
   routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, owned-session loading,

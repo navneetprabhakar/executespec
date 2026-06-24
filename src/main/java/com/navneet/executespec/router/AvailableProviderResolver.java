@@ -53,9 +53,8 @@ public class AvailableProviderResolver {
   @Value("${spring.ai.fireworks.api-key:}")
   private String systemFireworksKey;
 
-  // 2026-06-21 — Sarvam AI system key. BYOK (user/org) lanes are deferred until the eval justifies
-  // a
-  // customer-facing surface, so Sarvam availability is system-key-only for now.
+  // 2026-06-21 — Sarvam AI system key. Retained for future eval breadcrumbs only. It is
+  // deliberately not added to available providers because live quality was not production-ready.
   @Value("${spring.ai.sarvam.api-key:}")
   private String systemSarvamKey;
 
@@ -84,7 +83,7 @@ public class AvailableProviderResolver {
       if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
       if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
       if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
-      if (isPresent(systemSarvamKey)) available.add(LlmProvider.SARVAM);
+      // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
     }
 
     if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
@@ -125,7 +124,7 @@ public class AvailableProviderResolver {
     if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
     if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
-    if (isPresent(systemSarvamKey)) providers.add(LlmProvider.SARVAM);
+    // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
 
     if (providers.isEmpty()) {
       // Last resort: assume Anthropic is available (system default)

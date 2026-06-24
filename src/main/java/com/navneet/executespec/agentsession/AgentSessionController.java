@@ -10,6 +10,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultReq
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveResponse;
@@ -33,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import io.micrometer.context.ContextSnapshotFactory;
@@ -46,6 +48,7 @@ public class AgentSessionController {
   private final AgentSessionService sessionService;
   private final AgentActionCatalog actionCatalog;
   private final AgentStreamTurnRunner streamTurnRunner;
+  private final AgentAttachmentService attachmentService;
 
   @GetMapping("/actions")
   public List<AgentActionDescriptor> actions() {
@@ -158,6 +161,18 @@ public class AgentSessionController {
         .name("agent-turn-" + ctx.turnId())
         .start(snapshot.wrap(() -> streamTurnRunner.run(emitter, ctx, user, request)));
     return emitter;
+  }
+
+  @PostMapping(
+      value = "/sessions/{sessionId}/attachments",
+      consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  public AttachmentResponse uploadAttachment(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam("file") MultipartFile file) {
+    // Ownership guard — throws if the session isn't the caller's (same check as getSession).
+    sessionService.getSession(sessionId, user);
+    return attachmentService.validateAndStore(sessionId, file, user);
   }
 
   @PostMapping("/intent/interpret")

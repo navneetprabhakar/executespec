@@ -65,9 +65,22 @@ esac
 # (The authenticated account must still have access to $GCP_PROJECT; the dry-run verifies that.)
 export CLOUDSDK_CORE_PROJECT="$GCP_PROJECT"
 
+# `gcloud compute ssh` needs Python 3.10+ — the bundled 3.9 crashes ("unsupported operand type(s)
+# for |"). Point gcloud at a newer interpreter if the caller hasn't.
+if [ -z "${CLOUDSDK_PYTHON:-}" ]; then
+  for _p in /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.13 python3; do
+    command -v "$_p" >/dev/null 2>&1 && "$_p" -c 'import sys;exit(0 if sys.version_info>=(3,10) else 1)' 2>/dev/null \
+      && { export CLOUDSDK_PYTHON="$(command -v "$_p")"; break; }
+  done
+fi
+# Lombok silently no-ops under the wrong JDK → "cannot find symbol: log" on a clean tree. Pin openjdk@21.
+if [ -z "${JAVA_HOME:-}" ] && [ -x "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java" ]; then
+  export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+fi
+
 # gcloud's bundled python prints a noisy 3.9 deprecation warning; keep it off stdout.
 GC() { gcloud "$@" 2>/dev/null; }
-SSH_BASE=(compute ssh "$INSTANCE" --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no)
+SSH_BASE=(gcloud compute ssh "$INSTANCE" --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no)
 
 echo "── deploy-local ──────────────────────────────────────────"
 echo "  mode=$MODE  env=$ENVNAME  sha=$SHA"

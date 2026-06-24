@@ -4,8 +4,13 @@ import {
   actionFromTurn,
   agentReducer,
   currency,
+  deriveBarStatus,
   initialAgentState,
+  isTerminalRunStatus,
   pct,
+  runOpenPath,
+  runPhaseLabel,
+  runProgress,
   sessionTitle,
   toMessages,
 } from './agentState';
@@ -126,5 +131,86 @@ describe('agentState', () => {
     expect(pct(5, 0)).toBe(0);
     expect(currency(4.125)).toBe('$4.13');
     expect(currency(-1)).toBe('n/a');
+  });
+
+  it('derives honest bar status, run phase, progress, and open path', () => {
+    expect(
+      deriveBarStatus({
+        status: 'idle',
+        hasPendingAction: false,
+        pendingGateCount: 0,
+        runActive: false,
+      }),
+    ).toEqual({label: 'Ready', tone: 'ok'});
+    expect(
+      deriveBarStatus({
+        status: 'idle',
+        hasPendingAction: true,
+        pendingGateCount: 0,
+        runActive: false,
+      }),
+    ).toEqual({label: 'Waiting for you', tone: 'waiting'});
+    expect(
+      deriveBarStatus({
+        status: 'idle',
+        hasPendingAction: false,
+        pendingGateCount: 2,
+        runActive: false,
+      }).tone,
+    ).toBe('waiting');
+    expect(
+      deriveBarStatus({
+        status: 'idle',
+        hasPendingAction: false,
+        pendingGateCount: 0,
+        runActive: true,
+      }),
+    ).toEqual({label: 'Running', tone: 'working'});
+    expect(
+      deriveBarStatus({
+        status: 'streaming',
+        hasPendingAction: false,
+        pendingGateCount: 0,
+        runActive: false,
+      }).tone,
+    ).toBe('working');
+    expect(
+      deriveBarStatus({
+        status: 'error',
+        hasPendingAction: true,
+        pendingGateCount: 3,
+        runActive: true,
+      }),
+    ).toEqual({label: 'Error', tone: 'error'});
+
+    expect(runPhaseLabel('AWAITING_APPROVAL')).toBe('Waiting for approval');
+    expect(runPhaseLabel('WORKING')).toBe('Coding');
+    expect(runPhaseLabel('COMPLETE')).toBe('Done');
+    expect(runPhaseLabel('FAILED')).toBe('Failed');
+
+    expect(isTerminalRunStatus('COMPLETE')).toBe(true);
+    expect(isTerminalRunStatus('WORKING')).toBe(false);
+
+    expect(runOpenPath('r1', 'AWAITING_APPROVAL')).toBe('/plan/r1');
+    expect(runOpenPath('r1', 'WORKING')).toBe('/live/r1');
+    expect(runOpenPath('r1', 'COMPLETE')).toBe('/result/r1');
+
+    expect(
+      runProgress([
+        {status: 'COMPLETE', title: 'a'},
+        {status: 'WORKING', title: 'b'},
+        {status: 'PENDING', title: 'c'},
+      ]),
+    ).toEqual({done: 1, total: 3, pct: 33, current: 'b'});
+    expect(runProgress([])).toEqual({done: 0, total: 0, pct: 0, current: null});
+  });
+
+  it('clears errors without wiping non-error state', () => {
+    const cleared = agentReducer(
+      {...initialAgentState, status: 'error', error: 'boom'},
+      {type: 'error:clear'},
+    );
+    expect(cleared.error).toBeNull();
+    expect(cleared.status).toBe('idle');
   });
 });
