@@ -98,7 +98,8 @@ export type AgentAction =
   | {type: 'attachment:add'; attachment: AgentAttachmentLite}
   | {type: 'attachment:remove'; attachmentId: string}
   | {type: 'sessions:toggle'}
-  | {type: 'error'; error: string};
+  | {type: 'error'; error: string}
+  | {type: 'error:clear'};
 
 export const initialAgentState: AgentState = {
   status: 'idle',
@@ -149,6 +150,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         streamEvents: [],
         routingState: null,
         attachments: [],
+        activeRun: null,
       };
     case 'turns:set':
       return {...state, turns: action.turns};
@@ -263,6 +265,8 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
     }
     case 'error':
       return {...state, status: 'error', error: action.error};
+    case 'error:clear':
+      return {...state, error: null, status: state.status === 'error' ? 'idle' : state.status};
     default:
       return state;
   }
@@ -315,6 +319,110 @@ export function toMessages(turns: api.AgentTurnResponse[]): LocalMessage[] {
 
 export function actionLabel(action: api.AgentTypedAction): string {
   return action.type.replace(/_/g, ' ');
+}
+
+export type BarTone = 'ok' | 'working' | 'waiting' | 'error';
+
+/**
+ * Honest top-bar status. A pending action or open gate means the agent is
+ * blocked on the human ("Waiting for you"), NOT idle — the old statusLabel
+ * showed a green "Ready" in exactly that moment, which was misleading.
+ */
+export function deriveBarStatus(args: {
+  status: AgentUiState;
+  hasPendingAction: boolean;
+  pendingGateCount: number;
+  runActive: boolean;
+}): {label: string; tone: BarTone} {
+  if (args.status === 'error') return {label: 'Error', tone: 'error'};
+  if (args.hasPendingAction || args.pendingGateCount > 0)
+    return {label: 'Waiting for you', tone: 'waiting'};
+  if (args.runActive) return {label: 'Running', tone: 'working'};
+  if (
+    args.status === 'streaming' ||
+    args.status === 'toolRunning' ||
+    args.status === 'runStreaming'
+  )
+    return {label: 'Working', tone: 'working'};
+  if (args.status === 'loadingSession') return {label: 'Loading', tone: 'working'};
+  if (args.status === 'reconnecting') return {label: 'Reconnecting', tone: 'working'};
+  return {label: 'Ready', tone: 'ok'};
+}
+
+/** Friendly phase for a run's backend status (transport jargon → plain English). */
+export function runPhaseLabel(status?: string | null): string {
+  const s = (status || '').toUpperCase();
+  if (['QUEUED', 'PENDING', 'SUBMITTED', 'QUEUED_BATCH'].includes(s)) return 'Queued';
+  if (['CLASSIFYING', 'PLANNING'].includes(s)) return 'Planning';
+  if (s === 'AWAITING_APPROVAL') return 'Waiting for approval';
+  if (['WORKING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH', 'CODING', 'RUNNING'].includes(s))
+    return 'Coding';
+  if (['COMPILING', 'BUILDING'].includes(s)) return 'Building';
+  if (s === 'REVIEWING') return 'Reviewing';
+  if (s === 'TESTING') return 'Testing';
+  if (['COMPLETE', 'COMPLETED'].includes(s)) return 'Done';
+  if (s === 'FAILED') return 'Failed';
+  if (s === 'CANCELLED') return 'Cancelled';
+  if (s === 'PAUSED') return 'Paused';
+  return s ? s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ') : 'Running';
+}
+
+export function isTerminalRunStatus(status?: string | null): boolean {
+  return ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'ERROR'].includes(
+    (status || '').toUpperCase(),
+  );
+}
+
+export type RunProgress = {done: number; total: number; pct: number; current: string | null};
+
+/** Done/total/percent + the title of the task currently in flight, for the run card. */
+export function runProgress(
+  tasks?: {status?: string | null; title?: string | null}[] | null,
+): RunProgress {
+  const list = tasks ?? [];
+  const total = list.length;
+  const isDone = (s?: string | null) =>
+    ['COMPLETE', 'COMPLETED', 'DONE'].includes((s || '').toUpperCase());
+  const isRunning = (s?: string | null) =>
+    ['WORKING', 'IN_PROGRESS', 'RUNNING'].includes((s || '').toUpperCase());
+  const done = list.filter((t) => isDone(t.status)).length;
+  const current = list.find((t) => isRunning(t.status))?.title ?? null;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return {done, total, pct, current};
+}
+
+/** Route for the run card's "Open" action, by run status. */
+export function runOpenPath(runId: string, status?: string | null): string {
+  const s = (status || '').toUpperCase();
+  if (s === 'AWAITING_APPROVAL') return `/plan/${runId}`;
+  if (isTerminalRunStatus(s) || s === 'PAUSED') return `/result/${runId}`;
+  return `/live/${runId}`;
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  web_search: 'Searched the web',
+  web_fetch: 'Read a web page',
+  list_recent_runs: 'Listed recent runs',
+  get_run_report: 'Read a run report',
+  search_repo_files: 'Searched the repo',
+  search_code: 'Searched the code',
+  list_project_documents: 'Listed documents',
+  read_generated_doc: 'Read a document',
+  search_project_docs: 'Searched documents',
+  get_latest_architecture: 'Read the architecture',
+  get_project_memory: 'Read project memory',
+  get_tech_debt_summary: 'Checked tech debt',
+  list_repos: 'Listed repos',
+  list_pull_requests: 'Listed pull requests',
+  get_latest_code_review: 'Read the code review',
+  submit_run: 'Started a run',
+  approve_plan: 'Approved a plan',
+};
+
+/** Friendly, human label for a tool name (replaces raw tool/JSON in the chat). */
+export function friendlyTool(name: string): string {
+  if (!name) return 'Ran a tool';
+  return TOOL_LABELS[name] ?? `Ran ${name.replace(/_/g, ' ')}`;
 }
 
 export function asText(value: unknown): string {

@@ -1,20 +1,16 @@
-import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
+import {type UIEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {
   actionFromTurn,
   agentReducer,
+  deriveBarStatus,
   initialAgentState,
+  isTerminalRunStatus,
   toMessages,
   type PendingAction,
 } from '@/ide/agentState';
-import {
-  AgentHeader,
-  AgentLeftRail,
-  AgentMainPanel,
-  AgentRightRail,
-  AgentTopStrip,
-} from '@/ide/agentPanels';
+import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 
 export default function IdeAgent() {
@@ -24,6 +20,11 @@ export default function IdeAgent() {
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [runDetail, setRunDetail] = useState<api.RunDetail | null>(null);
+  const [runCost, setRunCost] = useState<number | null>(null);
+  const stickToBottom = useRef(true);
 
   const selected = useMemo(
     () => state.sessions.find((session) => session.id === state.selectedId) ?? null,
@@ -114,8 +115,51 @@ export default function IdeAgent() {
   }, [loadTurns, state.selectedId]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({block: 'end'});
-  }, [state.turns, state.pendingUser, state.streamText, state.streamEvents]);
+    if (stickToBottom.current) endRef.current?.scrollIntoView({block: 'end'});
+  }, [state.turns, state.pendingUser, state.streamText, state.streamEvents, runDetail]);
+
+  // Poll the agent-submitted run so the pinned run card stays live until terminal.
+  useEffect(() => {
+    const id = state.activeRun;
+    if (!id) {
+      setRunDetail(null);
+      setRunCost(null);
+      return;
+    }
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const [detail, cost] = await Promise.all([
+          api.getRun(id),
+          api.getLiveCost(id).catch(() => null),
+        ]);
+        if (!alive) return;
+        setRunDetail(detail);
+        if (cost && typeof cost.costUsd === 'number') setRunCost(cost.costUsd);
+        if (!isTerminalRunStatus(detail.status)) timer = setTimeout(poll, 4000);
+      } catch {
+        if (alive) timer = setTimeout(poll, 6000);
+      }
+    };
+    void poll();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [state.activeRun]);
+
+  // Escape closes the chats drawer / settings popover.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setChatsOpen(false);
+        setSettingsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   async function createSession() {
     const session = await api.createAgentSession(webAgentSessionRequest({projectId, runId}));
@@ -180,7 +224,7 @@ export default function IdeAgent() {
       await api.streamAgentTurn(
         session.id,
         {
-          message: runId ? `[Run ${runId}] ${message}` : message,
+          message,
           attachmentIds,
           clientCapabilities: {
             localTools: false,
@@ -274,6 +318,7 @@ export default function IdeAgent() {
         },
       });
       await api.approveRun(gate.runId, true, gate.creditsRequired ?? undefined);
+      dispatch({type: 'run:submitted', runId: gate.runId});
       await refreshAfterMutation();
     } catch (e) {
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Plan approval failed.'});
@@ -289,6 +334,19 @@ export default function IdeAgent() {
     }
   }
 
+  async function stopRun() {
+    const id = state.activeRun;
+    if (!id) return;
+    try {
+      await api.cancelRun(id);
+      const detail = await api.getRun(id).catch(() => null);
+      if (detail) setRunDetail(detail);
+      await refreshAfterMutation();
+    } catch (e) {
+      dispatch({type: 'error', error: e instanceof Error ? e.message : 'Could not stop the run.'});
+    }
+  }
+
   function stop() {
     abortRef.current?.abort();
     dispatch({type: 'stream:stop'});
@@ -300,69 +358,103 @@ export default function IdeAgent() {
     state.status === 'toolRunning' ||
     state.status === 'runStreaming';
 
+  const runActive =
+    !!runDetail &&
+    !isTerminalRunStatus(runDetail.status) &&
+    runDetail.status !== 'AWAITING_APPROVAL';
+  // The run card owns the active run across every phase; drop it from the inline
+  // gate list so a just-submitted run isn't shown twice while it waits for approval.
+  const inlineGates = state.gates.filter((g) => g.runId !== state.activeRun);
+  const barStatus = deriveBarStatus({
+    status: state.status,
+    hasPendingAction: !!visibleAction || runDetail?.status === 'AWAITING_APPROVAL',
+    pendingGateCount: inlineGates.length,
+    runActive,
+  });
+  const scopeLabel = runId ? `Run ${runId.slice(0, 8)}` : projectId ? 'Project' : null;
+  const runCard = runDetail;
+  const onChatScroll = (e: UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   return (
-    <div className='ide-page agent-page'>
-      <AgentHeader onCreate={() => void createSession()} busy={isBusy} />
-      <AgentTopStrip
+    <div className='ide-page agent-chat-page'>
+      <AgentTopBar
         selected={selected}
-        projectId={projectId}
-        runId={runId}
-        activeRun={state.activeRun}
+        barStatus={barStatus}
+        scopeLabel={scopeLabel}
+        busy={isBusy}
+        settingsOpen={settingsOpen}
         managedAi={state.managedAi}
         routingState={state.routingState}
+        capabilities={state.capabilities}
+        onNewChat={() => {
+          setChatsOpen(false);
+          void createSession();
+        }}
+        onToggleChats={() => setChatsOpen((o) => !o)}
+        onToggleSettings={() => setSettingsOpen((o) => !o)}
       />
 
       {state.error && (
-        <div className='ide-card agent-error'>
-          <b>Agent error</b>
-          <span>{state.error}</span>
+        <div className='ide-card agent-error' role='alert'>
+          <span className='agent-error-body'>
+            <b>Something went wrong</b>
+            <span>{state.error}</span>
+          </span>
+          <button
+            className='agent-error-dismiss'
+            onClick={() => dispatch({type: 'error:clear'})}
+            aria-label='Dismiss error'
+          >
+            ×
+          </button>
         </div>
       )}
 
-      <div className={`agent-shell three${state.sessionsCollapsed ? ' no-left' : ''}`}>
-        {!state.sessionsCollapsed && (
-          <AgentLeftRail
-            sessions={state.sessions}
-            selectedId={state.selectedId}
-            status={state.status}
-            onToggle={() => dispatch({type: 'sessions:toggle'})}
-            dispatch={dispatch}
-          />
-        )}
-        <AgentMainPanel
-          selected={selected}
-          status={state.status}
-          messages={messages}
-          visibleAction={visibleAction}
-          isBusy={isBusy}
-          streamText={state.streamText}
-          streamEvents={state.streamEvents}
-          input={state.input}
-          projectId={projectId}
-          runId={runId}
-          endRef={endRef}
-          attachments={state.attachments}
-          uploading={uploading}
-          sessionsCollapsed={state.sessionsCollapsed}
-          onAddFiles={(files) => void handleFiles(files)}
-          onRemoveAttachment={(id) => dispatch({type: 'attachment:remove', attachmentId: id})}
-          onToggleSessions={() => dispatch({type: 'sessions:toggle'})}
-          dispatch={dispatch}
-          onConfirmAction={(pending) => void confirmAction(pending)}
-          onSend={() => void send()}
-          onStop={stop}
-        />
-        <AgentRightRail
-          managedAi={state.managedAi}
-          routingState={state.routingState}
-          gates={state.gates}
-          capabilities={state.capabilities}
-          busy={isBusy}
-          onApproveGate={(gate) => void approveGate(gate)}
-          onRejectGate={(gate) => void rejectGate(gate)}
-          onOpenGate={(id) => navigate(`/plan/${id}`)}
-        />
-      </div>
+      <AgentChatsDrawer
+        open={chatsOpen}
+        sessions={state.sessions}
+        selectedId={state.selectedId}
+        status={state.status}
+        onSelect={(id) => {
+          dispatch({type: 'session:select', sessionId: id});
+          setChatsOpen(false);
+        }}
+        onNewChat={() => {
+          setChatsOpen(false);
+          void createSession();
+        }}
+        onClose={() => setChatsOpen(false)}
+      />
+
+      <AgentConversation
+        messages={messages}
+        streamEvents={state.streamEvents}
+        streamText={state.streamText}
+        isBusy={isBusy}
+        visibleAction={visibleAction}
+        gates={inlineGates}
+        runCard={runCard}
+        runCost={runCost}
+        input={state.input}
+        attachments={state.attachments}
+        uploading={uploading}
+        endRef={endRef}
+        dispatch={dispatch}
+        onScroll={onChatScroll}
+        onSend={() => void send()}
+        onStop={stop}
+        onAddFiles={(files) => void handleFiles(files)}
+        onRemoveAttachment={(id) => dispatch({type: 'attachment:remove', attachmentId: id})}
+        onConfirmAction={(pending) => void confirmAction(pending)}
+        onApproveGate={(gate) => void approveGate(gate)}
+        onRejectGate={(gate) => void rejectGate(gate)}
+        onOpenGate={(id) => navigate(`/plan/${id}`)}
+        onOpenRun={(path) => navigate(path)}
+        onStopRun={() => void stopRun()}
+      />
     </div>
   );
 }
