@@ -63,6 +63,9 @@ public class ModelController {
         .getProviders()
         .forEach(
             (providerKey, models) -> {
+              if (ModelAccessService.isDisabledProvider(providerKey)) {
+                return;
+              }
               List<ModelEntry> modelEntries = new ArrayList<>();
 
               // PLANNING tier

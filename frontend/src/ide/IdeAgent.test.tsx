@@ -195,16 +195,32 @@ describe('IdeAgent', () => {
     host = null;
   });
 
-  it('renders the web agent control plane with managed-AI, gate, and WEB capability rails', async () => {
+  it('renders chat-first: top bar + inline gate, with internals behind the settings popover', async () => {
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('Control plane');
-    expect(host.textContent).toContain('1590 ES AI credits left');
-    expect(host.textContent).toContain('VALUE_MODE');
+    // Chat-first chrome (no jargon strip / rails in the main view)
+    expect(host.textContent).toContain('Chats');
+    expect(host.textContent).toContain('New chat');
+    expect(host.textContent).toContain('Web agent');
+    // Pending gate surfaces inline as an action card
+    expect(host.textContent).toContain('Waiting for your approval');
     expect(host.textContent).toContain('Add audit logs');
-    expect(host.textContent).toContain('chat_answer');
-    expect(host.textContent).toContain('create_cloud_run');
+    // Internals are de-jargoned out of the main view
+    expect(host.textContent).not.toContain('chat_answer');
+    expect(host.textContent).not.toContain('ES AI credits');
     expect(api.listAgentCapabilities).toHaveBeenCalledWith('WEB');
+
+    // Opening the settings popover reveals the internals (provider, credits, capabilities)
+    const settingsBtn = [...host.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === 'Agent settings and usage',
+    );
+    if (!settingsBtn) throw new Error('Settings button was not rendered.');
+    await act(async () => {
+      settingsBtn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    expect(host.textContent).toContain('chat answer');
+    expect(host.textContent).toContain('create cloud run');
+    expect(host.textContent).toContain('ES AI credits');
   });
 
   it('renders streamed route decisions and cloud-run proposal cards before execution', async () => {
@@ -242,21 +258,17 @@ describe('IdeAgent', () => {
     });
 
     ({host, root} = await renderAgent('/agent'));
-    const paletteButton = [...host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Create a cloud run',
-    );
-    if (!paletteButton) throw new Error('Create a cloud run command was not rendered.');
-
-    await act(async () => {
-      paletteButton.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
 
     const textarea = host.querySelector('textarea');
     if (!textarea) throw new Error('Agent composer textarea was not rendered.');
-    expect(textarea.value).toBe('Create a cloud run');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Start a run to add billing audit logs');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
 
     const send = [...host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Send',
+      (button) => button.getAttribute('aria-label') === 'Send',
     );
     if (!send) throw new Error('Send button was not rendered.');
 
@@ -265,11 +277,11 @@ describe('IdeAgent', () => {
     });
     await flush();
 
-    expect(host.textContent).toContain('CODE_RUN_REQUIRED');
+    // Proposal renders as a clean inline action card (no routing jargon in the main view)
+    expect(host.textContent).toContain('Start a cloud run');
     expect(host.textContent).toContain('Create a cloud run?');
     expect(host.textContent).toContain('Add billing audit logs');
-    expect(host.textContent).toContain('Run API');
-    expect(host.textContent).toContain('allowed after confirmation');
+    expect(host.textContent).toContain('Approve');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
   });
 });

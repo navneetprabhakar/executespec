@@ -74,4 +74,14 @@ class AgentActionCatalogTest {
           .containsEntry("required", descriptor.requiredFields());
     }
   }
+
+  @Test
+  void webResearchToolsExposedOnEverySurface() {
+    for (String surface : java.util.List.of("WEB", "CLI", "VSCODE")) {
+      assertThat(catalog.capabilities(surface, "FREE"))
+          .as("web research tools on %s", surface)
+          .extracting("name")
+          .contains("web_search", "web_fetch");
+    }
+  }
 }

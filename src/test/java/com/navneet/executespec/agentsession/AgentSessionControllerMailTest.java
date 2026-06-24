@@ -25,7 +25,8 @@ class AgentSessionControllerMailTest {
         new AgentSessionController(
             mock(AgentSessionService.class),
             mock(AgentActionCatalog.class),
-            mock(AgentStreamTurnRunner.class));
+            mock(AgentStreamTurnRunner.class),
+            mock(AgentAttachmentService.class));
 
     var response =
         controller.sessionSummaryEmail(

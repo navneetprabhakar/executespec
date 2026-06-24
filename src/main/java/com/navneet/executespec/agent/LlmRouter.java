@@ -504,12 +504,13 @@ public class LlmRouter {
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
       case "fireworks" -> callFireworks(request, tools, apiKey);
-      case "sarvam" -> callSarvam(request, tools, apiKey);
+      case "sarvam" ->
+          throw new IllegalStateException("Sarvam provider is disabled until quality eval passes");
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
                   + request.provider()
-                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks|sarvam)");
+                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks)");
     };
   }
 

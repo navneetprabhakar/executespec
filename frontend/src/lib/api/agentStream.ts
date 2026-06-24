@@ -13,6 +13,7 @@ export interface StreamAgentTurnRequest {
   repoContext?: AgentRepoContext | null;
   clientCapabilities?: AgentClientCapabilities | null;
   providerOverride?: string | null;
+  attachmentIds?: string[] | null;
 }
 
 export type AgentStreamEventName =
