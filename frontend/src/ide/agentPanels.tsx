@@ -1,65 +1,407 @@
-import type {Dispatch, RefObject} from 'react';
+import type {Dispatch, RefObject, UIEvent} from 'react';
 import * as api from '@/lib/api';
-import {IdeBadge} from '@/ide/IdeKit';
-import {CommandIcon, PlusIcon, StatusDot} from '@/ide/IdeIcons';
+import {Markdown} from '@/signal/components/Markdown';
+import {CommandIcon, PlusIcon, RunsIcon, SearchIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
 import {
-  actionLabel,
   asText,
+  friendlyTool,
+  isTerminalRunStatus,
   pct,
+  runOpenPath,
+  runPhaseLabel,
+  runProgress,
   sessionTitle,
   type AgentAction,
+  type AgentAttachmentLite,
   type AgentUiState,
+  type BarTone,
   type LocalMessage,
   type PendingAction,
   type RoutingState,
   type StreamTimelineItem,
 } from '@/ide/agentState';
 
-type BadgeKind = 'ok' | 'warn' | 'bad';
+const Paperclip = () => (
+  <svg
+    width='17'
+    height='17'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='2'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
+  </svg>
+);
 
-function managedKind(balance: api.ManagedAiBalance | null): BadgeKind {
-  if (!balance || balance.routingState === 'FULL') return 'ok';
-  return balance.routingState === 'EXHAUSTED' ? 'bad' : 'warn';
-}
+const ArrowUp = () => (
+  <svg
+    width='16'
+    height='16'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='2.5'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <path d='M12 19V5M5 12l7-7 7 7' />
+  </svg>
+);
 
-function routeKind(routingState: RoutingState): BadgeKind {
-  return routingState?.runApiAllowed ? 'warn' : 'ok';
-}
+const StopIcon = () => (
+  <svg width='15' height='15' viewBox='0 0 24 24' aria-hidden='true'>
+    <rect x='6' y='6' width='12' height='12' rx='2' fill='currentColor' />
+  </svg>
+);
 
-function statusKind(status: AgentUiState): BadgeKind {
-  return status === 'error' ? 'bad' : status === 'idle' ? 'ok' : 'warn';
-}
+const FolderIcon = () => (
+  <svg
+    width='13'
+    height='13'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth='2'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' />
+  </svg>
+);
 
-function MessageBubble({message}: {message: LocalMessage}) {
-  const kind =
-    message.role === 'user' ? 'warn' : message.status === 'FAILED' ? 'bad' : ('ok' as const);
+const SUGGESTIONS = [
+  'What plans are waiting?',
+  'Explain this project',
+  'Search the web for the latest pgvector release',
+  'Create a run to add audit logging',
+];
+
+/** Top bar: Chats · scope chip · title · honest status · New chat · settings popover. */
+export function AgentTopBar({
+  selected,
+  barStatus,
+  scopeLabel,
+  busy,
+  settingsOpen,
+  managedAi,
+  routingState,
+  capabilities,
+  onNewChat,
+  onToggleChats,
+  onToggleSettings,
+}: {
+  selected: api.AgentSessionResponse | null;
+  barStatus: {label: string; tone: BarTone};
+  scopeLabel: string | null;
+  busy: boolean;
+  settingsOpen: boolean;
+  managedAi: api.ManagedAiBalance | null;
+  routingState: RoutingState;
+  capabilities: api.AgentCapabilityTool[];
+  onNewChat: () => void;
+  onToggleChats: () => void;
+  onToggleSettings: () => void;
+}) {
   return (
-    <div className={`agent-msg ${message.role}`}>
-      <div className='agent-msg-meta'>
-        <span>
-          {message.role === 'user' ? 'You' : message.role === 'system' ? 'System' : 'Agent'}
+    <div className='agent-bar'>
+      <button className='agent-bar-btn' onClick={onToggleChats} aria-label='Show chats'>
+        <CommandIcon size={16} />
+        <span>Chats</span>
+      </button>
+      {scopeLabel && (
+        <span className='agent-bar-scope'>
+          <FolderIcon />
+          {scopeLabel}
         </span>
-        {message.status && <IdeBadge kind={kind}>{message.status}</IdeBadge>}
+      )}
+      <div className='agent-bar-title'>{selected ? sessionTitle(selected) : 'New chat'}</div>
+      <span className='agent-bar-spacer' />
+      <span className={`agent-bar-status ${barStatus.tone}`}>
+        <span className='agent-bar-dot' aria-hidden='true' />
+        {barStatus.label}
+      </span>
+      <button className='agent-bar-btn' onClick={onNewChat} disabled={busy}>
+        <PlusIcon size={14} />
+        <span>New chat</span>
+      </button>
+      <div className='agent-bar-settings'>
+        <button
+          className='agent-bar-icon'
+          onClick={onToggleSettings}
+          aria-label='Agent settings and usage'
+          aria-expanded={settingsOpen}
+        >
+          <SettingsIcon size={16} />
+        </button>
+        {settingsOpen && (
+          <SettingsPopover
+            selected={selected}
+            managedAi={managedAi}
+            routingState={routingState}
+            capabilities={capabilities}
+            onClose={onToggleSettings}
+          />
+        )}
       </div>
-      <div className='agent-msg-body'>{message.content}</div>
     </div>
   );
 }
 
-function Timeline({items}: {items: StreamTimelineItem[]}) {
-  if (!items.length) return null;
+function SettingsPopover({
+  selected,
+  managedAi,
+  routingState,
+  capabilities,
+  onClose,
+}: {
+  selected: api.AgentSessionResponse | null;
+  managedAi: api.ManagedAiBalance | null;
+  routingState: RoutingState;
+  capabilities: api.AgentCapabilityTool[];
+  onClose: () => void;
+}) {
   return (
-    <div className='agent-timeline'>
-      {items.slice(-8).map((item) => (
-        <div key={item.id} className={`agent-event ${item.type}`}>
-          <StatusDot
-            kind={item.type === 'tool' ? 'warn' : item.type === 'run' ? 'ok' : 'idle'}
-            size={7}
-          />
-          <span>{item.title}</span>
-          {item.detail && <small>{item.detail}</small>}
+    <>
+      <div className='agent-pop-backdrop' onClick={onClose} />
+      <div className='agent-pop' role='dialog' aria-label='Agent settings and usage'>
+        <div className='agent-pop-row'>
+          <span>Provider</span>
+          <code>{selected?.defaultProvider || 'account default'}</code>
         </div>
+        {managedAi ? (
+          <>
+            <div className='agent-pop-row'>
+              <span>ES AI credits</span>
+              <code>
+                {managedAi.aiCreditsUsed} / {managedAi.includedAiCredits}
+              </code>
+            </div>
+            <div className='agent-meter'>
+              <span
+                style={{width: `${pct(managedAi.aiCreditsUsed, managedAi.includedAiCredits)}%`}}
+              />
+            </div>
+          </>
+        ) : (
+          <div className='agent-pop-row'>
+            <span>ES AI credits</span>
+            <code>n/a</code>
+          </div>
+        )}
+        {routingState && (
+          <>
+            <div className='agent-pop-row'>
+              <span>Confidence</span>
+              <code>{Math.round(routingState.confidence * 100)}%</code>
+            </div>
+            <div className='agent-pop-row'>
+              <span>Run API</span>
+              <code>{routingState.runApiAllowed ? 'after confirm' : 'blocked'}</code>
+            </div>
+          </>
+        )}
+        <div className='agent-pop-caps-label'>What it can do ({capabilities.length})</div>
+        <div className='agent-pop-caps'>
+          {capabilities.slice(0, 16).map((c) => (
+            <span key={c.name}>
+              <StatusDot kind={c.confirmationRequired ? 'warn' : 'ok'} size={6} />
+              {c.name.replace(/_/g, ' ')}
+            </span>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Sessions as a slide-over drawer with auto-titled, time-stamped rows. */
+export function AgentChatsDrawer({
+  open,
+  sessions,
+  selectedId,
+  status,
+  onSelect,
+  onNewChat,
+  onClose,
+}: {
+  open: boolean;
+  sessions: api.AgentSessionResponse[];
+  selectedId: string | null;
+  status: AgentUiState;
+  onSelect: (id: string) => void;
+  onNewChat: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <>
+      <div className='agent-drawer-backdrop' onClick={onClose} />
+      <aside className='agent-drawer' role='dialog' aria-label='Chats'>
+        <div className='agent-drawer-head'>
+          <strong>Chats</strong>
+          <button className='ide-btn ghost' onClick={onNewChat}>
+            <PlusIcon size={13} />
+            New
+          </button>
+        </div>
+        {status === 'loadingSession' ? (
+          <div className='agent-muted'>Loading…</div>
+        ) : sessions.length === 0 ? (
+          <div className='agent-muted'>No chats yet.</div>
+        ) : (
+          <div className='agent-drawer-list'>
+            {sessions.map((s) => (
+              <button
+                key={s.id}
+                className={s.id === selectedId ? 'active' : ''}
+                onClick={() => onSelect(s.id)}
+              >
+                <span className='agent-drawer-title'>{sessionTitle(s)}</span>
+                <span className='agent-drawer-meta'>
+                  {scopeBadge(s)}
+                  {relTime(s.updatedAt)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+    </>
+  );
+}
+
+function scopeBadge(s: api.AgentSessionResponse): string {
+  if (s.runId) return 'Run · ';
+  if (s.projectId) return 'Project · ';
+  return '';
+}
+
+function relTime(iso?: string | null): string {
+  if (!iso) return '';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function MessageBubble({message}: {message: LocalMessage}) {
+  if (message.role === 'user') {
+    return (
+      <div className='agent-msg user'>
+        <div className='agent-msg-body'>{message.content}</div>
+      </div>
+    );
+  }
+  return (
+    <div className={`agent-msg ${message.role}`}>
+      <div className='agent-msg-label'>{message.role === 'system' ? 'System' : 'Agent'}</div>
+      <div className='agent-msg-body'>
+        <Markdown>{message.content}</Markdown>
+      </div>
+    </div>
+  );
+}
+
+/** Friendly activity chips for tool/run events — no raw JSON. */
+function Activity({items}: {items: StreamTimelineItem[]}) {
+  const shown = items.filter((i) => i.type === 'tool' || i.type === 'run');
+  if (!shown.length) return null;
+  return (
+    <div className='agent-activity'>
+      {shown.map((i) => (
+        <span key={i.id} className='agent-activity-chip'>
+          {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
+          {i.type === 'run' ? 'Run created' : friendlyTool(i.title)}
+        </span>
       ))}
+    </div>
+  );
+}
+
+function Typing() {
+  return (
+    <div className='agent-typing' aria-label='Agent is working'>
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
+/** Live (or just-finished) run, pinned in the chat that spawned it. */
+function RunCard({
+  run,
+  liveCostUsd,
+  busy,
+  onOpen,
+  onStop,
+}: {
+  run: api.RunDetail;
+  liveCostUsd: number | null;
+  busy: boolean;
+  onOpen: (path: string) => void;
+  onStop: () => void;
+}) {
+  const prog = runProgress(run.tasks);
+  const terminal = isTerminalRunStatus(run.status);
+  const failed = (run.status || '').toUpperCase() === 'FAILED';
+  const cancelled = (run.status || '').toUpperCase() === 'CANCELLED';
+  const cost = liveCostUsd ?? 0;
+  const est = run.costEstimateHigh ?? 0;
+  const variant = !terminal ? '' : failed ? ' failed' : cancelled ? ' cancelled' : ' done';
+  const pillKind = !terminal ? 'live' : failed ? 'bad' : cancelled ? 'muted' : 'ok';
+  return (
+    <div className={`agent-runcard${variant}`}>
+      <div className='agent-runcard-head'>
+        <RunsIcon size={16} />
+        <span className='agent-runcard-title'>{run.runTitle || 'Cloud run'}</span>
+        <span className={`agent-runcard-pill ${pillKind}`}>
+          {!terminal && <span className='agent-runcard-dot' aria-hidden='true' />}
+          {runPhaseLabel(run.status)}
+        </span>
+        <span className='agent-runcard-cost'>
+          ${cost.toFixed(2)}
+          {est ? ` / ~$${est.toFixed(2)}` : ''}
+        </span>
+      </div>
+      {!terminal && prog.current && (
+        <div className='agent-runcard-step'>
+          {prog.total > 0 ? `Task ${Math.min(prog.done + 1, prog.total)} of ${prog.total} · ` : ''}
+          {prog.current}
+        </div>
+      )}
+      {prog.total > 0 && (
+        <div className='agent-runcard-bar'>
+          <span style={{width: `${terminal && !failed && !cancelled ? 100 : prog.pct}%`}} />
+        </div>
+      )}
+      <div className='agent-runcard-actions'>
+        <button className='ide-btn' onClick={() => onOpen(runOpenPath(run.runId, run.status))}>
+          {terminal ? 'Open result' : 'Open run'}
+        </button>
+        {run.githubPrUrl && (
+          <a className='ide-btn ghost' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
+            View PR
+          </a>
+        )}
+        {!terminal && (
+          <button className='ide-btn ghost' onClick={onStop} disabled={busy}>
+            <StopIcon />
+            Stop
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -78,46 +420,61 @@ function ActionCard({
   const isCloudRun = pending.action.type === 'create_cloud_run';
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
+  const args = Object.entries(pending.action.arguments || {});
   return (
-    <div className='agent-action-card'>
-      <div className='agent-action-head'>
-        <div>
-          <strong>{isLocal ? 'Continue with local hands' : actionLabel(pending.action)}</strong>
-          <span>{pending.action.confirmationPrompt || pending.route}</span>
-        </div>
-        <IdeBadge kind={pending.action.requiresConfirmation ? 'warn' : 'ok'}>
-          {pending.action.billingImpact || 'none'}
-        </IdeBadge>
+    <div className={`agent-card${isCloudRun ? ' waiting' : ''}`}>
+      <div className='agent-card-head'>
+        <RunsIcon size={16} />
+        <strong>{isLocal ? 'Continue on your machine' : 'Start a cloud run'}</strong>
+        {pending.action.billingImpact && pending.action.billingImpact !== 'none' && (
+          <span className='agent-card-meta'>{pending.action.billingImpact.replace(/_/g, ' ')}</span>
+        )}
       </div>
-      <div className='agent-action-body'>
-        {Object.entries(pending.action.arguments || {}).map(([key, value]) => (
-          <div key={key} className='agent-kv-row'>
-            <span>{key}</span>
-            <code>{asText(value)}</code>
-          </div>
-        ))}
-      </div>
-      {isLocal ? (
-        <div className='agent-action-actions'>
-          <button className='ide-btn ghost' onClick={() => (window.location.href = '/cli-login')}>
-            Continue in CLI
-          </button>
-          <button className='ide-btn ghost' onClick={onDismiss}>
-            Keep as advice
-          </button>
-        </div>
-      ) : (
-        <div className='agent-action-actions'>
-          {isCloudRun && (
-            <button className='ide-btn' onClick={() => onConfirm(pending)} disabled={busy}>
-              Create cloud run
-            </button>
-          )}
-          <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
-            Dismiss
-          </button>
+      {pending.action.confirmationPrompt && (
+        <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
+      )}
+      {isCloudRun && (
+        <div className='agent-card-consequence'>
+          You approve the plan and cost on the next screen — nothing bills until then.
         </div>
       )}
+      {args.length > 0 && (
+        <div className='agent-card-args'>
+          {args.map(([key, value]) => (
+            <div key={key} className='agent-kv-row'>
+              <span>{key}</span>
+              <code>{asText(value)}</code>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className='agent-card-actions'>
+        {isLocal ? (
+          <>
+            <button className='ide-btn' onClick={() => (window.location.href = '/cli-login')}>
+              Continue in CLI
+            </button>
+            <button className='ide-btn ghost' onClick={onDismiss}>
+              Keep as advice
+            </button>
+          </>
+        ) : (
+          <>
+            {isCloudRun && (
+              <button
+                className='ide-btn agent-btn-primary'
+                onClick={() => onConfirm(pending)}
+                disabled={busy}
+              >
+                Review plan &amp; cost
+              </button>
+            )}
+            <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
+              Dismiss
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -136,29 +493,29 @@ function GateCard({
   busy: boolean;
 }) {
   return (
-    <div className='agent-gate-card'>
-      <button className='agent-gate-title' onClick={() => onOpen(gate.runId)}>
+    <div className='agent-card waiting'>
+      <button className='agent-card-title' onClick={() => onOpen(gate.runId)}>
         {gate.title || gate.summary || gate.runId}
       </button>
-      <div className='agent-gate-meta'>
-        <span>{gate.provider || 'provider n/a'}</span>
-        <span>{gate.model || 'model n/a'}</span>
-        <span>
-          {gate.creditsRequired != null
-            ? `${gate.creditsRequired} ES AI credit${gate.creditsRequired === 1 ? '' : 's'}`
-            : 'credits n/a'}
-        </span>
+      <div className='agent-card-consequence-row'>
+        {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
+        {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
+        <span>opens a PR</span>
       </div>
       {gate.tasks.length > 0 && (
-        <ul className='agent-gate-tasks'>
+        <ul className='agent-card-tasks'>
           {gate.tasks.slice(0, 4).map((task) => (
             <li key={task}>{task}</li>
           ))}
         </ul>
       )}
-      <div className='agent-action-actions'>
-        <button className='ide-btn' onClick={() => onApprove(gate)} disabled={busy}>
-          Approve
+      <div className='agent-card-actions'>
+        <button
+          className='ide-btn agent-btn-primary'
+          onClick={() => onApprove(gate)}
+          disabled={busy}
+        >
+          Approve &amp; run
         </button>
         <button className='ide-btn ghost' onClick={() => onReject(gate)} disabled={busy}>
           Reject
@@ -168,208 +525,98 @@ function GateCard({
   );
 }
 
-export function AgentHeader({onCreate, busy}: {onCreate: () => void; busy: boolean}) {
+function EmptyState({onPick}: {onPick: (text: string) => void}) {
   return (
-    <div className='agent-head'>
-      <div>
-        <div className='agent-kicker'>
-          <CommandIcon size={15} />
-          Agent
-        </div>
-        <h1>Control plane</h1>
-        <p>
-          Ask questions, create gated cloud runs, inspect plan gates, and keep decisions replayable.
-        </p>
+    <div className='agent-empty'>
+      <div className='agent-empty-icon'>
+        <CommandIcon size={26} />
       </div>
-      <button className='ide-btn' onClick={onCreate} disabled={busy}>
-        <PlusIcon size={14} />
-        New session
-      </button>
+      <strong>Ask the agent</strong>
+      <p>
+        Search the web, ask about your projects and runs, attach a file, or kick off a gated cloud
+        run — the human approves before anything bills.
+      </p>
+      <div className='agent-empty-chips'>
+        {SUGGESTIONS.map((s) => (
+          <button key={s} onClick={() => onPick(s)}>
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-export function AgentTopStrip({
-  selected,
-  projectId,
-  runId,
-  activeRun,
-  managedAi,
-  routingState,
-}: {
-  selected: api.AgentSessionResponse | null;
-  projectId?: string;
-  runId?: string;
-  activeRun: string | null;
-  managedAi: api.ManagedAiBalance | null;
-  routingState: RoutingState;
-}) {
-  return (
-    <div className='agent-top-strip'>
-      <span>Provider {selected?.defaultProvider || 'account default'}</span>
-      <span>
-        {projectId
-          ? `Project ${projectId}`
-          : selected?.projectId
-            ? `Project ${selected.projectId}`
-            : 'No project scope'}
-      </span>
-      <span>
-        {runId ? `Run ${runId}` : activeRun ? `Active run ${activeRun}` : 'No active run'}
-      </span>
-      <span>
-        {managedAi ? `${managedAi.aiCreditsRemaining} ES AI credits left` : 'ES AI credits n/a'}
-      </span>
-      {managedAi && <IdeBadge kind={managedKind(managedAi)}>{managedAi.routingState}</IdeBadge>}
-      {routingState && <IdeBadge kind={routeKind(routingState)}>{routingState.route}</IdeBadge>}
-    </div>
-  );
-}
-
-export function AgentLeftRail({
-  sessions,
-  selectedId,
-  status,
-  dispatch,
-}: {
-  sessions: api.AgentSessionResponse[];
-  selectedId: string | null;
-  status: AgentUiState;
-  dispatch: Dispatch<AgentAction>;
-}) {
-  return (
-    <aside className='agent-rail'>
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Sessions</span>
-          <IdeBadge kind='warn'>{sessions.length}</IdeBadge>
-        </div>
-        {status === 'loadingSession' ? (
-          <div className='agent-muted'>Loading sessions...</div>
-        ) : sessions.length === 0 ? (
-          <div className='agent-muted'>No agent sessions yet.</div>
-        ) : (
-          <div className='agent-list'>
-            {sessions.map((session) => (
-              <button
-                key={session.id}
-                className={session.id === selectedId ? 'active' : ''}
-                onClick={() => dispatch({type: 'session:select', sessionId: session.id})}
-              >
-                <span>{sessionTitle(session)}</span>
-                <small>{session.status}</small>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Command palette</span>
-          <IdeBadge kind='ok'>WEB</IdeBadge>
-        </div>
-        <div className='agent-command-grid'>
-          {[
-            'What plans are waiting?',
-            'List recent runs',
-            'Explain current project',
-            'Create a cloud run',
-          ].map((cmd) => (
-            <button key={cmd} onClick={() => dispatch({type: 'input:set', input: cmd})}>
-              {cmd}
-            </button>
-          ))}
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-export function AgentMainPanel({
-  selected,
-  status,
-  messages,
-  visibleAction,
-  isBusy,
-  streamText,
-  streamEvents,
+function Composer({
   input,
-  projectId,
-  runId,
-  endRef,
-  dispatch,
-  onConfirmAction,
+  attachments,
+  uploading,
+  isBusy,
+  onAddFiles,
+  onRemoveAttachment,
   onSend,
   onStop,
+  dispatch,
 }: {
-  selected: api.AgentSessionResponse | null;
-  status: AgentUiState;
-  messages: LocalMessage[];
-  visibleAction: PendingAction | null;
-  isBusy: boolean;
-  streamText: string;
-  streamEvents: StreamTimelineItem[];
   input: string;
-  projectId?: string;
-  runId?: string;
-  endRef: RefObject<HTMLDivElement>;
-  dispatch: Dispatch<AgentAction>;
-  onConfirmAction: (pending: PendingAction) => void;
+  attachments: AgentAttachmentLite[];
+  uploading: boolean;
+  isBusy: boolean;
+  onAddFiles: (files: FileList | null) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onSend: () => void;
   onStop: () => void;
+  dispatch: Dispatch<AgentAction>;
 }) {
   return (
-    <section className='ide-card agent-main'>
-      <div className='agent-main-head'>
-        <div>
-          <strong>{selected ? sessionTitle(selected) : 'No session selected'}</strong>
-          <span>{selected?.id ?? 'Create a session to start.'}</span>
+    <div
+      className='agent-composer'
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        onAddFiles(e.dataTransfer.files);
+      }}
+    >
+      {attachments.length > 0 && (
+        <div className='agent-attachments'>
+          {attachments.map((a) => (
+            <span
+              key={a.attachmentId}
+              className='agent-attach-chip'
+              title={`${a.mimeType} · ${a.extractedChars} chars extracted`}
+            >
+              <span className='agent-attach-chip-name'>{a.filename}</span>
+              <button
+                onClick={() => onRemoveAttachment(a.attachmentId)}
+                aria-label={`Remove ${a.filename}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
-        <IdeBadge kind={statusKind(status)}>{status}</IdeBadge>
-      </div>
-
-      <div className='agent-transcript'>
-        {messages.length === 0 && !isBusy ? (
-          <div className='agent-empty'>
-            <CommandIcon size={22} />
-            <strong>Ask the web agent</strong>
-            <span>Try "What plans are waiting?" or "Create a run to add audit logs."</span>
-          </div>
-        ) : (
-          messages.map((message) => <MessageBubble key={message.id} message={message} />)
-        )}
-        {visibleAction && (
-          <ActionCard
-            pending={visibleAction}
-            busy={isBusy}
-            onConfirm={onConfirmAction}
-            onDismiss={() => dispatch({type: 'action:clear'})}
+      )}
+      <div className='agent-composer-box'>
+        <label className='agent-attach-btn' title='Attach PDF, Markdown, or text'>
+          {uploading ? <span className='agent-attach-spin' /> : <Paperclip />}
+          <input
+            type='file'
+            accept='.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
+            multiple
+            style={{display: 'none'}}
+            disabled={uploading || isBusy}
+            onChange={(e) => {
+              onAddFiles(e.target.files);
+              e.currentTarget.value = '';
+            }}
+            aria-label='Attach a file'
           />
-        )}
-        {isBusy && !streamText && (
-          <div className='agent-muted' style={{padding: '0 4px 8px'}}>
-            Waiting for model/tool response...
-          </div>
-        )}
-        <Timeline items={streamEvents} />
-        <div ref={endRef} />
-      </div>
-
-      <div className='agent-composer'>
-        <div className='agent-context-chips'>
-          {projectId && <span>Project</span>}
-          {runId && <span>Run</span>}
-          <span>Architecture</span>
-          <span>Memory</span>
-          <span>Docs</span>
-          <span>Gate</span>
-        </div>
+        </label>
         <textarea
-          className='ide-input'
-          rows={3}
+          className='agent-input'
+          rows={1}
           value={input}
-          placeholder='Ask, inspect gates, or create a gated cloud run...'
+          placeholder='Message the agent…'
           onChange={(e) => dispatch({type: 'input:set', input: e.target.value})}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -379,126 +626,142 @@ export function AgentMainPanel({
           }}
           disabled={isBusy}
         />
-        <div className='agent-composer-actions'>
-          <span>Enter sends. Mutations render cards before execution.</span>
-          {isBusy ? (
-            <button className='ide-btn' onClick={onStop}>
-              Stop
-            </button>
-          ) : (
-            <button className='ide-btn' onClick={onSend} disabled={!input.trim()}>
-              Send
-            </button>
-          )}
-        </div>
+        {isBusy ? (
+          <button className='agent-send' onClick={onStop} aria-label='Stop'>
+            <StopIcon />
+          </button>
+        ) : (
+          <button
+            className='agent-send'
+            onClick={onSend}
+            disabled={!input.trim()}
+            aria-label='Send'
+          >
+            <ArrowUp />
+          </button>
+        )}
       </div>
-    </section>
+      <div className='agent-composer-hint'>
+        Enter to send · attach PDF, Markdown, or text · web search built in
+      </div>
+    </div>
   );
 }
 
-export function AgentRightRail({
-  managedAi,
-  routingState,
+/** The whole conversation surface: gates → messages → activity → run card → action card → composer. */
+export function AgentConversation({
+  messages,
+  streamEvents,
+  streamText,
+  isBusy,
+  visibleAction,
   gates,
-  capabilities,
-  busy,
+  runCard,
+  runCost,
+  input,
+  attachments,
+  uploading,
+  endRef,
+  dispatch,
+  onScroll,
+  onSend,
+  onStop,
+  onAddFiles,
+  onRemoveAttachment,
+  onConfirmAction,
   onApproveGate,
   onRejectGate,
   onOpenGate,
+  onOpenRun,
+  onStopRun,
 }: {
-  managedAi: api.ManagedAiBalance | null;
-  routingState: RoutingState;
+  messages: LocalMessage[];
+  streamEvents: StreamTimelineItem[];
+  streamText: string;
+  isBusy: boolean;
+  visibleAction: PendingAction | null;
   gates: api.AgentGateDecisionCard[];
-  capabilities: api.AgentCapabilityTool[];
-  busy: boolean;
+  runCard: api.RunDetail | null;
+  runCost: number | null;
+  input: string;
+  attachments: AgentAttachmentLite[];
+  uploading: boolean;
+  endRef: RefObject<HTMLDivElement>;
+  dispatch: Dispatch<AgentAction>;
+  onScroll: (e: UIEvent<HTMLDivElement>) => void;
+  onSend: () => void;
+  onStop: () => void;
+  onAddFiles: (files: FileList | null) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
+  onConfirmAction: (pending: PendingAction) => void;
   onApproveGate: (gate: api.AgentGateDecisionCard) => void;
   onRejectGate: (gate: api.AgentGateDecisionCard) => void;
   onOpenGate: (runId: string) => void;
+  onOpenRun: (path: string) => void;
+  onStopRun: () => void;
 }) {
-  const managedBadge = managedKind(managedAi);
-  const routeBadge = routeKind(routingState);
+  const empty = messages.length === 0 && !isBusy && !visibleAction && !runCard;
   return (
-    <aside className='agent-rail right'>
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Managed AI</span>
-          <IdeBadge kind={managedBadge}>{managedAi?.routingState || 'n/a'}</IdeBadge>
-        </div>
-        {managedAi ? (
-          <>
-            <div className='agent-kv-row'>
-              <span>Credits</span>
-              <code>
-                {managedAi.aiCreditsUsed} / {managedAi.includedAiCredits}
-              </code>
+    <section className='agent-chat'>
+      <div className='agent-chat-scroll' onScroll={onScroll}>
+        <div className='agent-chat-col'>
+          {gates.length > 0 && (
+            <div className='agent-gates-inline'>
+              <div className='agent-gates-label'>Waiting for your approval</div>
+              {gates.map((g) => (
+                <GateCard
+                  key={g.runId}
+                  gate={g}
+                  busy={isBusy}
+                  onApprove={onApproveGate}
+                  onReject={onRejectGate}
+                  onOpen={onOpenGate}
+                />
+              ))}
             </div>
-            <div className='agent-meter'>
-              <span
-                style={{width: `${pct(managedAi.aiCreditsUsed, managedAi.includedAiCredits)}%`}}
-              />
-            </div>
-            <div className='agent-kv-row'>
-              <span>Credits left</span>
-              <code>{managedAi.aiCreditsRemaining}</code>
-            </div>
-          </>
-        ) : (
-          <div className='agent-muted'>Usage unavailable.</div>
-        )}
-      </div>
-
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Routing state</span>
-          <IdeBadge kind={routeBadge}>{routingState?.route || 'idle'}</IdeBadge>
-        </div>
-        <div className='agent-kv-row'>
-          <span>Confidence</span>
-          <code>{routingState ? `${Math.round(routingState.confidence * 100)}%` : 'n/a'}</code>
-        </div>
-        <div className='agent-kv-row'>
-          <span>Run API</span>
-          <code>{routingState?.runApiAllowed ? 'allowed after confirmation' : 'blocked'}</code>
-        </div>
-      </div>
-
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>Pending gates</span>
-          <IdeBadge kind={gates.length ? 'warn' : 'ok'}>{gates.length}</IdeBadge>
-        </div>
-        {gates.length === 0 ? (
-          <div className='agent-muted'>No plans waiting.</div>
-        ) : (
-          <div className='agent-gate-list'>
-            {gates.map((gate) => (
-              <GateCard
-                key={gate.runId}
-                gate={gate}
-                busy={busy}
-                onApprove={onApproveGate}
-                onReject={onRejectGate}
-                onOpen={onOpenGate}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className='ide-card agent-panel'>
-        <div className='agent-panel-head'>
-          <span>WEB capabilities</span>
-          <IdeBadge kind='ok'>{capabilities.length}</IdeBadge>
-        </div>
-        <div className='agent-capabilities'>
-          {capabilities.slice(0, 12).map((capability) => (
-            <span key={capability.name}>
-              <StatusDot kind={capability.confirmationRequired ? 'warn' : 'ok'} size={7} />
-              {capability.name}
-            </span>
-          ))}
+          )}
+          {empty ? (
+            <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
+          ) : (
+            messages.map((message) => <MessageBubble key={message.id} message={message} />)
+          )}
+          <Activity items={streamEvents} />
+          {isBusy && !streamText && <Typing />}
+          {runCard && (
+            <RunCard
+              run={runCard}
+              liveCostUsd={runCost}
+              busy={isBusy}
+              onOpen={onOpenRun}
+              onStop={onStopRun}
+            />
+          )}
+          {visibleAction && (
+            <ActionCard
+              pending={visibleAction}
+              busy={isBusy}
+              onConfirm={onConfirmAction}
+              onDismiss={() => dispatch({type: 'action:clear'})}
+            />
+          )}
+          <div ref={endRef} />
         </div>
       </div>
-    </aside>
+      <div className='agent-composer-wrap'>
+        <div className='agent-chat-col'>
+          <Composer
+            input={input}
+            attachments={attachments}
+            uploading={uploading}
+            isBusy={isBusy}
+            onAddFiles={onAddFiles}
+            onRemoveAttachment={onRemoveAttachment}
+            onSend={onSend}
+            onStop={onStop}
+            dispatch={dispatch}
+          />
+        </div>
+      </div>
+    </section>
   );
 }

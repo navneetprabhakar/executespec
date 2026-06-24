@@ -25,6 +25,7 @@ public class AgentStreamTurnRunner {
   private final AgentSessionService sessionService;
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
+  private final AgentAttachmentService attachmentService;
 
   public void run(
       SseEmitter emitter,
@@ -76,6 +77,10 @@ public class AgentStreamTurnRunner {
       }
 
       AccumulatingSink sink = new AccumulatingSink(emitter, sessionService, ctx);
+      List<Map<String, Object>> conversation =
+          AgentStreamTurnSupport.withAttachmentBlock(
+              AgentStreamTurnSupport.conversationOrCurrentMessage(request),
+              attachmentService.injectionBlock(ctx.sessionId(), request.attachmentIds()));
       specChatService.runTurn(
           sink,
           user,
@@ -83,7 +88,7 @@ public class AgentStreamTurnRunner {
           ctx.projectId(),
           ctx.runId(),
           ctx.orgId(),
-          AgentStreamTurnSupport.conversationOrCurrentMessage(request),
+          conversation,
           ctx.provider(),
           AgentStreamTurnSupport.allowedReadOnlyTools());
       emitter.complete();

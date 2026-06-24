@@ -20,6 +20,7 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelAccessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,7 @@ public class ProjectService {
         String raw = req.aiProvider().trim().toUpperCase();
         if ("GOOGLE".equals(raw)) raw = "GEMINI";
         provider = LlmProvider.valueOf(raw);
+        ModelAccessService.assertProviderEnabled(provider.name());
         rememberPreferredProvider(createdBy, provider);
       } catch (IllegalArgumentException ignored) {
         /* default ANTHROPIC */
@@ -448,6 +450,7 @@ public class ProjectService {
       if ("GOOGLE".equals(raw)) raw = "GEMINI";
       try {
         LlmProvider provider = LlmProvider.valueOf(raw);
+        ModelAccessService.assertProviderEnabled(provider.name());
         project.setAiProvider(provider);
         rememberPreferredProvider(actorId, provider);
       } catch (IllegalArgumentException e) {
