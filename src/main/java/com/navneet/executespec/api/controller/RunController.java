@@ -593,9 +593,12 @@ public class RunController {
             .findRun(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
-    // Quota + key gates applied to the FORKER, not the source.
-    tierEnforcementService.assertAndIncrementRunCount(userDetails.getUser().getId());
-    usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
+    String forkerId = userDetails.getUser().getId();
+
+    // Fork creates a fresh run, so apply the same managed-AI start gate to the forker.
+    // Run-count quota is analytics-only here.
+    managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(forkerId));
+    tierEnforcementService.incrementRunCountForAnalytics(forkerId);
     apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
 
     String userRequest =
@@ -611,7 +614,7 @@ public class RunController {
                 ? source.getApprovedExecutionMode()
                 : "REALTIME");
 
-    log.info("Forking run {} as new run for user {}", runId, userDetails.getUser().getId());
+    log.info("Forking run {} as new run for user {}", runId, forkerId);
     PipelineRun forked =
         v2Orchestrator.submitRun(
             userRequest,
@@ -624,7 +627,7 @@ public class RunController {
             false, // autoMerge — same
             source.getPlannerModel(),
             source.getAiProvider(),
-            userDetails.getUser().getId(),
+            forkerId,
             userDetails.getUser().getOrgId(),
             source.getProjectId(),
             execMode,
@@ -632,7 +635,6 @@ public class RunController {
             source.getFigmaUrl(),
             false // tddMode — opt-in per fork
             );
-    usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(forked));
   }
 

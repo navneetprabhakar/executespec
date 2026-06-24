@@ -13,6 +13,11 @@ spring:
           test-on-borrow: true
           test-while-idle: true
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+
   datasource:
     url: jdbc:postgresql://localhost:5432/executespec
     driver-class-name: org.postgresql.Driver

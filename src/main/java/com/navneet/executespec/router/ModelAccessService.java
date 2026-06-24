@@ -1,6 +1,8 @@
 package com.navneet.executespec.router;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import com.navneet.executespec.auth.service.TierEnforcementService;
 
@@ -20,6 +22,11 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class ModelAccessService {
+
+  // Sarvam is intentionally dark-launched only. Live quality was not production-ready, so keep the
+  // enum/YAML breadcrumbs for later eval work but make every customer-facing selection path
+  // fail-closed until it is explicitly re-enabled.
+  private static final Set<String> DISABLED_PROVIDERS = Set.of("sarvam");
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -41,6 +48,7 @@ public class ModelAccessService {
 
   /** Lowest tier permitted to run the model — FREE for the free-tier provider, otherwise PRO. */
   public String minTierFor(String modelId) {
+    if (isDisabledModel(modelId)) return "DISABLED";
     return isFreeModel(modelId) ? "FREE" : "PRO";
   }
 
@@ -50,7 +58,29 @@ public class ModelAccessService {
 
   /** True when the user's tier may run this model. */
   public boolean isAllowed(String userId, String modelId) {
+    if (isDisabledModel(modelId)) return false;
     return !userIsFreeTier(userId) || isFreeModel(modelId);
+  }
+
+  public boolean isDisabledModel(String modelId) {
+    String provider = modelRegistry.providerFor(modelId);
+    return isDisabledProvider(provider);
+  }
+
+  public static boolean isDisabledProvider(String provider) {
+    return provider != null
+        && DISABLED_PROVIDERS.contains(provider.trim().toLowerCase(Locale.ROOT));
+  }
+
+  public static void assertProviderEnabled(String provider) {
+    if (isDisabledProvider(provider)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Provider '"
+              + provider
+              + "' is disabled; choose Anthropic, OpenAI, Gemini, DeepSeek,"
+              + " OpenRouter, or Fireworks.");
+    }
   }
 
   /**
@@ -61,6 +91,12 @@ public class ModelAccessService {
   public void assertModelAllowed(String userId, String modelName) {
     if (modelName == null || modelName.isBlank()) {
       return;
+    }
+    String provider = modelRegistry.providerFor(modelName);
+    if (isDisabledProvider(provider)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Model '" + modelName + "' is disabled because provider '" + provider + "' is disabled.");
     }
     if (!userIsFreeTier(userId)) {
       return;
