@@ -69,6 +69,8 @@ class RunEventContractTest {
                 "STOP_DONE",
                 "reason",
                 "ok",
+                "recommendedNextStep",
+                "No further work is required for this task.",
                 "evidence",
                 List.of("build passed")));
 
@@ -78,6 +80,8 @@ class RunEventContractTest {
     assertEquals(1, event.schemaVersion());
     assertEquals("DONE", event.data().get("state"));
     assertEquals("STOP_DONE", event.data().get("recommendedDecision"));
+    assertEquals(
+        "No further work is required for this task.", event.data().get("recommendedNextStep"));
     assertEquals(List.of("build passed"), event.data().get("evidence"));
   }
 

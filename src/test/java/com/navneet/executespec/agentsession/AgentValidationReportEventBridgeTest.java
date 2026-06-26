@@ -81,6 +81,8 @@ class AgentValidationReportEventBridgeTest {
     assertThat(event.getValue().getPayloadJson()).contains("\"source\":\"DETERMINISTIC\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"runGoalDecision\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"state\":\"UNCERTAIN\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"recommendedNextStep\"");
+    assertThat(event.getValue().getPayloadJson()).contains("Continue with the same model/provider");
     assertThat(event.getValue().getPayloadJson())
         .contains("\"spec adherence evidence unavailable\"");
     verify(sessionRepo).save(session);

@@ -45,7 +45,16 @@ class AgentRunEventBridgeTest {
         .thenReturn(List.of(session));
     when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
 
-    bridge.onRunEvent(RunEvent.goalDecision("run-1", "T1", "Goal DONE", Map.of("state", "DONE")));
+    bridge.onRunEvent(
+        RunEvent.goalDecision(
+            "run-1",
+            "T1",
+            "Goal DONE",
+            Map.of(
+                "state",
+                "DONE",
+                "recommendedNextStep",
+                "No further work is required for this task.")));
 
     ArgumentCaptor<AgentActionEvent> event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
@@ -55,6 +64,8 @@ class AgentRunEventBridgeTest {
     assertThat(event.getValue().getPayloadJson()).contains("\"taskId\":\"T1\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"runEventType\":\"GOAL_DECISION\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"state\":\"DONE\"");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"recommendedNextStep\":\"No further work is required for this task.\"");
     verify(sessionRepo).save(session);
   }
 
