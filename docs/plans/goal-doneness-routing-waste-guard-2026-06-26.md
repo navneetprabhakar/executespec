@@ -666,6 +666,13 @@ shows their resolved count in candidate reasons, but it leaves `benchmarkQuality
 those rows so ranking falls back to YAML/local/validation evidence. This prevents a tiny 5/5 or 1/1
 benchmark from being treated as a fully measured model while preserving operator visibility.
 
+Forty-third slice 2026-06-27: run submit now has a per-run confirmation guard for automatic
+continuation spend. `RunRequest.requireConfirmationBeforeExpensiveContinuation=true` writes a
+one-shot `RunContinuationConfirmationFlag`; `RunOrchestrator` consumes it at pipeline start and
+passes it into `ExecutionRequest`; `SequentialExecutor` applies `serverConfig || perRunFlag` before
+calling `GoalContinuationAdvisor` / `GoalContinuationPolicy`. This lets a user choose "ask before
+upgrading this run" without allowing them to bypass an operator-level confirmation requirement.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

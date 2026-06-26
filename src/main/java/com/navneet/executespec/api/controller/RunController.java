@@ -98,6 +98,10 @@ public class RunController {
   /** P3 local-hands (RL-2026-06-014) — per-run LOCAL-execution marker. */
   private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
 
+  /** Per-run continuation-spend confirmation marker. */
+  private final com.navneet.executespec.run.RunContinuationConfirmationFlag
+      runContinuationConfirmationFlag;
+
   /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
   private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
 
@@ -245,6 +249,10 @@ public class RunController {
     // call, default behaviour (auto-push) resumes naturally.
     if (Boolean.TRUE.equals(req.skipAutoPush())) {
       runSkipPushFlag.mark(run.getRunId());
+    }
+
+    if (Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation())) {
+      runContinuationConfirmationFlag.mark(run.getRunId());
     }
 
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;

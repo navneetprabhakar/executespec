@@ -332,6 +332,8 @@ to boot — skip it for those.""";
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepDownsPerTask =
       new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Boolean> continuationConfirmationRequiredByRun =
+      new ConcurrentHashMap<>();
 
   @Value("${execution.continuation.required-quality-threshold:70.0}")
   private double goalRequiredQualityThreshold = 70.0;
@@ -451,145 +453,156 @@ to boot — skip it for those.""";
     Plan plan = req.plan();
     String runId = req.runContext().runId();
     boolean abortedByGoalDecision = false;
-
-    log.info(
-        "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={} resumeTarget={}",
-        resume == null ? "START" : "RESUME",
+    continuationConfirmationRequiredByRun.put(
         runId,
-        plan.tasks().size(),
-        req.provider(),
-        req.model(),
-        req.enableSmokeTests(),
-        resume == null ? null : resume.targetTaskId());
-    emitTaskWavePlan(runId, plan);
+        requireConfirmationBeforeExpensiveContinuation
+            || Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation()));
 
-    int taskCount = plan.tasks().size();
-    for (int i = 0; i < taskCount; i++) {
-      // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
-      // calls {@code future.cancel(true)} which interrupts THIS thread, but
-      // the only place the interrupt actually surfaces is the next blocking
-      // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
-      // Without a top-of-loop check, every remaining task gets dispatched in
-      // turn — each one starts the worker, the very first LLM call throws
-      // {@code BackOffInterruptedException}, persistTaskStatus stamps it
-      // FAILED, the loop body returns, and we walk straight into the next
-      // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
-      // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
-      // their original PARTIAL / FAILED-stagnation reasons with a generic
-      // "Thread interrupted while sleeping" message and clobbering the
-      // COMPLETE state of T13–T16, T20.
-      //
-      // Re-asserting the interrupt flag with {@code Thread.currentThread()
-      // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
-      // {@code activeRuns} future) still sees it as cancelled.
-      if (Thread.currentThread().isInterrupted()) {
-        log.info(
-            "SequentialExecutor cancel detected at task index {}/{}, breaking loop", i, taskCount);
-        Thread.currentThread().interrupt();
-        break;
-      }
+    try {
+      log.info(
+          "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={}"
+              + " resumeTarget={}",
+          resume == null ? "START" : "RESUME",
+          runId,
+          plan.tasks().size(),
+          req.provider(),
+          req.model(),
+          req.enableSmokeTests(),
+          resume == null ? null : resume.targetTaskId());
+      emitTaskWavePlan(runId, plan);
 
-      PlannedTask task = plan.tasks().get(i);
-      boolean isFinalTask = (i == taskCount - 1);
-
-      // Resume bookkeeping: figure out what to do with this task BEFORE running anything.
-      //   - skip it (already terminal in DB) → emit synthetic outcome
-      //   - resume it (snapshot present) → executeOne with snapshot
-      //   - run fresh
-      TaskOutcome outcome;
-      if (resume != null) {
-        ResumeAction action = resolveResumeAction(runId, task.id(), resume);
-        switch (action.kind()) {
-          case SKIP_TERMINAL -> {
-            log.info(
-                "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                task.id(),
-                action.persistedStatus());
-            outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
-          }
-          case RESUME_FROM_SNAPSHOT -> {
-            log.info(
-                "Executor RESUME task={} from snapshot iter={}",
-                task.id(),
-                action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-            outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
-          }
-          case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
-          default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+      int taskCount = plan.tasks().size();
+      for (int i = 0; i < taskCount; i++) {
+        // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
+        // calls {@code future.cancel(true)} which interrupts THIS thread, but
+        // the only place the interrupt actually surfaces is the next blocking
+        // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
+        // Without a top-of-loop check, every remaining task gets dispatched in
+        // turn — each one starts the worker, the very first LLM call throws
+        // {@code BackOffInterruptedException}, persistTaskStatus stamps it
+        // FAILED, the loop body returns, and we walk straight into the next
+        // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
+        // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
+        // their original PARTIAL / FAILED-stagnation reasons with a generic
+        // "Thread interrupted while sleeping" message and clobbering the
+        // COMPLETE state of T13–T16, T20.
+        //
+        // Re-asserting the interrupt flag with {@code Thread.currentThread()
+        // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
+        // {@code activeRuns} future) still sees it as cancelled.
+        if (Thread.currentThread().isInterrupted()) {
+          log.info(
+              "SequentialExecutor cancel detected at task index {}/{}, breaking loop",
+              i,
+              taskCount);
+          Thread.currentThread().interrupt();
+          break;
         }
-      } else {
-        outcome = executeOne(task, plan, req, isFinalTask, null);
+
+        PlannedTask task = plan.tasks().get(i);
+        boolean isFinalTask = (i == taskCount - 1);
+
+        // Resume bookkeeping: figure out what to do with this task BEFORE running anything.
+        //   - skip it (already terminal in DB) → emit synthetic outcome
+        //   - resume it (snapshot present) → executeOne with snapshot
+        //   - run fresh
+        TaskOutcome outcome;
+        if (resume != null) {
+          ResumeAction action = resolveResumeAction(runId, task.id(), resume);
+          switch (action.kind()) {
+            case SKIP_TERMINAL -> {
+              log.info(
+                  "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+                  task.id(),
+                  action.persistedStatus());
+              outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+            }
+            case RESUME_FROM_SNAPSHOT -> {
+              log.info(
+                  "Executor RESUME task={} from snapshot iter={}",
+                  task.id(),
+                  action.snapshot() == null ? "n/a" : action.snapshot().iteration());
+              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
+            }
+            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
+            default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+          }
+        } else {
+          outcome = executeOne(task, plan, req, isFinalTask, null);
+        }
+
+        if (resume == null) {
+          outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+        }
+
+        outcomes.add(outcome);
+        metrics.recordTaskStatus(outcome.status().name());
+        metrics.recordTaskLatency(
+            outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
+
+        // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
+        // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
+        gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
+
+        GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
+        if (shouldEnforceGoalStop(goalDecision)) {
+          int remaining = taskCount - i - 1;
+          log.warn(
+              "SequentialExecutor goal-stop enforced run={} task={} decision={} state={}"
+                  + " remaining={}",
+              runId,
+              task.id(),
+              goalDecision.recommendedDecision(),
+              goalDecision.state(),
+              remaining);
+          broadcaster.emit(
+              runId,
+              RunEvent.log(
+                  runId,
+                  task.id(),
+                  "Goal stop enforced: "
+                      + goalDecision.recommendedDecision()
+                      + " ("
+                      + goalDecision.reason()
+                      + "); skipping "
+                      + remaining
+                      + " remaining task"
+                      + (remaining == 1 ? "" : "s")));
+          appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
+          abortedByGoalDecision = true;
+          break;
+        }
       }
 
-      if (resume == null) {
-        outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+      ExecutionResult result =
+          summarize(outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision);
+      log.info(
+          "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
+              + " latency={}ms",
+          runId,
+          result.overall(),
+          result.tasksSuccessful(),
+          result.tasksExecuted(),
+          result.tasksWithWarning(),
+          result.tasksFailed(),
+          result.totalLatencyMs());
+
+      // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
+      // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
+      // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
+      // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
+      // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
+      // state gets the same cleanup. Both calls are best-effort; failures are logged only.
+      if (contextStore != null) {
+        contextStore.deleteAll(runId);
       }
+      clearCrossProviderState(runId);
+      clearContinuationActionState(runId);
 
-      outcomes.add(outcome);
-      metrics.recordTaskStatus(outcome.status().name());
-      metrics.recordTaskLatency(
-          outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
-
-      // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
-      // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
-      gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
-
-      GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
-      if (shouldEnforceGoalStop(goalDecision)) {
-        int remaining = taskCount - i - 1;
-        log.warn(
-            "SequentialExecutor goal-stop enforced run={} task={} decision={} state={}"
-                + " remaining={}",
-            runId,
-            task.id(),
-            goalDecision.recommendedDecision(),
-            goalDecision.state(),
-            remaining);
-        broadcaster.emit(
-            runId,
-            RunEvent.log(
-                runId,
-                task.id(),
-                "Goal stop enforced: "
-                    + goalDecision.recommendedDecision()
-                    + " ("
-                    + goalDecision.reason()
-                    + "); skipping "
-                    + remaining
-                    + " remaining task"
-                    + (remaining == 1 ? "" : "s")));
-        appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
-        abortedByGoalDecision = true;
-        break;
-      }
+      return result;
+    } finally {
+      continuationConfirmationRequiredByRun.remove(runId);
     }
-
-    ExecutionResult result =
-        summarize(outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision);
-    log.info(
-        "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
-            + " latency={}ms",
-        runId,
-        result.overall(),
-        result.tasksSuccessful(),
-        result.tasksExecuted(),
-        result.tasksWithWarning(),
-        result.tasksFailed(),
-        result.totalLatencyMs());
-
-    // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
-    // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
-    // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
-    // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
-    // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
-    // state gets the same cleanup. Both calls are best-effort; failures are logged only.
-    if (contextStore != null) {
-      contextStore.deleteAll(runId);
-    }
-    clearCrossProviderState(runId);
-    clearContinuationActionState(runId);
-
-    return result;
   }
 
   private void emitTaskWavePlan(String runId, Plan plan) {
@@ -1820,7 +1833,7 @@ to boot — skip it for those.""";
         runId, RunEvent.goalDecision(runId, task.id(), goalSummary, goalDecisionData(decision)));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), goalSummary));
     GoalContinuationPolicyDecision continuationDecision =
-        decideContinuation(task, decision, dispatchedProvider, dispatchedModel);
+        decideContinuation(runId, task, decision, dispatchedProvider, dispatchedModel);
     log.info(
         "Executor task={} continuationDecision decision={} reason={}",
         task.id(),
@@ -1842,11 +1855,17 @@ to boot — skip it for those.""";
   }
 
   private GoalContinuationPolicyDecision decideContinuation(
-      PlannedTask task, GoalDonenessDecision decision, String provider, String model) {
+      String runId,
+      PlannedTask task,
+      GoalDonenessDecision decision,
+      String provider,
+      String model) {
     String taskCategory = taskCategory(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
+    boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
     if (goalContinuationAdvisor == null) {
-      return decideContinuationFallback(decision, taskCategory, requiredQualityThreshold);
+      return decideContinuationFallback(
+          decision, taskCategory, requiredQualityThreshold, confirmationRequired);
     }
     try {
       GoalContinuationPolicyDecision advised =
@@ -1859,13 +1878,13 @@ to boot — skip it for those.""";
                   .requiredQualityThreshold(requiredQualityThreshold)
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
-                  .expensiveContinuationRequiresConfirmation(
-                      requireConfirmationBeforeExpensiveContinuation)
+                  .expensiveContinuationRequiresConfirmation(confirmationRequired)
                   .maxProviderSwitches(maxProviderSwitches())
                   .maxModelStepUps(maxModelStepUps())
                   .maxModelStepDowns(maxModelStepDowns())
                   .build());
-      return withAppliedPolicy(advised, taskCategory, requiredQualityThreshold);
+      return withAppliedPolicy(
+          advised, taskCategory, requiredQualityThreshold, confirmationRequired);
     } catch (RuntimeException ex) {
       log.warn(
           "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
@@ -1874,30 +1893,35 @@ to boot — skip it for those.""";
           provider,
           model,
           ex);
-      return decideContinuationFallback(decision, taskCategory, requiredQualityThreshold);
+      return decideContinuationFallback(
+          decision, taskCategory, requiredQualityThreshold, confirmationRequired);
     }
   }
 
   private GoalContinuationPolicyDecision decideContinuationFallback(
-      GoalDonenessDecision decision, String taskCategory, double requiredQualityThreshold) {
+      GoalDonenessDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired) {
     return withAppliedPolicy(
         goalContinuationPolicy.decide(
             GoalContinuationRequest.builder()
                 .goalDecision(decision)
-                .expensiveContinuationRequiresConfirmation(
-                    requireConfirmationBeforeExpensiveContinuation)
+                .expensiveContinuationRequiresConfirmation(confirmationRequired)
                 .maxProviderSwitches(maxProviderSwitches())
                 .maxModelStepUps(maxModelStepUps())
                 .maxModelStepDowns(maxModelStepDowns())
                 .build()),
         taskCategory,
-        requiredQualityThreshold);
+        requiredQualityThreshold,
+        confirmationRequired);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
       GoalContinuationPolicyDecision decision,
       String taskCategory,
-      double requiredQualityThreshold) {
+      double requiredQualityThreshold,
+      boolean confirmationRequired) {
     if (decision == null) {
       return null;
     }
@@ -1905,7 +1929,8 @@ to boot — skip it for those.""";
         decision.decision(),
         decision.selectedCandidate(),
         decision.reasons(),
-        continuationPolicyData(decision, taskCategory, requiredQualityThreshold));
+        continuationPolicyData(
+            decision, taskCategory, requiredQualityThreshold, confirmationRequired));
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -2099,6 +2124,18 @@ to boot — skip it for those.""";
       GoalContinuationPolicyDecision decision,
       String taskCategory,
       double requiredQualityThreshold) {
+    return continuationPolicyData(
+        decision,
+        taskCategory,
+        requiredQualityThreshold,
+        requireConfirmationBeforeExpensiveContinuation);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired) {
     Map<String, Object> data = new LinkedHashMap<>();
     if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
       data.putAll(decision.policy());
@@ -2118,15 +2155,18 @@ to boot — skip it for those.""";
     data.put("maxEditChurn", maxEditChurn());
     data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
-    data.put(
-        "requireConfirmationBeforeExpensiveContinuation",
-        requireConfirmationBeforeExpensiveContinuation);
+    data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
     data.put("maxTotalTokens", maxGoalTotalTokens());
     data.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
     data.put("actingEnabled", continuationActingEnabled);
     data.put("maxRerunsPerTask", maxContinuationReruns());
     return data;
+  }
+
+  private boolean requireConfirmationBeforeExpensiveContinuation(String runId) {
+    return continuationConfirmationRequiredByRun.getOrDefault(
+        runId, requireConfirmationBeforeExpensiveContinuation);
   }
 
   private double requiredGoalQualityThreshold() {

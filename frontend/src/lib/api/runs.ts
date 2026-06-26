@@ -83,6 +83,11 @@ export const createRun = (body: {
    * 24h Redis flag; not persisted to pipeline_run.
    */
   skipAutoPush?: boolean;
+  /**
+   * When true, automatic model/provider continuation stops for confirmation before spending on the
+   * rerun. This is a per-run tightening guard and does not override stricter server policy.
+   */
+  requireConfirmationBeforeExpensiveContinuation?: boolean;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 export const approveRun = (

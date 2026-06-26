@@ -4137,6 +4137,13 @@ components:
             proxied to the caller's machine; clone / smoke / reviewer / auto-push skipped).
             PAT-only and gated by the `worker.local-hands.enabled` flag; rejected for browser/JWT
             sessions (403) and when the flag is off (409). Transient (not persisted). Default false.
+        requireConfirmationBeforeExpensiveContinuation:
+          type: boolean
+          description: >
+            Per-run tightening guard for automatic continuation. When true, selected-candidate
+            model step-up / step-down / provider-change recommendations stop as confirmation-required
+            before spending on the rerun. This cannot disable an operator-level confirmation
+            requirement from server configuration.
 
     RunSummary:
       type: object
