@@ -131,6 +131,10 @@ execution:
   continuation:
     enabled: false
     required-quality-threshold: 70.0
+    required-quality-thresholds:
+      task-low: -1
+      task-medium: -1
+      task-high: -1
     max-no-progress-iterations: 28
     max-task-retries: 1
     max-high-complexity-retries: 2
@@ -150,10 +154,11 @@ execution:
     max-reruns-per-task: 1
 ```
 
-The first wired subset is advisory-only: `required-quality-threshold`,
+The first wired subset is advisory-only: `required-quality-threshold`, the `TASK_LOW` /
+`TASK_MEDIUM` / `TASK_HIGH` overrides under `required-quality-thresholds`,
 `max-provider-switches-per-run`, `max-model-step-ups-per-task`,
-`max-model-step-downs-per-task`, and
-`require-confirmation-before-expensive-continuation`. The first evidence-ceiling subset is
+`max-model-step-downs-per-task`, and `require-confirmation-before-expensive-continuation`. The
+first evidence-ceiling subset is
 disabled unless positive: `max-total-cost-usd`, `max-total-tokens`, and
 `max-task-wall-clock-ms` feed `GOAL_DECISION` budget evidence and can stop as
 `STOP_WASTE_GUARD` when crossed before proof of completion. The next acting subset is opt-in via
@@ -517,10 +522,22 @@ This gives web/CLI/VS Code clients the same bounded safe-parallelism evidence af
 already get for goal decisions, continuation advice, executed reruns, limit skips, and final
 validation evidence.
 
+Twenty-sixth slice 2026-06-26: required model/provider quality thresholds are now category-aware at
+the executor/advisor boundary. `application.yml` still keeps the global
+`execution.continuation.required-quality-threshold` fallback, but adds
+`required-quality-thresholds.task-low`, `.task-medium`, and `.task-high` overrides for the current
+`TASK_LOW` / `TASK_MEDIUM` / `TASK_HIGH` categories derived from `PlannedTask.complexity`.
+`SequentialExecutor` sends the applied category-specific threshold into
+`GoalContinuationAdvisor`, and the typed/durable continuation policy payload records
+`taskCategory`, `requiredQualityThreshold`, `defaultRequiredQualityThreshold`, and the resolved
+per-category threshold map. Broader semantic categories such as `BUG_FIX`, `TEST_FIX`, or
+`TERMINAL_TASK` remain a later classifier/planner concern.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
-- What is the required quality threshold per category and tier?
+- Which semantic task categories beyond `TASK_LOW` / `TASK_MEDIUM` / `TASK_HIGH` should the
+  planner/classifier emit first (`BUG_FIX`, `TEST_FIX`, `TERMINAL_TASK`, etc.)?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
 - Validation-report evidence-ledger surfacing now reaches `/report`, the run-result Evidence tab,
   and run-scoped agent-session action events, and produces a conservative `runGoalDecision` proof;

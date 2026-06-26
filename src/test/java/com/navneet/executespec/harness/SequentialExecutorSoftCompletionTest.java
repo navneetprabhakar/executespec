@@ -806,6 +806,73 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void continuation_decision_uses_category_specific_quality_threshold() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+                Optional.empty(),
+                List.of("continue with current candidate")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThreshold", 70.0);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdTaskLow", 64.0);
+    executor.execute(req(singleTaskPlan(), true));
+
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    GoalContinuationAdvisorRequest request = requestCaptor.getValue();
+    assertEquals("TASK_LOW", request.taskCategory());
+    assertEquals(64.0, request.requiredQualityThreshold());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"taskCategory\":\"TASK_LOW\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"requiredQualityThreshold\":64.0")
+                        && s.continuationDecisionJson()
+                            .contains("\"defaultRequiredQualityThreshold\":70.0")
+                        && s.continuationDecisionJson().contains("\"TASK_LOW\":64.0")),
+        "Expected category-specific continuation policy in persisted JSON. Saw: " + saveLog);
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event -> {
+                  if (!isContinuationDecisionEvent(event)) {
+                    return false;
+                  }
+                  @SuppressWarnings("unchecked")
+                  java.util.Map<String, Object> policy =
+                      (java.util.Map<String, Object>) event.data().get("policy");
+                  if (policy == null) {
+                    return false;
+                  }
+                  @SuppressWarnings("unchecked")
+                  java.util.Map<String, Object> thresholds =
+                      (java.util.Map<String, Object>) policy.get("requiredQualityThresholds");
+                  return "TASK_LOW".equals(policy.get("taskCategory"))
+                      && Double.valueOf(64.0).equals(policy.get("requiredQualityThreshold"))
+                      && Double.valueOf(70.0).equals(policy.get("defaultRequiredQualityThreshold"))
+                      && thresholds != null
+                      && Double.valueOf(64.0).equals(thresholds.get("TASK_LOW"));
+                }));
+  }
+
+  @Test
   void continuation_acting_reruns_once_with_selected_candidate_when_enabled() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any()))

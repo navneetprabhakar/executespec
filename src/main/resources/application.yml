@@ -94,6 +94,10 @@ execution:
     # Advisory-only goal continuation policy knobs. Runtime provider/model dispatch is unchanged
     # until an explicit acting component consumes the emitted decisions.
     required-quality-threshold: 70.0
+    required-quality-thresholds:
+      task-low: -1
+      task-medium: -1
+      task-high: -1
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
