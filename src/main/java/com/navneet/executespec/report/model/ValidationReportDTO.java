@@ -3,6 +3,7 @@ package com.navneet.executespec.report.model;
 import java.time.Instant;
 import java.util.List;
 
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.report.entity.PipelineResult;
 
 public record ValidationReportDTO(
@@ -48,6 +49,12 @@ public record ValidationReportDTO(
      * or unmeasured.
      */
     List<VerificationEvidenceDTO> verificationLedger,
+    /**
+     * Conservative run-level proof derived from the final validation ledger. `STOP_DONE` is emitted
+     * only when the report result and required proof rows pass; missing or warning evidence remains
+     * UNCERTAIN instead of letting the internal score vouch for completion.
+     */
+    GoalDonenessDecision runGoalDecision,
     /**
      * PR-E Phase A (2026-05-13, V194) — additive rubric score 0-100. Each dimension contributes
      * points independently so a single zero factor doesn't collapse the headline number the way the

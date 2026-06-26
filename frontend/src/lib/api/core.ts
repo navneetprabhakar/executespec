@@ -286,27 +286,7 @@ export interface TaskSummary {
   /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
   failureReason?: string | null;
   /** Structured goal-doneness decision from the executor task boundary. */
-  goalDoneness?: {
-    state?: string;
-    recommendedDecision?: string;
-    reason?: string;
-    goalSummary?: string;
-    completedItems?: string[];
-    incompleteItems?: string[];
-    evidence?: string[];
-    risks?: string[];
-    budgetCeilingReason?: string;
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    reasoningTokens?: number;
-    totalTokens?: number;
-    costUsd?: number;
-    wallClockMs?: number;
-    userInputRequired?: boolean;
-    anotherModelProviderMightHelp?: boolean;
-  } | null;
+  goalDoneness?: GoalDonenessDecisionData | null;
   /** Structured continuation / step-up / provider-change advice from the executor. */
   continuationDecision?: {
     decision?: string;
@@ -345,6 +325,28 @@ export interface TaskSummary {
   subtaskIndex?: number | null;
   /** Total number of subtasks in the parent. */
   subtaskTotal?: number | null;
+}
+
+export interface GoalDonenessDecisionData {
+  state?: string;
+  recommendedDecision?: string;
+  reason?: string;
+  goalSummary?: string;
+  completedItems?: string[];
+  incompleteItems?: string[];
+  evidence?: string[];
+  risks?: string[];
+  budgetCeilingReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  wallClockMs?: number;
+  userInputRequired?: boolean;
+  anotherModelProviderMightHelp?: boolean;
 }
 
 // Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue)
@@ -1190,6 +1192,8 @@ export interface ValidationReportData {
   rubricScore?: number | null;
   /** Auditable evidence behind verifiedScore. Source/confidence make self-scored signals explicit. */
   verificationLedger?: VerificationEvidence[];
+  /** Conservative run-level proof derived from the final validation ledger. */
+  runGoalDecision?: GoalDonenessDecisionData | null;
 }
 
 export interface VerificationEvidence {

@@ -50,6 +50,8 @@ public class ValidationReportService {
   private final ReviewScoringService reviewScoringService;
   private final FeatureFlagService featureFlagService;
   private final ApplicationEventPublisher eventPublisher;
+  private final ValidationReportGoalProofEvaluator goalProofEvaluator =
+      new ValidationReportGoalProofEvaluator();
 
   @Autowired
   public ValidationReportService(
@@ -686,6 +688,7 @@ public class ValidationReportService {
 
   private ValidationReportDTO toDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
+    List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -728,7 +731,9 @@ public class ValidationReportService {
         entity.getTestsTotal(),
         entity.getReviewerVerdict(),
         entity.getVerifiedScore(),
-        buildVerificationLedger(entity, issues),
+        verificationLedger,
+        goalProofEvaluator.evaluate(
+            entity.getRunId(), entity.getPipelineResult(), verificationLedger),
         entity.getRubricScore(),
         entity.getPreviewUrl());
   }

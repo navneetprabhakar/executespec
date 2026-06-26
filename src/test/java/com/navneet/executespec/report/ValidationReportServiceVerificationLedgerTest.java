@@ -194,6 +194,37 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
   }
 
+  @Test
+  void reportDtoIncludesRunGoalDecisionDerivedFromLedger() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    ValidationReportService service =
+        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-4")
+            .runId("run-4")
+            .filesGenerated(1)
+            .languages("TypeScript")
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .checksPassed("COMPILATION")
+            .reportMarkdown("# Report")
+            .finalBuildPassed(true)
+            .testsPassed(2)
+            .testsTotal(2)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(96)
+            .accuracyJson("{\"specAdherenceScore\": 91}")
+            .build();
+    when(repository.findByRunId("run-4")).thenReturn(Optional.of(report));
+
+    var dto = service.getByRunId("run-4").orElseThrow();
+
+    assertNotNull(dto.runGoalDecision());
+    assertEquals("DONE", dto.runGoalDecision().state().name());
+    assertEquals("STOP_DONE", dto.runGoalDecision().recommendedDecision().name());
+  }
+
   private static void assertEntry(
       List<VerificationEvidenceDTO> ledger,
       String id,

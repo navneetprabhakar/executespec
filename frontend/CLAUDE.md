@@ -35,7 +35,7 @@ frontend/
     ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
     │   ├── Crumbs.tsx                # compact breadcrumb trail reused by project/run detail surfaces
     │   ├── IdeSurfaces.tsx           # IdeWelcome / IdeCompose / IdeLive
-    │   ├── IdeRunResult.tsx · runResultUtils.ts  # flagship run detail + pure verdict/diff/log helpers; Steps renders goal/continuation state plus budget evidence and Evidence renders verificationLedger
+    │   ├── IdeRunResult.tsx · runResultUtils.ts  # flagship run detail + pure verdict/diff/log helpers; Steps renders goal/continuation state plus budget evidence; Evidence renders runGoalDecision plus verificationLedger
     │   ├── IdeProject(s|Tabs|More|Settings).tsx · projectMoreUtils.ts · projectChatUtils.ts · projectSettingsUtils.ts · projectArchitecturePanels.tsx · projectUi.tsx  # project workbench + pure helpers + shared project widgets
     │   ├── IdePlan.tsx · planUtils.ts  # plan gate + pure status/managed-AI plan helpers
     │   ├── IdeMore.tsx · moreUtils.ts  # Runs/Account/Deployments + pure work/account helpers

@@ -63,6 +63,13 @@ function taskGoalLine(t: api.TaskSummary): string | null {
   return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
 }
 
+function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
+  const s = (state || '').toUpperCase();
+  if (s === 'DONE') return 'ok';
+  if (s === 'FAILED' || s === 'BLOCKED' || s === 'WASTE_RISK') return 'bad';
+  return 'warn';
+}
+
 function preciseUsd(n?: number | null): string {
   if (n == null) return '—';
   if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
@@ -1669,6 +1676,59 @@ export default function IdeRunResult() {
                   <Kv k='Review failures' v={report.reviewFailures} />
                   <Kv k='Issues caught' v={report.issuesCaught} />
                 </div>
+                {report.runGoalDecision && (
+                  <>
+                    <div className='ide-h2'>Final goal proof</div>
+                    <div className='ide-card'>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                        <IdeBadge kind={goalStateKind(report.runGoalDecision.state)}>
+                          {report.runGoalDecision.state || 'UNKNOWN'}
+                        </IdeBadge>
+                        {report.runGoalDecision.recommendedDecision && (
+                          <span className='ide-mono' style={{fontSize: 12}}>
+                            {report.runGoalDecision.recommendedDecision}
+                          </span>
+                        )}
+                      </div>
+                      {report.runGoalDecision.reason && (
+                        <div style={{fontSize: 13, marginTop: 8}}>
+                          {report.runGoalDecision.reason}
+                        </div>
+                      )}
+                      {report.runGoalDecision.incompleteItems &&
+                        report.runGoalDecision.incompleteItems.length > 0 && (
+                          <div style={{marginTop: 10}}>
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            >
+                              Remaining proof
+                            </div>
+                            <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                              {report.runGoalDecision.incompleteItems.slice(0, 4).map((item, i) => (
+                                <li key={i}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      {report.runGoalDecision.risks && report.runGoalDecision.risks.length > 0 && (
+                        <div style={{marginTop: 10}}>
+                          <div
+                            className='ide-mono'
+                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                          >
+                            Risks
+                          </div>
+                          <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                            {report.runGoalDecision.risks.slice(0, 4).map((risk, i) => (
+                              <li key={i}>{risk}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
                 {report.verificationLedger && report.verificationLedger.length > 0 && (
                   <>
                     <div className='ide-h2'>Evidence ledger</div>
