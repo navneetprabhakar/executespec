@@ -345,6 +345,8 @@ public class RunMapper {
         t.getStartedAt(),
         t.getCompletedAt(),
         extractFailureReason(t),
+        parseJson(t.getGoalDonenessJson()),
+        parseJson(t.getContinuationDecisionJson()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),
@@ -357,6 +359,15 @@ public class RunMapper {
     if (taskJson == null || taskJson.isBlank()) return null;
     try {
       return objectMapper.readTree(taskJson).path("objective").asText(null);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private JsonNode parseJson(String json) {
+    if (json == null || json.isBlank()) return null;
+    try {
+      return objectMapper.readTree(json);
     } catch (Exception e) {
       return null;
     }

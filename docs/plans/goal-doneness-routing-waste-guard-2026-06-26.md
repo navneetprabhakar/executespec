@@ -377,6 +377,14 @@ rerun work; it only makes step-up, step-down, and change-provider recommendation
 candidates. `SequentialExecutorSoftCompletionTest` pins advisor-backed `STEP_UP_MODEL` visibility
 on validation-failed-with-progress and verifies the advisor request fields.
 
+Twelfth slice 2026-06-26: task-boundary goal and continuation decisions are now durable and
+visible in run detail. V250 adds `agent_task.goal_doneness_json` and
+`agent_task.continuation_decision_json`; `SequentialExecutor` writes both after emitting the SSE log
+events; `RunMapper` exposes them as parsed `TaskSummary.goalDoneness` and
+`TaskSummary.continuationDecision`; and the IDE run-result task list renders a compact
+`Goal ... -> ... · Next ...` line. This improves web/CLI-consumable visibility without enabling
+automatic provider/model switching.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

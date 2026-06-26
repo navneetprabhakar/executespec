@@ -1428,6 +1428,7 @@ to boot — skip it for those.""";
                 + " ("
                 + firstReason(continuationDecision)
                 + ")"));
+    persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
     return decision;
   }
 
@@ -1499,6 +1500,63 @@ to boot — skip it for those.""";
       return "TASK_MEDIUM";
     }
     return "TASK_" + task.complexity().name();
+  }
+
+  private void persistGoalAndContinuationDecision(
+      String runId,
+      String taskIdShort,
+      GoalDonenessDecision goalDecision,
+      GoalContinuationPolicyDecision continuationDecision) {
+    if (taskRepo == null
+        || objectMapper == null
+        || runId == null
+        || runId.length() < 8
+        || taskIdShort == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    try {
+      var existing = taskRepo.findById(key);
+      if (existing.isEmpty()) {
+        log.debug("persistGoalDecision: row not found id={}", key);
+        return;
+      }
+      var task = existing.get();
+      task.setGoalDonenessJson(objectMapper.writeValueAsString(goalDecision));
+      task.setContinuationDecisionJson(serializeContinuationDecision(continuationDecision));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn("persistGoalDecision: {} failed: {}", key, ex.getMessage(), ex);
+    }
+  }
+
+  private String serializeContinuationDecision(GoalContinuationPolicyDecision decision)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    ObjectNode node = objectMapper.createObjectNode();
+    if (decision == null) {
+      node.put("decision", "UNKNOWN");
+      node.putArray("reasons").add("continuation decision missing");
+      return objectMapper.writeValueAsString(node);
+    }
+    node.put("decision", decision.decision().name());
+    var selected = decision.selectedCandidate();
+    if (selected.isPresent()) {
+      var candidate = selected.get();
+      ObjectNode candidateNode = node.putObject("selectedCandidate");
+      candidateNode.put("provider", candidate.provider());
+      candidateNode.put("model", candidate.model());
+      candidateNode.put("taskCategory", candidate.taskCategory());
+      candidateNode.put("qualityScore", candidate.qualityScore());
+      candidateNode.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+      candidateNode.put("costPerMillionTokens", candidate.costPerMillionTokens());
+      candidateNode.put("latencyP50Ms", candidate.latencyP50Ms());
+      candidateNode.put("latencyP95Ms", candidate.latencyP95Ms());
+      var candidateReasons = candidateNode.putArray("reasons");
+      candidate.reasons().forEach(candidateReasons::add);
+    }
+    var reasons = node.putArray("reasons");
+    decision.reasons().forEach(reasons::add);
+    return objectMapper.writeValueAsString(node);
   }
 
   private static String firstReason(GoalContinuationPolicyDecision decision) {
