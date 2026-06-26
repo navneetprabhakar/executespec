@@ -16,7 +16,7 @@ For exhaustive class discovery use:
 | `integration` | Run orchestration, lifecycle, persistence writer, SCM push integration. |
 | `engine` | Worker agent and code-generation engine seam. |
 | `harness` | Sequential task executor, task-tier routing, goal-decision visibility, and default-off goal-stop enforcement. |
-| `execution` | Legacy Launches plus inert goal evidence, doneness, continuation decision, and evaluator policy seams. |
+| `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
 | `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, and the inert quality-first model/provider ranking policy. |
@@ -54,6 +54,7 @@ For exhaustive class discovery use:
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
 | `SequentialExecutor` | Per-task execution loop. |
+| `GoalDonenessEvaluator` / `GoalContinuationPolicy` | Pure goal-state and continue/escalate/stop policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
 | `ModelRegistry` / `ModelResolver` | YAML model matrix and tier lookup. |
