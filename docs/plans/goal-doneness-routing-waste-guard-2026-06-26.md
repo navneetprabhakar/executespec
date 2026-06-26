@@ -314,7 +314,17 @@ immediately, blocks expensive continuation until user confirmation, escalates wa
 when another model/provider may help and configured limits remain, changes provider for poor
 provider behavior, steps up for insufficient quality, and steps down only to cheaper candidates that
 still clear the quality threshold. `GoalContinuationPolicyTest` pins those cases. Runtime provider
-switching and candidate metric aggregation are still pending.
+switching and live candidate metric collection are still pending.
+
+Sixth slice 2026-06-26: `ModelProviderCapabilitySignal` and `ModelProviderCapabilityRegistry` now
+convert benchmark, local success, validation pass-rate, code-review, tool-reliability, recent
+failure, provider availability, fallback-order, context, cost, and latency signals into
+explainable `ModelProviderScore` candidates. The existing `ModelProviderRankingPolicy` remains the
+selection step, so quality-threshold filtering and quality/cost/latency ordering stay centralized.
+`ModelProviderCapabilityRegistryTest` pins combined quality scoring, unavailable-provider
+rejection, missing-benchmark fallback, and cheap-below-threshold rejection through the ranking
+policy. Runtime wiring from Redis, tier-eval rows, benchmark tracking, and YAML model metadata is
+still pending.
 
 ## Open Questions
 
