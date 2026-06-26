@@ -1,0 +1,192 @@
+package com.navneet.executespec.execution.service;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
+import com.navneet.executespec.execution.model.GoalContinuationRequest;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.router.ModelProviderRankingDecision;
+import com.navneet.executespec.router.ModelProviderScore;
+
+/**
+ * Pure policy for turning goal doneness plus ranked model/provider candidates into the next action.
+ *
+ * <p>This does not mutate run state, dispatch workers, or switch providers. It is the deterministic
+ * policy seam future runtime wiring can call before spending another expensive turn.
+ */
+public class GoalContinuationPolicy {
+
+  public GoalContinuationPolicyDecision decide(GoalContinuationRequest request) {
+    if (request == null || request.goalDecision() == null) {
+      return decision(
+          RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+          Optional.empty(),
+          "goal continuation evidence is missing; keep current model/provider");
+    }
+
+    GoalDonenessDecision goal = request.goalDecision();
+    if (goal.recommendedDecision() == RunContinuationDecision.STOP_DONE) {
+      return decision(goal.recommendedDecision(), Optional.empty(), goal.reason());
+    }
+    if (goal.recommendedDecision() == RunContinuationDecision.STOP_BLOCKED) {
+      return decision(goal.recommendedDecision(), Optional.empty(), goal.reason());
+    }
+
+    if (request.expensiveContinuationRequiresConfirmation()
+        && !request.userConfirmedExpensiveContinuation()) {
+      return decision(
+          RunContinuationDecision.STOP_BLOCKED,
+          Optional.empty(),
+          "expensive continuation requires user confirmation before more spend");
+    }
+
+    Optional<GoalContinuationPolicyDecision> escalation = escalationDecision(request);
+    if (escalation.isPresent()) {
+      return escalation.get();
+    }
+
+    if (goal.recommendedDecision() == RunContinuationDecision.STOP_FAILED
+        || goal.recommendedDecision() == RunContinuationDecision.STOP_WASTE_GUARD) {
+      return decision(goal.recommendedDecision(), Optional.empty(), goal.reason());
+    }
+
+    if (request.taskSimplerThanExpected() && request.canStepDown()) {
+      Optional<ModelProviderScore> cheaper = cheaperEligibleCandidate(request);
+      if (cheaper.isPresent()) {
+        ModelProviderScore selected = cheaper.get();
+        if (sameProvider(request.currentCandidate(), selected)) {
+          return decision(
+              RunContinuationDecision.STEP_DOWN_MODEL,
+              cheaper,
+              "task is simpler than expected; cheaper eligible model clears quality threshold: "
+                  + selected.label());
+        }
+        if (request.canSwitchProvider()) {
+          return decision(
+              RunContinuationDecision.CHANGE_PROVIDER,
+              cheaper,
+              "task is simpler than expected; cheaper eligible candidate requires provider change: "
+                  + selected.label());
+        }
+      }
+    }
+
+    return decision(
+        RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+        Optional.ofNullable(request.currentCandidate()),
+        "goal is not proven done, but no bounded escalation or step-down is justified");
+  }
+
+  private Optional<GoalContinuationPolicyDecision> escalationDecision(
+      GoalContinuationRequest request) {
+    if (request.providerBehaviorPoor() && request.canSwitchProvider()) {
+      Optional<ModelProviderScore> alternateProvider = bestDifferentProvider(request);
+      if (alternateProvider.isPresent()) {
+        return Optional.of(
+            decision(
+                RunContinuationDecision.CHANGE_PROVIDER,
+                alternateProvider,
+                "provider behavior is poor; selected better eligible provider: "
+                    + alternateProvider.get().label()));
+      }
+    }
+
+    boolean shouldImproveQuality =
+        request.qualityInsufficient()
+            || request.goalDecision().anotherModelProviderMightHelp()
+            || request.goalDecision().recommendedDecision() == RunContinuationDecision.STOP_FAILED
+            || request.goalDecision().recommendedDecision()
+                == RunContinuationDecision.STOP_WASTE_GUARD;
+    if (!shouldImproveQuality) {
+      return Optional.empty();
+    }
+
+    Optional<ModelProviderScore> stronger = strongerEligibleCandidate(request);
+    if (stronger.isEmpty()) {
+      return Optional.empty();
+    }
+
+    ModelProviderScore selected = stronger.get();
+    if (sameProvider(request.currentCandidate(), selected) && request.canStepUp()) {
+      return Optional.of(
+          decision(
+              RunContinuationDecision.STEP_UP_MODEL,
+              stronger,
+              "quality is insufficient; stronger eligible model clears threshold: "
+                  + selected.label()));
+    }
+    if (!sameProvider(request.currentCandidate(), selected) && request.canSwitchProvider()) {
+      return Optional.of(
+          decision(
+              RunContinuationDecision.CHANGE_PROVIDER,
+              stronger,
+              "quality is insufficient; best eligible candidate requires provider change: "
+                  + selected.label()));
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<ModelProviderScore> strongerEligibleCandidate(
+      GoalContinuationRequest request) {
+    ModelProviderScore current = request.currentCandidate();
+    if (current == null) {
+      return eligible(request).stream().findFirst();
+    }
+    return eligible(request).stream()
+        .filter(candidate -> !sameCandidate(current, candidate))
+        .filter(candidate -> candidate.qualityScore() > current.qualityScore())
+        .findFirst();
+  }
+
+  private static Optional<ModelProviderScore> bestDifferentProvider(
+      GoalContinuationRequest request) {
+    ModelProviderScore current = request.currentCandidate();
+    if (current == null) {
+      return eligible(request).stream().findFirst();
+    }
+    return eligible(request).stream()
+        .filter(candidate -> !candidate.provider().equalsIgnoreCase(current.provider()))
+        .findFirst();
+  }
+
+  private static Optional<ModelProviderScore> cheaperEligibleCandidate(
+      GoalContinuationRequest request) {
+    ModelProviderScore current = request.currentCandidate();
+    if (current == null) {
+      return Optional.empty();
+    }
+    return eligible(request).stream()
+        .filter(candidate -> !sameCandidate(current, candidate))
+        .filter(candidate -> candidate.costPerMillionTokens() < current.costPerMillionTokens())
+        .sorted(
+            Comparator.comparingDouble(ModelProviderScore::qualityScore)
+                .reversed()
+                .thenComparingDouble(ModelProviderScore::costPerMillionTokens)
+                .thenComparingLong(ModelProviderScore::latencyP50Ms))
+        .findFirst();
+  }
+
+  private static List<ModelProviderScore> eligible(GoalContinuationRequest request) {
+    ModelProviderRankingDecision ranking = request.rankingDecision();
+    return ranking == null ? List.of() : ranking.eligible();
+  }
+
+  private static boolean sameProvider(ModelProviderScore a, ModelProviderScore b) {
+    return a != null && b != null && a.provider().equalsIgnoreCase(b.provider());
+  }
+
+  private static boolean sameCandidate(ModelProviderScore a, ModelProviderScore b) {
+    return sameProvider(a, b) && a.model().equalsIgnoreCase(b.model());
+  }
+
+  private static GoalContinuationPolicyDecision decision(
+      RunContinuationDecision decision,
+      Optional<ModelProviderScore> selectedCandidate,
+      String reason) {
+    return new GoalContinuationPolicyDecision(
+        decision, selectedCandidate, reason == null ? List.of() : List.of(reason));
+  }
+}

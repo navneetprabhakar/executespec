@@ -307,6 +307,15 @@ Fourth slice 2026-06-26: V249 seeds `execution.goal-decision.enforcement.enabled
 returns aggregate `ABORTED`. `STOP_DONE` intentionally remains informational until a run-level goal
 proof exists. Provider/model step-up, step-down, and change-provider decisions are still pending.
 
+Fifth slice 2026-06-26: `GoalContinuationRequest`, `GoalContinuationPolicyDecision`, and
+`GoalContinuationPolicy` now define the pure escalation/exit policy that consumes
+`GoalDonenessDecision` plus ranked `ModelProviderScore` candidates. It stops done/blocked
+immediately, blocks expensive continuation until user confirmation, escalates waste/failure only
+when another model/provider may help and configured limits remain, changes provider for poor
+provider behavior, steps up for insufficient quality, and steps down only to cheaper candidates that
+still clear the quality threshold. `GoalContinuationPolicyTest` pins those cases. Runtime provider
+switching and candidate metric aggregation are still pending.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
