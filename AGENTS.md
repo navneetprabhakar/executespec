@@ -126,6 +126,8 @@ Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAV
 
 `execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
 
+Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
+
 When a terminal waste/failed goal decision still says another model/provider might help, `CONTINUATION_DECISION` now explains when no useful escalation remains within configured limits instead of hiding that stop behind the generic goal reason.
 
 5 published SLOs in [`docs/operations/slos.md`](docs/operations/slos.md): run terminal in 15min ≥95% / verified-score correctness ≥90% / cost estimate within 30% on ≥80% / webhook in 60s ≥99% / hot-path 5xx <0.5%.
