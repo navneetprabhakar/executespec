@@ -130,6 +130,7 @@ Add `ContinuationPolicy` and `WasteGuardPolicy` with explicit ceilings:
 execution:
   continuation:
     enabled: false
+    required-quality-threshold: 70.0
     max-no-progress-iterations: 28
     max-task-retries: 1
     max-high-complexity-retries: 2
@@ -140,8 +141,13 @@ execution:
     max-task-wall-clock-seconds-low: 1800
     max-task-wall-clock-seconds-medium: 2700
     max-task-wall-clock-seconds-high: 4500
-    require-confirmation-before-expensive-continuation: true
+    require-confirmation-before-expensive-continuation: false
 ```
+
+The first wired subset is advisory-only: `required-quality-threshold`,
+`max-provider-switches-per-run`, `max-model-step-ups-per-task`,
+`max-model-step-downs-per-task`, and
+`require-confirmation-before-expensive-continuation`.
 
 Hard exits:
 
@@ -392,6 +398,16 @@ evidence, risks, user-input flag, selected candidate, and continuation reasons. 
 emits those typed events alongside the existing `Goal decision: ...` and `Continuation decision: ...`
 log lines, preserving old web/CLI/VS Code readers while giving terminal/TUI clients a stable
 machine-readable contract.
+
+Fourteenth slice 2026-06-26: continuation advisory ceilings are no longer hardcoded at the executor
+boundary. `application.yml` now exposes `execution.continuation.required-quality-threshold`,
+`max-provider-switches-per-run`, `max-model-step-ups-per-task`,
+`max-model-step-downs-per-task`, and
+`require-confirmation-before-expensive-continuation`; `SequentialExecutor` sanitizes those values,
+passes them into `GoalContinuationAdvisor` / fallback `GoalContinuationPolicy`, and includes the
+applied policy in both typed `CONTINUATION_DECISION` SSE data and durable
+`agent_task.continuation_decision_json`. This still remains advisory-only: changing these settings
+does not make the executor rerun tasks or mutate provider/model dispatch.
 
 ## Open Questions
 

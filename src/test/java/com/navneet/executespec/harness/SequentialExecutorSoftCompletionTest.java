@@ -36,6 +36,7 @@ import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Pins the soft-completion gate introduced by Fix C (2026-05-03, run a076c876 T2 diagnosis).
@@ -453,6 +454,10 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals("claude-haiku-4-5-20251001", request.currentModel());
     assertEquals("TASK_LOW", request.taskCategory());
     assertTrue(request.qualityInsufficient());
+    assertEquals(70.0, request.requiredQualityThreshold());
+    assertEquals(1, request.maxProviderSwitches());
+    assertEquals(1, request.maxModelStepUps());
+    assertEquals(1, request.maxModelStepDowns());
     assertTrue(
         saveLog.stream()
             .anyMatch(
@@ -461,7 +466,12 @@ class SequentialExecutorSoftCompletionTest {
                         && s.goalDonenessJson() != null
                         && s.goalDonenessJson().contains("\"state\":\"NOT_DONE_BUT_PROGRESSING\"")
                         && s.continuationDecisionJson() != null
-                        && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")),
+                        && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"requiredQualityThreshold\":70.0")
+                        && s.continuationDecisionJson().contains("\"maxProviderSwitches\":1")
+                        && s.continuationDecisionJson().contains("\"maxModelStepUps\":1")
+                        && s.continuationDecisionJson().contains("\"maxModelStepDowns\":1")),
         "Expected persisted goal/continuation JSON on T1. Saw: " + saveLog);
     verify(broadcaster)
         .emit(
@@ -481,7 +491,79 @@ class SequentialExecutorSoftCompletionTest {
                         && ((List<?>) event.data().get("reasons"))
                             .contains(
                                 "quality is insufficient; stronger eligible model clears"
-                                    + " threshold")));
+                                    + " threshold")
+                        && ((java.util.Map<?, ?>) event.data().get("policy")).containsValue(70.0)));
+  }
+
+  @Test
+  void continuation_decision_uses_configured_advisory_limits() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_BLOCKED,
+                Optional.empty(),
+                List.of("expensive continuation requires user confirmation before more spend")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThreshold", 85.0);
+    ReflectionTestUtils.setField(executor, "advisoryProviderSwitchLimit", 0);
+    ReflectionTestUtils.setField(executor, "advisoryModelStepUpLimit", 2);
+    ReflectionTestUtils.setField(executor, "advisoryModelStepDownLimit", 3);
+    ReflectionTestUtils.setField(executor, "requireConfirmationBeforeExpensiveContinuation", true);
+    executor.execute(req(singleTaskPlan(), true));
+
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    GoalContinuationAdvisorRequest request = requestCaptor.getValue();
+    assertEquals(85.0, request.requiredQualityThreshold());
+    assertEquals(0, request.maxProviderSwitches());
+    assertEquals(2, request.maxModelStepUps());
+    assertEquals(3, request.maxModelStepDowns());
+    assertTrue(request.expensiveContinuationRequiresConfirmation());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"requiredQualityThreshold\":85.0")
+                        && s.continuationDecisionJson().contains("\"maxProviderSwitches\":0")
+                        && s.continuationDecisionJson().contains("\"maxModelStepUps\":2")
+                        && s.continuationDecisionJson().contains("\"maxModelStepDowns\":3")
+                        && s.continuationDecisionJson()
+                            .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")),
+        "Expected configured continuation policy in persisted JSON. Saw: " + saveLog);
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event -> {
+                  if (!isContinuationDecisionEvent(event)) {
+                    return false;
+                  }
+                  @SuppressWarnings("unchecked")
+                  java.util.Map<String, Object> policy =
+                      (java.util.Map<String, Object>) event.data().get("policy");
+                  return policy != null
+                      && Double.valueOf(85.0).equals(policy.get("requiredQualityThreshold"))
+                      && Integer.valueOf(0).equals(policy.get("maxProviderSwitches"))
+                      && Integer.valueOf(2).equals(policy.get("maxModelStepUps"))
+                      && Integer.valueOf(3).equals(policy.get("maxModelStepDowns"))
+                      && Boolean.TRUE.equals(
+                          policy.get("requireConfirmationBeforeExpensiveContinuation"));
+                }));
   }
 
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate

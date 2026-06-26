@@ -874,6 +874,8 @@ event envelope (`schemaVersion=1` + a typed `data` map) alongside the legacy str
 existing consumers keep working while richer fields ride along: `TOKEN_USAGE` includes typed
 cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields, and
 `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice.
+Continuation decision data also carries the applied `execution.continuation.*` advisory limits so
+live clients can explain which thresholds and ceilings shaped the recommendation.
 `GET /api/runs/{id}/cost` reflects this for live `v2` runs — it reads `RunCostTracker.snapshot` and
 returns `schemaVersion`, `source` (`live_tracker` / `stored_total` / `legacy_estimator`),
 `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls` in addition to cost and token
