@@ -597,6 +597,12 @@ proof into `GoalEvidence.staleExplanationCount`, publishes `staleExplanationCoun
 `GoalDonenessEvaluator` maps the configured `execution.continuation.max-stale-explanations`
 threshold to `WASTE_RISK / STOP_WASTE_GUARD`.
 
+Thirty-fourth slice 2026-06-27: terminal `STOP_WASTE_GUARD` / `STOP_FAILED` continuation decisions
+now make low-confidence-of-improvement explicit. If the goal decision says another model/provider
+might help but `GoalContinuationPolicy` cannot select a stronger/switch candidate within the
+configured step-up/provider-switch limits, the stop reason appends that no useful model/provider
+escalation remains within configured limits.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

@@ -50,6 +50,13 @@ public class GoalContinuationPolicy {
 
     if (goal.recommendedDecision() == RunContinuationDecision.STOP_FAILED
         || goal.recommendedDecision() == RunContinuationDecision.STOP_WASTE_GUARD) {
+      if (escalationMightHelp(request)) {
+        return decision(
+            goal.recommendedDecision(),
+            Optional.empty(),
+            goal.reason()
+                + "; no useful model/provider escalation remains within configured limits");
+      }
       return decision(goal.recommendedDecision(), Optional.empty(), goal.reason());
     }
 
@@ -94,13 +101,7 @@ public class GoalContinuationPolicy {
       }
     }
 
-    boolean shouldImproveQuality =
-        request.qualityInsufficient()
-            || request.goalDecision().anotherModelProviderMightHelp()
-            || request.goalDecision().recommendedDecision() == RunContinuationDecision.STOP_FAILED
-            || request.goalDecision().recommendedDecision()
-                == RunContinuationDecision.STOP_WASTE_GUARD;
-    if (!shouldImproveQuality) {
+    if (!escalationMightHelp(request)) {
       return Optional.empty();
     }
 
@@ -127,6 +128,17 @@ public class GoalContinuationPolicy {
                   + selected.label()));
     }
     return Optional.empty();
+  }
+
+  private static boolean escalationMightHelp(GoalContinuationRequest request) {
+    if (request == null || request.goalDecision() == null) {
+      return false;
+    }
+    return request.providerBehaviorPoor()
+        || request.qualityInsufficient()
+        || request.goalDecision().anotherModelProviderMightHelp()
+        || request.goalDecision().recommendedDecision() == RunContinuationDecision.STOP_FAILED
+        || request.goalDecision().recommendedDecision() == RunContinuationDecision.STOP_WASTE_GUARD;
   }
 
   private static Optional<ModelProviderScore> strongerEligibleCandidate(
