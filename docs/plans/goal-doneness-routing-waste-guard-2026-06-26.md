@@ -356,6 +356,16 @@ execution may be considered without allowing unsafe workspace mutation. `TaskWav
 now covers cap enforcement, same-file conflict, parent-directory conflict, unknown/broad
 serialization, and dependency preservation.
 
+Tenth slice 2026-06-26: `GoalContinuationAdvisorRequest` and `GoalContinuationAdvisor` now provide
+the runtime-facing candidate-backed decision function. The advisor builds candidates through
+`ModelProviderCandidateService`, ranks them with `ModelProviderRankingPolicy`, identifies the
+current provider/model candidate, and feeds the result into `GoalContinuationPolicy`. This is the
+first seam that can recommend `STEP_UP_MODEL`, `STEP_DOWN_MODEL`, or `CHANGE_PROVIDER` from live
+candidate data while still being advisory-only: it does not dispatch workers, mutate a run, or
+override strict-provider/user pins. `GoalContinuationAdvisorTest` pins same-provider step-up,
+provider change, cheaper eligible step-down, and propagation of provider/model filters plus
+availability/preference inputs to the candidate collector.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
