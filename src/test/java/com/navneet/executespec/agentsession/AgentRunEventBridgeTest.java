@@ -87,6 +87,38 @@ class AgentRunEventBridgeTest {
   }
 
   @Test
+  void bridgesTaskWavePlanIntoRunScopedAgentSession() {
+    AgentSession session = session("s1", "run-1");
+    when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(session));
+    when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    bridge.onRunEvent(
+        RunEvent.taskWavePlan(
+            "run-1",
+            "Task wave plan: 2 bounded waves",
+            Map.of(
+                "executionMode",
+                "SEQUENTIAL_ADVISORY",
+                "maxParallelTasks",
+                2,
+                "waves",
+                List.of(List.of("T1", "T2"), List.of("T3")))));
+
+    ArgumentCaptor<AgentActionEvent> event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getSessionId()).isEqualTo("s1");
+    assertThat(event.getValue().getType()).isEqualTo("RUN_TASK_WAVE_PLAN");
+    assertThat(event.getValue().getPayloadJson()).contains("\"runEventType\":\"TASK_WAVE_PLAN\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"summary\":\"Task wave plan");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"executionMode\":\"SEQUENTIAL_ADVISORY\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"maxParallelTasks\":2");
+    verify(sessionRepo).save(session);
+  }
+
+  @Test
   void ignoresUnmappedRunEventsAndEventsWithoutRunId() {
     bridge.onRunEvent(RunEvent.log("run-1", "T1", "plain log"));
     bridge.onRunEvent(RunEvent.goalDecision("", "T1", "Goal DONE", Map.of()));

@@ -882,9 +882,10 @@ evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-cl
 no-progress/false-done thresholds, and concrete budget-ceiling reasons when configured
 cost/token/time ceilings are crossed before proof of completion; those fields are structured in SSE
 data, durable task JSON, the run-detail API, and the IDE Steps tab.
-For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed goal/continuation run events
-into `agent_action_event` rows (`RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`,
-`RUN_CONTINUATION_ACTION`, `RUN_CONTINUATION_ACTION_SKIPPED`) and
+For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed task-wave and
+goal/continuation run events into `agent_action_event` rows (`RUN_TASK_WAVE_PLAN`,
+`RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`, `RUN_CONTINUATION_ACTION`,
+`RUN_CONTINUATION_ACTION_SKIPPED`) and
 `ValidationReportGoalProofEvaluator` maps the final validation report ledger into the same
 `GoalDonenessDecision` contract. `/api/runs/{id}/report` exposes that `runGoalDecision` beside the
 raw ledger, the Evidence tab renders both, and `AgentValidationReportEventBridge` mirrors the
