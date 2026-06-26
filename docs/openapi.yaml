@@ -14,7 +14,7 @@ info:
     persistence (V120). YAML keys under `model-matrix` / `failover-order` use
     `gemini`.
 
-    Tier ladder (live): FREE (15 runs/month) / PRO ($29, 30 managed runs) /
+    Tier ladder (live): FREE (5 runs/month) / PRO ($29, 30 managed runs) /
     TEAM ($39/seat, from 1 seat, BYOK) / ENTERPRISE. The Solo / MAX tiers do
     not exist on dev/main today (V185 retired Solo naming; V165 dropped MAX).
 

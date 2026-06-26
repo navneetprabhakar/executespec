@@ -81,7 +81,7 @@ operating software and data workflows end to end.
 ### R6. Commercial And Admin Controls
 
 - Tier gates must be enforced server-side, not only in UI.
-- FREE supports 15 monthly 1-credit runs with a $3 per-run platform cap.
+- FREE supports 5 monthly 1-credit runs with a $3 per-run platform cap.
 - PRO supports 30 monthly managed-key runs at $29/month or $289/year, with a $5 per-run platform cap unless BYOK is configured.
 - TEAM supports 1-20 self-serve seats at $39/seat/month, BYOK, unlimited runs against the customer's provider quota, and no platform per-run cap.
 - ENTERPRISE supports custom contract terms, org model matrix overrides, aggregator/provider org keys, and expanded admin controls.
@@ -129,7 +129,7 @@ These lines are roadmap scope, not current live product claims.
 
 | Tier | Current intent | Key constraints |
 | --- | --- | --- |
-| FREE | Trial/evaluation tier | 15 runs/month, small 1-credit specs only, fixed model default, $3/run cap, 1 project, 1 repo. |
+| FREE | Trial/evaluation tier | 5 runs/month, small 1-credit specs only, fixed model default, $3/run cap, 1 project, 1 repo. |
 | PRO | Solo paid tier | $29/month or $289/year, 30 managed runs/month, 2 projects, 2 repos/project, PR/code review quotas, $5/run cap, BYOK lifts cap. |
 | TEAM | Self-serve team tier | $39/seat/month, 1-20 seats, BYOK, unlimited runs against provider quota, no platform per-run markup, shared org controls. |
 | ENTERPRISE | Contract tier | Custom pricing, unlimited policy subject to contract/safety, org model matrix, OpenRouter/Fireworks/deep provider lanes, DPA/SLA/security review path. |

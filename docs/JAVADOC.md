@@ -83,7 +83,7 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V247`.
+Migration head in this worktree: `V248`.
 
 Recent relevant migrations:
 
@@ -99,6 +99,7 @@ Recent relevant migrations:
 - `V245`: `managed_ai_usage_period`, `managed_ai_usage_event`, and `managed_ai_state_notification` — ES AI credit ledger, raw-COGS caps, step-down/step-up routing state, and notification dedupe.
 - `V246`: `agent_session.run_id` — durable run-scoped web agent sessions.
 - `V247`: `agent_action_event.action_id` — first-class action/result correlation id for agent clients.
+- `V248`: FREE tier sentinel fix — force `tier_config.monthly_run_limit` and `billing_plan.run_limit` back to 5 when stale rows still carry any other value, especially `-1` unlimited.
 
 ## Deprecated / Transitional Areas
 

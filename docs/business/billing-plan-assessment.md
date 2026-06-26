@@ -1,19 +1,20 @@
 # Billing Plan Assessment
 
-> Assessed 2026-06-19 against migrations, backend enforcement, public website copy, and billing docs.
+> Assessed 2026-06-26 against migrations, backend enforcement, public website copy, and billing docs.
 
 ## Current Implemented Ladder
 
 | Tier | Listed offer | Runtime/enforcement truth | Assessment |
 | --- | --- | --- | --- |
-| FREE | $0, 15 runs/month, small specs, $3/run cap | V200 sets `tier_config.monthly_run_limit=15`, `billing_plan.run_limit=15`, and RUNS limit=15. `TierEnforcementService` reads `tier_config`; fallback now matches 15. | Good acquisition tier. Worst-case managed exposure can be high if many users run up to the $3 cap, so keep complexity gate and cap strict. |
+| FREE | $0, 5 runs/month, small specs, $3/run cap | V248 force-sets `tier_config.monthly_run_limit=5` and `billing_plan.run_limit=5` when stale rows carry another value, especially `-1` unlimited. `TierEnforcementService` reads `tier_config`; its Java fallback/comment path still needs a cleanup pass because it still mentions 15. | Tighter acquisition tier with lower managed-spend exposure. Keep complexity gate and cap strict. |
 | PRO | $29/month or $289/year, 30 managed-key runs, $5/run cap, BYOK can lift cap | V176 bumps PRO to 30 and seeds $29/₹2,499 rows; V177 adds annual; V185 restores Pro name; V207 deactivates stale $20 duplicate rows. `resolveRunCostBudget(PRO,false)=5`; PRO+BYOK is uncapped. | Viable as solo bridge, but gross margin needs active run-cost monitoring. Heavy managed-key users must be nudged to Team BYOK. |
 | TEAM | $39/seat/month, ₹3,399/seat, from 1 seat, monthly only, BYOK, no platform cost cap | V165 makes Team the canonical $39 seat tier and deactivates old yearly rows; V206 aligns INR to ₹3,399; `BillingService` and `OrgService` enforce 1-20 seats; `resolveRunCostBudget(TEAM,*)=-1`. | Best margin-safe self-serve plan. Missing annual Team plan is a deliberate gap but may reduce cash collection and procurement fit. |
 | ENTERPRISE | Custom, unlimited policy, DPA/SLA path, org model controls | `resolveRunCostBudget(ENTERPRISE,*)=-1`; org model overrides and provider key lanes exist; enterprise compliance claims remain bounded by docs. | Correct for custom sales, but do not oversell SAML/SOC2/dedicated region. |
 
 ## Code Truth Checked
 
-- `src/main/resources/db/migration/V200__bump_free_tier_to_15_runs.sql`
+- `src/main/resources/db/migration/V200__bump_free_tier_to_15_runs.sql` (historical; superseded for current FREE quota by V248)
+- `src/main/resources/db/migration/V248__fix_free_tier_run_limit_sentinel.sql`
 - `src/main/resources/db/migration/V176__unhide_pro_as_solo_tier.sql`
 - `src/main/resources/db/migration/V177__solo_annual_and_founder_pricing.sql`
 - `src/main/resources/db/migration/V185__retire_solo_branding.sql`
@@ -29,9 +30,9 @@
 
 | Issue | Severity | Fix in this pass |
 | --- | --- | --- |
-| Fallback quotas in `TierEnforcementService` still used stale Free=5 and Pro=20 if `tier_config` lookup failed. | Medium | Updated fallbacks to Free=15 and Pro=30. Runtime normally reads DB, but fallback should not contradict current product. |
+| Fallback quotas/comments in `TierEnforcementService` still mention Free=15 after V248 made the DB source of truth Free=5. | Medium | Not changed in this docs-only pass. Runtime normally reads DB, but fallback/comment drift should be fixed in code. |
 | Several code comments and DTO comments still said Team requires 2-20 seats. | Low | Updated comments to 1-20. Enforcement was already correct. |
-| Core docs had stale migration-head references while the current worktree is V247. | Low | Updated active docs to V247. |
+| Core docs had stale migration-head references while the current worktree is V248. | Low | Updated active docs to V248. |
 | `docs/billing-workflows.html` still described PRO as hidden/grandfathered. | Medium | Needs HTML refresh or replacement; do not use as current pricing truth until updated. |
 | `website/pricing-analysis.md` is explicitly pre-V141 and contains old MAX/Pro economics. | Medium | Treat as historical. Current assessment supersedes it for business planning. |
 
@@ -39,7 +40,7 @@
 
 ### Free
 
-Free is intentionally more generous after V200. The risk is cost exposure, not conversion friction. Keep Free limited to small specs and enforce the $3 cap. Do not increase Free until activation and cost data justify it.
+Free is intentionally narrow after V248: 5 small runs/month with a $3 cap. The risk is still managed-key cost exposure, not conversion friction. Keep Free limited to small specs and enforce the $3 cap. Do not increase Free until activation and cost data justify it.
 
 ### Pro
 
