@@ -49,7 +49,7 @@ Billing boundary: run credits are charged only through the plan-approval path. S
 ## Run Telemetry (W0)
 
 - `GET /api/runs/{id}/cost` returns `schemaVersion=1`, `source`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls`. Live V2 runs read from `RunCostTracker`; terminal/legacy rows expose null for fields older runs do not store.
-- `sse/RunEvent` carries an additive envelope (`schemaVersion=1`, typed `data`) while preserving the legacy string `payload`; `TOKEN_USAGE` and `TOOL_CALL` events expose typed fields (RL-2026-06-043).
+- `sse/RunEvent` carries an additive envelope (`schemaVersion=1`, typed `data`) while preserving the legacy string `payload`; `TOKEN_USAGE`, `TOOL_CALL`, `GOAL_DECISION`, `CONTINUATION_DECISION`, `CONTINUATION_ACTION`, and `CONTINUATION_ACTION_SKIPPED` expose typed fields (RL-2026-06-043 / RL-2026-06-198).
 - `RunStepUsageRecorder` writes every successful LLM call to `run_step_usage` (V243) with run/task/provider/model/token/cache/reasoning/cost/call-index plus producer attribution (`agentRole`, `stepId`, `retryOf`); same-provider retries and cross-provider failover rows point back to the original role/step (RL-2026-06-044). Raw provider-usage capture and typed `TOOL_RESULT`/`STEP` events remain W0 follow-ups.
 
 ## Safety Invariants

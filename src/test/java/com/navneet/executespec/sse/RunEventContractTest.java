@@ -129,5 +129,36 @@ class RunEventContractTest {
     assertEquals("quality", event.data().get("reason"));
     assertEquals(1, event.data().get("attempt"));
     assertEquals(1, event.data().get("maxAttempts"));
+    assertEquals(null, event.data().get("limitName"));
+    assertEquals(0, event.data().get("usedLimit"));
+    assertEquals(0, event.data().get("maxLimit"));
+  }
+
+  @Test
+  void continuationActionSkippedCarriesTypedLimitEnvelope() {
+    RunEvent event =
+        RunEvent.continuationActionSkipped(
+            "run-1",
+            "task-1",
+            "Continuation action skipped: STEP_UP_MODEL -> openai/gpt-5.4 (limit reached)",
+            "STEP_UP_MODEL",
+            "openai",
+            "gpt-5.4",
+            "quality",
+            "maxModelStepUps",
+            0,
+            0);
+
+    assertEquals("CONTINUATION_ACTION_SKIPPED", event.type());
+    assertEquals(
+        "Continuation action skipped: STEP_UP_MODEL -> openai/gpt-5.4 (limit reached)",
+        event.payload());
+    assertEquals("STEP_UP_MODEL", event.data().get("decision"));
+    assertEquals("openai", event.data().get("selectedProvider"));
+    assertEquals("gpt-5.4", event.data().get("selectedModel"));
+    assertEquals("quality", event.data().get("reason"));
+    assertEquals("maxModelStepUps", event.data().get("limitName"));
+    assertEquals(0, event.data().get("usedLimit"));
+    assertEquals(0, event.data().get("maxLimit"));
   }
 }

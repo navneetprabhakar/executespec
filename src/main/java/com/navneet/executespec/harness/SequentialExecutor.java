@@ -5,6 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -322,6 +325,12 @@ to boot — skip it for those.""";
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
+  private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationModelStepDownsPerTask =
+      new ConcurrentHashMap<>();
 
   @Value("${execution.continuation.required-quality-threshold:70.0}")
   private double goalRequiredQualityThreshold = 70.0;
@@ -516,6 +525,7 @@ to boot — skip it for those.""";
       contextStore.deleteAll(runId);
     }
     clearCrossProviderState(runId);
+    clearContinuationActionState(runId);
 
     return result;
   }
@@ -706,6 +716,12 @@ to boot — skip it for those.""";
     }
 
     String runId = req.runContext().runId();
+    ContinuationActionLimit actionLimit = reserveContinuationAction(runId, task.id(), decision);
+    if (!actionLimit.allowed()) {
+      emitContinuationActionSkipped(runId, task.id(), decision, candidate, actionLimit);
+      return outcome;
+    }
+
     String reason = firstReason(decision);
     String summary =
         "Continuation action: "
@@ -733,7 +749,10 @@ to boot — skip it for those.""";
             candidate.model(),
             reason,
             1,
-            maxContinuationReruns()));
+            maxContinuationReruns(),
+            actionLimit.limitName(),
+            actionLimit.usedAfterReserve(),
+            actionLimit.maxAllowed()));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), summary));
 
     TaskOutcome rerun =
@@ -771,6 +790,111 @@ to boot — skip it for those.""";
   private int maxContinuationReruns() {
     return Math.min(1, Math.max(0, continuationRerunLimit));
   }
+
+  private ContinuationActionLimit reserveContinuationAction(
+      String runId, String taskId, GoalContinuationPolicyDecision decision) {
+    return switch (decision.decision()) {
+      case CHANGE_PROVIDER ->
+          reserveLimit(
+              continuationProviderSwitchesPerRun,
+              runId,
+              "maxProviderSwitches",
+              maxProviderSwitches());
+      case STEP_UP_MODEL ->
+          reserveLimit(
+              continuationModelStepUpsPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxModelStepUps",
+              maxModelStepUps());
+      case STEP_DOWN_MODEL ->
+          reserveLimit(
+              continuationModelStepDownsPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxModelStepDowns",
+              maxModelStepDowns());
+      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+          new ContinuationActionLimit("notActionable", 0, 0, false);
+    };
+  }
+
+  private static ContinuationActionLimit reserveLimit(
+      ConcurrentMap<String, AtomicInteger> counters, String key, String limitName, int maxAllowed) {
+    if (maxAllowed <= 0) {
+      int used = counters.getOrDefault(key, new AtomicInteger(0)).get();
+      return new ContinuationActionLimit(limitName, used, maxAllowed, false);
+    }
+    AtomicInteger counter = counters.computeIfAbsent(key, ignored -> new AtomicInteger(0));
+    while (true) {
+      int used = counter.get();
+      if (used >= maxAllowed) {
+        return new ContinuationActionLimit(limitName, used, maxAllowed, false);
+      }
+      if (counter.compareAndSet(used, used + 1)) {
+        return new ContinuationActionLimit(limitName, used + 1, maxAllowed, true);
+      }
+    }
+  }
+
+  private void emitContinuationActionSkipped(
+      String runId,
+      String taskId,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      ContinuationActionLimit actionLimit) {
+    String reason =
+        actionLimit.limitName()
+            + " limit reached (used="
+            + actionLimit.usedAfterReserve()
+            + ", max="
+            + actionLimit.maxAllowed()
+            + ")";
+    String summary =
+        "Continuation action skipped: "
+            + decision.decision()
+            + " -> "
+            + candidate.label()
+            + " ("
+            + reason
+            + ")";
+    log.warn(
+        "SequentialExecutor continuation action skipped run={} task={} decision={} selected={}"
+            + " limit={} used={} max={}",
+        runId,
+        taskId,
+        decision.decision(),
+        candidate.label(),
+        actionLimit.limitName(),
+        actionLimit.usedAfterReserve(),
+        actionLimit.maxAllowed());
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationActionSkipped(
+            runId,
+            taskId,
+            summary,
+            decision.decision().name(),
+            candidate.provider(),
+            candidate.model(),
+            firstReason(decision),
+            actionLimit.limitName(),
+            actionLimit.usedAfterReserve(),
+            actionLimit.maxAllowed()));
+    broadcaster.emit(runId, RunEvent.log(runId, taskId, summary));
+  }
+
+  private void clearContinuationActionState(String runId) {
+    continuationProviderSwitchesPerRun.remove(runId);
+    String prefix = continuationTaskKey(runId, "");
+    continuationModelStepUpsPerTask.keySet().removeIf(key -> key.startsWith(prefix));
+    continuationModelStepDownsPerTask.keySet().removeIf(key -> key.startsWith(prefix));
+  }
+
+  private static String continuationTaskKey(String runId, String taskId) {
+    return (runId == null ? "" : runId) + ":" + (taskId == null ? "" : taskId);
+  }
+
+  private record ContinuationActionLimit(
+      String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
 
   private static TaskOutcome mergeContinuationAttempt(TaskOutcome initial, TaskOutcome rerun) {
     if (rerun == null) {
