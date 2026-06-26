@@ -331,6 +331,7 @@ export interface GoalDonenessDecisionData {
   state?: string;
   recommendedDecision?: string;
   reason?: string;
+  recommendedNextStep?: string;
   goalSummary?: string;
   completedItems?: string[];
   incompleteItems?: string[];

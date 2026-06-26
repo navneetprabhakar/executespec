@@ -483,6 +483,8 @@ class SequentialExecutorSoftCompletionTest {
                     isGoalDecisionEvent(event)
                         && "WASTE_RISK".equals(event.data().get("state"))
                         && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("recommendedNextStep"))
+                            .contains("Stop this attempt")
                         && String.valueOf(event.data().get("reason"))
                             .contains("repeated false completion claims")
                         && ((List<?>) event.data().get("evidence"))
@@ -648,6 +650,8 @@ class SequentialExecutorSoftCompletionTest {
                     isGoalDecisionEvent(event)
                         && "DONE".equals(event.data().get("state"))
                         && "STOP_DONE".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("recommendedNextStep"))
+                            .contains("No further work")
                         && "goal satisfied with validation evidence and required outputs present"
                             .equals(event.data().get("reason"))));
     verify(broadcaster)
@@ -703,6 +707,7 @@ class SequentialExecutorSoftCompletionTest {
                     s.taskKey().endsWith("_T1")
                         && s.goalDonenessJson() != null
                         && s.goalDonenessJson().contains("\"state\":\"NOT_DONE_BUT_PROGRESSING\"")
+                        && s.goalDonenessJson().contains("\"recommendedNextStep\":")
                         && s.continuationDecisionJson() != null
                         && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")
                         && s.continuationDecisionJson()

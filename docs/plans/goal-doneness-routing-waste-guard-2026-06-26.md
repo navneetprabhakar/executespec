@@ -549,6 +549,13 @@ before falling back to `TASK_LOW` / `TASK_MEDIUM` / `TASK_HIGH`. The first seman
 letting benchmark/local validation signals and quality thresholds line up on real task categories
 when the task text is explicit enough.
 
+Twenty-eighth slice 2026-06-26: every `GoalDonenessDecision` now carries an explicit
+`recommendedNextStep` string, closing the last "Every exit must explain" field without introducing a
+second decision type. The value is deterministic from the recommended decision and whether user
+input or another model/provider might help; typed `GOAL_DECISION` SSE data, durable
+`agent_task.goal_doneness_json`, `TaskSummary.goalDoneness`, `/api/runs/{id}/report`
+`runGoalDecision`, OpenAPI, and the run-result Steps/Evidence tabs all expose the same field.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

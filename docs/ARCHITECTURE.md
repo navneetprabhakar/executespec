@@ -874,8 +874,8 @@ event envelope (`schemaVersion=1` + a typed `data` map) alongside the legacy str
 existing consumers keep working while richer fields ride along: `TOKEN_USAGE` includes typed
 cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields,
 `TASK_WAVE_PLAN` exposes the advisory bounded safe-parallelism plan while execution remains
-sequential, and `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus
-next-action advice.
+sequential, and `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state,
+recommended next step, and next-action advice.
 Continuation decision data also carries the applied `execution.continuation.*` advisory limits so
 live clients can explain which thresholds and ceilings shaped the recommendation. Goal decision
 evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, configured
@@ -887,10 +887,11 @@ goal/continuation run events into `agent_action_event` rows (`RUN_TASK_WAVE_PLAN
 `RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`, `RUN_CONTINUATION_ACTION`,
 `RUN_CONTINUATION_ACTION_SKIPPED`) and
 `ValidationReportGoalProofEvaluator` maps the final validation report ledger into the same
-`GoalDonenessDecision` contract. `/api/runs/{id}/report` exposes that `runGoalDecision` beside the
-raw ledger, the Evidence tab renders both, and `AgentValidationReportEventBridge` mirrors the
-ledger plus that proof as `RUN_VALIDATION_EVIDENCE`, so web/CLI/VS Code clients can reload the same
-decision and evidence trail through `/api/agent/sessions/{id}/events`.
+`GoalDonenessDecision` contract, including `recommendedNextStep`. `/api/runs/{id}/report` exposes
+that `runGoalDecision` beside the raw ledger, the Evidence tab renders both, and
+`AgentValidationReportEventBridge` mirrors the ledger plus that proof as `RUN_VALIDATION_EVIDENCE`,
+so web/CLI/VS Code clients can reload the same decision and evidence trail through
+`/api/agent/sessions/{id}/events`.
 When the default-off continuation acting switch is enabled, `CONTINUATION_ACTION` marks the actual
 selected-candidate same-task rerun with decision, provider, model, reason, bounded attempt metadata,
 and consumed limit metadata. If runtime ceilings block an otherwise actionable recommendation,

@@ -2537,6 +2537,8 @@ paths:
                           ]
                       reason:
                         type: string
+                      recommendedNextStep:
+                        type: string
                       goalSummary:
                         type: string
                       completedItems:
