@@ -1,6 +1,6 @@
 # Goal Doneness, Routing, and Waste Guard
 
-> Status: incremental implementation in progress, default-off runtime enforcement only. Date: 2026-06-26.
+> Status: incremental implementation in progress; task-stop and model/provider acting remain default-off, while final run-level proof is persisted. Date: 2026-06-27.
 
 ## Problem
 
@@ -337,8 +337,11 @@ Fourth slice 2026-06-26: V249 seeds `execution.goal-decision.enforcement.enabled
 `TaskOutcome` now carries the computed `GoalDonenessDecision`; when the flag is enabled,
 `SequentialExecutor` aborts remaining sequential tasks after `STOP_BLOCKED`, `STOP_FAILED`, or
 `STOP_WASTE_GUARD`, emits `Goal stop enforced: ...`, appends synthetic `SKIPPED` task outcomes, and
-returns aggregate `ABORTED`. `STOP_DONE` intentionally remains informational until a run-level goal
-proof exists. Provider/model step-up, step-down, and change-provider decisions are still pending.
+returns aggregate `ABORTED`. Task-boundary `STOP_DONE` intentionally remains informational even
+after V251's final run-level proof, because one task proving done does not prove a multi-task run is
+done; final proof is persisted on `pipeline_run.run_goal_doneness_json` after validation-report
+generation. Provider/model step-up, step-down, and change-provider decisions are selected by the
+advisor and only executed when the default-off acting flag is enabled.
 
 Fifth slice 2026-06-26: `GoalContinuationRequest`, `GoalContinuationPolicyDecision`, and
 `GoalContinuationPolicy` now define the pure escalation/exit policy that consumes
@@ -521,8 +524,9 @@ boundary without enabling concurrent workspace mutation. `application.yml` expos
 through `TaskWaveScheduler.scheduleBounded(...)` at run start; emits typed `TASK_WAVE_PLAN` SSE data
 with `executionMode=SEQUENTIAL_ADVISORY`, bounded waves, serialized tasks, missing/unscheduled
 dependency metadata, and the configured cap; and includes `maxParallelTasks` in the applied
-continuation policy payload. Runtime task dispatch remains sequential until a separate eval-gated
-parallel execution flag is introduced.
+continuation policy payload. Runtime task dispatch remains sequential for mutating work; the only
+automatic runtime parallelism is the separate pure read-only worker tool batch path gated by
+`execution.continuation.parallel-read-tools-enabled`.
 
 Twenty-fifth slice 2026-06-26: advisory task-wave plans are now reloadable through run-scoped
 agent sessions, not only transient run SSE. `AgentRunEventBridge` maps typed `TASK_WAVE_PLAN`
