@@ -1,8 +1,10 @@
 package com.navneet.executespec.harness;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -1399,18 +1401,17 @@ to boot — skip it for those.""";
         decision.state(),
         decision.recommendedDecision(),
         decision.reason());
+    String goalSummary =
+        "Goal decision: "
+            + decision.state()
+            + " -> "
+            + decision.recommendedDecision()
+            + " ("
+            + decision.reason()
+            + ")";
     broadcaster.emit(
-        runId,
-        RunEvent.log(
-            runId,
-            task.id(),
-            "Goal decision: "
-                + decision.state()
-                + " -> "
-                + decision.recommendedDecision()
-                + " ("
-                + decision.reason()
-                + ")"));
+        runId, RunEvent.goalDecision(runId, task.id(), goalSummary, goalDecisionData(decision)));
+    broadcaster.emit(runId, RunEvent.log(runId, task.id(), goalSummary));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(task, decision, dispatchedProvider, dispatchedModel);
     log.info(
@@ -1418,16 +1419,17 @@ to boot — skip it for those.""";
         task.id(),
         continuationDecision.decision(),
         firstReason(continuationDecision));
+    String continuationSummary =
+        "Continuation decision: "
+            + continuationDecision.decision()
+            + " ("
+            + firstReason(continuationDecision)
+            + ")";
     broadcaster.emit(
         runId,
-        RunEvent.log(
-            runId,
-            task.id(),
-            "Continuation decision: "
-                + continuationDecision.decision()
-                + " ("
-                + firstReason(continuationDecision)
-                + ")"));
+        RunEvent.continuationDecision(
+            runId, task.id(), continuationSummary, continuationDecisionData(continuationDecision)));
+    broadcaster.emit(runId, RunEvent.log(runId, task.id(), continuationSummary));
     persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
     return decision;
   }
@@ -1500,6 +1502,55 @@ to boot — skip it for those.""";
       return "TASK_MEDIUM";
     }
     return "TASK_" + task.complexity().name();
+  }
+
+  private static Map<String, Object> goalDecisionData(GoalDonenessDecision decision) {
+    if (decision == null) {
+      return Map.of("state", "UNKNOWN", "reason", "goal decision missing");
+    }
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("state", decision.state().name());
+    data.put("recommendedDecision", decision.recommendedDecision().name());
+    data.put("reason", decision.reason());
+    data.put("goalSummary", decision.goalSummary());
+    data.put("completedItems", decision.completedItems());
+    data.put("incompleteItems", decision.incompleteItems());
+    data.put("evidence", decision.evidence());
+    data.put("risks", decision.risks());
+    data.put("userInputRequired", decision.userInputRequired());
+    data.put("anotherModelProviderMightHelp", decision.anotherModelProviderMightHelp());
+    return data;
+  }
+
+  private static Map<String, Object> continuationDecisionData(
+      GoalContinuationPolicyDecision decision) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    if (decision == null) {
+      data.put("decision", "UNKNOWN");
+      data.put("reasons", List.of("continuation decision missing"));
+      return data;
+    }
+    data.put("decision", decision.decision().name());
+    decision
+        .selectedCandidate()
+        .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
+    data.put("reasons", decision.reasons());
+    return data;
+  }
+
+  private static Map<String, Object> selectedCandidateData(
+      com.navneet.executespec.router.ModelProviderScore candidate) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("provider", candidate.provider());
+    data.put("model", candidate.model());
+    data.put("taskCategory", candidate.taskCategory());
+    data.put("qualityScore", candidate.qualityScore());
+    data.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+    data.put("costPerMillionTokens", candidate.costPerMillionTokens());
+    data.put("latencyP50Ms", candidate.latencyP50Ms());
+    data.put("latencyP95Ms", candidate.latencyP95Ms());
+    data.put("reasons", candidate.reasons());
+    return data;
   }
 
   private void persistGoalAndContinuationDecision(

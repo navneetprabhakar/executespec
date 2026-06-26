@@ -32,6 +32,38 @@ public record RunEvent(
   }
 
   /**
+   * Machine-readable task goal-doneness decision. The payload remains a compact human summary for
+   * older log consumers; structured clients should read {@code data}.
+   */
+  public static RunEvent goalDecision(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "GOAL_DECISION",
+        runId,
+        taskId,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
+   * Machine-readable continuation / step-up / step-down / provider-change advice emitted after goal
+   * evaluation. This is advisory unless a later executor component explicitly acts on it.
+   */
+  public static RunEvent continuationDecision(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "CONTINUATION_DECISION",
+        runId,
+        taskId,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
    * PR-C (2026-05-13) — emitted by {@link com.navneet.executespec.tool.WriteFileTool} and {@link
    * com.navneet.executespec.tool.EditFileTool} after every successful write. Payload is the
    * workspace-relative path so the v2/v3 RunDetail file-tree can update the moment a tool call

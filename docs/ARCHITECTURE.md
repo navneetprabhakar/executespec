@@ -872,7 +872,8 @@ phase.
 [`sse/RunEvent`](../src/main/java/com/navneet/executespec/sse/RunEvent.java) carries an additive
 event envelope (`schemaVersion=1` + a typed `data` map) alongside the legacy string `payload`, so
 existing consumers keep working while richer fields ride along: `TOKEN_USAGE` includes typed
-cost/cache/reasoning/call fields and `TOOL_CALL` includes typed remote-tool fields.
+cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields, and
+`GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice.
 `GET /api/runs/{id}/cost` reflects this for live `v2` runs — it reads `RunCostTracker.snapshot` and
 returns `schemaVersion`, `source` (`live_tracker` / `stored_total` / `legacy_estimator`),
 `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls` in addition to cost and token
