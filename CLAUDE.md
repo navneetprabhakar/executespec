@@ -120,6 +120,8 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 
 Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAVE_PLAN` action events so web/CLI/VS Code clients can reload bounded safe-parallelism evidence after the run SSE stream is gone.
 
+`execution.continuation.parallel-read-tools-enabled` defaults to true and gates the worker's automatic read-only tool-batch parallelism. Pure same-turn read batches (`readFile` / `searchFiles` / `listFiles` / `gitStatus` / `gitDiff`) emit server and legacy `LOG` SSE start/done lines with call labels and per-call `ok`/`err` results; mutating, remote, partial, or timed-out batches fall back to sequential dispatch.
+
 `execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
 
 When a terminal waste/failed goal decision still says another model/provider might help, `CONTINUATION_DECISION` now explains when no useful escalation remains within configured limits instead of hiding that stop behind the generic goal reason.
