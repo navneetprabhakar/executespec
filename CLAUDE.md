@@ -124,6 +124,8 @@ Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAV
 
 `execution.continuation.parallel-provider-evaluation-enabled` defaults to true and gates bounded parallel model/provider candidate evaluation inside `ModelProviderCandidateService`; it uses `execution.continuation.max-parallel-tasks` as the cap, logs start labels and done result labels, preserves deterministic model-order output, and records whether each candidate was evaluated in the bounded parallel batch or sequentially in the candidate reasons.
 
+`ModelProviderCandidateService` also reads the latest DONE `benchmark_run` rows fail-soft and converts each provider/model resolved rate (`resolved_tasks / total_tasks`) into a benchmark quality prior. This informs step-up / step-down / change-provider advice without letting benchmark data override the quality-first ranking policy or mutate a run by itself.
+
 `execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
 
 Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.

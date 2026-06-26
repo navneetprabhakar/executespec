@@ -642,6 +642,14 @@ and `runTests` failures to their tool/argument call before counting
 when stderr differs between attempts, while existing exact-line signatures still cover refusals,
 critic gaps, and verify-before-complete nudges.
 
+Fortieth slice 2026-06-27: runtime candidate scoring now uses persisted benchmark results as a real
+quality prior. `ModelProviderCandidateService` reads the latest DONE `benchmark_run` rows fail-soft,
+converts each provider/model run's `resolved_tasks / total_tasks` into a
+`benchmarkQualityScore`, and merges that signal with caller-supplied benchmark/validation signals
+and local 24-hour performance before the strict quality/cost/latency ranking policy runs. This keeps
+benchmarks informative without making them the sole decision-maker or letting the candidate service
+mutate run state.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

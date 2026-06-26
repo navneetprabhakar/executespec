@@ -8,4 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface BenchmarkRunRepository extends JpaRepository<BenchmarkRun, String> {
 
   List<BenchmarkRun> findTop50ByOrderByCreatedAtDesc();
+
+  List<BenchmarkRun> findTop50ByStatusOrderByCreatedAtDesc(String status);
 }
