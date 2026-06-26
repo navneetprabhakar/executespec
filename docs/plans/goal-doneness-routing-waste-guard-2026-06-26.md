@@ -333,8 +333,9 @@ bridge live runtime/config sources into the pure capability seam. The service it
 `ModelPerformanceTracker` success/latency when enough local samples exist, accepts external
 benchmark/validation signals, applies explicit provider/model allow-lists, provider availability,
 and provider preference order, then returns scored `ModelProviderScore` candidates. This closes the
-first live-source collection gap without enabling automatic provider switching; `SequentialExecutor`,
-`ModelResolver`, and `LlmRouter` still do not call the candidate service for run-loop decisions.
+first live-source collection gap without enabling automatic provider switching. Later slice 11 wires
+`SequentialExecutor` to this collector through `GoalContinuationAdvisor` for advisory logs only;
+`ModelResolver` and `LlmRouter` still do not use it for dispatch decisions.
 `ModelProviderCandidateServiceTest` pins YAML fallback quality, local+external signal merge,
 allow-list filtering, unavailable-provider rejection, and fallback-order penalty behavior.
 
@@ -365,6 +366,16 @@ candidate data while still being advisory-only: it does not dispatch workers, mu
 override strict-provider/user pins. `GoalContinuationAdvisorTest` pins same-provider step-up,
 provider change, cheaper eligible step-down, and propagation of provider/model filters plus
 availability/preference inputs to the candidate collector.
+
+Eleventh slice 2026-06-26: `SequentialExecutor` now uses `GoalContinuationAdvisor` at every
+task-boundary goal decision when the advisor bean is available. The executor passes the actual
+dispatched provider/model, task category, a conservative required quality threshold, and YAML
+failover preference order into the advisor, then emits the candidate-backed
+`Continuation decision: DECISION (...)` log. The call is fail-soft: missing/throwing advisor falls
+back to the pure `GoalContinuationPolicy`. This still does not execute provider/model switching or
+rerun work; it only makes step-up, step-down, and change-provider recommendations visible from live
+candidates. `SequentialExecutorSoftCompletionTest` pins advisor-backed `STEP_UP_MODEL` visibility
+on validation-failed-with-progress and verifies the advisor request fields.
 
 ## Open Questions
 

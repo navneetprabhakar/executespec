@@ -64,7 +64,8 @@ class SequentialExecutorTierConfigTest {
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(ContextStore.class),
         mock(RunCostTracker.class),
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        null);
   }
 
   /** Reflectively invoke {@code tierConfigFor} and return field-by-field for assertion. */

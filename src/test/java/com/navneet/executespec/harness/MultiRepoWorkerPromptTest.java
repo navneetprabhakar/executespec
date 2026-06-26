@@ -54,7 +54,8 @@ class MultiRepoWorkerPromptTest {
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(com.navneet.executespec.context.ContextStore.class),
         mock(com.navneet.executespec.cost.RunCostTracker.class),
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        null);
   }
 
   private PlannedTask task() {
