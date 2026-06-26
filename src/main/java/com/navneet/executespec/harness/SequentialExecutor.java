@@ -10,8 +10,11 @@ import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
+import com.navneet.executespec.execution.model.GoalContinuationRequest;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.execution.model.GoalEvidence;
+import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
@@ -309,6 +312,7 @@ to boot — skip it for those.""";
       gcsTaskCheckpointService;
 
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
+  private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
 
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
@@ -1352,7 +1356,32 @@ to boot — skip it for those.""";
                 + " ("
                 + decision.reason()
                 + ")"));
+    GoalContinuationPolicyDecision continuationDecision =
+        goalContinuationPolicy.decide(
+            GoalContinuationRequest.builder().goalDecision(decision).build());
+    log.info(
+        "Executor task={} continuationDecision decision={} reason={}",
+        task.id(),
+        continuationDecision.decision(),
+        firstReason(continuationDecision));
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            task.id(),
+            "Continuation decision: "
+                + continuationDecision.decision()
+                + " ("
+                + firstReason(continuationDecision)
+                + ")"));
     return decision;
+  }
+
+  private static String firstReason(GoalContinuationPolicyDecision decision) {
+    if (decision == null || decision.reasons().isEmpty()) {
+      return "no continuation reason supplied";
+    }
+    return decision.reasons().getFirst();
   }
 
   private GoalEvidence buildGoalEvidence(

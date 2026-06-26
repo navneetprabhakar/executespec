@@ -338,6 +338,15 @@ first live-source collection gap without enabling automatic provider switching; 
 `ModelProviderCandidateServiceTest` pins YAML fallback quality, local+external signal merge,
 allow-list filtering, unavailable-provider rejection, and fallback-order penalty behavior.
 
+Eighth slice 2026-06-26: `SequentialExecutor` now passes every task-boundary
+`GoalDonenessDecision` through `GoalContinuationPolicy` and emits a second SSE `LOG` event:
+`Continuation decision: DECISION (...)`. This is visibility-only because no ranked candidates are
+supplied at the executor boundary yet; the policy can expose continue/stop reasoning, but it cannot
+select step-up, step-down, or change-provider actions from runtime candidates. The existing
+goal-stop enforcement flag still uses the conservative doneness stop decisions, so default runtime
+behavior and provider/model selection remain unchanged. `SequentialExecutorSoftCompletionTest`
+pins the `STOP_DONE` continuation event on completeTask+passing-smoke.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

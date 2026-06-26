@@ -15,7 +15,7 @@ For exhaustive class discovery use:
 | `api` | Run controllers, model controller, global advice, admin surfaces. |
 | `integration` | Run orchestration, lifecycle, persistence writer, SCM push integration. |
 | `engine` | Worker agent and code-generation engine seam. |
-| `harness` | Sequential task executor, task-tier routing, goal-decision visibility, and default-off goal-stop enforcement. |
+| `harness` | Sequential task executor, task-tier routing, goal/continuation decision visibility, and default-off goal-stop enforcement. |
 | `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
