@@ -147,6 +147,7 @@ execution:
     max-task-retries: 1
     max-high-complexity-retries: 2
     max-false-done-claims: 2
+    max-repeated-failures: 3
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
@@ -555,6 +556,15 @@ second decision type. The value is deterministic from the recommended decision a
 input or another model/provider might help; typed `GOAL_DECISION` SSE data, durable
 `agent_task.goal_doneness_json`, `TaskSummary.goalDoneness`, `/api/runs/{id}/report`
 `runGoalDecision`, OpenAPI, and the run-result Steps/Evidence tabs all expose the same field.
+
+Twenty-ninth slice 2026-06-26: the waste guard now carries explicit repeated-failure evidence.
+`GoalEvidence` includes `repeatedFailureCount` / `maxRepeatedFailures`, `application.yml` exposes
+`execution.continuation.max-repeated-failures` (default 3, disabled by `<=0` through the same
+normalization as no-progress and false-done), and `GoalDonenessEvaluator` maps repeated
+tool/command/validation failures to `WASTE_RISK / STOP_WASTE_GUARD`. `SequentialExecutor` derives
+the count from repeated worker tool refusals/errors and from post-retry smoke validation failures,
+then publishes `repeatedFailureCount=current/max` in typed `GOAL_DECISION` data and durable task
+JSON.
 
 ## Open Questions
 

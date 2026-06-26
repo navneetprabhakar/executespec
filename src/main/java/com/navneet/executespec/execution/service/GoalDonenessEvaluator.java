@@ -91,6 +91,16 @@ public class GoalDonenessEvaluator {
           false);
     }
 
+    if (repeatedFailureLimitReached(evidence)) {
+      return fromEvidence(
+          evidence,
+          GoalDonenessState.WASTE_RISK,
+          RunContinuationDecision.STOP_WASTE_GUARD,
+          "repeated tool, command, or validation failures reached the configured limit",
+          false,
+          false);
+    }
+
     if (noProgressLimitReached(evidence)) {
       return fromEvidence(
           evidence,
@@ -155,6 +165,10 @@ public class GoalDonenessEvaluator {
   private static boolean noProgressLimitReached(GoalEvidence evidence) {
     return !evidence.hasMeaningfulProgress()
         && evidence.noProgressIterations() >= evidence.maxNoProgressIterations();
+  }
+
+  private static boolean repeatedFailureLimitReached(GoalEvidence evidence) {
+    return evidence.repeatedFailureCount() >= evidence.maxRepeatedFailures();
   }
 
   private static GoalDonenessDecision fromEvidence(
