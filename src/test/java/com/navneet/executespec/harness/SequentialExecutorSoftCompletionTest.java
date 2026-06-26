@@ -195,6 +195,34 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  private static Plan parallelSafePlan() {
+    return Plan.builder()
+        .planTitle("Parallel safe")
+        .tasks(
+            List.of(
+                PlannedTask.builder()
+                    .id("T1")
+                    .title("edit auth")
+                    .complexity(Complexity.LOW)
+                    .touchesFiles(List.of("src/Auth.java"))
+                    .build(),
+                PlannedTask.builder()
+                    .id("T2")
+                    .title("edit billing")
+                    .complexity(Complexity.LOW)
+                    .touchesFiles(List.of("src/Billing.java"))
+                    .build(),
+                PlannedTask.builder()
+                    .id("T3")
+                    .title("wire app")
+                    .complexity(Complexity.LOW)
+                    .touchesFiles(List.of("src/App.java"))
+                    .dependsOn(List.of("T1", "T2"))
+                    .build()))
+        .buildCommand("echo build")
+        .build();
+  }
+
   private static ExecutionRequest req(Plan plan, boolean enableSmoke) {
     return ExecutionRequest.builder()
         .plan(plan)
@@ -389,6 +417,31 @@ class SequentialExecutorSoftCompletionTest {
                             .equals(event.data().get("recommendedDecision"))
                         && ((List<?>) event.data().get("evidence"))
                             .contains("noProgressIterations=60/120")));
+  }
+
+  @Test
+  void task_wave_plan_uses_configured_parallel_task_cap_without_enabling_parallel_execution() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0"));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalParallelTasks", 2);
+    executor.execute(req(parallelSafePlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && "TASK_WAVE_PLAN".equals(event.type())
+                        && "SEQUENTIAL_ADVISORY".equals(event.data().get("executionMode"))
+                        && Integer.valueOf(2).equals(event.data().get("maxParallelTasks"))
+                        && Boolean.TRUE.equals(event.data().get("parallelEligible"))
+                        && ((List<?>) event.data().get("waves"))
+                            .equals(List.of(List.of("T1", "T2"), List.of("T3")))));
   }
 
   @Test
@@ -687,6 +740,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "advisoryModelStepDownLimit", 3);
     ReflectionTestUtils.setField(executor, "maxGoalNoProgressIterations", 44);
     ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 5);
+    ReflectionTestUtils.setField(executor, "maxGoalParallelTasks", 6);
     ReflectionTestUtils.setField(executor, "requireConfirmationBeforeExpensiveContinuation", true);
     ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 1.25);
     ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 12_345);
@@ -716,6 +770,7 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"maxModelStepDowns\":3")
                         && s.continuationDecisionJson().contains("\"maxNoProgressIterations\":44")
                         && s.continuationDecisionJson().contains("\"maxFalseDoneClaims\":5")
+                        && s.continuationDecisionJson().contains("\"maxParallelTasks\":6")
                         && s.continuationDecisionJson().contains("\"maxTotalCostUsd\":1.25")
                         && s.continuationDecisionJson().contains("\"maxTotalTokens\":12345")
                         && s.continuationDecisionJson().contains("\"maxTaskWallClockMs\":67890")
@@ -741,6 +796,7 @@ class SequentialExecutorSoftCompletionTest {
                       && Integer.valueOf(3).equals(policy.get("maxModelStepDowns"))
                       && Integer.valueOf(44).equals(policy.get("maxNoProgressIterations"))
                       && Integer.valueOf(5).equals(policy.get("maxFalseDoneClaims"))
+                      && Integer.valueOf(6).equals(policy.get("maxParallelTasks"))
                       && Double.valueOf(1.25).equals(policy.get("maxTotalCostUsd"))
                       && Integer.valueOf(12_345).equals(policy.get("maxTotalTokens"))
                       && Long.valueOf(67_890L).equals(policy.get("maxTaskWallClockMs"))

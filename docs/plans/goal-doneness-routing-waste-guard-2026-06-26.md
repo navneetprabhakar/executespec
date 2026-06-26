@@ -500,6 +500,15 @@ false-done thresholds. `application.yml` exposes
 same limits in the applied continuation policy payload. `GoalEvidence` keeps the existing
 `<=0`-means-disabled normalization for these thresholds.
 
+Twenty-fourth slice 2026-06-26: safe parallelism is now visible and capped at the executor
+boundary without enabling concurrent workspace mutation. `application.yml` exposes
+`execution.continuation.max-parallel-tasks` (default 3); `SequentialExecutor` runs the current plan
+through `TaskWaveScheduler.scheduleBounded(...)` at run start; emits typed `TASK_WAVE_PLAN` SSE data
+with `executionMode=SEQUENTIAL_ADVISORY`, bounded waves, serialized tasks, missing/unscheduled
+dependency metadata, and the configured cap; and includes `maxParallelTasks` in the applied
+continuation policy payload. Runtime task dispatch remains sequential until a separate eval-gated
+parallel execution flag is introduced.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

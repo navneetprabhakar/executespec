@@ -64,6 +64,21 @@ public record RunEvent(
   }
 
   /**
+   * Machine-readable task wave plan for safe-parallelism analysis. This does not mean the executor
+   * is running tasks concurrently; clients should read {@code data.executionMode}.
+   */
+  public static RunEvent taskWavePlan(String runId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "TASK_WAVE_PLAN",
+        runId,
+        null,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
    * Machine-readable continuation action emitted only when the executor actually acts on a
    * continuation recommendation, for example by rerunning the same task with an advisor-selected
    * provider/model. The legacy LOG line is still emitted for old clients.

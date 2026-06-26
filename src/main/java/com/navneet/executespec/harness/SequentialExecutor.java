@@ -351,6 +351,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-false-done-claims:2}")
   private int maxGoalFalseDoneClaims = 2;
 
+  @Value("${execution.continuation.max-parallel-tasks:3}")
+  private int maxGoalParallelTasks = 3;
+
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
@@ -416,6 +419,7 @@ to boot — skip it for those.""";
         req.model(),
         req.enableSmokeTests(),
         resume == null ? null : resume.targetTaskId());
+    emitTaskWavePlan(runId, plan);
 
     int taskCount = plan.tasks().size();
     for (int i = 0; i < taskCount; i++) {
@@ -544,6 +548,67 @@ to boot — skip it for those.""";
     clearContinuationActionState(runId);
 
     return result;
+  }
+
+  private void emitTaskWavePlan(String runId, Plan plan) {
+    if (plan == null || plan.tasks().isEmpty()) {
+      return;
+    }
+    TaskWaveScheduler.BoundedResult schedule =
+        TaskWaveScheduler.scheduleBounded(
+            taskIds(plan), dependsOnByTask(plan), touchesFilesByTask(plan), maxParallelTasks());
+    int maxWaveWidth = schedule.waves().stream().mapToInt(List::size).max().orElse(0);
+    boolean parallelEligible = schedule.waves().stream().anyMatch(wave -> wave.size() > 1);
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("executionMode", "SEQUENTIAL_ADVISORY");
+    data.put("maxParallelTasks", maxParallelTasks());
+    data.put("taskCount", plan.tasks().size());
+    data.put("waveCount", schedule.waves().size());
+    data.put("maxWaveWidth", maxWaveWidth);
+    data.put("parallelEligible", parallelEligible);
+    data.put("waves", schedule.waves());
+    data.put("serializedTasks", schedule.serializedTasks());
+    data.put("unscheduledTasks", schedule.unscheduled());
+    data.put("missingDependencies", schedule.missingDependencies());
+    String summary =
+        "Task wave plan: "
+            + schedule.waves().size()
+            + " bounded wave"
+            + (schedule.waves().size() == 1 ? "" : "s")
+            + " · maxParallelTasks="
+            + maxParallelTasks()
+            + " · execution=sequential-advisory";
+    log.info(
+        "SequentialExecutor taskWavePlan run={} waves={} maxParallelTasks={} serialized={} "
+            + "unscheduled={} missingDeps={}",
+        runId,
+        schedule.waves(),
+        maxParallelTasks(),
+        schedule.serializedTasks(),
+        schedule.unscheduled(),
+        schedule.missingDependencies());
+    broadcaster.emit(runId, RunEvent.taskWavePlan(runId, summary, data));
+    broadcaster.emit(runId, RunEvent.log(runId, null, summary));
+  }
+
+  private static List<String> taskIds(Plan plan) {
+    return plan.tasks().stream().map(PlannedTask::id).toList();
+  }
+
+  private static Map<String, List<String>> dependsOnByTask(Plan plan) {
+    Map<String, List<String>> dependsOn = new LinkedHashMap<>();
+    for (PlannedTask task : plan.tasks()) {
+      dependsOn.put(task.id(), task.dependsOn());
+    }
+    return dependsOn;
+  }
+
+  private static Map<String, List<String>> touchesFilesByTask(Plan plan) {
+    Map<String, List<String>> touchesFiles = new LinkedHashMap<>();
+    for (PlannedTask task : plan.tasks()) {
+      touchesFiles.put(task.id(), task.touchesFiles());
+    }
+    return touchesFiles;
   }
 
   /**
@@ -1887,6 +1952,7 @@ to boot — skip it for those.""";
     data.put("maxModelStepDowns", maxModelStepDowns());
     data.put("maxNoProgressIterations", maxNoProgressIterations());
     data.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    data.put("maxParallelTasks", maxParallelTasks());
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
@@ -1923,6 +1989,10 @@ to boot — skip it for those.""";
 
   private int maxFalseDoneClaims() {
     return maxGoalFalseDoneClaims;
+  }
+
+  private int maxParallelTasks() {
+    return Math.max(1, maxGoalParallelTasks);
   }
 
   private static Map<String, Object> selectedCandidateData(
@@ -2006,6 +2076,7 @@ to boot — skip it for those.""";
     policyNode.put("maxModelStepDowns", maxModelStepDowns());
     policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
     policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    policyNode.put("maxParallelTasks", maxParallelTasks());
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);

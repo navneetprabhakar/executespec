@@ -53,9 +53,9 @@ For exhaustive class discovery use:
 | `RunOrchestrator` | Pipeline coordinator. |
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
-| `SequentialExecutor` | Per-task execution loop; emits goal/continuation decisions with validation plus cost/token/wall-clock budget evidence. |
+| `SequentialExecutor` | Per-task execution loop; emits advisory `TASK_WAVE_PLAN` plus goal/continuation decisions with validation plus cost/token/wall-clock budget evidence. |
 | `ValidationReportService` / `ValidationReportGoalProofEvaluator` | Generates reports, verified/rubric scores, verification ledger rows, final validation-evidence events, and conservative run-level goal proof from final report evidence. |
-| `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for future safe parallel execution. |
+| `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for advisory and future safe parallel execution. |
 | `GoalDonenessEvaluator` / `GoalContinuationPolicy` / `GoalContinuationAdvisor` | Goal-state, candidate-backed continue/escalate/stop advice, and pure policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
