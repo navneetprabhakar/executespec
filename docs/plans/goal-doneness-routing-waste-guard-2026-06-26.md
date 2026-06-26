@@ -626,6 +626,14 @@ title/summary and then the legacy run-id label. This closes the final-exit expla
 "what goal was being attempted" on persisted JSON, `/api/runs/{id}/report`, run detail, and
 run-scoped validation-evidence events.
 
+Thirty-eighth slice 2026-06-27: provider/model candidate evaluation is now bounded-parallel instead
+of always sequential. `execution.continuation.parallel-provider-evaluation-enabled` defaults true,
+reuses `execution.continuation.max-parallel-tasks` as the cap, and only activates after allow-list
+filtering leaves more than one independent model/provider candidate. `ModelProviderCandidateService`
+logs start labels and done result labels, preserves deterministic model-order output by collecting futures in input
+order, falls back to sequential on executor failure/interruption, and writes the parallel/sequential
+evaluation mode into each candidate's reasons so continuation advice remains explainable.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
