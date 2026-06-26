@@ -883,6 +883,8 @@ no-progress/false-done/repeated-failure/edit-churn thresholds, conservative envi
 and unsafe-continuation signatures, and concrete budget-ceiling reasons when configured
 cost/token/time ceilings are crossed before proof of completion; those fields are structured in SSE
 data, durable task JSON, the run-detail API, and the IDE Steps tab.
+Repeated assistant explanations without new file-write or validation proof are recorded as
+`staleExplanationCount=current/max` using `execution.continuation.max-stale-explanations`.
 For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed task-wave and
 goal/continuation run events into `agent_action_event` rows (`RUN_TASK_WAVE_PLAN`,
 `RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`, `RUN_CONTINUATION_ACTION`,

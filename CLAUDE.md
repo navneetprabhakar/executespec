@@ -120,6 +120,8 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 
 Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAVE_PLAN` action events so web/CLI/VS Code clients can reload bounded safe-parallelism evidence after the run SSE stream is gone.
 
+`execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
+
 5 published SLOs in [`docs/operations/slos.md`](docs/operations/slos.md): run terminal in 15min ≥95% / verified-score correctness ≥90% / cost estimate within 30% on ≥80% / webhook in 60s ≥99% / hot-path 5xx <0.5%.
 
 ### Operator-only Telegram bridge

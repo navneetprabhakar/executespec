@@ -28,6 +28,8 @@ public record GoalEvidence(
     int maxRepeatedFailures,
     int editChurnCount,
     int maxEditChurn,
+    int staleExplanationCount,
+    int maxStaleExplanations,
     boolean budgetCeilingReached,
     String budgetCeilingReason,
     int inputTokens,
@@ -53,6 +55,7 @@ public record GoalEvidence(
     maxFalseDoneClaims = maxFalseDoneClaims <= 0 ? Integer.MAX_VALUE : maxFalseDoneClaims;
     maxRepeatedFailures = maxRepeatedFailures <= 0 ? Integer.MAX_VALUE : maxRepeatedFailures;
     maxEditChurn = maxEditChurn <= 0 ? Integer.MAX_VALUE : maxEditChurn;
+    maxStaleExplanations = maxStaleExplanations <= 0 ? Integer.MAX_VALUE : maxStaleExplanations;
     budgetCeilingReason =
         budgetCeilingReason == null || budgetCeilingReason.isBlank()
             ? "budget, token, iteration, or wall-clock ceiling reached"

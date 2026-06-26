@@ -178,6 +178,22 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void stopsWasteGuardAfterSameExplanationRepeatsWithoutNewEvidence() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .staleExplanationCount(2)
+                .maxStaleExplanations(2)
+                .evidence(List.of("staleExplanationCount=2/2"))
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.WASTE_RISK);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
+    assertThat(decision.reason()).contains("same assistant explanation repeated");
+    assertThat(decision.evidence()).contains("staleExplanationCount=2/2");
+  }
+
+  @Test
   void stopsWasteGuardWhenBudgetCeilingIsReachedBeforeDone() {
     GoalDonenessDecision decision =
         evaluator.evaluate(
