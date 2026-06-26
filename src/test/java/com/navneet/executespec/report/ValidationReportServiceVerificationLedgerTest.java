@@ -188,6 +188,8 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("run-1", event.runId());
     assertEquals(saved.get().getId(), event.reportId());
     assertEquals(saved.get().getVerifiedScore(), event.verifiedScore());
+    assertNotNull(event.runGoalDecision());
+    assertEquals("UNCERTAIN", event.runGoalDecision().state().name());
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
   }

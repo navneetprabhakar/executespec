@@ -59,6 +59,7 @@ class AgentValidationReportEventBridge {
         event.pipelineResult() == null ? null : event.pipelineResult().name());
     put(payload, "createdAt", event.createdAt() == null ? null : event.createdAt().toString());
     payload.put("verificationLedger", event.verificationLedger());
+    put(payload, "runGoalDecision", event.runGoalDecision());
     return payload;
   }
 
