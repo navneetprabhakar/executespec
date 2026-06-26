@@ -29,6 +29,20 @@ class ValidationReportGoalProofEvaluatorTest {
   }
 
   @Test
+  void preservesExplicitRunGoalInFinalProof() {
+    var decision =
+        evaluator.evaluate(
+            "run-1",
+            "run goal: add billing export with CSV download",
+            PipelineResult.PASSED,
+            passingLedger());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
+    assertThat(decision.goalSummary())
+        .isEqualTo("run goal: add billing export with CSV download");
+  }
+
+  @Test
   void keepsCompletionUnprovenWhenConcreteTestsAreMissing() {
     var decision =
         evaluator.evaluate(

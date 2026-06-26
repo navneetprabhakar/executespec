@@ -30,13 +30,22 @@ public class ValidationReportGoalProofEvaluator {
 
   public GoalDonenessDecision evaluate(
       String runId, PipelineResult pipelineResult, List<VerificationEvidenceDTO> ledger) {
+    return evaluate(runId, null, pipelineResult, ledger);
+  }
+
+  public GoalDonenessDecision evaluate(
+      String runId,
+      String goalSummary,
+      PipelineResult pipelineResult,
+      List<VerificationEvidenceDTO> ledger) {
+    String goal = goal(runId, goalSummary);
     List<VerificationEvidenceDTO> safeLedger = ledger == null ? List.of() : ledger;
     if (safeLedger.isEmpty()) {
       return decision(
           GoalDonenessState.UNCERTAIN,
           RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
           "final validation ledger is missing; run completion is unproven",
-          goal(runId),
+          goal,
           List.of(),
           List.of("collect final validation evidence"),
           List.of(),
@@ -128,7 +137,7 @@ public class ValidationReportGoalProofEvaluator {
           GoalDonenessState.DONE,
           RunContinuationDecision.STOP_DONE,
           "final validation report proves the run goal is satisfied",
-          goal(runId),
+          goal,
           completed,
           List.of(),
           evidence,
@@ -142,7 +151,7 @@ public class ValidationReportGoalProofEvaluator {
           GoalDonenessState.FAILED,
           RunContinuationDecision.STOP_FAILED,
           "final validation report contains failed completion evidence",
-          goal(runId),
+          goal,
           completed,
           incomplete,
           evidence,
@@ -155,7 +164,7 @@ public class ValidationReportGoalProofEvaluator {
         GoalDonenessState.UNCERTAIN,
         RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
         "final validation report does not prove run completion",
-        goal(runId),
+        goal,
         completed,
         incomplete,
         evidence,
@@ -188,7 +197,10 @@ public class ValidationReportGoalProofEvaluator {
         anotherModelProviderMightHelp);
   }
 
-  private static String goal(String runId) {
+  private static String goal(String runId, String goalSummary) {
+    if (goalSummary != null && !goalSummary.isBlank()) {
+      return goalSummary.strip();
+    }
     return runId == null || runId.isBlank()
         ? "run-level completion proof from final validation report"
         : "run-level completion proof from final validation report for run " + runId;
