@@ -872,8 +872,10 @@ phase.
 [`sse/RunEvent`](../src/main/java/com/navneet/executespec/sse/RunEvent.java) carries an additive
 event envelope (`schemaVersion=1` + a typed `data` map) alongside the legacy string `payload`, so
 existing consumers keep working while richer fields ride along: `TOKEN_USAGE` includes typed
-cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields, and
-`GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice.
+cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields,
+`TASK_WAVE_PLAN` exposes the advisory bounded safe-parallelism plan while execution remains
+sequential, and `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus
+next-action advice.
 Continuation decision data also carries the applied `execution.continuation.*` advisory limits so
 live clients can explain which thresholds and ceilings shaped the recommendation. Goal decision
 evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, configured

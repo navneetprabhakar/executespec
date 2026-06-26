@@ -1,6 +1,7 @@
 package com.navneet.executespec.sse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -103,6 +104,30 @@ class RunEventContractTest {
     Map<String, Object> candidate = (Map<String, Object>) event.data().get("selectedCandidate");
     assertEquals("anthropic", candidate.get("provider"));
     assertEquals("claude-sonnet-4-6", candidate.get("model"));
+  }
+
+  @Test
+  void taskWavePlanCarriesTypedAdvisoryEnvelope() {
+    RunEvent event =
+        RunEvent.taskWavePlan(
+            "run-1",
+            "Task wave plan: 2 bounded waves",
+            Map.of(
+                "executionMode",
+                "SEQUENTIAL_ADVISORY",
+                "maxParallelTasks",
+                2,
+                "waves",
+                List.of(List.of("T1", "T2"), List.of("T3"))));
+
+    assertEquals("TASK_WAVE_PLAN", event.type());
+    assertEquals("run-1", event.runId());
+    assertNull(event.taskId());
+    assertEquals("Task wave plan: 2 bounded waves", event.payload());
+    assertEquals(1, event.schemaVersion());
+    assertEquals("SEQUENTIAL_ADVISORY", event.data().get("executionMode"));
+    assertEquals(2, event.data().get("maxParallelTasks"));
+    assertEquals(List.of(List.of("T1", "T2"), List.of("T3")), event.data().get("waves"));
   }
 
   @Test
