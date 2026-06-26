@@ -618,6 +618,14 @@ Thirty-sixth slice 2026-06-27: final validation-ledger goal proof is now persist
 exposes it as `runGoalDoneness`, and the IDE Steps tab shows the final run-level proof before the
 task cards so the run goal state survives reloads without requiring a second report fetch.
 
+Thirty-seventh slice 2026-06-27: final run-level proof now names the actual submitted run goal
+instead of only a generic run-id proof label. `ValidationReportService` passes
+`PipelineRun.userRequest` into `ValidationReportGoalProofEvaluator` when generating/persisting
+proof; report reads use the same value through `StateStore.findRun`, falling back to planner
+title/summary and then the legacy run-id label. This closes the final-exit explanation gap for
+"what goal was being attempted" on persisted JSON, `/api/runs/{id}/report`, run detail, and
+run-scoped validation-evidence events.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

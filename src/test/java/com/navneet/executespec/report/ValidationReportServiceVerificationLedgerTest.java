@@ -159,7 +159,11 @@ class ValidationReportServiceVerificationLedgerTest {
             reviewScoringService,
             flags,
             events::add);
-    PipelineRun run = PipelineRun.builder().runId("run-1").build();
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-1")
+            .userRequest("Add a billing export endpoint with CSV download")
+            .build();
     WorkerReport workerReport =
         WorkerReport.builder()
             .filesCreated(List.of("src/App.tsx"))
@@ -196,18 +200,26 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals(saved.get().getVerifiedScore(), event.verifiedScore());
     assertNotNull(event.runGoalDecision());
     assertEquals("UNCERTAIN", event.runGoalDecision().state().name());
+    assertEquals(
+        "run goal: Add a billing export endpoint with CSV download",
+        event.runGoalDecision().goalSummary());
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
     assertNotNull(run.getRunGoalDonenessJson());
     assertTrue(run.getRunGoalDonenessJson().contains("\"state\":\"UNCERTAIN\""));
+    assertTrue(
+        run.getRunGoalDonenessJson()
+            .contains("run goal: Add a billing export endpoint with CSV download"));
     verify(stateStore).save(run);
   }
 
   @Test
   void reportDtoIncludesRunGoalDecisionDerivedFromLedger() {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    StateStore stateStore = mock(StateStore.class);
     ValidationReportService service =
-        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+        new ValidationReportService(
+            repository, null, new ObjectMapper(), null, stateStore, null, flags);
     ValidationReport report =
         ValidationReport.builder()
             .id("vr-4")
@@ -226,12 +238,20 @@ class ValidationReportServiceVerificationLedgerTest {
             .accuracyJson("{\"specAdherenceScore\": 91}")
             .build();
     when(repository.findByRunId("run-4")).thenReturn(Optional.of(report));
+    when(stateStore.findRun("run-4"))
+        .thenReturn(
+            Optional.of(
+                PipelineRun.builder()
+                    .runId("run-4")
+                    .userRequest("Generate a project setup guide")
+                    .build()));
 
     var dto = service.getByRunId("run-4").orElseThrow();
 
     assertNotNull(dto.runGoalDecision());
     assertEquals("DONE", dto.runGoalDecision().state().name());
     assertEquals("STOP_DONE", dto.runGoalDecision().recommendedDecision().name());
+    assertEquals("run goal: Generate a project setup guide", dto.runGoalDecision().goalSummary());
   }
 
   private static void assertEntry(

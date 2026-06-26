@@ -297,7 +297,11 @@ public class ValidationReportService {
       var saved = repository.save(report);
       List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
       GoalDonenessDecision runGoalDecision =
-          goalProofEvaluator.evaluate(saved.getRunId(), saved.getPipelineResult(), verificationLedger);
+          goalProofEvaluator.evaluate(
+              saved.getRunId(),
+              runGoalSummary(input.run()),
+              saved.getPipelineResult(),
+              verificationLedger);
       persistRunGoalDecision(input.run(), runGoalDecision);
       publishEvidenceEvent(saved, verificationLedger, runGoalDecision);
 
@@ -757,9 +761,45 @@ public class ValidationReportService {
         entity.getVerifiedScore(),
         verificationLedger,
         goalProofEvaluator.evaluate(
-            entity.getRunId(), entity.getPipelineResult(), verificationLedger),
+            entity.getRunId(),
+            runGoalSummary(findRunForReport(entity.getRunId())),
+            entity.getPipelineResult(),
+            verificationLedger),
         entity.getRubricScore(),
         entity.getPreviewUrl());
+  }
+
+  private PipelineRun findRunForReport(String runId) {
+    if (runId == null || runId.isBlank() || stateStore == null) {
+      return null;
+    }
+    try {
+      return stateStore.findRun(runId).orElse(null);
+    } catch (RuntimeException ex) {
+      log.debug("Failed to load run goal summary for report run={}: {}", runId, ex.getMessage());
+      return null;
+    }
+  }
+
+  private static String runGoalSummary(PipelineRun run) {
+    if (run == null) {
+      return null;
+    }
+    if (run.getUserRequest() != null && !run.getUserRequest().isBlank()) {
+      return "run goal: " + singleLine(run.getUserRequest());
+    }
+    if (run.getRunTitle() != null && !run.getRunTitle().isBlank()) {
+      String title = singleLine(run.getRunTitle());
+      if (run.getRunSummary() != null && !run.getRunSummary().isBlank()) {
+        return "run goal: " + title + " — " + singleLine(run.getRunSummary());
+      }
+      return "run goal: " + title;
+    }
+    return null;
+  }
+
+  private static String singleLine(String value) {
+    return value == null ? "" : value.replaceAll("\\s+", " ").strip();
   }
 
   List<VerificationEvidenceDTO> buildVerificationLedger(
