@@ -575,6 +575,13 @@ and `SequentialExecutor` derives the count from path-bearing `writeFile` / `edit
 configured threshold, `GoalDonenessEvaluator` maps it to `WASTE_RISK / STOP_WASTE_GUARD` and typed
 goal evidence publishes `editChurnCount=current/max`.
 
+Thirty-first slice 2026-06-26: executor-built goal evidence now populates the existing
+`blockedByEnvironment` field for clear external blockers instead of leaving it pure-model-only.
+`SequentialExecutor` marks environment blocks from conservative failure signatures such as missing
+credentials/API keys, auth/permission denial, DNS/network timeouts, or explicitly missing required
+files, publishes `blockedByEnvironment=true` in typed `GOAL_DECISION` evidence, and lets
+`GoalDonenessEvaluator` map those cases to `BLOCKED / STOP_BLOCKED` with `userInputRequired=true`.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

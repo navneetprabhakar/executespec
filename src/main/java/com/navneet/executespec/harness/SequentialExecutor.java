@@ -2382,6 +2382,7 @@ to boot — skip it for those.""";
 
     String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
+    boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
     int noProgressIterations =
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
@@ -2394,6 +2395,9 @@ to boot — skip it for those.""";
     evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
     evidence.add("repeatedFailureCount=" + repeatedFailureCount + "/" + maxRepeatedFailures());
     evidence.add("editChurnCount=" + editChurnCount + "/" + maxEditChurn());
+    if (blockedByEnvironment) {
+      evidence.add("blockedByEnvironment=true");
+    }
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
@@ -2421,6 +2425,7 @@ to boot — skip it for those.""";
         .totalTokens(totalTokens)
         .costUsd(cost.costUsd())
         .wallClockMs(wallClockMs)
+        .blockedByEnvironment(blockedByEnvironment)
         .completeTaskClaimed(completeTaskClaimed)
         .completedItems(completed)
         .incompleteItems(incomplete)
@@ -2529,6 +2534,35 @@ to boot — skip it for those.""";
     int paren = text.indexOf(')', start);
     int end = comma < 0 ? paren : paren < 0 ? comma : Math.min(comma, paren);
     return end > start ? text.substring(start, end).trim() : text.substring(start).trim();
+  }
+
+  private static boolean blockedByEnvironment(WorkerResult workerResult, String failureReason) {
+    StringBuilder combined = new StringBuilder();
+    if (failureReason != null) {
+      combined.append(failureReason).append('\n');
+    }
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        if (entry != null) {
+          combined.append(entry).append('\n');
+        }
+      }
+    }
+    String lower = combined.toString().toLowerCase(Locale.ROOT);
+    return lower.contains("missing credential")
+        || lower.contains("missing api key")
+        || lower.contains("api key missing")
+        || lower.contains("api_key")
+        || lower.contains("not configured")
+        || lower.contains("authentication failed")
+        || lower.contains("unauthorized")
+        || lower.contains("permission denied")
+        || lower.contains("access denied")
+        || lower.contains("network unreachable")
+        || lower.contains("could not resolve host")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("connection timed out")
+        || lower.contains("missing required file");
   }
 
   private static String goalSummary(PlannedTask task) {
