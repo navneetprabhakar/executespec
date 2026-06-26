@@ -77,6 +77,21 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void blockedWhenContinuationWouldBeUnsafe() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .unsafeContinuation(true)
+                .risks(List.of("path traversal blocked by sandbox policy"))
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.BLOCKED);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.userInputRequired()).isTrue();
+    assertThat(decision.reason()).contains("unsafe or outside the goal scope");
+  }
+
+  @Test
   void uncertainWhenValidationCannotProveSuccess() {
     GoalDonenessDecision decision =
         evaluator.evaluate(
