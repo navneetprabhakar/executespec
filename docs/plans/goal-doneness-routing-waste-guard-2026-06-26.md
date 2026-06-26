@@ -300,6 +300,13 @@ retry behavior, provider choice, or run termination. `SequentialExecutorSoftComp
 both `DONE -> STOP_DONE` on completeTask+passing smoke and `WASTE_RISK -> STOP_WASTE_GUARD` on
 iteration-limit/no-write failure. Enforcement is still pending.
 
+Fourth slice 2026-06-26: V249 seeds `execution.goal-decision.enforcement.enabled` default OFF.
+`TaskOutcome` now carries the computed `GoalDonenessDecision`; when the flag is enabled,
+`SequentialExecutor` aborts remaining sequential tasks after `STOP_BLOCKED`, `STOP_FAILED`, or
+`STOP_WASTE_GUARD`, emits `Goal stop enforced: ...`, appends synthetic `SKIPPED` task outcomes, and
+returns aggregate `ABORTED`. `STOP_DONE` intentionally remains informational until a run-level goal
+proof exists. Provider/model step-up, step-down, and change-provider decisions are still pending.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
 
 import lombok.Builder;
 
@@ -27,6 +28,8 @@ import lombok.Builder;
  *     SequentialExecutor.tierConfigFor}. Closes the b171fa52 finding where every task row was
  *     persisted as Haiku because {@code RunTokenAttributor.attributeWorker} wrote the run-level
  *     default into every row, masking the tier-correct workhouse/planning escalation.
+ * @param goalDonenessDecision conservative goal-based continuation decision emitted at the terminal
+ *     task boundary. Null for synthetic/resume-skipped outcomes.
  */
 @Builder
 public record TaskOutcome(
@@ -42,7 +45,8 @@ public record TaskOutcome(
     long totalLatencyMs,
     int toolCallsDispatched,
     String dispatchedProvider,
-    String dispatchedModel) {
+    String dispatchedModel,
+    GoalDonenessDecision goalDonenessDecision) {
 
   public enum Status {
     /** Worker completed AND smoke test passed. */

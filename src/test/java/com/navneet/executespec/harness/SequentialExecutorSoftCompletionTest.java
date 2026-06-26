@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,6 +71,8 @@ class SequentialExecutorSoftCompletionTest {
       mock(com.navneet.executespec.project.rag.RetrievalService.class);
   private final com.navneet.executespec.cost.RunCostTracker costTracker =
       mock(com.navneet.executespec.cost.RunCostTracker.class);
+  private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService =
+      mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
 
   private SequentialExecutor newExecutor() {
     // ModelResolver is called from tierConfigFor — stub it to throw so we fall back to the
@@ -92,8 +95,7 @@ class SequentialExecutorSoftCompletionTest {
         org.mockito.Mockito.mock(com.navneet.executespec.router.ModelMatrixProperties.class),
         retrievalService,
         org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
-        org.mockito.Mockito.mock(
-            com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+        featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
         org.mockito.Mockito.mock(
@@ -320,6 +322,49 @@ class SequentialExecutorSoftCompletionTest {
                 event ->
                     isGoalDecisionLog(event)
                         && event.payload().contains("WASTE_RISK -> STOP_WASTE_GUARD")));
+  }
+
+  @Test
+  void goal_decision_enforcement_default_off_does_not_skip_remaining_tasks() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.FAILED, result.overall());
+    assertEquals(2, result.perTask().size());
+    assertEquals(0, result.tasksSkipped());
+    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+  }
+
+  @Test
+  void goal_decision_enforcement_stops_after_waste_risk_and_skips_remaining_tasks() {
+    stubTaskRow();
+    when(featureFlagService.isEnabled(SequentialExecutor.FLAG_GOAL_DECISION_ENFORCEMENT))
+        .thenReturn(true);
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
+    assertEquals(2, result.perTask().size());
+    assertEquals(TaskOutcome.Status.WORKER_FAILED, result.perTask().get(0).status());
+    assertEquals(TaskOutcome.Status.SKIPPED, result.perTask().get(1).status());
+    assertEquals(1, result.tasksSkipped());
+    assertEquals(1, result.tasksExecuted());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && "LOG".equals(event.type())
+                        && event.payload() != null
+                        && event.payload().startsWith("Goal stop enforced:")
+                        && event.payload().contains("STOP_WASTE_GUARD")));
   }
 
   @Test

@@ -15,7 +15,7 @@ For exhaustive class discovery use:
 | `api` | Run controllers, model controller, global advice, admin surfaces. |
 | `integration` | Run orchestration, lifecycle, persistence writer, SCM push integration. |
 | `engine` | Worker agent and code-generation engine seam. |
-| `harness` | Sequential task executor, task-tier routing, and goal-decision log visibility. |
+| `harness` | Sequential task executor, task-tier routing, goal-decision visibility, and default-off goal-stop enforcement. |
 | `execution` | Legacy Launches plus inert goal evidence, doneness, continuation decision, and evaluator policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
@@ -84,7 +84,7 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V248`.
+Migration head in this worktree: `V249`.
 
 Recent relevant migrations:
 
@@ -101,6 +101,7 @@ Recent relevant migrations:
 - `V246`: `agent_session.run_id` — durable run-scoped web agent sessions.
 - `V247`: `agent_action_event.action_id` — first-class action/result correlation id for agent clients.
 - `V248`: FREE tier sentinel fix — force `tier_config.monthly_run_limit` and `billing_plan.run_limit` back to 5 when stale rows still carry any other value, especially `-1` unlimited.
+- `V249`: seed `execution.goal-decision.enforcement.enabled` default OFF — executor task-boundary aborts after negative goal decisions.
 
 ## Deprecated / Transitional Areas
 
