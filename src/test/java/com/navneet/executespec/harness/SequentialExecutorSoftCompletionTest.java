@@ -564,6 +564,34 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void goal_decision_marks_clear_environment_failures_blocked() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nMissing API key: ANTHROPIC_API_KEY is not configured"),
+            new ToolResult.Ok("exit=1\nMissing API key: ANTHROPIC_API_KEY is not configured"));
+
+    SequentialExecutor executor = newExecutor();
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "BLOCKED".equals(event.data().get("state"))
+                        && "STOP_BLOCKED".equals(event.data().get("recommendedDecision"))
+                        && Boolean.TRUE.equals(event.data().get("userInputRequired"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("blocked by environment")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("blockedByEnvironment=true")));
+  }
+
+  @Test
   void goal_decision_uses_configured_cost_ceiling_evidence() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
