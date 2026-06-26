@@ -1360,6 +1360,11 @@ export default function IdeRunResult() {
                           {goalLine}
                         </div>
                       )}
+                      {t.goalDoneness?.recommendedNextStep && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          Next: {t.goalDoneness.recommendedNextStep}
+                        </div>
+                      )}
                       {budgetFacts.length > 0 && (
                         <div
                           style={{
@@ -1693,6 +1698,11 @@ export default function IdeRunResult() {
                       {report.runGoalDecision.reason && (
                         <div style={{fontSize: 13, marginTop: 8}}>
                           {report.runGoalDecision.reason}
+                        </div>
+                      )}
+                      {report.runGoalDecision.recommendedNextStep && (
+                        <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                          Next: {report.runGoalDecision.recommendedNextStep}
                         </div>
                       )}
                       {report.runGoalDecision.incompleteItems &&

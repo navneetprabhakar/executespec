@@ -23,6 +23,7 @@ class ValidationReportGoalProofEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_DONE);
     assertThat(decision.reason()).contains("proves");
+    assertThat(decision.recommendedNextStep()).contains("No further work");
     assertThat(decision.incompleteItems()).isEmpty();
     assertThat(decision.anotherModelProviderMightHelp()).isFalse();
   }
@@ -44,6 +45,7 @@ class ValidationReportGoalProofEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
     assertThat(decision.recommendedDecision())
         .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+    assertThat(decision.recommendedNextStep()).contains("Continue with the same model/provider");
     assertThat(decision.incompleteItems()).contains("Tests is unknown");
     assertThat(decision.risks()).contains("Tests is unknown");
   }
@@ -65,6 +67,7 @@ class ValidationReportGoalProofEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
     assertThat(decision.reason()).contains("failed completion evidence");
+    assertThat(decision.recommendedNextStep()).contains("alternate model/provider");
     assertThat(decision.anotherModelProviderMightHelp()).isTrue();
   }
 

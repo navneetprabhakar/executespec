@@ -2038,6 +2038,7 @@ to boot — skip it for those.""";
     data.put("state", decision.state().name());
     data.put("recommendedDecision", decision.recommendedDecision().name());
     data.put("reason", decision.reason());
+    data.put("recommendedNextStep", decision.recommendedNextStep());
     data.put("goalSummary", decision.goalSummary());
     data.put("completedItems", decision.completedItems());
     data.put("incompleteItems", decision.incompleteItems());

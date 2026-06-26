@@ -33,6 +33,7 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_DONE);
     assertThat(decision.incompleteItems()).isEmpty();
     assertThat(decision.reason()).contains("goal satisfied");
+    assertThat(decision.recommendedNextStep()).contains("No further work");
   }
 
   @Test
@@ -71,6 +72,7 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.BLOCKED);
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
     assertThat(decision.userInputRequired()).isTrue();
+    assertThat(decision.recommendedNextStep()).contains("required user input");
     assertThat(decision.incompleteItems()).containsExactly("missing GITHUB_TOKEN");
   }
 
@@ -105,6 +107,7 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.WASTE_RISK);
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
     assertThat(decision.reason()).contains("no meaningful progress");
+    assertThat(decision.recommendedNextStep()).contains("Stop this attempt");
   }
 
   @Test
@@ -154,6 +157,7 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
     assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+    assertThat(decision.recommendedNextStep()).contains("alternate model/provider");
   }
 
   private static GoalEvidence.GoalEvidenceBuilder base() {
