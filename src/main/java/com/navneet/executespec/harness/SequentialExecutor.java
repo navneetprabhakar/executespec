@@ -33,6 +33,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -320,9 +321,20 @@ to boot — skip it for those.""";
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
 
-  private static final double DEFAULT_GOAL_REQUIRED_QUALITY_THRESHOLD = 70.0;
-  private static final int DEFAULT_ADVISORY_PROVIDER_SWITCH_LIMIT = 1;
-  private static final int DEFAULT_ADVISORY_MODEL_STEP_LIMIT = 1;
+  @Value("${execution.continuation.required-quality-threshold:70.0}")
+  private double goalRequiredQualityThreshold = 70.0;
+
+  @Value("${execution.continuation.max-provider-switches-per-run:1}")
+  private int advisoryProviderSwitchLimit = 1;
+
+  @Value("${execution.continuation.max-model-step-ups-per-task:1}")
+  private int advisoryModelStepUpLimit = 1;
+
+  @Value("${execution.continuation.max-model-step-downs-per-task:1}")
+  private int advisoryModelStepDownLimit = 1;
+
+  @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
+  private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
@@ -1446,12 +1458,14 @@ to boot — skip it for those.""";
               .currentProvider(provider)
               .currentModel(model)
               .taskCategory(taskCategory(task))
-              .requiredQualityThreshold(DEFAULT_GOAL_REQUIRED_QUALITY_THRESHOLD)
+              .requiredQualityThreshold(requiredGoalQualityThreshold())
               .providerPreferenceOrder(providerPreferenceOrder(provider))
               .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
-              .maxProviderSwitches(DEFAULT_ADVISORY_PROVIDER_SWITCH_LIMIT)
-              .maxModelStepUps(DEFAULT_ADVISORY_MODEL_STEP_LIMIT)
-              .maxModelStepDowns(DEFAULT_ADVISORY_MODEL_STEP_LIMIT)
+              .expensiveContinuationRequiresConfirmation(
+                  requireConfirmationBeforeExpensiveContinuation)
+              .maxProviderSwitches(maxProviderSwitches())
+              .maxModelStepUps(maxModelStepUps())
+              .maxModelStepDowns(maxModelStepDowns())
               .build());
     } catch (RuntimeException ex) {
       log.warn(
@@ -1467,7 +1481,14 @@ to boot — skip it for those.""";
 
   private GoalContinuationPolicyDecision decideContinuationFallback(GoalDonenessDecision decision) {
     return goalContinuationPolicy.decide(
-        GoalContinuationRequest.builder().goalDecision(decision).build());
+        GoalContinuationRequest.builder()
+            .goalDecision(decision)
+            .expensiveContinuationRequiresConfirmation(
+                requireConfirmationBeforeExpensiveContinuation)
+            .maxProviderSwitches(maxProviderSwitches())
+            .maxModelStepUps(maxModelStepUps())
+            .maxModelStepDowns(maxModelStepDowns())
+            .build());
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -1522,12 +1543,12 @@ to boot — skip it for those.""";
     return data;
   }
 
-  private static Map<String, Object> continuationDecisionData(
-      GoalContinuationPolicyDecision decision) {
+  private Map<String, Object> continuationDecisionData(GoalContinuationPolicyDecision decision) {
     Map<String, Object> data = new LinkedHashMap<>();
     if (decision == null) {
       data.put("decision", "UNKNOWN");
       data.put("reasons", List.of("continuation decision missing"));
+      data.put("policy", continuationPolicyData());
       return data;
     }
     data.put("decision", decision.decision().name());
@@ -1535,7 +1556,39 @@ to boot — skip it for those.""";
         .selectedCandidate()
         .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
     data.put("reasons", decision.reasons());
+    data.put("policy", continuationPolicyData());
     return data;
+  }
+
+  private Map<String, Object> continuationPolicyData() {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("requiredQualityThreshold", requiredGoalQualityThreshold());
+    data.put("maxProviderSwitches", maxProviderSwitches());
+    data.put("maxModelStepUps", maxModelStepUps());
+    data.put("maxModelStepDowns", maxModelStepDowns());
+    data.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        requireConfirmationBeforeExpensiveContinuation);
+    return data;
+  }
+
+  private double requiredGoalQualityThreshold() {
+    if (!Double.isFinite(goalRequiredQualityThreshold) || goalRequiredQualityThreshold <= 0.0) {
+      return 70.0;
+    }
+    return Math.min(100.0, goalRequiredQualityThreshold);
+  }
+
+  private int maxProviderSwitches() {
+    return Math.max(0, advisoryProviderSwitchLimit);
+  }
+
+  private int maxModelStepUps() {
+    return Math.max(0, advisoryModelStepUpLimit);
+  }
+
+  private int maxModelStepDowns() {
+    return Math.max(0, advisoryModelStepDownLimit);
   }
 
   private static Map<String, Object> selectedCandidateData(
@@ -1587,6 +1640,7 @@ to boot — skip it for those.""";
     if (decision == null) {
       node.put("decision", "UNKNOWN");
       node.putArray("reasons").add("continuation decision missing");
+      writeContinuationPolicy(node.putObject("policy"));
       return objectMapper.writeValueAsString(node);
     }
     node.put("decision", decision.decision().name());
@@ -1607,7 +1661,18 @@ to boot — skip it for those.""";
     }
     var reasons = node.putArray("reasons");
     decision.reasons().forEach(reasons::add);
+    writeContinuationPolicy(node.putObject("policy"));
     return objectMapper.writeValueAsString(node);
+  }
+
+  private void writeContinuationPolicy(ObjectNode policyNode) {
+    policyNode.put("requiredQualityThreshold", requiredGoalQualityThreshold());
+    policyNode.put("maxProviderSwitches", maxProviderSwitches());
+    policyNode.put("maxModelStepUps", maxModelStepUps());
+    policyNode.put("maxModelStepDowns", maxModelStepDowns());
+    policyNode.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        requireConfirmationBeforeExpensiveContinuation);
   }
 
   private static String firstReason(GoalContinuationPolicyDecision decision) {
