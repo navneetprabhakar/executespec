@@ -218,7 +218,10 @@ class AccessGuardCoverageTest {
               // resolve picks a variant; dry-run computes applicability + cost + sample diff.
               // C2 — audit 2026-05-29.
               "com.navneet.executespec.readymade.controller.ReadymadeController#resolve",
-              "com.navneet.executespec.migration.controller.MigrationController#dryRun"));
+              "com.navneet.executespec.migration.controller.MigrationController#dryRun",
+              // Fork intentionally reads the source run and creates a separate run owned by the
+              // caller; it does not mutate the source run's lifecycle, workspace, gate, or PR state.
+              "com.navneet.executespec.api.controller.RunController#forkRun"));
 
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
@@ -288,12 +291,13 @@ class AccessGuardCoverageTest {
 
     String writeMsg =
         "Write handler gated behind a READ-only guard — cross-org read-only members can mutate.\n\n"
-            + "These mutating endpoints (POST/PUT/DELETE/PATCH) on a project path call\n"
-            + "ProjectAccessGuard.assertCanRead but never assertCanWrite. assertCanRead admits a\n"
-            + "cross-org PROJECT_VIEWER, so a read-only member can drive the mutation"
+            + "These mutating endpoints (POST/PUT/DELETE/PATCH) call\n"
+            + "ProjectAccessGuard.assertCanRead without assertCanWrite, or\n"
+            + "RunAccessGuard.requireRunAccess without requireRunWriteAccess/assertWriteAccess.\n"
+            + "Read guards admit users who can view a run/project but must not mutate it"
             + " (RL-2026-05-040).\n\n"
-            + "Fix: swap assertCanRead -> assertCanWrite. Only if the endpoint genuinely needs"
-            + " read\n"
+            + "Fix: swap the read guard to the matching write guard. Only if the endpoint genuinely"
+            + " needs read\n"
             + "(a POST that triggers a read-only computation + mutates no tenant state) add it to\n"
             + "READ_ONLY_WRITE_HANDLERS with a one-line justification.\n\n"
             + "Violations:\n"
@@ -380,25 +384,32 @@ class AccessGuardCoverageTest {
   }
 
   /**
-   * True iff the handler's ONLY {@code ProjectAccessGuard} call is {@code assertCanRead} (it never
-   * calls {@code assertCanWrite}). {@code assertCanRead} admits a cross-org {@code PROJECT_VIEWER},
-   * so a write gated only by it lets a read-only member mutate. Handlers guarded by {@code
-   * RunAccessGuard} or a delegated name-pattern guard have no read/write split and return false
-   * (out of scope for this rule).
+   * True iff the handler calls a read guard ({@code ProjectAccessGuard.assertCanRead} or {@code
+   * RunAccessGuard.requireRunAccess}) and never calls the matching write guard ({@code
+   * ProjectAccessGuard.assertCanWrite}, {@code RunAccessGuard.requireRunWriteAccess}, or {@code
+   * RunAccessGuard.assertWriteAccess}). Read guards admit users who can view the resource but must
+   * not mutate lifecycle, workspace, SCM, gate, test, preview, or share state.
    */
   private static boolean gatesWriteBehindReadGuard(JavaMethod m) {
     boolean callsProjectRead = false;
     boolean callsProjectWrite = false;
+    boolean callsRunRead = false;
+    boolean callsRunWrite = false;
     for (var call : m.getMethodCallsFromSelf()) {
-      if (!"com.navneet.executespec.project.security.ProjectAccessGuard"
-          .equals(call.getTargetOwner().getName())) {
-        continue;
-      }
+      String owner = call.getTargetOwner().getName();
       String n = call.getTarget().getName();
-      if ("assertCanRead".equals(n)) callsProjectRead = true;
-      if ("assertCanWrite".equals(n)) callsProjectWrite = true;
+      if ("com.navneet.executespec.project.security.ProjectAccessGuard".equals(owner)) {
+        if ("assertCanRead".equals(n)) callsProjectRead = true;
+        if ("assertCanWrite".equals(n)) callsProjectWrite = true;
+      }
+      if ("com.navneet.executespec.auth.security.RunAccessGuard".equals(owner)) {
+        if ("requireRunAccess".equals(n)) callsRunRead = true;
+        if ("requireRunWriteAccess".equals(n) || "assertWriteAccess".equals(n)) {
+          callsRunWrite = true;
+        }
+      }
     }
-    return callsProjectRead && !callsProjectWrite;
+    return (callsProjectRead && !callsProjectWrite) || (callsRunRead && !callsRunWrite);
   }
 
   private static String extractClassBasePath(com.tngtech.archunit.core.domain.JavaClass cls) {
