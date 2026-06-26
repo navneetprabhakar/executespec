@@ -659,6 +659,13 @@ confirmation-blocked path now keeps the proposed candidate on the `STOP_BLOCKED`
 clients can show the exact upgrade being requested. Candidate reasons also explicitly say when a
 provider/model has no benchmark quality prior, so unbenchmarked models do not look fully measured.
 
+Forty-second slice 2026-06-27: persisted benchmark rows now have an explicit sample-size gate before
+they can influence provider/model quality. `execution.continuation.benchmark-min-sample-tasks`
+defaults to 20. `ModelProviderCandidateService` still reads smaller DONE `benchmark_run` rows and
+shows their resolved count in candidate reasons, but it leaves `benchmarkQualityScore` unset for
+those rows so ranking falls back to YAML/local/validation evidence. This prevents a tiny 5/5 or 1/1
+benchmark from being treated as a fully measured model while preserving operator visibility.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

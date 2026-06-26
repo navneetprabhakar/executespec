@@ -115,6 +115,7 @@ execution:
     max-edit-churn: 6
     max-stale-explanations: 2
     max-parallel-tasks: 3
+    benchmark-min-sample-tasks: 20
     parallel-read-tools-enabled: true
     parallel-provider-evaluation-enabled: true
     max-total-cost-usd: -1
