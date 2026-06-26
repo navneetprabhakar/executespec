@@ -423,6 +423,15 @@ aggregate tool-call/latency accounting. It does not loop, does not act on `CONTI
 does not act during resume, and does not invent a provider/model outside the advisor-selected
 candidate.
 
+Sixteenth slice 2026-06-26: continuation acting now hard-enforces the configured ceilings at the
+runtime boundary instead of trusting advisory request fields alone. `SequentialExecutor` tracks
+actual `CHANGE_PROVIDER` usage per run and actual `STEP_UP_MODEL` / `STEP_DOWN_MODEL` usage per
+task, reserves the relevant slot before dispatching a selected-candidate rerun, clears the counters
+at run end, and emits typed `CONTINUATION_ACTION_SKIPPED` plus the legacy log when a recommendation
+is blocked by `maxProviderSwitches`, `maxModelStepUps`, or `maxModelStepDowns`. Successful
+`CONTINUATION_ACTION` events also carry limit metadata (`limitName`, `usedLimit`, `maxLimit`) so
+clients can explain both executed and blocked escalations.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
