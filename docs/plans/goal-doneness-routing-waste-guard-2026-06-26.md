@@ -466,11 +466,21 @@ The payload preserves the original run-event type, run/task ids, summary, timest
 next-action advice, executed reruns, and limit-blocked rerun recommendations from
 `/api/agent/sessions/{id}/events` without scraping run SSE logs.
 
+Twentieth slice 2026-06-26: validation-report evidence ledger surfacing is now reloadable for
+run-scoped agent sessions too. `ValidationReportService` publishes a small
+`ValidationReportEvidenceEvent` after a report row is saved; `AgentValidationReportEventBridge`
+appends a `RUN_VALIDATION_EVIDENCE` row to every active `agent_session` with the matching `run_id`.
+The payload includes the report id, verified/rubric scores, pipeline result, created timestamp, and
+the same `verificationLedger[]` rows already returned by `/api/runs/{id}/report` and rendered in
+the run-result Evidence tab. This gives web/CLI/VS Code clients a durable final evidence summary
+through `/api/agent/sessions/{id}/events`.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
 - What is the required quality threshold per category and tier?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
-- Validation-report evidence-ledger surfacing is still pending; SSE, run-detail task cards, and
-  run-scoped agent-session action events now have structured goal/budget/continuation coverage.
+- Validation-report evidence-ledger surfacing now reaches `/report`, the run-result Evidence tab,
+  and run-scoped agent-session action events; remaining work is using that final report evidence as
+  a run-level completion proof rather than only a post-run explanation.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?

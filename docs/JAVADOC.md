@@ -18,7 +18,7 @@ For exhaustive class discovery use:
 | `harness` | Sequential task executor, task-tier routing, durable + live SSE goal/continuation decision visibility with configurable limits, default-off goal-stop enforcement, opt-in selected-candidate continuation reruns, and typed skipped-action events when runtime ceilings block escalation. |
 | `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, candidate-backed advisor, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
-| `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards, and run-scoped goal/continuation action-event mirrors. |
+| `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards, run-scoped goal/continuation action-event mirrors, and validation-ledger evidence mirrors. |
 | `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, candidate collection, capability aggregation, and the inert quality-first model/provider ranking policy. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |
@@ -54,6 +54,7 @@ For exhaustive class discovery use:
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
 | `SequentialExecutor` | Per-task execution loop; emits goal/continuation decisions with validation plus cost/token/wall-clock budget evidence. |
+| `ValidationReportService` | Generates reports, verified/rubric scores, verification ledger rows, and final validation-evidence events. |
 | `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for future safe parallel execution. |
 | `GoalDonenessEvaluator` / `GoalContinuationPolicy` / `GoalContinuationAdvisor` | Goal-state, candidate-backed continue/escalate/stop advice, and pure policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
