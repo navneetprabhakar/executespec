@@ -2395,9 +2395,10 @@ paths:
         failed review/build/test evidence) plus `accuracyScore` (LLM-inferred,
         secondary). `verifiedScore` is the primary UI badge; `accuracyScore` is
         "Est. requirement coverage". The response also exposes the underlying
-        signal fields and `verificationLedger[]` so the frontend can show which
-        claims are deterministic, LLM-assessed, LLM-assisted counts, or internal
-        score summaries.
+        signal fields, `verificationLedger[]`, and `runGoalDecision` so the
+        frontend can show which claims are deterministic, LLM-assessed,
+        LLM-assisted counts, or internal score summaries, plus whether that
+        final evidence proves run completion.
       parameters:
         - $ref: "#/components/parameters/runId"
       responses:
@@ -2505,6 +2506,55 @@ paths:
                         total:
                           type: integer
                           nullable: true
+                  runGoalDecision:
+                    type: object
+                    nullable: true
+                    description: "Conservative run-level goal proof derived from the final validation ledger."
+                    properties:
+                      state:
+                        type: string
+                        enum:
+                          [
+                            DONE,
+                            NOT_DONE_BUT_PROGRESSING,
+                            BLOCKED,
+                            FAILED,
+                            UNCERTAIN,
+                            WASTE_RISK,
+                          ]
+                      recommendedDecision:
+                        type: string
+                        enum:
+                          [
+                            CONTINUE_SAME_MODEL_PROVIDER,
+                            STEP_UP_MODEL,
+                            STEP_DOWN_MODEL,
+                            CHANGE_PROVIDER,
+                            STOP_DONE,
+                            STOP_BLOCKED,
+                            STOP_FAILED,
+                            STOP_WASTE_GUARD,
+                          ]
+                      reason:
+                        type: string
+                      goalSummary:
+                        type: string
+                      completedItems:
+                        type: array
+                        items: { type: string }
+                      incompleteItems:
+                        type: array
+                        items: { type: string }
+                      evidence:
+                        type: array
+                        items: { type: string }
+                      risks:
+                        type: array
+                        items: { type: string }
+                      userInputRequired:
+                        type: boolean
+                      anotherModelProviderMightHelp:
+                        type: boolean
 
   /runs/{runId}/report/share:
     post:

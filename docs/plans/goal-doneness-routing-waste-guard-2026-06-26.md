@@ -486,6 +486,12 @@ endpoint/test-coverage proof all pass; missing/unknown/warning evidence keeps th
 `AgentValidationReportEventBridge` includes it in `RUN_VALIDATION_EVIDENCE` payloads so web/CLI/VS
 Code can reload the final proof beside the raw ledger.
 
+Twenty-second slice 2026-06-26: the final proof is now part of the primary validation-report
+surface, not only the agent-session event stream. `ValidationReportDTO` includes `runGoalDecision`,
+`GET /api/runs/{id}/report` documents it in `openapi.yaml`, the frontend API type reuses the same
+goal decision shape as task summaries, and the run-result Evidence tab renders a "Final goal proof"
+card above the raw evidence ledger.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
