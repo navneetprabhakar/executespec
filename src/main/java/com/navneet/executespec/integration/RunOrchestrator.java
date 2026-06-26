@@ -206,6 +206,10 @@ public class RunOrchestrator implements RunControlPort {
    */
   private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
 
+  /** Per-run marker for confirmation-required automatic continuation spend. */
+  private final com.navneet.executespec.run.RunContinuationConfirmationFlag
+      runContinuationConfirmationFlag;
+
   private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
@@ -966,6 +970,7 @@ public class RunOrchestrator implements RunControlPort {
       localRun =
           featureFlagService.isEnabled("worker.local-hands.enabled")
               && runLocalExecutionFlag.consume(runId);
+      boolean requireContinuationConfirmation = runContinuationConfirmationFlag.consume(runId);
 
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
@@ -1378,6 +1383,7 @@ public class RunOrchestrator implements RunControlPort {
                     .maxIterationsPerTask(null) // per-complexity caps applied in SequentialExecutor
                     .enableSmokeTests(!localRun)
                     .localHandsMode(localRun)
+                    .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT

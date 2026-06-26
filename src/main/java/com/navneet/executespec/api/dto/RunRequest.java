@@ -129,6 +129,13 @@ public record RunRequest(
      */
     Boolean skipAutoPush,
     /**
+     * Optional per-run spend guard for automatic continuation. When true, model/provider step-up,
+     * step-down, or provider-change recommendations stop as confirmation-required instead of
+     * automatically rerunning the task. This only tightens policy; it cannot bypass an
+     * operator-level confirmation requirement.
+     */
+    Boolean requireConfirmationBeforeExpensiveContinuation,
+    /**
      * P3 local-hands (RL-2026-06-014) — when true AND the {@code worker.local-hands.enabled} flag
      * is on, the run executes in LOCAL mode: the server-side brain (classifier → planner → worker)
      * runs as normal, but every worker tool call is proxied to the caller's machine (the CLI's

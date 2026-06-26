@@ -73,6 +73,16 @@ class RunRequestBranchAndPrCommentsTest {
   }
 
   @Test
+  void continuationConfirmationFlag_is_deserialised() throws Exception {
+    String json =
+        "{\"userRequest\":\"ship safely\","
+            + "\"requireConfirmationBeforeExpensiveContinuation\":true}";
+    RunRequest req = mapper.readValue(json, RunRequest.class);
+
+    assertThat(req.requireConfirmationBeforeExpensiveContinuation()).isTrue();
+  }
+
+  @Test
   void missing_fields_are_null_not_blank() throws Exception {
     String json = "{\"userRequest\":\"plain run\"}";
     RunRequest req = mapper.readValue(json, RunRequest.class);

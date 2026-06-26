@@ -18,6 +18,9 @@ import lombok.Builder;
  *     has no buildable project)
  * @param localHandsMode when true, the worker is editing the caller's local working tree through
  *     proxied tools; prompt discipline should avoid unsolicited scaffold/test files.
+ * @param requireConfirmationBeforeExpensiveContinuation per-run tightening override that blocks
+ *     model/provider continuation spend until a client confirms it. Null/false leaves the server
+ *     YAML default in control.
  */
 @Builder
 public record ExecutionRequest(
@@ -28,6 +31,7 @@ public record ExecutionRequest(
     Integer maxIterationsPerTask,
     Boolean enableSmokeTests,
     Boolean localHandsMode,
+    Boolean requireConfirmationBeforeExpensiveContinuation,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
@@ -59,5 +63,7 @@ public record ExecutionRequest(
     if (runContext == null) throw new IllegalArgumentException("runContext required");
     if (enableSmokeTests == null) enableSmokeTests = true;
     if (localHandsMode == null) localHandsMode = false;
+    if (requireConfirmationBeforeExpensiveContinuation == null)
+      requireConfirmationBeforeExpensiveContinuation = false;
   }
 }

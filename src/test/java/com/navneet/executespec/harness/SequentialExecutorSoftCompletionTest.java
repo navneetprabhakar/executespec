@@ -241,12 +241,18 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   private static ExecutionRequest req(Plan plan, boolean enableSmoke) {
+    return req(plan, enableSmoke, false);
+  }
+
+  private static ExecutionRequest req(
+      Plan plan, boolean enableSmoke, boolean requireContinuationConfirmation) {
     return ExecutionRequest.builder()
         .plan(plan)
         .provider("anthropic")
         .model("claude-haiku-4-5-20251001")
         .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
         .enableSmokeTests(enableSmoke)
+        .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
         .build();
   }
 
@@ -1040,6 +1046,46 @@ class SequentialExecutorSoftCompletionTest {
                       && Boolean.TRUE.equals(
                           policy.get("requireConfirmationBeforeExpensiveContinuation"));
                 }));
+  }
+
+  @Test
+  void continuation_decision_uses_per_run_confirmation_requirement() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_BLOCKED,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of(
+                    "expensive continuation requires user confirmation before more spend;"
+                        + " proposed action STEP_UP_MODEL -> openai/gpt-5.4")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    executor.execute(req(singleTaskPlan(), true, true));
+
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    assertTrue(requestCaptor.getValue().expensiveContinuationRequiresConfirmation());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
+                        && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")),
+        "Expected per-run confirmation requirement in persisted continuation JSON. Saw: "
+            + saveLog);
   }
 
   @Test
