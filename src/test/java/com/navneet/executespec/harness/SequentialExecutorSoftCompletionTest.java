@@ -384,6 +384,14 @@ class SequentialExecutorSoftCompletionTest {
             argThat(
                 event ->
                     isGoalDecisionLog(event) && event.payload().contains("DONE -> STOP_DONE")));
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isContinuationDecisionLog(event)
+                        && event.payload().contains("STOP_DONE")
+                        && event.payload().contains("goal satisfied with validation evidence")));
   }
 
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate
@@ -423,5 +431,12 @@ class SequentialExecutorSoftCompletionTest {
         && "LOG".equals(event.type())
         && event.payload() != null
         && event.payload().startsWith("Goal decision:");
+  }
+
+  private static boolean isContinuationDecisionLog(RunEvent event) {
+    return event != null
+        && "LOG".equals(event.type())
+        && event.payload() != null
+        && event.payload().startsWith("Continuation decision:");
   }
 }
