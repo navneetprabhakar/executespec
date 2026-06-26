@@ -19,7 +19,7 @@ For exhaustive class discovery use:
 | `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
-| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, and the inert quality-first model/provider ranking policy. |
+| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, capability aggregation, and the inert quality-first model/provider ranking policy. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |
 | `report` | Validation report and verified-score computation. |
