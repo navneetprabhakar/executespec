@@ -18,7 +18,7 @@ For exhaustive class discovery use:
 | `harness` | Sequential task executor, task-tier routing, durable + live SSE goal/continuation decision visibility with configurable limits, default-off goal-stop enforcement, opt-in selected-candidate continuation reruns, and typed skipped-action events when runtime ceilings block escalation. |
 | `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, candidate-backed advisor, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
-| `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
+| `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards, and run-scoped goal/continuation action-event mirrors. |
 | `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, candidate collection, capability aggregation, and the inert quality-first model/provider ranking policy. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |

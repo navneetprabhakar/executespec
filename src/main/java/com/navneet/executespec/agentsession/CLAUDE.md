@@ -64,6 +64,7 @@ turns separately from runs.
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
+| `AgentRunEventBridge.java`                 | Mirrors typed goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail.                                           |
 | `AgentTracePayloadFactory.java`            | Builds orchestrator trace payloads with route, policy, prompt, cost-run-call, and message-hash evidence.                                                                                                            |
 | `AgentContextResolver.java`                | Resolves local Git remotes/repo names to accessible linked projects without leaking unreadable project links.                                                                                                       |
 | `AgentGateDecisionCardFactory.java`        | Builds plan-gate decision cards from `PipelineRun` plus project metadata and plan JSON; keeps task/risk/model fallback logic out of the session service.                                                            |
@@ -180,6 +181,8 @@ turns separately from runs.
   append.
 - `AgentEventRecorderTest` pins session/turn-scoped event metadata, payload JSON, and null payload
   handling for durable action events.
+- `AgentRunEventBridgeTest` pins run-scoped action-event surfacing for typed goal/continuation run
+  events and verifies unrelated run events do not write agent-session records.
 - `AgentTracePayloadFactoryTest` pins route/policy/run metadata, deterministic prompt metadata,
   message hashes, policy decision evidence, and blocked-route fallback fields.
 - `AgentContextResolverTest` pins Git remote normalization, nested repo-context fallback,
