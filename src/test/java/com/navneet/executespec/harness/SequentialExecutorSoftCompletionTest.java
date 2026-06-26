@@ -383,7 +383,9 @@ class SequentialExecutorSoftCompletionTest {
                         && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
                         && String.valueOf(event.data().get("reason"))
                             .contains("configured total cost ceiling reached")
-                        && ((List<?>) event.data().get("evidence")).contains("costUsd=0.250000")));
+                        && ((List<?>) event.data().get("evidence")).contains("costUsd=0.250000")
+                        && Double.valueOf(0.25).equals(event.data().get("costUsd"))
+                        && Integer.valueOf(160).equals(event.data().get("totalTokens"))));
   }
 
   @Test
@@ -413,7 +415,8 @@ class SequentialExecutorSoftCompletionTest {
                         && String.valueOf(event.data().get("reason"))
                             .contains("configured total token ceiling reached")
                         && ((List<?>) event.data().get("evidence"))
-                            .contains("totalTrackedTokens=205")));
+                            .contains("totalTrackedTokens=205")
+                        && Integer.valueOf(205).equals(event.data().get("totalTokens"))));
   }
 
   @Test
@@ -439,7 +442,8 @@ class SequentialExecutorSoftCompletionTest {
                         && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
                         && String.valueOf(event.data().get("reason"))
                             .contains("configured task wall-clock ceiling reached")
-                        && ((List<?>) event.data().get("evidence")).contains("wallClockMs=20000")));
+                        && ((List<?>) event.data().get("evidence")).contains("wallClockMs=20000")
+                        && Long.valueOf(20_000L).equals(event.data().get("wallClockMs"))));
   }
 
   @Test
@@ -618,6 +622,9 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "advisoryModelStepUpLimit", 2);
     ReflectionTestUtils.setField(executor, "advisoryModelStepDownLimit", 3);
     ReflectionTestUtils.setField(executor, "requireConfirmationBeforeExpensiveContinuation", true);
+    ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 1.25);
+    ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 12_345);
+    ReflectionTestUtils.setField(executor, "maxGoalTaskWallClockMs", 67_890L);
     executor.execute(req(singleTaskPlan(), true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
@@ -641,6 +648,9 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"maxProviderSwitches\":0")
                         && s.continuationDecisionJson().contains("\"maxModelStepUps\":2")
                         && s.continuationDecisionJson().contains("\"maxModelStepDowns\":3")
+                        && s.continuationDecisionJson().contains("\"maxTotalCostUsd\":1.25")
+                        && s.continuationDecisionJson().contains("\"maxTotalTokens\":12345")
+                        && s.continuationDecisionJson().contains("\"maxTaskWallClockMs\":67890")
                         && s.continuationDecisionJson()
                             .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")),
         "Expected configured continuation policy in persisted JSON. Saw: " + saveLog);
@@ -661,6 +671,9 @@ class SequentialExecutorSoftCompletionTest {
                       && Integer.valueOf(0).equals(policy.get("maxProviderSwitches"))
                       && Integer.valueOf(2).equals(policy.get("maxModelStepUps"))
                       && Integer.valueOf(3).equals(policy.get("maxModelStepDowns"))
+                      && Double.valueOf(1.25).equals(policy.get("maxTotalCostUsd"))
+                      && Integer.valueOf(12_345).equals(policy.get("maxTotalTokens"))
+                      && Long.valueOf(67_890L).equals(policy.get("maxTaskWallClockMs"))
                       && Boolean.TRUE.equals(
                           policy.get("requireConfirmationBeforeExpensiveContinuation"));
                 }));

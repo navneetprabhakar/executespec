@@ -1734,21 +1734,23 @@ to boot — skip it for those.""";
       return decideContinuationFallback(decision);
     }
     try {
-      return goalContinuationAdvisor.advise(
-          GoalContinuationAdvisorRequest.builder()
-              .goalDecision(decision)
-              .currentProvider(provider)
-              .currentModel(model)
-              .taskCategory(taskCategory(task))
-              .requiredQualityThreshold(requiredGoalQualityThreshold())
-              .providerPreferenceOrder(providerPreferenceOrder(provider))
-              .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
-              .expensiveContinuationRequiresConfirmation(
-                  requireConfirmationBeforeExpensiveContinuation)
-              .maxProviderSwitches(maxProviderSwitches())
-              .maxModelStepUps(maxModelStepUps())
-              .maxModelStepDowns(maxModelStepDowns())
-              .build());
+      GoalContinuationPolicyDecision advised =
+          goalContinuationAdvisor.advise(
+              GoalContinuationAdvisorRequest.builder()
+                  .goalDecision(decision)
+                  .currentProvider(provider)
+                  .currentModel(model)
+                  .taskCategory(taskCategory(task))
+                  .requiredQualityThreshold(requiredGoalQualityThreshold())
+                  .providerPreferenceOrder(providerPreferenceOrder(provider))
+                  .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
+                  .expensiveContinuationRequiresConfirmation(
+                      requireConfirmationBeforeExpensiveContinuation)
+                  .maxProviderSwitches(maxProviderSwitches())
+                  .maxModelStepUps(maxModelStepUps())
+                  .maxModelStepDowns(maxModelStepDowns())
+                  .build());
+      return withAppliedPolicy(advised);
     } catch (RuntimeException ex) {
       log.warn(
           "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
@@ -1762,15 +1764,28 @@ to boot — skip it for those.""";
   }
 
   private GoalContinuationPolicyDecision decideContinuationFallback(GoalDonenessDecision decision) {
-    return goalContinuationPolicy.decide(
-        GoalContinuationRequest.builder()
-            .goalDecision(decision)
-            .expensiveContinuationRequiresConfirmation(
-                requireConfirmationBeforeExpensiveContinuation)
-            .maxProviderSwitches(maxProviderSwitches())
-            .maxModelStepUps(maxModelStepUps())
-            .maxModelStepDowns(maxModelStepDowns())
-            .build());
+    return withAppliedPolicy(
+        goalContinuationPolicy.decide(
+            GoalContinuationRequest.builder()
+                .goalDecision(decision)
+                .expensiveContinuationRequiresConfirmation(
+                    requireConfirmationBeforeExpensiveContinuation)
+                .maxProviderSwitches(maxProviderSwitches())
+                .maxModelStepUps(maxModelStepUps())
+                .maxModelStepDowns(maxModelStepDowns())
+                .build()));
+  }
+
+  private GoalContinuationPolicyDecision withAppliedPolicy(
+      GoalContinuationPolicyDecision decision) {
+    if (decision == null) {
+      return null;
+    }
+    return new GoalContinuationPolicyDecision(
+        decision.decision(),
+        decision.selectedCandidate(),
+        decision.reasons(),
+        continuationPolicyData(decision));
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -1820,6 +1835,15 @@ to boot — skip it for those.""";
     data.put("incompleteItems", decision.incompleteItems());
     data.put("evidence", decision.evidence());
     data.put("risks", decision.risks());
+    data.put("budgetCeilingReason", decision.budgetCeilingReason());
+    data.put("inputTokens", decision.inputTokens());
+    data.put("outputTokens", decision.outputTokens());
+    data.put("cacheReadTokens", decision.cacheReadTokens());
+    data.put("cacheWriteTokens", decision.cacheWriteTokens());
+    data.put("reasoningTokens", decision.reasoningTokens());
+    data.put("totalTokens", decision.totalTokens());
+    data.put("costUsd", decision.costUsd());
+    data.put("wallClockMs", decision.wallClockMs());
     data.put("userInputRequired", decision.userInputRequired());
     data.put("anotherModelProviderMightHelp", decision.anotherModelProviderMightHelp());
     return data;
@@ -1838,8 +1862,15 @@ to boot — skip it for those.""";
         .selectedCandidate()
         .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
     data.put("reasons", decision.reasons());
-    data.put("policy", continuationPolicyData());
+    data.put("policy", continuationPolicyData(decision));
     return data;
+  }
+
+  private Map<String, Object> continuationPolicyData(GoalContinuationPolicyDecision decision) {
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      return decision.policy();
+    }
+    return continuationPolicyData();
   }
 
   private Map<String, Object> continuationPolicyData() {
@@ -1851,6 +1882,9 @@ to boot — skip it for those.""";
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
+    data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
+    data.put("maxTotalTokens", maxGoalTotalTokens());
+    data.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
     data.put("actingEnabled", continuationActingEnabled);
     data.put("maxRerunsPerTask", maxContinuationReruns());
     return data;
@@ -1957,6 +1991,9 @@ to boot — skip it for those.""";
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
+    policyNode.put("maxTotalCostUsd", maxGoalTotalCostUsd());
+    policyNode.put("maxTotalTokens", maxGoalTotalTokens());
+    policyNode.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
     policyNode.put("actingEnabled", continuationActingEnabled);
     policyNode.put("maxRerunsPerTask", maxContinuationReruns());
   }

@@ -295,6 +295,15 @@ export interface TaskSummary {
     incompleteItems?: string[];
     evidence?: string[];
     risks?: string[];
+    budgetCeilingReason?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+    totalTokens?: number;
+    costUsd?: number;
+    wallClockMs?: number;
     userInputRequired?: boolean;
     anotherModelProviderMightHelp?: boolean;
   } | null;
@@ -312,6 +321,18 @@ export interface TaskSummary {
       latencyP95Ms?: number;
       reasons?: string[];
     } | null;
+    policy?: {
+      requiredQualityThreshold?: number;
+      maxProviderSwitches?: number;
+      maxModelStepUps?: number;
+      maxModelStepDowns?: number;
+      requireConfirmationBeforeExpensiveContinuation?: boolean;
+      maxTotalCostUsd?: number;
+      maxTotalTokens?: number;
+      maxTaskWallClockMs?: number;
+      actingEnabled?: boolean;
+      maxRerunsPerTask?: number;
+    };
     reasons?: string[];
   } | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
