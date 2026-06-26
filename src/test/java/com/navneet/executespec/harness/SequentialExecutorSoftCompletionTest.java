@@ -564,6 +564,40 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void goal_decision_uses_configured_stale_explanation_limit() {
+    stubTaskRow();
+    WorkerResult staleExplanation =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+            .iterations(6)
+            .toolCallsDispatched(0)
+            .finalAssistantText("I already explained the implementation is complete.")
+            .repeatedAssistantTextCount(2)
+            .toolCallLog(List.of())
+            .totalLatencyMs(12_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(staleExplanation);
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalNoProgressIterations", 120);
+    ReflectionTestUtils.setField(executor, "maxGoalStaleExplanations", 2);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "WASTE_RISK".equals(event.data().get("state"))
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("same assistant explanation repeated")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("staleExplanationCount=2/2")));
+  }
+
+  @Test
   void goal_decision_marks_clear_environment_failures_blocked() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));

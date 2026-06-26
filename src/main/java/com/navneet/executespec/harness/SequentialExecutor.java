@@ -390,6 +390,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-edit-churn:6}")
   private int maxGoalEditChurn = 6;
 
+  @Value("${execution.continuation.max-stale-explanations:2}")
+  private int maxGoalStaleExplanations = 2;
+
   @Value("${execution.continuation.max-parallel-tasks:3}")
   private int maxGoalParallelTasks = 3;
 
@@ -2113,6 +2116,7 @@ to boot — skip it for those.""";
     data.put("maxFalseDoneClaims", maxFalseDoneClaims());
     data.put("maxRepeatedFailures", maxRepeatedFailures());
     data.put("maxEditChurn", maxEditChurn());
+    data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
@@ -2200,6 +2204,10 @@ to boot — skip it for those.""";
 
   private int maxEditChurn() {
     return maxGoalEditChurn;
+  }
+
+  private int maxStaleExplanations() {
+    return maxGoalStaleExplanations;
   }
 
   private int maxParallelTasks() {
@@ -2392,10 +2400,12 @@ to boot — skip it for those.""";
     int repeatedFailureCount =
         repeatedFailureCount(workerResult, validationAttempted, validationPassed, failureReason);
     int editChurnCount = editChurnCount(workerResult);
+    int staleExplanationCount = staleExplanationCount(workerResult, fileWrites, validationPassed);
     evidence.add("noProgressIterations=" + noProgressIterations + "/" + maxNoProgressIterations());
     evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
     evidence.add("repeatedFailureCount=" + repeatedFailureCount + "/" + maxRepeatedFailures());
     evidence.add("editChurnCount=" + editChurnCount + "/" + maxEditChurn());
+    evidence.add("staleExplanationCount=" + staleExplanationCount + "/" + maxStaleExplanations());
     if (blockedByEnvironment) {
       evidence.add("blockedByEnvironment=true");
     }
@@ -2419,6 +2429,8 @@ to boot — skip it for those.""";
         .maxRepeatedFailures(maxRepeatedFailures())
         .editChurnCount(editChurnCount)
         .maxEditChurn(maxEditChurn())
+        .staleExplanationCount(staleExplanationCount)
+        .maxStaleExplanations(maxStaleExplanations())
         .budgetCeilingReached(budgetCeilingReached)
         .budgetCeilingReason(budgetCeilingReason)
         .inputTokens(cost.inputTokens())
@@ -2496,6 +2508,17 @@ to boot — skip it for those.""";
       max = Math.max(max, count);
     }
     return max;
+  }
+
+  private static int staleExplanationCount(
+      WorkerResult workerResult, int fileWrites, boolean validationPassed) {
+    if (workerResult == null || fileWrites > 0 || validationPassed) {
+      return 0;
+    }
+    if (workerResult.finalAssistantText() == null || workerResult.finalAssistantText().isBlank()) {
+      return 0;
+    }
+    return Math.max(0, workerResult.repeatedAssistantTextCount());
   }
 
   private static String mutationPathSignature(String entry) {

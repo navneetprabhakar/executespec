@@ -149,6 +149,7 @@ execution:
     max-false-done-claims: 2
     max-repeated-failures: 3
     max-edit-churn: 6
+    max-stale-explanations: 2
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
@@ -589,6 +590,12 @@ workspace writes, sandbox-blocked commands, destructive commands, refused overwr
 exfiltration, and cloud-metadata access, publishes `unsafeContinuation=true` in typed
 `GOAL_DECISION` evidence, and lets `GoalDonenessEvaluator` map those cases to
 `BLOCKED / STOP_BLOCKED` with `userInputRequired=true`.
+
+Thirty-third slice 2026-06-26: worker terminal results now carry `repeatedAssistantTextCount`.
+`SequentialExecutor` maps repeated normalized assistant text with no new file-write or validation
+proof into `GoalEvidence.staleExplanationCount`, publishes `staleExplanationCount=current/max`, and
+`GoalDonenessEvaluator` maps the configured `execution.continuation.max-stale-explanations`
+threshold to `WASTE_RISK / STOP_WASTE_GUARD`.
 
 ## Open Questions
 

@@ -111,6 +111,16 @@ public class GoalDonenessEvaluator {
           false);
     }
 
+    if (staleExplanationLimitReached(evidence)) {
+      return fromEvidence(
+          evidence,
+          GoalDonenessState.WASTE_RISK,
+          RunContinuationDecision.STOP_WASTE_GUARD,
+          "same assistant explanation repeated without new goal evidence",
+          false,
+          false);
+    }
+
     if (noProgressLimitReached(evidence)) {
       return fromEvidence(
           evidence,
@@ -183,6 +193,12 @@ public class GoalDonenessEvaluator {
 
   private static boolean editChurnLimitReached(GoalEvidence evidence) {
     return evidence.validationFailed() && evidence.editChurnCount() >= evidence.maxEditChurn();
+  }
+
+  private static boolean staleExplanationLimitReached(GoalEvidence evidence) {
+    return !isDone(evidence)
+        && !evidence.hasMeaningfulProgress()
+        && evidence.staleExplanationCount() >= evidence.maxStaleExplanations();
   }
 
   private static GoalDonenessDecision fromEvidence(

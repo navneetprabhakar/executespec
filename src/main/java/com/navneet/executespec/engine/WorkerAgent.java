@@ -407,6 +407,8 @@ public class WorkerAgent {
     // DELIVERABLE_GATE_MAX_REFUSALS.
     final List<String> requiredDeliverables =
         req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
+    java.util.Map<String, Integer> assistantTextCounts = new java.util.LinkedHashMap<>();
+    int maxRepeatedAssistantTextCount = 0;
     int deliverableRefusals = 0;
     // VBC verify-before-complete — bounded refusal counter (fail-open after VBC_GATE_MAX_REFUSALS).
     // Re-runs the tests on each completeTask attempt (the worker fixes between attempts), unlike
@@ -468,6 +470,7 @@ public class WorkerAgent {
             .iterations(iter)
             .toolCallsDispatched(toolsDispatched)
             .finalAssistantText(lastText)
+            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
@@ -507,6 +510,7 @@ public class WorkerAgent {
             .iterations(iter)
             .toolCallsDispatched(toolsDispatched)
             .finalAssistantText(lastText)
+            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
@@ -565,6 +569,7 @@ public class WorkerAgent {
                       + " exceeded mid-task (spent $"
                       + String.format("%.2f", spent)
                       + ")")
+              .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
               .toolCallLog(toolLog)
               .totalLatencyMs(System.currentTimeMillis() - start)
               .build();
@@ -650,7 +655,15 @@ public class WorkerAgent {
         }
       }
       String assistantText = textBuf.toString();
-      if (!assistantText.isEmpty()) lastText = assistantText;
+      if (!assistantText.isEmpty()) {
+        lastText = assistantText;
+        String assistantSignature = assistantText.replaceAll("\\s+", " ").trim();
+        if (!assistantSignature.isBlank()) {
+          int count = assistantTextCounts.getOrDefault(assistantSignature, 0) + 1;
+          assistantTextCounts.put(assistantSignature, count);
+          maxRepeatedAssistantTextCount = Math.max(maxRepeatedAssistantTextCount, count);
+        }
+      }
 
       log.info(
           "WorkerAgent iter={} text={}chars toolCalls={}",
@@ -707,6 +720,7 @@ public class WorkerAgent {
             .iterations(iter)
             .toolCallsDispatched(toolsDispatched)
             .finalAssistantText(lastText)
+            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
@@ -1000,6 +1014,7 @@ public class WorkerAgent {
               .toolCallsDispatched(toolsDispatched)
               .completionSummary(completionSummary)
               .finalAssistantText(lastText)
+              .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
               .toolCallLog(toolLog)
               .totalLatencyMs(System.currentTimeMillis() - start)
               .build();
@@ -1202,6 +1217,7 @@ public class WorkerAgent {
             .iterations(iter)
             .toolCallsDispatched(toolsDispatched)
             .finalAssistantText(lastText)
+            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
@@ -1248,6 +1264,7 @@ public class WorkerAgent {
         .iterations(maxIter)
         .toolCallsDispatched(toolsDispatched)
         .finalAssistantText(lastText)
+        .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
         .toolCallLog(toolLog)
         .totalLatencyMs(System.currentTimeMillis() - start)
         .build();
