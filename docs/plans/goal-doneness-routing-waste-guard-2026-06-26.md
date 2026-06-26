@@ -1,6 +1,6 @@
 # Goal Doneness, Routing, and Waste Guard
 
-> Status: review approach, not implementation. Date: 2026-06-26.
+> Status: incremental implementation in progress, default-off runtime enforcement only. Date: 2026-06-26.
 
 ## Problem
 
@@ -247,9 +247,10 @@ When enabled, allow at most:
 
 ### Phase 4 - Evidence-backed model/provider ranking
 
-Build `ModelProviderEvidenceService` that reads:
+Build `ModelProviderCandidateService` / evidence readers that read:
 
 - YAML model matrix and pricing,
+- Redis-backed local model performance,
 - `run_step_usage`,
 - `TierEvalResult` outputs,
 - benchmark tracking tables,
@@ -325,6 +326,17 @@ selection step, so quality-threshold filtering and quality/cost/latency ordering
 rejection, missing-benchmark fallback, and cheap-below-threshold rejection through the ranking
 policy. Runtime wiring from Redis, tier-eval rows, benchmark tracking, and YAML model metadata is
 still pending.
+
+Seventh slice 2026-06-26: `ModelProviderCandidateRequest` and `ModelProviderCandidateService` now
+bridge live runtime/config sources into the pure capability seam. The service iterates YAML
+`model-matrix.models`, preserves pricing and context metadata from `ModelRegistry`, merges Redis
+`ModelPerformanceTracker` success/latency when enough local samples exist, accepts external
+benchmark/validation signals, applies explicit provider/model allow-lists, provider availability,
+and provider preference order, then returns scored `ModelProviderScore` candidates. This closes the
+first live-source collection gap without enabling automatic provider switching; `SequentialExecutor`,
+`ModelResolver`, and `LlmRouter` still do not call the candidate service for run-loop decisions.
+`ModelProviderCandidateServiceTest` pins YAML fallback quality, local+external signal merge,
+allow-list filtering, unavailable-provider rejection, and fallback-order penalty behavior.
 
 ## Open Questions
 

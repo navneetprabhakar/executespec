@@ -19,7 +19,7 @@ For exhaustive class discovery use:
 | `execution` | Legacy Launches plus goal evidence, doneness, continuation decision, evaluator, and continuation-policy seams. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
-| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, capability aggregation, and the inert quality-first model/provider ranking policy. |
+| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, candidate collection, capability aggregation, and the inert quality-first model/provider ranking policy. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |
 | `report` | Validation report and verified-score computation. |
@@ -58,6 +58,7 @@ For exhaustive class discovery use:
 | `WorkerAgent` | Native tool-calling worker. |
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
 | `ModelRegistry` / `ModelResolver` | YAML model matrix and tier lookup. |
+| `ModelProviderCandidateService` | Converts YAML model metadata, Redis local performance, explicit availability, provider preference order, and external benchmark/validation signals into explainable model/provider candidates. |
 | `RunCostTracker` | Token/cost accounting and pricing lookup. |
 | `RunStepUsageRecorder` | Durable per-call LLM usage write to `run_step_usage` (role/step/retry attribution; fail-soft, `REQUIRES_NEW`). |
 | `ValidationReportService` | Additive verifiedScore, trust caps, verification ledger, and report assembly. |
