@@ -1,6 +1,6 @@
 # Goal Doneness, Routing, and Waste Guard
 
-> Status: incremental implementation in progress; task-stop and model/provider acting remain default-off, while final run-level proof is persisted. Date: 2026-06-27.
+> Status: incremental implementation in progress; task-stop enforcement remains default-off, selected-candidate continuation acting is default-on, and final run-level proof is persisted. Date: 2026-06-27.
 
 ## Problem
 
@@ -129,7 +129,7 @@ Add `ContinuationPolicy` and `WasteGuardPolicy` with explicit ceilings:
 ```yaml
 execution:
   continuation:
-    enabled: false
+    enabled: true
     required-quality-threshold: 70.0
     required-quality-thresholds:
       task-low: -1
@@ -161,17 +161,17 @@ execution:
     max-task-wall-clock-seconds-high: 4500
     require-confirmation-before-expensive-continuation: false
     acting:
-      enabled: false
+      enabled: true
     max-reruns-per-task: 1
 ```
 
-The first wired subset is advisory-only: `required-quality-threshold`, the semantic and complexity
+The first wired subset is policy-visible: `required-quality-threshold`, the semantic and complexity
 overrides under `required-quality-thresholds`, `max-provider-switches-per-run`,
 `max-model-step-ups-per-task`, `max-model-step-downs-per-task`, and
 `require-confirmation-before-expensive-continuation`. The first evidence-ceiling subset is
 disabled unless positive: `max-total-cost-usd`, `max-total-tokens`, and
 `max-task-wall-clock-ms` feed `GOAL_DECISION` budget evidence and can stop as
-`STOP_WASTE_GUARD` when crossed before proof of completion. The next acting subset is opt-in via
+`STOP_WASTE_GUARD` when crossed before proof of completion. The acting subset is enabled by default via
 `acting.enabled` and currently permits at most one same-task rerun with an advisor-selected
 provider/model.
 
@@ -341,7 +341,7 @@ returns aggregate `ABORTED`. Task-boundary `STOP_DONE` intentionally remains inf
 after V251's final run-level proof, because one task proving done does not prove a multi-task run is
 done; final proof is persisted on `pipeline_run.run_goal_doneness_json` after validation-report
 generation. Provider/model step-up, step-down, and change-provider decisions are selected by the
-advisor and only executed when the default-off acting flag is enabled.
+advisor and executed automatically when selected-candidate acting remains enabled.
 
 Fifth slice 2026-06-26: `GoalContinuationRequest`, `GoalContinuationPolicyDecision`, and
 `GoalContinuationPolicy` now define the pure escalation/exit policy that consumes
@@ -437,8 +437,8 @@ passes them into `GoalContinuationAdvisor` / fallback `GoalContinuationPolicy`, 
 applied policy in both typed `CONTINUATION_DECISION` SSE data and durable
 `agent_task.continuation_decision_json`.
 
-Fifteenth slice 2026-06-26: `SequentialExecutor` can now optionally act on non-terminal
-continuation decisions. Default behavior is unchanged (`execution.continuation.acting.enabled=false`).
+Fifteenth slice 2026-06-26: `SequentialExecutor` gained the selected-candidate acting path on non-terminal
+continuation decisions. Automatic selected-candidate reruns are now enabled by default (`execution.continuation.acting.enabled=true`).
 When enabled, the executor only acts on `STEP_UP_MODEL`, `STEP_DOWN_MODEL`, or `CHANGE_PROVIDER`
 decisions that carry a selected `ModelProviderScore`; it emits a typed `CONTINUATION_ACTION` event
 plus the legacy log line, reruns the same task once with that selected provider/model while
@@ -649,6 +649,15 @@ converts each provider/model run's `resolved_tasks / total_tasks` into a
 and local 24-hour performance before the strict quality/cost/latency ranking policy runs. This keeps
 benchmarks informative without making them the sole decision-maker or letting the candidate service
 mutate run state.
+
+Forty-first slice 2026-06-27: selected-candidate continuation acting is now default-on. When a task
+fails or produces low-quality evidence and `GoalContinuationAdvisor` selects `STEP_UP_MODEL`,
+`STEP_DOWN_MODEL`, or `CHANGE_PROVIDER`, `SequentialExecutor` reruns that same task once with the
+selected provider/model unless `execution.continuation.acting.enabled=false`, a configured ceiling
+is exhausted, or `require-confirmation-before-expensive-continuation=true` blocks the spend. The
+confirmation-blocked path now keeps the proposed candidate on the `STOP_BLOCKED` decision so UI/CLI
+clients can show the exact upgrade being requested. Candidate reasons also explicitly say when a
+provider/model has no benchmark quality prior, so unbenchmarked models do not look fully measured.
 
 ## Open Questions
 

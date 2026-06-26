@@ -895,7 +895,7 @@ that `runGoalDecision` beside the raw ledger, the Evidence tab renders both, and
 `AgentValidationReportEventBridge` mirrors the ledger plus that proof as `RUN_VALIDATION_EVIDENCE`,
 so web/CLI/VS Code clients can reload the same decision and evidence trail through
 `/api/agent/sessions/{id}/events`.
-When the default-off continuation acting switch is enabled, `CONTINUATION_ACTION` marks the actual
+When selected-candidate continuation acting is enabled, `CONTINUATION_ACTION` marks the actual
 selected-candidate same-task rerun with decision, provider, model, reason, bounded attempt metadata,
 and consumed limit metadata. If runtime ceilings block an otherwise actionable recommendation,
 `CONTINUATION_ACTION_SKIPPED` carries the selected candidate plus the exhausted limit name and

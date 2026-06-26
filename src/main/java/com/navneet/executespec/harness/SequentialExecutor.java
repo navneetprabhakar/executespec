@@ -408,8 +408,8 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-task-wall-clock-ms:-1}")
   private long maxGoalTaskWallClockMs = -1L;
 
-  @Value("${execution.continuation.acting.enabled:false}")
-  private boolean continuationActingEnabled = false;
+  @Value("${execution.continuation.acting.enabled:true}")
+  private boolean continuationActingEnabled = true;
 
   @Value("${execution.continuation.max-reruns-per-task:1}")
   private int continuationRerunLimit = 1;

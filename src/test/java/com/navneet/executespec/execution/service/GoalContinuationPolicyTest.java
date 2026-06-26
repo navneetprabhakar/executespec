@@ -167,9 +167,11 @@ class GoalContinuationPolicyTest {
 
   @Test
   void expensiveContinuationRequiresConfirmationBeforeEscalation() {
+    ModelProviderScore stronger = strongerSameProvider();
+
     GoalContinuationPolicyDecision decision =
         policy.decide(
-            request(progressing(true), current(), ranked(strongerSameProvider(), current()))
+            request(progressing(true), current(), ranked(stronger, current()))
                 .qualityInsufficient(true)
                 .maxModelStepUps(1)
                 .expensiveContinuationRequiresConfirmation(true)
@@ -177,7 +179,10 @@ class GoalContinuationPolicyTest {
                 .build());
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(stronger);
     assertThat(decision.reasons().getFirst()).contains("requires user confirmation");
+    assertThat(decision.reasons().getFirst()).contains("proposed action STEP_UP_MODEL");
+    assertThat(decision.reasons().getFirst()).contains(stronger.label());
   }
 
   private GoalContinuationRequest.GoalContinuationRequestBuilder request(

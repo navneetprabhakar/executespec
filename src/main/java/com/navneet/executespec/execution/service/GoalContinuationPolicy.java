@@ -35,16 +35,17 @@ public class GoalContinuationPolicy {
       return decision(goal.recommendedDecision(), Optional.empty(), goal.reason());
     }
 
-    if (request.expensiveContinuationRequiresConfirmation()
-        && !request.userConfirmedExpensiveContinuation()) {
-      return decision(
-          RunContinuationDecision.STOP_BLOCKED,
-          Optional.empty(),
-          "expensive continuation requires user confirmation before more spend");
-    }
-
     Optional<GoalContinuationPolicyDecision> escalation = escalationDecision(request);
     if (escalation.isPresent()) {
+      if (request.expensiveContinuationRequiresConfirmation()
+          && !request.userConfirmedExpensiveContinuation()) {
+        return decision(
+            RunContinuationDecision.STOP_BLOCKED,
+            escalation.get().selectedCandidate(),
+            "expensive continuation requires user confirmation before more spend; proposed action "
+                + escalation.get().decision()
+                + proposedCandidateSuffix(escalation.get()));
+      }
       return escalation.get();
     }
 
@@ -200,5 +201,9 @@ public class GoalContinuationPolicy {
       String reason) {
     return new GoalContinuationPolicyDecision(
         decision, selectedCandidate, reason == null ? List.of() : List.of(reason));
+  }
+
+  private static String proposedCandidateSuffix(GoalContinuationPolicyDecision decision) {
+    return decision.selectedCandidate().map(candidate -> " -> " + candidate.label()).orElse("");
   }
 }

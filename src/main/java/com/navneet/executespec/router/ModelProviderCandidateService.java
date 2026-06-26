@@ -181,6 +181,14 @@ public class ModelProviderCandidateService {
       reasons.add("merged " + external.size() + " external benchmark/validation signal(s)");
       external.stream().flatMap(signal -> signal.reasons().stream()).forEach(reasons::add);
     }
+    if (external.stream().noneMatch(signal -> signal.benchmarkQualityScore() != null)) {
+      reasons.add(
+          "benchmark quality prior unavailable for "
+              + provider
+              + "/"
+              + canonicalModel
+              + "; using fallback/local/validation signals only");
+    }
 
     long latencyP50 =
         externalLong(external, ModelProviderCapabilitySignal::latencyP50Ms).stream()
