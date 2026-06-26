@@ -521,6 +521,49 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void goal_decision_uses_configured_edit_churn_limit() {
+    stubTaskRow();
+    WorkerResult churned =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(12)
+            .toolCallsDispatched(15)
+            .completionSummary("done")
+            .toolCallLog(
+                List.of(
+                    "editFile({\"path\":\"src/App.tsx\",\"old\":\"a\",\"new\":\"b\"})",
+                    "editFile({\"path\":\"src/App.tsx\",\"old\":\"b\",\"new\":\"c\"})",
+                    "writeFile({\"path\":\"src/App.tsx\",\"content\":\"final\"})"))
+            .totalLatencyMs(20_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(churned);
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 5);
+    ReflectionTestUtils.setField(executor, "maxGoalRepeatedFailures", 9);
+    ReflectionTestUtils.setField(executor, "maxGoalEditChurn", 3);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "WASTE_RISK".equals(event.data().get("state"))
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("same file was repeatedly mutated")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("editChurnCount=3/3")));
+  }
+
+  @Test
   void goal_decision_uses_configured_cost_ceiling_evidence() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
@@ -792,6 +835,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "maxGoalNoProgressIterations", 44);
     ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 5);
     ReflectionTestUtils.setField(executor, "maxGoalRepeatedFailures", 7);
+    ReflectionTestUtils.setField(executor, "maxGoalEditChurn", 8);
     ReflectionTestUtils.setField(executor, "maxGoalParallelTasks", 6);
     ReflectionTestUtils.setField(executor, "requireConfirmationBeforeExpensiveContinuation", true);
     ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 1.25);
@@ -823,6 +867,7 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"maxNoProgressIterations\":44")
                         && s.continuationDecisionJson().contains("\"maxFalseDoneClaims\":5")
                         && s.continuationDecisionJson().contains("\"maxRepeatedFailures\":7")
+                        && s.continuationDecisionJson().contains("\"maxEditChurn\":8")
                         && s.continuationDecisionJson().contains("\"maxParallelTasks\":6")
                         && s.continuationDecisionJson().contains("\"maxTotalCostUsd\":1.25")
                         && s.continuationDecisionJson().contains("\"maxTotalTokens\":12345")
@@ -850,6 +895,7 @@ class SequentialExecutorSoftCompletionTest {
                       && Integer.valueOf(44).equals(policy.get("maxNoProgressIterations"))
                       && Integer.valueOf(5).equals(policy.get("maxFalseDoneClaims"))
                       && Integer.valueOf(7).equals(policy.get("maxRepeatedFailures"))
+                      && Integer.valueOf(8).equals(policy.get("maxEditChurn"))
                       && Integer.valueOf(6).equals(policy.get("maxParallelTasks"))
                       && Double.valueOf(1.25).equals(policy.get("maxTotalCostUsd"))
                       && Integer.valueOf(12_345).equals(policy.get("maxTotalTokens"))

@@ -148,6 +148,7 @@ execution:
     max-high-complexity-retries: 2
     max-false-done-claims: 2
     max-repeated-failures: 3
+    max-edit-churn: 6
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
@@ -565,6 +566,14 @@ tool/command/validation failures to `WASTE_RISK / STOP_WASTE_GUARD`. `Sequential
 the count from repeated worker tool refusals/errors and from post-retry smoke validation failures,
 then publishes `repeatedFailureCount=current/max` in typed `GOAL_DECISION` data and durable task
 JSON.
+
+Thirtieth slice 2026-06-26: the waste guard now carries same-file edit-churn evidence without
+changing worker dispatch. `GoalEvidence` includes `editChurnCount` / `maxEditChurn`,
+`application.yml` exposes `execution.continuation.max-edit-churn` (default 6, disabled by `<=0`),
+and `SequentialExecutor` derives the count from path-bearing `writeFile` / `editFile` /
+`multiEdit` worker tool-log entries. When validation still fails and the same path reaches the
+configured threshold, `GoalDonenessEvaluator` maps it to `WASTE_RISK / STOP_WASTE_GUARD` and typed
+goal evidence publishes `editChurnCount=current/max`.
 
 ## Open Questions
 

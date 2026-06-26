@@ -146,6 +146,23 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void stopsWasteGuardAfterSameFileMutationChurnWithoutValidationImprovement() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .validationAttempted(true)
+                .validationPassed(false)
+                .meaningfulDiffCount(3)
+                .editChurnCount(4)
+                .maxEditChurn(4)
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.WASTE_RISK);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
+    assertThat(decision.reason()).contains("same file was repeatedly mutated");
+  }
+
+  @Test
   void stopsWasteGuardWhenBudgetCeilingIsReachedBeforeDone() {
     GoalDonenessDecision decision =
         evaluator.evaluate(

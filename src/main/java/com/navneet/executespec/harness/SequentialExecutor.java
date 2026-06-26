@@ -387,6 +387,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-repeated-failures:3}")
   private int maxGoalRepeatedFailures = 3;
 
+  @Value("${execution.continuation.max-edit-churn:6}")
+  private int maxGoalEditChurn = 6;
+
   @Value("${execution.continuation.max-parallel-tasks:3}")
   private int maxGoalParallelTasks = 3;
 
@@ -2109,6 +2112,7 @@ to boot — skip it for those.""";
     data.put("maxNoProgressIterations", maxNoProgressIterations());
     data.put("maxFalseDoneClaims", maxFalseDoneClaims());
     data.put("maxRepeatedFailures", maxRepeatedFailures());
+    data.put("maxEditChurn", maxEditChurn());
     data.put("maxParallelTasks", maxParallelTasks());
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
@@ -2192,6 +2196,10 @@ to boot — skip it for those.""";
 
   private int maxRepeatedFailures() {
     return maxGoalRepeatedFailures;
+  }
+
+  private int maxEditChurn() {
+    return maxGoalEditChurn;
   }
 
   private int maxParallelTasks() {
@@ -2293,6 +2301,7 @@ to boot — skip it for those.""";
     policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
     policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
     policyNode.put("maxRepeatedFailures", maxRepeatedFailures());
+    policyNode.put("maxEditChurn", maxEditChurn());
     policyNode.put("maxParallelTasks", maxParallelTasks());
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
@@ -2380,9 +2389,11 @@ to boot — skip it for those.""";
     int falseDoneClaims = completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0;
     int repeatedFailureCount =
         repeatedFailureCount(workerResult, validationAttempted, validationPassed, failureReason);
+    int editChurnCount = editChurnCount(workerResult);
     evidence.add("noProgressIterations=" + noProgressIterations + "/" + maxNoProgressIterations());
     evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
     evidence.add("repeatedFailureCount=" + repeatedFailureCount + "/" + maxRepeatedFailures());
+    evidence.add("editChurnCount=" + editChurnCount + "/" + maxEditChurn());
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
@@ -2398,6 +2409,8 @@ to boot — skip it for those.""";
         .maxFalseDoneClaims(maxFalseDoneClaims())
         .repeatedFailureCount(repeatedFailureCount)
         .maxRepeatedFailures(maxRepeatedFailures())
+        .editChurnCount(editChurnCount)
+        .maxEditChurn(maxEditChurn())
         .budgetCeilingReached(budgetCeilingReached)
         .budgetCeilingReason(budgetCeilingReason)
         .inputTokens(cost.inputTokens())
@@ -2455,6 +2468,67 @@ to boot — skip it for those.""";
             || lower.contains("critic")
             || lower.contains("verify-before-complete");
     return failure ? normalized : null;
+  }
+
+  private static int editChurnCount(WorkerResult workerResult) {
+    int max = 0;
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    if (workerResult == null || workerResult.toolCallLog() == null) {
+      return 0;
+    }
+    for (String entry : workerResult.toolCallLog()) {
+      String path = mutationPathSignature(entry);
+      if (path == null) {
+        continue;
+      }
+      int count = counts.getOrDefault(path, 0) + 1;
+      counts.put(path, count);
+      max = Math.max(max, count);
+    }
+    return max;
+  }
+
+  private static String mutationPathSignature(String entry) {
+    if (entry == null || entry.isBlank()) {
+      return null;
+    }
+    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
+    if (!(normalized.startsWith("writeFile")
+        || normalized.startsWith("write_file")
+        || normalized.startsWith("editFile")
+        || normalized.startsWith("edit_file")
+        || normalized.startsWith("multiEdit")
+        || normalized.startsWith("multi_edit"))) {
+      return null;
+    }
+    String path = quotedJsonPath(normalized);
+    if (path == null) {
+      path = keyValuePath(normalized);
+    }
+    return path == null || path.isBlank() ? null : path;
+  }
+
+  private static String quotedJsonPath(String text) {
+    int key = text.indexOf("\"path\"");
+    if (key < 0) {
+      return null;
+    }
+    int colon = text.indexOf(':', key);
+    int start = colon < 0 ? -1 : text.indexOf('"', colon + 1);
+    int end = start < 0 ? -1 : text.indexOf('"', start + 1);
+    return end > start ? text.substring(start + 1, end) : null;
+  }
+
+  private static String keyValuePath(String text) {
+    int key = text.indexOf("path=");
+    if (key < 0) {
+      return null;
+    }
+    int start = key + "path=".length();
+    int comma = text.indexOf(',', start);
+    int paren = text.indexOf(')', start);
+    int end = comma < 0 ? paren : paren < 0 ? comma : Math.min(comma, paren);
+    return end > start ? text.substring(start, end).trim() : text.substring(start).trim();
   }
 
   private static String goalSummary(PlannedTask task) {
