@@ -77,7 +77,7 @@ Current implemented ladder:
 
 | Tier | Price | Usage model |
 | --- | --- | --- |
-| Free | $0 | 15 runs/month, small specs, $3/run cap. |
+| Free | $0 | 5 runs/month, small specs, $3/run cap. |
 | Pro | $29/month or $289/year | 30 managed-key runs/month, $5/run cap, BYOK can lift cap. |
 | Team | $39/seat/month | 1-20 seats, BYOK, unlimited runs against customer provider quota, zero provider markup. |
 | Enterprise | Custom | Contract, DPA/SLA path, org model matrix, aggregator/provider lanes. |

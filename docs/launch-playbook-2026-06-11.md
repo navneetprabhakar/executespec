@@ -65,7 +65,7 @@ ExecuteSpec-bot (PRs use the caller's PAT), workspace/Explorer jargon in marketi
 
 | Tier | Price | What it really includes | Caps |
 | --- | --- | --- | --- |
-| **FREE** | $0 | 15 runs/mo · small (1-credit) specs · 1 project · 1 repo · managed keys | $3/run |
+| **FREE** | $0 | 5 runs/mo · small (1-credit) specs · 1 project · 1 repo · managed keys | $3/run |
 | **PRO** | **$29/mo** or **$289/yr** (−17%) · ₹2,499/mo | 30 runs/mo · managed keys (Anthropic/OpenAI/Gemini) · PR review + code review (4 scans/mo) · 2 projects × 2 repos | $5/run — BYOK lifts it |
 | **TEAM** | **$39/seat/mo** · ₹3,399 · from 1 seat · **monthly only** | BYOK (your keys, zero markup) · unlimited runs · 5 projects · cross-repo · sharing · unlimited code reviews · autofix | none (org spend caps + approval thresholds available) |
 | **ENTERPRISE** | custom | Team + custom MSA + signed DPA · model-matrix override + per-run pins · OpenRouter gateway · standards/contracts/ADRs · audit trail · repo allowlists | none |

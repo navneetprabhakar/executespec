@@ -8,7 +8,7 @@ ExecuteSpec uses tiered access plus run credits. Runs consume quota at the submi
 
 | Tier | Listed shape | Enforcement notes |
 | --- | --- | --- |
-| FREE | 15 runs/month, small specs, fixed model default, $3/run cap | V200 updates `tier_config`, `billing_plan`, and RUNS plan limit to 15. FREE has no model matrix. |
+| FREE | 5 runs/month, small specs, fixed model default, $3/run cap | V248 force-corrects `tier_config.monthly_run_limit` and `billing_plan.run_limit` to 5 so stale `-1` unlimited sentinels cannot leak through entitlements. FREE has no model matrix. |
 | PRO | $29/month or $289/year, 30 managed-key runs/month, $5/run cap | V176/V177/V185/V207 make PRO listed and remove stale $20 duplicates. BYOK lifts the cap. |
 | TEAM | $39/seat/month, from 1 seat, 1-20 self-serve seats, BYOK, unlimited runs against customer provider quota | V165 makes Team the canonical $39 seat plan; V206 aligns INR to ₹3,399; no platform per-run cap. |
 | ENTERPRISE | Custom contract, DPA/SLA path, org model controls, expanded admin/security review | Custom/commercial path; do not imply self-serve SOC 2, SAML enforcement, or dedicated region. |
