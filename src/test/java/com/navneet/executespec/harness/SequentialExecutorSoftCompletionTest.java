@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -20,6 +22,7 @@ import com.navneet.executespec.agent.PlannedTask.Complexity;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
@@ -192,6 +195,19 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  private static WorkerResult workerCompleted(int writes) {
+    java.util.List<String> log = new java.util.ArrayList<>();
+    for (int i = 0; i < writes; i++) log.add("writeFile(...)");
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.COMPLETED)
+        .iterations(12)
+        .toolCallsDispatched(15)
+        .completionSummary("done")
+        .toolCallLog(log)
+        .totalLatencyMs(20_000L)
+        .build();
+  }
+
   // 1: T2-class case — multi-task, intermediate, iter-limit + writes
 
   @Test
@@ -297,6 +313,32 @@ class SequentialExecutorSoftCompletionTest {
 
     boolean sawFailed = saveLog.stream().anyMatch(s -> "FAILED".equals(s.status()));
     assertTrue(sawFailed, "Expected DB row to persist as FAILED. Saw: " + saveLog);
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionLog(event)
+                        && event.payload().contains("WASTE_RISK -> STOP_WASTE_GUARD")));
+  }
+
+  @Test
+  void completed_worker_with_passing_smoke_emits_done_goal_decision() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    TaskOutcome t1 = result.perTask().get(0);
+    assertEquals(TaskOutcome.Status.SUCCESS, t1.status());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionLog(event) && event.payload().contains("DONE -> STOP_DONE")));
   }
 
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate
@@ -329,5 +371,12 @@ class SequentialExecutorSoftCompletionTest {
         t1.status(),
         "COMPLETED_BY_STAGNATION + writes must funnel through the soft-completion gate, not"
             + " FAILED.");
+  }
+
+  private static boolean isGoalDecisionLog(RunEvent event) {
+    return event != null
+        && "LOG".equals(event.type())
+        && event.payload() != null
+        && event.payload().startsWith("Goal decision:");
   }
 }

@@ -293,6 +293,13 @@ no-progress waste guard, repeated false completion, budget ceiling, and failed v
 useful progress. Runtime execution is still unchanged until `SequentialExecutor` starts producing
 `GoalEvidence` at the task boundary.
 
+Third slice 2026-06-26: `SequentialExecutor` now builds conservative `GoalEvidence` at terminal
+task branches and emits a `Goal decision: STATE -> DECISION (...)` `LOG` event. This gives the
+UI/CLI event stream visible doneness/exit-policy state without changing persisted task status,
+retry behavior, provider choice, or run termination. `SequentialExecutorSoftCompletionTest` pins
+both `DONE -> STOP_DONE` on completeTask+passing smoke and `WASTE_RISK -> STOP_WASTE_GUARD` on
+iteration-limit/no-write failure. Enforcement is still pending.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

@@ -10,6 +10,9 @@ import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
+import com.navneet.executespec.execution.model.GoalEvidence;
+import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
@@ -304,6 +307,8 @@ to boot — skip it for those.""";
   // RL-2026-05-041 (audit #2) — mid-run durability: GCS checkpoint at each task boundary.
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService
       gcsTaskCheckpointService;
+
+  private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
 
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
@@ -746,6 +751,7 @@ to boot — skip it for those.""";
             task.id(),
             primary.outcome(),
             primary.iterations());
+        String failureReason = describeWorkerFailure(primary);
         // v2.5.12 — populate a concrete failureReason for every terminal
         // worker outcome so RunMapper doesn't have to fall back to
         // "unknown — see worker logs". This closes Bug D from the eval.
@@ -756,9 +762,11 @@ to boot — skip it for those.""";
             runId,
             task.id(),
             "FAILED",
-            describeWorkerFailure(primary),
+            failureReason,
             buildFailureDiagnosticJson(primary, cfg.maxIter));
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
+        emitGoalDecision(
+            runId, task, primary, TaskOutcome.Status.WORKER_FAILED, null, failureReason);
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
@@ -791,6 +799,8 @@ to boot — skip it for those.""";
     }
 
     if (!req.enableSmokeTests()) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {}{}",
           task.id(),
@@ -798,13 +808,11 @@ to boot — skip it for those.""";
           " (smoke tests disabled)");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      emitGoalDecision(runId, task, primary, status, null, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
@@ -821,6 +829,8 @@ to boot — skip it for those.""";
     // statuses on tasks whose code is later wired up correctly.
     boolean multiTask = plan.tasks().size() > 1;
     if (multiTask && !isFinalTask) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {} (intermediate smoke skipped — multi-task plan, final task +"
               + " reviewer are authoritative)",
@@ -828,13 +838,11 @@ to boot — skip it for those.""";
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      emitGoalDecision(runId, task, primary, status, null, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
@@ -845,6 +853,8 @@ to boot — skip it for those.""";
 
     SmokeTestResult smoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (smoke.passed()) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
@@ -853,13 +863,11 @@ to boot — skip it for those.""";
           smoke.latencyMs());
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      emitGoalDecision(runId, task, primary, status, true, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .smokeTestPassed(true)
           .smokeTestExitCode(smoke.exitCode())
@@ -890,6 +898,8 @@ to boot — skip it for those.""";
       log.warn("Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+      emitGoalDecision(
+          runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1004,6 +1014,13 @@ to boot — skip it for those.""";
               crossProviderRetry.provider());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          emitGoalDecision(
+              runId,
+              task,
+              crossProviderRetry.result(),
+              TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+              true,
+              null);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1027,6 +1044,9 @@ to boot — skip it for those.""";
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
           retry.outcome());
+      String retryFailureReason = describeWorkerFailure(retry);
+      emitGoalDecision(
+          runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, retryFailureReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1050,6 +1070,7 @@ to boot — skip it for those.""";
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      emitGoalDecision(runId, task, retry, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1082,6 +1103,14 @@ to boot — skip it for those.""";
           task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      emitGoalDecision(
+          runId,
+          task,
+          retry,
+          TaskOutcome.Status.SUCCESS,
+          false,
+          "Smoke failed after retry but no files were written; treated as"
+              + " verify-only/environmental");
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1135,6 +1164,7 @@ to boot — skip it for those.""";
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          emitGoalDecision(runId, task, retry2, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1182,6 +1212,7 @@ to boot — skip it for those.""";
             + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
     persistTaskStatus(runId, task.id(), "PARTIAL", reason);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+    emitGoalDecision(runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
     return TaskOutcome.builder()
         .taskId(task.id())
         .taskTitle(task.title())
@@ -1197,6 +1228,145 @@ to boot — skip it for those.""";
         .dispatchedProvider(cfg.provider)
         .dispatchedModel(cfg.model)
         .build();
+  }
+
+  private void emitGoalDecision(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason) {
+    GoalDonenessDecision decision =
+        goalDonenessEvaluator.evaluate(
+            buildGoalEvidence(task, workerResult, finalStatus, smokePassed, failureReason));
+    log.info(
+        "Executor task={} goalDecision state={} decision={} reason={}",
+        task.id(),
+        decision.state(),
+        decision.recommendedDecision(),
+        decision.reason());
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            task.id(),
+            "Goal decision: "
+                + decision.state()
+                + " -> "
+                + decision.recommendedDecision()
+                + " ("
+                + decision.reason()
+                + ")"));
+  }
+
+  private GoalEvidence buildGoalEvidence(
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason) {
+    int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    boolean completeTaskClaimed =
+        workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
+    boolean validationAttempted = smokePassed != null;
+    boolean validationPassed = Boolean.TRUE.equals(smokePassed);
+    boolean statusClean =
+        finalStatus == TaskOutcome.Status.SUCCESS
+            || finalStatus == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
+    List<String> completed = new ArrayList<>();
+    if (completeTaskClaimed) {
+      completed.add("worker called completeTask");
+    }
+    if (fileWrites > 0) {
+      completed.add(fileWrites + " file write" + (fileWrites == 1 ? "" : "s"));
+    }
+    if (validationPassed) {
+      completed.add("smoke validation passed");
+    }
+
+    List<String> incomplete = new ArrayList<>();
+    if (!statusClean) {
+      incomplete.add("task status is " + finalStatus);
+    }
+    if (validationAttempted && !validationPassed) {
+      incomplete.add("smoke validation failed");
+    }
+    if (failureReason != null && !failureReason.isBlank()) {
+      incomplete.add(failureReason);
+    }
+
+    List<String> evidence = new ArrayList<>();
+    evidence.add("taskStatus=" + finalStatus);
+    if (workerResult != null) {
+      evidence.add("workerOutcome=" + workerResult.outcome());
+      evidence.add("iterations=" + workerResult.iterations());
+      evidence.add("toolCalls=" + workerResult.toolCallsDispatched());
+      evidence.add("fileWrites=" + fileWrites);
+    }
+    if (smokePassed != null) {
+      evidence.add("smokePassed=" + smokePassed);
+    }
+
+    boolean budgetCeilingReached = workerStoppedOnCeiling(workerResult) && !validationPassed;
+    int noProgressIterations =
+        fileWrites == 0 && !completeTaskClaimed && workerResult != null
+            ? Math.max(0, workerResult.iterations())
+            : 0;
+
+    return GoalEvidence.builder()
+        .goalSummary(goalSummary(task))
+        .goalCriteriaSatisfied(completeTaskClaimed && validationPassed && statusClean)
+        .validationAttempted(validationAttempted)
+        .validationPassed(smokePassed)
+        .requiredOutputsPresent(validationPassed && statusClean)
+        .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
+        .meaningfulDiffCount(fileWrites)
+        .noProgressIterations(noProgressIterations)
+        .maxNoProgressIterations(Math.max(1, noProgressIterations))
+        .falseDoneClaims(completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0)
+        .maxFalseDoneClaims(2)
+        .budgetCeilingReached(budgetCeilingReached)
+        .completeTaskClaimed(completeTaskClaimed)
+        .completedItems(completed)
+        .incompleteItems(incomplete)
+        .evidence(evidence)
+        .risks(risksFor(workerResult, failureReason, budgetCeilingReached))
+        .build();
+  }
+
+  private static String goalSummary(PlannedTask task) {
+    if (task == null) {
+      return "unspecified task goal";
+    }
+    if (task.description() == null || task.description().isBlank()) {
+      return task.title();
+    }
+    return task.title() + " — " + task.description();
+  }
+
+  private static boolean workerStoppedOnCeiling(WorkerResult workerResult) {
+    if (workerResult == null) {
+      return false;
+    }
+    return workerResult.outcome() == WorkerResult.Outcome.BUDGET_EXCEEDED
+        || workerResult.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
+        || workerResult.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+  }
+
+  private static List<String> risksFor(
+      WorkerResult workerResult, String failureReason, boolean budgetCeilingReached) {
+    List<String> risks = new ArrayList<>();
+    if (workerResult != null && workerResult.outcome() != WorkerResult.Outcome.COMPLETED) {
+      risks.add("workerOutcome=" + workerResult.outcome());
+    }
+    if (budgetCeilingReached) {
+      risks.add("budget or execution ceiling reached before proof of completion");
+    }
+    if (failureReason != null && !failureReason.isBlank()) {
+      risks.add(failureReason);
+    }
+    return List.copyOf(risks);
   }
 
   /**
