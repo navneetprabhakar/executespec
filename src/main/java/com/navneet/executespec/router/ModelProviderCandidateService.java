@@ -46,6 +46,9 @@ public class ModelProviderCandidateService {
   @Value("${execution.continuation.max-parallel-tasks:3}")
   private int maxParallelTasks = 3;
 
+  @Value("${execution.continuation.benchmark-min-sample-tasks:20}")
+  private int benchmarkMinSampleTasks = 20;
+
   public List<ModelProviderScore> buildCandidates(ModelProviderCandidateRequest request) {
     return capabilityRegistry.scoreAll(buildSignals(request));
   }
@@ -229,11 +232,16 @@ public class ModelProviderCandidateService {
   private List<ModelProviderCapabilitySignal> externalSignals(
       ModelProviderCandidateRequest request) {
     List<ModelProviderCapabilitySignal> signals = new ArrayList<>(request.externalSignals());
-    signals.addAll(benchmarkSignals(request.taskCategory()));
+    signals.addAll(benchmarkSignals(request.taskCategory(), benchmarkMinSampleTasks()));
     return List.copyOf(signals);
   }
 
-  private List<ModelProviderCapabilitySignal> benchmarkSignals(String taskCategory) {
+  private int benchmarkMinSampleTasks() {
+    return Math.max(1, benchmarkMinSampleTasks);
+  }
+
+  private List<ModelProviderCapabilitySignal> benchmarkSignals(
+      String taskCategory, int minSampleTasks) {
     if (benchmarkRunRepository == null) {
       return List.of();
     }
@@ -244,7 +252,7 @@ public class ModelProviderCandidateService {
       }
       return runs.stream()
           .filter(run -> run != null && run.getTotalTasks() > 0)
-          .map(run -> benchmarkSignal(run, taskCategory))
+          .map(run -> benchmarkSignal(run, taskCategory, minSampleTasks))
           .toList();
     } catch (RuntimeException ex) {
       log.warn("ModelProviderCandidateService benchmark signal read failed: {}", ex.getMessage());
@@ -253,22 +261,28 @@ public class ModelProviderCandidateService {
   }
 
   private static ModelProviderCapabilitySignal benchmarkSignal(
-      BenchmarkRun run, String taskCategory) {
+      BenchmarkRun run, String taskCategory, int minSampleTasks) {
     double resolvedRate = (run.getResolvedTasks() * 100.0) / run.getTotalTasks();
+    boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
     return ModelProviderCapabilitySignal.builder()
         .provider(run.getProvider())
         .model(run.getModel())
         .taskCategory(taskCategory)
-        .benchmarkQualityScore(resolvedRate)
+        .benchmarkQualityScore(enoughSample ? resolvedRate : null)
         .reasons(
             List.of(
                 String.format(
                     Locale.ROOT,
-                    "benchmark %s/%s resolved %d/%d tasks",
+                    "benchmark %s/%s resolved %d/%d tasks%s",
                     run.getSuite(),
                     run.getDataset(),
                     run.getResolvedTasks(),
-                    run.getTotalTasks())))
+                    run.getTotalTasks(),
+                    enoughSample
+                        ? " (used as quality prior)"
+                        : " (below "
+                            + minSampleTasks
+                            + "-task minimum; not used as quality prior)")))
         .build();
   }
 

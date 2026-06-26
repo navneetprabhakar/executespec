@@ -170,9 +170,42 @@ class ModelProviderCandidateServiceTest {
     ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
     assertThat(sonnet.qualityScore()).isEqualTo(90.0);
     assertThat(sonnet.reasons())
-        .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks");
+        .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks (used as quality prior)");
     assertThat(sonnet.reasons())
         .doesNotContain(
+            "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
+                + " fallback/local/validation signals only");
+  }
+
+  @Test
+  void ignoresPersistedBenchmarkRunsBelowSampleThresholdAsQualityPriors() {
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-tiny")
+                    .suite("TERMINAL_BENCH")
+                    .dataset("tiny-5")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(5)
+                    .resolvedTasks(5)
+                    .status("DONE")
+                    .build()));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(70.0)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnet.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnet.reasons())
+        .contains(
+            "benchmark TERMINAL_BENCH/tiny-5 resolved 5/5 tasks (below 20-task minimum; not used"
+                + " as quality prior)",
             "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
                 + " fallback/local/validation signals only");
   }
