@@ -292,7 +292,7 @@ Then use `ModelProviderRankingPolicy` only at controlled decision points: initia
 
 ### Phase 5 - Dependency-safe parallelism
 
-Use the existing latency plan's `TaskWaveScheduler` idea. Parallelize only when the plan can prove independent tasks and enforce a low global concurrency cap. Keep worker mutation within one task serial. Keep `WorkerAgent` read-only batch parallelism as-is.
+Use the existing latency plan's `TaskWaveScheduler` idea. Parallelize only when the plan can prove independent tasks and enforce a low global concurrency cap. Keep worker mutation within one task serial. Keep `WorkerAgent` read-only batch parallelism gated by `execution.continuation.parallel-read-tools-enabled`, with server/SSE logs carrying call labels and per-call results.
 
 ## Minimal First Code Slice
 
@@ -602,6 +602,12 @@ now make low-confidence-of-improvement explicit. If the goal decision says anoth
 might help but `GoalContinuationPolicy` cannot select a stronger/switch candidate within the
 configured step-up/provider-switch limits, the stop reason appends that no useful model/provider
 escalation remains within configured limits.
+
+Thirty-fifth slice 2026-06-27: the worker read-only tool batch path is now explicitly configurable
+through `execution.continuation.parallel-read-tools-enabled` (default true). When enabled, same-turn
+pure read batches emit start/done server logs plus legacy `LOG` SSE lines with labels and `ok`/`err`
+results; batches that include mutation, remote dispatch, timeout, or partial completion still run
+through the sequential path.
 
 ## Open Questions
 

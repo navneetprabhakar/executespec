@@ -30,6 +30,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -137,6 +138,9 @@ public class WorkerAgent {
    * order so those call sites only append one trailing arg.
    */
   private final WorkspaceTestRunner workspaceTestRunner;
+
+  @Value("${execution.continuation.parallel-read-tools-enabled:true}")
+  private boolean parallelReadToolsEnabled = true;
 
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
@@ -1674,7 +1678,7 @@ public class WorkerAgent {
    */
   private java.util.Map<String, String> maybeParallelReadDispatch(
       java.util.List<AssistantMessage.ToolCall> calls, WorkerTaskRequest req) {
-    if (calls.size() < 2 || toolRegistry.isRemoteRun(req.context())) {
+    if (!parallelReadToolsEnabled || calls.size() < 2 || toolRegistry.isRemoteRun(req.context())) {
       return java.util.Map.of();
     }
     for (AssistantMessage.ToolCall c : calls) {
@@ -1682,6 +1686,15 @@ public class WorkerAgent {
         return java.util.Map.of();
       }
     }
+    List<String> labels = calls.stream().map(c -> safeId(c.id()) + ":" + c.name()).toList();
+    log.info(
+        "WorkerAgent parallelReadDispatch START run={} task={} calls={} labels={}",
+        req.context().runId(),
+        req.context().taskId(),
+        calls.size(),
+        labels);
+    emitWorkerLog(
+        req, "Parallel read batch start · " + calls.size() + " read-only tools · " + labels);
     final int last = calls.size() - 1;
     java.util.Map<String, String> out = new java.util.concurrent.ConcurrentHashMap<>();
     var exec = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
@@ -1709,7 +1722,27 @@ public class WorkerAgent {
       return java.util.Map.of();
     }
     // Belt-and-suspenders: any missing entry (a task that didn't complete) → sequential.
-    return out.size() == calls.size() ? out : java.util.Map.of();
+    if (out.size() != calls.size()) {
+      return java.util.Map.of();
+    }
+    List<String> results =
+        calls.stream()
+            .map(c -> safeId(c.id()) + ":" + c.name() + "=" + envelopeStatus(out.get(safeId(c.id()))))
+            .toList();
+    log.info(
+        "WorkerAgent parallelReadDispatch DONE run={} task={} results={}",
+        req.context().runId(),
+        req.context().taskId(),
+        results);
+    emitWorkerLog(req, "Parallel read batch done · " + results);
+    return out;
+  }
+
+  private static String envelopeStatus(String envelope) {
+    if (envelope == null || envelope.isBlank()) {
+      return "missing";
+    }
+    return envelope.contains("\"ok\":true") ? "ok" : "err";
   }
 
   private String dispatchOne(
