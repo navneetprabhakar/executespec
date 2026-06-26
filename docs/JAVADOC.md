@@ -18,7 +18,7 @@ For exhaustive class discovery use:
 | `harness` | Sequential task executor and task-tier routing. |
 | `agent` | Planner/classifier/router/client support and legacy non-tool LLM paths. |
 | `agentsession` | Durable CLI/VS Code agent-session protocol: sessions, turns, intent/action catalog, gate cards. |
-| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers. |
+| `router` | Model registry, resolver, provider enum, model override services, aggregator mappers, and the inert quality-first model/provider ranking policy. |
 | `tool` | Worker tools, sandbox policy, file tools, build/test tools, background jobs. |
 | `reviewer` | Reviewer agent and accuracy assessment helpers. |
 | `report` | Validation report and verified-score computation. |

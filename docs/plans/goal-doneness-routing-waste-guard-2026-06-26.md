@@ -280,6 +280,12 @@ The safest first code slice after review:
 
 That gives the repository a pinned, reviewable policy before touching `WorkerAgent` or `SequentialExecutor`.
 
+Status 2026-06-26: this first slice has landed. `GoalDonenessState` and
+`RunContinuationDecision` live under `execution/model/`; `ModelProviderScore`,
+`ModelProviderRankingDecision`, and `ModelProviderRankingPolicy` live under `router/`.
+`ModelProviderRankingPolicyTest` pins the quality-threshold and quality/cost/latency ordering.
+No runtime routing, worker, or executor behavior calls the policy yet.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
