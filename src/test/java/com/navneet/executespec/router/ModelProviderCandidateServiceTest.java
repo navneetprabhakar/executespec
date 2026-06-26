@@ -9,6 +9,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.benchmark.BenchmarkRun;
+import com.navneet.executespec.benchmark.BenchmarkRunRepository;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -17,11 +20,15 @@ class ModelProviderCandidateServiceTest {
 
   private final ModelRegistry modelRegistry = mock(ModelRegistry.class);
   private final ModelPerformanceTracker performanceTracker = mock(ModelPerformanceTracker.class);
+  private final BenchmarkRunRepository benchmarkRunRepository = mock(BenchmarkRunRepository.class);
   private ModelProviderCandidateService service;
 
   @BeforeEach
   void setUp() {
-    service = new ModelProviderCandidateService(modelRegistry, performanceTracker);
+    service =
+        new ModelProviderCandidateService(
+            modelRegistry, performanceTracker, benchmarkRunRepository);
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE")).thenReturn(List.of());
     Map<String, ModelMatrixProperties.ModelConfig> models = new LinkedHashMap<>();
     models.put("claude-sonnet-4-6", model("anthropic", "HIGH", "CAPABLE", 3.0, 15.0, 200_000));
     models.put("gpt-5.4-mini", model("openai", "STANDARD", "UTILITY", 0.2, 0.6, 256_000));
@@ -131,6 +138,35 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.reasons())
         .anySatisfy(reason -> assertThat(reason).contains("local 24h success score 80.00%"));
     assertThat(sonnet.reasons()).contains("terminal-bench first-20");
+  }
+
+  @Test
+  void mergesPersistedBenchmarkRunsAsBenchmarkQualitySignals() {
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-1")
+                    .suite("TERMINAL_BENCH")
+                    .dataset("first-20")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(18)
+                    .status("DONE")
+                    .build()));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(70.0)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnet.qualityScore()).isEqualTo(90.0);
+    assertThat(sonnet.reasons())
+        .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks");
   }
 
   @Test

@@ -12,6 +12,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
+import com.navneet.executespec.benchmark.BenchmarkRun;
+import com.navneet.executespec.benchmark.BenchmarkRunRepository;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +36,7 @@ public class ModelProviderCandidateService {
 
   private final ModelRegistry modelRegistry;
   private final ModelPerformanceTracker performanceTracker;
+  private final BenchmarkRunRepository benchmarkRunRepository;
   private final ModelProviderCapabilityRegistry capabilityRegistry =
       new ModelProviderCapabilityRegistry();
 
@@ -149,7 +153,7 @@ public class ModelProviderCandidateService {
     String canonicalModel = modelRegistry.canonicalize(model);
     String provider = providerFor(canonicalModel, config);
     List<ModelProviderCapabilitySignal> external =
-        request.externalSignals().stream()
+        externalSignals(request).stream()
             .filter(signal -> matches(signal, provider, canonicalModel, request.taskCategory()))
             .toList();
 
@@ -211,6 +215,52 @@ public class ModelProviderCandidateService {
         .requiredQualityThreshold(request.requiredQualityThreshold())
         .fallbackQualityScore(fallbackQualityScore(config))
         .reasons(reasons)
+        .build();
+  }
+
+  private List<ModelProviderCapabilitySignal> externalSignals(
+      ModelProviderCandidateRequest request) {
+    List<ModelProviderCapabilitySignal> signals = new ArrayList<>(request.externalSignals());
+    signals.addAll(benchmarkSignals(request.taskCategory()));
+    return List.copyOf(signals);
+  }
+
+  private List<ModelProviderCapabilitySignal> benchmarkSignals(String taskCategory) {
+    if (benchmarkRunRepository == null) {
+      return List.of();
+    }
+    try {
+      List<BenchmarkRun> runs = benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE");
+      if (runs == null || runs.isEmpty()) {
+        return List.of();
+      }
+      return runs.stream()
+          .filter(run -> run != null && run.getTotalTasks() > 0)
+          .map(run -> benchmarkSignal(run, taskCategory))
+          .toList();
+    } catch (RuntimeException ex) {
+      log.warn("ModelProviderCandidateService benchmark signal read failed: {}", ex.getMessage());
+      return List.of();
+    }
+  }
+
+  private static ModelProviderCapabilitySignal benchmarkSignal(
+      BenchmarkRun run, String taskCategory) {
+    double resolvedRate = (run.getResolvedTasks() * 100.0) / run.getTotalTasks();
+    return ModelProviderCapabilitySignal.builder()
+        .provider(run.getProvider())
+        .model(run.getModel())
+        .taskCategory(taskCategory)
+        .benchmarkQualityScore(resolvedRate)
+        .reasons(
+            List.of(
+                String.format(
+                    Locale.ROOT,
+                    "benchmark %s/%s resolved %d/%d tasks",
+                    run.getSuite(),
+                    run.getDataset(),
+                    run.getResolvedTasks(),
+                    run.getTotalTasks())))
         .build();
   }
 
