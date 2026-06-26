@@ -158,6 +158,9 @@ class WorkerAgentToolDispatchTest {
         result.outcome(),
         "Un-parseable tool args must yield an INVALID_ARGS envelope the model recovers from, not a"
             + " crash.");
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("readFile") && s.contains("-> ERR")),
+        "Malformed tool args must be recorded as an ERR tool-call log entry for waste guards.");
   }
 
   @Test
@@ -177,6 +180,10 @@ class WorkerAgentToolDispatchTest {
         WorkerResult.Outcome.COMPLETED,
         result.outcome(),
         "An unknown-tool call must yield an error envelope the model recovers from, not a crash.");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("bogusTool") && s.contains("-> ERR")),
+        "Unknown tool calls must be recorded as ERR tool-call log entries for waste guards.");
   }
 
   @Test
@@ -229,6 +236,14 @@ class WorkerAgentToolDispatchTest {
     assertTrue(
         result.toolCallLog().stream().anyMatch(s -> s.contains("searchFiles")),
         "the parallel-dispatched searchFiles must still be recorded in the tool log in order");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("readFile") && s.contains("-> OK")),
+        "the parallel-dispatched readFile must be recorded as an OK tool-call log entry");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("searchFiles") && s.contains("-> OK")),
+        "the parallel-dispatched searchFiles must be recorded as an OK tool-call log entry");
     verify(broadcaster)
         .emit(
             anyString(),
