@@ -582,6 +582,14 @@ credentials/API keys, auth/permission denial, DNS/network timeouts, or explicitl
 files, publishes `blockedByEnvironment=true` in typed `GOAL_DECISION` evidence, and lets
 `GoalDonenessEvaluator` map those cases to `BLOCKED / STOP_BLOCKED` with `userInputRequired=true`.
 
+Thirty-second slice 2026-06-26: executor-built goal evidence now also populates the existing
+`unsafeContinuation` field for clear sandbox/path/destructive-action blockers. `SequentialExecutor`
+marks unsafe continuation from conservative failure signatures such as path traversal, outside
+workspace writes, sandbox-blocked commands, destructive commands, refused overwrites, code-abuse,
+exfiltration, and cloud-metadata access, publishes `unsafeContinuation=true` in typed
+`GOAL_DECISION` evidence, and lets `GoalDonenessEvaluator` map those cases to
+`BLOCKED / STOP_BLOCKED` with `userInputRequired=true`.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

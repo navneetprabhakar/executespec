@@ -2383,6 +2383,7 @@ to boot — skip it for those.""";
     String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
+    boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
     int noProgressIterations =
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
@@ -2397,6 +2398,9 @@ to boot — skip it for those.""";
     evidence.add("editChurnCount=" + editChurnCount + "/" + maxEditChurn());
     if (blockedByEnvironment) {
       evidence.add("blockedByEnvironment=true");
+    }
+    if (unsafeContinuation) {
+      evidence.add("unsafeContinuation=true");
     }
 
     return GoalEvidence.builder()
@@ -2426,6 +2430,7 @@ to boot — skip it for those.""";
         .costUsd(cost.costUsd())
         .wallClockMs(wallClockMs)
         .blockedByEnvironment(blockedByEnvironment)
+        .unsafeContinuation(unsafeContinuation)
         .completeTaskClaimed(completeTaskClaimed)
         .completedItems(completed)
         .incompleteItems(incomplete)
@@ -2563,6 +2568,31 @@ to boot — skip it for those.""";
         || lower.contains("temporary failure in name resolution")
         || lower.contains("connection timed out")
         || lower.contains("missing required file");
+  }
+
+  private static boolean unsafeContinuation(WorkerResult workerResult, String failureReason) {
+    StringBuilder combined = new StringBuilder();
+    if (failureReason != null) {
+      combined.append(failureReason).append('\n');
+    }
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        if (entry != null) {
+          combined.append(entry).append('\n');
+        }
+      }
+    }
+    String lower = combined.toString().toLowerCase(Locale.ROOT);
+    return lower.contains("path traversal not allowed")
+        || lower.contains("outside workspace")
+        || lower.contains("blocked by sandbox")
+        || lower.contains("command not allowed")
+        || lower.contains("destructive command")
+        || lower.contains("refused to overwrite")
+        || lower.contains("code abuse")
+        || lower.contains("exfiltration")
+        || lower.contains("cloud metadata")
+        || lower.contains("sandbox policy");
   }
 
   private static String goalSummary(PlannedTask task) {

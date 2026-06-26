@@ -880,9 +880,9 @@ Continuation decision data also carries the applied `execution.continuation.*` a
 live clients can explain which thresholds and ceilings shaped the recommendation. Goal decision
 evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, configured
 no-progress/false-done/repeated-failure/edit-churn thresholds, conservative environment-block
-signatures, and concrete budget-ceiling reasons when configured cost/token/time ceilings are
-crossed before proof of completion; those fields are structured in SSE data, durable task JSON, the
-run-detail API, and the IDE Steps tab.
+and unsafe-continuation signatures, and concrete budget-ceiling reasons when configured
+cost/token/time ceilings are crossed before proof of completion; those fields are structured in SSE
+data, durable task JSON, the run-detail API, and the IDE Steps tab.
 For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed task-wave and
 goal/continuation run events into `agent_action_event` rows (`RUN_TASK_WAVE_PLAN`,
 `RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`, `RUN_CONTINUATION_ACTION`,
