@@ -345,6 +345,30 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.required-quality-thresholds.task-high:-1}")
   private double goalRequiredQualityThresholdTaskHigh = -1.0;
 
+  @Value("${execution.continuation.required-quality-thresholds.greenfield-build:-1}")
+  private double goalRequiredQualityThresholdGreenfieldBuild = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.project-patch:-1}")
+  private double goalRequiredQualityThresholdProjectPatch = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.bug-fix:-1}")
+  private double goalRequiredQualityThresholdBugFix = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.test-fix:-1}")
+  private double goalRequiredQualityThresholdTestFix = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.refactor:-1}")
+  private double goalRequiredQualityThresholdRefactor = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.benchmark-patch:-1}")
+  private double goalRequiredQualityThresholdBenchmarkPatch = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.terminal-task:-1}")
+  private double goalRequiredQualityThresholdTerminalTask = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.read-only-help:-1}")
+  private double goalRequiredQualityThresholdReadOnlyHelp = -1.0;
+
   @Value("${execution.continuation.max-provider-switches-per-run:1}")
   private int advisoryProviderSwitchLimit = 1;
 
@@ -1906,7 +1930,104 @@ to boot — skip it for those.""";
     if (task == null || task.complexity() == null) {
       return "TASK_MEDIUM";
     }
+    String text = normalizedTaskText(task);
+    if (containsAny(text, "swe-bench", "terminal-bench", "programbench", "benchmark")) {
+      return "BENCHMARK_PATCH";
+    }
+    if (touchesTestFiles(task)
+        || containsAny(
+            text,
+            "failing test",
+            "test failure",
+            "fix test",
+            "unit test",
+            "integration test",
+            "pytest",
+            "junit",
+            "jest")) {
+      return "TEST_FIX";
+    }
+    if (containsAny(
+        text,
+        "bug",
+        "fix",
+        "error",
+        "exception",
+        "failure",
+        "regression",
+        "broken",
+        "failing",
+        "crash")) {
+      return "BUG_FIX";
+    }
+    if (containsAny(
+        text, "refactor", "cleanup", "clean up", "rename", "extract", "restructure", "decompose")) {
+      return "REFACTOR";
+    }
+    if (containsAny(text, "terminal", "cli", "command-line", "command line", "shell", "script")) {
+      return "TERMINAL_TASK";
+    }
+    if (containsAny(
+        text, "read-only", "read only", "investigate", "analyze", "analyse", "explain")) {
+      return "READ_ONLY_HELP";
+    }
+    if (containsAny(text, "create", "implement", "build", "add", "new", "scaffold", "generate")) {
+      return "GREENFIELD_BUILD";
+    }
+    if (!taskValues(task.touchesFiles()).isEmpty()) {
+      return "PROJECT_PATCH";
+    }
     return "TASK_" + task.complexity().name();
+  }
+
+  private static String normalizedTaskText(PlannedTask task) {
+    StringBuilder text = new StringBuilder();
+    appendTaskText(text, task.title());
+    appendTaskText(text, task.description());
+    taskValues(task.hardConstraints()).forEach(value -> appendTaskText(text, value));
+    taskValues(task.touchesFiles()).forEach(value -> appendTaskText(text, value));
+    return text.toString().toLowerCase(Locale.ROOT);
+  }
+
+  private static List<String> taskValues(List<String> values) {
+    return values == null ? List.of() : values;
+  }
+
+  private static void appendTaskText(StringBuilder text, String value) {
+    if (value != null && !value.isBlank()) {
+      text.append(' ').append(value);
+    }
+  }
+
+  private static boolean containsAny(String text, String... needles) {
+    if (text == null || text.isBlank()) {
+      return false;
+    }
+    for (String needle : needles) {
+      if (needle != null && !needle.isBlank() && text.contains(needle)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean touchesTestFiles(PlannedTask task) {
+    return taskValues(task.touchesFiles()).stream()
+        .map(value -> value == null ? "" : value.toLowerCase(Locale.ROOT))
+        .anyMatch(
+            path ->
+                path.contains("/test/")
+                    || path.contains("/tests/")
+                    || path.contains("__tests__")
+                    || path.endsWith("test.java")
+                    || path.endsWith("tests.java")
+                    || path.endsWith(".test.ts")
+                    || path.endsWith(".test.tsx")
+                    || path.endsWith(".spec.ts")
+                    || path.endsWith(".spec.tsx")
+                    || path.endsWith("_test.go")
+                    || path.startsWith("test_")
+                    || path.endsWith("_test.py"));
   }
 
   private static Map<String, Object> goalDecisionData(GoalDonenessDecision decision) {
@@ -2005,6 +2126,14 @@ to boot — skip it for those.""";
           case "TASK_LOW" -> goalRequiredQualityThresholdTaskLow;
           case "TASK_MEDIUM" -> goalRequiredQualityThresholdTaskMedium;
           case "TASK_HIGH" -> goalRequiredQualityThresholdTaskHigh;
+          case "GREENFIELD_BUILD" -> goalRequiredQualityThresholdGreenfieldBuild;
+          case "PROJECT_PATCH" -> goalRequiredQualityThresholdProjectPatch;
+          case "BUG_FIX" -> goalRequiredQualityThresholdBugFix;
+          case "TEST_FIX" -> goalRequiredQualityThresholdTestFix;
+          case "REFACTOR" -> goalRequiredQualityThresholdRefactor;
+          case "BENCHMARK_PATCH" -> goalRequiredQualityThresholdBenchmarkPatch;
+          case "TERMINAL_TASK" -> goalRequiredQualityThresholdTerminalTask;
+          case "READ_ONLY_HELP" -> goalRequiredQualityThresholdReadOnlyHelp;
           default -> -1.0;
         };
     if (Double.isFinite(override) && override > 0.0) {
@@ -2018,6 +2147,14 @@ to boot — skip it for those.""";
     thresholds.put("TASK_LOW", requiredGoalQualityThreshold("TASK_LOW"));
     thresholds.put("TASK_MEDIUM", requiredGoalQualityThreshold("TASK_MEDIUM"));
     thresholds.put("TASK_HIGH", requiredGoalQualityThreshold("TASK_HIGH"));
+    thresholds.put("GREENFIELD_BUILD", requiredGoalQualityThreshold("GREENFIELD_BUILD"));
+    thresholds.put("PROJECT_PATCH", requiredGoalQualityThreshold("PROJECT_PATCH"));
+    thresholds.put("BUG_FIX", requiredGoalQualityThreshold("BUG_FIX"));
+    thresholds.put("TEST_FIX", requiredGoalQualityThreshold("TEST_FIX"));
+    thresholds.put("REFACTOR", requiredGoalQualityThreshold("REFACTOR"));
+    thresholds.put("BENCHMARK_PATCH", requiredGoalQualityThreshold("BENCHMARK_PATCH"));
+    thresholds.put("TERMINAL_TASK", requiredGoalQualityThreshold("TERMINAL_TASK"));
+    thresholds.put("READ_ONLY_HELP", requiredGoalQualityThreshold("READ_ONLY_HELP"));
     return thresholds;
   }
 

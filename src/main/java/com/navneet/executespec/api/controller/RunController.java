@@ -600,6 +600,10 @@ public class RunController {
     managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(forkerId));
     tierEnforcementService.incrementRunCountForAnalytics(forkerId);
     apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
+    modelAccessService.assertModelAllowed(forkerId, source.getPlannerModel());
+    if (source.getAiProvider() != null && !source.getAiProvider().isBlank()) {
+      aiProviderPreferenceService.normalizeProvider(source.getAiProvider());
+    }
 
     String userRequest =
         overrides != null && overrides.userRequest() != null && !overrides.userRequest().isBlank()

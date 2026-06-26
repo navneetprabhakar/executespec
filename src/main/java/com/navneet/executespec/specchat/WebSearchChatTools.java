@@ -3,6 +3,7 @@ package com.navneet.executespec.specchat;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
@@ -12,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -64,6 +66,29 @@ public class WebSearchChatTools {
               + "\\s*[=:])");
   private static final Pattern HIGH_ENTROPY_TOKEN_PATTERN =
       Pattern.compile("(?i)[a-z0-9_./+=-]{80,}");
+  private static final Set<String> SUSPICIOUS_EGRESS_QUERY_KEYS =
+      Set.of(
+          "access_token",
+          "api_key",
+          "apikey",
+          "authorization",
+          "body",
+          "clipboard",
+          "content",
+          "context",
+          "data",
+          "file",
+          "files",
+          "key",
+          "local_context",
+          "localcontext",
+          "password",
+          "pat",
+          "payload",
+          "refresh_token",
+          "secret",
+          "snapshot",
+          "token");
 
   private final ObjectMapper json;
   private final ContextSanitizer contextSanitizer;
@@ -174,6 +199,9 @@ public class WebSearchChatTools {
     if (looksUnsafeForEgress(rawUrl)) {
       return FetchOutcome.err("URL looks like it may contain credentials or copied secrets");
     }
+    if (hasSuspiciousQueryParam(uri)) {
+      return FetchOutcome.err("URL query parameter may exfiltrate local or credential data");
+    }
     String host = uri.getHost();
     if (host == null || host.isBlank()) return FetchOutcome.err("URL has no host");
     if (isBlockedHost(host)) return FetchOutcome.err("host is not allowed");
@@ -222,6 +250,33 @@ public class WebSearchChatTools {
   private static boolean looksUnsafeForEgress(String value) {
     String v = value == null ? "" : value;
     return SECRET_EGRESS_PATTERN.matcher(v).find() || HIGH_ENTROPY_TOKEN_PATTERN.matcher(v).find();
+  }
+
+  private static boolean hasSuspiciousQueryParam(URI uri) {
+    String query = uri.getRawQuery();
+    if (query == null || query.isBlank()) {
+      return false;
+    }
+    for (String part : query.split("[&;]")) {
+      int equals = part.indexOf('=');
+      String rawKey = equals >= 0 ? part.substring(0, equals) : part;
+      String key = decodeQueryKey(rawKey);
+      if (SUSPICIOUS_EGRESS_QUERY_KEYS.contains(key)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static String decodeQueryKey(String rawKey) {
+    try {
+      return URLDecoder.decode(rawKey, StandardCharsets.UTF_8)
+          .trim()
+          .toLowerCase(Locale.ROOT)
+          .replace('-', '_');
+    } catch (IllegalArgumentException e) {
+      return rawKey == null ? "" : rawKey.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+    }
   }
 
   private static boolean isBlockedAddress(InetAddress addr) {

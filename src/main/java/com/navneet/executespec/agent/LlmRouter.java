@@ -158,11 +158,8 @@ public class LlmRouter {
   @Value("${spring.ai.fireworks.base-url:https://api.fireworks.ai/inference/v1}")
   private String fireworksBaseUrl;
 
-  // 2026-06-21 — Sarvam AI: OpenAI-wire-compatible Indian-language provider (api.sarvam.ai). Same
-  // per-call base-URL plumbing as DeepSeek/Fireworks. Sarvam accepts `Authorization: Bearer` (its
-  // docs note this is for OpenAI-compatible tooling; verified live 2026-06-21), so
-  // OpenAiNativeToolClient works unchanged. System fallback key; org BYOK deferred (eval/benchmark
-  // provider for now). NOT in the failover chain (deliberate operator/BYOK route).
+  // 2026-06-26 — Sarvam is disabled/dark only. Keep config bindings for stale-env compatibility;
+  // dispatch still fails closed until quality evals pass.
   @Value("${spring.ai.sarvam.api-key:}")
   private String sarvamApiKey;
 
@@ -773,8 +770,8 @@ public class LlmRouter {
   }
 
   /**
-   * Sarvam AI dispatcher (2026-06-21). OpenAI-wire-compatible Indian-language provider
-   * (api.sarvam.ai). Reuses {@link OpenAiNativeToolClient} with a per-call base-URL like
+   * Disabled Sarvam dispatcher breadcrumb (2026-06-26). OpenAI-wire-compatible Indian-language
+   * provider (api.sarvam.ai). Reuses {@link OpenAiNativeToolClient} with a per-call base-URL like
    * DeepSeek/Fireworks; Sarvam's model ids ({@code sarvam-105b} / {@code sarvam-30b}) are its own
    * API names, so they pass straight through (no slug map).
    *
@@ -783,7 +780,7 @@ public class LlmRouter {
    * 2048-token default and truncates worker file writes. Verified live 2026-06-21: Bearer auth →
    * 200, native tool_calls in OpenAI schema, {@code max_tokens} + {@code tool_choice:"auto"}
    * accepted, and Sarvam returns {@code reasoning_content} (already captured + round-tripped by
-   * OpenAiNativeToolClient). ENTERPRISE/eval BYOK; system fallback key.
+   * OpenAiNativeToolClient). Do not route here while the dispatch switch rejects provider=sarvam.
    */
   private ChatResponse callSarvam(LlmRequest r, List<ToolCallback> tools, String apiKey) {
     String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : sarvamApiKey;
