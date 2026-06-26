@@ -64,6 +64,10 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.meetsQualityThreshold()).isTrue();
     assertThat(sonnet.reasons())
         .anySatisfy(reason -> assertThat(reason).contains("candidate from model-matrix YAML"));
+    assertThat(sonnet.reasons())
+        .contains(
+            "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
+                + " fallback/local/validation signals only");
   }
 
   @Test
@@ -167,6 +171,10 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.qualityScore()).isEqualTo(90.0);
     assertThat(sonnet.reasons())
         .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks");
+    assertThat(sonnet.reasons())
+        .doesNotContain(
+            "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
+                + " fallback/local/validation signals only");
   }
 
   @Test

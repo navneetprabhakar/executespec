@@ -91,8 +91,8 @@ spring:
 
 execution:
   continuation:
-    # Advisory-only goal continuation policy knobs. Runtime provider/model dispatch is unchanged
-    # until an explicit acting component consumes the emitted decisions.
+    # Goal continuation policy knobs. Selected-candidate step-up / step-down / provider-change
+    # reruns are automatic by default, bounded by the limits below, unless confirmation is required.
     required-quality-threshold: 70.0
     required-quality-thresholds:
       task-low: -1
@@ -122,7 +122,7 @@ execution:
     max-task-wall-clock-ms: -1
     require-confirmation-before-expensive-continuation: false
     acting:
-      enabled: false
+      enabled: true
     max-reruns-per-task: 1
 
 managed-ai:
