@@ -6,11 +6,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Builds explainable provider/model candidates from current runtime sources.
@@ -20,6 +26,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class ModelProviderCandidateService {
 
   private static final long UNKNOWN_LATENCY_MS = 0L;
@@ -28,6 +35,12 @@ public class ModelProviderCandidateService {
   private final ModelPerformanceTracker performanceTracker;
   private final ModelProviderCapabilityRegistry capabilityRegistry =
       new ModelProviderCapabilityRegistry();
+
+  @Value("${execution.continuation.parallel-provider-evaluation-enabled:true}")
+  private boolean parallelProviderEvaluationEnabled = true;
+
+  @Value("${execution.continuation.max-parallel-tasks:3}")
+  private int maxParallelTasks = 3;
 
   public List<ModelProviderScore> buildCandidates(ModelProviderCandidateRequest request) {
     return capabilityRegistry.scoreAll(buildSignals(request));
@@ -39,27 +52,100 @@ public class ModelProviderCandidateService {
     Set<String> allowedProviders = normalizeSet(req.providerAllowList());
     Set<String> allowedModels = normalizeSet(req.modelAllowList());
 
-    return modelRegistry.allModels().entrySet().stream()
-        .filter(entry -> entry.getValue() != null)
-        .sorted(Map.Entry.comparingByKey())
-        .filter(
-            entry -> {
-              String provider = providerFor(entry.getKey(), entry.getValue());
-              return provider != null
-                  && (allowedProviders.isEmpty() || allowedProviders.contains(normalize(provider)))
-                  && (allowedModels.isEmpty()
-                      || allowedModels.contains(normalize(entry.getKey()))
-                      || allowedModels.contains(
-                          normalize(modelRegistry.canonicalize(entry.getKey()))));
-            })
-        .map(entry -> signalFor(entry.getKey(), entry.getValue(), req))
+    List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries =
+        modelRegistry.allModels().entrySet().stream()
+            .filter(entry -> entry.getValue() != null)
+            .sorted(Map.Entry.comparingByKey())
+            .filter(
+                entry -> {
+                  String provider = providerFor(entry.getKey(), entry.getValue());
+                  return provider != null
+                      && (allowedProviders.isEmpty()
+                          || allowedProviders.contains(normalize(provider)))
+                      && (allowedModels.isEmpty()
+                          || allowedModels.contains(normalize(entry.getKey()))
+                          || allowedModels.contains(
+                              normalize(modelRegistry.canonicalize(entry.getKey()))));
+                })
+            .toList();
+
+    if (shouldBuildSignalsInParallel(entries)) {
+      return buildSignalsParallel(entries, req);
+    }
+    return buildSignalsSequential(entries, req, false);
+  }
+
+  private boolean shouldBuildSignalsInParallel(
+      List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries) {
+    return parallelProviderEvaluationEnabled && maxParallelTasks() > 1 && entries.size() > 1;
+  }
+
+  private List<ModelProviderCapabilitySignal> buildSignalsParallel(
+      List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
+      ModelProviderCandidateRequest request) {
+    int parallelism = Math.min(entries.size(), maxParallelTasks());
+    List<String> labels = entries.stream().map(this::candidateLabel).toList();
+    log.info(
+        "ModelProviderCandidateService parallelProviderEvaluation START count={} parallelism={} labels={}",
+        entries.size(),
+        parallelism,
+        labels);
+
+    try (ExecutorService executor = Executors.newFixedThreadPool(parallelism)) {
+      List<Future<ModelProviderCapabilitySignal>> futures =
+          entries.stream()
+              .map(
+                  entry ->
+                      executor.submit(
+                          () -> signalFor(entry.getKey(), entry.getValue(), request, true)))
+              .toList();
+      List<ModelProviderCapabilitySignal> out = new ArrayList<>(futures.size());
+      for (Future<ModelProviderCapabilitySignal> future : futures) {
+        out.add(future.get());
+      }
+      List<String> results = labels.stream().map(label -> label + "=ok").toList();
+      log.info(
+          "ModelProviderCandidateService parallelProviderEvaluation DONE count={} results={}",
+          out.size(),
+          results);
+      return List.copyOf(out);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      log.warn(
+          "ModelProviderCandidateService parallelProviderEvaluation interrupted; falling back to sequential");
+      return buildSignalsSequential(entries, request, false);
+    } catch (ExecutionException | RuntimeException ex) {
+      log.warn(
+          "ModelProviderCandidateService parallelProviderEvaluation failed: {}; falling back to sequential",
+          ex.getMessage());
+      return buildSignalsSequential(entries, request, false);
+    }
+  }
+
+  private List<ModelProviderCapabilitySignal> buildSignalsSequential(
+      List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
+      ModelProviderCandidateRequest request,
+      boolean parallelEvaluation) {
+    return entries.stream()
+        .map(entry -> signalFor(entry.getKey(), entry.getValue(), request, parallelEvaluation))
         .toList();
+  }
+
+  private String candidateLabel(Map.Entry<String, ModelMatrixProperties.ModelConfig> entry) {
+    return providerFor(entry.getKey(), entry.getValue())
+        + "/"
+        + modelRegistry.canonicalize(entry.getKey());
+  }
+
+  private int maxParallelTasks() {
+    return Math.max(1, maxParallelTasks);
   }
 
   private ModelProviderCapabilitySignal signalFor(
       String model,
       ModelMatrixProperties.ModelConfig config,
-      ModelProviderCandidateRequest request) {
+      ModelProviderCandidateRequest request,
+      boolean parallelEvaluation) {
     String canonicalModel = modelRegistry.canonicalize(model);
     String provider = providerFor(canonicalModel, config);
     List<ModelProviderCapabilitySignal> external =
@@ -78,6 +164,10 @@ public class ModelProviderCandidateService {
 
     List<String> reasons = new ArrayList<>();
     reasons.add("candidate from model-matrix YAML: " + provider + "/" + canonicalModel);
+    reasons.add(
+        parallelEvaluation
+            ? "provider/model candidate evaluated in bounded parallel batch"
+            : "provider/model candidate evaluated sequentially");
     if (localScore == ModelPerformanceTracker.UNKNOWN_SCORE) {
       reasons.add("local 24h performance score unavailable or below sample threshold");
     } else {

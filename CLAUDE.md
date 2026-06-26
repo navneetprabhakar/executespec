@@ -122,6 +122,8 @@ Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAV
 
 `execution.continuation.parallel-read-tools-enabled` defaults to true and gates the worker's automatic read-only tool-batch parallelism. Pure same-turn read batches (`readFile` / `searchFiles` / `listFiles` / `gitStatus` / `gitDiff`) emit server and legacy `LOG` SSE start/done lines with call labels and per-call `ok`/`err` results; mutating, remote, partial, or timed-out batches fall back to sequential dispatch.
 
+`execution.continuation.parallel-provider-evaluation-enabled` defaults to true and gates bounded parallel model/provider candidate evaluation inside `ModelProviderCandidateService`; it uses `execution.continuation.max-parallel-tasks` as the cap, logs start labels and done result labels, preserves deterministic model-order output, and records whether each candidate was evaluated in the bounded parallel batch or sequentially in the candidate reasons.
+
 `execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
 
 When a terminal waste/failed goal decision still says another model/provider might help, `CONTINUATION_DECISION` now explains when no useful escalation remains within configured limits instead of hiding that stop behind the generic goal reason.

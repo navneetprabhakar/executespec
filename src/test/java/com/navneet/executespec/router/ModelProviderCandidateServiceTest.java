@@ -11,6 +11,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class ModelProviderCandidateServiceTest {
 
@@ -56,6 +57,46 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.meetsQualityThreshold()).isTrue();
     assertThat(sonnet.reasons())
         .anySatisfy(reason -> assertThat(reason).contains("candidate from model-matrix YAML"));
+  }
+
+  @Test
+  void evaluatesIndependentCandidatesInBoundedParallelBatchWithDeterministicOrder() {
+    ReflectionTestUtils.setField(service, "parallelProviderEvaluationEnabled", true);
+    ReflectionTestUtils.setField(service, "maxParallelTasks", 2);
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .build());
+
+    assertThat(candidates)
+        .extracting(ModelProviderScore::model)
+        .containsExactly("claude-sonnet-4-6", "gemini-3-flash-preview", "gpt-5.4-mini");
+    assertThat(candidates)
+        .allSatisfy(
+            score ->
+                assertThat(score.reasons())
+                    .contains("provider/model candidate evaluated in bounded parallel batch"));
+  }
+
+  @Test
+  void usesSequentialEvaluationWhenParallelCandidateEvaluationIsDisabled() {
+    ReflectionTestUtils.setField(service, "parallelProviderEvaluationEnabled", false);
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .build());
+
+    assertThat(candidates)
+        .allSatisfy(
+            score ->
+                assertThat(score.reasons())
+                    .contains("provider/model candidate evaluated sequentially"));
   }
 
   @Test

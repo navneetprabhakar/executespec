@@ -116,6 +116,7 @@ execution:
     max-stale-explanations: 2
     max-parallel-tasks: 3
     parallel-read-tools-enabled: true
+    parallel-provider-evaluation-enabled: true
     max-total-cost-usd: -1
     max-total-tokens: -1
     max-task-wall-clock-ms: -1
