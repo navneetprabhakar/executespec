@@ -346,6 +346,7 @@ to boot — skip it for those.""";
     List<TaskOutcome> outcomes = new ArrayList<>();
     Plan plan = req.plan();
     String runId = req.runContext().runId();
+    boolean abortedByGoalDecision = false;
 
     log.info(
         "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={} resumeTarget={}",
@@ -423,9 +424,39 @@ to boot — skip it for those.""";
       // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
       // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
       gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
+
+      GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
+      if (shouldEnforceGoalStop(goalDecision)) {
+        int remaining = taskCount - i - 1;
+        log.warn(
+            "SequentialExecutor goal-stop enforced run={} task={} decision={} state={}"
+                + " remaining={}",
+            runId,
+            task.id(),
+            goalDecision.recommendedDecision(),
+            goalDecision.state(),
+            remaining);
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId,
+                task.id(),
+                "Goal stop enforced: "
+                    + goalDecision.recommendedDecision()
+                    + " ("
+                    + goalDecision.reason()
+                    + "); skipping "
+                    + remaining
+                    + " remaining task"
+                    + (remaining == 1 ? "" : "s")));
+        appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
+        abortedByGoalDecision = true;
+        break;
+      }
     }
 
-    ExecutionResult result = summarize(outcomes, System.currentTimeMillis() - runStart);
+    ExecutionResult result =
+        summarize(outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision);
     log.info(
         "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
             + " latency={}ms",
@@ -583,6 +614,40 @@ to boot — skip it for those.""";
         .totalLatencyMs(0L)
         .toolCallsDispatched(0)
         .build();
+  }
+
+  private void appendSkippedGoalStopOutcomes(
+      List<TaskOutcome> outcomes, Plan plan, int firstSkippedIndex) {
+    for (int j = firstSkippedIndex; j < plan.tasks().size(); j++) {
+      PlannedTask skipped = plan.tasks().get(j);
+      outcomes.add(
+          TaskOutcome.builder()
+              .taskId(skipped.id())
+              .taskTitle(skipped.title())
+              .status(TaskOutcome.Status.SKIPPED)
+              .totalLatencyMs(0L)
+              .toolCallsDispatched(0)
+              .build());
+    }
+  }
+
+  private boolean shouldEnforceGoalStop(GoalDonenessDecision decision) {
+    if (decision == null) {
+      return false;
+    }
+    if (featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_GOAL_DECISION_ENFORCEMENT)) {
+      return false;
+    }
+    return switch (decision.recommendedDecision()) {
+      case STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD -> true;
+      case STOP_DONE,
+              CONTINUE_SAME_MODEL_PROVIDER,
+              STEP_UP_MODEL,
+              STEP_DOWN_MODEL,
+              CHANGE_PROVIDER ->
+          false;
+    };
   }
 
   private TaskOutcome executeOne(
@@ -765,8 +830,9 @@ to boot — skip it for those.""";
             failureReason,
             buildFailureDiagnosticJson(primary, cfg.maxIter));
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
-        emitGoalDecision(
-            runId, task, primary, TaskOutcome.Status.WORKER_FAILED, null, failureReason);
+        GoalDonenessDecision goalDecision =
+            emitGoalDecision(
+                runId, task, primary, TaskOutcome.Status.WORKER_FAILED, null, failureReason);
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
@@ -776,6 +842,7 @@ to boot — skip it for those.""";
             .toolCallsDispatched(primary.toolCallsDispatched())
             .dispatchedProvider(cfg.provider)
             .dispatchedModel(cfg.model)
+            .goalDonenessDecision(goalDecision)
             .build();
       }
       // Soft completion: worker wrote files; fall through to smoke gate.
@@ -808,7 +875,8 @@ to boot — skip it for those.""";
           " (smoke tests disabled)");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      emitGoalDecision(runId, task, primary, status, null, softWarnReason);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(runId, task, primary, status, null, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -818,6 +886,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -838,7 +907,8 @@ to boot — skip it for those.""";
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      emitGoalDecision(runId, task, primary, status, null, softWarnReason);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(runId, task, primary, status, null, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -848,6 +918,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -863,7 +934,8 @@ to boot — skip it for those.""";
           smoke.latencyMs());
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      emitGoalDecision(runId, task, primary, status, true, softWarnReason);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(runId, task, primary, status, true, softWarnReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -876,6 +948,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -898,8 +971,9 @@ to boot — skip it for those.""";
       log.warn("Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-      emitGoalDecision(
-          runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(
+              runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -912,6 +986,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -1014,13 +1089,14 @@ to boot — skip it for those.""";
               crossProviderRetry.provider());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-          emitGoalDecision(
-              runId,
-              task,
-              crossProviderRetry.result(),
-              TaskOutcome.Status.SUCCESS_AFTER_RETRY,
-              true,
-              null);
+          GoalDonenessDecision goalDecision =
+              emitGoalDecision(
+                  runId,
+                  task,
+                  crossProviderRetry.result(),
+                  TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+                  true,
+                  null);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1035,6 +1111,7 @@ to boot — skip it for those.""";
               .toolCallsDispatched(totalToolCalls)
               .dispatchedProvider(crossProviderRetry.provider())
               .dispatchedModel(crossProviderRetry.model())
+              .goalDonenessDecision(goalDecision)
               .build();
         }
       } else if (crossProviderRetry != null) {
@@ -1045,8 +1122,14 @@ to boot — skip it for those.""";
           task.id(),
           retry.outcome());
       String retryFailureReason = describeWorkerFailure(retry);
-      emitGoalDecision(
-          runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, retryFailureReason);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.COMPLETED_WITH_WARNING,
+              false,
+              retryFailureReason);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1061,6 +1144,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -1070,7 +1154,8 @@ to boot — skip it for those.""";
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      emitGoalDecision(runId, task, retry, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(runId, task, retry, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1085,6 +1170,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -1103,14 +1189,15 @@ to boot — skip it for those.""";
           task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      emitGoalDecision(
-          runId,
-          task,
-          retry,
-          TaskOutcome.Status.SUCCESS,
-          false,
-          "Smoke failed after retry but no files were written; treated as"
-              + " verify-only/environmental");
+      GoalDonenessDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.SUCCESS,
+              false,
+              "Smoke failed after retry but no files were written; treated as"
+                  + " verify-only/environmental");
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1125,6 +1212,7 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision)
           .build();
     }
 
@@ -1164,7 +1252,9 @@ to boot — skip it for those.""";
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-          emitGoalDecision(runId, task, retry2, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
+          GoalDonenessDecision goalDecision =
+              emitGoalDecision(
+                  runId, task, retry2, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1179,6 +1269,7 @@ to boot — skip it for those.""";
               .toolCallsDispatched(totalToolCalls2)
               .dispatchedProvider(cfg.provider)
               .dispatchedModel(cfg.model)
+              .goalDonenessDecision(goalDecision)
               .build();
         }
         // retry-2 completed but smoke STILL fails → fall through to COMPLETED_WITH_WARNING
@@ -1212,7 +1303,9 @@ to boot — skip it for those.""";
             + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
     persistTaskStatus(runId, task.id(), "PARTIAL", reason);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-    emitGoalDecision(runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
+    GoalDonenessDecision goalDecision =
+        emitGoalDecision(
+            runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
     return TaskOutcome.builder()
         .taskId(task.id())
         .taskTitle(task.title())
@@ -1227,10 +1320,11 @@ to boot — skip it for those.""";
         .toolCallsDispatched(totalToolCalls)
         .dispatchedProvider(cfg.provider)
         .dispatchedModel(cfg.model)
+        .goalDonenessDecision(goalDecision)
         .build();
   }
 
-  private void emitGoalDecision(
+  private GoalDonenessDecision emitGoalDecision(
       String runId,
       PlannedTask task,
       WorkerResult workerResult,
@@ -1258,6 +1352,7 @@ to boot — skip it for those.""";
                 + " ("
                 + decision.reason()
                 + ")"));
+    return decision;
   }
 
   private GoalEvidence buildGoalEvidence(
@@ -1840,6 +1935,14 @@ to boot — skip it for those.""";
       "worker.retry-context-retention.enabled";
 
   /**
+   * Goal-decision enforcement flag (RL-2026-06-198). When ON, negative goal stop decisions at task
+   * boundaries abort the remaining sequential tasks instead of continuing to spend tokens on work
+   * the evaluator already classified as blocked, failed, or waste-risk. Default OFF, V249.
+   */
+  public static final String FLAG_GOAL_DECISION_ENFORCEMENT =
+      "execution.goal-decision.enforcement.enabled";
+
+  /**
    * Forced-tool-call salvage flag (RL-2026-05-059). When ON, the worker's Lever-B salvage call
    * restricts its tool set to write/edit/completeTask AND sets {@code tool_choice="required"} so a
    * model that would otherwise return reasoning-only text (the verified 4/10 native-DeepSeek
@@ -2278,7 +2381,8 @@ to boot — skip it for those.""";
 
   private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
 
-  private ExecutionResult summarize(List<TaskOutcome> outcomes, long totalLatency) {
+  private ExecutionResult summarize(
+      List<TaskOutcome> outcomes, long totalLatency, boolean abortedByGoalDecision) {
     int succ = 0, warn = 0, fail = 0, skip = 0;
     for (var o : outcomes) {
       switch (o.status()) {
@@ -2289,7 +2393,8 @@ to boot — skip it for those.""";
       }
     }
     ExecutionResult.Overall overall;
-    if (fail > 0) overall = ExecutionResult.Overall.FAILED;
+    if (abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
+    else if (fail > 0) overall = ExecutionResult.Overall.FAILED;
     else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
     else overall = ExecutionResult.Overall.ALL_SUCCESS;
 
