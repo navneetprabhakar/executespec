@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,6 +41,16 @@ public final class TaskWaveScheduler {
    */
   public record Result(
       List<List<String>> waves, List<String> unscheduled, List<String> missingDependencies) {}
+
+  /**
+   * Bounded, mutation-safe waves. Tasks listed in {@code serializedTasks} were intentionally placed
+   * alone because their write set was unknown or broad.
+   */
+  public record BoundedResult(
+      List<List<String>> waves,
+      List<String> unscheduled,
+      List<String> missingDependencies,
+      List<String> serializedTasks) {}
 
   /**
    * Group {@code taskIds} into dependency waves.
@@ -97,5 +108,95 @@ public final class TaskWaveScheduler {
       if (!done.contains(id)) unscheduled.add(id);
     }
     return new Result(waves, unscheduled, missing);
+  }
+
+  /**
+   * Groups tasks into dependency-safe waves and then splits each wave by a conservative file-touch
+   * conflict check plus a hard per-wave concurrency cap.
+   *
+   * <p>A task with no declared touched files is serialized alone. The scheduler cannot prove it is
+   * safe to mutate in parallel.
+   */
+  public static BoundedResult scheduleBounded(
+      List<String> taskIds,
+      Map<String, List<String>> dependsOn,
+      Map<String, List<String>> touchesFiles,
+      int maxWaveSize) {
+    Result dependencySchedule = schedule(taskIds, dependsOn);
+    int cap = Math.max(1, maxWaveSize);
+    List<List<String>> bounded = new ArrayList<>();
+    List<String> serialized = new ArrayList<>();
+
+    for (List<String> wave : dependencySchedule.waves()) {
+      List<String> current = new ArrayList<>();
+      List<String> currentFiles = new ArrayList<>();
+      for (String taskId : wave) {
+        List<String> files = normalizeFiles(touchesFiles == null ? null : touchesFiles.get(taskId));
+        if (files.isEmpty() || containsBroadPath(files)) {
+          flushWave(bounded, current, currentFiles);
+          bounded.add(List.of(taskId));
+          serialized.add(taskId);
+          continue;
+        }
+        if (current.size() >= cap || conflicts(currentFiles, files)) {
+          flushWave(bounded, current, currentFiles);
+        }
+        current.add(taskId);
+        currentFiles.addAll(files);
+      }
+      flushWave(bounded, current, currentFiles);
+    }
+
+    return new BoundedResult(
+        List.copyOf(bounded),
+        dependencySchedule.unscheduled(),
+        dependencySchedule.missingDependencies(),
+        List.copyOf(serialized));
+  }
+
+  private static void flushWave(
+      List<List<String>> waves, List<String> current, List<String> currentFiles) {
+    if (!current.isEmpty()) {
+      waves.add(List.copyOf(current));
+      current.clear();
+      currentFiles.clear();
+    }
+  }
+
+  private static List<String> normalizeFiles(List<String> files) {
+    if (files == null || files.isEmpty()) return List.of();
+    return files.stream()
+        .filter(file -> file != null && !file.isBlank())
+        .map(TaskWaveScheduler::normalizePath)
+        .distinct()
+        .toList();
+  }
+
+  private static String normalizePath(String path) {
+    String normalized = path.trim().replace('\\', '/');
+    while (normalized.startsWith("./")) {
+      normalized = normalized.substring(2);
+    }
+    while (normalized.endsWith("/") && normalized.length() > 1) {
+      normalized = normalized.substring(0, normalized.length() - 1);
+    }
+    return normalized.toLowerCase(Locale.ROOT);
+  }
+
+  private static boolean containsBroadPath(List<String> files) {
+    return files.stream().anyMatch(file -> file.equals(".") || file.equals("/") || file.isBlank());
+  }
+
+  private static boolean conflicts(List<String> currentFiles, List<String> candidateFiles) {
+    for (String existing : currentFiles) {
+      for (String candidate : candidateFiles) {
+        if (pathConflicts(existing, candidate)) return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean pathConflicts(String left, String right) {
+    return left.equals(right) || left.startsWith(right + "/") || right.startsWith(left + "/");
   }
 }

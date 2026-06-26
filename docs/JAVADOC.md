@@ -54,6 +54,7 @@ For exhaustive class discovery use:
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
 | `SequentialExecutor` | Per-task execution loop. |
+| `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for future safe parallel execution. |
 | `GoalDonenessEvaluator` / `GoalContinuationPolicy` | Pure goal-state and continue/escalate/stop policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
 | `LlmRouter` | Provider dispatch, retry, failover, cost tracking. |
