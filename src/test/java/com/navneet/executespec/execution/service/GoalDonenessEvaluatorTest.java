@@ -129,6 +129,23 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void stopsWasteGuardAfterRepeatedToolCommandOrValidationFailures() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .validationAttempted(true)
+                .validationPassed(false)
+                .meaningfulDiffCount(2)
+                .repeatedFailureCount(3)
+                .maxRepeatedFailures(3)
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.WASTE_RISK);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
+    assertThat(decision.reason()).contains("repeated tool, command, or validation failures");
+  }
+
+  @Test
   void stopsWasteGuardWhenBudgetCeilingIsReachedBeforeDone() {
     GoalDonenessDecision decision =
         evaluator.evaluate(

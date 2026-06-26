@@ -111,6 +111,7 @@ execution:
     max-model-step-downs-per-task: 1
     max-no-progress-iterations: 28
     max-false-done-claims: 2
+    max-repeated-failures: 3
     max-parallel-tasks: 3
     max-total-cost-usd: -1
     max-total-tokens: -1

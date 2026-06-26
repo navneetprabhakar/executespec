@@ -384,6 +384,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-false-done-claims:2}")
   private int maxGoalFalseDoneClaims = 2;
 
+  @Value("${execution.continuation.max-repeated-failures:3}")
+  private int maxGoalRepeatedFailures = 3;
+
   @Value("${execution.continuation.max-parallel-tasks:3}")
   private int maxGoalParallelTasks = 3;
 
@@ -2105,6 +2108,7 @@ to boot — skip it for those.""";
     data.put("maxModelStepDowns", maxModelStepDowns());
     data.put("maxNoProgressIterations", maxNoProgressIterations());
     data.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    data.put("maxRepeatedFailures", maxRepeatedFailures());
     data.put("maxParallelTasks", maxParallelTasks());
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
@@ -2184,6 +2188,10 @@ to boot — skip it for those.""";
 
   private int maxFalseDoneClaims() {
     return maxGoalFalseDoneClaims;
+  }
+
+  private int maxRepeatedFailures() {
+    return maxGoalRepeatedFailures;
   }
 
   private int maxParallelTasks() {
@@ -2284,6 +2292,7 @@ to boot — skip it for those.""";
     policyNode.put("maxModelStepDowns", maxModelStepDowns());
     policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
     policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    policyNode.put("maxRepeatedFailures", maxRepeatedFailures());
     policyNode.put("maxParallelTasks", maxParallelTasks());
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
@@ -2369,8 +2378,11 @@ to boot — skip it for those.""";
             ? Math.max(0, workerResult.iterations())
             : 0;
     int falseDoneClaims = completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0;
+    int repeatedFailureCount =
+        repeatedFailureCount(workerResult, validationAttempted, validationPassed, failureReason);
     evidence.add("noProgressIterations=" + noProgressIterations + "/" + maxNoProgressIterations());
     evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
+    evidence.add("repeatedFailureCount=" + repeatedFailureCount + "/" + maxRepeatedFailures());
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
@@ -2384,6 +2396,8 @@ to boot — skip it for those.""";
         .maxNoProgressIterations(maxNoProgressIterations())
         .falseDoneClaims(falseDoneClaims)
         .maxFalseDoneClaims(maxFalseDoneClaims())
+        .repeatedFailureCount(repeatedFailureCount)
+        .maxRepeatedFailures(maxRepeatedFailures())
         .budgetCeilingReached(budgetCeilingReached)
         .budgetCeilingReason(budgetCeilingReason)
         .inputTokens(cost.inputTokens())
@@ -2400,6 +2414,47 @@ to boot — skip it for those.""";
         .evidence(evidence)
         .risks(risksFor(workerResult, failureReason, budgetCeilingReason))
         .build();
+  }
+
+  private static int repeatedFailureCount(
+      WorkerResult workerResult,
+      boolean validationAttempted,
+      boolean validationPassed,
+      String failureReason) {
+    int max = 0;
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        String signature = repeatedFailureSignature(entry);
+        if (signature == null) {
+          continue;
+        }
+        int count = counts.getOrDefault(signature, 0) + 1;
+        counts.put(signature, count);
+        max = Math.max(max, count);
+      }
+    }
+    if (validationAttempted
+        && !validationPassed
+        && failureReason != null
+        && failureReason.toLowerCase(Locale.ROOT).contains("after one retry")) {
+      max = Math.max(max, 2);
+    }
+    return max;
+  }
+
+  private static String repeatedFailureSignature(String entry) {
+    if (entry == null || entry.isBlank()) {
+      return null;
+    }
+    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
+    String lower = normalized.toLowerCase(Locale.ROOT);
+    boolean failure =
+        lower.contains("refused")
+            || lower.contains("-> err")
+            || lower.contains("critic")
+            || lower.contains("verify-before-complete");
+    return failure ? normalized : null;
   }
 
   private static String goalSummary(PlannedTask task) {
