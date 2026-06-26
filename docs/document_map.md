@@ -1,7 +1,7 @@
 # Documentation Map
 
 > Authoritative index of every document under `docs/` plus the four entry-point files at the repo root.
-> Updated 2026-06-26: indexed the goal doneness / routing / waste-guard approach and current V250 task-decision visibility surface.
+> Updated 2026-06-27: indexed the goal doneness / routing / waste-guard approach and current V251 run-level goal-proof visibility surface.
 
 This file is the routing table for the documentation surface. Each entry below has a one-line description of what the document covers and a note on when you should reach for it. If you don't know which file to open first, start here.
 

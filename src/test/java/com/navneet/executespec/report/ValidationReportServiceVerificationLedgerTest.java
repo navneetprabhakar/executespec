@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -22,6 +24,8 @@ import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.report.model.ReportIssueDTO;
 import com.navneet.executespec.report.model.VerificationEvidenceDTO;
 import com.navneet.executespec.scoring.ReviewScoringService;
+import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -143,6 +147,7 @@ class ValidationReportServiceVerificationLedgerTest {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     ValidationReportGenerator generator = mock(ValidationReportGenerator.class);
     ReviewScoringService reviewScoringService = mock(ReviewScoringService.class);
+    StateStore stateStore = mock(StateStore.class);
     List<Object> events = new ArrayList<>();
     ValidationReportService service =
         new ValidationReportService(
@@ -150,10 +155,11 @@ class ValidationReportServiceVerificationLedgerTest {
             generator,
             new ObjectMapper(),
             new SimpleMeterRegistry(),
-            null,
+            stateStore,
             reviewScoringService,
             flags,
             events::add);
+    PipelineRun run = PipelineRun.builder().runId("run-1").build();
     WorkerReport workerReport =
         WorkerReport.builder()
             .filesCreated(List.of("src/App.tsx"))
@@ -161,7 +167,7 @@ class ValidationReportServiceVerificationLedgerTest {
             .build();
     ReportInput input =
         new ReportInput(
-            null,
+            run,
             List.of(workerReport),
             null,
             CompileResult.passed(1),
@@ -173,7 +179,7 @@ class ValidationReportServiceVerificationLedgerTest {
             null);
     when(generator.generate(input))
         .thenReturn(new ValidationReportGenerator.LlmReportResult("# Report", "model-a", 0, 0));
-    when(reviewScoringService.score(null, null, null, null, null))
+    when(reviewScoringService.score(any(), any(), any(), any(), any()))
         .thenReturn(new ReviewScoringService.Scores(null, null, null, null, null, null));
     when(repository.findByRunId("run-1")).thenReturn(Optional.empty());
     when(repository.save(org.mockito.ArgumentMatchers.any(ValidationReport.class)))
@@ -192,6 +198,9 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("UNCERTAIN", event.runGoalDecision().state().name());
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
+    assertNotNull(run.getRunGoalDonenessJson());
+    assertTrue(run.getRunGoalDonenessJson().contains("\"state\":\"UNCERTAIN\""));
+    verify(stateStore).save(run);
   }
 
   @Test

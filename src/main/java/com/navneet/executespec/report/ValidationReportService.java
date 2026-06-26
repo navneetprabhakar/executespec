@@ -12,6 +12,7 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator;
 import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.BootVerification;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ReportInput;
@@ -26,6 +27,7 @@ import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
@@ -293,7 +295,11 @@ public class ValidationReportService {
       // Delete any existing report for this run (rework edge case)
       repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
       var saved = repository.save(report);
-      publishEvidenceEvent(saved, issues);
+      List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
+      GoalDonenessDecision runGoalDecision =
+          goalProofEvaluator.evaluate(saved.getRunId(), saved.getPipelineResult(), verificationLedger);
+      persistRunGoalDecision(input.run(), runGoalDecision);
+      publishEvidenceEvent(saved, verificationLedger, runGoalDecision);
 
       // 5. Metrics
       meterRegistry
@@ -330,13 +336,31 @@ public class ValidationReportService {
     }
   }
 
-  private void publishEvidenceEvent(ValidationReport saved, List<ReportIssueDTO> issues) {
+  private void persistRunGoalDecision(PipelineRun run, GoalDonenessDecision decision) {
+    if (run == null || decision == null || stateStore == null || objectMapper == null) {
+      return;
+    }
+    try {
+      run.setRunGoalDonenessJson(objectMapper.writeValueAsString(decision));
+      stateStore.save(run);
+    } catch (Exception ex) {
+      log.debug(
+          "Failed to persist run-level goal decision for run={}: {}",
+          run.getRunId(),
+          ex.getMessage());
+    }
+  }
+
+  private void publishEvidenceEvent(
+      ValidationReport saved,
+      List<VerificationEvidenceDTO> verificationLedger,
+      GoalDonenessDecision runGoalDecision) {
     if (eventPublisher == null || saved == null) {
       return;
     }
     try {
       eventPublisher.publishEvent(
-          ValidationReportEvidenceEvent.from(saved, buildVerificationLedger(saved, issues)));
+          ValidationReportEvidenceEvent.from(saved, verificationLedger, runGoalDecision));
     } catch (RuntimeException ex) {
       log.debug(
           "Failed to publish validation evidence event for run={}: {}",

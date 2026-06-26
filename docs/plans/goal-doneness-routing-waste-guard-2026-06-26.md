@@ -609,6 +609,11 @@ pure read batches emit start/done server logs plus legacy `LOG` SSE lines with l
 results; batches that include mutation, remote dispatch, timeout, or partial completion still run
 through the sequential path.
 
+Thirty-sixth slice 2026-06-27: final validation-ledger goal proof is now persisted back onto
+`pipeline_run.run_goal_doneness_json` (V251) when the validation report is generated. `RunDetail`
+exposes it as `runGoalDoneness`, and the IDE Steps tab shows the final run-level proof before the
+task cards so the run goal state survives reloads without requiring a second report fetch.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
@@ -616,7 +621,6 @@ through the sequential path.
   the category set?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
 - Validation-report evidence-ledger surfacing now reaches `/report`, the run-result Evidence tab,
-  and run-scoped agent-session action events, and produces a conservative `runGoalDecision` proof;
-  remaining work is deciding whether that proof should update persisted run-level goal state or
-  stay as final evidence attached to the report/session stream.
+  run detail, and run-scoped agent-session action events, and produces a conservative
+  `runGoalDecision` proof that is durably cached on the run.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?

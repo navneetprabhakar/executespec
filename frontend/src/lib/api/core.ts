@@ -405,6 +405,8 @@ export interface RunDetail extends RunSummary {
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
+  /** Durable final run-level proof derived from the validation-report ledger. */
+  runGoalDoneness?: GoalDonenessDecisionData | null;
   integrationSource: {sourceType: string; sourceId: string; sourceUrl: string} | null;
   failureReason?: string | null;
   currentGate?: string | null;
