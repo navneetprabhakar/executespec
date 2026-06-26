@@ -27,6 +27,7 @@ import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
+import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -229,6 +230,11 @@ class SequentialExecutorSoftCompletionTest {
         .toolCallLog(log)
         .totalLatencyMs(20_000L)
         .build();
+  }
+
+  private static ModelProviderScore candidate(String provider, String model) {
+    return new ModelProviderScore(
+        provider, model, "TASK_LOW", 91.0, 8.0, 1_000L, 2_000L, 70.0, List.of("test candidate"));
   }
 
   // 1: T2-class case — multi-task, intermediate, iter-limit + writes
@@ -439,13 +445,16 @@ class SequentialExecutorSoftCompletionTest {
         .thenReturn(
             new GoalContinuationPolicyDecision(
                 RunContinuationDecision.STEP_UP_MODEL,
-                Optional.empty(),
+                Optional.of(candidate("openai", "gpt-5.4")),
                 List.of("quality is insufficient; stronger eligible model clears threshold")));
 
     SequentialExecutor executor = newExecutor(advisor);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
+    assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
         ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
     verify(advisor).advise(requestCaptor.capture());
@@ -566,6 +575,71 @@ class SequentialExecutorSoftCompletionTest {
                 }));
   }
 
+  @Test
+  void continuation_acting_reruns_once_with_selected_candidate_when_enabled() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(2), workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=0\nbuild ok"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STEP_UP_MODEL,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of("quality is insufficient; stronger eligible model clears threshold")),
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_DONE,
+                Optional.empty(),
+                List.of("goal satisfied with validation evidence and required outputs present")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "continuationActingEnabled", true);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    assertEquals("openai", result.perTask().get(0).dispatchedProvider());
+    assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
+    assertEquals(45, result.perTask().get(0).toolCallsDispatched());
+    ArgumentCaptor<WorkerTaskRequest> requestCaptor =
+        ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker, times(2)).run(requestCaptor.capture(), any());
+    assertEquals("anthropic", requestCaptor.getAllValues().get(0).provider());
+    assertEquals("claude-haiku-4-5-20251001", requestCaptor.getAllValues().get(0).model());
+    assertEquals("openai", requestCaptor.getAllValues().get(1).provider());
+    assertEquals("gpt-5.4", requestCaptor.getAllValues().get(1).model());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isContinuationActionEvent(event)
+                        && "STEP_UP_MODEL".equals(event.data().get("decision"))
+                        && "openai".equals(event.data().get("selectedProvider"))
+                        && "gpt-5.4".equals(event.data().get("selectedModel"))
+                        && Integer.valueOf(1).equals(event.data().get("attempt"))
+                        && Integer.valueOf(1).equals(event.data().get("maxAttempts"))));
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && "LOG".equals(event.type())
+                        && event.payload() != null
+                        && event
+                            .payload()
+                            .contains(
+                                "Continuation action: STEP_UP_MODEL -> rerun task with"
+                                    + " openai/gpt-5.4")));
+  }
+
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate
 
   @Test
@@ -618,5 +692,9 @@ class SequentialExecutorSoftCompletionTest {
 
   private static boolean isContinuationDecisionEvent(RunEvent event) {
     return event != null && "CONTINUATION_DECISION".equals(event.type()) && event.data() != null;
+  }
+
+  private static boolean isContinuationActionEvent(RunEvent event) {
+    return event != null && "CONTINUATION_ACTION".equals(event.type()) && event.data() != null;
   }
 }

@@ -64,6 +64,40 @@ public record RunEvent(
   }
 
   /**
+   * Machine-readable continuation action emitted only when the executor actually acts on a
+   * continuation recommendation, for example by rerunning the same task with an advisor-selected
+   * provider/model. The legacy LOG line is still emitted for old clients.
+   */
+  public static RunEvent continuationAction(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      int attempt,
+      int maxAttempts) {
+    return withData(
+        "CONTINUATION_ACTION",
+        runId,
+        taskId,
+        summary,
+        "decision",
+        decision,
+        "selectedProvider",
+        selectedProvider,
+        "selectedModel",
+        selectedModel,
+        "reason",
+        reason,
+        "attempt",
+        attempt,
+        "maxAttempts",
+        maxAttempts);
+  }
+
+  /**
    * PR-C (2026-05-13) — emitted by {@link com.navneet.executespec.tool.WriteFileTool} and {@link
    * com.navneet.executespec.tool.EditFileTool} after every successful write. Payload is the
    * workspace-relative path so the v2/v3 RunDetail file-tree can update the moment a tool call

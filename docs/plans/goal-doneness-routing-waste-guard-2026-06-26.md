@@ -142,12 +142,17 @@ execution:
     max-task-wall-clock-seconds-medium: 2700
     max-task-wall-clock-seconds-high: 4500
     require-confirmation-before-expensive-continuation: false
+    acting:
+      enabled: false
+    max-reruns-per-task: 1
 ```
 
 The first wired subset is advisory-only: `required-quality-threshold`,
 `max-provider-switches-per-run`, `max-model-step-ups-per-task`,
 `max-model-step-downs-per-task`, and
-`require-confirmation-before-expensive-continuation`.
+`require-confirmation-before-expensive-continuation`. The next acting subset is opt-in via
+`acting.enabled` and currently permits at most one same-task rerun with an advisor-selected
+provider/model.
 
 Hard exits:
 
@@ -406,8 +411,17 @@ boundary. `application.yml` now exposes `execution.continuation.required-quality
 `require-confirmation-before-expensive-continuation`; `SequentialExecutor` sanitizes those values,
 passes them into `GoalContinuationAdvisor` / fallback `GoalContinuationPolicy`, and includes the
 applied policy in both typed `CONTINUATION_DECISION` SSE data and durable
-`agent_task.continuation_decision_json`. This still remains advisory-only: changing these settings
-does not make the executor rerun tasks or mutate provider/model dispatch.
+`agent_task.continuation_decision_json`.
+
+Fifteenth slice 2026-06-26: `SequentialExecutor` can now optionally act on non-terminal
+continuation decisions. Default behavior is unchanged (`execution.continuation.acting.enabled=false`).
+When enabled, the executor only acts on `STEP_UP_MODEL`, `STEP_DOWN_MODEL`, or `CHANGE_PROVIDER`
+decisions that carry a selected `ModelProviderScore`; it emits a typed `CONTINUATION_ACTION` event
+plus the legacy log line, reruns the same task once with that selected provider/model while
+retaining the original tier caps, and reports the final rerun outcome as the task outcome with
+aggregate tool-call/latency accounting. It does not loop, does not act on `CONTINUE_SAME_MODEL_PROVIDER`,
+does not act during resume, and does not invent a provider/model outside the advisor-selected
+candidate.
 
 ## Open Questions
 

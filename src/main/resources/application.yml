@@ -98,6 +98,9 @@ execution:
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
     require-confirmation-before-expensive-continuation: false
+    acting:
+      enabled: false
+    max-reruns-per-task: 1
 
 managed-ai:
   enabled: true
