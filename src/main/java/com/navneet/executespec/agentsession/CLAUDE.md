@@ -161,7 +161,9 @@ turns separately from runs.
 - `AgentAttachmentServiceTest` pins the upload gate: clean text is accepted/extracted/stored, image
   and oversize/empty files are rejected, and an `InputSanitizer` injection hit propagates as 400 with
   no store write. `specchat/WebSearchChatToolsTest` pins the `web_fetch` SSRF guards (scheme,
-  localhost/`*.internal`, loopback/link-local/metadata IPs) and required-arg rejection.
+  localhost/`*.internal`, loopback/link-local/metadata IPs), suspicious egress-query rejection,
+  default-port-only enforcement, pinned-address handoff, content-type/length response guards, and
+  required-arg rejection.
 - `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
   routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, owned-session loading,

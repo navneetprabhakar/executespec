@@ -50,6 +50,13 @@ public record ValidationReportEvidenceEvent(
 
   public static ValidationReportEvidenceEvent from(
       ValidationReport report, List<VerificationEvidenceDTO> ledger) {
+    return from(report, ledger, null);
+  }
+
+  public static ValidationReportEvidenceEvent from(
+      ValidationReport report,
+      List<VerificationEvidenceDTO> ledger,
+      GoalDonenessDecision runGoalDecision) {
     return new ValidationReportEvidenceEvent(
         report == null ? null : report.getRunId(),
         report == null ? null : report.getId(),
@@ -57,6 +64,7 @@ public record ValidationReportEvidenceEvent(
         report == null ? null : report.getRubricScore(),
         report == null ? null : report.getPipelineResult(),
         report == null ? null : report.getCreatedAt(),
-        ledger);
+        ledger,
+        runGoalDecision);
   }
 }

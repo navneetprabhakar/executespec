@@ -1,20 +1,30 @@
 package com.navneet.executespec.specchat;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.nio.charset.Charset;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +36,6 @@ import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -42,22 +51,25 @@ import lombok.extern.slf4j.Slf4j;
  * only {@code http}/{@code https}, (b) resolves the host and rejects loopback / link-local /
  * site-local / any-local / multicast / CGNAT / IPv6 unique-local addresses plus {@code
  * localhost}/{@code *.internal}/cloud-metadata hostnames, and (c) does <em>not</em> follow
- * redirects (so a public URL cannot bounce to an internal address). Returned content is capped,
- * HTML-stripped, run through {@link ContextSanitizer} to strip embedded injection phrases / system
- * tags, and explicitly marked {@code untrusted} in the envelope — the system prompt instructs the
- * model never to treat fetched/uploaded content as instructions. Known bound: DNS-rebinding (TOCTOU
- * between resolve and connect) is not defended here; that needs a pinned-IP HTTP client and is
- * tracked as a follow-up.
+ * redirects (so a public URL cannot bounce to an internal address). The connection is opened
+ * against the validated {@link InetAddress} rather than resolving the host a second time, response
+ * headers and body bytes are bounded before decoding, non-text responses are rejected, returned
+ * content is capped, HTML-stripped, run through {@link ContextSanitizer} to strip embedded injection
+ * phrases / system tags, and explicitly marked {@code untrusted} in the envelope — the system
+ * prompt instructs the model never to treat fetched/uploaded content as instructions.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class WebSearchChatTools {
 
   private static final int MAX_CHARS = 8_000;
+  private static final int MAX_FETCH_BYTES = 64_000;
+  private static final int MAX_HEADER_BYTES = 16_384;
   private static final int MAX_QUERY = 400;
   private static final int MAX_URL = 2_048;
   private static final int MAX_URL_QUERY = 256;
+  private static final int CONNECT_TIMEOUT_MILLIS = 8_000;
+  private static final int READ_TIMEOUT_MILLIS = 15_000;
   private static final Pattern SECRET_EGRESS_PATTERN =
       Pattern.compile(
           "(?i)(es_pat_|sk-[a-z0-9_-]{16,}|ghp_[a-z0-9_]{20,}|github_pat_|"
@@ -92,12 +104,18 @@ public class WebSearchChatTools {
 
   private final ObjectMapper json;
   private final ContextSanitizer contextSanitizer;
+  private final GuardedFetcher fetcher;
 
-  private final HttpClient http =
-      HttpClient.newBuilder()
-          .connectTimeout(Duration.ofSeconds(8))
-          .followRedirects(HttpClient.Redirect.NEVER)
-          .build();
+  public WebSearchChatTools(ObjectMapper json, ContextSanitizer contextSanitizer) {
+    this(json, contextSanitizer, new PinnedHttpFetcher());
+  }
+
+  WebSearchChatTools(
+      ObjectMapper json, ContextSanitizer contextSanitizer, GuardedFetcher fetcher) {
+    this.json = json;
+    this.contextSanitizer = contextSanitizer;
+    this.fetcher = fetcher;
+  }
 
   /** Build the read-only web tools. Caller filters by name against the surface allow-list. */
   public List<ToolCallback> bind() {
@@ -168,7 +186,7 @@ public class WebSearchChatTools {
 
   // --- SSRF-guarded fetch -------------------------------------------------------------------
 
-  private record FetchOutcome(boolean ok, String body, String error) {
+  record FetchOutcome(boolean ok, String body, String error) {
     static FetchOutcome ok(String body) {
       return new FetchOutcome(true, body, null);
     }
@@ -196,6 +214,7 @@ public class WebSearchChatTools {
     if (uri.getRawQuery() != null && uri.getRawQuery().length() > MAX_URL_QUERY) {
       return FetchOutcome.err("URL query string is too long");
     }
+    if (!isAllowedFetchPort(uri)) return FetchOutcome.err("only default http/https ports are allowed");
     if (looksUnsafeForEgress(rawUrl)) {
       return FetchOutcome.err("URL looks like it may contain credentials or copied secrets");
     }
@@ -205,36 +224,23 @@ public class WebSearchChatTools {
     String host = uri.getHost();
     if (host == null || host.isBlank()) return FetchOutcome.err("URL has no host");
     if (isBlockedHost(host)) return FetchOutcome.err("host is not allowed");
+    List<InetAddress> addresses;
     try {
-      for (InetAddress addr : InetAddress.getAllByName(host)) {
+      addresses = Arrays.asList(InetAddress.getAllByName(host));
+      for (InetAddress addr : addresses) {
         if (isBlockedAddress(addr)) return FetchOutcome.err("host resolves to a blocked address");
       }
     } catch (UnknownHostException e) {
       return FetchOutcome.err("host could not be resolved");
     }
-    try {
-      HttpResponse<String> res =
-          http.send(
-              HttpRequest.newBuilder(uri)
-                  .timeout(Duration.ofSeconds(15))
-                  .header("User-Agent", "ExecuteSpec-Agent/1.0")
-                  .GET()
-                  .build(),
-              HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-      int code = res.statusCode();
-      if (code >= 300 && code < 400) {
-        return FetchOutcome.err("redirect (status " + code + ") not followed for safety");
-      }
-      if (code < 200 || code >= 300) {
-        return FetchOutcome.err("fetch failed with status " + code);
-      }
-      return FetchOutcome.ok(res.body());
-    } catch (IOException e) {
-      return FetchOutcome.err("network error");
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return FetchOutcome.err("interrupted");
-    }
+    if (addresses.isEmpty()) return FetchOutcome.err("host could not be resolved");
+    return fetcher.fetch(uri, host, addresses.get(0));
+  }
+
+  static boolean isAllowedFetchPort(URI uri) {
+    int port = effectivePort(uri);
+    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+    return (scheme.equals("http") && port == 80) || (scheme.equals("https") && port == 443);
   }
 
   private static boolean isBlockedHost(String host) {
@@ -299,6 +305,36 @@ public class WebSearchChatTools {
       if ((b[0] & 0xFE) == 0xFC) return true;
     }
     return false;
+  }
+
+  private static int effectivePort(URI uri) {
+    if (uri.getPort() > 0) return uri.getPort();
+    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+    return scheme.equals("https") ? 443 : 80;
+  }
+
+  static boolean isAllowedContentType(String value) {
+    if (value == null || value.isBlank()) return true;
+    String contentType = value.toLowerCase(Locale.ROOT);
+    int semi = contentType.indexOf(';');
+    String mediaType = (semi >= 0 ? contentType.substring(0, semi) : contentType).trim();
+    return mediaType.startsWith("text/")
+        || mediaType.equals("application/json")
+        || mediaType.endsWith("+json")
+        || mediaType.equals("application/xml")
+        || mediaType.endsWith("+xml")
+        || mediaType.equals("application/javascript")
+        || mediaType.equals("application/x-javascript")
+        || mediaType.equals("application/x-www-form-urlencoded");
+  }
+
+  static boolean isContentLengthTooLarge(String value) {
+    if (value == null || value.isBlank()) return false;
+    try {
+      return Long.parseLong(value.trim()) > MAX_FETCH_BYTES;
+    } catch (NumberFormatException e) {
+      return true;
+    }
   }
 
   private static String stripHtml(String html) {
@@ -382,5 +418,219 @@ public class WebSearchChatTools {
   @FunctionalInterface
   private interface ToolBody {
     ObjectNode run(JsonNode args) throws Exception;
+  }
+
+  @FunctionalInterface
+  interface GuardedFetcher {
+    FetchOutcome fetch(URI uri, String host, InetAddress address);
+  }
+
+  private static final class PinnedHttpFetcher implements GuardedFetcher {
+    private static final int LINE_LIMIT = 4_096;
+
+    public FetchOutcome fetch(URI uri, String host, InetAddress address) {
+      int port = effectivePort(uri);
+      try (Socket socket = openSocket(uri, host, address, port)) {
+        writeRequest(socket.getOutputStream(), uri, host, port);
+        InputStream in = socket.getInputStream();
+        HeaderBlock headerBlock = readHeaders(in);
+        int code = headerBlock.statusCode();
+        if (code >= 300 && code < 400) {
+          return FetchOutcome.err("redirect (status " + code + ") not followed for safety");
+        }
+        if (code < 200 || code >= 300) {
+          return FetchOutcome.err("fetch failed with status " + code);
+        }
+        String contentType = headerBlock.firstHeader("content-type");
+        if (!isAllowedContentType(contentType)) {
+          return FetchOutcome.err("content type is not allowed");
+        }
+        String contentEncoding = headerBlock.firstHeader("content-encoding");
+        if (contentEncoding != null && !contentEncoding.isBlank()) {
+          return FetchOutcome.err("compressed responses are not accepted");
+        }
+        String contentLength = headerBlock.firstHeader("content-length");
+        if (isContentLengthTooLarge(contentLength)) {
+          return FetchOutcome.err("response body is too large");
+        }
+        BodyBytes body = readBody(in, headerBlock);
+        String text = new String(body.bytes(), charsetFor(contentType));
+        if (body.truncated()) text += "\n...[truncated]";
+        return FetchOutcome.ok(text);
+      } catch (IOException e) {
+        return FetchOutcome.err("network error");
+      }
+    }
+
+    private static Socket openSocket(URI uri, String host, InetAddress address, int port)
+        throws IOException {
+      Socket raw = new Socket();
+      raw.connect(new InetSocketAddress(address, port), CONNECT_TIMEOUT_MILLIS);
+      raw.setSoTimeout(READ_TIMEOUT_MILLIS);
+      if (!"https".equalsIgnoreCase(uri.getScheme())) {
+        return raw;
+      }
+      SSLSocketFactory sslFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+      SSLSocket ssl = (SSLSocket) sslFactory.createSocket(raw, host, port, true);
+      SSLParameters params = ssl.getSSLParameters();
+      params.setServerNames(List.of(new SNIHostName(host)));
+      params.setEndpointIdentificationAlgorithm("HTTPS");
+      ssl.setSSLParameters(params);
+      ssl.startHandshake();
+      ssl.setSoTimeout(READ_TIMEOUT_MILLIS);
+      return ssl;
+    }
+
+    private static void writeRequest(OutputStream out, URI uri, String host, int port)
+        throws IOException {
+      String target = uri.getRawPath();
+      if (target == null || target.isBlank()) target = "/";
+      if (uri.getRawQuery() != null && !uri.getRawQuery().isBlank()) {
+        target += "?" + uri.getRawQuery();
+      }
+      String hostHeader =
+          (port == 80 || port == 443) ? host : host + ":" + port;
+      String request =
+          "GET "
+              + target
+              + " HTTP/1.1\r\n"
+              + "Host: "
+              + hostHeader
+              + "\r\n"
+              + "User-Agent: ExecuteSpec-Agent/1.0\r\n"
+              + "Accept: text/*, application/json, application/*+json, application/xml, application/*+xml\r\n"
+              + "Accept-Encoding: identity\r\n"
+              + "Connection: close\r\n\r\n";
+      out.write(request.getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+    }
+
+    private static HeaderBlock readHeaders(InputStream in) throws IOException {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      int matched = 0;
+      int b;
+      byte[] marker = new byte[] {'\r', '\n', '\r', '\n'};
+      while ((b = in.read()) != -1) {
+        out.write(b);
+        if (out.size() > MAX_HEADER_BYTES) throw new IOException("headers too large");
+        matched = b == marker[matched] ? matched + 1 : (b == marker[0] ? 1 : 0);
+        if (matched == marker.length) break;
+      }
+      if (matched != marker.length) throw new IOException("headers incomplete");
+      String raw = out.toString(StandardCharsets.ISO_8859_1);
+      String[] lines = raw.split("\\r?\\n");
+      if (lines.length == 0 || !lines[0].startsWith("HTTP/")) {
+        throw new IOException("invalid status line");
+      }
+      String[] status = lines[0].split(" ", 3);
+      if (status.length < 2) throw new IOException("invalid status line");
+      int code;
+      try {
+        code = Integer.parseInt(status[1]);
+      } catch (NumberFormatException e) {
+        throw new IOException("invalid status code", e);
+      }
+      Map<String, String> headers = new LinkedHashMap<>();
+      for (int i = 1; i < lines.length; i++) {
+        String line = lines[i];
+        int colon = line.indexOf(':');
+        if (colon <= 0) continue;
+        String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+        String value = line.substring(colon + 1).trim();
+        headers.merge(name, value, (a, b2) -> a + "," + b2);
+      }
+      return new HeaderBlock(code, headers);
+    }
+
+    private static BodyBytes readBody(InputStream in, HeaderBlock headers) throws IOException {
+      String transferEncoding = headers.firstHeader("transfer-encoding");
+      if (transferEncoding != null
+          && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked")) {
+        return readChunkedBody(in);
+      }
+      return readUntilEof(in);
+    }
+
+    private static BodyBytes readUntilEof(InputStream in) throws IOException {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      byte[] buffer = new byte[4096];
+      int read;
+      while ((read = in.read(buffer)) != -1) {
+        int remaining = MAX_FETCH_BYTES - out.size();
+        if (remaining <= 0) return new BodyBytes(out.toByteArray(), true);
+        if (read > remaining) {
+          out.write(buffer, 0, remaining);
+          return new BodyBytes(out.toByteArray(), true);
+        }
+        out.write(buffer, 0, read);
+      }
+      return new BodyBytes(out.toByteArray(), false);
+    }
+
+    private static BodyBytes readChunkedBody(InputStream in) throws IOException {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      while (true) {
+        String sizeLine = readAsciiLine(in);
+        int semi = sizeLine.indexOf(';');
+        String hex = (semi >= 0 ? sizeLine.substring(0, semi) : sizeLine).trim();
+        int chunkSize;
+        try {
+          chunkSize = Integer.parseInt(hex, 16);
+        } catch (NumberFormatException e) {
+          throw new IOException("invalid chunk size", e);
+        }
+        if (chunkSize == 0) return new BodyBytes(out.toByteArray(), false);
+        int remaining = MAX_FETCH_BYTES - out.size();
+        if (remaining <= 0) return new BodyBytes(out.toByteArray(), true);
+        if (chunkSize > remaining) {
+          out.write(readExact(in, remaining));
+          return new BodyBytes(out.toByteArray(), true);
+        }
+        out.write(readExact(in, chunkSize));
+        String crlf = readAsciiLine(in);
+        if (!crlf.isEmpty()) throw new IOException("invalid chunk terminator");
+      }
+    }
+
+    private static byte[] readExact(InputStream in, int count) throws IOException {
+      byte[] data = in.readNBytes(count);
+      if (data.length != count) throw new IOException("body ended early");
+      return data;
+    }
+
+    private static String readAsciiLine(InputStream in) throws IOException {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      int b;
+      while ((b = in.read()) != -1) {
+        if (b == '\n') break;
+        if (b != '\r') out.write(b);
+        if (out.size() > LINE_LIMIT) throw new IOException("line too long");
+      }
+      if (b == -1) throw new IOException("line ended early");
+      return out.toString(StandardCharsets.US_ASCII);
+    }
+
+    private static Charset charsetFor(String contentType) {
+      if (contentType == null) return StandardCharsets.UTF_8;
+      for (String part : contentType.split(";")) {
+        String trimmed = part.trim();
+        if (!trimmed.toLowerCase(Locale.ROOT).startsWith("charset=")) continue;
+        String name = trimmed.substring("charset=".length()).trim().replace("\"", "");
+        try {
+          return Charset.forName(name);
+        } catch (Exception ignored) {
+          return StandardCharsets.UTF_8;
+        }
+      }
+      return StandardCharsets.UTF_8;
+    }
+
+    private record HeaderBlock(int statusCode, Map<String, String> headers) {
+      String firstHeader(String name) {
+        return headers.get(name.toLowerCase(Locale.ROOT));
+      }
+    }
+
+    private record BodyBytes(byte[] bytes, boolean truncated) {}
   }
 }

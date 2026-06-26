@@ -8,6 +8,10 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.security.ContextSanitizer;
 
+import java.net.InetAddress;
+import java.net.URI;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
 
@@ -24,6 +28,12 @@ class WebSearchChatToolsTest {
     ContextSanitizer san = mock(ContextSanitizer.class);
     when(san.sanitizeInput(any(), any())).thenAnswer(i -> i.getArgument(0));
     return new WebSearchChatTools(new ObjectMapper(), san);
+  }
+
+  private static WebSearchChatTools build(WebSearchChatTools.GuardedFetcher fetcher) {
+    ContextSanitizer san = mock(ContextSanitizer.class);
+    when(san.sanitizeInput(any(), any())).thenAnswer(i -> i.getArgument(0));
+    return new WebSearchChatTools(new ObjectMapper(), san, fetcher);
   }
 
   private String call(String name, String argsJson) {
@@ -95,6 +105,63 @@ class WebSearchChatToolsTest {
     assertThat(call("web_fetch", "{\"url\":\"https://example.com/?" + longQuery + "\"}"))
         .contains("\"ok\":false")
         .contains("query string is too long");
+  }
+
+  @Test
+  void webFetchRejectsNonDefaultPortsBeforeNetwork() {
+    AtomicReference<URI> called = new AtomicReference<>();
+    WebSearchChatTools guarded =
+        build(
+            (uri, host, address) -> {
+              called.set(uri);
+              return WebSearchChatTools.FetchOutcome.ok("should not run");
+            });
+    ToolCallback cb =
+        guarded.bind().stream()
+            .filter(t -> t.getToolDefinition().name().equals("web_fetch"))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(cb.call("{\"url\":\"https://93.184.216.34:8443/\"}"))
+        .contains("\"ok\":false")
+        .contains("default http/https ports");
+    assertThat(called).hasValue(null);
+  }
+
+  @Test
+  void webFetchPassesValidatedPublicAddressToPinnedFetcher() {
+    AtomicReference<InetAddress> capturedAddress = new AtomicReference<>();
+    WebSearchChatTools guarded =
+        build(
+            (uri, host, address) -> {
+              capturedAddress.set(address);
+              assertThat(uri.toString()).isEqualTo("http://93.184.216.34/docs");
+              assertThat(host).isEqualTo("93.184.216.34");
+              return WebSearchChatTools.FetchOutcome.ok("public docs");
+            });
+    ToolCallback cb =
+        guarded.bind().stream()
+            .filter(t -> t.getToolDefinition().name().equals("web_fetch"))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(cb.call("{\"url\":\"http://93.184.216.34/docs\"}"))
+        .contains("\"ok\":true")
+        .contains("public docs");
+    assertThat(capturedAddress.get()).isNotNull();
+    assertThat(capturedAddress.get().isLoopbackAddress()).isFalse();
+  }
+
+  @Test
+  void contentMetadataGuardsRejectLargeAndNonTextResponses() {
+    assertThat(WebSearchChatTools.isContentLengthTooLarge("64001")).isTrue();
+    assertThat(WebSearchChatTools.isContentLengthTooLarge("64000")).isFalse();
+    assertThat(WebSearchChatTools.isContentLengthTooLarge("not-a-number")).isTrue();
+    assertThat(WebSearchChatTools.isAllowedContentType("text/html; charset=utf-8")).isTrue();
+    assertThat(WebSearchChatTools.isAllowedContentType("application/json")).isTrue();
+    assertThat(WebSearchChatTools.isAllowedContentType("application/problem+json")).isTrue();
+    assertThat(WebSearchChatTools.isAllowedContentType("image/png")).isFalse();
+    assertThat(WebSearchChatTools.isAllowedContentType("application/octet-stream")).isFalse();
   }
 
   @Test
