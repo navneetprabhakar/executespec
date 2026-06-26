@@ -64,4 +64,72 @@ class TaskWaveSchedulerTest {
     assertThat(r.waves()).isEmpty();
     assertThat(r.unscheduled()).isEmpty();
   }
+
+  @Test
+  void bounded_schedule_groups_disjoint_declared_file_sets_up_to_cap() {
+    var r =
+        TaskWaveScheduler.scheduleBounded(
+            List.of("A", "B", "C"),
+            Map.of(),
+            Map.of(
+                "A", List.of("src/A.java"),
+                "B", List.of("src/B.java"),
+                "C", List.of("src/C.java")),
+            2);
+
+    assertThat(r.waves()).containsExactly(List.of("A", "B"), List.of("C"));
+    assertThat(r.serializedTasks()).isEmpty();
+  }
+
+  @Test
+  void bounded_schedule_splits_same_file_mutations() {
+    var r =
+        TaskWaveScheduler.scheduleBounded(
+            List.of("A", "B"),
+            Map.of(),
+            Map.of("A", List.of("src/User.java"), "B", List.of("./src/User.java")),
+            4);
+
+    assertThat(r.waves()).containsExactly(List.of("A"), List.of("B"));
+  }
+
+  @Test
+  void bounded_schedule_splits_parent_directory_conflicts() {
+    var r =
+        TaskWaveScheduler.scheduleBounded(
+            List.of("A", "B"),
+            Map.of(),
+            Map.of("A", List.of("src/main"), "B", List.of("src/main/java/App.java")),
+            4);
+
+    assertThat(r.waves()).containsExactly(List.of("A"), List.of("B"));
+  }
+
+  @Test
+  void bounded_schedule_serializes_unknown_or_broad_touch_sets() {
+    var r =
+        TaskWaveScheduler.scheduleBounded(
+            List.of("A", "B", "C"),
+            Map.of(),
+            Map.of("A", List.of("src/A.java"), "B", List.of(), "C", List.of(".")),
+            4);
+
+    assertThat(r.waves()).containsExactly(List.of("A"), List.of("B"), List.of("C"));
+    assertThat(r.serializedTasks()).containsExactly("B", "C");
+  }
+
+  @Test
+  void bounded_schedule_preserves_dependency_waves_before_file_splitting() {
+    var r =
+        TaskWaveScheduler.scheduleBounded(
+            List.of("A", "B", "C"),
+            Map.of("C", List.of("A", "B")),
+            Map.of(
+                "A", List.of("src/A.java"),
+                "B", List.of("src/B.java"),
+                "C", List.of("src/C.java")),
+            4);
+
+    assertThat(r.waves()).containsExactly(List.of("A", "B"), List.of("C"));
+  }
 }

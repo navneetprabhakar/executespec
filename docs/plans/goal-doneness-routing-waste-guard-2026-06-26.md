@@ -347,6 +347,15 @@ goal-stop enforcement flag still uses the conservative doneness stop decisions, 
 behavior and provider/model selection remain unchanged. `SequentialExecutorSoftCompletionTest`
 pins the `STOP_DONE` continuation event on completeTask+passing-smoke.
 
+Ninth slice 2026-06-26: existing `TaskWaveScheduler` dependency-wave planning was extended with
+`scheduleBounded(...)`, a pure safe-parallelism policy seam. It preserves topological dependency
+waves, enforces a hard max wave size, groups only tasks with declared disjoint `touchesFiles`, splits
+same-file and parent/child path conflicts, and serializes tasks with unknown or broad touch sets.
+`SequentialExecutor` still runs sequentially; this pins the conditions under which future parallel
+execution may be considered without allowing unsafe workspace mutation. `TaskWaveSchedulerTest`
+now covers cap enforcement, same-file conflict, parent-directory conflict, unknown/broad
+serialization, and dependency preservation.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
