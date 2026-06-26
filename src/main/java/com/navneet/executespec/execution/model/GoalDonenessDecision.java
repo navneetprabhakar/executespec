@@ -12,6 +12,15 @@ public record GoalDonenessDecision(
     List<String> incompleteItems,
     List<String> evidence,
     List<String> risks,
+    String budgetCeilingReason,
+    int inputTokens,
+    int outputTokens,
+    int cacheReadTokens,
+    int cacheWriteTokens,
+    int reasoningTokens,
+    int totalTokens,
+    double costUsd,
+    long wallClockMs,
     boolean userInputRequired,
     boolean anotherModelProviderMightHelp) {
 
@@ -28,5 +37,47 @@ public record GoalDonenessDecision(
     incompleteItems = incompleteItems == null ? List.of() : List.copyOf(incompleteItems);
     evidence = evidence == null ? List.of() : List.copyOf(evidence);
     risks = risks == null ? List.of() : List.copyOf(risks);
+    budgetCeilingReason = budgetCeilingReason == null ? "" : budgetCeilingReason;
+    inputTokens = Math.max(0, inputTokens);
+    outputTokens = Math.max(0, outputTokens);
+    cacheReadTokens = Math.max(0, cacheReadTokens);
+    cacheWriteTokens = Math.max(0, cacheWriteTokens);
+    reasoningTokens = Math.max(0, reasoningTokens);
+    totalTokens = Math.max(0, totalTokens);
+    costUsd = Math.max(0.0, costUsd);
+    wallClockMs = Math.max(0L, wallClockMs);
+  }
+
+  public GoalDonenessDecision(
+      GoalDonenessState state,
+      RunContinuationDecision recommendedDecision,
+      String reason,
+      String goalSummary,
+      List<String> completedItems,
+      List<String> incompleteItems,
+      List<String> evidence,
+      List<String> risks,
+      boolean userInputRequired,
+      boolean anotherModelProviderMightHelp) {
+    this(
+        state,
+        recommendedDecision,
+        reason,
+        goalSummary,
+        completedItems,
+        incompleteItems,
+        evidence,
+        risks,
+        "",
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.0,
+        0L,
+        userInputRequired,
+        anotherModelProviderMightHelp);
   }
 }

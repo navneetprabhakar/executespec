@@ -1,6 +1,7 @@
 package com.navneet.executespec.execution.model;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.router.ModelProviderScore;
@@ -9,7 +10,8 @@ import com.navneet.executespec.router.ModelProviderScore;
 public record GoalContinuationPolicyDecision(
     RunContinuationDecision decision,
     Optional<ModelProviderScore> selectedCandidate,
-    List<String> reasons) {
+    List<String> reasons,
+    Map<String, Object> policy) {
 
   public GoalContinuationPolicyDecision {
     if (decision == null) {
@@ -17,6 +19,14 @@ public record GoalContinuationPolicyDecision(
     }
     selectedCandidate = selectedCandidate == null ? Optional.empty() : selectedCandidate;
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
+    policy = policy == null ? Map.of() : Map.copyOf(policy);
+  }
+
+  public GoalContinuationPolicyDecision(
+      RunContinuationDecision decision,
+      Optional<ModelProviderScore> selectedCandidate,
+      List<String> reasons) {
+    this(decision, selectedCandidate, reasons, Map.of());
   }
 
   public boolean terminal() {

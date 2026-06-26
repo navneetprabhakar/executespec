@@ -447,11 +447,20 @@ read/cache write/reasoning/total token counts, cost USD, and task wall-clock mil
 crossings as `WASTE_RISK` / `STOP_WASTE_GUARD` before proof of completion. The default values stay
 `-1`, so existing runs are unchanged until an operator enables a ceiling.
 
+Eighteenth slice 2026-06-26: budget evidence is now a structured client contract instead of only
+an evidence-string convention. `GoalDonenessDecision` carries the same cost/token/cache/reasoning
+and wall-clock fields as first-class JSON properties; `GOAL_DECISION`, durable
+`agent_task.goal_doneness_json`, and `TaskSummary.goalDoneness` expose them directly. The applied
+continuation policy also includes `maxTotalCostUsd`, `maxTotalTokens`, and
+`maxTaskWallClockMs`. `IdeRunResult`'s Steps tab renders cost/tokens/time against enabled ceilings,
+the concrete ceiling reason, remaining items, and risks so operators can see why the run continued
+or stopped without opening raw logs.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
 - What is the required quality threshold per category and tier?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
 - Validation-report evidence-ledger and agent-session action-event surfacing are still pending; SSE
-  and run-detail task cards now have structured coverage.
+  and run-detail task cards now have structured goal/budget/continuation coverage.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?

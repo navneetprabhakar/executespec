@@ -63,6 +63,51 @@ function taskGoalLine(t: api.TaskSummary): string | null {
   return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
 }
 
+function preciseUsd(n?: number | null): string {
+  if (n == null) return '—';
+  if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
+  return usd(n);
+}
+
+function positive(n?: number | null): number | null {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
+  const goal = t.goalDoneness;
+  if (!goal) return [];
+  const policy = t.continuationDecision?.policy || {};
+  const facts: {k: string; v: string}[] = [];
+  const cost = positive(goal.costUsd);
+  const costLimit = positive(policy.maxTotalCostUsd);
+  if (cost != null || costLimit != null) {
+    facts.push({
+      k: 'Cost',
+      v: costLimit != null ? `${preciseUsd(cost)} / ${preciseUsd(costLimit)}` : preciseUsd(cost),
+    });
+  }
+  const tokens = positive(goal.totalTokens);
+  const tokenLimit = positive(policy.maxTotalTokens);
+  if (tokens != null || tokenLimit != null) {
+    facts.push({
+      k: 'Tokens',
+      v: tokenLimit != null ? `${num(tokens)} / ${num(tokenLimit)}` : num(tokens),
+    });
+  }
+  const wall = positive(goal.wallClockMs);
+  const wallLimit = positive(policy.maxTaskWallClockMs);
+  if (wall != null || wallLimit != null) {
+    facts.push({
+      k: 'Time',
+      v: wallLimit != null ? `${fmtDur(wall)} / ${fmtDur(wallLimit)}` : fmtDur(wall),
+    });
+  }
+  if (goal.budgetCeilingReason) {
+    facts.push({k: 'Ceiling', v: goal.budgetCeilingReason});
+  }
+  return facts;
+}
+
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -1247,6 +1292,9 @@ export default function IdeRunResult() {
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => {
                   const goalLine = taskGoalLine(t);
+                  const budgetFacts = taskBudgetFacts(t);
+                  const incompleteItems = t.goalDoneness?.incompleteItems || [];
+                  const risks = t.goalDoneness?.risks || [];
                   return (
                     <div
                       key={t.taskId}
@@ -1303,6 +1351,81 @@ export default function IdeRunResult() {
                       {goalLine && (
                         <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                           {goalLine}
+                        </div>
+                      )}
+                      {budgetFacts.length > 0 && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                            gap: 6,
+                            marginTop: 8,
+                          }}
+                        >
+                          {budgetFacts.map((fact) => (
+                            <div
+                              key={fact.k}
+                              style={{
+                                border: '1px solid var(--ide-border)',
+                                borderRadius: 6,
+                                padding: '6px 8px',
+                                minWidth: 0,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: 'var(--ide-fg-muted)',
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {fact.k}
+                              </div>
+                              <div
+                                className='ide-mono'
+                                style={{
+                                  fontSize: 11,
+                                  color: 'var(--ide-fg)',
+                                  overflowWrap: 'anywhere',
+                                }}
+                              >
+                                {fact.v}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(incompleteItems.length > 0 || risks.length > 0) && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                            gap: 8,
+                            marginTop: 8,
+                            fontSize: 11,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          {incompleteItems.length > 0 && (
+                            <div>
+                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
+                                Remaining
+                              </div>
+                              {incompleteItems.slice(0, 3).map((item) => (
+                                <div key={item}>- {item}</div>
+                              ))}
+                            </div>
+                          )}
+                          {risks.length > 0 && (
+                            <div>
+                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
+                                Risks
+                              </div>
+                              {risks.slice(0, 3).map((risk) => (
+                                <div key={risk}>- {risk}</div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

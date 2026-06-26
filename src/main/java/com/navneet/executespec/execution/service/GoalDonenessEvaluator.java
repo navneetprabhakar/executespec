@@ -28,6 +28,15 @@ public class GoalDonenessEvaluator {
           List.of("collect goal evidence"),
           List.of(),
           List.of("missing evidence"),
+          "",
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0.0,
+          0L,
           false,
           false);
     }
@@ -164,6 +173,15 @@ public class GoalDonenessEvaluator {
         incompleteItemsFor(evidence, state),
         evidence.evidence(),
         risksFor(evidence, reason),
+        evidence.budgetCeilingReason(),
+        evidence.inputTokens(),
+        evidence.outputTokens(),
+        evidence.cacheReadTokens(),
+        evidence.cacheWriteTokens(),
+        evidence.reasoningTokens(),
+        evidence.totalTokens(),
+        evidence.costUsd(),
+        evidence.wallClockMs(),
         userInputRequired,
         anotherModelProviderMightHelp);
   }
@@ -205,6 +223,15 @@ public class GoalDonenessEvaluator {
       List<String> incompleteItems,
       List<String> evidence,
       List<String> risks,
+      String budgetCeilingReason,
+      int inputTokens,
+      int outputTokens,
+      int cacheReadTokens,
+      int cacheWriteTokens,
+      int reasoningTokens,
+      int totalTokens,
+      double costUsd,
+      long wallClockMs,
       boolean userInputRequired,
       boolean anotherModelProviderMightHelp) {
     return new GoalDonenessDecision(
@@ -216,6 +243,15 @@ public class GoalDonenessEvaluator {
         incompleteItems,
         evidence,
         risks,
+        budgetCeilingReason,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        reasoningTokens,
+        totalTokens,
+        costUsd,
+        wallClockMs,
         userInputRequired,
         anotherModelProviderMightHelp);
   }
