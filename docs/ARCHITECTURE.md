@@ -880,6 +880,10 @@ evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-cl
 budget-ceiling reasons when configured cost/token/time ceilings are crossed before proof of
 completion; those fields are structured in SSE data, durable task JSON, the run-detail API, and the
 IDE Steps tab.
+For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed goal/continuation run events
+into `agent_action_event` rows (`RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`,
+`RUN_CONTINUATION_ACTION`, `RUN_CONTINUATION_ACTION_SKIPPED`) so web/CLI/VS Code clients can reload
+the same evidence through `/api/agent/sessions/{id}/events`.
 When the default-off continuation acting switch is enabled, `CONTINUATION_ACTION` marks the actual
 selected-candidate same-task rerun with decision, provider, model, reason, bounded attempt metadata,
 and consumed limit metadata. If runtime ceilings block an otherwise actionable recommendation,

@@ -456,11 +456,21 @@ continuation policy also includes `maxTotalCostUsd`, `maxTotalTokens`, and
 the concrete ceiling reason, remaining items, and risks so operators can see why the run continued
 or stopped without opening raw logs.
 
+Nineteenth slice 2026-06-26: run-scoped agent sessions now receive the same goal/continuation
+signals through their durable action-event stream. `AgentRunEventBridge` listens to typed local
+`RunEvent`s emitted by `SseBroadcaster` and appends `RUN_GOAL_DECISION`,
+`RUN_CONTINUATION_DECISION`, `RUN_CONTINUATION_ACTION`, and
+`RUN_CONTINUATION_ACTION_SKIPPED` rows to every active `agent_session` with the matching `run_id`.
+The payload preserves the original run-event type, run/task ids, summary, timestamp,
+`schemaVersion`, and structured `data`, so web/CLI/VS Code clients can reload goal state,
+next-action advice, executed reruns, and limit-blocked rerun recommendations from
+`/api/agent/sessions/{id}/events` without scraping run SSE logs.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
 - What is the required quality threshold per category and tier?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
-- Validation-report evidence-ledger and agent-session action-event surfacing are still pending; SSE
-  and run-detail task cards now have structured goal/budget/continuation coverage.
+- Validation-report evidence-ledger surfacing is still pending; SSE, run-detail task cards, and
+  run-scoped agent-session action events now have structured goal/budget/continuation coverage.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?
