@@ -509,6 +509,14 @@ dependency metadata, and the configured cap; and includes `maxParallelTasks` in 
 continuation policy payload. Runtime task dispatch remains sequential until a separate eval-gated
 parallel execution flag is introduced.
 
+Twenty-fifth slice 2026-06-26: advisory task-wave plans are now reloadable through run-scoped
+agent sessions, not only transient run SSE. `AgentRunEventBridge` maps typed `TASK_WAVE_PLAN`
+events into `RUN_TASK_WAVE_PLAN` `agent_action_event` rows for active sessions with the matching
+`run_id`, preserving the original summary, timestamp, `schemaVersion`, and structured wave data.
+This gives web/CLI/VS Code clients the same bounded safe-parallelism evidence after reload as they
+already get for goal decisions, continuation advice, executed reruns, limit skips, and final
+validation evidence.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

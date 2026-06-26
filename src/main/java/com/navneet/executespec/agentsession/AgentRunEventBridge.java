@@ -21,11 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 class AgentRunEventBridge {
 
   private static final Map<String, String> EVENT_TYPES =
-      Map.of(
-          "GOAL_DECISION", "RUN_GOAL_DECISION",
-          "CONTINUATION_DECISION", "RUN_CONTINUATION_DECISION",
-          "CONTINUATION_ACTION", "RUN_CONTINUATION_ACTION",
-          "CONTINUATION_ACTION_SKIPPED", "RUN_CONTINUATION_ACTION_SKIPPED");
+      Map.ofEntries(
+          Map.entry("TASK_WAVE_PLAN", "RUN_TASK_WAVE_PLAN"),
+          Map.entry("GOAL_DECISION", "RUN_GOAL_DECISION"),
+          Map.entry("CONTINUATION_DECISION", "RUN_CONTINUATION_DECISION"),
+          Map.entry("CONTINUATION_ACTION", "RUN_CONTINUATION_ACTION"),
+          Map.entry("CONTINUATION_ACTION_SKIPPED", "RUN_CONTINUATION_ACTION_SKIPPED"));
 
   private final AgentSessionRepository sessionRepo;
   private final AgentEventRecorder eventRecorder;
