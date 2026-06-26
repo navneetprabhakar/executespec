@@ -336,6 +336,15 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.required-quality-threshold:70.0}")
   private double goalRequiredQualityThreshold = 70.0;
 
+  @Value("${execution.continuation.required-quality-thresholds.task-low:-1}")
+  private double goalRequiredQualityThresholdTaskLow = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.task-medium:-1}")
+  private double goalRequiredQualityThresholdTaskMedium = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.task-high:-1}")
+  private double goalRequiredQualityThresholdTaskHigh = -1.0;
+
   @Value("${execution.continuation.max-provider-switches-per-run:1}")
   private int advisoryProviderSwitchLimit = 1;
 
@@ -1801,8 +1810,10 @@ to boot — skip it for those.""";
 
   private GoalContinuationPolicyDecision decideContinuation(
       PlannedTask task, GoalDonenessDecision decision, String provider, String model) {
+    String taskCategory = taskCategory(task);
+    double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     if (goalContinuationAdvisor == null) {
-      return decideContinuationFallback(decision);
+      return decideContinuationFallback(decision, taskCategory, requiredQualityThreshold);
     }
     try {
       GoalContinuationPolicyDecision advised =
@@ -1811,8 +1822,8 @@ to boot — skip it for those.""";
                   .goalDecision(decision)
                   .currentProvider(provider)
                   .currentModel(model)
-                  .taskCategory(taskCategory(task))
-                  .requiredQualityThreshold(requiredGoalQualityThreshold())
+                  .taskCategory(taskCategory)
+                  .requiredQualityThreshold(requiredQualityThreshold)
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .expensiveContinuationRequiresConfirmation(
@@ -1821,7 +1832,7 @@ to boot — skip it for those.""";
                   .maxModelStepUps(maxModelStepUps())
                   .maxModelStepDowns(maxModelStepDowns())
                   .build());
-      return withAppliedPolicy(advised);
+      return withAppliedPolicy(advised, taskCategory, requiredQualityThreshold);
     } catch (RuntimeException ex) {
       log.warn(
           "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
@@ -1830,11 +1841,12 @@ to boot — skip it for those.""";
           provider,
           model,
           ex);
-      return decideContinuationFallback(decision);
+      return decideContinuationFallback(decision, taskCategory, requiredQualityThreshold);
     }
   }
 
-  private GoalContinuationPolicyDecision decideContinuationFallback(GoalDonenessDecision decision) {
+  private GoalContinuationPolicyDecision decideContinuationFallback(
+      GoalDonenessDecision decision, String taskCategory, double requiredQualityThreshold) {
     return withAppliedPolicy(
         goalContinuationPolicy.decide(
             GoalContinuationRequest.builder()
@@ -1844,11 +1856,15 @@ to boot — skip it for those.""";
                 .maxProviderSwitches(maxProviderSwitches())
                 .maxModelStepUps(maxModelStepUps())
                 .maxModelStepDowns(maxModelStepDowns())
-                .build()));
+                .build()),
+        taskCategory,
+        requiredQualityThreshold);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
-      GoalContinuationPolicyDecision decision) {
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold) {
     if (decision == null) {
       return null;
     }
@@ -1856,7 +1872,7 @@ to boot — skip it for those.""";
         decision.decision(),
         decision.selectedCandidate(),
         decision.reasons(),
-        continuationPolicyData(decision));
+        continuationPolicyData(decision, taskCategory, requiredQualityThreshold));
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -1945,8 +1961,23 @@ to boot — skip it for those.""";
   }
 
   private Map<String, Object> continuationPolicyData() {
+    return continuationPolicyData(null, "UNKNOWN", requiredGoalQualityThreshold());
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold) {
     Map<String, Object> data = new LinkedHashMap<>();
-    data.put("requiredQualityThreshold", requiredGoalQualityThreshold());
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      data.putAll(decision.policy());
+    }
+    data.put(
+        "taskCategory", taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory);
+    data.put(
+        "requiredQualityThreshold", sanitizeRequiredQualityThreshold(requiredQualityThreshold));
+    data.put("defaultRequiredQualityThreshold", requiredGoalQualityThreshold());
+    data.put("requiredQualityThresholds", requiredQualityThresholdsByCategory());
     data.put("maxProviderSwitches", maxProviderSwitches());
     data.put("maxModelStepUps", maxModelStepUps());
     data.put("maxModelStepDowns", maxModelStepDowns());
@@ -1965,10 +1996,36 @@ to boot — skip it for those.""";
   }
 
   private double requiredGoalQualityThreshold() {
-    if (!Double.isFinite(goalRequiredQualityThreshold) || goalRequiredQualityThreshold <= 0.0) {
+    return sanitizeRequiredQualityThreshold(goalRequiredQualityThreshold);
+  }
+
+  private double requiredGoalQualityThreshold(String taskCategory) {
+    double override =
+        switch (taskCategory == null ? "" : taskCategory.trim().toUpperCase(Locale.ROOT)) {
+          case "TASK_LOW" -> goalRequiredQualityThresholdTaskLow;
+          case "TASK_MEDIUM" -> goalRequiredQualityThresholdTaskMedium;
+          case "TASK_HIGH" -> goalRequiredQualityThresholdTaskHigh;
+          default -> -1.0;
+        };
+    if (Double.isFinite(override) && override > 0.0) {
+      return sanitizeRequiredQualityThreshold(override);
+    }
+    return requiredGoalQualityThreshold();
+  }
+
+  private Map<String, Object> requiredQualityThresholdsByCategory() {
+    Map<String, Object> thresholds = new LinkedHashMap<>();
+    thresholds.put("TASK_LOW", requiredGoalQualityThreshold("TASK_LOW"));
+    thresholds.put("TASK_MEDIUM", requiredGoalQualityThreshold("TASK_MEDIUM"));
+    thresholds.put("TASK_HIGH", requiredGoalQualityThreshold("TASK_HIGH"));
+    return thresholds;
+  }
+
+  private static double sanitizeRequiredQualityThreshold(double threshold) {
+    if (!Double.isFinite(threshold) || threshold <= 0.0) {
       return 70.0;
     }
-    return Math.min(100.0, goalRequiredQualityThreshold);
+    return Math.min(100.0, threshold);
   }
 
   private int maxProviderSwitches() {
@@ -2044,7 +2101,7 @@ to boot — skip it for those.""";
     if (decision == null) {
       node.put("decision", "UNKNOWN");
       node.putArray("reasons").add("continuation decision missing");
-      writeContinuationPolicy(node.putObject("policy"));
+      writeContinuationPolicy(node.putObject("policy"), null);
       return objectMapper.writeValueAsString(node);
     }
     node.put("decision", decision.decision().name());
@@ -2065,12 +2122,25 @@ to boot — skip it for those.""";
     }
     var reasons = node.putArray("reasons");
     decision.reasons().forEach(reasons::add);
-    writeContinuationPolicy(node.putObject("policy"));
+    writeContinuationPolicy(node.putObject("policy"), decision);
     return objectMapper.writeValueAsString(node);
   }
 
-  private void writeContinuationPolicy(ObjectNode policyNode) {
+  private void writeContinuationPolicy(
+      ObjectNode policyNode, GoalContinuationPolicyDecision decision) {
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      objectMapper
+          .valueToTree(decision.policy())
+          .fields()
+          .forEachRemaining(entry -> policyNode.set(entry.getKey(), entry.getValue()));
+      return;
+    }
+    policyNode.put("taskCategory", "UNKNOWN");
     policyNode.put("requiredQualityThreshold", requiredGoalQualityThreshold());
+    policyNode.put("defaultRequiredQualityThreshold", requiredGoalQualityThreshold());
+    ObjectNode thresholds = policyNode.putObject("requiredQualityThresholds");
+    requiredQualityThresholdsByCategory()
+        .forEach((category, threshold) -> thresholds.put(category, (Double) threshold));
     policyNode.put("maxProviderSwitches", maxProviderSwitches());
     policyNode.put("maxModelStepUps", maxModelStepUps());
     policyNode.put("maxModelStepDowns", maxModelStepDowns());
