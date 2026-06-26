@@ -138,6 +138,9 @@ execution:
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
+    max-total-cost-usd: -1
+    max-total-tokens: -1
+    max-task-wall-clock-ms: -1
     max-task-wall-clock-seconds-low: 1800
     max-task-wall-clock-seconds-medium: 2700
     max-task-wall-clock-seconds-high: 4500
@@ -150,7 +153,10 @@ execution:
 The first wired subset is advisory-only: `required-quality-threshold`,
 `max-provider-switches-per-run`, `max-model-step-ups-per-task`,
 `max-model-step-downs-per-task`, and
-`require-confirmation-before-expensive-continuation`. The next acting subset is opt-in via
+`require-confirmation-before-expensive-continuation`. The first evidence-ceiling subset is
+disabled unless positive: `max-total-cost-usd`, `max-total-tokens`, and
+`max-task-wall-clock-ms` feed `GOAL_DECISION` budget evidence and can stop as
+`STOP_WASTE_GUARD` when crossed before proof of completion. The next acting subset is opt-in via
 `acting.enabled` and currently permits at most one same-task rerun with an advisor-selected
 provider/model.
 
@@ -431,6 +437,15 @@ at run end, and emits typed `CONTINUATION_ACTION_SKIPPED` plus the legacy log wh
 is blocked by `maxProviderSwitches`, `maxModelStepUps`, or `maxModelStepDowns`. Successful
 `CONTINUATION_ACTION` events also carry limit metadata (`limitName`, `usedLimit`, `maxLimit`) so
 clients can explain both executed and blocked escalations.
+
+Seventeenth slice 2026-06-26: goal evidence now carries explicit spend, token, and wall-clock
+proof for waste-guard decisions. `GoalEvidence` stores `budgetCeilingReason`, input/output/cache
+read/cache write/reasoning/total token counts, cost USD, and task wall-clock milliseconds.
+`SequentialExecutor` builds that evidence from `RunCostTracker.snapshot(runId)` plus the
+`WorkerResult` latency, appends the values to `GOAL_DECISION` evidence, and treats positive
+`execution.continuation.max-total-cost-usd`, `max-total-tokens`, or `max-task-wall-clock-ms`
+crossings as `WASTE_RISK` / `STOP_WASTE_GUARD` before proof of completion. The default values stay
+`-1`, so existing runs are unchanged until an operator enables a ceiling.
 
 ## Open Questions
 

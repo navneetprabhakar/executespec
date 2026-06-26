@@ -875,7 +875,10 @@ existing consumers keep working while richer fields ride along: `TOKEN_USAGE` in
 cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields, and
 `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice.
 Continuation decision data also carries the applied `execution.continuation.*` advisory limits so
-live clients can explain which thresholds and ceilings shaped the recommendation.
+live clients can explain which thresholds and ceilings shaped the recommendation. Goal decision
+evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, and concrete
+budget-ceiling reasons when configured cost/token/time ceilings are crossed before proof of
+completion.
 When the default-off continuation acting switch is enabled, `CONTINUATION_ACTION` marks the actual
 selected-candidate same-task rerun with decision, provider, model, reason, bounded attempt metadata,
 and consumed limit metadata. If runtime ceilings block an otherwise actionable recommendation,

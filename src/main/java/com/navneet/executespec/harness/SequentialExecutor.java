@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -346,6 +347,15 @@ to boot — skip it for those.""";
 
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
+
+  @Value("${execution.continuation.max-total-cost-usd:-1}")
+  private double maxGoalTotalCostUsd = -1.0;
+
+  @Value("${execution.continuation.max-total-tokens:-1}")
+  private int maxGoalTotalTokens = -1;
+
+  @Value("${execution.continuation.max-task-wall-clock-ms:-1}")
+  private long maxGoalTaskWallClockMs = -1L;
 
   @Value("${execution.continuation.acting.enabled:false}")
   private boolean continuationActingEnabled = false;
@@ -1678,7 +1688,7 @@ to boot — skip it for those.""";
       String dispatchedModel) {
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
-            buildGoalEvidence(task, workerResult, finalStatus, smokePassed, failureReason));
+            buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
     log.info(
         "Executor task={} goalDecision state={} decision={} reason={}",
         task.id(),
@@ -1959,12 +1969,16 @@ to boot — skip it for those.""";
   }
 
   private GoalEvidence buildGoalEvidence(
+      String runId,
       PlannedTask task,
       WorkerResult workerResult,
       TaskOutcome.Status finalStatus,
       Boolean smokePassed,
       String failureReason) {
     int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    RunCostTracker.Snapshot cost = costSnapshot(runId);
+    int totalTokens = totalTrackedTokens(cost);
+    long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
     boolean completeTaskClaimed =
         workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
     boolean validationAttempted = smokePassed != null;
@@ -2001,12 +2015,21 @@ to boot — skip it for those.""";
       evidence.add("iterations=" + workerResult.iterations());
       evidence.add("toolCalls=" + workerResult.toolCallsDispatched());
       evidence.add("fileWrites=" + fileWrites);
+      evidence.add("wallClockMs=" + wallClockMs);
     }
+    evidence.add("inputTokens=" + cost.inputTokens());
+    evidence.add("outputTokens=" + cost.outputTokens());
+    evidence.add("cacheReadTokens=" + cost.cacheReadTokens());
+    evidence.add("cacheWriteTokens=" + cost.cacheWriteTokens());
+    evidence.add("reasoningTokens=" + cost.reasoningTokens());
+    evidence.add("totalTrackedTokens=" + totalTokens);
+    evidence.add("costUsd=" + String.format(Locale.ROOT, "%.6f", cost.costUsd()));
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
     }
 
-    boolean budgetCeilingReached = workerStoppedOnCeiling(workerResult) && !validationPassed;
+    String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
+    boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     int noProgressIterations =
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
@@ -2025,11 +2048,20 @@ to boot — skip it for those.""";
         .falseDoneClaims(completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0)
         .maxFalseDoneClaims(2)
         .budgetCeilingReached(budgetCeilingReached)
+        .budgetCeilingReason(budgetCeilingReason)
+        .inputTokens(cost.inputTokens())
+        .outputTokens(cost.outputTokens())
+        .cacheReadTokens(cost.cacheReadTokens())
+        .cacheWriteTokens(cost.cacheWriteTokens())
+        .reasoningTokens(cost.reasoningTokens())
+        .totalTokens(totalTokens)
+        .costUsd(cost.costUsd())
+        .wallClockMs(wallClockMs)
         .completeTaskClaimed(completeTaskClaimed)
         .completedItems(completed)
         .incompleteItems(incomplete)
         .evidence(evidence)
-        .risks(risksFor(workerResult, failureReason, budgetCeilingReached))
+        .risks(risksFor(workerResult, failureReason, budgetCeilingReason))
         .build();
   }
 
@@ -2052,14 +2084,81 @@ to boot — skip it for those.""";
         || workerResult.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
   }
 
+  private RunCostTracker.Snapshot costSnapshot(String runId) {
+    if (costTracker == null) {
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+    try {
+      RunCostTracker.Snapshot snapshot = costTracker.snapshot(runId);
+      return snapshot == null ? new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0) : snapshot;
+    } catch (Exception ex) {
+      log.debug("goalEvidence: cost snapshot failed for run={}: {}", runId, ex.getMessage());
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+  }
+
+  private String budgetCeilingReason(
+      WorkerResult workerResult, RunCostTracker.Snapshot cost, int totalTokens, long wallClockMs) {
+    if (workerStoppedOnCeiling(workerResult)) {
+      return "worker outcome " + workerResult.outcome() + " reached an execution ceiling";
+    }
+    if (maxGoalTotalCostUsd() > 0.0 && cost != null && cost.costUsd() >= maxGoalTotalCostUsd()) {
+      return "configured total cost ceiling reached ($"
+          + String.format(Locale.ROOT, "%.6f", cost.costUsd())
+          + " >= $"
+          + String.format(Locale.ROOT, "%.6f", maxGoalTotalCostUsd())
+          + ")";
+    }
+    if (maxGoalTotalTokens() > 0 && totalTokens >= maxGoalTotalTokens()) {
+      return "configured total token ceiling reached ("
+          + totalTokens
+          + " >= "
+          + maxGoalTotalTokens()
+          + ")";
+    }
+    if (maxGoalTaskWallClockMs() > 0 && wallClockMs >= maxGoalTaskWallClockMs()) {
+      return "configured task wall-clock ceiling reached ("
+          + wallClockMs
+          + "ms >= "
+          + maxGoalTaskWallClockMs()
+          + "ms)";
+    }
+    return null;
+  }
+
+  private static int totalTrackedTokens(RunCostTracker.Snapshot cost) {
+    if (cost == null) {
+      return 0;
+    }
+    long total =
+        (long) cost.inputTokens()
+            + cost.outputTokens()
+            + cost.cacheReadTokens()
+            + cost.cacheWriteTokens()
+            + cost.reasoningTokens();
+    return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+  }
+
+  private double maxGoalTotalCostUsd() {
+    return Double.isFinite(maxGoalTotalCostUsd) ? maxGoalTotalCostUsd : -1.0;
+  }
+
+  private int maxGoalTotalTokens() {
+    return maxGoalTotalTokens;
+  }
+
+  private long maxGoalTaskWallClockMs() {
+    return maxGoalTaskWallClockMs;
+  }
+
   private static List<String> risksFor(
-      WorkerResult workerResult, String failureReason, boolean budgetCeilingReached) {
+      WorkerResult workerResult, String failureReason, String budgetCeilingReason) {
     List<String> risks = new ArrayList<>();
     if (workerResult != null && workerResult.outcome() != WorkerResult.Outcome.COMPLETED) {
       risks.add("workerOutcome=" + workerResult.outcome());
     }
-    if (budgetCeilingReached) {
-      risks.add("budget or execution ceiling reached before proof of completion");
+    if (budgetCeilingReason != null && !budgetCeilingReason.isBlank()) {
+      risks.add(budgetCeilingReason);
     }
     if (failureReason != null && !failureReason.isBlank()) {
       risks.add(failureReason);

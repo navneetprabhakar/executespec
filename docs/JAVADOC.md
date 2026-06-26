@@ -53,7 +53,7 @@ For exhaustive class discovery use:
 | `RunOrchestrator` | Pipeline coordinator. |
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
-| `SequentialExecutor` | Per-task execution loop. |
+| `SequentialExecutor` | Per-task execution loop; emits goal/continuation decisions with validation plus cost/token/wall-clock budget evidence. |
 | `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for future safe parallel execution. |
 | `GoalDonenessEvaluator` / `GoalContinuationPolicy` / `GoalContinuationAdvisor` | Goal-state, candidate-backed continue/escalate/stop advice, and pure policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
