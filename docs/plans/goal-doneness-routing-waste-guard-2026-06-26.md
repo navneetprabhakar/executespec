@@ -135,6 +135,14 @@ execution:
       task-low: -1
       task-medium: -1
       task-high: -1
+      greenfield-build: -1
+      project-patch: -1
+      bug-fix: -1
+      test-fix: -1
+      refactor: -1
+      benchmark-patch: -1
+      terminal-task: -1
+      read-only-help: -1
     max-no-progress-iterations: 28
     max-task-retries: 1
     max-high-complexity-retries: 2
@@ -154,11 +162,10 @@ execution:
     max-reruns-per-task: 1
 ```
 
-The first wired subset is advisory-only: `required-quality-threshold`, the `TASK_LOW` /
-`TASK_MEDIUM` / `TASK_HIGH` overrides under `required-quality-thresholds`,
-`max-provider-switches-per-run`, `max-model-step-ups-per-task`,
-`max-model-step-downs-per-task`, and `require-confirmation-before-expensive-continuation`. The
-first evidence-ceiling subset is
+The first wired subset is advisory-only: `required-quality-threshold`, the semantic and complexity
+overrides under `required-quality-thresholds`, `max-provider-switches-per-run`,
+`max-model-step-ups-per-task`, `max-model-step-downs-per-task`, and
+`require-confirmation-before-expensive-continuation`. The first evidence-ceiling subset is
 disabled unless positive: `max-total-cost-usd`, `max-total-tokens`, and
 `max-task-wall-clock-ms` feed `GOAL_DECISION` budget evidence and can stop as
 `STOP_WASTE_GUARD` when crossed before proof of completion. The next acting subset is opt-in via
@@ -533,11 +540,20 @@ the executor/advisor boundary. `application.yml` still keeps the global
 per-category threshold map. Broader semantic categories such as `BUG_FIX`, `TEST_FIX`, or
 `TERMINAL_TASK` remain a later classifier/planner concern.
 
+Twenty-seventh slice 2026-06-26: `SequentialExecutor` now derives a conservative semantic task
+category from existing `PlannedTask` title / description / hard-constraint / touched-file hints
+before falling back to `TASK_LOW` / `TASK_MEDIUM` / `TASK_HIGH`. The first semantic set is
+`GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`,
+`TERMINAL_TASK`, and `READ_ONLY_HELP`; all are default-off threshold override keys under
+`execution.continuation.required-quality-thresholds.*`. This keeps the planner schema stable while
+letting benchmark/local validation signals and quality thresholds line up on real task categories
+when the task text is explicit enough.
+
 ## Open Questions
 
-- What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
-- Which semantic task categories beyond `TASK_LOW` / `TASK_MEDIUM` / `TASK_HIGH` should the
-  planner/classifier emit first (`BUG_FIX`, `TEST_FIX`, `TERMINAL_TASK`, etc.)?
+- Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
+  executor-local semantic classifier remain the compatibility bridge until enough run data proves
+  the category set?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
 - Validation-report evidence-ledger surfacing now reaches `/report`, the run-result Evidence tab,
   and run-scoped agent-session action events, and produces a conservative `runGoalDecision` proof;

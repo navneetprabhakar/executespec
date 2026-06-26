@@ -80,6 +80,16 @@ class WebSearchChatToolsTest {
   }
 
   @Test
+  void webFetchRejectsLocalDataExfiltrationQueryKeysBeforeNetwork() {
+    assertThat(call("web_fetch", "{\"url\":\"https://example.com/?data=approved-local-context\"}"))
+        .contains("\"ok\":false")
+        .contains("exfiltrate");
+    assertThat(call("web_fetch", "{\"url\":\"https://example.com/?payload=run-summary\"}"))
+        .contains("\"ok\":false")
+        .contains("exfiltrate");
+  }
+
+  @Test
   void webFetchRejectsVeryLongQueryStringsBeforeNetwork() {
     String longQuery = "a".repeat(300);
     assertThat(call("web_fetch", "{\"url\":\"https://example.com/?" + longQuery + "\"}"))

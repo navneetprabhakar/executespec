@@ -126,6 +126,9 @@ public class ModelController {
             (id, cfg) -> {
               String provider =
                   cfg.getProvider() != null ? cfg.getProvider().toUpperCase() : "OTHER";
+              if (ModelAccessService.isDisabledProvider(provider)) {
+                return;
+              }
               out.add(
                   new UserModel(
                       id,

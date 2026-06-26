@@ -195,6 +195,23 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  private static Plan bugFixPlan() {
+    return Plan.builder()
+        .planTitle("Bug fix")
+        .tasks(
+            List.of(
+                PlannedTask.builder()
+                    .id("T1")
+                    .title("Fix failing login regression")
+                    .description(
+                        "Fix the NullPointerException in AuthService without broad rewrites")
+                    .complexity(Complexity.LOW)
+                    .touchesFiles(List.of("src/main/java/app/AuthService.java"))
+                    .build()))
+        .buildCommand("echo build")
+        .build();
+  }
+
   private static Plan parallelSafePlan() {
     return Plan.builder()
         .planTitle("Parallel safe")
@@ -870,6 +887,49 @@ class SequentialExecutorSoftCompletionTest {
                       && thresholds != null
                       && Double.valueOf(64.0).equals(thresholds.get("TASK_LOW"));
                 }));
+  }
+
+  @Test
+  void continuation_decision_uses_semantic_category_quality_threshold() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nNullPointerException"),
+            new ToolResult.Ok("exit=1\nNullPointerException"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+                Optional.empty(),
+                List.of("continue with current candidate")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThreshold", 70.0);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdTaskLow", 64.0);
+    ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdBugFix", 88.0);
+    executor.execute(req(bugFixPlan(), true));
+
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    GoalContinuationAdvisorRequest request = requestCaptor.getValue();
+    assertEquals("BUG_FIX", request.taskCategory());
+    assertEquals(88.0, request.requiredQualityThreshold());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"taskCategory\":\"BUG_FIX\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"requiredQualityThreshold\":88.0")
+                        && s.continuationDecisionJson().contains("\"BUG_FIX\":88.0")
+                        && s.continuationDecisionJson().contains("\"TASK_LOW\":64.0")),
+        "Expected semantic category continuation policy in persisted JSON. Saw: " + saveLog);
   }
 
   @Test
