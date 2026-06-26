@@ -883,9 +883,10 @@ IDE Steps tab.
 For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed goal/continuation run events
 into `agent_action_event` rows (`RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`,
 `RUN_CONTINUATION_ACTION`, `RUN_CONTINUATION_ACTION_SKIPPED`) and
-`AgentValidationReportEventBridge` mirrors the final validation report ledger as
-`RUN_VALIDATION_EVIDENCE`, so web/CLI/VS Code clients can reload the same decision and evidence
-trail through `/api/agent/sessions/{id}/events`.
+`ValidationReportGoalProofEvaluator` maps the final validation report ledger into the same
+`GoalDonenessDecision` contract, and `AgentValidationReportEventBridge` mirrors the ledger plus
+that `runGoalDecision` as `RUN_VALIDATION_EVIDENCE`, so web/CLI/VS Code clients can reload the same
+decision and evidence trail through `/api/agent/sessions/{id}/events`.
 When the default-off continuation acting switch is enabled, `CONTINUATION_ACTION` marks the actual
 selected-candidate same-task rerun with decision, provider, model, reason, bounded attempt metadata,
 and consumed limit metadata. If runtime ceilings block an otherwise actionable recommendation,

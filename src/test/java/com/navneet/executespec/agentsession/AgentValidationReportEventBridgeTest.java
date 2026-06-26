@@ -79,6 +79,10 @@ class AgentValidationReportEventBridgeTest {
     assertThat(event.getValue().getPayloadJson()).contains("\"verifiedScore\":87");
     assertThat(event.getValue().getPayloadJson()).contains("\"id\":\"build\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"source\":\"DETERMINISTIC\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"runGoalDecision\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"state\":\"UNCERTAIN\"");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"spec adherence evidence unavailable\"");
     verify(sessionRepo).save(session);
   }
 

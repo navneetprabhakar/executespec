@@ -475,12 +475,24 @@ the same `verificationLedger[]` rows already returned by `/api/runs/{id}/report`
 the run-result Evidence tab. This gives web/CLI/VS Code clients a durable final evidence summary
 through `/api/agent/sessions/{id}/events`.
 
+Twenty-first slice 2026-06-26: final validation ledgers now produce a conservative run-level goal
+proof instead of staying as raw explanation only. `ValidationReportGoalProofEvaluator` maps the
+saved report's `pipelineResult` plus `verificationLedger[]` into the shared
+`GoalDonenessDecision` contract. It returns `DONE / STOP_DONE` only when final report result,
+delivery, build, concrete tests, reviewer, report issues, spec-adherence, and any optional
+endpoint/test-coverage proof all pass; missing/unknown/warning evidence keeps the proof
+`UNCERTAIN`, and failed completion evidence maps to `FAILED / STOP_FAILED`. The
+`ValidationReportEvidenceEvent` carries this `runGoalDecision`, and
+`AgentValidationReportEventBridge` includes it in `RUN_VALIDATION_EVIDENCE` payloads so web/CLI/VS
+Code can reload the final proof beside the raw ledger.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
 - What is the required quality threshold per category and tier?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
 - Validation-report evidence-ledger surfacing now reaches `/report`, the run-result Evidence tab,
-  and run-scoped agent-session action events; remaining work is using that final report evidence as
-  a run-level completion proof rather than only a post-run explanation.
+  and run-scoped agent-session action events, and produces a conservative `runGoalDecision` proof;
+  remaining work is deciding whether that proof should update persisted run-level goal state or
+  stay as final evidence attached to the report/session stream.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?

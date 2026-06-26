@@ -54,7 +54,7 @@ For exhaustive class discovery use:
 | `RunLifecycleService` | Shared terminal/lifecycle operations. |
 | `RunPersistenceWriter` | Status/event persistence guard. |
 | `SequentialExecutor` | Per-task execution loop; emits goal/continuation decisions with validation plus cost/token/wall-clock budget evidence. |
-| `ValidationReportService` | Generates reports, verified/rubric scores, verification ledger rows, and final validation-evidence events. |
+| `ValidationReportService` / `ValidationReportGoalProofEvaluator` | Generates reports, verified/rubric scores, verification ledger rows, final validation-evidence events, and conservative run-level goal proof from final report evidence. |
 | `TaskWaveScheduler` | Pure dependency and bounded file-conflict wave planner for future safe parallel execution. |
 | `GoalDonenessEvaluator` / `GoalContinuationPolicy` / `GoalContinuationAdvisor` | Goal-state, candidate-backed continue/escalate/stop advice, and pure policy seams. |
 | `WorkerAgent` | Native tool-calling worker. |
