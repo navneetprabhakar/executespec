@@ -345,6 +345,12 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-model-step-downs-per-task:1}")
   private int advisoryModelStepDownLimit = 1;
 
+  @Value("${execution.continuation.max-no-progress-iterations:28}")
+  private int maxGoalNoProgressIterations = 28;
+
+  @Value("${execution.continuation.max-false-done-claims:2}")
+  private int maxGoalFalseDoneClaims = 2;
+
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
@@ -1879,6 +1885,8 @@ to boot — skip it for those.""";
     data.put("maxProviderSwitches", maxProviderSwitches());
     data.put("maxModelStepUps", maxModelStepUps());
     data.put("maxModelStepDowns", maxModelStepDowns());
+    data.put("maxNoProgressIterations", maxNoProgressIterations());
+    data.put("maxFalseDoneClaims", maxFalseDoneClaims());
     data.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
@@ -1907,6 +1915,14 @@ to boot — skip it for those.""";
 
   private int maxModelStepDowns() {
     return Math.max(0, advisoryModelStepDownLimit);
+  }
+
+  private int maxNoProgressIterations() {
+    return maxGoalNoProgressIterations;
+  }
+
+  private int maxFalseDoneClaims() {
+    return maxGoalFalseDoneClaims;
   }
 
   private static Map<String, Object> selectedCandidateData(
@@ -1988,6 +2004,8 @@ to boot — skip it for those.""";
     policyNode.put("maxProviderSwitches", maxProviderSwitches());
     policyNode.put("maxModelStepUps", maxModelStepUps());
     policyNode.put("maxModelStepDowns", maxModelStepDowns());
+    policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
+    policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
@@ -2071,6 +2089,9 @@ to boot — skip it for those.""";
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
             : 0;
+    int falseDoneClaims = completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0;
+    evidence.add("noProgressIterations=" + noProgressIterations + "/" + maxNoProgressIterations());
+    evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
@@ -2081,9 +2102,9 @@ to boot — skip it for those.""";
         .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
         .meaningfulDiffCount(fileWrites)
         .noProgressIterations(noProgressIterations)
-        .maxNoProgressIterations(Math.max(1, noProgressIterations))
-        .falseDoneClaims(completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0)
-        .maxFalseDoneClaims(2)
+        .maxNoProgressIterations(maxNoProgressIterations())
+        .falseDoneClaims(falseDoneClaims)
+        .maxFalseDoneClaims(maxFalseDoneClaims())
         .budgetCeilingReached(budgetCeilingReached)
         .budgetCeilingReason(budgetCeilingReason)
         .inputTokens(cost.inputTokens())

@@ -97,6 +97,8 @@ execution:
     max-provider-switches-per-run: 1
     max-model-step-ups-per-task: 1
     max-model-step-downs-per-task: 1
+    max-no-progress-iterations: 28
+    max-false-done-claims: 2
     max-total-cost-usd: -1
     max-total-tokens: -1
     max-task-wall-clock-ms: -1

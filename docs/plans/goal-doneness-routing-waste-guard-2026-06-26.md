@@ -492,6 +492,14 @@ surface, not only the agent-session event stream. `ValidationReportDTO` includes
 goal decision shape as task summaries, and the run-result Evidence tab renders a "Final goal proof"
 card above the raw evidence ledger.
 
+Twenty-third slice 2026-06-26: the task-boundary waste guard no longer hardcodes no-progress and
+false-done thresholds. `application.yml` exposes
+`execution.continuation.max-no-progress-iterations` (default 28) and
+`max-false-done-claims` (default 2); `SequentialExecutor` passes them into `GoalEvidence`, records
+`current/max` evidence strings in typed `GOAL_DECISION` data and durable task JSON, and includes the
+same limits in the applied continuation policy payload. `GoalEvidence` keeps the existing
+`<=0`-means-disabled normalization for these thresholds.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.

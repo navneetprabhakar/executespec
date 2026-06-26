@@ -219,6 +219,19 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  private static WorkerResult workerStoppedWithoutComplete(int writes) {
+    java.util.List<String> log = new java.util.ArrayList<>();
+    for (int i = 0; i < writes; i++) log.add("writeFile(...)");
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+        .iterations(60)
+        .toolCallsDispatched(66)
+        .finalAssistantText("I stopped without completing the task.")
+        .toolCallLog(log)
+        .totalLatencyMs(115_000L)
+        .build();
+  }
+
   private static WorkerResult workerCompleted(int writes) {
     return workerCompleted(writes, 20_000L);
   }
@@ -353,6 +366,57 @@ class SequentialExecutorSoftCompletionTest {
                 event ->
                     isGoalDecisionLog(event)
                         && event.payload().contains("WASTE_RISK -> STOP_WASTE_GUARD")));
+  }
+
+  @Test
+  void goal_decision_uses_configured_no_progress_iteration_limit() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerStoppedWithoutComplete(0));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalNoProgressIterations", 120);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "UNCERTAIN".equals(event.data().get("state"))
+                        && "CONTINUE_SAME_MODEL_PROVIDER"
+                            .equals(event.data().get("recommendedDecision"))
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("noProgressIterations=60/120")));
+  }
+
+  @Test
+  void goal_decision_uses_configured_false_done_limit() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 1);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "WASTE_RISK".equals(event.data().get("state"))
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("repeated false completion claims")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("falseDoneClaims=1/1")));
   }
 
   @Test
@@ -621,6 +685,8 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "advisoryProviderSwitchLimit", 0);
     ReflectionTestUtils.setField(executor, "advisoryModelStepUpLimit", 2);
     ReflectionTestUtils.setField(executor, "advisoryModelStepDownLimit", 3);
+    ReflectionTestUtils.setField(executor, "maxGoalNoProgressIterations", 44);
+    ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 5);
     ReflectionTestUtils.setField(executor, "requireConfirmationBeforeExpensiveContinuation", true);
     ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 1.25);
     ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 12_345);
@@ -648,6 +714,8 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"maxProviderSwitches\":0")
                         && s.continuationDecisionJson().contains("\"maxModelStepUps\":2")
                         && s.continuationDecisionJson().contains("\"maxModelStepDowns\":3")
+                        && s.continuationDecisionJson().contains("\"maxNoProgressIterations\":44")
+                        && s.continuationDecisionJson().contains("\"maxFalseDoneClaims\":5")
                         && s.continuationDecisionJson().contains("\"maxTotalCostUsd\":1.25")
                         && s.continuationDecisionJson().contains("\"maxTotalTokens\":12345")
                         && s.continuationDecisionJson().contains("\"maxTaskWallClockMs\":67890")
@@ -671,6 +739,8 @@ class SequentialExecutorSoftCompletionTest {
                       && Integer.valueOf(0).equals(policy.get("maxProviderSwitches"))
                       && Integer.valueOf(2).equals(policy.get("maxModelStepUps"))
                       && Integer.valueOf(3).equals(policy.get("maxModelStepDowns"))
+                      && Integer.valueOf(44).equals(policy.get("maxNoProgressIterations"))
+                      && Integer.valueOf(5).equals(policy.get("maxFalseDoneClaims"))
                       && Double.valueOf(1.25).equals(policy.get("maxTotalCostUsd"))
                       && Integer.valueOf(12_345).equals(policy.get("maxTotalTokens"))
                       && Long.valueOf(67_890L).equals(policy.get("maxTaskWallClockMs"))

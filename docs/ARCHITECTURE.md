@@ -876,10 +876,10 @@ cost/cache/reasoning/call fields, `TOOL_CALL` includes typed remote-tool fields,
 `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice.
 Continuation decision data also carries the applied `execution.continuation.*` advisory limits so
 live clients can explain which thresholds and ceilings shaped the recommendation. Goal decision
-evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, and concrete
-budget-ceiling reasons when configured cost/token/time ceilings are crossed before proof of
-completion; those fields are structured in SSE data, durable task JSON, the run-detail API, and the
-IDE Steps tab.
+evidence includes RunCostTracker cost/token/cache/reasoning fields, task wall-clock, configured
+no-progress/false-done thresholds, and concrete budget-ceiling reasons when configured
+cost/token/time ceilings are crossed before proof of completion; those fields are structured in SSE
+data, durable task JSON, the run-detail API, and the IDE Steps tab.
 For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed goal/continuation run events
 into `agent_action_event` rows (`RUN_GOAL_DECISION`, `RUN_CONTINUATION_DECISION`,
 `RUN_CONTINUATION_ACTION`, `RUN_CONTINUATION_ACTION_SKIPPED`) and
