@@ -521,6 +521,48 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void goal_decision_groups_repeated_shell_failures_by_command_signature() {
+    stubTaskRow();
+    WorkerResult repeatedShellFailure =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(8)
+            .toolCallsDispatched(5)
+            .completionSummary("done")
+            .toolCallLog(
+                List.of(
+                    "shell({\"command\":\"npm test\"}) -> ERR: first failure",
+                    "shell({\"command\":\"npm test\"}) -> ERR: second failure",
+                    "shell({\"command\":\"npm test\"}) -> ERR: third failure"))
+            .totalLatencyMs(18_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(repeatedShellFailure);
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nTests failed"),
+            new ToolResult.Ok("exit=1\nTests failed again"));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalFalseDoneClaims", 5);
+    ReflectionTestUtils.setField(executor, "maxGoalRepeatedFailures", 3);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "WASTE_RISK".equals(event.data().get("state"))
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("repeated tool, command, or validation failures")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("repeatedFailureCount=3/3")));
+  }
+
+  @Test
   void goal_decision_uses_configured_edit_churn_limit() {
     stubTaskRow();
     WorkerResult churned =

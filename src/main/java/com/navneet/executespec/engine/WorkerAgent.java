@@ -1066,7 +1066,7 @@ public class WorkerAgent {
         }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
-        toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");
+        toolLog.add(toolCallLogEntry(tc, envelope));
         // 2026-05-04 — emit a per-mutation log line so the LiveLog shows real activity, not
         // just the token counter. Filtered to mutating + heavy tools (writes, edits, shell,
         // build) — read/list/search/git noise stays out of the user-facing log so the screen
@@ -1906,6 +1906,11 @@ public class WorkerAgent {
   private static String previewArgs(String args) {
     if (args == null) return "";
     return args.length() > 80 ? args.substring(0, 80) + "..." : args;
+  }
+
+  private static String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
+    String status = envelope != null && envelope.startsWith("{\"ok\":true") ? "OK" : "ERR";
+    return tc.name() + "(" + previewArgs(tc.arguments()) + ") -> " + status;
   }
 
   private WorkerResult errorResult(

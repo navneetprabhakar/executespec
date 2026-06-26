@@ -2489,7 +2489,24 @@ to boot — skip it for those.""";
             || lower.contains("-> err")
             || lower.contains("critic")
             || lower.contains("verify-before-complete");
-    return failure ? normalized : null;
+    if (!failure) {
+      return null;
+    }
+    String commandSignature = repeatedCommandFailureSignature(normalized);
+    return commandSignature == null ? normalized : commandSignature;
+  }
+
+  private static String repeatedCommandFailureSignature(String normalized) {
+    String lower = normalized.toLowerCase(Locale.ROOT);
+    if (!(lower.startsWith("shell(")
+        || lower.startsWith("bash(")
+        || lower.startsWith("buildproject(")
+        || lower.startsWith("runtests("))) {
+      return null;
+    }
+    int status = lower.indexOf("->");
+    String call = status < 0 ? normalized : normalized.substring(0, status).trim();
+    return call.isBlank() ? null : call;
   }
 
   private static int editChurnCount(WorkerResult workerResult) {

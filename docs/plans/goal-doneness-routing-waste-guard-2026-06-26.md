@@ -634,6 +634,14 @@ logs start labels and done result labels, preserves deterministic model-order ou
 order, falls back to sequential on executor failure/interruption, and writes the parallel/sequential
 evaluation mode into each candidate's reasons so continuation advice remains explainable.
 
+Thirty-ninth slice 2026-06-27: repeated command/test failures now use stable command signatures
+instead of exact failure-line equality. Normal `WorkerAgent` tool-call log entries include
+`-> OK` / `-> ERR`; `SequentialExecutor` collapses result-bearing `shell`, `bash`, `buildProject`,
+and `runTests` failures to their tool/argument call before counting
+`repeatedFailureCount=current/max`. This catches the same command or test failing repeatedly even
+when stderr differs between attempts, while existing exact-line signatures still cover refusals,
+critic gaps, and verify-before-complete nudges.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
