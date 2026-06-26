@@ -1,20 +1,32 @@
 package com.navneet.executespec.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.report.model.CompileResult;
+import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.report.model.ReportIssueDTO;
 import com.navneet.executespec.report.model.VerificationEvidenceDTO;
+import com.navneet.executespec.scoring.ReviewScoringService;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * RL-2026-06 — pins the report evidence ledger. verifiedScore remains the operational routing
@@ -22,9 +34,14 @@ import org.junit.jupiter.api.Test;
  */
 class ValidationReportServiceVerificationLedgerTest {
 
-  private final ValidationReportService svc =
-      new ValidationReportService(
-          null, null, new ObjectMapper(), null, null, null, mock(FeatureFlagService.class));
+  private FeatureFlagService flags;
+  private ValidationReportService svc;
+
+  @BeforeEach
+  void setUp() {
+    flags = mock(FeatureFlagService.class);
+    svc = new ValidationReportService(null, null, new ObjectMapper(), null, null, null, flags);
+  }
 
   @Test
   void ledger_separates_deterministic_and_llm_signals() {
@@ -119,6 +136,60 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("INTERNAL_FORMULA", cap.source());
     assertTrue(cap.summary().contains("reviewer failed"));
     assertEquals(70, cap.total());
+  }
+
+  @Test
+  void generateAndPersistPublishesValidationEvidenceEventAfterSave() throws Exception {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    ValidationReportGenerator generator = mock(ValidationReportGenerator.class);
+    ReviewScoringService reviewScoringService = mock(ReviewScoringService.class);
+    List<Object> events = new ArrayList<>();
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            generator,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            reviewScoringService,
+            flags,
+            events::add);
+    WorkerReport workerReport =
+        WorkerReport.builder()
+            .filesCreated(List.of("src/App.tsx"))
+            .filesModified(List.of())
+            .build();
+    ReportInput input =
+        new ReportInput(
+            null,
+            List.of(workerReport),
+            null,
+            CompileResult.passed(1),
+            List.of(),
+            null,
+            List.of(),
+            false,
+            null,
+            null);
+    when(generator.generate(input))
+        .thenReturn(new ValidationReportGenerator.LlmReportResult("# Report", "model-a", 0, 0));
+    when(reviewScoringService.score(null, null, null, null, null))
+        .thenReturn(new ReviewScoringService.Scores(null, null, null, null, null, null));
+    when(repository.findByRunId("run-1")).thenReturn(Optional.empty());
+    when(repository.save(org.mockito.ArgumentMatchers.any(ValidationReport.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
+
+    Optional<ValidationReport> saved = service.generateAndPersist("run-1", input);
+
+    assertTrue(saved.isPresent());
+    assertFalse(events.isEmpty(), "expected a validation evidence event");
+    ValidationReportEvidenceEvent event =
+        assertInstanceOf(ValidationReportEvidenceEvent.class, events.get(0));
+    assertEquals("run-1", event.runId());
+    assertEquals(saved.get().getId(), event.reportId());
+    assertEquals(saved.get().getVerifiedScore(), event.verifiedScore());
+    assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
+    assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
   }
 
   private static void assertEntry(

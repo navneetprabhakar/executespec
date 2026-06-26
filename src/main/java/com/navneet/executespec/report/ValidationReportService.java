@@ -30,16 +30,16 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ValidationReportService {
 
   private final ValidationReportRepository repository;
@@ -49,6 +49,46 @@ public class ValidationReportService {
   private final StateStore stateStore;
   private final ReviewScoringService reviewScoringService;
   private final FeatureFlagService featureFlagService;
+  private final ApplicationEventPublisher eventPublisher;
+
+  @Autowired
+  public ValidationReportService(
+      ValidationReportRepository repository,
+      ValidationReportGenerator generator,
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry,
+      StateStore stateStore,
+      ReviewScoringService reviewScoringService,
+      FeatureFlagService featureFlagService,
+      ApplicationEventPublisher eventPublisher) {
+    this.repository = repository;
+    this.generator = generator;
+    this.objectMapper = objectMapper;
+    this.meterRegistry = meterRegistry;
+    this.stateStore = stateStore;
+    this.reviewScoringService = reviewScoringService;
+    this.featureFlagService = featureFlagService;
+    this.eventPublisher = eventPublisher;
+  }
+
+  ValidationReportService(
+      ValidationReportRepository repository,
+      ValidationReportGenerator generator,
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry,
+      StateStore stateStore,
+      ReviewScoringService reviewScoringService,
+      FeatureFlagService featureFlagService) {
+    this(
+        repository,
+        generator,
+        objectMapper,
+        meterRegistry,
+        stateStore,
+        reviewScoringService,
+        featureFlagService,
+        null);
+  }
 
   /**
    * v2.5.10 — when enabled, ReviewScoringService anchors on verifiedScore (build + tests + verdict)
@@ -251,6 +291,7 @@ public class ValidationReportService {
       // Delete any existing report for this run (rework edge case)
       repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
       var saved = repository.save(report);
+      publishEvidenceEvent(saved, issues);
 
       // 5. Metrics
       meterRegistry
@@ -284,6 +325,21 @@ public class ValidationReportService {
           .counter("executespec.report.errors", "error_type", e.getClass().getSimpleName())
           .increment();
       return Optional.empty();
+    }
+  }
+
+  private void publishEvidenceEvent(ValidationReport saved, List<ReportIssueDTO> issues) {
+    if (eventPublisher == null || saved == null) {
+      return;
+    }
+    try {
+      eventPublisher.publishEvent(
+          ValidationReportEvidenceEvent.from(saved, buildVerificationLedger(saved, issues)));
+    } catch (RuntimeException ex) {
+      log.debug(
+          "Failed to publish validation evidence event for run={}: {}",
+          saved.getRunId(),
+          ex.getMessage());
     }
   }
 
