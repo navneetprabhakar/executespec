@@ -88,7 +88,7 @@ Every tier-routed agent should resolve through `ModelResolver` and call through 
 
 ## Migrations
 
-Migration head in this worktree: `V250`.
+Migration head in this worktree: `V251`.
 
 Recent relevant migrations:
 
@@ -107,6 +107,7 @@ Recent relevant migrations:
 - `V248`: FREE tier sentinel fix — force `tier_config.monthly_run_limit` and `billing_plan.run_limit` back to 5 when stale rows still carry any other value, especially `-1` unlimited.
 - `V249`: seed `execution.goal-decision.enforcement.enabled` default OFF — executor task-boundary aborts after negative goal decisions.
 - `V250`: `agent_task.goal_doneness_json` and `agent_task.continuation_decision_json` — durable task-level goal state and next-action advice for run detail clients.
+- `V251`: `pipeline_run.run_goal_doneness_json` — durable final run-level goal proof derived from the validation-report ledger.
 
 ## Deprecated / Transitional Areas
 

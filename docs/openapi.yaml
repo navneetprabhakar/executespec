@@ -4223,6 +4223,10 @@ components:
         review:
           type: object
           nullable: true
+        runGoalDoneness:
+          type: object
+          nullable: true
+          description: Durable final run-level goal proof derived from the validation-report ledger.
         createdAt:
           type: string
           format: date-time

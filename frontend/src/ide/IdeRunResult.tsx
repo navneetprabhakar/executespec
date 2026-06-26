@@ -1293,6 +1293,28 @@ export default function IdeRunResult() {
         {tab === 'Tasks' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <div className='ide-h1'>Steps</div>
+            {run?.runGoalDoneness && (
+              <div className='ide-card' style={{marginBottom: 12}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                  <IdeBadge kind={goalStateKind(run.runGoalDoneness.state)}>
+                    {run.runGoalDoneness.state || 'UNKNOWN'}
+                  </IdeBadge>
+                  {run.runGoalDoneness.recommendedDecision && (
+                    <span className='ide-mono' style={{fontSize: 12}}>
+                      {run.runGoalDoneness.recommendedDecision}
+                    </span>
+                  )}
+                </div>
+                {run.runGoalDoneness.reason && (
+                  <div style={{fontSize: 13, marginTop: 8}}>{run.runGoalDoneness.reason}</div>
+                )}
+                {run.runGoalDoneness.recommendedNextStep && (
+                  <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                    Next: {run.runGoalDoneness.recommendedNextStep}
+                  </div>
+                )}
+              </div>
+            )}
             {!run?.tasks?.length ? (
               <div className='ide-empty'>No steps.</div>
             ) : (

@@ -233,6 +233,7 @@ public class RunMapper {
         .statusReason(r.getStatusReason())
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
+        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson()))
         .tasks(
             tasks.stream()
                 .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
