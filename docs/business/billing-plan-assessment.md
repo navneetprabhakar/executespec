@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | Fallback quotas/comments in `TierEnforcementService` still mention Free=15 after V248 made the DB source of truth Free=5. | Medium | Not changed in this docs-only pass. Runtime normally reads DB, but fallback/comment drift should be fixed in code. |
 | Several code comments and DTO comments still said Team requires 2-20 seats. | Low | Updated comments to 1-20. Enforcement was already correct. |
-| Core docs had stale migration-head references while the current worktree is V249. | Low | Updated active docs to V249. |
+| Core docs had stale migration-head references at assessment time. | Low | Updated active docs in that pass; current migration head is tracked in the root docs and CODEMAP. |
 | `docs/billing-workflows.html` still described PRO as hidden/grandfathered. | Medium | Needs HTML refresh or replacement; do not use as current pricing truth until updated. |
 | `website/pricing-analysis.md` is explicitly pre-V141 and contains old MAX/Pro economics. | Medium | Treat as historical. Current assessment supersedes it for business planning. |
 

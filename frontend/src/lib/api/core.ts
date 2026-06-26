@@ -285,6 +285,35 @@ export interface TaskSummary {
   readmeUpdated: boolean;
   /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
   failureReason?: string | null;
+  /** Structured goal-doneness decision from the executor task boundary. */
+  goalDoneness?: {
+    state?: string;
+    recommendedDecision?: string;
+    reason?: string;
+    goalSummary?: string;
+    completedItems?: string[];
+    incompleteItems?: string[];
+    evidence?: string[];
+    risks?: string[];
+    userInputRequired?: boolean;
+    anotherModelProviderMightHelp?: boolean;
+  } | null;
+  /** Structured continuation / step-up / provider-change advice from the executor. */
+  continuationDecision?: {
+    decision?: string;
+    selectedCandidate?: {
+      provider?: string;
+      model?: string;
+      taskCategory?: string;
+      qualityScore?: number;
+      requiredQualityThreshold?: number;
+      costPerMillionTokens?: number;
+      latencyP50Ms?: number;
+      latencyP95Ms?: number;
+      reasons?: string[];
+    } | null;
+    reasons?: string[];
+  } | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
   objective?: string | null;
   /** The worker's summary of what was implemented. */

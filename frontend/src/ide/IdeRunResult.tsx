@@ -48,6 +48,21 @@ function Kv({k, v}: {k: string; v: React.ReactNode}) {
   );
 }
 
+function taskGoalLine(t: api.TaskSummary): string | null {
+  const goal = t.goalDoneness;
+  const continuation = t.continuationDecision;
+  if (!goal && !continuation) return null;
+  const goalPart =
+    goal?.state && goal?.recommendedDecision
+      ? `Goal ${goal.state} -> ${goal.recommendedDecision}`
+      : goal?.state
+        ? `Goal ${goal.state}`
+        : null;
+  const nextPart = continuation?.decision ? `Next ${continuation.decision}` : null;
+  const reason = continuation?.reasons?.[0] || goal?.reason || null;
+  return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
+}
+
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -1230,61 +1245,69 @@ export default function IdeRunResult() {
               <div className='ide-empty'>No steps.</div>
             ) : (
               <div className='ide-card' style={{padding: 0}}>
-                {run.tasks.map((t, i) => (
-                  <div
-                    key={t.taskId}
-                    style={{
-                      padding: '12px 16px',
-                      borderBottom:
-                        i < run.tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    }}
-                  >
-                    <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                      <IdeBadge
-                        kind={
-                          t.status === 'COMPLETE' || t.status === 'SUCCESS'
-                            ? 'ok'
-                            : t.status === 'FAILED'
-                              ? 'bad'
-                              : 'warn'
-                        }
-                      >
-                        {t.status}
-                      </IdeBadge>
-                      <span style={{flex: 1, fontWeight: 500}}>{t.title}</span>
-                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                        {fmtDur(t.durationMs)}
-                      </span>
-                      {(t.status === 'FAILED' ||
-                        t.status === 'PARTIAL' ||
-                        t.status === 'BLOCKED') && (
-                        <button
-                          className='ide-btn ghost'
-                          style={{padding: '3px 8px'}}
-                          disabled={busy === t.taskId}
-                          onClick={() =>
-                            action(
-                              t.taskId,
-                              () => api.retryTask(runId, t.taskId),
-                              () => 'Retry started.',
-                            )
+                {run.tasks.map((t, i) => {
+                  const goalLine = taskGoalLine(t);
+                  return (
+                    <div
+                      key={t.taskId}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom:
+                          i < run.tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      }}
+                    >
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+                        <IdeBadge
+                          kind={
+                            t.status === 'COMPLETE' || t.status === 'SUCCESS'
+                              ? 'ok'
+                              : t.status === 'FAILED'
+                                ? 'bad'
+                                : 'warn'
                           }
                         >
-                          Retry
-                        </button>
+                          {t.status}
+                        </IdeBadge>
+                        <span style={{flex: 1, fontWeight: 500}}>{t.title}</span>
+                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          {fmtDur(t.durationMs)}
+                        </span>
+                        {(t.status === 'FAILED' ||
+                          t.status === 'PARTIAL' ||
+                          t.status === 'BLOCKED') && (
+                          <button
+                            className='ide-btn ghost'
+                            style={{padding: '3px 8px'}}
+                            disabled={busy === t.taskId}
+                            onClick={() =>
+                              action(
+                                t.taskId,
+                                () => api.retryTask(runId, t.taskId),
+                                () => 'Retry started.',
+                              )
+                            }
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                      {t.failureReason && (
+                        <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}>
+                          {t.failureReason}
+                        </div>
+                      )}
+                      <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                        {(t.provider || '').toLowerCase()} · {t.model || t.assignedModel} ·{' '}
+                        {num(t.inputTokens + t.outputTokens)} tok
+                      </div>
+                      {goalLine && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          {goalLine}
+                        </div>
                       )}
                     </div>
-                    {t.failureReason && (
-                      <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}>
-                        {t.failureReason}
-                      </div>
-                    )}
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                      {(t.provider || '').toLowerCase()} · {t.model || t.assignedModel} ·{' '}
-                      {num(t.inputTokens + t.outputTokens)} tok
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

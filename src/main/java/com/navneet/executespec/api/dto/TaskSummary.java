@@ -2,6 +2,8 @@ package com.navneet.executespec.api.dto;
 
 import java.time.Instant;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 public record TaskSummary(
     String taskId,
     String title,
@@ -21,6 +23,10 @@ public record TaskSummary(
     Instant completedAt,
     /** Human-readable reason why this task is PARTIAL / BLOCKED / FAILED. */
     String failureReason,
+    /** Structured goal-doneness decision from the executor task boundary. */
+    JsonNode goalDoneness,
+    /** Structured continuation / step-up / provider-change advice from the executor. */
+    JsonNode continuationDecision,
     /**
      * The objective/description from the planner's TaskDefinition. Shown in the UI when expanded.
      */

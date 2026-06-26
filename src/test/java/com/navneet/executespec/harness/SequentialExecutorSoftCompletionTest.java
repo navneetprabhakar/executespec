@@ -112,7 +112,12 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */
-  private record SaveSnapshot(String taskKey, String status, String lastLlmFailure) {}
+  private record SaveSnapshot(
+      String taskKey,
+      String status,
+      String lastLlmFailure,
+      String goalDonenessJson,
+      String continuationDecisionJson) {}
 
   private final java.util.List<SaveSnapshot> saveLog = new java.util.ArrayList<>();
 
@@ -144,7 +149,13 @@ class SequentialExecutorSoftCompletionTest {
                   break;
                 }
               }
-              saveLog.add(new SaveSnapshot(key, t.getStatus(), t.getLastLlmFailure()));
+              saveLog.add(
+                  new SaveSnapshot(
+                      key,
+                      t.getStatus(),
+                      t.getLastLlmFailure(),
+                      t.getGoalDonenessJson(),
+                      t.getContinuationDecisionJson()));
               return t;
             });
   }
@@ -432,6 +443,16 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals("claude-haiku-4-5-20251001", request.currentModel());
     assertEquals("TASK_LOW", request.taskCategory());
     assertTrue(request.qualityInsufficient());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.goalDonenessJson() != null
+                        && s.goalDonenessJson().contains("\"state\":\"NOT_DONE_BUT_PROGRESSING\"")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")),
+        "Expected persisted goal/continuation JSON on T1. Saw: " + saveLog);
     verify(broadcaster)
         .emit(
             anyString(),

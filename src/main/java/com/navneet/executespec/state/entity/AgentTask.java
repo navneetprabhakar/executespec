@@ -115,6 +115,22 @@ public class AgentTask {
   @Column(name = "failure_diagnostic_json", columnDefinition = "TEXT")
   private String failureDiagnosticJson;
 
+  /**
+   * V250 (RL-2026-06-198) — structured goal-doneness result emitted by {@code SequentialExecutor}
+   * at terminal task boundaries. Mirrors the SSE "Goal decision" event so API, web, and terminal
+   * clients do not need to scrape logs.
+   */
+  @Column(name = "goal_doneness_json", columnDefinition = "TEXT")
+  private String goalDonenessJson;
+
+  /**
+   * V250 (RL-2026-06-198) — structured continuation advice emitted by {@code SequentialExecutor}.
+   * Advisory-only: this records step-up/step-down/provider-change recommendations without implying
+   * that the executor switched model/provider.
+   */
+  @Column(name = "continuation_decision_json", columnDefinition = "TEXT")
+  private String continuationDecisionJson;
+
   @Column(name = "tenant_id", nullable = false)
   @Builder.Default
   private String tenantId = "default";
