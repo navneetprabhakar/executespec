@@ -101,6 +101,16 @@ public class GoalDonenessEvaluator {
           false);
     }
 
+    if (editChurnLimitReached(evidence)) {
+      return fromEvidence(
+          evidence,
+          GoalDonenessState.WASTE_RISK,
+          RunContinuationDecision.STOP_WASTE_GUARD,
+          "same file was repeatedly mutated without proof of validation improvement",
+          false,
+          false);
+    }
+
     if (noProgressLimitReached(evidence)) {
       return fromEvidence(
           evidence,
@@ -169,6 +179,10 @@ public class GoalDonenessEvaluator {
 
   private static boolean repeatedFailureLimitReached(GoalEvidence evidence) {
     return evidence.repeatedFailureCount() >= evidence.maxRepeatedFailures();
+  }
+
+  private static boolean editChurnLimitReached(GoalEvidence evidence) {
+    return evidence.validationFailed() && evidence.editChurnCount() >= evidence.maxEditChurn();
   }
 
   private static GoalDonenessDecision fromEvidence(
