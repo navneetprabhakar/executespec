@@ -385,10 +385,19 @@ events; `RunMapper` exposes them as parsed `TaskSummary.goalDoneness` and
 `Goal ... -> ... · Next ...` line. This improves web/CLI-consumable visibility without enabling
 automatic provider/model switching.
 
+Thirteenth slice 2026-06-26: live run-event visibility no longer requires clients to scrape the
+legacy `LOG` payload. `RunEvent` now has explicit `GOAL_DECISION` and `CONTINUATION_DECISION`
+events with `schemaVersion=1` and structured `data` fields for state, recommended decision, reason,
+evidence, risks, user-input flag, selected candidate, and continuation reasons. `SequentialExecutor`
+emits those typed events alongside the existing `Goal decision: ...` and `Continuation decision: ...`
+log lines, preserving old web/CLI/VS Code readers while giving terminal/TUI clients a stable
+machine-readable contract.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
 - What is the required quality threshold per category and tier?
 - Should user-selected provider be a hard pin, or can ExecuteSpec ask for confirmation to override it on quality grounds?
-- Where should continuation explanations be surfaced first: SSE logs, task card diagnostic JSON, validation report evidence ledger, or agent-session action events?
+- Validation-report evidence-ledger and agent-session action-event surfacing are still pending; SSE
+  and run-detail task cards now have structured coverage.
 - Should a failed step-up count against credits if it stops as waste-risk before producing useful output?

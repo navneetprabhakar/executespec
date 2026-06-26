@@ -409,6 +409,16 @@ class SequentialExecutorSoftCompletionTest {
             anyString(),
             argThat(
                 event ->
+                    isGoalDecisionEvent(event)
+                        && "DONE".equals(event.data().get("state"))
+                        && "STOP_DONE".equals(event.data().get("recommendedDecision"))
+                        && "goal satisfied with validation evidence and required outputs present"
+                            .equals(event.data().get("reason"))));
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
                     isContinuationDecisionLog(event)
                         && event.payload().contains("STOP_DONE")
                         && event.payload().contains("goal satisfied with validation evidence")));
@@ -461,6 +471,17 @@ class SequentialExecutorSoftCompletionTest {
                     isContinuationDecisionLog(event)
                         && event.payload().contains("STEP_UP_MODEL")
                         && event.payload().contains("stronger eligible model clears threshold")));
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isContinuationDecisionEvent(event)
+                        && "STEP_UP_MODEL".equals(event.data().get("decision"))
+                        && ((List<?>) event.data().get("reasons"))
+                            .contains(
+                                "quality is insufficient; stronger eligible model clears"
+                                    + " threshold")));
   }
 
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate
@@ -502,10 +523,18 @@ class SequentialExecutorSoftCompletionTest {
         && event.payload().startsWith("Goal decision:");
   }
 
+  private static boolean isGoalDecisionEvent(RunEvent event) {
+    return event != null && "GOAL_DECISION".equals(event.type()) && event.data() != null;
+  }
+
   private static boolean isContinuationDecisionLog(RunEvent event) {
     return event != null
         && "LOG".equals(event.type())
         && event.payload() != null
         && event.payload().startsWith("Continuation decision:");
+  }
+
+  private static boolean isContinuationDecisionEvent(RunEvent event) {
+    return event != null && "CONTINUATION_DECISION".equals(event.type()) && event.data() != null;
   }
 }
