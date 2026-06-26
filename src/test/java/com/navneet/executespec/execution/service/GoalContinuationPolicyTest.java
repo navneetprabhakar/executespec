@@ -114,6 +114,24 @@ class GoalContinuationPolicyTest {
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
     assertThat(decision.terminal()).isTrue();
+    assertThat(decision.reasons().getFirst()).contains("no useful model/provider escalation");
+  }
+
+  @Test
+  void wasteRiskStopsWhenNoStrongerEligibleCandidateRemains() {
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(wasteRisk(true), current(), ranked(current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_WASTE_GUARD);
+    assertThat(decision.terminal()).isTrue();
+    assertThat(decision.selectedCandidate()).isEmpty();
+    assertThat(decision.reasons().getFirst())
+        .contains("no useful model/provider escalation remains within configured limits");
   }
 
   @Test
