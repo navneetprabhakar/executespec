@@ -67,7 +67,7 @@ public class GoalDonenessEvaluator {
           evidence,
           GoalDonenessState.WASTE_RISK,
           RunContinuationDecision.STOP_WASTE_GUARD,
-          "budget, token, iteration, or wall-clock ceiling reached before proof of completion",
+          evidence.budgetCeilingReason() + " before proof of completion",
           false,
           false);
     }

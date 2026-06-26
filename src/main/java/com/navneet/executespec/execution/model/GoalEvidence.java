@@ -25,6 +25,15 @@ public record GoalEvidence(
     int falseDoneClaims,
     int maxFalseDoneClaims,
     boolean budgetCeilingReached,
+    String budgetCeilingReason,
+    int inputTokens,
+    int outputTokens,
+    int cacheReadTokens,
+    int cacheWriteTokens,
+    int reasoningTokens,
+    int totalTokens,
+    double costUsd,
+    long wallClockMs,
     boolean blockedByEnvironment,
     boolean unsafeContinuation,
     boolean completeTaskClaimed,
@@ -38,6 +47,18 @@ public record GoalEvidence(
     maxNoProgressIterations =
         maxNoProgressIterations <= 0 ? Integer.MAX_VALUE : maxNoProgressIterations;
     maxFalseDoneClaims = maxFalseDoneClaims <= 0 ? Integer.MAX_VALUE : maxFalseDoneClaims;
+    budgetCeilingReason =
+        budgetCeilingReason == null || budgetCeilingReason.isBlank()
+            ? "budget, token, iteration, or wall-clock ceiling reached"
+            : budgetCeilingReason;
+    inputTokens = Math.max(0, inputTokens);
+    outputTokens = Math.max(0, outputTokens);
+    cacheReadTokens = Math.max(0, cacheReadTokens);
+    cacheWriteTokens = Math.max(0, cacheWriteTokens);
+    reasoningTokens = Math.max(0, reasoningTokens);
+    totalTokens = Math.max(0, totalTokens);
+    costUsd = Math.max(0.0, costUsd);
+    wallClockMs = Math.max(0L, wallClockMs);
     completedItems = completedItems == null ? List.of() : List.copyOf(completedItems);
     incompleteItems = incompleteItems == null ? List.of() : List.copyOf(incompleteItems);
     evidence = evidence == null ? List.of() : List.copyOf(evidence);

@@ -220,6 +220,10 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   private static WorkerResult workerCompleted(int writes) {
+    return workerCompleted(writes, 20_000L);
+  }
+
+  private static WorkerResult workerCompleted(int writes, long totalLatencyMs) {
     java.util.List<String> log = new java.util.ArrayList<>();
     for (int i = 0; i < writes; i++) log.add("writeFile(...)");
     return WorkerResult.builder()
@@ -228,7 +232,7 @@ class SequentialExecutorSoftCompletionTest {
         .toolCallsDispatched(15)
         .completionSummary("done")
         .toolCallLog(log)
-        .totalLatencyMs(20_000L)
+        .totalLatencyMs(totalLatencyMs)
         .build();
   }
 
@@ -349,6 +353,93 @@ class SequentialExecutorSoftCompletionTest {
                 event ->
                     isGoalDecisionLog(event)
                         && event.payload().contains("WASTE_RISK -> STOP_WASTE_GUARD")));
+  }
+
+  @Test
+  void goal_decision_uses_configured_cost_ceiling_evidence() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(120, 40, 0, 0, 0.25, 2));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 0.10);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "WASTE_RISK".equals(event.data().get("state"))
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("configured total cost ceiling reached")
+                        && ((List<?>) event.data().get("evidence")).contains("costUsd=0.250000")));
+  }
+
+  @Test
+  void goal_decision_uses_configured_token_ceiling_evidence() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(100, 80, 10, 15, 0.01, 2));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 200);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("configured total token ceiling reached")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("totalTrackedTokens=205")));
+  }
+
+  @Test
+  void goal_decision_uses_configured_task_wall_clock_ceiling_evidence() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2, 25_000L));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "maxGoalTaskWallClockMs", 10_000L);
+    executor.execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("configured task wall-clock ceiling reached")
+                        && ((List<?>) event.data().get("evidence")).contains("wallClockMs=20000")));
   }
 
   @Test
