@@ -286,6 +286,13 @@ Status 2026-06-26: this first slice has landed. `GoalDonenessState` and
 `ModelProviderRankingPolicyTest` pins the quality-threshold and quality/cost/latency ordering.
 No runtime routing, worker, or executor behavior calls the policy yet.
 
+Second slice 2026-06-26: `GoalEvidence`, `GoalDonenessDecision`, and the pure
+`GoalDonenessEvaluator` landed under `execution/`. `GoalDonenessEvaluatorTest` pins the
+conservative state mapping: proven done, false done, environment blocked, uncertain validation,
+no-progress waste guard, repeated false completion, budget ceiling, and failed validation with no
+useful progress. Runtime execution is still unchanged until `SequentialExecutor` starts producing
+`GoalEvidence` at the task boundary.
+
 ## Open Questions
 
 - What are the initial task categories? Candidate set: `GREENFIELD_BUILD`, `PROJECT_PATCH`, `BUG_FIX`, `TEST_FIX`, `REFACTOR`, `BENCHMARK_PATCH`, `TERMINAL_TASK`, `READ_ONLY_HELP`.
