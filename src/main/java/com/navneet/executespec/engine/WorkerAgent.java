@@ -1909,7 +1909,7 @@ public class WorkerAgent {
   }
 
   private static String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
-    String status = envelope != null && envelope.startsWith("{\"ok\":true") ? "OK" : "ERR";
+    String status = "ok".equals(envelopeStatus(envelope)) ? "OK" : "ERR";
     return tc.name() + "(" + previewArgs(tc.arguments()) + ") -> " + status;
   }
 
