@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
 
 import lombok.Builder;
@@ -30,6 +31,8 @@ import lombok.Builder;
  *     default into every row, masking the tier-correct workhouse/planning escalation.
  * @param goalDonenessDecision conservative goal-based continuation decision emitted at the terminal
  *     task boundary. Null for synthetic/resume-skipped outcomes.
+ * @param continuationDecision bounded next-action advice derived from the goal decision and
+ *     provider/model candidates. Null for synthetic/resume-skipped outcomes.
  */
 @Builder
 public record TaskOutcome(
@@ -46,7 +49,8 @@ public record TaskOutcome(
     int toolCallsDispatched,
     String dispatchedProvider,
     String dispatchedModel,
-    GoalDonenessDecision goalDonenessDecision) {
+    GoalDonenessDecision goalDonenessDecision,
+    GoalContinuationPolicyDecision continuationDecision) {
 
   public enum Status {
     /** Worker completed AND smoke test passed. */

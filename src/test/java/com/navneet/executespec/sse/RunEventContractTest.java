@@ -104,4 +104,30 @@ class RunEventContractTest {
     assertEquals("anthropic", candidate.get("provider"));
     assertEquals("claude-sonnet-4-6", candidate.get("model"));
   }
+
+  @Test
+  void continuationActionCarriesTypedRerunEnvelope() {
+    RunEvent event =
+        RunEvent.continuationAction(
+            "run-1",
+            "task-1",
+            "Continuation action: STEP_UP_MODEL -> rerun task with openai/gpt-5.4 (quality)",
+            "STEP_UP_MODEL",
+            "openai",
+            "gpt-5.4",
+            "quality",
+            1,
+            1);
+
+    assertEquals("CONTINUATION_ACTION", event.type());
+    assertEquals(
+        "Continuation action: STEP_UP_MODEL -> rerun task with openai/gpt-5.4 (quality)",
+        event.payload());
+    assertEquals("STEP_UP_MODEL", event.data().get("decision"));
+    assertEquals("openai", event.data().get("selectedProvider"));
+    assertEquals("gpt-5.4", event.data().get("selectedModel"));
+    assertEquals("quality", event.data().get("reason"));
+    assertEquals(1, event.data().get("attempt"));
+    assertEquals(1, event.data().get("maxAttempts"));
+  }
 }
