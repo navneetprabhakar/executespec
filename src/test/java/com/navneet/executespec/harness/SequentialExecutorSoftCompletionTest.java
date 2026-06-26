@@ -23,6 +23,10 @@ import com.navneet.executespec.agent.PlannedTask.Complexity;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -31,6 +35,7 @@ import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Pins the soft-completion gate introduced by Fix C (2026-05-03, run a076c876 T2 diagnosis).
@@ -75,6 +80,10 @@ class SequentialExecutorSoftCompletionTest {
       mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
 
   private SequentialExecutor newExecutor() {
+    return newExecutor(null);
+  }
+
+  private SequentialExecutor newExecutor(GoalContinuationAdvisor goalContinuationAdvisor) {
     // ModelResolver is called from tierConfigFor — stub it to throw so we fall back to the
     // run-level provider+model. That avoids needing real Spring config wiring in this unit
     // test.
@@ -98,8 +107,8 @@ class SequentialExecutorSoftCompletionTest {
         featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
-        org.mockito.Mockito.mock(
-            com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
+        org.mockito.Mockito.mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        goalContinuationAdvisor);
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */
@@ -392,6 +401,45 @@ class SequentialExecutorSoftCompletionTest {
                     isContinuationDecisionLog(event)
                         && event.payload().contains("STOP_DONE")
                         && event.payload().contains("goal satisfied with validation evidence")));
+  }
+
+  @Test
+  void continuation_decision_uses_candidate_backed_advisor_when_available() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STEP_UP_MODEL,
+                Optional.empty(),
+                List.of("quality is insufficient; stronger eligible model clears threshold")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    GoalContinuationAdvisorRequest request = requestCaptor.getValue();
+    assertEquals("anthropic", request.currentProvider());
+    assertEquals("claude-haiku-4-5-20251001", request.currentModel());
+    assertEquals("TASK_LOW", request.taskCategory());
+    assertTrue(request.qualityInsufficient());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isContinuationDecisionLog(event)
+                        && event.payload().contains("STEP_UP_MODEL")
+                        && event.payload().contains("stronger eligible model clears threshold")));
   }
 
   // 5: COMPLETED_BY_STAGNATION + writes flows through soft-completion gate

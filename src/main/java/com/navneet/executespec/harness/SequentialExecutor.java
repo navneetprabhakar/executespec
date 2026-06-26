@@ -2,6 +2,7 @@ package com.navneet.executespec.harness;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -10,10 +11,12 @@ import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.GoalContinuationRequest;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.execution.model.GoalEvidence;
+import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
@@ -311,8 +314,13 @@ to boot — skip it for those.""";
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService
       gcsTaskCheckpointService;
 
+  private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
+
+  private static final double DEFAULT_GOAL_REQUIRED_QUALITY_THRESHOLD = 70.0;
+  private static final int DEFAULT_ADVISORY_PROVIDER_SWITCH_LIMIT = 1;
+  private static final int DEFAULT_ADVISORY_MODEL_STEP_LIMIT = 1;
 
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
@@ -836,7 +844,14 @@ to boot — skip it for those.""";
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
         GoalDonenessDecision goalDecision =
             emitGoalDecision(
-                runId, task, primary, TaskOutcome.Status.WORKER_FAILED, null, failureReason);
+                runId,
+                task,
+                primary,
+                TaskOutcome.Status.WORKER_FAILED,
+                null,
+                failureReason,
+                cfg.provider,
+                cfg.model);
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
@@ -880,7 +895,8 @@ to boot — skip it for those.""";
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalDonenessDecision goalDecision =
-          emitGoalDecision(runId, task, primary, status, null, softWarnReason);
+          emitGoalDecision(
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -912,7 +928,8 @@ to boot — skip it for those.""";
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalDonenessDecision goalDecision =
-          emitGoalDecision(runId, task, primary, status, null, softWarnReason);
+          emitGoalDecision(
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -939,7 +956,8 @@ to boot — skip it for those.""";
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalDonenessDecision goalDecision =
-          emitGoalDecision(runId, task, primary, status, true, softWarnReason);
+          emitGoalDecision(
+              runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -977,7 +995,14 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       GoalDonenessDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
+              runId,
+              task,
+              primary,
+              TaskOutcome.Status.COMPLETED_WITH_WARNING,
+              false,
+              reason,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1100,7 +1125,9 @@ to boot — skip it for those.""";
                   crossProviderRetry.result(),
                   TaskOutcome.Status.SUCCESS_AFTER_RETRY,
                   true,
-                  null);
+                  null,
+                  crossProviderRetry.provider(),
+                  crossProviderRetry.model());
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1133,7 +1160,9 @@ to boot — skip it for those.""";
               retry,
               TaskOutcome.Status.COMPLETED_WITH_WARNING,
               false,
-              retryFailureReason);
+              retryFailureReason,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1159,7 +1188,15 @@ to boot — skip it for those.""";
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalDonenessDecision goalDecision =
-          emitGoalDecision(runId, task, retry, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+              true,
+              null,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1201,7 +1238,9 @@ to boot — skip it for those.""";
               TaskOutcome.Status.SUCCESS,
               false,
               "Smoke failed after retry but no files were written; treated as"
-                  + " verify-only/environmental");
+                  + " verify-only/environmental",
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1258,7 +1297,14 @@ to boot — skip it for those.""";
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
           GoalDonenessDecision goalDecision =
               emitGoalDecision(
-                  runId, task, retry2, TaskOutcome.Status.SUCCESS_AFTER_RETRY, true, null);
+                  runId,
+                  task,
+                  retry2,
+                  TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+                  true,
+                  null,
+                  cfg.provider,
+                  cfg.model);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1309,7 +1355,14 @@ to boot — skip it for those.""";
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
     GoalDonenessDecision goalDecision =
         emitGoalDecision(
-            runId, task, retry, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason);
+            runId,
+            task,
+            retry,
+            TaskOutcome.Status.COMPLETED_WITH_WARNING,
+            false,
+            reason,
+            cfg.provider,
+            cfg.model);
     return TaskOutcome.builder()
         .taskId(task.id())
         .taskTitle(task.title())
@@ -1334,7 +1387,9 @@ to boot — skip it for those.""";
       WorkerResult workerResult,
       TaskOutcome.Status finalStatus,
       Boolean smokePassed,
-      String failureReason) {
+      String failureReason,
+      String dispatchedProvider,
+      String dispatchedModel) {
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
             buildGoalEvidence(task, workerResult, finalStatus, smokePassed, failureReason));
@@ -1357,8 +1412,7 @@ to boot — skip it for those.""";
                 + decision.reason()
                 + ")"));
     GoalContinuationPolicyDecision continuationDecision =
-        goalContinuationPolicy.decide(
-            GoalContinuationRequest.builder().goalDecision(decision).build());
+        decideContinuation(task, decision, dispatchedProvider, dispatchedModel);
     log.info(
         "Executor task={} continuationDecision decision={} reason={}",
         task.id(),
@@ -1375,6 +1429,76 @@ to boot — skip it for those.""";
                 + firstReason(continuationDecision)
                 + ")"));
     return decision;
+  }
+
+  private GoalContinuationPolicyDecision decideContinuation(
+      PlannedTask task, GoalDonenessDecision decision, String provider, String model) {
+    if (goalContinuationAdvisor == null) {
+      return decideContinuationFallback(decision);
+    }
+    try {
+      return goalContinuationAdvisor.advise(
+          GoalContinuationAdvisorRequest.builder()
+              .goalDecision(decision)
+              .currentProvider(provider)
+              .currentModel(model)
+              .taskCategory(taskCategory(task))
+              .requiredQualityThreshold(DEFAULT_GOAL_REQUIRED_QUALITY_THRESHOLD)
+              .providerPreferenceOrder(providerPreferenceOrder(provider))
+              .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
+              .maxProviderSwitches(DEFAULT_ADVISORY_PROVIDER_SWITCH_LIMIT)
+              .maxModelStepUps(DEFAULT_ADVISORY_MODEL_STEP_LIMIT)
+              .maxModelStepDowns(DEFAULT_ADVISORY_MODEL_STEP_LIMIT)
+              .build());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
+              + " policy",
+          task.id(),
+          provider,
+          model,
+          ex);
+      return decideContinuationFallback(decision);
+    }
+  }
+
+  private GoalContinuationPolicyDecision decideContinuationFallback(GoalDonenessDecision decision) {
+    return goalContinuationPolicy.decide(
+        GoalContinuationRequest.builder().goalDecision(decision).build());
+  }
+
+  private List<String> providerPreferenceOrder(String currentProvider) {
+    List<String> order = new ArrayList<>();
+    if (currentProvider == null || currentProvider.isBlank()) {
+      return order;
+    }
+    addProvider(order, currentProvider);
+    if (matrixProps == null || matrixProps.getFailoverOrder() == null) {
+      return order;
+    }
+    List<String> failovers =
+        matrixProps.getFailoverOrder().get(currentProvider.toLowerCase(Locale.ROOT));
+    if (failovers != null) {
+      failovers.forEach(provider -> addProvider(order, provider));
+    }
+    return order;
+  }
+
+  private static void addProvider(List<String> order, String provider) {
+    if (provider == null || provider.isBlank()) {
+      return;
+    }
+    String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    if (!order.contains(normalized)) {
+      order.add(normalized);
+    }
+  }
+
+  private static String taskCategory(PlannedTask task) {
+    if (task == null || task.complexity() == null) {
+      return "TASK_MEDIUM";
+    }
+    return "TASK_" + task.complexity().name();
   }
 
   private static String firstReason(GoalContinuationPolicyDecision decision) {
