@@ -856,6 +856,16 @@ came from post-review continuation, the reviewer rerun also records its token de
 `attributePhaseAdditional(REVIEWER)`. This keeps cost evidence honest for user-approved upgrades
 instead of hiding retry/reviewer spend behind the control-plane path.
 
+Seventieth slice 2026-06-27: persisted benchmark priors are now task-category compatible, not just
+sample-size gated. `ModelProviderCandidateService` still reads DONE `benchmark_run` rows fail-soft
+and keeps incompatible rows visible in candidate reasons, but it sets `benchmarkQualityScore` only
+when `total_tasks >= execution.continuation.benchmark-min-sample-tasks` and the suite applies to the
+current task category. Terminal-Bench backs `TERMINAL_TASK` / `BENCHMARK_PATCH`; SWE-bench backs
+bug/test/project patch categories; ProgramBench backs bug/test/benchmark patch categories. This
+prevents Terminal-Bench evidence from automatically approving normal bug-fix or greenfield BUILD
+upgrades while preserving user-visible approval proposals for unbenchmarked or unrelated-suite
+candidates.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
