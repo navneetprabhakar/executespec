@@ -766,6 +766,15 @@ continuation. This still stops at decision emission; the remaining control-flow 
 the selected post-review task rerun, re-run reviewer on the updated workspace, and attribute the
 second worker/reviewer token deltas honestly.
 
+Fifty-seventh slice 2026-06-27: post-review selected-candidate execution is wired. When the
+post-review decision is `STEP_UP_MODEL` or `CHANGE_PROVIDER`, `RunOrchestrator` emits a typed
+`CONTINUATION_ACTION`, appends durable action history, resets the target task to `PENDING`, reruns
+only that task through `SequentialExecutor.execute(..., ResumeRequest)` with the selected
+provider/model, and seeds the escalation counters with both prior continuation actions and the
+selected post-review action. After the rerun it persists task rows, attributes the second worker
+delta, runs lint, re-runs the BUILD-mode reviewer, and attributes the second reviewer delta.
+`STOP_BLOCKED` remains approval-only, and `STEP_DOWN_MODEL` does not execute for reviewer failure.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

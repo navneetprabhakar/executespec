@@ -3,11 +3,14 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Optional;
 
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.reviewer.ReviewerResult;
+import com.navneet.executespec.router.ModelProviderScore;
 
 import org.junit.jupiter.api.Test;
 
@@ -161,6 +164,64 @@ class RunOrchestratorReviewerRouteTest {
         .containsExactly("Anthropic", "openai", "gemini", "deepseek", "openrouter", "fireworks");
   }
 
+  @Test
+  void postReviewActionGateOnlyExecutesQualityUpgrades() {
+    assertThat(
+            RunOrchestrator.actionablePostReviewContinuationDecision(
+                decision(RunContinuationDecision.STEP_UP_MODEL)))
+        .isTrue();
+    assertThat(
+            RunOrchestrator.actionablePostReviewContinuationDecision(
+                decision(RunContinuationDecision.CHANGE_PROVIDER)))
+        .isTrue();
+    assertThat(
+            RunOrchestrator.actionablePostReviewContinuationDecision(
+                decision(RunContinuationDecision.STEP_DOWN_MODEL)))
+        .isFalse();
+    assertThat(
+            RunOrchestrator.actionablePostReviewContinuationDecision(
+                decision(RunContinuationDecision.STOP_BLOCKED)))
+        .isFalse();
+  }
+
+  @Test
+  void postReviewContinuationUsageSeedsSelectedActionIntoRetryBudget() {
+    ExecutionResult previous =
+        result(
+            task(
+                "T1",
+                TaskOutcome.Status.SUCCESS,
+                RunContinuationDecision.CHANGE_PROVIDER,
+                "anthropic",
+                "claude-sonnet-4-6",
+                "anthropic",
+                "claude-sonnet-4-6"));
+    TaskOutcome target =
+        task(
+            "T2",
+            TaskOutcome.Status.SUCCESS,
+            null,
+            null,
+            null,
+            "deepseek",
+            "deepseek-v4-pro-native");
+
+    var usage =
+        RunOrchestrator.postReviewContinuationUsage(
+            previous, target, decision(RunContinuationDecision.STEP_UP_MODEL));
+
+    assertThat(usage.providerSwitches()).isEqualTo(1);
+    assertThat(usage.modelStepUps()).isEqualTo(1);
+    assertThat(usage.modelStepDowns()).isZero();
+  }
+
+  @Test
+  void fullTaskKeyPreservesAlreadyPrefixedIds() {
+    assertThat(RunOrchestrator.fullTaskKey("12345678-aaaa", "T1")).isEqualTo("12345678_T1");
+    assertThat(RunOrchestrator.fullTaskKey("12345678-aaaa", "12345678_T1"))
+        .isEqualTo("12345678_T1");
+  }
+
   private static ExecutionResult result(TaskOutcome... tasks) {
     return ExecutionResult.builder().perTask(List.of(tasks)).build();
   }
@@ -194,5 +255,23 @@ class RunOrchestratorReviewerRouteTest {
         .dispatchedProvider(dispatchedProvider)
         .dispatchedModel(dispatchedModel)
         .build();
+  }
+
+  private static GoalContinuationPolicyDecision decision(RunContinuationDecision decision) {
+    return new GoalContinuationPolicyDecision(
+        decision,
+        Optional.of(
+            new ModelProviderScore(
+                "anthropic",
+                "claude-sonnet-4-6",
+                "PROJECT_PATCH",
+                95.0,
+                3.0,
+                1000L,
+                2000L,
+                70.0,
+                true,
+                List.of("test candidate"))),
+        List.of("test decision"));
   }
 }
