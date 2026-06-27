@@ -21,8 +21,8 @@ import lombok.extern.slf4j.Slf4j;
  * the need for frontend API polling.
  *
  * <p>Listens for {@link RunEvent} Spring events and, for state-changing event types (TASK_STATUS,
- * RUN_STATUS, GATE_OPENED, COMPLETE, etc.), emits a {@code RUN_DETAIL} SSE event with the complete
- * run detail JSON payload.
+ * RUN_STATUS, GATE_OPENED, COMPLETE, continuation decisions/actions, etc.), emits a {@code
+ * RUN_DETAIL} SSE event with the complete run detail JSON payload.
  */
 @Service
 @Slf4j
@@ -33,6 +33,10 @@ public class RunDetailSseService {
       Set.of(
           "TASK_STATUS",
           "RUN_STATUS",
+          "GOAL_DECISION",
+          "CONTINUATION_DECISION",
+          "CONTINUATION_ACTION",
+          "CONTINUATION_ACTION_SKIPPED",
           "GATE_OPENED",
           "GATE_RESOLVED",
           "COMPLETE",
