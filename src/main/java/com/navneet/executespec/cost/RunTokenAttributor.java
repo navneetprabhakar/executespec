@@ -73,6 +73,43 @@ public class RunTokenAttributor {
   }
 
   /**
+   * Attribute an additional pass for a phase that may run more than once. Unlike {@link
+   * #attributePhase}, this adds to the phase-specific columns instead of replacing them, while still
+   * adding only the provided delta to the run total.
+   */
+  public void attributePhaseAdditional(
+      String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              switch (phase) {
+                case PLANNER -> {
+                  r.setPlannerInputTokens(safe(r.getPlannerInputTokens()) + Math.max(0, inTok));
+                  r.setPlannerOutputTokens(safe(r.getPlannerOutputTokens()) + Math.max(0, outTok));
+                  r.setPlannerProvider(providerUpper);
+                  r.setPlannerActualModel(model);
+                }
+                case REVIEWER -> {
+                  r.setReviewerInputTokens(safe(r.getReviewerInputTokens()) + Math.max(0, inTok));
+                  r.setReviewerOutputTokens(
+                      safe(r.getReviewerOutputTokens()) + Math.max(0, outTok));
+                  r.setReviewerProvider(providerUpper);
+                  r.setReviewerActualModel(model);
+                }
+              }
+              runRepo.save(r);
+            });
+    if (inTok > 0 || outTok > 0) {
+      try {
+        runRepo.addTokens(runId, inTok, outTok);
+      } catch (Exception e) {
+        log.warn("attributePhaseAdditional addTokens failed run={}: {}", runId, e.getMessage());
+      }
+    }
+  }
+
+  /**
    * Distribute worker-phase tokens (executor aggregate) across per-task rows so the task-level
    * token columns are populated. Real per-task snapshots come from {@link
    * RunCostTracker#snapshotTask}; any residual (tool-only retries that never hit the LLM) is
@@ -138,5 +175,9 @@ public class RunTokenAttributor {
                 taskRepo.save(t);
               });
     }
+  }
+
+  private static int safe(Integer value) {
+    return value == null ? 0 : Math.max(0, value);
   }
 }
