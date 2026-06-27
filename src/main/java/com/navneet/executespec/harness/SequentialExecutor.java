@@ -1968,7 +1968,13 @@ to boot — skip it for those.""";
         runId, RunEvent.goalDecision(runId, task.id(), goalSummary, goalDecisionData(decision)));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), goalSummary));
     GoalContinuationPolicyDecision continuationDecision =
-        decideContinuation(runId, task, decision, dispatchedProvider, dispatchedModel);
+        decideContinuation(
+            runId,
+            task,
+            decision,
+            dispatchedProvider,
+            dispatchedModel,
+            providerBehaviorPoor(workerResult, failureReason));
     log.info(
         "Executor task={} continuationDecision decision={} reason={}",
         task.id(),
@@ -1994,7 +2000,8 @@ to boot — skip it for those.""";
       PlannedTask task,
       GoalDonenessDecision decision,
       String provider,
-      String model) {
+      String model,
+      boolean providerBehaviorPoor) {
     String taskCategory = taskCategory(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
@@ -2007,6 +2014,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          providerBehaviorPoor,
           providerSwitchesUsed,
           modelStepUpsUsed,
           modelStepDownsUsed);
@@ -2022,6 +2030,7 @@ to boot — skip it for those.""";
                   .requiredQualityThreshold(requiredQualityThreshold)
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
+                  .providerBehaviorPoor(providerBehaviorPoor)
                   .expensiveContinuationRequiresConfirmation(confirmationRequired)
                   .benchmarkQualityPriorRequiredForAutomaticContinuation(
                       requireBenchmarkPriorForAutomaticContinuation)
@@ -2037,6 +2046,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          providerBehaviorPoor,
           providerSwitchesUsed,
           modelStepUpsUsed,
           modelStepDownsUsed);
@@ -2053,6 +2063,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          providerBehaviorPoor,
           providerSwitchesUsed,
           modelStepUpsUsed,
           modelStepDownsUsed);
@@ -2064,6 +2075,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean providerBehaviorPoor,
       int providerSwitchesUsed,
       int modelStepUpsUsed,
       int modelStepDownsUsed) {
@@ -2072,6 +2084,7 @@ to boot — skip it for those.""";
             GoalContinuationRequest.builder()
                 .goalDecision(decision)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .providerBehaviorPoor(providerBehaviorPoor)
                 .providerSwitchesUsed(providerSwitchesUsed)
                 .maxProviderSwitches(maxProviderSwitches())
                 .modelStepUpsUsed(modelStepUpsUsed)
@@ -2079,12 +2092,13 @@ to boot — skip it for those.""";
                 .modelStepDownsUsed(modelStepDownsUsed)
                 .maxModelStepDowns(maxModelStepDowns())
                 .build()),
-        taskCategory,
-        requiredQualityThreshold,
-        confirmationRequired,
-        providerSwitchesUsed,
-        modelStepUpsUsed,
-        modelStepDownsUsed);
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          providerBehaviorPoor,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
@@ -2092,6 +2106,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean providerBehaviorPoor,
       int providerSwitchesUsed,
       int modelStepUpsUsed,
       int modelStepDownsUsed) {
@@ -2107,6 +2122,7 @@ to boot — skip it for those.""";
             taskCategory,
             requiredQualityThreshold,
             confirmationRequired,
+            providerBehaviorPoor,
             providerSwitchesUsed,
             modelStepUpsUsed,
             modelStepDownsUsed));
@@ -2316,7 +2332,7 @@ to boot — skip it for those.""";
       double requiredQualityThreshold,
       boolean confirmationRequired) {
     return continuationPolicyData(
-        decision, taskCategory, requiredQualityThreshold, confirmationRequired, 0, 0, 0);
+        decision, taskCategory, requiredQualityThreshold, confirmationRequired, false, 0, 0, 0);
   }
 
   private Map<String, Object> continuationPolicyData(
@@ -2324,6 +2340,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean providerBehaviorPoor,
       int providerSwitchesUsed,
       int modelStepUpsUsed,
       int modelStepDownsUsed) {
@@ -2349,6 +2366,7 @@ to boot — skip it for those.""";
     data.put("maxEditChurn", maxEditChurn());
     data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
+    data.put("providerBehaviorPoor", providerBehaviorPoor);
     data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     data.put(
         "requireBenchmarkPriorForAutomaticContinuation",
@@ -2553,6 +2571,7 @@ to boot — skip it for those.""";
     policyNode.put("maxRepeatedFailures", maxRepeatedFailures());
     policyNode.put("maxEditChurn", maxEditChurn());
     policyNode.put("maxParallelTasks", maxParallelTasks());
+    policyNode.put("providerBehaviorPoor", false);
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
@@ -2787,6 +2806,31 @@ to boot — skip it for those.""";
       return 0;
     }
     return Math.max(0, workerResult.repeatedAssistantTextCount());
+  }
+
+  private static boolean providerBehaviorPoor(WorkerResult workerResult, String failureReason) {
+    if (workerResult != null && workerResult.outcome() == WorkerResult.Outcome.ERROR) {
+      return true;
+    }
+    String text =
+        ((failureReason == null ? "" : failureReason)
+                + " "
+                + (workerResult == null || workerResult.finalAssistantText() == null
+                    ? ""
+                    : workerResult.finalAssistantText()))
+            .toLowerCase(Locale.ROOT);
+    return containsAny(
+        text,
+        "llm",
+        "model provider",
+        "provider error",
+        "router",
+        "rate limit",
+        "429",
+        "5xx",
+        "timeout",
+        "connection reset",
+        "api error");
   }
 
   private static String mutationPathSignature(String entry) {

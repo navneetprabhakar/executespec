@@ -799,6 +799,13 @@ benchmark-backed escalation candidate. If one fits, the task can auto-step-up / 
 without stopping on a higher-scoring unbenchmarked candidate; if none fits, the best unbenchmarked
 proposal is still blocked as `STOP_BLOCKED` for approval.
 
+Sixty-second slice 2026-06-27: worker/provider breakdown now reaches the continuation advisor.
+`SequentialExecutor` derives `providerBehaviorPoor=true` from unrecoverable worker `ERROR` outcomes
+and provider/router/timeout-style failure text, passes it into `GoalContinuationAdvisor`, mirrors it
+through fallback `GoalContinuationPolicy`, and persists it in the continuation policy JSON. This
+lets breakdowns prefer bounded `CHANGE_PROVIDER` advice instead of treating every failure as generic
+low-quality or missing-proof evidence.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
