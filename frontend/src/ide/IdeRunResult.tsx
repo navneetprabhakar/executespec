@@ -85,7 +85,9 @@ function latestContinuationAction(t: api.TaskSummary): string | null {
   const actions = t.continuationActions || [];
   const action = actions.length > 0 ? actions[actions.length - 1] : null;
   if (!action?.decision || !action?.provider || !action?.model) return null;
-  const status = (action.status || '').toUpperCase() === 'SKIPPED' ? 'Skipped' : 'Used';
+  const rawStatus = (action.status || '').toUpperCase();
+  const status =
+    rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
   const limit =
     action.limitName && action.maxLimit != null
       ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`

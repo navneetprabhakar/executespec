@@ -732,8 +732,9 @@ failed actions do not trigger this, and `STEP_DOWN_MODEL` does not weaken the re
 
 Fifty-second slice 2026-06-27: approved blocked-continuation retries now share the same durable
 action trail as automatic reruns. `RunLifecycleService.approveContinuation` appends an `APPROVED`
-entry to `agent_task.continuation_actions_json` before dispatching the stored provider/model, while
-still seeding the provider-switch / model-step usage counters from the proposed action.
+entry to `agent_task.continuation_actions_json` only after the stored provider/model retry passes
+normal retry validation and is queued, while still seeding the provider-switch / model-step usage
+counters from the proposed action.
 
 ## Open Questions
 

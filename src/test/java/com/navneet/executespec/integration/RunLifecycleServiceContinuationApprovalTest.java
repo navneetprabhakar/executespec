@@ -277,6 +277,7 @@ class RunLifecycleServiceContinuationApprovalTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("Workspace gone");
     verify(taskRepo, atLeastOnce()).findById(TASK_KEY);
+    verify(taskRepo, never()).saveAndFlush(any());
   }
 
   @Test
