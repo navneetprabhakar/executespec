@@ -819,6 +819,13 @@ metrics, benchmark-prior marker, and rejected-below-quality-threshold count. Thi
 where the backend persisted ranking evidence but operators still had to inspect raw JSON to see why
 one model/provider was preferred over another.
 
+Sixty-fifth slice 2026-06-27: provider-breakdown escalation is now pinned against the benchmark
+confidence guard. Focused policy/advisor tests cover the DeepSeek-style failure mode: when the
+current provider breaks down and benchmark-prior gating is enabled, the policy auto-selects a
+benchmark-backed alternate provider before a higher-scoring unbenchmarked candidate; if no
+benchmark-backed alternate fits, it stops as `STOP_BLOCKED` while preserving the unbenchmarked
+provider-change proposal for approval.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
