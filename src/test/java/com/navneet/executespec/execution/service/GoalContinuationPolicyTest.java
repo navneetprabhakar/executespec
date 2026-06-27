@@ -183,6 +183,7 @@ class GoalContinuationPolicyTest {
     assertThat(decision.reasons().getFirst()).contains("requires user confirmation");
     assertThat(decision.reasons().getFirst()).contains("proposed action STEP_UP_MODEL");
     assertThat(decision.reasons().getFirst()).contains(stronger.label());
+    assertThat(decision.policy()).containsEntry("proposedAction", "STEP_UP_MODEL");
   }
 
   @Test
@@ -201,6 +202,7 @@ class GoalContinuationPolicyTest {
     assertThat(decision.selectedCandidate()).contains(stronger);
     assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
     assertThat(decision.reasons().getFirst()).contains("proposed action STEP_UP_MODEL");
+    assertThat(decision.policy()).containsEntry("proposedAction", "STEP_UP_MODEL");
   }
 
   @Test

@@ -2,6 +2,7 @@ package com.navneet.executespec.execution.service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
@@ -41,21 +42,23 @@ public class GoalContinuationPolicy {
           && !request.userConfirmedExpensiveContinuation()
           && escalation.get().selectedCandidate().stream()
               .noneMatch(ModelProviderScore::benchmarkQualityPriorAvailable)) {
-        return decision(
+        return blockedEscalationDecision(
             RunContinuationDecision.STOP_BLOCKED,
             escalation.get().selectedCandidate(),
             "selected continuation candidate lacks benchmark quality prior; proposed action "
                 + escalation.get().decision()
-                + proposedCandidateSuffix(escalation.get()));
+                + proposedCandidateSuffix(escalation.get()),
+            escalation.get().decision());
       }
       if (request.expensiveContinuationRequiresConfirmation()
           && !request.userConfirmedExpensiveContinuation()) {
-        return decision(
+        return blockedEscalationDecision(
             RunContinuationDecision.STOP_BLOCKED,
             escalation.get().selectedCandidate(),
             "expensive continuation requires user confirmation before more spend; proposed action "
                 + escalation.get().decision()
-                + proposedCandidateSuffix(escalation.get()));
+                + proposedCandidateSuffix(escalation.get()),
+            escalation.get().decision());
       }
       return escalation.get();
     }
@@ -212,6 +215,18 @@ public class GoalContinuationPolicy {
       String reason) {
     return new GoalContinuationPolicyDecision(
         decision, selectedCandidate, reason == null ? List.of() : List.of(reason));
+  }
+
+  private static GoalContinuationPolicyDecision blockedEscalationDecision(
+      RunContinuationDecision decision,
+      Optional<ModelProviderScore> selectedCandidate,
+      String reason,
+      RunContinuationDecision proposedAction) {
+    return new GoalContinuationPolicyDecision(
+        decision,
+        selectedCandidate,
+        reason == null ? List.of() : List.of(reason),
+        proposedAction == null ? Map.of() : Map.of("proposedAction", proposedAction.name()));
   }
 
   private static String proposedCandidateSuffix(GoalContinuationPolicyDecision decision) {

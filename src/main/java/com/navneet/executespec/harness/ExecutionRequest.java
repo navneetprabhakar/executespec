@@ -21,6 +21,13 @@ import lombok.Builder;
  * @param requireConfirmationBeforeExpensiveContinuation per-run tightening override that blocks
  *     model/provider continuation spend until a client confirms it. Null/false leaves the server
  *     YAML default in control.
+ * @param initialProviderSwitchesUsed initial run-level provider-switch count to seed before
+ *     continuation advice. Used by approved blocked continuation retries so the approved action
+ *     counts against the same ceiling as automatic reruns.
+ * @param initialModelStepUpsUsed initial target-task model-step-up count to seed before continuation
+ *     advice.
+ * @param initialModelStepDownsUsed initial target-task model-step-down count to seed before
+ *     continuation advice.
  */
 @Builder
 public record ExecutionRequest(
@@ -32,6 +39,9 @@ public record ExecutionRequest(
     Boolean enableSmokeTests,
     Boolean localHandsMode,
     Boolean requireConfirmationBeforeExpensiveContinuation,
+    Integer initialProviderSwitchesUsed,
+    Integer initialModelStepUpsUsed,
+    Integer initialModelStepDownsUsed,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
@@ -65,5 +75,11 @@ public record ExecutionRequest(
     if (localHandsMode == null) localHandsMode = false;
     if (requireConfirmationBeforeExpensiveContinuation == null)
       requireConfirmationBeforeExpensiveContinuation = false;
+    if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
+    if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;
+    if (initialModelStepDownsUsed == null) initialModelStepDownsUsed = 0;
+    initialProviderSwitchesUsed = Math.max(0, initialProviderSwitchesUsed);
+    initialModelStepUpsUsed = Math.max(0, initialModelStepUpsUsed);
+    initialModelStepDownsUsed = Math.max(0, initialModelStepDownsUsed);
   }
 }
