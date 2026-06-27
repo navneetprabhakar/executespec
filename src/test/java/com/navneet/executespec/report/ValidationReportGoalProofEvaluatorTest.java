@@ -86,6 +86,50 @@ class ValidationReportGoalProofEvaluatorTest {
   }
 
   @Test
+  void reviewerUnresolvedIsLowQualityFailureThatCanEscalate() {
+    var decision =
+        evaluator.evaluate(
+            "run-reviewer-warn",
+            PipelineResult.NEEDS_ATTENTION,
+            List.of(
+                row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
+                row("build", "Build", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("reviewer", "Reviewer", "WARN", "LLM_REVIEWER"),
+                row("report-issues", "Report issues", "PASS", "HYBRID"),
+                row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT")));
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.reason()).contains("reviewer low-quality evidence");
+    assertThat(decision.incompleteItems())
+        .contains("reviewer found unresolved or failed implementation quality evidence");
+    assertThat(decision.risks())
+        .contains("reviewer low-quality evidence may require model/provider escalation");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
+  void reviewerFailedIsLowQualityFailureThatCanEscalate() {
+    var decision =
+        evaluator.evaluate(
+            "run-reviewer-failed",
+            PipelineResult.FAILED,
+            List.of(
+                row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
+                row("build", "Build", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("reviewer", "Reviewer", "FAIL", "LLM_REVIEWER"),
+                row("report-issues", "Report issues", "PASS", "HYBRID"),
+                row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT")));
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
+    assertThat(decision.reason()).contains("reviewer low-quality evidence");
+    assertThat(decision.recommendedNextStep()).contains("alternate model/provider");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
   void treatsMissingSpecAdherenceAsUnprovenRatherThanDone() {
     List<VerificationEvidenceDTO> ledger =
         passingLedger().stream().filter(row -> !"spec-adherence".equals(row.id())).toList();

@@ -750,6 +750,13 @@ for continuation. When a worker writes files but does not cleanly prove completi
 `anotherModelProviderMightHelp=true`. That lets the existing quality-first, benchmark/confirmation
 guarded advisor propose a bounded step-up or provider change even when smoke validation passes.
 
+Fifty-fifth slice 2026-06-27: reviewer low-quality evidence is now explicit at final proof time.
+`ValidationReportGoalProofEvaluator` maps reviewer `WARN` / `FAIL` ledger rows to
+`FAILED / STOP_FAILED` with reviewer-specific incomplete/risk items and
+`anotherModelProviderMightHelp=true`, instead of leaving unresolved-review runs as a generic
+uncertain final proof. This is still a proof/visibility slice; automatic post-review worker reruns
+remain a separate control-flow follow-up.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
