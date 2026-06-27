@@ -2511,6 +2511,10 @@ to boot — skip it for those.""";
     decision
         .selectedCandidate()
         .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
+    String approvalRequiredReason = continuationApprovalRequiredReason(decision);
+    if (approvalRequiredReason != null) {
+      data.put("approvalRequiredReason", approvalRequiredReason);
+    }
     data.put("reasons", decision.reasons());
     data.put("policy", continuationPolicyData(decision));
     return data;
@@ -2725,6 +2729,24 @@ to boot — skip it for those.""";
     return data;
   }
 
+  private String continuationApprovalRequiredReason(GoalContinuationPolicyDecision decision) {
+    if (decision == null
+        || decision.decision() != RunContinuationDecision.STOP_BLOCKED
+        || decision.selectedCandidate().isEmpty()) {
+      return null;
+    }
+    Map<String, Object> policy = continuationPolicyData(decision);
+    ModelProviderScore candidate = decision.selectedCandidate().get();
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return "BENCHMARK_PRIOR_REQUIRED";
+    }
+    if (Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"))) {
+      return "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED";
+    }
+    return null;
+  }
+
   private void persistGoalAndContinuationDecision(
       String runId,
       String taskIdShort,
@@ -2778,6 +2800,10 @@ to boot — skip it for those.""";
       candidateNode.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
       var candidateReasons = candidateNode.putArray("reasons");
       candidate.reasons().forEach(candidateReasons::add);
+    }
+    String approvalRequiredReason = continuationApprovalRequiredReason(decision);
+    if (approvalRequiredReason != null) {
+      node.put("approvalRequiredReason", approvalRequiredReason);
     }
     var reasons = node.putArray("reasons");
     decision.reasons().forEach(reasons::add);

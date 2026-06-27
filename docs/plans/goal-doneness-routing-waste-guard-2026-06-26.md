@@ -904,6 +904,13 @@ events reads the same proof/proposal that caused the event. This closes the race
 upgrade proposal could be emitted live but the refreshed Steps payload still reflected the previous
 task row.
 
+Seventy-sixth slice 2026-06-27: blocked upgrade approvals now carry an explicit approval blocker.
+Task-boundary `SequentialExecutor` decisions and post-review `RunOrchestrator` decisions write
+`approvalRequiredReason` when `STOP_BLOCKED` keeps a selected provider/model candidate for approval.
+The reason distinguishes missing compatible benchmark evidence (`BENCHMARK_PRIOR_REQUIRED`) from
+explicit spend confirmation (`EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED`). The run-detail Steps tab renders the reason beside the Approve
+upgrade action, with policy-based fallback inference for older persisted decisions.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
