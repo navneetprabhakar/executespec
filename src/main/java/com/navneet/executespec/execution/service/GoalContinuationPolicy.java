@@ -104,8 +104,21 @@ public class GoalContinuationPolicy {
 
   private Optional<GoalContinuationPolicyDecision> escalationDecision(
       GoalContinuationRequest request) {
+    if (requiresBenchmarkPriorForAutomaticAction(request)) {
+      Optional<GoalContinuationPolicyDecision> benchmarkBacked =
+          escalationDecision(request, true);
+      if (benchmarkBacked.isPresent()) {
+        return benchmarkBacked;
+      }
+    }
+    return escalationDecision(request, false);
+  }
+
+  private Optional<GoalContinuationPolicyDecision> escalationDecision(
+      GoalContinuationRequest request, boolean benchmarkBackedOnly) {
     if (request.providerBehaviorPoor() && request.canSwitchProvider()) {
-      Optional<ModelProviderScore> alternateProvider = bestDifferentProvider(request);
+      Optional<ModelProviderScore> alternateProvider =
+          bestDifferentProvider(request, benchmarkBackedOnly);
       if (alternateProvider.isPresent()) {
         return Optional.of(
             decision(
@@ -120,7 +133,7 @@ public class GoalContinuationPolicy {
       return Optional.empty();
     }
 
-    Optional<ModelProviderScore> stronger = strongerEligibleCandidate(request);
+    Optional<ModelProviderScore> stronger = strongerEligibleCandidate(request, benchmarkBackedOnly);
     if (stronger.isEmpty()) {
       return Optional.empty();
     }
@@ -145,6 +158,12 @@ public class GoalContinuationPolicy {
     return Optional.empty();
   }
 
+  private static boolean requiresBenchmarkPriorForAutomaticAction(GoalContinuationRequest request) {
+    return request != null
+        && request.benchmarkQualityPriorRequiredForAutomaticContinuation()
+        && !request.userConfirmedExpensiveContinuation();
+  }
+
   private static boolean escalationMightHelp(GoalContinuationRequest request) {
     if (request == null || request.goalDecision() == null) {
       return false;
@@ -157,24 +176,24 @@ public class GoalContinuationPolicy {
   }
 
   private static Optional<ModelProviderScore> strongerEligibleCandidate(
-      GoalContinuationRequest request) {
+      GoalContinuationRequest request, boolean benchmarkBackedOnly) {
     ModelProviderScore current = request.currentCandidate();
     if (current == null) {
-      return eligible(request).stream().findFirst();
+      return eligibleForAutomaticAction(request, benchmarkBackedOnly).stream().findFirst();
     }
-    return eligible(request).stream()
+    return eligibleForAutomaticAction(request, benchmarkBackedOnly).stream()
         .filter(candidate -> !sameCandidate(current, candidate))
         .filter(candidate -> candidate.qualityScore() > current.qualityScore())
         .findFirst();
   }
 
   private static Optional<ModelProviderScore> bestDifferentProvider(
-      GoalContinuationRequest request) {
+      GoalContinuationRequest request, boolean benchmarkBackedOnly) {
     ModelProviderScore current = request.currentCandidate();
     if (current == null) {
-      return eligible(request).stream().findFirst();
+      return eligibleForAutomaticAction(request, benchmarkBackedOnly).stream().findFirst();
     }
-    return eligible(request).stream()
+    return eligibleForAutomaticAction(request, benchmarkBackedOnly).stream()
         .filter(candidate -> !candidate.provider().equalsIgnoreCase(current.provider()))
         .findFirst();
   }
@@ -199,6 +218,15 @@ public class GoalContinuationPolicy {
   private static List<ModelProviderScore> eligible(GoalContinuationRequest request) {
     ModelProviderRankingDecision ranking = request.rankingDecision();
     return ranking == null ? List.of() : ranking.eligible();
+  }
+
+  private static List<ModelProviderScore> eligibleForAutomaticAction(
+      GoalContinuationRequest request, boolean benchmarkBackedOnly) {
+    List<ModelProviderScore> eligible = eligible(request);
+    if (!benchmarkBackedOnly) {
+      return eligible;
+    }
+    return eligible.stream().filter(ModelProviderScore::benchmarkQualityPriorAvailable).toList();
   }
 
   private static boolean sameProvider(ModelProviderScore a, ModelProviderScore b) {

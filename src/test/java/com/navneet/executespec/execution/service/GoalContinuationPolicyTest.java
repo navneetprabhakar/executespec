@@ -221,6 +221,44 @@ class GoalContinuationPolicyTest {
     assertThat(decision.selectedCandidate()).contains(stronger);
   }
 
+  @Test
+  void benchmarkPriorRequiredPrefersBenchmarkBackedEscalationOverHigherUnbenchmarkedCandidate() {
+    ModelProviderScore higherUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked top");
+    ModelProviderScore benchmarkBacked =
+        score("anthropic", "opus", 90, 18.0, 2_000, 70, true, "benchmark-backed");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(higherUnbenchmarked, benchmarkBacked, current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
+    assertThat(decision.selectedCandidate()).contains(benchmarkBacked);
+  }
+
+  @Test
+  void benchmarkPriorRequiredStillBlocksWithUnbenchmarkedProposalWhenNoBenchmarkBackedOptionFits() {
+    ModelProviderScore higherUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked top");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(higherUnbenchmarked, current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(higherUnbenchmarked);
+    assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
+    assertThat(decision.policy()).containsEntry("proposedAction", "STEP_UP_MODEL");
+  }
+
   private GoalContinuationRequest.GoalContinuationRequestBuilder request(
       GoalDonenessDecision goalDecision,
       ModelProviderScore current,

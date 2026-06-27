@@ -792,6 +792,13 @@ terminal status resolution checks `REVIEW_FAILED` before failed final-build evid
 validation report keep `REVIEWER_FAILED` instead of degrading to `NO_REVIEW_RESULT` or
 `FINAL_BUILD_FAILED`.
 
+Sixty-first slice 2026-06-27: benchmark-prior guarded automatic escalation is now selection-aware.
+When `execution.continuation.require-benchmark-prior-for-automatic-continuation=true` and the user
+has not explicitly approved the upgrade, `GoalContinuationPolicy` first searches for a
+benchmark-backed escalation candidate. If one fits, the task can auto-step-up / change provider
+without stopping on a higher-scoring unbenchmarked candidate; if none fits, the best unbenchmarked
+proposal is still blocked as `STOP_BLOCKED` for approval.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
