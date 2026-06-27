@@ -908,7 +908,7 @@ to boot — skip it for those.""";
             null,
             new ProviderModelOverride(
                 candidate.provider(), candidate.model(), decision.decision()));
-    return mergeContinuationAttempt(outcome, rerun);
+    return mergeContinuationAttempt(outcome, rerun, decision, candidate);
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -1160,7 +1160,11 @@ to boot — skip it for those.""";
   private record ContinuationActionLimit(
       String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
 
-  private static TaskOutcome mergeContinuationAttempt(TaskOutcome initial, TaskOutcome rerun) {
+  private static TaskOutcome mergeContinuationAttempt(
+      TaskOutcome initial,
+      TaskOutcome rerun,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate) {
     if (rerun == null) {
       return initial;
     }
@@ -1180,6 +1184,9 @@ to boot — skip it for those.""";
         .dispatchedModel(rerun.dispatchedModel())
         .goalDonenessDecision(rerun.goalDonenessDecision())
         .continuationDecision(rerun.continuationDecision())
+        .continuationAction(decision == null ? null : decision.decision())
+        .continuationActionProvider(candidate == null ? null : candidate.provider())
+        .continuationActionModel(candidate == null ? null : candidate.model())
         .build();
   }
 

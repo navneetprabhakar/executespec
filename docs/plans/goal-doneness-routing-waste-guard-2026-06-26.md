@@ -724,6 +724,12 @@ continuation action records with decision, provider/model, limit name, used/max 
 latest action. This closes the observability gap where the rerun's final continuation decision could
 overwrite the earlier "system stepped up" advisory on the task row.
 
+Fifty-first slice 2026-06-27: final review now follows a successful automatic quality recovery.
+`TaskOutcome` carries the executed continuation action provider/model from a same-task rerun, and
+`RunOrchestrator` promotes the BUILD-mode reviewer route to the latest successful or warning-level
+`STEP_UP_MODEL` / `CHANGE_PROVIDER` action. Normal complexity tier routing does not trigger this,
+failed actions do not trigger this, and `STEP_DOWN_MODEL` does not weaken the reviewer.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
