@@ -7,6 +7,7 @@ import java.util.List;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
+import com.navneet.executespec.reviewer.ReviewerResult;
 
 import org.junit.jupiter.api.Test;
 
@@ -114,6 +115,52 @@ class RunOrchestratorReviewerRouteTest {
     assertThat(route.model()).isEqualTo("claude-sonnet-4-6");
   }
 
+  @Test
+  void unresolvedReviewerVerdictBuildsLowQualityGoalDecision() {
+    var decision =
+        RunOrchestrator.reviewerLowQualityGoalDecision(
+            ReviewerResult.builder().overall(ReviewerResult.Overall.UNRESOLVED_ISSUES).build(),
+            false);
+
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.reason()).contains("UNRESOLVED_ISSUES");
+    assertThat(decision.incompleteItems())
+        .contains("reviewer did not prove the implementation is acceptable");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
+  void reviewerContinuationTargetUsesLatestUsableWorkerTask() {
+    var target =
+        RunOrchestrator.reviewerContinuationTarget(
+            result(
+                task(
+                    "T1",
+                    TaskOutcome.Status.SUCCESS,
+                    null,
+                    null,
+                    null,
+                    "deepseek",
+                    "deepseek-v4-pro-native"),
+                task(
+                    "T2",
+                    TaskOutcome.Status.WORKER_FAILED,
+                    null,
+                    null,
+                    null,
+                    "anthropic",
+                    "claude-sonnet-4-6")));
+
+    assertThat(target).isPresent();
+    assertThat(target.get().taskId()).isEqualTo("T1");
+  }
+
+  @Test
+  void reviewerProviderPreferenceOrderStartsWithCurrentProviderAndDedupes() {
+    assertThat(RunOrchestrator.reviewerProviderPreferenceOrder("Anthropic"))
+        .containsExactly("Anthropic", "openai", "gemini", "deepseek", "openrouter", "fireworks");
+  }
+
   private static ExecutionResult result(TaskOutcome... tasks) {
     return ExecutionResult.builder().perTask(List.of(tasks)).build();
   }
@@ -125,8 +172,20 @@ class RunOrchestratorReviewerRouteTest {
       String actionModel,
       String dispatchedProvider,
       String dispatchedModel) {
+    return task(
+        "T1", status, action, actionProvider, actionModel, dispatchedProvider, dispatchedModel);
+  }
+
+  private static TaskOutcome task(
+      String taskId,
+      TaskOutcome.Status status,
+      RunContinuationDecision action,
+      String actionProvider,
+      String actionModel,
+      String dispatchedProvider,
+      String dispatchedModel) {
     return TaskOutcome.builder()
-        .taskId("T1")
+        .taskId(taskId)
         .taskTitle("Task")
         .status(status)
         .continuationAction(action)
