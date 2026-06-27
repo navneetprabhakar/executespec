@@ -299,6 +299,7 @@ export interface TaskSummary {
       costPerMillionTokens?: number;
       latencyP50Ms?: number;
       latencyP95Ms?: number;
+      benchmarkQualityPriorAvailable?: boolean;
       reasons?: string[];
     } | null;
     policy?: {

@@ -1068,12 +1068,14 @@ class SequentialExecutorSoftCompletionTest {
                         + " proposed action STEP_UP_MODEL -> openai/gpt-5.4")));
 
     SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
     executor.execute(req(singleTaskPlan(), true, true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
         ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
     verify(advisor).advise(requestCaptor.capture());
     assertTrue(requestCaptor.getValue().expensiveContinuationRequiresConfirmation());
+    assertTrue(requestCaptor.getValue().benchmarkQualityPriorRequiredForAutomaticContinuation());
     assertTrue(
         saveLog.stream()
             .anyMatch(
@@ -1083,7 +1085,9 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
                         && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
                         && s.continuationDecisionJson()
-                            .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")),
+                            .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")
+                        && s.continuationDecisionJson()
+                            .contains("\"requireBenchmarkPriorForAutomaticContinuation\":true")),
         "Expected per-run confirmation requirement in persisted continuation JSON. Saw: "
             + saveLog);
   }

@@ -60,6 +60,7 @@ class ModelProviderCandidateServiceTest {
 
     ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
     assertThat(sonnet.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
     assertThat(sonnet.costPerMillionTokens()).isEqualTo(18.0);
     assertThat(sonnet.meetsQualityThreshold()).isTrue();
     assertThat(sonnet.reasons())
@@ -137,6 +138,7 @@ class ModelProviderCandidateServiceTest {
 
     ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
     assertThat(sonnet.qualityScore()).isCloseTo(84.1667, within(0.0001));
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
     assertThat(sonnet.latencyP50Ms()).isEqualTo(900);
     assertThat(sonnet.latencyP95Ms()).isEqualTo(1_800);
     assertThat(sonnet.reasons())
@@ -169,6 +171,7 @@ class ModelProviderCandidateServiceTest {
 
     ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
     assertThat(sonnet.qualityScore()).isEqualTo(90.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
     assertThat(sonnet.reasons())
         .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks (used as quality prior)");
     assertThat(sonnet.reasons())
@@ -202,6 +205,7 @@ class ModelProviderCandidateServiceTest {
 
     ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
     assertThat(sonnet.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
     assertThat(sonnet.reasons())
         .contains(
             "benchmark TERMINAL_BENCH/tiny-5 resolved 5/5 tasks (below 20-task minimum; not used"
