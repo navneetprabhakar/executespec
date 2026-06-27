@@ -2077,6 +2077,13 @@ to boot — skip it for those.""";
             cfg.provider,
             cfg.model,
             providerBehaviorPoor(primary, reason));
+    if (approvalBlockedContinuationProposal(continuationDecision)) {
+      persistTaskStatus(runId, task.id(), "PARTIAL", reason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+      emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+      return preRetryContinuationOutcome(
+          task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+    }
     if (!actionableContinuationDecision(continuationDecision)) {
       return null;
     }
@@ -2089,23 +2096,42 @@ to boot — skip it for those.""";
     }
     emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
     TaskOutcome preRetryOutcome =
-        TaskOutcome.builder()
-            .taskId(task.id())
-            .taskTitle(task.title())
-            .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
-            .workerOutcome(primary)
-            .smokeTestPassed(false)
-            .smokeTestExitCode(smoke.exitCode())
-            .smokeTestOutput(smoke.output())
-            .totalLatencyMs(System.currentTimeMillis() - taskStart)
-            .toolCallsDispatched(primary.toolCallsDispatched())
-            .dispatchedProvider(cfg.provider)
-            .dispatchedModel(cfg.model)
-            .goalDonenessDecision(goalDecision)
-            .continuationDecision(continuationDecision)
-            .build();
+        preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
     return executeContinuationAction(
         task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
+  }
+
+  private static boolean approvalBlockedContinuationProposal(
+      GoalContinuationPolicyDecision decision) {
+    return decision != null
+        && decision.decision() == RunContinuationDecision.STOP_BLOCKED
+        && decision.selectedCandidate().isPresent();
+  }
+
+  private static TaskOutcome preRetryContinuationOutcome(
+      PlannedTask task,
+      long taskStart,
+      WorkerResult primary,
+      SmokeTestResult smoke,
+      TierConfig cfg,
+      GoalDonenessDecision goalDecision,
+      GoalContinuationPolicyDecision continuationDecision) {
+    return TaskOutcome.builder()
+        .taskId(task.id())
+        .taskTitle(task.title())
+        .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
+        .workerOutcome(primary)
+        .smokeTestPassed(false)
+        .smokeTestExitCode(smoke.exitCode())
+        .smokeTestOutput(smoke.output())
+        .totalLatencyMs(System.currentTimeMillis() - taskStart)
+        .toolCallsDispatched(primary.toolCallsDispatched())
+        .dispatchedProvider(cfg.provider)
+        .dispatchedModel(cfg.model)
+        .goalDonenessDecision(goalDecision)
+        .continuationDecision(continuationDecision)
+        .build();
   }
 
   private boolean continuationActionCapacityAvailable(

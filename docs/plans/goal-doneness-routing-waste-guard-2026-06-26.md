@@ -882,6 +882,14 @@ provider-switch or model-step limit still has capacity, the executor emits the s
 goal/continuation/action evidence and reruns the task with that candidate. If no eligible candidate
 exists or the limit is exhausted, the existing same-provider retry path continues unchanged.
 
+Seventy-third slice 2026-06-27: approval-blocked pre-retry upgrades now stop before spending the
+weak retry. When the pre-retry continuation decision is `STOP_BLOCKED` with a selected candidate
+because benchmark-prior or confirmation policy blocks auto-spend, `SequentialExecutor` marks the
+task `PARTIAL`, persists the selected-candidate proposal, emits the normal goal/continuation
+events, and returns without the same-provider retry. Existing approval flow can then resume with
+that stored provider/model. Non-candidate blockers and exhausted action limits keep existing
+behavior.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
