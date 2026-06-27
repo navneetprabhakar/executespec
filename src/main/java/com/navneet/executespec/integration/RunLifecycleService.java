@@ -621,7 +621,11 @@ public class RunLifecycleService {
     retryTaskInternal(
         runId,
         taskId,
-        new RetryProviderOverride(approval.provider(), approval.model(), approval.proposedAction()));
+        new RetryProviderOverride(
+            approval.provider(),
+            approval.model(),
+            approval.proposedAction(),
+            approval.postReview()));
     return approval;
   }
 
@@ -726,12 +730,31 @@ public class RunLifecycleService {
                             fullTargetTaskId));
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
 
-                var terminal = RunOrchestrator.resolveTerminalStatus(result, null);
+                ReviewerResult reviewResult =
+                    override != null && override.postReview()
+                        ? runReviewerAfterApprovedPostReviewContinuation(
+                            runId, plan, rootCtx, provider, model, result)
+                        : null;
+                if (override != null && override.postReview()) {
+                  try {
+                    validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
+                  } catch (Exception e) {
+                    log.warn(
+                        "approved post-review continuation validation failed run={}: {}",
+                        runId,
+                        e.getMessage());
+                  }
+                }
+
+                var terminal = RunOrchestrator.resolveTerminalStatus(result, reviewResult);
                 controlPort.terminate(
                     runId,
                     terminal.status(),
                     terminal.reason(),
-                    "retry final status: " + terminal.reason(),
+                    (override != null && override.postReview()
+                            ? "approved post-review continuation final status: "
+                            : "retry final status: ")
+                        + terminal.reason(),
                     null);
               } catch (Exception e) {
                 log.error(
@@ -745,6 +768,36 @@ public class RunLifecycleService {
       appendApprovedContinuationAction(task, override);
     }
     controlPort.putActiveRun(runId, future);
+  }
+
+  private ReviewerResult runReviewerAfterApprovedPostReviewContinuation(
+      String runId,
+      Plan plan,
+      ExecutionContext rootCtx,
+      String approvedProvider,
+      String approvedModel,
+      ExecutionResult result) {
+    persistenceWriter.updateStatus(runId, "REVIEWING");
+    RunOrchestrator.ProviderModel reviewerRoute =
+        RunOrchestrator.reviewerRouteFor(approvedProvider, approvedModel, result);
+    try {
+      ReviewerResult reviewResult =
+          reviewer.review(
+              ReviewerRequest.builder()
+                  .provider(reviewerRoute.provider())
+                  .model(reviewerRoute.model())
+                  .context(rootCtx)
+                  .buildCommand(plan.buildCommand())
+                  .skipWiringPass(false)
+                  .build());
+      persistenceWriter.persistReview(runId, reviewResult);
+      return reviewResult;
+    } catch (Exception e) {
+      log.warn(
+          "approved post-review continuation reviewer failed run={}: {}", runId, e.getMessage());
+      persistenceWriter.persistReviewFailure(runId, e);
+      return RunOrchestrator.reviewerFailedResult(e);
+    }
   }
 
   private com.navneet.executespec.state.entity.AgentTask findTask(String runId, String taskId) {
@@ -767,6 +820,7 @@ public class RunLifecycleService {
     try {
       JsonNode root = objectMapper.readTree(json);
       String decision = root.path("decision").asText("");
+      String source = root.path("policy").path("source").asText(root.path("source").asText(""));
       boolean explicitConfirmationRequired =
           root.path("policy").path("requireConfirmationBeforeExpensiveContinuation").asBoolean();
       JsonNode candidate = root.path("selectedCandidate");
@@ -787,7 +841,8 @@ public class RunLifecycleService {
         throw new IllegalStateException(
             "Continuation approval requires a proposed provider and model.");
       }
-      return new ContinuationApproval(provider, model, proposedAction);
+      return new ContinuationApproval(
+          provider, model, proposedAction, "POST_REVIEW".equalsIgnoreCase(source));
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
@@ -958,10 +1013,10 @@ public class RunLifecycleService {
   }
 
   public record ContinuationApproval(
-      String provider, String model, RunContinuationDecision proposedAction) {}
+      String provider, String model, RunContinuationDecision proposedAction, boolean postReview) {}
 
   private record RetryProviderOverride(
-      String provider, String model, RunContinuationDecision proposedAction) {}
+      String provider, String model, RunContinuationDecision proposedAction, boolean postReview) {}
 
   private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
     static ContinuationUsage none() {

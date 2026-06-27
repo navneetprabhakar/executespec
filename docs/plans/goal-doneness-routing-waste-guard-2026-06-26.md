@@ -842,6 +842,13 @@ and `GoalContinuationPolicy` bypasses benchmark-prior or confirmation guards onl
 candidate exactly matches the approved action/provider/model. A different later provider, model, or
 action still stops as `STOP_BLOCKED` for a fresh approval.
 
+Sixty-eighth slice 2026-06-27: approved post-review continuation now regenerates reviewer proof.
+`RunLifecycleService.approveContinuation` parses `policy.source=POST_REVIEW` from the persisted
+blocked proposal. Task-boundary approvals still rerun the worker task and resolve terminal status
+from that retry, but post-review approvals rerun the task with the selected provider/model, then run
+reviewer and validation before terminal status. The approval API response now includes `postReview`
+so clients can distinguish the heavier reviewer-backed approval path.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

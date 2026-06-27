@@ -29,6 +29,7 @@ import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
+import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -237,6 +238,78 @@ class RunLifecycleServiceContinuationApprovalTest {
         task, RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
     assertApprovedContinuationEvent(
         RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
+  }
+
+  @Test
+  void approveContinuation_postReviewProposalRerunsReviewerAndValidation() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "planSummary": "",
+                  "buildCommand": "mvn test",
+                  "tasks": [{"id": "T1", "title": "Fix review issues", "description": ""}]
+                }
+                """)
+            .aiProvider("deepseek")
+            .workerModel("deepseek-v4-pro")
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .continuationDecisionJson(
+                """
+                {
+                  "decision": "STOP_BLOCKED",
+                  "source": "POST_REVIEW",
+                  "selectedCandidate": {
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                    "benchmarkQualityPriorAvailable": false
+                  },
+                  "policy": {
+                    "source": "POST_REVIEW",
+                    "requireBenchmarkPriorForAutomaticContinuation": true,
+                    "proposedAction": "CHANGE_PROVIDER"
+                  }
+                }
+                """)
+            .build();
+    ExecutionResult retryResult =
+        ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
+    ReviewerResult reviewResult =
+        ReviewerResult.builder().overall(ReviewerResult.Overall.CLEAN).finalBuildPassed(true).build();
+
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(retryResult);
+    when(reviewer.review(any())).thenReturn(reviewResult);
+
+    RunLifecycleService.ContinuationApproval approval =
+        service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    assertThat(approval.postReview()).isTrue();
+    ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
+    verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
+    assertThat(request.getValue().provider()).isEqualTo("openai");
+    assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
+    verify(persistenceWriter).updateStatus(RUN_ID, "REVIEWING");
+    verify(reviewer).review(any());
+    verify(persistenceWriter).persistReview(RUN_ID, reviewResult);
+    verify(validationKickoff).generateValidationReport(RUN_ID, retryResult, reviewResult, request.getValue().plan());
+    verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
 
   @Test
