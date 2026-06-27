@@ -133,6 +133,20 @@ class RunOrchestratorReviewerRouteTest {
   }
 
   @Test
+  void reviewerFailureResultPreservesReviewerFailedTerminalReason() {
+    ReviewerResult review = RunOrchestrator.reviewerFailedResult(new RuntimeException("boom"));
+
+    RunOrchestrator.StatusAndReason terminal =
+        RunOrchestrator.resolveTerminalStatus(
+            ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build(),
+            review);
+
+    assertThat(review.overall()).isEqualTo(ReviewerResult.Overall.REVIEW_FAILED);
+    assertThat(terminal.status()).isEqualTo("PARTIAL");
+    assertThat(terminal.reason()).isEqualTo("REVIEWER_FAILED");
+  }
+
+  @Test
   void reviewerContinuationTargetUsesLatestUsableWorkerTask() {
     var target =
         RunOrchestrator.reviewerContinuationTarget(
