@@ -812,6 +812,13 @@ and rejected-below-threshold candidates to the continuation policy payload. The 
 already quality-first internally; this makes the quality > cost > latency ordering visible in SSE,
 durable task JSON, and reloadable run evidence.
 
+Sixty-fourth slice 2026-06-27: the run-detail Steps tab now renders continuation ranking evidence.
+`TaskSummary.continuationDecision.policy` is typed with ranking-policy fields and compact candidate
+rows, and `IdeRunResult` shows the ranking rule, top eligible candidates, quality/cost/latency
+metrics, benchmark-prior marker, and rejected-below-quality-threshold count. This closes the UI gap
+where the backend persisted ranking evidence but operators still had to inspect raw JSON to see why
+one model/provider was preferred over another.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

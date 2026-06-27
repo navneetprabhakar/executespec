@@ -303,7 +303,9 @@ export interface TaskSummary {
       reasons?: string[];
     } | null;
     policy?: {
+      taskCategory?: string;
       requiredQualityThreshold?: number;
+      defaultRequiredQualityThreshold?: number;
       providerSwitchesUsed?: number;
       maxProviderSwitches?: number;
       modelStepUpsUsed?: number;
@@ -315,8 +317,33 @@ export interface TaskSummary {
       maxTotalCostUsd?: number;
       maxTotalTokens?: number;
       maxTaskWallClockMs?: number;
+      providerBehaviorPoor?: boolean;
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
+      rankingPolicy?: string;
+      rankingReasons?: string[];
+      eligibleCandidateCount?: number;
+      rejectedBelowQualityThresholdCount?: number;
+      topEligibleCandidates?: {
+        provider?: string;
+        model?: string;
+        qualityScore?: number;
+        requiredQualityThreshold?: number;
+        costPerMillionTokens?: number;
+        latencyP50Ms?: number;
+        latencyP95Ms?: number;
+        benchmarkQualityPriorAvailable?: boolean;
+      }[];
+      topRejectedCandidates?: {
+        provider?: string;
+        model?: string;
+        qualityScore?: number;
+        requiredQualityThreshold?: number;
+        costPerMillionTokens?: number;
+        latencyP50Ms?: number;
+        latencyP95Ms?: number;
+        benchmarkQualityPriorAvailable?: boolean;
+      }[];
     };
     reasons?: string[];
   } | null;
