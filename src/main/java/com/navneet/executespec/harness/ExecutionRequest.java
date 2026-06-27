@@ -21,6 +21,9 @@ import lombok.Builder;
  * @param requireConfirmationBeforeExpensiveContinuation per-run tightening override that blocks
  *     model/provider continuation spend until a client confirms it. Null/false leaves the server
  *     YAML default in control.
+ * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
+ *     user approved a blocked continuation proposal. This lets the retry spend on the approved
+ *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
  * @param initialProviderSwitchesUsed initial run-level provider-switch count to seed before
  *     continuation advice. Used by approved blocked continuation retries so the approved action
  *     counts against the same ceiling as automatic reruns.
@@ -39,6 +42,7 @@ public record ExecutionRequest(
     Boolean enableSmokeTests,
     Boolean localHandsMode,
     Boolean requireConfirmationBeforeExpensiveContinuation,
+    Boolean userConfirmedExpensiveContinuation,
     Integer initialProviderSwitchesUsed,
     Integer initialModelStepUpsUsed,
     Integer initialModelStepDownsUsed,
@@ -75,6 +79,7 @@ public record ExecutionRequest(
     if (localHandsMode == null) localHandsMode = false;
     if (requireConfirmationBeforeExpensiveContinuation == null)
       requireConfirmationBeforeExpensiveContinuation = false;
+    if (userConfirmedExpensiveContinuation == null) userConfirmedExpensiveContinuation = false;
     if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
     if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;
     if (initialModelStepDownsUsed == null) initialModelStepDownsUsed = 0;

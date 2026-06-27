@@ -155,6 +155,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
+    assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
@@ -219,6 +220,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
     assertThat(request.getValue().provider()).isEqualTo("anthropic");
     assertThat(request.getValue().model()).isEqualTo("claude-sonnet-4-6");
+    assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
     assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
     assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();

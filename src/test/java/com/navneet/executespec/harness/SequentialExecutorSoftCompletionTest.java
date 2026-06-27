@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -243,11 +244,19 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   private static ExecutionRequest req(Plan plan, boolean enableSmoke) {
-    return req(plan, enableSmoke, false);
+    return req(plan, enableSmoke, false, false);
   }
 
   private static ExecutionRequest req(
       Plan plan, boolean enableSmoke, boolean requireContinuationConfirmation) {
+    return req(plan, enableSmoke, requireContinuationConfirmation, false);
+  }
+
+  private static ExecutionRequest req(
+      Plan plan,
+      boolean enableSmoke,
+      boolean requireContinuationConfirmation,
+      boolean userConfirmedContinuation) {
     return ExecutionRequest.builder()
         .plan(plan)
         .provider("anthropic")
@@ -255,6 +264,7 @@ class SequentialExecutorSoftCompletionTest {
         .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
         .enableSmokeTests(enableSmoke)
         .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
+        .userConfirmedExpensiveContinuation(userConfirmedContinuation)
         .build();
   }
 
@@ -1156,6 +1166,47 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson()
                             .contains("\"requireBenchmarkPriorForAutomaticContinuation\":true")),
         "Expected per-run confirmation requirement in persisted continuation JSON. Saw: "
+            + saveLog);
+  }
+
+  @Test
+  void continuation_decision_carries_user_confirmed_continuation_to_advisorAndPolicy() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.CHANGE_PROVIDER,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of("user-approved provider change can proceed")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    executor.execute(req(singleTaskPlan(), true, true, true));
+
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor, atLeastOnce()).advise(requestCaptor.capture());
+    assertTrue(
+        requestCaptor.getAllValues().stream()
+            .allMatch(GoalContinuationAdvisorRequest::expensiveContinuationRequiresConfirmation));
+    assertTrue(
+        requestCaptor.getAllValues().stream()
+            .allMatch(GoalContinuationAdvisorRequest::userConfirmedExpensiveContinuation));
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson()
+                            .contains("\"userConfirmedExpensiveContinuation\":true")),
+        "Expected user-confirmed continuation flag in persisted continuation JSON. Saw: "
             + saveLog);
   }
 
