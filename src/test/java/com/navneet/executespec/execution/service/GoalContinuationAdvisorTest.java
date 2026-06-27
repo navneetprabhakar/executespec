@@ -48,6 +48,7 @@ class GoalContinuationAdvisorTest {
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
     assertThat(decision.selectedCandidate()).contains(score("anthropic", "sonnet", 91, 70, 8.0));
+    assertThat(decision.policy()).containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
   }
 
   @Test
@@ -123,6 +124,47 @@ class GoalContinuationAdvisorTest {
     assertThat(captor.getValue().modelAllowList()).containsExactly("sonnet", "gpt-5.4");
     assertThat(captor.getValue().providerAvailability()).containsEntry("openai", false);
     assertThat(captor.getValue().providerPreferenceOrder()).containsExactly("anthropic", "openai");
+  }
+
+  @Test
+  void includesCompactRankingEvidenceInContinuationPolicy() {
+    ModelProviderScore cheapWeak = score("openai", "mini", 60, 70, 0.1);
+    ModelProviderScore cheapEligible = score("deepseek", "v4", 88, 70, 0.4);
+    ModelProviderScore stronger = score("anthropic", "sonnet", 92, 70, 8.0);
+    when(candidateService.buildCandidates(any()))
+        .thenReturn(List.of(cheapWeak, cheapEligible, stronger));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("deepseek")
+                .currentModel("v4")
+                .taskCategory("BUG_FIX")
+                .qualityInsufficient(true)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.policy()).containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
+    assertThat(decision.policy()).containsEntry("eligibleCandidateCount", 2);
+    assertThat(decision.policy()).containsEntry("rejectedBelowQualityThresholdCount", 1);
+    assertThat(decision.policy()).containsKey("rankingReasons");
+    assertThat(decision.policy().get("topEligibleCandidates")).isInstanceOf(List.class);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> eligible =
+        (List<Map<String, Object>>) decision.policy().get("topEligibleCandidates");
+    assertThat(eligible)
+        .extracting(candidate -> candidate.get("model"))
+        .containsExactly("sonnet", "v4");
+    assertThat(eligible.getFirst())
+        .containsEntry("qualityScore", 92.0)
+        .containsEntry("costPerMillionTokens", 8.0)
+        .containsEntry("latencyP50Ms", 1_000L);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> rejected =
+        (List<Map<String, Object>>) decision.policy().get("topRejectedCandidates");
+    assertThat(rejected).extracting(candidate -> candidate.get("model")).containsExactly("mini");
   }
 
   private static GoalDonenessDecision progressing() {

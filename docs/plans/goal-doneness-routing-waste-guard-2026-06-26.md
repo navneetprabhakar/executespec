@@ -806,6 +806,12 @@ through fallback `GoalContinuationPolicy`, and persists it in the continuation p
 lets breakdowns prefer bounded `CHANGE_PROVIDER` advice instead of treating every failure as generic
 low-quality or missing-proof evidence.
 
+Sixty-third slice 2026-06-27: advisor-backed continuation decisions now preserve ranking evidence.
+`GoalContinuationAdvisor` adds compact `rankingPolicy`, ranking reasons, top eligible candidates,
+and rejected-below-threshold candidates to the continuation policy payload. The selected model was
+already quality-first internally; this makes the quality > cost > latency ordering visible in SSE,
+durable task JSON, and reloadable run evidence.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
