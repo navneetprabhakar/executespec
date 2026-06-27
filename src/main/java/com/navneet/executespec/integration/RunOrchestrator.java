@@ -2737,9 +2737,9 @@ public class RunOrchestrator implements RunControlPort {
       RunCostTracker.Snapshot afterPostReviewExec = costTracker.snapshot(runId);
       int workerIn = afterPostReviewExec.inputTokens() - beforePostReviewAction.inputTokens();
       int workerOut = afterPostReviewExec.outputTokens() - beforePostReviewAction.outputTokens();
-      tokenAttributor.attributeWorker(
+      tokenAttributor.attributeWorkerAdditionalTask(
           runId,
-          rerunResult,
+          targetTaskId,
           workerIn,
           workerOut,
           candidate.provider().toUpperCase(Locale.ROOT),
