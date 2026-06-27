@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
@@ -602,6 +603,24 @@ public class RunLifecycleService {
    * @throws IllegalStateException if the run is not in a retryable state
    */
   public void retryTask(String runId, String taskId) {
+    retryTaskInternal(runId, taskId, null);
+  }
+
+  /**
+   * Approves a previously blocked model/provider continuation proposal for one task, then
+   * dispatches the normal retry path with the proposed provider/model. This only accepts proposals
+   * that were explicitly stopped by the continuation-confirmation guard; generic blocked tasks
+   * still require a normal retry or a fresh run.
+   */
+  public ContinuationApproval approveContinuation(String runId, String taskId) {
+    var task = findTask(runId, taskId);
+    ContinuationApproval approval = parseContinuationApproval(task);
+    retryTaskInternal(
+        runId, taskId, new RetryProviderOverride(approval.provider(), approval.model()));
+    return approval;
+  }
+
+  private void retryTaskInternal(String runId, String taskId, RetryProviderOverride override) {
     var run =
         runRepo
             .findById(runId)
@@ -611,11 +630,7 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Task retry requires PARTIAL / FAILED / COMPLETE run (current: " + status + ")");
     }
-    String key = runId.substring(0, 8) + "_" + taskId;
-    var task =
-        taskRepo
-            .findById(key)
-            .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+    var task = findTask(runId, taskId);
 
     java.nio.file.Path workspace =
         java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
@@ -636,10 +651,12 @@ public class RunLifecycleService {
     }
 
     log.info(
-        "RunOrchestrator retryTask: run={} task={} dispatching real re-execution via"
-            + " SequentialExecutor.execute(req, ResumeRequest)",
+        "RunOrchestrator retryTask: run={} task={} override={}/{} dispatching real re-execution"
+            + " via SequentialExecutor.execute(req, ResumeRequest)",
         runId,
-        taskId);
+        taskId,
+        override == null ? "-" : override.provider(),
+        override == null ? "-" : override.model());
 
     task.setStatus("PENDING");
     task.setStartedAt(null);
@@ -653,11 +670,7 @@ public class RunLifecycleService {
     runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
     broadcaster.emit(
-        runId,
-        RunEvent.log(
-            runId,
-            "retry",
-            "Retrying task " + taskId + " (run was " + prevRunStatus + " → now WORKING)"));
+        runId, RunEvent.log(runId, "retry", retryMessage(taskId, prevRunStatus, override)));
 
     final java.nio.file.Path retryWorkspace = workspace;
     final String fullTargetTaskId = task.getTaskId(); // already prefixed with runId-short
@@ -669,6 +682,10 @@ public class RunLifecycleService {
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
                 String model = row == null ? null : row.getWorkerModel();
+                if (override != null) {
+                  provider = override.provider();
+                  model = override.model();
+                }
 
                 ExecutionContext rootCtx =
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
@@ -711,6 +728,64 @@ public class RunLifecycleService {
             });
     controlPort.putActiveRun(runId, future);
   }
+
+  private com.navneet.executespec.state.entity.AgentTask findTask(String runId, String taskId) {
+    if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
+      throw new IllegalArgumentException("Task not found: " + taskId);
+    }
+    String runPrefix = runId.substring(0, 8) + "_";
+    String key = taskId.startsWith(runPrefix) ? taskId : runPrefix + taskId;
+    return taskRepo
+        .findById(key)
+        .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+  }
+
+  private ContinuationApproval parseContinuationApproval(
+      com.navneet.executespec.state.entity.AgentTask task) {
+    String json = task.getContinuationDecisionJson();
+    if (json == null || json.isBlank()) {
+      throw new IllegalStateException("No continuation proposal is recorded for this task.");
+    }
+    try {
+      JsonNode root = objectMapper.readTree(json);
+      String decision = root.path("decision").asText("");
+      boolean confirmationRequired =
+          root.path("policy").path("requireConfirmationBeforeExpensiveContinuation").asBoolean();
+      JsonNode candidate = root.path("selectedCandidate");
+      String provider = candidate.path("provider").asText("");
+      String model = candidate.path("model").asText("");
+      if (!"STOP_BLOCKED".equals(decision) || !confirmationRequired) {
+        throw new IllegalStateException(
+            "Continuation approval requires a confirmation-blocked continuation proposal.");
+      }
+      if (provider.isBlank() || model.isBlank()) {
+        throw new IllegalStateException(
+            "Continuation approval requires a proposed provider and model.");
+      }
+      return new ContinuationApproval(provider, model);
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("Continuation proposal JSON is corrupted: " + e.getMessage());
+    }
+  }
+
+  private static String retryMessage(
+      String taskId, String prevRunStatus, RetryProviderOverride override) {
+    String base = "Retrying task " + taskId + " (run was " + prevRunStatus + " → now WORKING)";
+    if (override == null) {
+      return base;
+    }
+    return base
+        + " with approved continuation model "
+        + override.provider()
+        + "/"
+        + override.model();
+  }
+
+  public record ContinuationApproval(String provider, String model) {}
+
+  private record RetryProviderOverride(String provider, String model) {}
 
   /**
    * Regenerate the validation report for a COMPLETE run whose background validation failed or needs
