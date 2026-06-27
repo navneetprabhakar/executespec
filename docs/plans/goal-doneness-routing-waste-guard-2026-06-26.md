@@ -890,6 +890,13 @@ events, and returns without the same-provider retry. Existing approval flow can 
 that stored provider/model. Non-candidate blockers and exhausted action limits keep existing
 behavior.
 
+Seventy-fourth slice 2026-06-27: typed goal/continuation events now refresh live run detail.
+`RunDetailSseService` treats `GOAL_DECISION`, `CONTINUATION_DECISION`, `CONTINUATION_ACTION`, and
+`CONTINUATION_ACTION_SKIPPED` as detail-refresh triggers and emits a fresh `RUN_DETAIL` payload.
+That makes blocked upgrade proposals, approval buttons, and continuation action history visible in
+the Steps tab as soon as the decision is persisted, not only after a later task-status event or
+manual reload.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
