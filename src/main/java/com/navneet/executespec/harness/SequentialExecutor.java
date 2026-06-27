@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
@@ -894,6 +896,8 @@ to boot — skip it for those.""";
             actionLimit.usedAfterReserve(),
             actionLimit.maxAllowed()));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), summary));
+    appendContinuationActionHistory(
+        runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
     TaskOutcome rerun =
         executeOne(
@@ -1020,6 +1024,67 @@ to boot — skip it for those.""";
             actionLimit.usedAfterReserve(),
             actionLimit.maxAllowed()));
     broadcaster.emit(runId, RunEvent.log(runId, taskId, summary));
+    appendContinuationActionHistory(
+        runId, taskId, decision, candidate, actionLimit, "SKIPPED", reason);
+  }
+
+  private void appendContinuationActionHistory(
+      String runId,
+      String taskIdShort,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      ContinuationActionLimit actionLimit,
+      String status,
+      String reason) {
+    if (taskRepo == null
+        || objectMapper == null
+        || runId == null
+        || runId.length() < 8
+        || taskIdShort == null
+        || taskIdShort.isBlank()
+        || decision == null
+        || candidate == null
+        || actionLimit == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    try {
+      var existing = taskRepo.findById(key);
+      if (existing.isEmpty()) {
+        log.debug("appendContinuationActionHistory: row not found id={}", key);
+        return;
+      }
+      var task = existing.get();
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode action = actions.addObject();
+      action.put("status", status == null || status.isBlank() ? "UNKNOWN" : status);
+      action.put("decision", decision.decision().name());
+      action.put("provider", candidate.provider());
+      action.put("model", candidate.model());
+      action.put("reason", reason == null ? "" : reason);
+      action.put("limitName", actionLimit.limitName());
+      action.put("usedLimit", actionLimit.usedAfterReserve());
+      action.put("maxLimit", actionLimit.maxAllowed());
+      action.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn("appendContinuationActionHistory: {} failed: {}", key, ex.getMessage(), ex);
+    }
+  }
+
+  private ArrayNode readContinuationActions(String json)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return objectMapper.createArrayNode();
+    }
+    JsonNode parsed = objectMapper.readTree(json);
+    if (parsed != null && parsed.isArray()) {
+      ArrayNode copy = objectMapper.createArrayNode();
+      parsed.forEach(copy::add);
+      return copy;
+    }
+    return objectMapper.createArrayNode();
   }
 
   private void clearContinuationActionState(String runId) {

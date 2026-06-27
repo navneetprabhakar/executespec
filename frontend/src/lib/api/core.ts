@@ -320,6 +320,20 @@ export interface TaskSummary {
     };
     reasons?: string[];
   } | null;
+  /** Durable history of continuation actions actually executed or skipped for this task. */
+  continuationActions?:
+    | {
+        status?: string;
+        decision?: string;
+        provider?: string;
+        model?: string;
+        reason?: string;
+        limitName?: string;
+        usedLimit?: number;
+        maxLimit?: number;
+        attempt?: number;
+      }[]
+    | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
   objective?: string | null;
   /** The worker's summary of what was implemented. */
