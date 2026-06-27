@@ -849,6 +849,13 @@ from that retry, but post-review approvals rerun the task with the selected prov
 reviewer and validation before terminal status. The approval API response now includes `postReview`
 so clients can distinguish the heavier reviewer-backed approval path.
 
+Sixty-ninth slice 2026-06-27: approved continuation retries now account for upgrade spend.
+`RunLifecycleService` snapshots `RunCostTracker` around the approved worker retry and attributes the
+delta to the target task with `RunTokenAttributor.attributeWorkerAdditionalTask`. When the approval
+came from post-review continuation, the reviewer rerun also records its token delta through
+`attributePhaseAdditional(REVIEWER)`. This keeps cost evidence honest for user-approved upgrades
+instead of hiding retry/reviewer spend behind the control-plane path.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
