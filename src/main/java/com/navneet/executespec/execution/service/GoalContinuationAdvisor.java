@@ -1,7 +1,9 @@
 package com.navneet.executespec.execution.service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
@@ -53,26 +55,75 @@ public class GoalContinuationAdvisor {
     ModelProviderRankingDecision ranking = rankingPolicy.rank(candidates);
     ModelProviderScore current = findCurrentCandidate(candidates, request).orElse(null);
 
-    return continuationPolicy.decide(
-        GoalContinuationRequest.builder()
-            .goalDecision(request.goalDecision())
-            .currentCandidate(current)
-            .rankingDecision(ranking)
-            .qualityInsufficient(request.qualityInsufficient())
-            .providerBehaviorPoor(request.providerBehaviorPoor())
-            .taskSimplerThanExpected(request.taskSimplerThanExpected())
-            .expensiveContinuationRequiresConfirmation(
-                request.expensiveContinuationRequiresConfirmation())
-            .benchmarkQualityPriorRequiredForAutomaticContinuation(
-                request.benchmarkQualityPriorRequiredForAutomaticContinuation())
-            .userConfirmedExpensiveContinuation(request.userConfirmedExpensiveContinuation())
-            .providerSwitchesUsed(request.providerSwitchesUsed())
-            .maxProviderSwitches(request.maxProviderSwitches())
-            .modelStepUpsUsed(request.modelStepUpsUsed())
-            .maxModelStepUps(request.maxModelStepUps())
-            .modelStepDownsUsed(request.modelStepDownsUsed())
-            .maxModelStepDowns(request.maxModelStepDowns())
-            .build());
+    GoalContinuationPolicyDecision decision =
+        continuationPolicy.decide(
+            GoalContinuationRequest.builder()
+                .goalDecision(request.goalDecision())
+                .currentCandidate(current)
+                .rankingDecision(ranking)
+                .qualityInsufficient(request.qualityInsufficient())
+                .providerBehaviorPoor(request.providerBehaviorPoor())
+                .taskSimplerThanExpected(request.taskSimplerThanExpected())
+                .expensiveContinuationRequiresConfirmation(
+                    request.expensiveContinuationRequiresConfirmation())
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(
+                    request.benchmarkQualityPriorRequiredForAutomaticContinuation())
+                .userConfirmedExpensiveContinuation(request.userConfirmedExpensiveContinuation())
+                .providerSwitchesUsed(request.providerSwitchesUsed())
+                .maxProviderSwitches(request.maxProviderSwitches())
+                .modelStepUpsUsed(request.modelStepUpsUsed())
+                .maxModelStepUps(request.maxModelStepUps())
+                .modelStepDownsUsed(request.modelStepDownsUsed())
+                .maxModelStepDowns(request.maxModelStepDowns())
+                .build());
+    return withRankingEvidence(decision, ranking);
+  }
+
+  private static GoalContinuationPolicyDecision withRankingEvidence(
+      GoalContinuationPolicyDecision decision, ModelProviderRankingDecision ranking) {
+    if (decision == null) {
+      return null;
+    }
+    Map<String, Object> policy = new LinkedHashMap<>();
+    if (decision.policy() != null) {
+      policy.putAll(decision.policy());
+    }
+    policy.put("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
+    policy.put("rankingReasons", ranking == null ? List.of() : ranking.reasons());
+    policy.put(
+        "eligibleCandidateCount", ranking == null ? 0 : Math.max(0, ranking.eligible().size()));
+    policy.put(
+        "rejectedBelowQualityThresholdCount",
+        ranking == null ? 0 : Math.max(0, ranking.rejectedBelowThreshold().size()));
+    policy.put(
+        "topEligibleCandidates",
+        ranking == null ? List.of() : candidateSummaries(ranking.eligible(), 5));
+    policy.put(
+        "topRejectedCandidates",
+        ranking == null ? List.of() : candidateSummaries(ranking.rejectedBelowThreshold(), 5));
+    return new GoalContinuationPolicyDecision(
+        decision.decision(), decision.selectedCandidate(), decision.reasons(), policy);
+  }
+
+  private static List<Map<String, Object>> candidateSummaries(
+      List<ModelProviderScore> candidates, int limit) {
+    if (candidates == null || candidates.isEmpty() || limit <= 0) {
+      return List.of();
+    }
+    return candidates.stream().limit(limit).map(GoalContinuationAdvisor::candidateSummary).toList();
+  }
+
+  private static Map<String, Object> candidateSummary(ModelProviderScore candidate) {
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("provider", candidate.provider());
+    out.put("model", candidate.model());
+    out.put("qualityScore", candidate.qualityScore());
+    out.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+    out.put("costPerMillionTokens", candidate.costPerMillionTokens());
+    out.put("latencyP50Ms", candidate.latencyP50Ms());
+    out.put("latencyP95Ms", candidate.latencyP95Ms());
+    out.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
+    return out;
   }
 
   private static Optional<ModelProviderScore> findCurrentCandidate(
