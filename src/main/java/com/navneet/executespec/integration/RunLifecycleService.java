@@ -749,14 +749,20 @@ public class RunLifecycleService {
     try {
       JsonNode root = objectMapper.readTree(json);
       String decision = root.path("decision").asText("");
-      boolean confirmationRequired =
+      boolean explicitConfirmationRequired =
           root.path("policy").path("requireConfirmationBeforeExpensiveContinuation").asBoolean();
       JsonNode candidate = root.path("selectedCandidate");
       String provider = candidate.path("provider").asText("");
       String model = candidate.path("model").asText("");
-      if (!"STOP_BLOCKED".equals(decision) || !confirmationRequired) {
+      boolean benchmarkPriorRequired =
+          root.path("policy").path("requireBenchmarkPriorForAutomaticContinuation").asBoolean();
+      boolean candidateHasBenchmarkPrior =
+          candidate.path("benchmarkQualityPriorAvailable").asBoolean(false);
+      boolean benchmarkConfidenceBlocked = benchmarkPriorRequired && !candidateHasBenchmarkPrior;
+      if (!"STOP_BLOCKED".equals(decision)
+          || (!explicitConfirmationRequired && !benchmarkConfidenceBlocked)) {
         throw new IllegalStateException(
-            "Continuation approval requires a confirmation-blocked continuation proposal.");
+            "Continuation approval requires an approval-blocked continuation proposal.");
       }
       if (provider.isBlank() || model.isBlank()) {
         throw new IllegalStateException(

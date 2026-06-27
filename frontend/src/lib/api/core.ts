@@ -308,6 +308,7 @@ export interface TaskSummary {
       maxModelStepUps?: number;
       maxModelStepDowns?: number;
       requireConfirmationBeforeExpensiveContinuation?: boolean;
+      requireBenchmarkPriorForAutomaticContinuation?: boolean;
       maxTotalCostUsd?: number;
       maxTotalTokens?: number;
       maxTaskWallClockMs?: number;

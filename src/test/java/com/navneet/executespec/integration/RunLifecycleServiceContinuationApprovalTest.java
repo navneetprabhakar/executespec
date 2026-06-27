@@ -171,7 +171,66 @@ class RunLifecycleServiceContinuationApprovalTest {
 
     assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("confirmation-blocked continuation proposal");
+        .hasMessageContaining("approval-blocked continuation proposal");
+    verify(pool, never()).submit(any(Runnable.class));
+    verify(runRepo, never()).findById(any());
+  }
+
+  @Test
+  void approveContinuation_acceptsBenchmarkConfidenceBlockedProposal() {
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .continuationDecisionJson(
+                """
+                {
+                  "decision": "STOP_BLOCKED",
+                  "selectedCandidate": {
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                    "benchmarkQualityPriorAvailable": false
+                  },
+                  "policy": {"requireBenchmarkPriorForAutomaticContinuation": true}
+                }
+                """)
+            .build();
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("FAILED").build()));
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Workspace gone");
+    verify(taskRepo, atLeastOnce()).findById(TASK_KEY);
+  }
+
+  @Test
+  void approveContinuation_rejectsBenchmarkBackedStopWithoutConfirmationReason() {
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .continuationDecisionJson(
+                """
+                {
+                  "decision": "STOP_BLOCKED",
+                  "selectedCandidate": {
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                    "benchmarkQualityPriorAvailable": true
+                  },
+                  "policy": {"requireBenchmarkPriorForAutomaticContinuation": true}
+                }
+                """)
+            .build();
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("approval-blocked continuation proposal");
     verify(pool, never()).submit(any(Runnable.class));
     verify(runRepo, never()).findById(any());
   }
