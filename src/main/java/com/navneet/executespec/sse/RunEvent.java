@@ -79,9 +79,10 @@ public record RunEvent(
   }
 
   /**
-   * Machine-readable continuation action emitted only when the executor actually acts on a
-   * continuation recommendation, for example by rerunning the same task with an advisor-selected
-   * provider/model. The legacy LOG line is still emitted for old clients.
+   * Machine-readable continuation action emitted when the system acts on a continuation
+   * recommendation, for example by rerunning the same task with an advisor-selected provider/model
+   * or accepting a user-approved blocked continuation. The {@code status} data field distinguishes
+   * automatic execution from approval.
    */
   public static RunEvent continuationAction(
       String runId,
