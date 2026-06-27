@@ -264,11 +264,12 @@ public class ModelProviderCandidateService {
       BenchmarkRun run, String taskCategory, int minSampleTasks) {
     double resolvedRate = (run.getResolvedTasks() * 100.0) / run.getTotalTasks();
     boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
+    boolean compatibleTaskCategory = benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
     return ModelProviderCapabilitySignal.builder()
         .provider(run.getProvider())
         .model(run.getModel())
         .taskCategory(taskCategory)
-        .benchmarkQualityScore(enoughSample ? resolvedRate : null)
+        .benchmarkQualityScore(enoughSample && compatibleTaskCategory ? resolvedRate : null)
         .reasons(
             List.of(
                 String.format(
@@ -278,12 +279,73 @@ public class ModelProviderCandidateService {
                     run.getDataset(),
                     run.getResolvedTasks(),
                     run.getTotalTasks(),
-                    enoughSample
-                        ? " (used as quality prior)"
-                        : " (below "
-                            + minSampleTasks
-                            + "-task minimum; not used as quality prior)")))
+                    benchmarkPriorSuffix(
+                        enoughSample,
+                        compatibleTaskCategory,
+                        minSampleTasks,
+                        run.getSuite(),
+                        taskCategory))))
         .build();
+  }
+
+  private static String benchmarkPriorSuffix(
+      boolean enoughSample,
+      boolean compatibleTaskCategory,
+      int minSampleTasks,
+      String suite,
+      String taskCategory) {
+    if (!enoughSample) {
+      return " (below " + minSampleTasks + "-task minimum; not used as quality prior)";
+    }
+    if (!compatibleTaskCategory) {
+      return " (suite "
+          + safeLabel(suite)
+          + " is not a prior for task category "
+          + safeLabel(taskCategory)
+          + ")";
+    }
+    return " (used as quality prior)";
+  }
+
+  private static boolean benchmarkSuiteSupportsTaskCategory(String suite, String taskCategory) {
+    String normalizedSuite = normalizeBenchmarkLabel(suite);
+    String normalizedCategory = normalizeBenchmarkLabel(taskCategory);
+    if (normalizedSuite.isEmpty() || normalizedCategory.isEmpty()) {
+      return false;
+    }
+    return switch (normalizedSuite) {
+      case "terminal_bench", "terminalbench" ->
+          normalizedCategory.equals("terminal_task")
+              || normalizedCategory.equals("benchmark_patch");
+      case "swe_bench", "swebench", "swe_bench_lite", "swe_bench_verified" ->
+          normalizedCategory.equals("bug_fix")
+              || normalizedCategory.equals("test_fix")
+              || normalizedCategory.equals("project_patch")
+              || normalizedCategory.equals("benchmark_patch");
+      case "program_bench", "programbench" ->
+          normalizedCategory.equals("bug_fix")
+              || normalizedCategory.equals("test_fix")
+              || normalizedCategory.equals("benchmark_patch");
+      default ->
+          normalizedCategory.equals("benchmark_patch")
+              || normalizedCategory.equals("terminal_task")
+              || normalizedCategory.equals("bug_fix")
+              || normalizedCategory.equals("test_fix")
+              || normalizedCategory.equals("project_patch");
+    };
+  }
+
+  private static String normalizeBenchmarkLabel(String value) {
+    return value == null
+        ? ""
+        : value.trim()
+            .toLowerCase(Locale.ROOT)
+            .replace('-', '_')
+            .replace(' ', '_');
+  }
+
+  private static String safeLabel(String value) {
+    return value == null || value.isBlank() ? "UNKNOWN" : value;
   }
 
   private static String providerFor(String model, ModelMatrixProperties.ModelConfig config) {

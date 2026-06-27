@@ -147,14 +147,14 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
-  void mergesPersistedBenchmarkRunsAsBenchmarkQualitySignals() {
+  void mergesCompatiblePersistedBenchmarkRunsAsBenchmarkQualitySignals() {
     when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
         .thenReturn(
             List.of(
                 BenchmarkRun.builder()
                     .id("bench-1")
-                    .suite("TERMINAL_BENCH")
-                    .dataset("first-20")
+                    .suite("SWE_BENCH")
+                    .dataset("lite")
                     .provider("anthropic")
                     .model("claude-sonnet-4-6")
                     .totalTasks(20)
@@ -173,11 +173,75 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.qualityScore()).isEqualTo(90.0);
     assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
     assertThat(sonnet.reasons())
-        .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks (used as quality prior)");
+        .contains("benchmark SWE_BENCH/lite resolved 18/20 tasks (used as quality prior)");
     assertThat(sonnet.reasons())
         .doesNotContain(
             "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
                 + " fallback/local/validation signals only");
+  }
+
+  @Test
+  void keepsIncompatiblePersistedBenchmarkRunsVisibleButNotAsQualityPriors() {
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-terminal")
+                    .suite("TERMINAL_BENCH")
+                    .dataset("first-20")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(18)
+                    .status("DONE")
+                    .build()));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(70.0)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnet.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
+    assertThat(sonnet.reasons())
+        .contains(
+            "benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks (suite TERMINAL_BENCH is not a"
+                + " prior for task category BUG_FIX)",
+            "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
+                + " fallback/local/validation signals only");
+  }
+
+  @Test
+  void allowsTerminalBenchQualityPriorForTerminalTaskCategory() {
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-terminal")
+                    .suite("TERMINAL_BENCH")
+                    .dataset("first-20")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(18)
+                    .status("DONE")
+                    .build()));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("TERMINAL_TASK")
+                .requiredQualityThreshold(70.0)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnet.qualityScore()).isEqualTo(90.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
+    assertThat(sonnet.reasons())
+        .contains("benchmark TERMINAL_BENCH/first-20 resolved 18/20 tasks (used as quality prior)");
   }
 
   @Test
