@@ -98,6 +98,37 @@ class AgentRunEventBridgeTest {
   }
 
   @Test
+  void bridgesApprovedContinuationActionWithStatus() {
+    AgentSession session = session("s1", "run-1");
+    when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(session));
+    when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    bridge.onRunEvent(
+        RunEvent.continuationAction(
+            "run-1",
+            "T1",
+            "approved",
+            "STEP_UP_MODEL",
+            "openai",
+            "gpt-5.4",
+            "user approved blocked continuation",
+            1,
+            1,
+            "userApproval",
+            1,
+            1,
+            "APPROVED"));
+
+    ArgumentCaptor<AgentActionEvent> event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getType()).isEqualTo("RUN_CONTINUATION_ACTION");
+    assertThat(event.getValue().getPayloadJson()).contains("\"status\":\"APPROVED\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"limitName\":\"userApproval\"");
+  }
+
+  @Test
   void bridgesTaskWavePlanIntoRunScopedAgentSession() {
     AgentSession session = session("s1", "run-1");
     when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
