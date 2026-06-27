@@ -401,6 +401,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
+  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:true}")
+  private boolean requireBenchmarkPriorForAutomaticContinuation = false;
+
   @Value("${execution.continuation.max-total-cost-usd:-1}")
   private double maxGoalTotalCostUsd = -1.0;
 
@@ -1879,6 +1882,8 @@ to boot — skip it for those.""";
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                  .benchmarkQualityPriorRequiredForAutomaticContinuation(
+                      requireBenchmarkPriorForAutomaticContinuation)
                   .maxProviderSwitches(maxProviderSwitches())
                   .maxModelStepUps(maxModelStepUps())
                   .maxModelStepDowns(maxModelStepDowns())
@@ -2156,6 +2161,9 @@ to boot — skip it for those.""";
     data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
     data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
+    data.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        requireBenchmarkPriorForAutomaticContinuation);
     data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
     data.put("maxTotalTokens", maxGoalTotalTokens());
     data.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
@@ -2265,6 +2273,7 @@ to boot — skip it for those.""";
     data.put("costPerMillionTokens", candidate.costPerMillionTokens());
     data.put("latencyP50Ms", candidate.latencyP50Ms());
     data.put("latencyP95Ms", candidate.latencyP95Ms());
+    data.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
     data.put("reasons", candidate.reasons());
     return data;
   }
@@ -2319,6 +2328,7 @@ to boot — skip it for those.""";
       candidateNode.put("costPerMillionTokens", candidate.costPerMillionTokens());
       candidateNode.put("latencyP50Ms", candidate.latencyP50Ms());
       candidateNode.put("latencyP95Ms", candidate.latencyP95Ms());
+      candidateNode.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
       var candidateReasons = candidateNode.putArray("reasons");
       candidate.reasons().forEach(candidateReasons::add);
     }
@@ -2354,6 +2364,9 @@ to boot — skip it for those.""";
     policyNode.put(
         "requireConfirmationBeforeExpensiveContinuation",
         requireConfirmationBeforeExpensiveContinuation);
+    policyNode.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        requireBenchmarkPriorForAutomaticContinuation);
     policyNode.put("maxTotalCostUsd", maxGoalTotalCostUsd());
     policyNode.put("maxTotalTokens", maxGoalTotalTokens());
     policyNode.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());

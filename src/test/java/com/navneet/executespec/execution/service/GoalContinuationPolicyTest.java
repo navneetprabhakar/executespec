@@ -185,6 +185,40 @@ class GoalContinuationPolicyTest {
     assertThat(decision.reasons().getFirst()).contains(stronger.label());
   }
 
+  @Test
+  void benchmarkPriorRequiredBlocksUnbenchmarkedAutomaticEscalation() {
+    ModelProviderScore stronger = strongerSameProvider();
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(stronger, current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(stronger);
+    assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
+    assertThat(decision.reasons().getFirst()).contains("proposed action STEP_UP_MODEL");
+  }
+
+  @Test
+  void benchmarkPriorRequiredAllowsBenchmarkBackedEscalation() {
+    ModelProviderScore stronger = score("anthropic", "opus", 91, 18.0, 2_000, 70, true, "stronger");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(stronger, current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
+    assertThat(decision.selectedCandidate()).contains(stronger);
+  }
+
   private GoalContinuationRequest.GoalContinuationRequestBuilder request(
       GoalDonenessDecision goalDecision,
       ModelProviderScore current,
@@ -278,6 +312,28 @@ class GoalContinuationPolicyTest {
         latency,
         latency * 2,
         threshold,
+        List.of(reason));
+  }
+
+  private static ModelProviderScore score(
+      String provider,
+      String model,
+      double quality,
+      double cost,
+      long latency,
+      double threshold,
+      boolean benchmarkQualityPriorAvailable,
+      String reason) {
+    return new ModelProviderScore(
+        provider,
+        model,
+        "BUG_FIX",
+        quality,
+        cost,
+        latency,
+        latency * 2,
+        threshold,
+        benchmarkQualityPriorAvailable,
         List.of(reason));
   }
 }

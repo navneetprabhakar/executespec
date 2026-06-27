@@ -63,6 +63,8 @@ public class GoalContinuationAdvisor {
             .taskSimplerThanExpected(request.taskSimplerThanExpected())
             .expensiveContinuationRequiresConfirmation(
                 request.expensiveContinuationRequiresConfirmation())
+            .benchmarkQualityPriorRequiredForAutomaticContinuation(
+                request.benchmarkQualityPriorRequiredForAutomaticContinuation())
             .userConfirmedExpensiveContinuation(request.userConfirmedExpensiveContinuation())
             .providerSwitchesUsed(request.providerSwitchesUsed())
             .maxProviderSwitches(request.maxProviderSwitches())

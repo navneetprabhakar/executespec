@@ -24,6 +24,7 @@ public record GoalContinuationAdvisorRequest(
     boolean providerBehaviorPoor,
     boolean taskSimplerThanExpected,
     boolean expensiveContinuationRequiresConfirmation,
+    boolean benchmarkQualityPriorRequiredForAutomaticContinuation,
     boolean userConfirmedExpensiveContinuation,
     int providerSwitchesUsed,
     int maxProviderSwitches,

@@ -18,6 +18,7 @@ public record ModelProviderScore(
     long latencyP50Ms,
     long latencyP95Ms,
     double requiredQualityThreshold,
+    boolean benchmarkQualityPriorAvailable,
     List<String> reasons) {
 
   public ModelProviderScore {
@@ -29,6 +30,29 @@ public record ModelProviderScore(
     }
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
+  }
+
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      List<String> reasons) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        false,
+        reasons);
   }
 
   public boolean meetsQualityThreshold() {

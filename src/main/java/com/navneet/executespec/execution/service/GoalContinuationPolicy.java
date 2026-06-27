@@ -37,6 +37,17 @@ public class GoalContinuationPolicy {
 
     Optional<GoalContinuationPolicyDecision> escalation = escalationDecision(request);
     if (escalation.isPresent()) {
+      if (request.benchmarkQualityPriorRequiredForAutomaticContinuation()
+          && !request.userConfirmedExpensiveContinuation()
+          && escalation.get().selectedCandidate().stream()
+              .noneMatch(ModelProviderScore::benchmarkQualityPriorAvailable)) {
+        return decision(
+            RunContinuationDecision.STOP_BLOCKED,
+            escalation.get().selectedCandidate(),
+            "selected continuation candidate lacks benchmark quality prior; proposed action "
+                + escalation.get().decision()
+                + proposedCandidateSuffix(escalation.get()));
+      }
       if (request.expensiveContinuationRequiresConfirmation()
           && !request.userConfirmedExpensiveContinuation()) {
         return decision(
