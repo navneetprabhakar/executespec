@@ -130,6 +130,7 @@ Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAV
 
 `execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
 Soft-completed edits also feed `completionConfidenceLow=true` when the worker changed files but did not cleanly prove completion; those task decisions remain progressing but set `anotherModelProviderMightHelp=true` so the benchmark/confirmation-guarded continuation advisor can step up.
+Final validation-ledger proof treats reviewer `WARN` / `FAIL` rows as reviewer low-quality failure with `anotherModelProviderMightHelp=true`, so unresolved review becomes an explicit escalation signal.
 
 Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
 

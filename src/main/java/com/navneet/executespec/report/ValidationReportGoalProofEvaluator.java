@@ -105,6 +105,22 @@ public class ValidationReportGoalProofEvaluator {
       risks.add(item);
     }
 
+    if (reviewerQualityFailed(byId.get("reviewer"))) {
+      return decision(
+          GoalDonenessState.FAILED,
+          RunContinuationDecision.STOP_FAILED,
+          "final validation report contains reviewer low-quality evidence",
+          goal,
+          completed,
+          incompleteWith(
+              incomplete, "reviewer found unresolved or failed implementation quality evidence"),
+          evidence,
+          risksWith(
+              risks, "reviewer low-quality evidence may require model/provider escalation"),
+          false,
+          true);
+    }
+
     for (String id : OPTIONAL_PROOF_IDS) {
       VerificationEvidenceDTO row = byId.get(id);
       if (row == null) {
@@ -171,6 +187,29 @@ public class ValidationReportGoalProofEvaluator {
         risks,
         false,
         true);
+  }
+
+  private static boolean reviewerQualityFailed(VerificationEvidenceDTO reviewer) {
+    String status = status(reviewer);
+    return "WARN".equals(status) || "FAIL".equals(status);
+  }
+
+  private static List<String> incompleteWith(List<String> incomplete, String item) {
+    if (item == null || item.isBlank() || incomplete.contains(item)) {
+      return incomplete;
+    }
+    List<String> out = new ArrayList<>(incomplete);
+    out.add(item);
+    return List.copyOf(out);
+  }
+
+  private static List<String> risksWith(List<String> risks, String item) {
+    if (item == null || item.isBlank() || risks.contains(item)) {
+      return risks;
+    }
+    List<String> out = new ArrayList<>(risks);
+    out.add(item);
+    return List.copyOf(out);
   }
 
   private static GoalDonenessDecision decision(
