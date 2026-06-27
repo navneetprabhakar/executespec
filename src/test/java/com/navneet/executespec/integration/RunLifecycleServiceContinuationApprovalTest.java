@@ -20,6 +20,7 @@ import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -125,7 +126,10 @@ class RunLifecycleServiceContinuationApprovalTest {
                 {
                   "decision": "STOP_BLOCKED",
                   "selectedCandidate": {"provider": "openai", "model": "gpt-5.4"},
-                  "policy": {"requireConfirmationBeforeExpensiveContinuation": true}
+                  "policy": {
+                    "requireConfirmationBeforeExpensiveContinuation": true,
+                    "proposedAction": "CHANGE_PROVIDER"
+                  }
                 }
                 """)
             .build();
@@ -144,11 +148,76 @@ class RunLifecycleServiceContinuationApprovalTest {
 
     assertThat(approval.provider()).isEqualTo("openai");
     assertThat(approval.model()).isEqualTo("gpt-5.4");
+    assertThat(approval.proposedAction()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
     verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
+    assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
+    assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
+    assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
+  }
+
+  @Test
+  void approveContinuation_seedsApprovedModelStepUpUsage() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "planSummary": "",
+                  "tasks": [{"id": "T1", "title": "Fix build", "description": ""}]
+                }
+                """)
+            .aiProvider("anthropic")
+            .workerModel("claude-haiku-4-5-20251001")
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .continuationDecisionJson(
+                """
+{
+  "decision": "STOP_BLOCKED",
+  "selectedCandidate": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6"
+  },
+  "policy": {"requireConfirmationBeforeExpensiveContinuation": true},
+  "reasons": [
+    "expensive continuation requires user confirmation before more spend; proposed action STEP_UP_MODEL -> anthropic/claude-sonnet-4-6"
+  ]
+}
+""")
+            .build();
+
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+
+    RunLifecycleService.ContinuationApproval approval =
+        service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    assertThat(approval.proposedAction()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
+    ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
+    verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
+    assertThat(request.getValue().provider()).isEqualTo("anthropic");
+    assertThat(request.getValue().model()).isEqualTo("claude-sonnet-4-6");
+    assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
+    assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
+    assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
   }
 
   @Test

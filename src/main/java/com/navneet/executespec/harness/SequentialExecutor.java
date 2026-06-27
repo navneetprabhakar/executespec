@@ -460,6 +460,7 @@ to boot — skip it for those.""";
         runId,
         requireConfirmationBeforeExpensiveContinuation
             || Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation()));
+    seedInitialContinuationActionState(runId, req, resume);
 
     try {
       log.info(
@@ -1030,6 +1031,40 @@ to boot — skip it for those.""";
 
   private static String continuationTaskKey(String runId, String taskId) {
     return (runId == null ? "" : runId) + ":" + (taskId == null ? "" : taskId);
+  }
+
+  private void seedInitialContinuationActionState(
+      String runId, ExecutionRequest req, ResumeRequest resume) {
+    if (runId == null || runId.isBlank() || req == null) {
+      return;
+    }
+    if (req.initialProviderSwitchesUsed() > 0) {
+      continuationProviderSwitchesPerRun.put(
+          runId, new AtomicInteger(req.initialProviderSwitchesUsed()));
+    }
+    String targetTaskId = resumeTargetShortTaskId(runId, resume);
+    if (targetTaskId == null || targetTaskId.isBlank()) {
+      return;
+    }
+    if (req.initialModelStepUpsUsed() > 0) {
+      continuationModelStepUpsPerTask.put(
+          continuationTaskKey(runId, targetTaskId), new AtomicInteger(req.initialModelStepUpsUsed()));
+    }
+    if (req.initialModelStepDownsUsed() > 0) {
+      continuationModelStepDownsPerTask.put(
+          continuationTaskKey(runId, targetTaskId),
+          new AtomicInteger(req.initialModelStepDownsUsed()));
+    }
+  }
+
+  private static String resumeTargetShortTaskId(String runId, ResumeRequest resume) {
+    if (resume == null || resume.targetTaskId() == null || resume.targetTaskId().isBlank()) {
+      return null;
+    }
+    String target = resume.targetTaskId();
+    String prefix =
+        runId != null && runId.length() >= 8 ? runId.substring(0, 8) + "_" : "";
+    return !prefix.isBlank() && target.startsWith(prefix) ? target.substring(prefix.length()) : target;
   }
 
   private int providerSwitchesUsed(String runId) {

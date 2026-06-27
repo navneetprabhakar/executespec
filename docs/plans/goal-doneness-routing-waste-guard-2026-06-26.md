@@ -710,6 +710,13 @@ sends `requireConfirmationBeforeExpensiveContinuation=true` on `POST /api/runs` 
 shows the setting in the Review step. This makes the user-config path available from the main web
 surface instead of only through raw API/CLI payloads.
 
+Forty-ninth slice 2026-06-27: approved blocked-continuation retries now consume the same escalation
+budget as automatic continuation. Confirmation-blocked policy decisions store `policy.proposedAction`,
+the approval path carries that action into the retry override, and `ExecutionRequest` can seed initial
+provider-switch / model-step usage before `SequentialExecutor` evaluates the resumed task. Legacy
+persisted proposals that only have the proposed action in reason text are parsed defensively, so older
+blocked approvals still count against the same configured ceilings.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

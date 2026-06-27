@@ -16,6 +16,7 @@ import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -616,7 +617,9 @@ public class RunLifecycleService {
     var task = findTask(runId, taskId);
     ContinuationApproval approval = parseContinuationApproval(task);
     retryTaskInternal(
-        runId, taskId, new RetryProviderOverride(approval.provider(), approval.model()));
+        runId,
+        taskId,
+        new RetryProviderOverride(approval.provider(), approval.model(), approval.proposedAction()));
     return approval;
   }
 
@@ -686,6 +689,7 @@ public class RunLifecycleService {
                   provider = override.provider();
                   model = override.model();
                 }
+                ContinuationUsage approvedUsage = continuationUsageFor(row, override);
 
                 ExecutionContext rootCtx =
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
@@ -701,6 +705,9 @@ public class RunLifecycleService {
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
                             .enableSmokeTests(true)
+                            .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
+                            .initialModelStepUpsUsed(approvedUsage.modelStepUps())
+                            .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
                             .designBlock(null)
                             .projectId(row == null ? null : row.getProjectId())
                             .workspaceSummary(
@@ -754,6 +761,7 @@ public class RunLifecycleService {
       JsonNode candidate = root.path("selectedCandidate");
       String provider = candidate.path("provider").asText("");
       String model = candidate.path("model").asText("");
+      RunContinuationDecision proposedAction = proposedContinuationAction(root);
       boolean benchmarkPriorRequired =
           root.path("policy").path("requireBenchmarkPriorForAutomaticContinuation").asBoolean();
       boolean candidateHasBenchmarkPrior =
@@ -768,7 +776,7 @@ public class RunLifecycleService {
         throw new IllegalStateException(
             "Continuation approval requires a proposed provider and model.");
       }
-      return new ContinuationApproval(provider, model);
+      return new ContinuationApproval(provider, model, proposedAction);
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
@@ -789,9 +797,101 @@ public class RunLifecycleService {
         + override.model();
   }
 
-  public record ContinuationApproval(String provider, String model) {}
+  private static RunContinuationDecision proposedContinuationAction(JsonNode root) {
+    String explicit = root.path("policy").path("proposedAction").asText("");
+    if (explicit.isBlank()) {
+      explicit = root.path("proposedAction").asText("");
+    }
+    RunContinuationDecision parsed = parseContinuationAction(explicit);
+    if (parsed != null) {
+      return parsed;
+    }
+    JsonNode reasons = root.path("reasons");
+    if (reasons.isArray()) {
+      for (JsonNode reason : reasons) {
+        parsed = proposedContinuationActionFromText(reason.asText(""));
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  }
 
-  private record RetryProviderOverride(String provider, String model) {}
+  private static RunContinuationDecision proposedContinuationActionFromText(String text) {
+    if (text == null || text.isBlank()) {
+      return null;
+    }
+    for (RunContinuationDecision candidate :
+        List.of(
+            RunContinuationDecision.STEP_UP_MODEL,
+            RunContinuationDecision.STEP_DOWN_MODEL,
+            RunContinuationDecision.CHANGE_PROVIDER)) {
+      if (text.contains("proposed action " + candidate.name())) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static RunContinuationDecision parseContinuationAction(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      RunContinuationDecision decision = RunContinuationDecision.valueOf(value.trim());
+      return switch (decision) {
+        case STEP_UP_MODEL, STEP_DOWN_MODEL, CHANGE_PROVIDER -> decision;
+        case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+            null;
+      };
+    } catch (IllegalArgumentException ex) {
+      return null;
+    }
+  }
+
+  private static ContinuationUsage continuationUsageFor(
+      PipelineRun row, RetryProviderOverride override) {
+    if (override == null) {
+      return ContinuationUsage.none();
+    }
+    RunContinuationDecision action = override.proposedAction();
+    if (action == RunContinuationDecision.CHANGE_PROVIDER) {
+      return new ContinuationUsage(1, 0, 0);
+    }
+    if (action == RunContinuationDecision.STEP_UP_MODEL) {
+      return new ContinuationUsage(0, 1, 0);
+    }
+    if (action == RunContinuationDecision.STEP_DOWN_MODEL) {
+      return new ContinuationUsage(0, 0, 1);
+    }
+    String currentProvider = row == null ? "" : blankToEmpty(row.getAiProvider());
+    if (!currentProvider.isBlank()
+        && !currentProvider.equalsIgnoreCase(blankToEmpty(override.provider()))) {
+      return new ContinuationUsage(1, 0, 0);
+    }
+    String currentModel = row == null ? "" : blankToEmpty(row.getWorkerModel());
+    if (!currentModel.isBlank() && !currentModel.equals(blankToEmpty(override.model()))) {
+      return new ContinuationUsage(0, 1, 0);
+    }
+    return ContinuationUsage.none();
+  }
+
+  private static String blankToEmpty(String value) {
+    return value == null ? "" : value.trim();
+  }
+
+  public record ContinuationApproval(
+      String provider, String model, RunContinuationDecision proposedAction) {}
+
+  private record RetryProviderOverride(
+      String provider, String model, RunContinuationDecision proposedAction) {}
+
+  private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
+    static ContinuationUsage none() {
+      return new ContinuationUsage(0, 0, 0);
+    }
+  }
 
   /**
    * Regenerate the validation report for a COMPLETE run whose background validation failed or needs
