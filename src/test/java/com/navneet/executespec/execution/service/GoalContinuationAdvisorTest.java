@@ -167,6 +167,34 @@ class GoalContinuationAdvisorTest {
     assertThat(rejected).extracting(candidate -> candidate.get("model")).containsExactly("mini");
   }
 
+  @Test
+  void providerBreakdownAutoChangesToBenchmarkBackedProviderBeforeHigherUnbenchmarkedCandidate() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
+    ModelProviderScore higherUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 70, 22.0, false);
+    ModelProviderScore benchmarkBacked =
+        score("openai", "gpt-5.4", 90, 70, 16.0, true);
+    when(candidateService.buildCandidates(any()))
+        .thenReturn(List.of(current, higherUnbenchmarked, benchmarkBacked));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("deepseek")
+                .currentModel("deepseek-v4-pro")
+                .taskCategory("BUG_FIX")
+                .providerBehaviorPoor(true)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(benchmarkBacked);
+    assertThat(decision.policy()).containsEntry("eligibleCandidateCount", 3);
+  }
+
   private static GoalDonenessDecision progressing() {
     return new GoalDonenessDecision(
         GoalDonenessState.NOT_DONE_BUT_PROGRESSING,
@@ -185,5 +213,25 @@ class GoalContinuationAdvisorTest {
       String provider, String model, double quality, double threshold, double cost) {
     return new ModelProviderScore(
         provider, model, "BUG_FIX", quality, cost, 1_000, 2_000, threshold, List.of());
+  }
+
+  private static ModelProviderScore score(
+      String provider,
+      String model,
+      double quality,
+      double threshold,
+      double cost,
+      boolean benchmarkQualityPriorAvailable) {
+    return new ModelProviderScore(
+        provider,
+        model,
+        "BUG_FIX",
+        quality,
+        cost,
+        1_000,
+        2_000,
+        threshold,
+        benchmarkQualityPriorAvailable,
+        List.of());
   }
 }

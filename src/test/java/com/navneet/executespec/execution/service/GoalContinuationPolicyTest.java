@@ -241,6 +241,48 @@ class GoalContinuationPolicyTest {
   }
 
   @Test
+  void benchmarkPriorRequiredPrefersBenchmarkBackedProviderChangeAfterProviderBreakdown() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 76, 0.4, 1_600, 70, true, "current broke down");
+    ModelProviderScore higherUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked top");
+    ModelProviderScore benchmarkBacked =
+        score("openai", "gpt-5.4", 90, 16.0, 1_800, 70, true, "benchmark-backed");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current, ranked(higherUnbenchmarked, benchmarkBacked, current))
+                .providerBehaviorPoor(true)
+                .maxProviderSwitches(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(benchmarkBacked);
+  }
+
+  @Test
+  void benchmarkPriorRequiredBlocksProviderChangeWithUnbenchmarkedProposalWhenNoBackedProviderFits() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 76, 0.4, 1_600, 70, true, "current broke down");
+    ModelProviderScore higherUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked top");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current, ranked(higherUnbenchmarked, current))
+                .providerBehaviorPoor(true)
+                .maxProviderSwitches(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(higherUnbenchmarked);
+    assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
+    assertThat(decision.policy()).containsEntry("proposedAction", "CHANGE_PROVIDER");
+  }
+
+  @Test
   void benchmarkPriorRequiredStillBlocksWithUnbenchmarkedProposalWhenNoBenchmarkBackedOptionFits() {
     ModelProviderScore higherUnbenchmarked =
         score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked top");
