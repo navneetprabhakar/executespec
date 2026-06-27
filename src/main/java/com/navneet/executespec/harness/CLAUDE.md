@@ -19,6 +19,8 @@
 | `ExecutionRequest.java` | Executor input shape. `localHandsMode=true` is set only by CLI local-hands runs and appends a local-only scope prompt so empty working-tree edits do not sprout unsolicited scaffolds/tests. |
 | `ApprovalGate.java` | Plan-gate interface. |
 
+Continuation approval scope: approved blocked-continuation retries carry both `userConfirmedExpensiveContinuation=true` and the exact approved action/provider/model on `ExecutionRequest`. `GoalContinuationPolicy` may bypass confirmation or benchmark-prior guards only when the later selected continuation matches that stored scope; a different provider, model, or action remains blocked for a fresh approval.
+
 ## Pipeline sequencing (PRODUCTION mode)
 
 1. `RunOrchestrator.submitRun(req)` persists the run row + estimate.

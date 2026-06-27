@@ -834,6 +834,14 @@ persists it in the policy JSON. This prevents an approved unbenchmarked/expensiv
 being treated as unconfirmed during the resumed retry while preserving the consumed escalation
 counters.
 
+Sixty-seventh slice 2026-06-27: approved continuation confirmation is now scoped, not blanket.
+`ExecutionRequest`, `GoalContinuationAdvisorRequest`, and `GoalContinuationRequest` carry the
+approved action/provider/model alongside `userConfirmedExpensiveContinuation`. `RunLifecycleService`
+fills that scope from the stored blocked proposal, `SequentialExecutor` persists it in policy JSON,
+and `GoalContinuationPolicy` bypasses benchmark-prior or confirmation guards only when the selected
+candidate exactly matches the approved action/provider/model. A different later provider, model, or
+action still stops as `STOP_BLOCKED` for a fresh approval.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

@@ -265,6 +265,10 @@ class SequentialExecutorSoftCompletionTest {
         .enableSmokeTests(enableSmoke)
         .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
         .userConfirmedExpensiveContinuation(userConfirmedContinuation)
+        .userConfirmedContinuationAction(
+            userConfirmedContinuation ? RunContinuationDecision.CHANGE_PROVIDER : null)
+        .userConfirmedContinuationProvider(userConfirmedContinuation ? "openai" : null)
+        .userConfirmedContinuationModel(userConfirmedContinuation ? "gpt-5.4" : null)
         .build();
   }
 
@@ -1199,14 +1203,28 @@ class SequentialExecutorSoftCompletionTest {
         requestCaptor.getAllValues().stream()
             .allMatch(GoalContinuationAdvisorRequest::userConfirmedExpensiveContinuation));
     assertTrue(
+        requestCaptor.getAllValues().stream()
+            .allMatch(
+                request ->
+                    request.userConfirmedContinuationAction()
+                            == RunContinuationDecision.CHANGE_PROVIDER
+                        && "openai".equals(request.userConfirmedContinuationProvider())
+                        && "gpt-5.4".equals(request.userConfirmedContinuationModel())));
+    assertTrue(
         saveLog.stream()
             .anyMatch(
                 s ->
                     s.taskKey().endsWith("_T1")
                         && s.continuationDecisionJson() != null
                         && s.continuationDecisionJson()
-                            .contains("\"userConfirmedExpensiveContinuation\":true")),
-        "Expected user-confirmed continuation flag in persisted continuation JSON. Saw: "
+                            .contains("\"userConfirmedExpensiveContinuation\":true")
+                        && s.continuationDecisionJson()
+                            .contains("\"userConfirmedContinuationAction\":\"CHANGE_PROVIDER\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"userConfirmedContinuationProvider\":\"openai\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"userConfirmedContinuationModel\":\"gpt-5.4\"")),
+        "Expected scoped user-confirmed continuation in persisted continuation JSON. Saw: "
             + saveLog);
   }
 

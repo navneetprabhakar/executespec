@@ -69,6 +69,9 @@ public class GoalContinuationAdvisor {
                 .benchmarkQualityPriorRequiredForAutomaticContinuation(
                     request.benchmarkQualityPriorRequiredForAutomaticContinuation())
                 .userConfirmedExpensiveContinuation(request.userConfirmedExpensiveContinuation())
+                .userConfirmedContinuationAction(request.userConfirmedContinuationAction())
+                .userConfirmedContinuationProvider(request.userConfirmedContinuationProvider())
+                .userConfirmedContinuationModel(request.userConfirmedContinuationModel())
                 .providerSwitchesUsed(request.providerSwitchesUsed())
                 .maxProviderSwitches(request.maxProviderSwitches())
                 .modelStepUpsUsed(request.modelStepUpsUsed())

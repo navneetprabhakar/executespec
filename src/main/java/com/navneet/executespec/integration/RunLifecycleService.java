@@ -708,6 +708,11 @@ public class RunLifecycleService {
                             .maxIterationsPerTask(null)
                             .enableSmokeTests(true)
                             .userConfirmedExpensiveContinuation(override != null)
+                            .userConfirmedContinuationAction(
+                                override == null ? null : override.proposedAction())
+                            .userConfirmedContinuationProvider(
+                                override == null ? null : override.provider())
+                            .userConfirmedContinuationModel(override == null ? null : override.model())
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
                             .initialModelStepUpsUsed(approvedUsage.modelStepUps())
                             .initialModelStepDownsUsed(approvedUsage.modelStepDowns())

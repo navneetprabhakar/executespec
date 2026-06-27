@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import lombok.Builder;
@@ -24,6 +25,10 @@ import lombok.Builder;
  * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
  *     user approved a blocked continuation proposal. This lets the retry spend on the approved
  *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
+ * @param userConfirmedContinuationAction approved continuation action scope. Confirmation applies
+ *     only when the later policy proposal matches this action, provider, and model.
+ * @param userConfirmedContinuationProvider approved continuation provider scope.
+ * @param userConfirmedContinuationModel approved continuation model scope.
  * @param initialProviderSwitchesUsed initial run-level provider-switch count to seed before
  *     continuation advice. Used by approved blocked continuation retries so the approved action
  *     counts against the same ceiling as automatic reruns.
@@ -43,6 +48,9 @@ public record ExecutionRequest(
     Boolean localHandsMode,
     Boolean requireConfirmationBeforeExpensiveContinuation,
     Boolean userConfirmedExpensiveContinuation,
+    RunContinuationDecision userConfirmedContinuationAction,
+    String userConfirmedContinuationProvider,
+    String userConfirmedContinuationModel,
     Integer initialProviderSwitchesUsed,
     Integer initialModelStepUpsUsed,
     Integer initialModelStepDownsUsed,

@@ -195,6 +195,37 @@ class GoalContinuationAdvisorTest {
     assertThat(decision.policy()).containsEntry("eligibleCandidateCount", 3);
   }
 
+  @Test
+  void approvedContinuationScopeCanSelectMatchingUnbenchmarkedCandidate() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
+    ModelProviderScore unapprovedTop =
+        score("anthropic", "opus-preview", 96, 70, 22.0, false);
+    ModelProviderScore approvedLower =
+        score("openai", "gpt-5.4", 90, 70, 16.0, false);
+    when(candidateService.buildCandidates(any()))
+        .thenReturn(List.of(current, unapprovedTop, approvedLower));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("deepseek")
+                .currentModel("deepseek-v4-pro")
+                .taskCategory("BUG_FIX")
+                .providerBehaviorPoor(true)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .userConfirmedExpensiveContinuation(true)
+                .userConfirmedContinuationAction(RunContinuationDecision.CHANGE_PROVIDER)
+                .userConfirmedContinuationProvider("openai")
+                .userConfirmedContinuationModel("gpt-5.4")
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(approvedLower);
+  }
+
   private static GoalDonenessDecision progressing() {
     return new GoalDonenessDecision(
         GoalDonenessState.NOT_DONE_BUT_PROGRESSING,
