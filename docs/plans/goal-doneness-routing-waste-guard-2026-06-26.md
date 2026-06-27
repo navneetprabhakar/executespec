@@ -675,11 +675,11 @@ upgrading this run" without allowing them to bypass an operator-level confirmati
 
 Forty-fourth slice 2026-06-27: confirmation-blocked continuation proposals now have a concrete
 approval path. `POST /api/runs/{id}/tasks/{taskId}/continuation/approve` reads the task's persisted
-`continuationDecisionJson`, requires `STOP_BLOCKED` plus
-`policy.requireConfirmationBeforeExpensiveContinuation=true`, extracts the stored selected
-provider/model, and queues the existing same-task retry machinery with that override. The run-detail
-Steps tab shows an Approve upgrade action only for that persisted state, so generic blocked tasks
-cannot silently spend on a stronger model.
+`continuationDecisionJson`, requires `STOP_BLOCKED` plus either explicit spend confirmation or
+benchmark-confidence confirmation, extracts the stored selected provider/model, and queues the
+existing same-task retry machinery with that override. The run-detail Steps tab shows an Approve
+upgrade action only for those persisted states, so generic blocked tasks cannot silently spend on a
+stronger model.
 
 Forty-fifth slice 2026-06-27: automatic continuation now respects benchmark confidence. Candidate
 scores carry `benchmarkQualityPriorAvailable`, which is true only when a persisted or external
@@ -688,6 +688,13 @@ benchmark-quality signal met the configured sample gate. The new default-on
 selected `STEP_UP_MODEL` / `CHANGE_PROVIDER` / `STEP_DOWN_MODEL` candidates as `STOP_BLOCKED` when
 they lack usable benchmark priors, preserving the selected candidate for the approval endpoint
 instead of auto-spending from YAML/default assumptions alone.
+
+Forty-sixth slice 2026-06-27: the approval path now accepts the benchmark-confidence blocked state
+created by the forty-fifth slice. Both backend validation and the run-detail `Approve upgrade`
+predicate now treat `STOP_BLOCKED` with
+`policy.requireBenchmarkPriorForAutomaticContinuation=true` and
+`selectedCandidate.benchmarkQualityPriorAvailable=false` as approvable. Candidates that are already
+benchmark-backed still cannot use that reason to bypass normal stop semantics.
 
 ## Open Questions
 

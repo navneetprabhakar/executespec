@@ -66,9 +66,13 @@ function taskGoalLine(t: api.TaskSummary): string | null {
 function continuationApprovalCandidate(t: api.TaskSummary) {
   const continuation = t.continuationDecision;
   const candidate = continuation?.selectedCandidate;
+  const explicitConfirmation = continuation?.policy?.requireConfirmationBeforeExpensiveContinuation;
+  const benchmarkConfidenceBlocked =
+    continuation?.policy?.requireBenchmarkPriorForAutomaticContinuation &&
+    candidate?.benchmarkQualityPriorAvailable === false;
   if (
     continuation?.decision !== 'STOP_BLOCKED' ||
-    !continuation.policy?.requireConfirmationBeforeExpensiveContinuation ||
+    (!explicitConfirmation && !benchmarkConfidenceBlocked) ||
     !candidate?.provider ||
     !candidate?.model
   ) {
