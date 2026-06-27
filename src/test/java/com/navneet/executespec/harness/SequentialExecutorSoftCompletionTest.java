@@ -15,7 +15,9 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
@@ -28,6 +30,9 @@ import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
+import com.navneet.executespec.router.AvailableProviderResolver;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -81,6 +86,9 @@ class SequentialExecutorSoftCompletionTest {
       mock(com.navneet.executespec.cost.RunCostTracker.class);
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService =
       mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+  private final ModelMatrixProperties matrixProps = mock(ModelMatrixProperties.class);
+  private final AvailableProviderResolver availableProviderResolver =
+      mock(AvailableProviderResolver.class);
 
   private SequentialExecutor newExecutor() {
     return newExecutor(null);
@@ -104,13 +112,14 @@ class SequentialExecutorSoftCompletionTest {
         broadcaster,
         taskRepo,
         modelResolver,
-        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelMatrixProperties.class),
+        matrixProps,
         retrievalService,
         org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
         featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
         org.mockito.Mockito.mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        availableProviderResolver,
         goalContinuationAdvisor);
   }
 
@@ -923,6 +932,14 @@ class SequentialExecutorSoftCompletionTest {
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
             new ToolResult.Ok("exit=0\nbuild ok"));
+    when(matrixProps.getProviders())
+        .thenReturn(
+            Map.of(
+                "anthropic",
+                mock(ModelMatrixProperties.ProviderModels.class),
+                "openai",
+                mock(ModelMatrixProperties.ProviderModels.class)));
+    when(availableProviderResolver.resolve(anyString())).thenReturn(Set.of(LlmProvider.ANTHROPIC));
     GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
     when(advisor.advise(any()))
         .thenReturn(
@@ -957,6 +974,8 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(0, request.providerSwitchesUsed());
     assertEquals(0, request.modelStepUpsUsed());
     assertEquals(0, request.modelStepDownsUsed());
+    assertEquals(Boolean.TRUE, request.providerAvailability().get("anthropic"));
+    assertEquals(Boolean.FALSE, request.providerAvailability().get("openai"));
     GoalContinuationAdvisorRequest rerunRequest = requestCaptor.getAllValues().get(1);
     assertEquals("openai", rerunRequest.currentProvider());
     assertEquals("gpt-5.4", rerunRequest.currentModel());
