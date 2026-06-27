@@ -66,6 +66,7 @@ class SequentialExecutorResumeKeyTest {
         mock(ContextStore.class),
         null /* costTracker */,
         null /* gcsTaskCheckpointService */,
+        null /* availableProviderResolver */,
         null /* goalContinuationAdvisor */);
   }
 

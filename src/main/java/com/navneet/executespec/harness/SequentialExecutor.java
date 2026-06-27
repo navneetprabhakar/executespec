@@ -1,10 +1,12 @@
 package com.navneet.executespec.harness;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +35,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -325,6 +328,7 @@ to boot — skip it for those.""";
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService
       gcsTaskCheckpointService;
 
+  private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
@@ -2049,6 +2053,7 @@ to boot — skip it for those.""";
                   .currentModel(model)
                   .taskCategory(taskCategory)
                   .requiredQualityThreshold(requiredQualityThreshold)
+                  .providerAvailability(providerAvailability(runId))
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .providerBehaviorPoor(providerBehaviorPoor)
@@ -2180,6 +2185,36 @@ to boot — skip it for those.""";
       failovers.forEach(provider -> addProvider(order, provider));
     }
     return order;
+  }
+
+  private Map<String, Boolean> providerAvailability(String runId) {
+    if (availableProviderResolver == null) {
+      return Map.of();
+    }
+    try {
+      Set<LlmProvider> available = availableProviderResolver.resolve(runId);
+      return ProviderAvailabilityMap.fromAvailableProviders(available, knownProviderNames());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Goal continuation provider availability lookup failed for run={}: {}",
+          runId,
+          ex.getMessage());
+      return Map.of();
+    }
+  }
+
+  private Set<String> knownProviderNames() {
+    Set<String> providers = new LinkedHashSet<>();
+    if (matrixProps != null && matrixProps.getProviders() != null) {
+      providers.addAll(matrixProps.getProviders().keySet());
+    }
+    if (matrixProps != null && matrixProps.getModels() != null) {
+      matrixProps.getModels().values().stream()
+          .filter(config -> config != null && config.getProvider() != null)
+          .map(com.navneet.executespec.router.ModelMatrixProperties.ModelConfig::getProvider)
+          .forEach(providers::add);
+    }
+    return providers;
   }
 
   private static void addProvider(List<String> order, String provider) {

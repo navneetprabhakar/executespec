@@ -13,10 +13,12 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -66,11 +68,13 @@ import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
+import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -166,6 +170,7 @@ public class RunOrchestrator implements RunControlPort {
   private final PerkyMessenger perky;
   private final GateStore gateStore;
   private final ModelResolver modelResolver;
+  private final AvailableProviderResolver availableProviderResolver;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final com.navneet.executespec.smoketest.CliSmokeRunner cliSmokeRunner;
@@ -2585,6 +2590,7 @@ public class RunOrchestrator implements RunControlPort {
                 .currentModel(task.dispatchedModel())
                 .taskCategory("PROJECT_PATCH")
                 .requiredQualityThreshold(postReviewRequiredQualityThreshold)
+                .providerAvailability(providerAvailability(runId))
                 .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
                 .qualityInsufficient(true)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
@@ -3036,6 +3042,33 @@ public class RunOrchestrator implements RunControlPort {
     addProviderPreference(providers, "openrouter");
     addProviderPreference(providers, "fireworks");
     return List.copyOf(providers);
+  }
+
+  private Map<String, Boolean> providerAvailability(String runId) {
+    if (availableProviderResolver == null) {
+      return Map.of();
+    }
+    try {
+      Set<LlmProvider> available = availableProviderResolver.resolve(runId);
+      return ProviderAvailabilityMap.fromAvailableProviders(available, knownProviderNames());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Post-review continuation provider availability lookup failed for run={}: {}",
+          runId,
+          ex.getMessage());
+      return Map.of();
+    }
+  }
+
+  private Set<String> knownProviderNames() {
+    Set<String> providers = new LinkedHashSet<>();
+    if (modelRegistry != null && modelRegistry.allModels() != null) {
+      modelRegistry.allModels().values().stream()
+          .filter(config -> config != null && hasText(config.getProvider()))
+          .map(com.navneet.executespec.router.ModelMatrixProperties.ModelConfig::getProvider)
+          .forEach(providers::add);
+    }
+    return providers;
   }
 
   private static void addProviderPreference(List<String> providers, String provider) {

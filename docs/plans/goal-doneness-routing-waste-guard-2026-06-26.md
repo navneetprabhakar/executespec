@@ -866,6 +866,14 @@ prevents Terminal-Bench evidence from automatically approving normal bug-fix or 
 upgrades while preserving user-visible approval proposals for unbenchmarked or unrelated-suite
 candidates.
 
+Seventy-first slice 2026-06-27: automatic continuation now respects provider key/org-policy
+availability. `ProviderAvailabilityMap` converts `AvailableProviderResolver.resolve(runId)` into
+the candidate-service availability map, including the `gemini` / `google` alias pair. Task-boundary
+`SequentialExecutor` and post-review `RunOrchestrator` both pass that map into
+`GoalContinuationAdvisor`, so unavailable providers stay visible in ranking evidence but are forced
+below the quality threshold and cannot be selected for automatic `STEP_UP_MODEL` /
+`CHANGE_PROVIDER` actions.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
