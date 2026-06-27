@@ -813,7 +813,9 @@ paths:
         continuation proposal with a selected candidate and either explicit spend confirmation
         (`policy.requireConfirmationBeforeExpensiveContinuation=true`) or benchmark-confidence
         confirmation (`policy.requireBenchmarkPriorForAutomaticContinuation=true` while the
-        selected candidate lacks a benchmark quality prior).
+        selected candidate lacks a benchmark quality prior). If the saved proposal has
+        `policy.source=POST_REVIEW`, the approved retry also runs reviewer + validation before
+        resolving terminal status.
       parameters:
         - $ref: "#/components/parameters/runId"
         - name: taskId
@@ -824,6 +826,28 @@ paths:
       responses:
         "202":
           description: Approved continuation queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, runId, taskId, provider, model, postReview, message]
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  runId:
+                    type: string
+                  taskId:
+                    type: string
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  postReview:
+                    type: boolean
+                    description: True when the approved proposal came from post-review continuation and will rerun reviewer/validation after the worker retry.
+                  message:
+                    type: string
         "409":
           description: No approval-blocked continuation proposal is available
 

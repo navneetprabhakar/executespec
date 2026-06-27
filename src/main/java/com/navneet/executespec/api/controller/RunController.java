@@ -1128,6 +1128,8 @@ public class RunController {
                   approval.provider(),
                   "model",
                   approval.model(),
+                  "postReview",
+                  approval.postReview(),
                   "message",
                   "Approved continuation queued — watch the run feed for progress."));
     } catch (IllegalArgumentException e) {

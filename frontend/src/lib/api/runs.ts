@@ -125,6 +125,7 @@ export const approveContinuation = (runId: string, taskId: string) =>
     taskId: string;
     provider: string;
     model: string;
+    postReview: boolean;
     message: string;
   }>(`/runs/${runId}/tasks/${taskId}/continuation/approve`, {method: 'POST'});
 
