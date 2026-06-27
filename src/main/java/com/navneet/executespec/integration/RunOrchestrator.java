@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,10 +39,12 @@ import com.navneet.executespec.engine.CodeGenEngine;
 import com.navneet.executespec.engine.EngineRequest;
 import com.navneet.executespec.engine.EngineResult;
 import com.navneet.executespec.engine.VerifyMode;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.observability.Metrics;
@@ -1513,11 +1516,22 @@ public class RunOrchestrator implements RunControlPort {
             plan.classification());
       }
       try {
+        ProviderModel reviewerRoute = reviewerRouteFor(provider, model, execResult);
+        if (!sameRoute(provider, model, reviewerRoute)) {
+          log.info(
+              "RunOrchestrator run={} reviewer route promoted after continuation action:"
+                  + " {}/{} -> {}/{}",
+              runId,
+              provider,
+              model,
+              reviewerRoute.provider(),
+              reviewerRoute.model());
+        }
         reviewResult =
             reviewer.review(
                 ReviewerRequest.builder()
-                    .provider(provider)
-                    .model(model)
+                    .provider(reviewerRoute.provider())
+                    .model(reviewerRoute.model())
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(skipWiring)
@@ -1533,8 +1547,8 @@ public class RunOrchestrator implements RunControlPort {
             com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,
             reviewerIn,
             reviewerOut,
-            upperProvider,
-            model);
+            reviewerRoute.provider().toUpperCase(Locale.ROOT),
+            reviewerRoute.model());
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
         // Review failure is non-fatal; the execution already succeeded or partially
@@ -2478,6 +2492,67 @@ public class RunOrchestrator implements RunControlPort {
   static double clampHardCap(double platformCap, Double userCostCap) {
     if (userCostCap == null || userCostCap <= 0) return platformCap;
     return Math.min(platformCap, userCostCap);
+  }
+
+  record ProviderModel(String provider, String model) {}
+
+  static ProviderModel reviewerRouteFor(
+      String defaultProvider, String defaultModel, ExecutionResult exec) {
+    ProviderModel fallback = new ProviderModel(defaultProvider, defaultModel);
+    if (exec == null || exec.perTask() == null || exec.perTask().isEmpty()) {
+      return fallback;
+    }
+    List<TaskOutcome> perTask = exec.perTask();
+    for (int i = perTask.size() - 1; i >= 0; i--) {
+      TaskOutcome task = perTask.get(i);
+      if (!successfulEnoughForReviewPromotion(task) || !qualityContinuationAction(task)) {
+        continue;
+      }
+      ProviderModel candidate =
+          new ProviderModel(task.continuationActionProvider(), task.continuationActionModel());
+      if (sameRoute(defaultProvider, defaultModel, candidate)) {
+        return fallback;
+      }
+      return candidate;
+    }
+    return fallback;
+  }
+
+  private static boolean successfulEnoughForReviewPromotion(TaskOutcome task) {
+    if (task == null || task.status() == null) {
+      return false;
+    }
+    return switch (task.status()) {
+      case SUCCESS, SUCCESS_AFTER_RETRY, COMPLETED_WITH_WARNING -> true;
+      case WORKER_FAILED, SKIPPED -> false;
+    };
+  }
+
+  private static boolean qualityContinuationAction(TaskOutcome task) {
+    if (!hasText(task.continuationActionProvider()) || !hasText(task.continuationActionModel())) {
+      return false;
+    }
+    RunContinuationDecision action = task.continuationAction();
+    return action == RunContinuationDecision.STEP_UP_MODEL
+        || action == RunContinuationDecision.CHANGE_PROVIDER;
+  }
+
+  private static boolean sameRoute(String provider, String model, ProviderModel route) {
+    if (route == null) {
+      return false;
+    }
+    return equalsIgnoreCase(provider, route.provider()) && equalsIgnoreCase(model, route.model());
+  }
+
+  private static boolean equalsIgnoreCase(String left, String right) {
+    if (left == null || right == null) {
+      return left == right;
+    }
+    return left.equalsIgnoreCase(right);
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
