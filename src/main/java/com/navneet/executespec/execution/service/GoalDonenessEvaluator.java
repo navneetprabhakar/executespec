@@ -150,6 +150,16 @@ public class GoalDonenessEvaluator {
           true);
     }
 
+    if (evidence.completionConfidenceLow() && evidence.hasMeaningfulProgress()) {
+      return fromEvidence(
+          evidence,
+          GoalDonenessState.NOT_DONE_BUT_PROGRESSING,
+          RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+          "task produced progress, but completion confidence is low",
+          false,
+          true);
+    }
+
     if (evidence.hasMeaningfulProgress()) {
       return fromEvidence(
           evidence,

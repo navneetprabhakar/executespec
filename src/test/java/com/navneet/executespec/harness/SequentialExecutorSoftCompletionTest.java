@@ -359,6 +359,18 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, t1.status());
     assertEquals(true, t1.smokeTestPassed());
     assertEquals(0, t1.smokeTestExitCode());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "NOT_DONE_BUT_PROGRESSING".equals(event.data().get("state"))
+                        && Boolean.TRUE.equals(event.data().get("anotherModelProviderMightHelp"))
+                        && String.valueOf(event.data().get("reason"))
+                            .contains("completion confidence is low")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("completionConfidenceLow=true")));
   }
 
   // 3: Single-task + iter-limit + writes + smoke FAIL → PARTIAL

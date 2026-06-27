@@ -110,6 +110,50 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void lowCompletionConfidenceWithProgressAllowsModelEscalationEvenWhenValidationPasses() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .goalCriteriaSatisfied(false)
+                .validationAttempted(true)
+                .validationPassed(true)
+                .requiredOutputsPresent(false)
+                .constraintsRespected(true)
+                .meaningfulDiffCount(2)
+                .completionConfidenceLow(true)
+                .incompleteItems(List.of("completion confidence is low despite meaningful changes"))
+                .evidence(List.of("completionConfidenceLow=true"))
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.NOT_DONE_BUT_PROGRESSING);
+    assertThat(decision.recommendedDecision())
+        .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+    assertThat(decision.reason()).contains("completion confidence is low");
+    assertThat(decision.incompleteItems())
+        .contains("completion confidence is low despite meaningful changes");
+  }
+
+  @Test
+  void validationFailureReasonWinsOverLowCompletionConfidence() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .goalCriteriaSatisfied(false)
+                .validationAttempted(true)
+                .validationPassed(false)
+                .requiredOutputsPresent(false)
+                .constraintsRespected(true)
+                .meaningfulDiffCount(2)
+                .completionConfidenceLow(true)
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.NOT_DONE_BUT_PROGRESSING);
+    assertThat(decision.reason()).contains("validation failed");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
   void stopsWasteGuardAfterNoProgressLimit() {
     GoalDonenessDecision decision =
         evaluator.evaluate(

@@ -743,6 +743,13 @@ continuation-action evidence. `RunEvent.CONTINUATION_ACTION` carries a `status` 
 `AgentRunEventBridge` mirrors that event into active run-scoped agent sessions without a separate
 event type.
 
+Fifty-fourth slice 2026-06-27: soft-completed edits now count as low-confidence quality evidence
+for continuation. When a worker writes files but does not cleanly prove completion,
+`SequentialExecutor` emits `completionConfidenceLow=true` in `GOAL_DECISION`; the pure
+`GoalDonenessEvaluator` keeps the task in `NOT_DONE_BUT_PROGRESSING` but marks
+`anotherModelProviderMightHelp=true`. That lets the existing quality-first, benchmark/confirmation
+guarded advisor propose a bounded step-up or provider change even when smoke validation passes.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
