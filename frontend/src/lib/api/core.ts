@@ -290,6 +290,7 @@ export interface TaskSummary {
   /** Structured continuation / step-up / provider-change advice from the executor. */
   continuationDecision?: {
     decision?: string;
+    approvalRequiredReason?: string;
     selectedCandidate?: {
       provider?: string;
       model?: string;

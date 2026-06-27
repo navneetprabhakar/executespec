@@ -347,6 +347,20 @@ class SequentialExecutorSoftCompletionTest {
         provider, model, "TASK_LOW", 91.0, 8.0, 1_000L, 2_000L, 70.0, List.of("test candidate"));
   }
 
+  private static ModelProviderScore benchmarkBackedCandidate(String provider, String model) {
+    return new ModelProviderScore(
+        provider,
+        model,
+        "TASK_LOW",
+        91.0,
+        8.0,
+        1_000L,
+        2_000L,
+        70.0,
+        true,
+        List.of("test candidate", "benchmark prior available"));
+  }
+
   // 1: T2-class case — multi-task, intermediate, iter-limit + writes
 
   @Test
@@ -968,6 +982,7 @@ class SequentialExecutorSoftCompletionTest {
                 List.of("goal satisfied with validation evidence and required outputs present")));
 
     SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
@@ -1183,7 +1198,7 @@ class SequentialExecutorSoftCompletionTest {
         .thenReturn(
             new GoalContinuationPolicyDecision(
                 RunContinuationDecision.STOP_BLOCKED,
-                Optional.of(candidate("openai", "gpt-5.4")),
+                Optional.of(benchmarkBackedCandidate("openai", "gpt-5.4")),
                 List.of(
                     "expensive continuation requires user confirmation before more spend;"
                         + " proposed action STEP_UP_MODEL -> openai/gpt-5.4")));
@@ -1206,6 +1221,10 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson() != null
                         && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
                         && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
+                        && s.continuationDecisionJson()
+                            .contains(
+                                "\"approvalRequiredReason\":"
+                                    + "\"EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED\"")
                         && s.continuationDecisionJson()
                             .contains("\"requireConfirmationBeforeExpensiveContinuation\":true")
                         && s.continuationDecisionJson()
@@ -1236,6 +1255,7 @@ class SequentialExecutorSoftCompletionTest {
                     true)));
 
     SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
@@ -1258,6 +1278,9 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
                         && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
                         && s.continuationDecisionJson().contains("\"model\":\"gpt-5.4\"")
+                        && s.continuationDecisionJson()
+                            .contains(
+                                "\"approvalRequiredReason\":\"BENCHMARK_PRIOR_REQUIRED\"")
                         && s.continuationDecisionJson()
                             .contains("\"proposedAction\":\"STEP_UP_MODEL\"")),
         "Expected PARTIAL task with persisted blocked continuation proposal before retry. Saw: "

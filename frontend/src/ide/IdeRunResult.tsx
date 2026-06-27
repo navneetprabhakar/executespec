@@ -81,6 +81,32 @@ function continuationApprovalCandidate(t: api.TaskSummary) {
   return candidate;
 }
 
+function continuationApprovalReason(t: api.TaskSummary): string | null {
+  const continuation = t.continuationDecision;
+  if (continuation?.decision !== 'STOP_BLOCKED') return null;
+  switch ((continuation.approvalRequiredReason || '').toUpperCase()) {
+    case 'BENCHMARK_PRIOR_REQUIRED':
+      return 'Approval needed: no usable benchmark prior for this model on this task category.';
+    case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
+      return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+    case 'APPROVAL_REQUIRED':
+      return 'Approval needed before this model/provider upgrade can run.';
+    default:
+      break;
+  }
+  const candidate = continuation.selectedCandidate;
+  if (
+    continuation.policy?.requireBenchmarkPriorForAutomaticContinuation &&
+    candidate?.benchmarkQualityPriorAvailable === false
+  ) {
+    return 'Approval needed: no usable benchmark prior for this model on this task category.';
+  }
+  if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
+    return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+  }
+  return null;
+}
+
 function latestContinuationAction(t: api.TaskSummary): string | null {
   const actions = t.continuationActions || [];
   const action = actions.length > 0 ? actions[actions.length - 1] : null;
@@ -1382,6 +1408,7 @@ export default function IdeRunResult() {
                   const incompleteItems = t.goalDoneness?.incompleteItems || [];
                   const risks = t.goalDoneness?.risks || [];
                   const approvalCandidate = continuationApprovalCandidate(t);
+                  const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
                   const rejectedRankingCount =
@@ -1464,6 +1491,11 @@ export default function IdeRunResult() {
                       {goalLine && (
                         <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                           {goalLine}
+                        </div>
+                      )}
+                      {approvalReason && (
+                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                          {approvalReason}
                         </div>
                       )}
                       {continuationActionLine && (

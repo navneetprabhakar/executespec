@@ -3131,8 +3131,30 @@ public class RunOrchestrator implements RunControlPort {
     decision
         .selectedCandidate()
         .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
+    String approvalRequiredReason = postReviewContinuationApprovalRequiredReason(decision, policy);
+    if (approvalRequiredReason != null) {
+      data.put("approvalRequiredReason", approvalRequiredReason);
+    }
     data.put("source", "POST_REVIEW");
     return data;
+  }
+
+  private static String postReviewContinuationApprovalRequiredReason(
+      GoalContinuationPolicyDecision decision, Map<String, Object> policy) {
+    if (decision == null
+        || decision.decision() != RunContinuationDecision.STOP_BLOCKED
+        || decision.selectedCandidate().isEmpty()) {
+      return null;
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().get();
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return "BENCHMARK_PRIOR_REQUIRED";
+    }
+    if (Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"))) {
+      return "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED";
+    }
+    return null;
   }
 
   private void persistPostReviewContinuationDecision(
