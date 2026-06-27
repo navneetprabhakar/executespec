@@ -2764,7 +2764,7 @@ public class RunOrchestrator implements RunControlPort {
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
         int reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
         int reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
-        tokenAttributor.attributePhase(
+        tokenAttributor.attributePhaseAdditional(
             runId,
             com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,
             reviewerIn,

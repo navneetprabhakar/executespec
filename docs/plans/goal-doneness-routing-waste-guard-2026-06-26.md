@@ -775,6 +775,11 @@ selected post-review action. After the rerun it persists task rows, attributes t
 delta, runs lint, re-runs the BUILD-mode reviewer, and attributes the second reviewer delta.
 `STOP_BLOCKED` remains approval-only, and `STEP_DOWN_MODEL` does not execute for reviewer failure.
 
+Fifty-eighth slice 2026-06-27: second-pass reviewer accounting is now additive. `RunTokenAttributor`
+has an additive phase-attribution path for repeated phases, and the post-review reviewer rerun uses
+it so `pipeline_run.reviewer_input_tokens` / `reviewer_output_tokens` retain the first reviewer pass
+plus the post-review reviewer pass. Run totals still receive only the new second-pass delta once.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
