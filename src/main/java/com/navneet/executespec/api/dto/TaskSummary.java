@@ -27,6 +27,8 @@ public record TaskSummary(
     JsonNode goalDoneness,
     /** Structured continuation / step-up / provider-change advice from the executor. */
     JsonNode continuationDecision,
+    /** Durable history of continuation actions attempted or skipped for this task. */
+    JsonNode continuationActions,
     /**
      * The objective/description from the planner's TaskDefinition. Shown in the UI when expanded.
      */

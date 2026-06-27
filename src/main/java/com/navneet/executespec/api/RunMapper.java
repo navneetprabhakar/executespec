@@ -348,6 +348,7 @@ public class RunMapper {
         extractFailureReason(t),
         parseJson(t.getGoalDonenessJson()),
         parseJson(t.getContinuationDecisionJson()),
+        parseJson(t.getContinuationActionsJson()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),

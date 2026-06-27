@@ -119,7 +119,8 @@ class SequentialExecutorSoftCompletionTest {
       String status,
       String lastLlmFailure,
       String goalDonenessJson,
-      String continuationDecisionJson) {}
+      String continuationDecisionJson,
+      String continuationActionsJson) {}
 
   private final java.util.List<SaveSnapshot> saveLog = new java.util.ArrayList<>();
 
@@ -157,7 +158,8 @@ class SequentialExecutorSoftCompletionTest {
                       t.getStatus(),
                       t.getLastLlmFailure(),
                       t.getGoalDonenessJson(),
-                      t.getContinuationDecisionJson()));
+                      t.getContinuationDecisionJson(),
+                      t.getContinuationActionsJson()));
               return t;
             });
   }
@@ -1273,6 +1275,20 @@ class SequentialExecutorSoftCompletionTest {
                             .contains(
                                 "Continuation action: STEP_UP_MODEL -> rerun task with"
                                     + " openai/gpt-5.4")));
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    "run-soft_T1".equals(s.taskKey())
+                        && s.continuationActionsJson() != null
+                        && s.continuationActionsJson().contains("\"status\":\"EXECUTED\"")
+                        && s.continuationActionsJson().contains("\"decision\":\"STEP_UP_MODEL\"")
+                        && s.continuationActionsJson().contains("\"provider\":\"openai\"")
+                        && s.continuationActionsJson().contains("\"model\":\"gpt-5.4\"")
+                        && s.continuationActionsJson().contains("\"limitName\":\"maxModelStepUps\"")
+                        && s.continuationActionsJson().contains("\"usedLimit\":1")
+                        && s.continuationActionsJson().contains("\"maxLimit\":1")),
+        "Expected durable continuation action history on T1. Saw: " + saveLog);
   }
 
   @Test
@@ -1314,6 +1330,20 @@ class SequentialExecutorSoftCompletionTest {
                         && "maxModelStepUps".equals(event.data().get("limitName"))
                         && Integer.valueOf(0).equals(event.data().get("usedLimit"))
                         && Integer.valueOf(0).equals(event.data().get("maxLimit"))));
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    "run-soft_T1".equals(s.taskKey())
+                        && s.continuationActionsJson() != null
+                        && s.continuationActionsJson().contains("\"status\":\"SKIPPED\"")
+                        && s.continuationActionsJson().contains("\"decision\":\"STEP_UP_MODEL\"")
+                        && s.continuationActionsJson().contains("\"provider\":\"openai\"")
+                        && s.continuationActionsJson().contains("\"model\":\"gpt-5.4\"")
+                        && s.continuationActionsJson().contains("\"limitName\":\"maxModelStepUps\"")
+                        && s.continuationActionsJson().contains("\"usedLimit\":0")
+                        && s.continuationActionsJson().contains("\"maxLimit\":0")),
+        "Expected durable skipped continuation action history on T1. Saw: " + saveLog);
   }
 
   @Test

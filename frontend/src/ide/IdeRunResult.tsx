@@ -81,6 +81,18 @@ function continuationApprovalCandidate(t: api.TaskSummary) {
   return candidate;
 }
 
+function latestContinuationAction(t: api.TaskSummary): string | null {
+  const actions = t.continuationActions || [];
+  const action = actions.length > 0 ? actions[actions.length - 1] : null;
+  if (!action?.decision || !action?.provider || !action?.model) return null;
+  const status = (action.status || '').toUpperCase() === 'SKIPPED' ? 'Skipped' : 'Used';
+  const limit =
+    action.limitName && action.maxLimit != null
+      ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`
+      : '';
+  return `${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
+}
+
 function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
   const s = (state || '').toUpperCase();
   if (s === 'DONE') return 'ok';
@@ -1339,6 +1351,7 @@ export default function IdeRunResult() {
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => {
                   const goalLine = taskGoalLine(t);
+                  const continuationActionLine = latestContinuationAction(t);
                   const budgetFacts = taskBudgetFacts(t);
                   const incompleteItems = t.goalDoneness?.incompleteItems || [];
                   const risks = t.goalDoneness?.risks || [];
@@ -1419,6 +1432,11 @@ export default function IdeRunResult() {
                       {goalLine && (
                         <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                           {goalLine}
+                        </div>
+                      )}
+                      {continuationActionLine && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          {continuationActionLine}
                         </div>
                       )}
                       {t.goalDoneness?.recommendedNextStep && (

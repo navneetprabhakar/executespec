@@ -717,6 +717,13 @@ provider-switch / model-step usage before `SequentialExecutor` evaluates the res
 persisted proposals that only have the proposed action in reason text are parsed defensively, so older
 blocked approvals still count against the same configured ceilings.
 
+Fiftieth slice 2026-06-27: automatic continuation actions now survive reloads. V252 adds
+`agent_task.continuation_actions_json`; `SequentialExecutor` appends executed or skipped
+continuation action records with decision, provider/model, limit name, used/max counts, and reason;
+`TaskSummary.continuationActions` exposes that history; and the run-detail Steps card renders the
+latest action. This closes the observability gap where the rerun's final continuation decision could
+overwrite the earlier "system stepped up" advisory on the task row.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
