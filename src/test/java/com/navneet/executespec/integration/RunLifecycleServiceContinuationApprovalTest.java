@@ -30,6 +30,7 @@ import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -158,6 +159,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
     assertApprovedContinuationAction(task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
+    assertApprovedContinuationEvent(RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
 
@@ -222,6 +224,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
     assertApprovedContinuationAction(
         task, RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
+    assertApprovedContinuationEvent(
+        RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
   }
 
   @Test
@@ -348,5 +352,21 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(action.path("model").asText()).isEqualTo(model);
     assertThat(action.path("limitName").asText()).isEqualTo("userApproval");
     assertThat(action.path("attempt").asInt()).isEqualTo(1);
+  }
+
+  private void assertApprovedContinuationEvent(
+      RunContinuationDecision decision, String provider, String model) {
+    ArgumentCaptor<RunEvent> event = ArgumentCaptor.forClass(RunEvent.class);
+    verify(broadcaster, atLeastOnce()).emit(eq(RUN_ID), event.capture());
+    assertThat(event.getAllValues())
+        .anySatisfy(
+            e -> {
+              assertThat(e.type()).isEqualTo("CONTINUATION_ACTION");
+              assertThat(e.data()).containsEntry("status", "APPROVED");
+              assertThat(e.data()).containsEntry("decision", decision.name());
+              assertThat(e.data()).containsEntry("selectedProvider", provider);
+              assertThat(e.data()).containsEntry("selectedModel", model);
+              assertThat(e.data()).containsEntry("limitName", "userApproval");
+            });
   }
 }

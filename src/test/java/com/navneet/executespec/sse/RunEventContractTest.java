@@ -161,6 +161,32 @@ class RunEventContractTest {
     assertEquals(null, event.data().get("limitName"));
     assertEquals(0, event.data().get("usedLimit"));
     assertEquals(0, event.data().get("maxLimit"));
+    assertEquals("EXECUTED", event.data().get("status"));
+  }
+
+  @Test
+  void continuationActionCanCarryApprovedStatus() {
+    RunEvent event =
+        RunEvent.continuationAction(
+            "run-1",
+            "task-1",
+            "Continuation action approved: STEP_UP_MODEL -> openai/gpt-5.4",
+            "STEP_UP_MODEL",
+            "openai",
+            "gpt-5.4",
+            "user approved blocked continuation",
+            1,
+            1,
+            "userApproval",
+            1,
+            1,
+            "APPROVED");
+
+    assertEquals("CONTINUATION_ACTION", event.type());
+    assertEquals("APPROVED", event.data().get("status"));
+    assertEquals("userApproval", event.data().get("limitName"));
+    assertEquals(1, event.data().get("usedLimit"));
+    assertEquals(1, event.data().get("maxLimit"));
   }
 
   @Test

@@ -810,6 +810,27 @@ public class RunLifecycleService {
       action.put("attempt", actions.size());
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepo.saveAndFlush(task);
+      broadcaster.emit(
+          task.getRunId(),
+          RunEvent.continuationAction(
+              task.getRunId(),
+              task.getTaskId(),
+              "Continuation action approved: "
+                  + (override.proposedAction() == null ? "UNKNOWN" : override.proposedAction())
+                  + " -> "
+                  + override.provider()
+                  + "/"
+                  + override.model(),
+              override.proposedAction() == null ? "UNKNOWN" : override.proposedAction().name(),
+              override.provider(),
+              override.model(),
+              "user approved blocked continuation",
+              actions.size(),
+              1,
+              "userApproval",
+              1,
+              1,
+              "APPROVED"));
     } catch (Exception ex) {
       log.warn(
           "approveContinuation: failed to append action history for task {}: {}",

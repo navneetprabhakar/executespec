@@ -736,6 +736,13 @@ entry to `agent_task.continuation_actions_json` only after the stored provider/m
 normal retry validation and is queued, while still seeding the provider-switch / model-step usage
 counters from the proposed action.
 
+Fifty-third slice 2026-06-27: approved blocked-continuation retries now also emit live typed
+continuation-action evidence. `RunEvent.CONTINUATION_ACTION` carries a `status` data field
+(`EXECUTED` for automatic reruns, `APPROVED` for user-approved upgrades), and
+`RunLifecycleService.approveContinuation` emits the approved action after the retry is accepted.
+`AgentRunEventBridge` mirrors that event into active run-scoped agent sessions without a separate
+event type.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

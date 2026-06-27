@@ -105,7 +105,8 @@ public record RunEvent(
         maxAttempts,
         null,
         0,
-        0);
+        0,
+        "EXECUTED");
   }
 
   public static RunEvent continuationAction(
@@ -121,6 +122,36 @@ public record RunEvent(
       String limitName,
       int usedLimit,
       int maxLimit) {
+    return continuationAction(
+        runId,
+        taskId,
+        summary,
+        decision,
+        selectedProvider,
+        selectedModel,
+        reason,
+        attempt,
+        maxAttempts,
+        limitName,
+        usedLimit,
+        maxLimit,
+        "EXECUTED");
+  }
+
+  public static RunEvent continuationAction(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      int attempt,
+      int maxAttempts,
+      String limitName,
+      int usedLimit,
+      int maxLimit,
+      String status) {
     return withData(
         "CONTINUATION_ACTION",
         runId,
@@ -143,7 +174,9 @@ public record RunEvent(
         "usedLimit",
         usedLimit,
         "maxLimit",
-        maxLimit);
+        maxLimit,
+        "status",
+        status == null || status.isBlank() ? "EXECUTED" : status);
   }
 
   /** Emitted when a continuation recommendation is actionable but runtime limits block it. */
