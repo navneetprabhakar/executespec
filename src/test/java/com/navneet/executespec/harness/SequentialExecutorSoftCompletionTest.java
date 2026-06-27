@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -1190,6 +1191,56 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson()
                             .contains("\"requireBenchmarkPriorForAutomaticContinuation\":true")),
         "Expected per-run confirmation requirement in persisted continuation JSON. Saw: "
+            + saveLog);
+  }
+
+  @Test
+  void pre_retry_blocked_upgrade_proposal_stops_before_same_provider_retry() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_BLOCKED,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of(
+                    "selected continuation candidate lacks benchmark quality prior; proposed"
+                        + " action STEP_UP_MODEL -> openai/gpt-5.4"),
+                Map.of(
+                    "proposedAction",
+                    "STEP_UP_MODEL",
+                    "requireBenchmarkPriorForAutomaticContinuation",
+                    true)));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
+    assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());
+    assertEquals(false, result.perTask().get(0).smokeTestPassed());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
+    verify(worker, never()).run(any(WorkerTaskRequest.class));
+    verify(buildProjectTool, times(1)).execute(any(), any());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    "run-soft_T1".equals(s.taskKey())
+                        && "PARTIAL".equals(s.status())
+                        && s.lastLlmFailure() != null
+                        && s.lastLlmFailure().contains("before same-model retry")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"decision\":\"STOP_BLOCKED\"")
+                        && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
+                        && s.continuationDecisionJson().contains("\"model\":\"gpt-5.4\"")
+                        && s.continuationDecisionJson()
+                            .contains("\"proposedAction\":\"STEP_UP_MODEL\"")),
+        "Expected PARTIAL task with persisted blocked continuation proposal before retry. Saw: "
             + saveLog);
   }
 
