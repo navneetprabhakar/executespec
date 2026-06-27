@@ -17,6 +17,7 @@ import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
@@ -92,6 +93,7 @@ public class RunLifecycleService {
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
   private final RunCostTracker costTracker;
+  private final RunTokenAttributor tokenAttributor;
   private final RunKeyContextStore keyContextStore;
   private final WorkspaceRestoreService workspaceRestoreService;
   private final RunPersistenceWriter persistenceWriter;
@@ -701,6 +703,7 @@ public class RunLifecycleService {
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
+                RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
 
                 ExecutionResult result =
                     executor.execute(
@@ -729,11 +732,19 @@ public class RunLifecycleService {
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
+                RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
+                tokenAttributor.attributeWorkerAdditionalTask(
+                    runId,
+                    fullTargetTaskId,
+                    afterRetry.inputTokens() - beforeRetry.inputTokens(),
+                    afterRetry.outputTokens() - beforeRetry.outputTokens(),
+                    provider.toUpperCase(),
+                    model);
 
                 ReviewerResult reviewResult =
                     override != null && override.postReview()
                         ? runReviewerAfterApprovedPostReviewContinuation(
-                            runId, plan, rootCtx, provider, model, result)
+                            runId, plan, rootCtx, provider, model, result, afterRetry)
                         : null;
                 if (override != null && override.postReview()) {
                   try {
@@ -776,7 +787,8 @@ public class RunLifecycleService {
       ExecutionContext rootCtx,
       String approvedProvider,
       String approvedModel,
-      ExecutionResult result) {
+      ExecutionResult result,
+      RunCostTracker.Snapshot beforeReview) {
     persistenceWriter.updateStatus(runId, "REVIEWING");
     RunOrchestrator.ProviderModel reviewerRoute =
         RunOrchestrator.reviewerRouteFor(approvedProvider, approvedModel, result);
@@ -791,6 +803,14 @@ public class RunLifecycleService {
                   .skipWiringPass(false)
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
+      RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
+      tokenAttributor.attributePhaseAdditional(
+          runId,
+          RunTokenAttributor.Phase.REVIEWER,
+          afterReview.inputTokens() - beforeReview.inputTokens(),
+          afterReview.outputTokens() - beforeReview.outputTokens(),
+          reviewerRoute.provider().toUpperCase(),
+          reviewerRoute.model());
       return reviewResult;
     } catch (Exception e) {
       log.warn(

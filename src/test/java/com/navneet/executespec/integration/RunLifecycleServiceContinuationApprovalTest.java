@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
@@ -63,6 +64,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final SequentialExecutor executor = mock(SequentialExecutor.class);
   private final ReviewerAgent reviewer = mock(ReviewerAgent.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
+  private final RunTokenAttributor tokenAttributor = mock(RunTokenAttributor.class);
   private final RunKeyContextStore keyContextStore = mock(RunKeyContextStore.class);
   private final WorkspaceRestoreService workspaceRestoreService =
       mock(WorkspaceRestoreService.class);
@@ -78,6 +80,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   @BeforeEach
   void setUp() {
     agentProps.setWorkspace(tempDir.toString());
+    when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
     service =
         new RunLifecycleService(
             runRepo,
@@ -92,6 +95,7 @@ class RunLifecycleServiceContinuationApprovalTest {
             executor,
             reviewer,
             costTracker,
+            tokenAttributor,
             keyContextStore,
             workspaceRestoreService,
             persistenceWriter,
@@ -295,6 +299,11 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
         .thenReturn(retryResult);
     when(reviewer.review(any())).thenReturn(reviewResult);
+    when(costTracker.snapshot(RUN_ID))
+        .thenReturn(
+            new RunCostTracker.Snapshot(100, 20, 0, 0, 0.10, 1),
+            new RunCostTracker.Snapshot(250, 60, 0, 0, 0.30, 2),
+            new RunCostTracker.Snapshot(310, 80, 0, 0, 0.45, 3));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -306,9 +315,15 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
     verify(persistenceWriter).updateStatus(RUN_ID, "REVIEWING");
+    verify(tokenAttributor)
+        .attributeWorkerAdditionalTask(RUN_ID, TASK_KEY, 150, 40, "OPENAI", "gpt-5.4");
     verify(reviewer).review(any());
     verify(persistenceWriter).persistReview(RUN_ID, reviewResult);
-    verify(validationKickoff).generateValidationReport(RUN_ID, retryResult, reviewResult, request.getValue().plan());
+    verify(tokenAttributor)
+        .attributePhaseAdditional(
+            RUN_ID, RunTokenAttributor.Phase.REVIEWER, 60, 20, "OPENAI", "gpt-5.4");
+    verify(validationKickoff)
+        .generateValidationReport(RUN_ID, retryResult, reviewResult, request.getValue().plan());
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
 
