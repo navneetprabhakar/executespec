@@ -874,6 +874,14 @@ the candidate-service availability map, including the `gemini` / `google` alias 
 below the quality threshold and cannot be selected for automatic `STEP_UP_MODEL` /
 `CHANGE_PROVIDER` actions.
 
+Seventy-second slice 2026-06-27: build-smoke failures can now upgrade before the weak retry.
+`SequentialExecutor` evaluates `GoalDonenessEvaluator` / `GoalContinuationAdvisor` immediately after
+the primary worker attempt fails smoke validation, before the legacy same-provider build-error retry.
+When the selected continuation candidate is a different provider/model and the relevant
+provider-switch or model-step limit still has capacity, the executor emits the same durable
+goal/continuation/action evidence and reruns the task with that candidate. If no eligible candidate
+exists or the limit is exhausted, the existing same-provider retry path continues unchanged.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

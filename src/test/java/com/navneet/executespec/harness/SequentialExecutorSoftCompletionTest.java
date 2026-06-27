@@ -930,7 +930,6 @@ class SequentialExecutorSoftCompletionTest {
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
-            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
             new ToolResult.Ok("exit=0\nbuild ok"));
     when(matrixProps.getProviders())
         .thenReturn(
@@ -1084,6 +1083,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 1.25);
     ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 12_345);
     ReflectionTestUtils.setField(executor, "maxGoalTaskWallClockMs", 67_890L);
+    ReflectionTestUtils.setField(executor, "continuationActingEnabled", false);
     executor.execute(req(singleTaskPlan(), true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
@@ -1169,6 +1169,7 @@ class SequentialExecutorSoftCompletionTest {
 
     SequentialExecutor executor = newExecutor(advisor);
     ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
+    ReflectionTestUtils.setField(executor, "continuationActingEnabled", false);
     executor.execute(req(singleTaskPlan(), true, true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
@@ -1267,6 +1268,7 @@ class SequentialExecutorSoftCompletionTest {
     SequentialExecutor executor = newExecutor(advisor);
     ReflectionTestUtils.setField(executor, "goalRequiredQualityThreshold", 70.0);
     ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdTaskLow", 64.0);
+    ReflectionTestUtils.setField(executor, "continuationActingEnabled", false);
     executor.execute(req(singleTaskPlan(), true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
@@ -1335,6 +1337,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "goalRequiredQualityThreshold", 70.0);
     ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdTaskLow", 64.0);
     ReflectionTestUtils.setField(executor, "goalRequiredQualityThresholdBugFix", 88.0);
+    ReflectionTestUtils.setField(executor, "continuationActingEnabled", false);
     executor.execute(req(bugFixPlan(), true));
 
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
@@ -1366,7 +1369,6 @@ class SequentialExecutorSoftCompletionTest {
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
-            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
             new ToolResult.Ok("exit=0\nbuild ok"));
     GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
     when(advisor.advise(any()))
@@ -1387,7 +1389,7 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
     assertEquals("openai", result.perTask().get(0).dispatchedProvider());
     assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
-    assertEquals(45, result.perTask().get(0).toolCallsDispatched());
+    assertEquals(30, result.perTask().get(0).toolCallsDispatched());
     ArgumentCaptor<WorkerTaskRequest> requestCaptor =
         ArgumentCaptor.forClass(WorkerTaskRequest.class);
     verify(worker, times(2)).run(requestCaptor.capture(), any());
