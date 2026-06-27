@@ -786,6 +786,12 @@ post-review worker delta now uses a dedicated single-task attribution path that 
 rerun target task row from its `RunCostTracker.snapshotTask` provider/model evidence and adds the
 worker delta to run totals once.
 
+Sixtieth slice 2026-06-27: reviewer exceptions now preserve reviewer-failure evidence. Initial and
+post-review reviewer exceptions are converted to a synthetic `ReviewerResult.REVIEW_FAILED`, and
+terminal status resolution checks `REVIEW_FAILED` before failed final-build evidence so the run and
+validation report keep `REVIEWER_FAILED` instead of degrading to `NO_REVIEW_RESULT` or
+`FINAL_BUILD_FAILED`.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

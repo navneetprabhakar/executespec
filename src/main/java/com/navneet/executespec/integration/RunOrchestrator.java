@@ -1584,6 +1584,7 @@ public class RunOrchestrator implements RunControlPort {
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
         reviewerErrored = true;
+        reviewResult = reviewerFailedResult(e);
         // Review failure is non-fatal; the execution already succeeded or partially
         // succeeded. Record the failure in reviewJson so the UI can surface it.
         persistenceWriter.persistReviewFailure(runId, e);
@@ -2776,6 +2777,7 @@ public class RunOrchestrator implements RunControlPort {
             "RunOrchestrator run={} post-review continuation reviewer failed — recording partial review",
             runId,
             ex);
+        rerunReviewResult = reviewerFailedResult(ex);
         persistenceWriter.persistReviewFailure(runId, ex);
       }
       return Optional.of(new PostReviewContinuationResult(rerunResult, rerunReviewResult));
@@ -2800,6 +2802,19 @@ public class RunOrchestrator implements RunControlPort {
 
   private record PostReviewContinuationResult(
       ExecutionResult execResult, ReviewerResult reviewResult) {}
+
+  static ReviewerResult reviewerFailedResult(Exception ex) {
+    String message =
+        ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
+            ? "reviewer failed"
+            : ex.getMessage();
+    return ReviewerResult.builder()
+        .overall(ReviewerResult.Overall.REVIEW_FAILED)
+        .generalPassSummary("Reviewer failed: " + truncate(message, 500))
+        .finalBuildPassed(false)
+        .finalBuildOutput(truncate(message, 2000))
+        .build();
+  }
 
   static boolean actionablePostReviewContinuationDecision(GoalContinuationPolicyDecision decision) {
     if (decision == null || decision.selectedCandidate().isEmpty()) {
@@ -3240,14 +3255,14 @@ public class RunOrchestrator implements RunControlPort {
       return new StatusAndReason(
           "COMPLETE", anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
     }
+    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
+      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
+    }
     if (review != null && !buildPassed) {
       return new StatusAndReason("PARTIAL", "FINAL_BUILD_FAILED");
     }
     if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.UNRESOLVED_ISSUES) {
       return new StatusAndReason("PARTIAL", "REVIEWER_UNRESOLVED");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
     }
     if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
       return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");
