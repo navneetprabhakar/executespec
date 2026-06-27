@@ -147,6 +147,30 @@ function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
   return facts;
 }
 
+type ContinuationPolicy = NonNullable<
+  NonNullable<api.TaskSummary['continuationDecision']>['policy']
+>;
+type RankingCandidate = NonNullable<ContinuationPolicy['topEligibleCandidates']>[number];
+
+function rankingLabel(policy?: string | null): string {
+  return policy === 'quality_desc_then_cost_asc_then_latency_asc'
+    ? 'Quality > cost > latency'
+    : policy || 'Model ranking';
+}
+
+function candidateLabel(c: RankingCandidate): string {
+  const provider = providerLabel(c.provider) || c.provider || 'Provider';
+  return `${provider}/${c.model || 'model'}`;
+}
+
+function candidateMetrics(c: RankingCandidate): string {
+  const q = c.qualityScore == null ? 'Q —' : `Q ${Math.round(c.qualityScore)}`;
+  const cost = c.costPerMillionTokens == null ? '$—/M' : `$${c.costPerMillionTokens.toFixed(2)}/M`;
+  const latency = c.latencyP50Ms == null ? 'p50 —' : `p50 ${fmtDur(c.latencyP50Ms)}`;
+  const benchmark = c.benchmarkQualityPriorAvailable ? 'bench' : 'no bench';
+  return `${q} · ${cost} · ${latency} · ${benchmark}`;
+}
+
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -1358,6 +1382,12 @@ export default function IdeRunResult() {
                   const incompleteItems = t.goalDoneness?.incompleteItems || [];
                   const risks = t.goalDoneness?.risks || [];
                   const approvalCandidate = continuationApprovalCandidate(t);
+                  const policy = t.continuationDecision?.policy;
+                  const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
+                  const rejectedRankingCount =
+                    policy?.rejectedBelowQualityThresholdCount ??
+                    policy?.topRejectedCandidates?.length ??
+                    0;
                   return (
                     <div
                       key={t.taskId}
@@ -1444,6 +1474,52 @@ export default function IdeRunResult() {
                       {t.goalDoneness?.recommendedNextStep && (
                         <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                           Next: {t.goalDoneness.recommendedNextStep}
+                        </div>
+                      )}
+                      {policy?.rankingPolicy && rankingCandidates.length > 0 && (
+                        <div
+                          style={{
+                            border: '1px solid var(--ide-border)',
+                            borderRadius: 6,
+                            padding: '7px 8px',
+                            marginTop: 8,
+                            fontSize: 11,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 8,
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              marginBottom: 5,
+                            }}
+                          >
+                            <span style={{color: 'var(--ide-fg-bright)'}}>Model ranking</span>
+                            <span className='ide-mono'>{rankingLabel(policy.rankingPolicy)}</span>
+                            {rejectedRankingCount > 0 && (
+                              <span>{rejectedRankingCount} below quality bar</span>
+                            )}
+                          </div>
+                          <div style={{display: 'grid', gap: 4}}>
+                            {rankingCandidates.map((candidate, idx) => (
+                              <div
+                                key={`${candidate.provider || 'provider'}:${candidate.model || idx}`}
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                                  gap: 8,
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span className='ide-mono' style={{overflowWrap: 'anywhere'}}>
+                                  {idx + 1}. {candidateLabel(candidate)}
+                                </span>
+                                <span>{candidateMetrics(candidate)}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                       {budgetFacts.length > 0 && (
