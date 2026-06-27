@@ -304,8 +304,11 @@ export interface TaskSummary {
     } | null;
     policy?: {
       requiredQualityThreshold?: number;
+      providerSwitchesUsed?: number;
       maxProviderSwitches?: number;
+      modelStepUpsUsed?: number;
       maxModelStepUps?: number;
+      modelStepDownsUsed?: number;
       maxModelStepDowns?: number;
       requireConfirmationBeforeExpensiveContinuation?: boolean;
       requireBenchmarkPriorForAutomaticContinuation?: boolean;

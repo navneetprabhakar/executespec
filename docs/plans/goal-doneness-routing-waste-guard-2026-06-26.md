@@ -696,6 +696,14 @@ predicate now treat `STOP_BLOCKED` with
 `selectedCandidate.benchmarkQualityPriorAvailable=false` as approvable. Candidates that are already
 benchmark-backed still cannot use that reason to bypass normal stop semantics.
 
+Forty-seventh slice 2026-06-27: continuation advice now sees consumed escalation budget before it
+selects the next model/provider action. `SequentialExecutor` passes current provider-switch,
+model-step-up, and model-step-down usage counters into `GoalContinuationAdvisorRequest` on every
+task-boundary decision, including rerun decisions after an automatic continuation already consumed a
+counter. The typed/persisted policy now exposes `providerSwitchesUsed`, `modelStepUpsUsed`, and
+`modelStepDownsUsed` beside the max values, so the policy can stop as "no useful escalation remains"
+instead of recommending an impossible upgrade that only the action-skip layer rejects later.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
