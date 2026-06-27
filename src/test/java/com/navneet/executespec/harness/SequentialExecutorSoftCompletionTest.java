@@ -285,6 +285,17 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  private static WorkerResult workerProviderError() {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.ERROR)
+        .iterations(1)
+        .toolCallsDispatched(0)
+        .finalAssistantText("LLM provider timeout")
+        .toolCallLog(List.of())
+        .totalLatencyMs(30_000L)
+        .build();
+  }
+
   private static WorkerResult workerCompleted(int writes) {
     return workerCompleted(writes, 20_000L);
   }
@@ -974,6 +985,39 @@ class SequentialExecutorSoftCompletionTest {
                                 "quality is insufficient; stronger eligible model clears"
                                     + " threshold")
                         && ((java.util.Map<?, ?>) event.data().get("policy")).containsValue(70.0)));
+  }
+
+  @Test
+  void provider_error_sets_provider_behavior_poor_for_continuation_advisor() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerProviderError());
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_FAILED,
+                Optional.empty(),
+                List.of("provider failed and no safe escalation is available")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    assertEquals(TaskOutcome.Status.WORKER_FAILED, result.perTask().get(0).status());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    GoalContinuationAdvisorRequest request = requestCaptor.getValue();
+    assertTrue(request.providerBehaviorPoor());
+    assertEquals("anthropic", request.currentProvider());
+    assertEquals("claude-haiku-4-5-20251001", request.currentModel());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"providerBehaviorPoor\":true")),
+        "Expected providerBehaviorPoor in persisted continuation policy. Saw: " + saveLog);
   }
 
   @Test
