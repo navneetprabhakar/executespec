@@ -2010,6 +2010,7 @@ to boot — skip it for those.""";
       PlannedTask task,
       GoalDonenessDecision decision,
       GoalContinuationPolicyDecision continuationDecision) {
+    persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
     log.info(
         "Executor task={} goalDecision state={} decision={} reason={}",
         task.id(),
@@ -2043,7 +2044,6 @@ to boot — skip it for those.""";
         RunEvent.continuationDecision(
             runId, task.id(), continuationSummary, continuationDecisionData(continuationDecision)));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), continuationSummary));
-    persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
   }
 
   private TaskOutcome maybeActOnContinuationBeforeSmokeRetry(

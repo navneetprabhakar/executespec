@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -134,6 +135,7 @@ class SequentialExecutorSoftCompletionTest {
       String continuationActionsJson) {}
 
   private final java.util.List<SaveSnapshot> saveLog = new java.util.ArrayList<>();
+  private final java.util.List<String> persistenceEventOrder = new java.util.ArrayList<>();
 
   /**
    * Make the task repo return a fresh AgentTask row per id and snapshot every saveAndFlush so the
@@ -171,6 +173,9 @@ class SequentialExecutorSoftCompletionTest {
                       t.getGoalDonenessJson(),
                       t.getContinuationDecisionJson(),
                       t.getContinuationActionsJson()));
+              if (t.getContinuationDecisionJson() != null) {
+                persistenceEventOrder.add("save-continuation");
+              }
               return t;
             });
   }
@@ -926,6 +931,16 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void continuation_decision_uses_candidate_backed_advisor_when_available() {
     stubTaskRow();
+    doAnswer(
+            inv -> {
+              RunEvent event = inv.getArgument(1);
+              if (isContinuationDecisionEvent(event)) {
+                persistenceEventOrder.add("emit-continuation");
+              }
+              return null;
+            })
+        .when(broadcaster)
+        .emit(anyString(), any(RunEvent.class));
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
@@ -956,6 +971,11 @@ class SequentialExecutorSoftCompletionTest {
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    assertTrue(
+        persistenceEventOrder.indexOf("save-continuation")
+            < persistenceEventOrder.indexOf("emit-continuation"),
+        "Expected continuation JSON to be persisted before the live event. Saw: "
+            + persistenceEventOrder);
     assertEquals("openai", result.perTask().get(0).dispatchedProvider());
     assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
     verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());

@@ -897,6 +897,13 @@ That makes blocked upgrade proposals, approval buttons, and continuation action 
 the Steps tab as soon as the decision is persisted, not only after a later task-status event or
 manual reload.
 
+Seventy-fifth slice 2026-06-27: continuation proof is now persisted before live decision events.
+`SequentialExecutor` writes `agent_task.goal_doneness_json` and `continuation_decision_json` before
+emitting `GOAL_DECISION` / `CONTINUATION_DECISION`, so the `RUN_DETAIL` refresh triggered by those
+events reads the same proof/proposal that caused the event. This closes the race where a blocked
+upgrade proposal could be emitted live but the refreshed Steps payload still reflected the previous
+task row.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
