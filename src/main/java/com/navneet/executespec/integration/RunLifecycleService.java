@@ -618,7 +618,6 @@ public class RunLifecycleService {
   public ContinuationApproval approveContinuation(String runId, String taskId) {
     var task = findTask(runId, taskId);
     ContinuationApproval approval = parseContinuationApproval(task);
-    appendApprovedContinuationAction(task, approval);
     retryTaskInternal(
         runId,
         taskId,
@@ -736,6 +735,9 @@ public class RunLifecycleService {
                 controlPort.removeActiveRun(runId);
               }
             });
+    if (override != null) {
+      appendApprovedContinuationAction(task, override);
+    }
     controlPort.putActiveRun(runId, future);
   }
 
@@ -788,8 +790,8 @@ public class RunLifecycleService {
   }
 
   private void appendApprovedContinuationAction(
-      com.navneet.executespec.state.entity.AgentTask task, ContinuationApproval approval) {
-    if (task == null || approval == null) {
+      com.navneet.executespec.state.entity.AgentTask task, RetryProviderOverride override) {
+    if (task == null || override == null) {
       return;
     }
     try {
@@ -798,9 +800,9 @@ public class RunLifecycleService {
       action.put("status", "APPROVED");
       action.put(
           "decision",
-          approval.proposedAction() == null ? "UNKNOWN" : approval.proposedAction().name());
-      action.put("provider", approval.provider());
-      action.put("model", approval.model());
+          override.proposedAction() == null ? "UNKNOWN" : override.proposedAction().name());
+      action.put("provider", override.provider());
+      action.put("model", override.model());
       action.put("reason", "user approved blocked continuation");
       action.put("limitName", "userApproval");
       action.put("usedLimit", 1);
