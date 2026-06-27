@@ -757,6 +757,15 @@ Fifty-fifth slice 2026-06-27: reviewer low-quality evidence is now explicit at f
 uncertain final proof. This is still a proof/visibility slice; automatic post-review worker reruns
 remain a separate control-flow follow-up.
 
+Fifty-sixth slice 2026-06-27: post-review reviewer failure now enters the same continuation advisor.
+`RunOrchestrator` watches the BUILD-mode reviewer result and, when it sees `UNRESOLVED_ISSUES`,
+`REVIEW_FAILED`, or a reviewer exception, emits a post-review `CONTINUATION_DECISION` for the latest
+usable worker task. The decision uses the same quality-first candidate ranking, benchmark-prior
+guard, confirmation guard, provider-switch ceiling, and model-step ceiling as task-boundary
+continuation. This still stops at decision emission; the remaining control-flow work is to execute
+the selected post-review task rerun, re-run reviewer on the updated workspace, and attribute the
+second worker/reviewer token deltas honestly.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

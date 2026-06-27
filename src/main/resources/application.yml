@@ -118,6 +118,8 @@ execution:
     benchmark-min-sample-tasks: 20
     parallel-read-tools-enabled: true
     parallel-provider-evaluation-enabled: true
+    post-review:
+      enabled: true
     max-total-cost-usd: -1
     max-total-tokens: -1
     max-task-wall-clock-ms: -1
