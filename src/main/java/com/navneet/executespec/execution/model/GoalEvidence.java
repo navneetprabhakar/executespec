@@ -42,6 +42,7 @@ public record GoalEvidence(
     long wallClockMs,
     boolean blockedByEnvironment,
     boolean unsafeContinuation,
+    boolean completionConfidenceLow,
     boolean completeTaskClaimed,
     List<String> completedItems,
     List<String> incompleteItems,

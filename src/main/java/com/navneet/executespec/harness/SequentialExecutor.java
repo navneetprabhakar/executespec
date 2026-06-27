@@ -2637,6 +2637,7 @@ to boot — skip it for those.""";
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
     boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
+    boolean completionConfidenceLow = fileWrites > 0 && (!completeTaskClaimed || !statusClean);
     int noProgressIterations =
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
@@ -2656,6 +2657,10 @@ to boot — skip it for those.""";
     }
     if (unsafeContinuation) {
       evidence.add("unsafeContinuation=true");
+    }
+    if (completionConfidenceLow) {
+      evidence.add("completionConfidenceLow=true");
+      incomplete.add("completion confidence is low despite meaningful changes");
     }
 
     return GoalEvidence.builder()
@@ -2688,11 +2693,12 @@ to boot — skip it for those.""";
         .wallClockMs(wallClockMs)
         .blockedByEnvironment(blockedByEnvironment)
         .unsafeContinuation(unsafeContinuation)
+        .completionConfidenceLow(completionConfidenceLow)
         .completeTaskClaimed(completeTaskClaimed)
         .completedItems(completed)
         .incompleteItems(incomplete)
         .evidence(evidence)
-        .risks(risksFor(workerResult, failureReason, budgetCeilingReason))
+        .risks(risksFor(workerResult, failureReason, budgetCeilingReason, completionConfidenceLow))
         .build();
   }
 
@@ -2967,10 +2973,16 @@ to boot — skip it for those.""";
   }
 
   private static List<String> risksFor(
-      WorkerResult workerResult, String failureReason, String budgetCeilingReason) {
+      WorkerResult workerResult,
+      String failureReason,
+      String budgetCeilingReason,
+      boolean completionConfidenceLow) {
     List<String> risks = new ArrayList<>();
     if (workerResult != null && workerResult.outcome() != WorkerResult.Outcome.COMPLETED) {
       risks.add("workerOutcome=" + workerResult.outcome());
+    }
+    if (completionConfidenceLow) {
+      risks.add("completion confidence is low despite meaningful changes");
     }
     if (budgetCeilingReason != null && !budgetCeilingReason.isBlank()) {
       risks.add(budgetCeilingReason);
