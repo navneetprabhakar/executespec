@@ -707,6 +707,7 @@ public class RunLifecycleService {
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
                             .enableSmokeTests(true)
+                            .userConfirmedExpensiveContinuation(override != null)
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
                             .initialModelStepUpsUsed(approvedUsage.modelStepUps())
                             .initialModelStepDownsUsed(approvedUsage.modelStepDowns())

@@ -826,6 +826,14 @@ benchmark-backed alternate provider before a higher-scoring unbenchmarked candid
 benchmark-backed alternate fits, it stops as `STOP_BLOCKED` while preserving the unbenchmarked
 provider-change proposal for approval.
 
+Sixty-sixth slice 2026-06-27: approved continuation retries now carry explicit user-confirmation
+state into the resumed executor pass. `ExecutionRequest` has `userConfirmedExpensiveContinuation`;
+`RunLifecycleService.approveContinuation` sets it when dispatching the approved retry; and
+`SequentialExecutor` passes it into both advisor-backed and fallback continuation policy, then
+persists it in the policy JSON. This prevents an approved unbenchmarked/expensive proposal from
+being treated as unconfirmed during the resumed retry while preserving the consumed escalation
+counters.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

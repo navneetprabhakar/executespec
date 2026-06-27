@@ -318,6 +318,7 @@ export interface TaskSummary {
       maxTotalTokens?: number;
       maxTaskWallClockMs?: number;
       providerBehaviorPoor?: boolean;
+      userConfirmedExpensiveContinuation?: boolean;
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
       rankingPolicy?: string;
