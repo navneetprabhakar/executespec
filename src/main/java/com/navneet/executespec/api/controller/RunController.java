@@ -1106,6 +1106,37 @@ public class RunController {
     }
   }
 
+  @PostMapping("/{runId}/tasks/{taskId}/continuation/approve")
+  public ResponseEntity<Map<String, Object>> approveContinuation(
+      @PathVariable String runId,
+      @PathVariable String taskId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunWriteAccess(runId, userDetails);
+    log.info("POST /api/runs/{}/tasks/{}/continuation/approve", runId, taskId);
+    try {
+      var approval = runLifecycleService.approveContinuation(runId, taskId);
+      return ResponseEntity.accepted()
+          .body(
+              Map.of(
+                  "status",
+                  "queued",
+                  "runId",
+                  runId,
+                  "taskId",
+                  taskId,
+                  "provider",
+                  approval.provider(),
+                  "model",
+                  approval.model(),
+                  "message",
+                  "Approved continuation queued — watch the run feed for progress."));
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+  }
+
   @PostMapping("/{runId}/implement-suggestions")
   public ResponseEntity<Void> implementSuggestions(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {

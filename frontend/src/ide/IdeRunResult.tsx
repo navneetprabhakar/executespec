@@ -63,6 +63,20 @@ function taskGoalLine(t: api.TaskSummary): string | null {
   return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
 }
 
+function continuationApprovalCandidate(t: api.TaskSummary) {
+  const continuation = t.continuationDecision;
+  const candidate = continuation?.selectedCandidate;
+  if (
+    continuation?.decision !== 'STOP_BLOCKED' ||
+    !continuation.policy?.requireConfirmationBeforeExpensiveContinuation ||
+    !candidate?.provider ||
+    !candidate?.model
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
 function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
   const s = (state || '').toUpperCase();
   if (s === 'DONE') return 'ok';
@@ -1324,6 +1338,7 @@ export default function IdeRunResult() {
                   const budgetFacts = taskBudgetFacts(t);
                   const incompleteItems = t.goalDoneness?.incompleteItems || [];
                   const risks = t.goalDoneness?.risks || [];
+                  const approvalCandidate = continuationApprovalCandidate(t);
                   return (
                     <div
                       key={t.taskId}
@@ -1365,6 +1380,26 @@ export default function IdeRunResult() {
                             }
                           >
                             Retry
+                          </button>
+                        )}
+                        {approvalCandidate && (
+                          <button
+                            className='ide-btn primary'
+                            style={{padding: '3px 8px'}}
+                            disabled={busy === `continuation-${t.taskId}`}
+                            title={`Approve continuation with ${approvalCandidate.provider}/${approvalCandidate.model}`}
+                            onClick={() =>
+                              action(
+                                `continuation-${t.taskId}`,
+                                () => api.approveContinuation(runId, t.taskId),
+                                (r) =>
+                                  typeof r === 'object' && r && 'message' in r
+                                    ? String(r.message)
+                                    : 'Continuation approved.',
+                              )
+                            }
+                          >
+                            Approve upgrade
                           </button>
                         )}
                       </div>

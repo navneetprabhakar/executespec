@@ -118,6 +118,16 @@ export const cancelRun = (id: string) => req<void>(`/runs/${id}`, {method: 'DELE
 export const retryTask = (runId: string, taskId: string) =>
   req<void>(`/runs/${runId}/tasks/${taskId}/retry`, {method: 'POST'});
 
+export const approveContinuation = (runId: string, taskId: string) =>
+  req<{
+    status: string;
+    runId: string;
+    taskId: string;
+    provider: string;
+    model: string;
+    message: string;
+  }>(`/runs/${runId}/tasks/${taskId}/continuation/approve`, {method: 'POST'});
+
 export const pauseRun = (runId: string) => req<void>(`/runs/${runId}/pause`, {method: 'POST'});
 
 export const resumeRun = (runId: string) => req<void>(`/runs/${runId}/resume`, {method: 'POST'});

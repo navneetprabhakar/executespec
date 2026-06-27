@@ -803,6 +803,28 @@ paths:
         "200":
           description: Task retry started
 
+  /runs/{runId}/tasks/{taskId}/continuation/approve:
+    post:
+      tags: [Runs]
+      summary: Approve a confirmation-blocked model/provider continuation
+      description: >
+        Queues a same-task retry using the provider/model stored on the task's
+        confirmation-blocked continuation decision. Returns 409 unless the task has a
+        `STOP_BLOCKED` continuation proposal with
+        `policy.requireConfirmationBeforeExpensiveContinuation=true` and a selected candidate.
+      parameters:
+        - $ref: "#/components/parameters/runId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Approved continuation queued
+        "409":
+          description: No confirmation-blocked continuation proposal is available
+
   /runs/{runId}/archive:
     post:
       tags: [Runs]

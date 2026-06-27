@@ -673,6 +673,14 @@ passes it into `ExecutionRequest`; `SequentialExecutor` applies `serverConfig ||
 calling `GoalContinuationAdvisor` / `GoalContinuationPolicy`. This lets a user choose "ask before
 upgrading this run" without allowing them to bypass an operator-level confirmation requirement.
 
+Forty-fourth slice 2026-06-27: confirmation-blocked continuation proposals now have a concrete
+approval path. `POST /api/runs/{id}/tasks/{taskId}/continuation/approve` reads the task's persisted
+`continuationDecisionJson`, requires `STOP_BLOCKED` plus
+`policy.requireConfirmationBeforeExpensiveContinuation=true`, extracts the stored selected
+provider/model, and queues the existing same-task retry machinery with that override. The run-detail
+Steps tab shows an Approve upgrade action only for that persisted state, so generic blocked tasks
+cannot silently spend on a stronger model.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
