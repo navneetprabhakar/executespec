@@ -341,6 +341,7 @@ export function IdeCompose() {
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
+  const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -622,6 +623,7 @@ export function IdeCompose() {
       if (selectedRepoIds.length > 0) body.selectedRepoIds = selectedRepoIds;
       if (costCap > 0) body.userCostCap = costCap;
       if (tddMode) body.tddMode = true;
+      if (confirmModelUpgrades) body.requireConfirmationBeforeExpensiveContinuation = true;
       if (figmaUrl.trim()) body.figmaUrl = figmaUrl.trim();
       // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
       // and '' means "Default (org / system matrix)" → send no modelName at all.
@@ -983,6 +985,22 @@ export function IdeCompose() {
                     />
                     TDD mode
                   </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={confirmModelUpgrades}
+                      onChange={(e) => setConfirmModelUpgrades(e.target.checked)}
+                    />
+                    Confirm model upgrades
+                  </label>
                   <div style={{flex: 1, minWidth: 220}}>
                     <label
                       htmlFor='compose-figma-url'
@@ -1080,6 +1098,10 @@ export function IdeCompose() {
               <div className='ide-kv'>
                 <span>Approval</span>
                 <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Model upgrades</span>
+                <span>{confirmModelUpgrades ? 'Ask first' : 'Automatic within policy'}</span>
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>

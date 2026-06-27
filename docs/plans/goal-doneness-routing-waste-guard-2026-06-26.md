@@ -704,6 +704,12 @@ counter. The typed/persisted policy now exposes `providerSwitchesUsed`, `modelSt
 `modelStepDownsUsed` beside the max values, so the policy can stop as "no useful escalation remains"
 instead of recommending an impossible upgrade that only the action-skip layer rejects later.
 
+Forty-eighth slice 2026-06-27: web run submission now exposes the per-run confirmation guard for
+automatic model/provider upgrades. `IdeCompose` adds a `Confirm model upgrades` advanced checkbox,
+sends `requireConfirmationBeforeExpensiveContinuation=true` on `POST /api/runs` when selected, and
+shows the setting in the Review step. This makes the user-config path available from the main web
+surface instead of only through raw API/CLI payloads.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
