@@ -177,6 +177,48 @@ public class RunTokenAttributor {
     }
   }
 
+  /**
+   * Attribute an additional worker pass for one resumed task. Resume-aware executor results include
+   * synthetic SKIPPED outcomes for earlier terminal tasks, so the normal aggregate distributor would
+   * revisit unrelated rows. This method records the run-total delta and rewrites only the target
+   * task row from its real task snapshot.
+   */
+  public void attributeWorkerAdditionalTask(
+      String runId,
+      String taskId,
+      int totalIn,
+      int totalOut,
+      String providerUpper,
+      String model) {
+    if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
+      return;
+    }
+    if (totalIn > 0 || totalOut > 0) {
+      try {
+        runRepo.addTokens(runId, totalIn, totalOut);
+      } catch (Exception e) {
+        log.warn(
+            "attributeWorkerAdditionalTask addTokens failed run={}: {}", runId, e.getMessage());
+      }
+    }
+    String taskRowId =
+        taskId.startsWith(runId.substring(0, 8) + "_")
+            ? taskId
+            : runId.substring(0, 8) + "_" + taskId;
+    String logicalTaskId = taskRowId.substring(runId.substring(0, 8).length() + 1);
+    RunCostTracker.Snapshot snapshot = costTracker.snapshotTask(runId, logicalTaskId);
+    taskRepo
+        .findById(taskRowId)
+        .ifPresent(
+            task -> {
+              task.setInputTokens(snapshot.inputTokens());
+              task.setOutputTokens(snapshot.outputTokens());
+              task.setProvider(providerUpper);
+              task.setModel(model);
+              taskRepo.save(task);
+            });
+  }
+
   private static int safe(Integer value) {
     return value == null ? 0 : Math.max(0, value);
   }

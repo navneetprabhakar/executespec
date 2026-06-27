@@ -780,6 +780,12 @@ has an additive phase-attribution path for repeated phases, and the post-review 
 it so `pipeline_run.reviewer_input_tokens` / `reviewer_output_tokens` retain the first reviewer pass
 plus the post-review reviewer pass. Run totals still receive only the new second-pass delta once.
 
+Fifty-ninth slice 2026-06-27: post-review worker accounting is now target-task-only. The
+resume-aware executor returns synthetic `SKIPPED` outcomes for already-terminal tasks, so the
+post-review worker delta now uses a dedicated single-task attribution path that writes only the
+rerun target task row from its `RunCostTracker.snapshotTask` provider/model evidence and adds the
+worker delta to run totals once.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
