@@ -11,6 +11,8 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
@@ -616,6 +618,7 @@ public class RunLifecycleService {
   public ContinuationApproval approveContinuation(String runId, String taskId) {
     var task = findTask(runId, taskId);
     ContinuationApproval approval = parseContinuationApproval(task);
+    appendApprovedContinuationAction(task, approval);
     retryTaskInternal(
         runId,
         taskId,
@@ -782,6 +785,50 @@ public class RunLifecycleService {
     } catch (Exception e) {
       throw new IllegalStateException("Continuation proposal JSON is corrupted: " + e.getMessage());
     }
+  }
+
+  private void appendApprovedContinuationAction(
+      com.navneet.executespec.state.entity.AgentTask task, ContinuationApproval approval) {
+    if (task == null || approval == null) {
+      return;
+    }
+    try {
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode action = actions.addObject();
+      action.put("status", "APPROVED");
+      action.put(
+          "decision",
+          approval.proposedAction() == null ? "UNKNOWN" : approval.proposedAction().name());
+      action.put("provider", approval.provider());
+      action.put("model", approval.model());
+      action.put("reason", "user approved blocked continuation");
+      action.put("limitName", "userApproval");
+      action.put("usedLimit", 1);
+      action.put("maxLimit", 1);
+      action.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn(
+          "approveContinuation: failed to append action history for task {}: {}",
+          task.getTaskId(),
+          ex.getMessage(),
+          ex);
+    }
+  }
+
+  private ArrayNode readContinuationActions(String json)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return objectMapper.createArrayNode();
+    }
+    JsonNode parsed = objectMapper.readTree(json);
+    if (parsed != null && parsed.isArray()) {
+      ArrayNode copy = objectMapper.createArrayNode();
+      parsed.forEach(copy::add);
+      return copy;
+    }
+    return objectMapper.createArrayNode();
   }
 
   private static String retryMessage(
