@@ -880,11 +880,24 @@ to boot — skip it for those.""";
       return outcome;
     }
 
+    return executeContinuationAction(
+        task, plan, req, isFinalTask, outcome, decision, candidate, true);
+  }
+
+  private TaskOutcome executeContinuationAction(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      TaskOutcome outcome,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      boolean keepOriginalWhenSkipped) {
     String runId = req.runContext().runId();
     ContinuationActionLimit actionLimit = reserveContinuationAction(runId, task.id(), decision);
     if (!actionLimit.allowed()) {
       emitContinuationActionSkipped(runId, task.id(), decision, candidate, actionLimit);
-      return outcome;
+      return keepOriginalWhenSkipped ? outcome : null;
     }
 
     String reason = firstReason(decision);
@@ -1593,6 +1606,13 @@ to boot — skip it for those.""";
           .build();
     }
 
+    TaskOutcome continuationBeforeRetry =
+        maybeActOnContinuationBeforeSmokeRetry(
+            task, plan, req, isFinalTask, taskStart, primary, smoke, cfg);
+    if (continuationBeforeRetry != null) {
+      return continuationBeforeRetry;
+    }
+
     log.warn(
         "Executor task={} smoke test FAILED (exit={}), retrying once with error context",
         task.id(),
@@ -1973,6 +1993,23 @@ to boot — skip it for those.""";
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
             buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
+    GoalContinuationPolicyDecision continuationDecision =
+        decideContinuation(
+            runId,
+            task,
+            decision,
+            dispatchedProvider,
+            dispatchedModel,
+            providerBehaviorPoor(workerResult, failureReason));
+    emitGoalAndContinuationDecision(runId, task, decision, continuationDecision);
+    return new GoalTaskDecision(decision, continuationDecision);
+  }
+
+  private void emitGoalAndContinuationDecision(
+      String runId,
+      PlannedTask task,
+      GoalDonenessDecision decision,
+      GoalContinuationPolicyDecision continuationDecision) {
     log.info(
         "Executor task={} goalDecision state={} decision={} reason={}",
         task.id(),
@@ -1990,14 +2027,6 @@ to boot — skip it for those.""";
     broadcaster.emit(
         runId, RunEvent.goalDecision(runId, task.id(), goalSummary, goalDecisionData(decision)));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), goalSummary));
-    GoalContinuationPolicyDecision continuationDecision =
-        decideContinuation(
-            runId,
-            task,
-            decision,
-            dispatchedProvider,
-            dispatchedModel,
-            providerBehaviorPoor(workerResult, failureReason));
     log.info(
         "Executor task={} continuationDecision decision={} reason={}",
         task.id(),
@@ -2015,7 +2044,92 @@ to boot — skip it for those.""";
             runId, task.id(), continuationSummary, continuationDecisionData(continuationDecision)));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), continuationSummary));
     persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
-    return new GoalTaskDecision(decision, continuationDecision);
+  }
+
+  private TaskOutcome maybeActOnContinuationBeforeSmokeRetry(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      long taskStart,
+      WorkerResult primary,
+      SmokeTestResult smoke,
+      TierConfig cfg) {
+    if (!continuationActingEnabled || maxContinuationReruns() <= 0 || primary == null) {
+      return null;
+    }
+    String runId = req.runContext().runId();
+    String reason = smokeFailureReason(smoke, "before same-model retry");
+    GoalDonenessDecision goalDecision =
+        goalDonenessEvaluator.evaluate(
+            buildGoalEvidence(
+                runId,
+                task,
+                primary,
+                TaskOutcome.Status.COMPLETED_WITH_WARNING,
+                false,
+                reason));
+    GoalContinuationPolicyDecision continuationDecision =
+        decideContinuation(
+            runId,
+            task,
+            goalDecision,
+            cfg.provider,
+            cfg.model,
+            providerBehaviorPoor(primary, reason));
+    if (!actionableContinuationDecision(continuationDecision)) {
+      return null;
+    }
+    ModelProviderScore candidate = continuationDecision.selectedCandidate().orElse(null);
+    if (candidate == null || sameProviderModel(candidate, cfg.provider, cfg.model)) {
+      return null;
+    }
+    if (!continuationActionCapacityAvailable(runId, task.id(), continuationDecision.decision())) {
+      return null;
+    }
+    emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+    TaskOutcome preRetryOutcome =
+        TaskOutcome.builder()
+            .taskId(task.id())
+            .taskTitle(task.title())
+            .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
+            .workerOutcome(primary)
+            .smokeTestPassed(false)
+            .smokeTestExitCode(smoke.exitCode())
+            .smokeTestOutput(smoke.output())
+            .totalLatencyMs(System.currentTimeMillis() - taskStart)
+            .toolCallsDispatched(primary.toolCallsDispatched())
+            .dispatchedProvider(cfg.provider)
+            .dispatchedModel(cfg.model)
+            .goalDonenessDecision(goalDecision)
+            .continuationDecision(continuationDecision)
+            .build();
+    return executeContinuationAction(
+        task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
+  }
+
+  private boolean continuationActionCapacityAvailable(
+      String runId, String taskId, RunContinuationDecision decision) {
+    return switch (decision) {
+      case CHANGE_PROVIDER -> providerSwitchesUsed(runId) < maxProviderSwitches();
+      case STEP_UP_MODEL -> modelStepUpsUsed(runId, taskId) < maxModelStepUps();
+      case STEP_DOWN_MODEL -> modelStepDownsUsed(runId, taskId) < maxModelStepDowns();
+      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+          false;
+    };
+  }
+
+  private static String smokeFailureReason(SmokeTestResult smoke, String phase) {
+    String smokeTail = smoke == null || smoke.output() == null ? "" : smoke.output();
+    if (smokeTail.length() > 240) {
+      smokeTail = smokeTail.substring(smokeTail.length() - 240);
+    }
+    String suffix = smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " ");
+    return "Build smoke failed (exit "
+        + (smoke == null ? "unknown" : smoke.exitCode())
+        + ") "
+        + phase
+        + suffix;
   }
 
   private GoalContinuationPolicyDecision decideContinuation(
