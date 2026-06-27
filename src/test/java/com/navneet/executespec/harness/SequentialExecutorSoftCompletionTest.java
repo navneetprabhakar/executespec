@@ -915,6 +915,15 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(1, request.maxProviderSwitches());
     assertEquals(1, request.maxModelStepUps());
     assertEquals(1, request.maxModelStepDowns());
+    assertEquals(0, request.providerSwitchesUsed());
+    assertEquals(0, request.modelStepUpsUsed());
+    assertEquals(0, request.modelStepDownsUsed());
+    GoalContinuationAdvisorRequest rerunRequest = requestCaptor.getAllValues().get(1);
+    assertEquals("openai", rerunRequest.currentProvider());
+    assertEquals("gpt-5.4", rerunRequest.currentModel());
+    assertEquals(0, rerunRequest.providerSwitchesUsed());
+    assertEquals(1, rerunRequest.modelStepUpsUsed());
+    assertEquals(0, rerunRequest.modelStepDownsUsed());
     assertTrue(
         saveLog.stream()
             .anyMatch(
@@ -1344,6 +1353,12 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals("anthropic", requestCaptor.getAllValues().get(0).provider());
     assertEquals("openai", requestCaptor.getAllValues().get(1).provider());
     assertEquals("anthropic", requestCaptor.getAllValues().get(2).provider());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> advisorRequestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor, times(3)).advise(advisorRequestCaptor.capture());
+    assertEquals(0, advisorRequestCaptor.getAllValues().get(0).providerSwitchesUsed());
+    assertEquals(1, advisorRequestCaptor.getAllValues().get(1).providerSwitchesUsed());
+    assertEquals(1, advisorRequestCaptor.getAllValues().get(2).providerSwitchesUsed());
     verify(broadcaster)
         .emit(
             anyString(),

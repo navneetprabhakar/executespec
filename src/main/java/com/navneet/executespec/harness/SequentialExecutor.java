@@ -1032,6 +1032,31 @@ to boot — skip it for those.""";
     return (runId == null ? "" : runId) + ":" + (taskId == null ? "" : taskId);
   }
 
+  private int providerSwitchesUsed(String runId) {
+    if (runId == null || runId.isBlank()) {
+      return 0;
+    }
+    AtomicInteger used = continuationProviderSwitchesPerRun.get(runId);
+    return used == null ? 0 : Math.max(0, used.get());
+  }
+
+  private int modelStepUpsUsed(String runId, String taskId) {
+    return continuationTaskCounterValue(continuationModelStepUpsPerTask, runId, taskId);
+  }
+
+  private int modelStepDownsUsed(String runId, String taskId) {
+    return continuationTaskCounterValue(continuationModelStepDownsPerTask, runId, taskId);
+  }
+
+  private int continuationTaskCounterValue(
+      ConcurrentMap<String, AtomicInteger> counters, String runId, String taskId) {
+    if (runId == null || runId.isBlank() || taskId == null || taskId.isBlank()) {
+      return 0;
+    }
+    AtomicInteger used = counters.get(continuationTaskKey(runId, taskId));
+    return used == null ? 0 : Math.max(0, used.get());
+  }
+
   private record ContinuationActionLimit(
       String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
 
@@ -1866,9 +1891,18 @@ to boot — skip it for those.""";
     String taskCategory = taskCategory(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
+    int providerSwitchesUsed = providerSwitchesUsed(runId);
+    int modelStepUpsUsed = modelStepUpsUsed(runId, task.id());
+    int modelStepDownsUsed = modelStepDownsUsed(runId, task.id());
     if (goalContinuationAdvisor == null) {
       return decideContinuationFallback(
-          decision, taskCategory, requiredQualityThreshold, confirmationRequired);
+          decision,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
     }
     try {
       GoalContinuationPolicyDecision advised =
@@ -1884,12 +1918,21 @@ to boot — skip it for those.""";
                   .expensiveContinuationRequiresConfirmation(confirmationRequired)
                   .benchmarkQualityPriorRequiredForAutomaticContinuation(
                       requireBenchmarkPriorForAutomaticContinuation)
+                  .providerSwitchesUsed(providerSwitchesUsed)
                   .maxProviderSwitches(maxProviderSwitches())
+                  .modelStepUpsUsed(modelStepUpsUsed)
                   .maxModelStepUps(maxModelStepUps())
+                  .modelStepDownsUsed(modelStepDownsUsed)
                   .maxModelStepDowns(maxModelStepDowns())
                   .build());
       return withAppliedPolicy(
-          advised, taskCategory, requiredQualityThreshold, confirmationRequired);
+          advised,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
     } catch (RuntimeException ex) {
       log.warn(
           "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
@@ -1899,7 +1942,13 @@ to boot — skip it for those.""";
           model,
           ex);
       return decideContinuationFallback(
-          decision, taskCategory, requiredQualityThreshold, confirmationRequired);
+          decision,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
     }
   }
 
@@ -1907,26 +1956,38 @@ to boot — skip it for those.""";
       GoalDonenessDecision decision,
       String taskCategory,
       double requiredQualityThreshold,
-      boolean confirmationRequired) {
+      boolean confirmationRequired,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed) {
     return withAppliedPolicy(
         goalContinuationPolicy.decide(
             GoalContinuationRequest.builder()
                 .goalDecision(decision)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .providerSwitchesUsed(providerSwitchesUsed)
                 .maxProviderSwitches(maxProviderSwitches())
+                .modelStepUpsUsed(modelStepUpsUsed)
                 .maxModelStepUps(maxModelStepUps())
+                .modelStepDownsUsed(modelStepDownsUsed)
                 .maxModelStepDowns(maxModelStepDowns())
                 .build()),
         taskCategory,
         requiredQualityThreshold,
-        confirmationRequired);
+        confirmationRequired,
+        providerSwitchesUsed,
+        modelStepUpsUsed,
+        modelStepDownsUsed);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
       GoalContinuationPolicyDecision decision,
       String taskCategory,
       double requiredQualityThreshold,
-      boolean confirmationRequired) {
+      boolean confirmationRequired,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed) {
     if (decision == null) {
       return null;
     }
@@ -1935,7 +1996,13 @@ to boot — skip it for those.""";
         decision.selectedCandidate(),
         decision.reasons(),
         continuationPolicyData(
-            decision, taskCategory, requiredQualityThreshold, confirmationRequired));
+            decision,
+            taskCategory,
+            requiredQualityThreshold,
+            confirmationRequired,
+            providerSwitchesUsed,
+            modelStepUpsUsed,
+            modelStepDownsUsed));
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -2141,6 +2208,18 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired) {
+    return continuationPolicyData(
+        decision, taskCategory, requiredQualityThreshold, confirmationRequired, 0, 0, 0);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed) {
     Map<String, Object> data = new LinkedHashMap<>();
     if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
       data.putAll(decision.policy());
@@ -2151,8 +2230,11 @@ to boot — skip it for those.""";
         "requiredQualityThreshold", sanitizeRequiredQualityThreshold(requiredQualityThreshold));
     data.put("defaultRequiredQualityThreshold", requiredGoalQualityThreshold());
     data.put("requiredQualityThresholds", requiredQualityThresholdsByCategory());
+    data.put("providerSwitchesUsed", Math.max(0, providerSwitchesUsed));
     data.put("maxProviderSwitches", maxProviderSwitches());
+    data.put("modelStepUpsUsed", Math.max(0, modelStepUpsUsed));
     data.put("maxModelStepUps", maxModelStepUps());
+    data.put("modelStepDownsUsed", Math.max(0, modelStepDownsUsed));
     data.put("maxModelStepDowns", maxModelStepDowns());
     data.put("maxNoProgressIterations", maxNoProgressIterations());
     data.put("maxFalseDoneClaims", maxFalseDoneClaims());
@@ -2353,8 +2435,11 @@ to boot — skip it for those.""";
     ObjectNode thresholds = policyNode.putObject("requiredQualityThresholds");
     requiredQualityThresholdsByCategory()
         .forEach((category, threshold) -> thresholds.put(category, (Double) threshold));
+    policyNode.put("providerSwitchesUsed", providerSwitchesUsed(null));
     policyNode.put("maxProviderSwitches", maxProviderSwitches());
+    policyNode.put("modelStepUpsUsed", modelStepUpsUsed(null, null));
     policyNode.put("maxModelStepUps", maxModelStepUps());
+    policyNode.put("modelStepDownsUsed", modelStepDownsUsed(null, null));
     policyNode.put("maxModelStepDowns", maxModelStepDowns());
     policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
     policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
