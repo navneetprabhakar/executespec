@@ -2,6 +2,7 @@ package com.navneet.executespec.execution.service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -38,8 +39,9 @@ public class GoalContinuationPolicy {
 
     Optional<GoalContinuationPolicyDecision> escalation = escalationDecision(request);
     if (escalation.isPresent()) {
+      boolean userConfirmedForEscalation = userConfirmedFor(request, escalation.get());
       if (request.benchmarkQualityPriorRequiredForAutomaticContinuation()
-          && !request.userConfirmedExpensiveContinuation()
+          && !userConfirmedForEscalation
           && escalation.get().selectedCandidate().stream()
               .noneMatch(ModelProviderScore::benchmarkQualityPriorAvailable)) {
         return blockedEscalationDecision(
@@ -51,7 +53,7 @@ public class GoalContinuationPolicy {
             escalation.get().decision());
       }
       if (request.expensiveContinuationRequiresConfirmation()
-          && !request.userConfirmedExpensiveContinuation()) {
+          && !userConfirmedForEscalation) {
         return blockedEscalationDecision(
             RunContinuationDecision.STOP_BLOCKED,
             escalation.get().selectedCandidate(),
@@ -160,8 +162,7 @@ public class GoalContinuationPolicy {
 
   private static boolean requiresBenchmarkPriorForAutomaticAction(GoalContinuationRequest request) {
     return request != null
-        && request.benchmarkQualityPriorRequiredForAutomaticContinuation()
-        && !request.userConfirmedExpensiveContinuation();
+        && request.benchmarkQualityPriorRequiredForAutomaticContinuation();
   }
 
   private static boolean escalationMightHelp(GoalContinuationRequest request) {
@@ -226,7 +227,55 @@ public class GoalContinuationPolicy {
     if (!benchmarkBackedOnly) {
       return eligible;
     }
-    return eligible.stream().filter(ModelProviderScore::benchmarkQualityPriorAvailable).toList();
+    return eligible.stream()
+        .filter(
+            candidate ->
+                candidate.benchmarkQualityPriorAvailable()
+                    || userConfirmedForAnyEscalation(request, candidate))
+        .toList();
+  }
+
+  private static boolean userConfirmedFor(
+      GoalContinuationRequest request, GoalContinuationPolicyDecision decision) {
+    if (decision == null || decision.selectedCandidate().isEmpty()) {
+      return false;
+    }
+    return userConfirmedFor(request, decision.decision(), decision.selectedCandidate().get());
+  }
+
+  private static boolean userConfirmedForAnyEscalation(
+      GoalContinuationRequest request, ModelProviderScore candidate) {
+    return userConfirmedFor(request, RunContinuationDecision.CHANGE_PROVIDER, candidate)
+        || userConfirmedFor(request, RunContinuationDecision.STEP_UP_MODEL, candidate)
+        || userConfirmedFor(request, RunContinuationDecision.STEP_DOWN_MODEL, candidate);
+  }
+
+  private static boolean userConfirmedFor(
+      GoalContinuationRequest request,
+      RunContinuationDecision action,
+      ModelProviderScore selectedCandidate) {
+    if (request == null
+        || selectedCandidate == null
+        || !request.userConfirmedExpensiveContinuation()
+        || request.userConfirmedContinuationAction() == null
+        || action == null
+        || request.userConfirmedContinuationAction() != action
+        || !hasText(request.userConfirmedContinuationProvider())
+        || !hasText(request.userConfirmedContinuationModel())) {
+      return false;
+    }
+    return normalize(request.userConfirmedContinuationProvider())
+            .equals(normalize(selectedCandidate.provider()))
+        && normalize(request.userConfirmedContinuationModel())
+            .equals(normalize(selectedCandidate.model()));
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
+  private static String normalize(String value) {
+    return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
   }
 
   private static boolean sameProvider(ModelProviderScore a, ModelProviderScore b) {

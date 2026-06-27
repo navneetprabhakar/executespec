@@ -319,6 +319,9 @@ export interface TaskSummary {
       maxTaskWallClockMs?: number;
       providerBehaviorPoor?: boolean;
       userConfirmedExpensiveContinuation?: boolean;
+      userConfirmedContinuationAction?: string;
+      userConfirmedContinuationProvider?: string;
+      userConfirmedContinuationModel?: string;
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
       rankingPolicy?: string;

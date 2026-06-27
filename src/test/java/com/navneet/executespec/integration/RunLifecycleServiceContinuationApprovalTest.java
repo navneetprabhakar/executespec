@@ -156,6 +156,10 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
     assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
+    assertThat(request.getValue().userConfirmedContinuationAction())
+        .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("openai");
+    assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("gpt-5.4");
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
@@ -221,6 +225,11 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().provider()).isEqualTo("anthropic");
     assertThat(request.getValue().model()).isEqualTo("claude-sonnet-4-6");
     assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
+    assertThat(request.getValue().userConfirmedContinuationAction())
+        .isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
+    assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("anthropic");
+    assertThat(request.getValue().userConfirmedContinuationModel())
+        .isEqualTo("claude-sonnet-4-6");
     assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
     assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();

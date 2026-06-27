@@ -301,6 +301,77 @@ class GoalContinuationPolicyTest {
     assertThat(decision.policy()).containsEntry("proposedAction", "STEP_UP_MODEL");
   }
 
+  @Test
+  void userConfirmationOnlyBypassesBenchmarkGuardForMatchingApprovedProposal() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 76, 0.4, 1_600, 70, true, "current broke down");
+    ModelProviderScore approvedUnbenchmarked =
+        score("openai", "gpt-5.4", 92, 16.0, 1_800, 70, false, "approved");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current, ranked(approvedUnbenchmarked, current))
+                .providerBehaviorPoor(true)
+                .maxProviderSwitches(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .userConfirmedExpensiveContinuation(true)
+                .userConfirmedContinuationAction(RunContinuationDecision.CHANGE_PROVIDER)
+                .userConfirmedContinuationProvider("openai")
+                .userConfirmedContinuationModel("gpt-5.4")
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(approvedUnbenchmarked);
+  }
+
+  @Test
+  void userConfirmationDoesNotBypassBenchmarkGuardForDifferentCandidate() {
+    ModelProviderScore current =
+        score("deepseek", "deepseek-v4-pro", 76, 0.4, 1_600, 70, true, "current broke down");
+    ModelProviderScore unapprovedUnbenchmarked =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unapproved");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current, ranked(unapprovedUnbenchmarked, current))
+                .providerBehaviorPoor(true)
+                .maxProviderSwitches(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .userConfirmedExpensiveContinuation(true)
+                .userConfirmedContinuationAction(RunContinuationDecision.CHANGE_PROVIDER)
+                .userConfirmedContinuationProvider("openai")
+                .userConfirmedContinuationModel("gpt-5.4")
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(unapprovedUnbenchmarked);
+    assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
+    assertThat(decision.policy()).containsEntry("proposedAction", "CHANGE_PROVIDER");
+  }
+
+  @Test
+  void userConfirmationDoesNotBypassBenchmarkGuardForDifferentAction() {
+    ModelProviderScore stronger =
+        score("anthropic", "opus-preview", 96, 22.0, 2_200, 70, false, "unbenchmarked");
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(stronger, current()))
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
+                .userConfirmedExpensiveContinuation(true)
+                .userConfirmedContinuationAction(RunContinuationDecision.CHANGE_PROVIDER)
+                .userConfirmedContinuationProvider("anthropic")
+                .userConfirmedContinuationModel("opus-preview")
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(stronger);
+    assertThat(decision.reasons().getFirst()).contains("lacks benchmark quality prior");
+    assertThat(decision.policy()).containsEntry("proposedAction", "STEP_UP_MODEL");
+  }
+
   private GoalContinuationRequest.GoalContinuationRequestBuilder request(
       GoalDonenessDecision goalDecision,
       ModelProviderScore current,
