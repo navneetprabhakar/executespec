@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
@@ -156,6 +157,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
+    assertApprovedContinuationAction(task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
 
@@ -218,6 +220,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
     assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
+    assertApprovedContinuationAction(
+        task, RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
   }
 
   @Test
@@ -328,5 +332,20 @@ class RunLifecycleServiceContinuationApprovalTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("Workspace gone");
     verify(taskRepo, atLeastOnce()).findById(TASK_KEY);
+  }
+
+  private void assertApprovedContinuationAction(
+      AgentTask task, RunContinuationDecision decision, String provider, String model)
+      throws Exception {
+    JsonNode actions = objectMapper.readTree(task.getContinuationActionsJson());
+    assertThat(actions.isArray()).isTrue();
+    assertThat(actions).hasSize(1);
+    JsonNode action = actions.get(0);
+    assertThat(action.path("status").asText()).isEqualTo("APPROVED");
+    assertThat(action.path("decision").asText()).isEqualTo(decision.name());
+    assertThat(action.path("provider").asText()).isEqualTo(provider);
+    assertThat(action.path("model").asText()).isEqualTo(model);
+    assertThat(action.path("limitName").asText()).isEqualTo("userApproval");
+    assertThat(action.path("attempt").asInt()).isEqualTo(1);
   }
 }

@@ -730,6 +730,11 @@ Fifty-first slice 2026-06-27: final review now follows a successful automatic qu
 `STEP_UP_MODEL` / `CHANGE_PROVIDER` action. Normal complexity tier routing does not trigger this,
 failed actions do not trigger this, and `STEP_DOWN_MODEL` does not weaken the reviewer.
 
+Fifty-second slice 2026-06-27: approved blocked-continuation retries now share the same durable
+action trail as automatic reruns. `RunLifecycleService.approveContinuation` appends an `APPROVED`
+entry to `agent_task.continuation_actions_json` before dispatching the stored provider/model, while
+still seeding the provider-switch / model-step usage counters from the proposed action.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
