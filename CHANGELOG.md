@@ -13,6 +13,16 @@ Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-trac
 
 A second multi-track push has since landed (V203 → V243, ~2026-05-20 → 2026-06-16): the agent-session protocol behind the CLI/VS Code clients, the W0 LLM-usage attribution contract, cross-surface provider preference, local-hands run gates, the Console-only web shell, Enterprise per-org model overrides, the OpenRouter/DeepSeek/Fireworks aggregator + BYOK lanes, anti-gaming scoring guards + trust caps, and a tranche of flag-gated worker-quality levers. Highlights below, newest first.
 
+### Fixed — agent control plane web-search boot
+
+- **`WebSearchChatTools` failed to start the context.** The class declared two constructors (a 2-arg
+  production ctor delegating to a 3-arg test ctor) with neither annotated, so Spring fell back to a
+  non-existent no-arg constructor and the app aborted at startup with
+  `NoSuchMethodException: WebSearchChatTools.<init>()` (cascading through `specChatService` →
+  `agentStreamTurnRunner` → `agentSessionController`). Annotated the production constructor with
+  `@Autowired` so the container binds `ObjectMapper` + `ContextSanitizer` and builds the default
+  `PinnedHttpFetcher`. The backend now boots on `profile=local`.
+
 ### Added — CLI / VS Code agent sessions (V240)
 
 - **Agent-session protocol** (`agentsession/`, tables `agent_session` / `agent_turn` / `agent_action_event` / `agent_usage_ledger`) — durable, open-ended conversations for the CLI + VS Code clients, kept separate from `pipeline_run` so run credits stay charged only at plan approval. Endpoints under `/api/agent/*` (`/sessions`, `/sessions/{id}/events`, `/sessions/{id}/turns` + streaming `/turns/stream`, `/actions`, `/intent/interpret`, `/context/resolve`, `/gates`). CLI/VS Code chat prefers `turns/stream` over the legacy `/api/spec/chat`; when a session carries a `projectId`, the project/code tool surface (`ProjectChatTools`) is bound alongside run-control tools.
