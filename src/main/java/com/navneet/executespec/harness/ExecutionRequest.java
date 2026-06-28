@@ -25,6 +25,8 @@ import lombok.Builder;
  * @param requireBenchmarkPriorForAutomaticContinuation optional per-run override for whether
  *     automatic model/provider continuation requires a compatible benchmark quality prior. Null
  *     leaves the server YAML default in control.
+ * @param routePinned true when the run is bound to a validated explicit provider/model pin; pinned
+ *     runs may surface better candidates but must not automatically change provider/model.
  * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
  *     user approved a blocked continuation proposal. This lets the retry spend on the approved
  *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
@@ -51,6 +53,7 @@ public record ExecutionRequest(
     Boolean localHandsMode,
     Boolean requireConfirmationBeforeExpensiveContinuation,
     Boolean requireBenchmarkPriorForAutomaticContinuation,
+    Boolean routePinned,
     Boolean userConfirmedExpensiveContinuation,
     RunContinuationDecision userConfirmedContinuationAction,
     String userConfirmedContinuationProvider,
@@ -91,6 +94,7 @@ public record ExecutionRequest(
     if (localHandsMode == null) localHandsMode = false;
     if (requireConfirmationBeforeExpensiveContinuation == null)
       requireConfirmationBeforeExpensiveContinuation = false;
+    if (routePinned == null) routePinned = false;
     if (userConfirmedExpensiveContinuation == null) userConfirmedExpensiveContinuation = false;
     if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
     if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;

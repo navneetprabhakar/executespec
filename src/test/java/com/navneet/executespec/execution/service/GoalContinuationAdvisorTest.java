@@ -77,6 +77,33 @@ class GoalContinuationAdvisorTest {
   }
 
   @Test
+  void routePinBlocksAutomaticAdvisorProviderChange() {
+    when(candidateService.buildCandidates(any()))
+        .thenReturn(
+            List.of(
+                score("anthropic", "sonnet", 80, 70, 8.0),
+                score("openai", "gpt-5.4", 88, 70, 7.0)));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("anthropic")
+                .currentModel("sonnet")
+                .taskCategory("BUG_FIX")
+                .providerBehaviorPoor(true)
+                .routePinned(true)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(score("openai", "gpt-5.4", 88, 70, 7.0));
+    assertThat(decision.policy())
+        .containsEntry("routePinned", true)
+        .containsEntry("blockedAutomaticContinuationReason", "ROUTE_PINNED");
+  }
+
+  @Test
   void recommendsStepDownOnlyToCheaperEligibleCandidate() {
     when(candidateService.buildCandidates(any()))
         .thenReturn(

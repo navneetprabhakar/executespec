@@ -945,6 +945,14 @@ band and benchmark-confidence mode beside the candidate order. This makes the un
 behavior explicit: operators can see whether unbenchmarked upgrades need approval or are allowed to
 auto-run for that submitted run, alongside the candidate's `bench` / `no bench` marker.
 
+Eighty-first slice 2026-06-28: validated ENTERPRISE per-run provider/model pins are now hard
+constraints for automatic continuation. `RunOrchestrator` threads the validated pin state into
+`ExecutionRequest.routePinned`; `SequentialExecutor` and post-review continuation pass it through
+the advisor; and `GoalContinuationPolicy` stops proposed step-up, step-down, or provider-change
+actions as `STOP_BLOCKED` with `blockedAutomaticContinuationReason=ROUTE_PINNED` while keeping the
+better candidate visible. This closes the silent override gap without deciding the separate product
+question of whether a future explicit user approval may override a pinned route.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

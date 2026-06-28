@@ -14,6 +14,7 @@ public record GoalContinuationRequest(
     boolean qualityInsufficient,
     boolean providerBehaviorPoor,
     boolean taskSimplerThanExpected,
+    boolean routePinned,
     boolean expensiveContinuationRequiresConfirmation,
     boolean benchmarkQualityPriorRequiredForAutomaticContinuation,
     boolean userConfirmedExpensiveContinuation,

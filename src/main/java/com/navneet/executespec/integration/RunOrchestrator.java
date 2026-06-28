@@ -1053,6 +1053,7 @@ public class RunOrchestrator implements RunControlPort {
       // overrides and the YAML defaults for every role (planner / worker / reviewer) on that
       // provider. This RunModelOverrides overlay is the single authoritative routing mechanism —
       // the worker no longer silently re-resolves to the tier default and ignores the pin.
+      boolean routePinned = false;
       try {
         PipelineRun ovProbe = runRepo.findById(runId).orElse(null);
         String orgId = ovProbe != null ? ovProbe.getOrgId() : null;
@@ -1103,6 +1104,7 @@ public class RunOrchestrator implements RunControlPort {
         }
 
         if (validatedPin != null) {
+          routePinned = true;
           log.info(
               "V2 run={} ENTERPRISE per-run pin: {} ({}) overrides org+YAML for all tiers",
               runId,
@@ -1556,6 +1558,7 @@ public class RunOrchestrator implements RunControlPort {
                     .localHandsMode(localRun)
                     .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
                     .requireBenchmarkPriorForAutomaticContinuation(requireContinuationBenchmarkPrior)
+                    .routePinned(routePinned)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -1735,7 +1738,8 @@ public class RunOrchestrator implements RunControlPort {
               reviewResult,
               reviewerErrored,
               requireContinuationConfirmation,
-              requireContinuationBenchmarkPrior);
+              requireContinuationBenchmarkPrior,
+              routePinned);
       Optional<PostReviewContinuationResult> postReviewContinuationResult =
           maybeActOnPostReviewContinuation(
               runId,
@@ -2701,7 +2705,8 @@ public class RunOrchestrator implements RunControlPort {
       ReviewerResult reviewResult,
       boolean reviewerErrored,
       boolean confirmationRequired,
-      boolean benchmarkPriorRequired) {
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
     if (!postReviewContinuationEnabled || !reviewerQualityFailed(reviewResult, reviewerErrored)) {
       return Optional.empty();
     }
@@ -2733,6 +2738,7 @@ public class RunOrchestrator implements RunControlPort {
                 .providerAvailability(providerAvailability(runId))
                 .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
                 .qualityInsufficient(true)
+                .routePinned(routePinned)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
                 .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
                 .providerSwitchesUsed(providerSwitchesUsed(execResult))
@@ -2762,10 +2768,10 @@ public class RunOrchestrator implements RunControlPort {
             task.taskId(),
             summary,
             postReviewContinuationDecisionData(
-                decision, confirmationRequired, benchmarkPriorRequired)));
+                decision, confirmationRequired, benchmarkPriorRequired, routePinned)));
     broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
     persistPostReviewContinuationDecision(
-        runId, task.taskId(), decision, confirmationRequired, benchmarkPriorRequired);
+        runId, task.taskId(), decision, confirmationRequired, benchmarkPriorRequired, routePinned);
     return Optional.of(new PostReviewContinuation(task, decision));
   }
 
@@ -3253,7 +3259,8 @@ public class RunOrchestrator implements RunControlPort {
   private Map<String, Object> postReviewContinuationDecisionData(
       GoalContinuationPolicyDecision decision,
       boolean confirmationRequired,
-      boolean benchmarkPriorRequired) {
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("decision", decision.decision().name());
     data.put("reasons", decision.reasons());
@@ -3269,6 +3276,7 @@ public class RunOrchestrator implements RunControlPort {
     policy.put("maxModelStepDowns", Math.max(0, postReviewMaxModelStepDowns));
     policy.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     policy.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
+    policy.put("routePinned", routePinned);
     policy.put("source", "POST_REVIEW");
     data.put("policy", policy);
     decision
@@ -3290,6 +3298,9 @@ public class RunOrchestrator implements RunControlPort {
       return null;
     }
     ModelProviderScore candidate = decision.selectedCandidate().get();
+    if (Boolean.TRUE.equals(policy.get("routePinned"))) {
+      return "ROUTE_PINNED";
+    }
     if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
         && !candidate.benchmarkQualityPriorAvailable()) {
       return "BENCHMARK_PRIOR_REQUIRED";
@@ -3305,7 +3316,8 @@ public class RunOrchestrator implements RunControlPort {
       String taskId,
       GoalContinuationPolicyDecision decision,
       boolean confirmationRequired,
-      boolean benchmarkPriorRequired) {
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
     if (runId == null || taskId == null || decision == null) {
       return;
     }
@@ -3319,7 +3331,10 @@ public class RunOrchestrator implements RunControlPort {
                   task.setContinuationDecisionJson(
                       objectMapper.writeValueAsString(
                           postReviewContinuationDecisionData(
-                              decision, confirmationRequired, benchmarkPriorRequired)));
+                              decision,
+                              confirmationRequired,
+                              benchmarkPriorRequired,
+                              routePinned)));
                   taskRepo.saveAndFlush(task);
                 } catch (Exception ex) {
                   throw new IllegalStateException(ex);

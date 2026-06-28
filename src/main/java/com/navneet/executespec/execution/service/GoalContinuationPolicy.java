@@ -39,6 +39,17 @@ public class GoalContinuationPolicy {
 
     Optional<GoalContinuationPolicyDecision> escalation = escalationDecision(request);
     if (escalation.isPresent()) {
+      if (request.routePinned()) {
+        return blockedEscalationDecision(
+            RunContinuationDecision.STOP_BLOCKED,
+            escalation.get().selectedCandidate(),
+            "run is pinned to the selected provider/model; proposed action "
+                + escalation.get().decision()
+                + " requires changing that route"
+                + proposedCandidateSuffix(escalation.get()),
+            escalation.get().decision(),
+            "ROUTE_PINNED");
+      }
       boolean userConfirmedForEscalation = userConfirmedFor(request, escalation.get());
       if (request.benchmarkQualityPriorRequiredForAutomaticContinuation()
           && !userConfirmedForEscalation
@@ -50,7 +61,8 @@ public class GoalContinuationPolicy {
             "selected continuation candidate lacks benchmark quality prior; proposed action "
                 + escalation.get().decision()
                 + proposedCandidateSuffix(escalation.get()),
-            escalation.get().decision());
+            escalation.get().decision(),
+            "BENCHMARK_PRIOR_REQUIRED");
       }
       if (request.expensiveContinuationRequiresConfirmation()
           && !userConfirmedForEscalation) {
@@ -60,7 +72,8 @@ public class GoalContinuationPolicy {
             "expensive continuation requires user confirmation before more spend; proposed action "
                 + escalation.get().decision()
                 + proposedCandidateSuffix(escalation.get()),
-            escalation.get().decision());
+            escalation.get().decision(),
+            "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED");
       }
       return escalation.get();
     }
@@ -81,6 +94,16 @@ public class GoalContinuationPolicy {
       Optional<ModelProviderScore> cheaper = cheaperEligibleCandidate(request);
       if (cheaper.isPresent()) {
         ModelProviderScore selected = cheaper.get();
+        if (request.routePinned()) {
+          return blockedEscalationDecision(
+              RunContinuationDecision.STOP_BLOCKED,
+              cheaper,
+              "run is pinned to the selected provider/model; proposed action STEP_DOWN_MODEL"
+                  + " requires changing that route -> "
+                  + selected.label(),
+              RunContinuationDecision.STEP_DOWN_MODEL,
+              "ROUTE_PINNED");
+        }
         if (sameProvider(request.currentCandidate(), selected)) {
           return decision(
               RunContinuationDecision.STEP_DOWN_MODEL,
@@ -298,12 +321,21 @@ public class GoalContinuationPolicy {
       RunContinuationDecision decision,
       Optional<ModelProviderScore> selectedCandidate,
       String reason,
-      RunContinuationDecision proposedAction) {
+      RunContinuationDecision proposedAction,
+      String blockedReason) {
+    Map<String, Object> policy =
+        proposedAction == null
+            ? Map.of()
+            : Map.of(
+                "proposedAction",
+                proposedAction.name(),
+                "blockedAutomaticContinuationReason",
+                blockedReason == null ? "UNKNOWN" : blockedReason);
     return new GoalContinuationPolicyDecision(
         decision,
         selectedCandidate,
         reason == null ? List.of() : List.of(reason),
-        proposedAction == null ? Map.of() : Map.of("proposedAction", proposedAction.name()));
+        policy);
   }
 
   private static String proposedCandidateSuffix(GoalContinuationPolicyDecision decision) {
