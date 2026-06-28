@@ -206,6 +206,45 @@ class GoalContinuationPolicyTest {
   }
 
   @Test
+  void routePinBlocksAutomaticStepUpButKeepsProposedCandidateVisible() {
+    ModelProviderScore stronger = strongerSameProvider();
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(stronger, current()))
+                .qualityInsufficient(true)
+                .routePinned(true)
+                .maxModelStepUps(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(stronger);
+    assertThat(decision.reasons().getFirst()).contains("pinned to the selected provider/model");
+    assertThat(decision.policy())
+        .containsEntry("proposedAction", "STEP_UP_MODEL")
+        .containsEntry("blockedAutomaticContinuationReason", "ROUTE_PINNED");
+  }
+
+  @Test
+  void routePinBlocksAutomaticProviderChangeAfterProviderBreakdown() {
+    ModelProviderScore alternate = strongerDifferentProvider();
+
+    GoalContinuationPolicyDecision decision =
+        policy.decide(
+            request(progressing(true), current(), ranked(alternate, current()))
+                .providerBehaviorPoor(true)
+                .routePinned(true)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.selectedCandidate()).contains(alternate);
+    assertThat(decision.policy())
+        .containsEntry("proposedAction", "CHANGE_PROVIDER")
+        .containsEntry("blockedAutomaticContinuationReason", "ROUTE_PINNED");
+  }
+
+  @Test
   void benchmarkPriorRequiredAllowsBenchmarkBackedEscalation() {
     ModelProviderScore stronger = score("anthropic", "opus", 91, 18.0, 2_000, 70, true, "stronger");
 

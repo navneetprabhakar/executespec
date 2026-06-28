@@ -89,6 +89,8 @@ function continuationApprovalReason(t: api.TaskSummary): string | null {
       return 'Approval needed: no usable benchmark prior for this model on this task category.';
     case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
       return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+    case 'ROUTE_PINNED':
+      return 'Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.';
     case 'APPROVAL_REQUIRED':
       return 'Approval needed before this model/provider upgrade can run.';
     default:
@@ -103,6 +105,9 @@ function continuationApprovalReason(t: api.TaskSummary): string | null {
   }
   if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
     return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+  }
+  if (continuation.policy?.routePinned) {
+    return 'Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.';
   }
   return null;
 }
@@ -196,6 +201,9 @@ function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
     details.push('unbenchmarked upgrades need approval');
   } else if (policy.requireBenchmarkPriorForAutomaticContinuation === false) {
     details.push('unbenchmarked upgrades can auto-run');
+  }
+  if (policy.routePinned) {
+    details.push('route pinned');
   }
   return details;
 }

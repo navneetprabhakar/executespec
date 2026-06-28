@@ -323,6 +323,7 @@ export interface TaskSummary {
       userConfirmedContinuationAction?: string;
       userConfirmedContinuationProvider?: string;
       userConfirmedContinuationModel?: string;
+      routePinned?: boolean;
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
       rankingPolicy?: string;

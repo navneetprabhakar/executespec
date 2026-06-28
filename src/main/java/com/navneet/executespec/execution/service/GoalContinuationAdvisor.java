@@ -69,6 +69,7 @@ public class GoalContinuationAdvisor {
                 .qualityInsufficient(request.qualityInsufficient())
                 .providerBehaviorPoor(request.providerBehaviorPoor())
                 .taskSimplerThanExpected(request.taskSimplerThanExpected())
+                .routePinned(request.routePinned())
                 .expensiveContinuationRequiresConfirmation(
                     request.expensiveContinuationRequiresConfirmation())
                 .benchmarkQualityPriorRequiredForAutomaticContinuation(
@@ -84,13 +85,14 @@ public class GoalContinuationAdvisor {
                 .modelStepDownsUsed(request.modelStepDownsUsed())
                 .maxModelStepDowns(request.maxModelStepDowns())
                 .build());
-    return withRankingEvidence(decision, ranking, qualityTieBand);
+    return withRankingEvidence(decision, ranking, qualityTieBand, request.routePinned());
   }
 
   private static GoalContinuationPolicyDecision withRankingEvidence(
       GoalContinuationPolicyDecision decision,
       ModelProviderRankingDecision ranking,
-      double qualityTieBand) {
+      double qualityTieBand,
+      boolean routePinned) {
     if (decision == null) {
       return null;
     }
@@ -100,6 +102,7 @@ public class GoalContinuationAdvisor {
     }
     policy.put("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
     policy.put("rankingQualityTieBand", qualityTieBand);
+    policy.put("routePinned", routePinned);
     policy.put("rankingReasons", ranking == null ? List.of() : ranking.reasons());
     policy.put(
         "eligibleCandidateCount", ranking == null ? 0 : Math.max(0, ranking.eligible().size()));
