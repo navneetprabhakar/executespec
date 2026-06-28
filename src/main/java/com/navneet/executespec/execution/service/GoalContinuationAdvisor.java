@@ -16,6 +16,7 @@ import com.navneet.executespec.router.ModelProviderRankingDecision;
 import com.navneet.executespec.router.ModelProviderRankingPolicy;
 import com.navneet.executespec.router.ModelProviderScore;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -30,8 +31,10 @@ import lombok.RequiredArgsConstructor;
 public class GoalContinuationAdvisor {
 
   private final ModelProviderCandidateService candidateService;
-  private final ModelProviderRankingPolicy rankingPolicy = new ModelProviderRankingPolicy();
   private final GoalContinuationPolicy continuationPolicy = new GoalContinuationPolicy();
+
+  @Value("${execution.continuation.quality-tie-band:1.0}")
+  private double rankingQualityTieBand = ModelProviderRankingPolicy.DEFAULT_QUALITY_TIE_BAND;
 
   public GoalContinuationPolicyDecision advise(GoalContinuationAdvisorRequest request) {
     if (request == null || request.goalDecision() == null) {
@@ -52,7 +55,9 @@ public class GoalContinuationAdvisor {
                 .providerAvailability(request.providerAvailability())
                 .providerPreferenceOrder(request.providerPreferenceOrder())
                 .build());
-    ModelProviderRankingDecision ranking = rankingPolicy.rank(candidates);
+    double qualityTieBand = Math.max(0.0, rankingQualityTieBand);
+    ModelProviderRankingDecision ranking =
+        new ModelProviderRankingPolicy(qualityTieBand).rank(candidates);
     ModelProviderScore current = findCurrentCandidate(candidates, request).orElse(null);
 
     GoalContinuationPolicyDecision decision =
@@ -79,11 +84,13 @@ public class GoalContinuationAdvisor {
                 .modelStepDownsUsed(request.modelStepDownsUsed())
                 .maxModelStepDowns(request.maxModelStepDowns())
                 .build());
-    return withRankingEvidence(decision, ranking);
+    return withRankingEvidence(decision, ranking, qualityTieBand);
   }
 
   private static GoalContinuationPolicyDecision withRankingEvidence(
-      GoalContinuationPolicyDecision decision, ModelProviderRankingDecision ranking) {
+      GoalContinuationPolicyDecision decision,
+      ModelProviderRankingDecision ranking,
+      double qualityTieBand) {
     if (decision == null) {
       return null;
     }
@@ -92,6 +99,7 @@ public class GoalContinuationAdvisor {
       policy.putAll(decision.policy());
     }
     policy.put("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
+    policy.put("rankingQualityTieBand", qualityTieBand);
     policy.put("rankingReasons", ranking == null ? List.of() : ranking.reasons());
     policy.put(
         "eligibleCandidateCount", ranking == null ? 0 : Math.max(0, ranking.eligible().size()));

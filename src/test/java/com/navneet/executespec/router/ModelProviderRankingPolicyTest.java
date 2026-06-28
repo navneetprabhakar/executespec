@@ -39,6 +39,49 @@ class ModelProviderRankingPolicyTest {
   }
 
   @Test
+  void ranksByCostWhenQualityIsInsideTieBand() {
+    ModelProviderScore expensiveNearQuality =
+        score("anthropic", "sonnet", 90.8, 80, 5.00, 200, "BUG_FIX");
+    ModelProviderScore cheapNearQuality =
+        score("deepseek", "v4", 90.0, 80, 0.30, 1_500, "BUG_FIX");
+
+    ModelProviderRankingDecision decision =
+        new ModelProviderRankingPolicy(1.0).rank(List.of(expensiveNearQuality, cheapNearQuality));
+
+    assertThat(decision.selected()).contains(cheapNearQuality);
+    assertThat(decision.eligible()).containsExactly(cheapNearQuality, expensiveNearQuality);
+    assertThat(decision.reasons().getFirst()).contains("1.00 quality points");
+  }
+
+  @Test
+  void qualityStillWinsOutsideTieBand() {
+    ModelProviderScore expensiveClearlyBetter =
+        score("anthropic", "sonnet", 92.0, 80, 5.00, 200, "BUG_FIX");
+    ModelProviderScore cheapLowerQuality =
+        score("deepseek", "v4", 90.0, 80, 0.30, 1_500, "BUG_FIX");
+
+    ModelProviderRankingDecision decision =
+        new ModelProviderRankingPolicy(1.0).rank(List.of(expensiveClearlyBetter, cheapLowerQuality));
+
+    assertThat(decision.selected()).contains(expensiveClearlyBetter);
+    assertThat(decision.eligible()).containsExactly(expensiveClearlyBetter, cheapLowerQuality);
+  }
+
+  @Test
+  void nearQualityBandsAreAnchoredFromBestRemainingQuality() {
+    ModelProviderScore bestExpensive =
+        score("anthropic", "sonnet", 91.5, 80, 5.00, 200, "BUG_FIX");
+    ModelProviderScore middleCheap = score("deepseek", "v4", 90.8, 80, 0.30, 1_500, "BUG_FIX");
+    ModelProviderScore lowerCheap = score("openai", "mini", 90.0, 80, 0.20, 400, "BUG_FIX");
+
+    ModelProviderRankingDecision decision =
+        new ModelProviderRankingPolicy(1.0).rank(List.of(bestExpensive, middleCheap, lowerCheap));
+
+    assertThat(decision.selected()).contains(middleCheap);
+    assertThat(decision.eligible()).containsExactly(middleCheap, bestExpensive, lowerCheap);
+  }
+
+  @Test
   void ranksByCostBeforeLatencyWhenQualityIsEqual() {
     ModelProviderScore fastExpensive = score("anthropic", "sonnet", 90, 80, 5.00, 200, "REFACTOR");
     ModelProviderScore slowCheap = score("deepseek", "v4", 90, 80, 0.30, 1_500, "REFACTOR");

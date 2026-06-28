@@ -10,19 +10,24 @@ import java.util.Locale;
  *
  * <p>The policy is deliberately lexicographic: candidates below the required quality threshold are
  * rejected before cost or latency are considered. Among eligible candidates, quality dominates
- * cost, and cost dominates latency. This prevents a cheaper or faster model from winning when it
- * cannot satisfy the task's configured quality bar.
+ * unless candidates are inside the configured near-quality band; inside that band cost wins, then
+ * latency. This prevents a cheaper or faster model from winning when it cannot satisfy the task's
+ * configured quality bar, while making cost and latency meaningful for effectively equivalent
+ * quality scores.
  */
 public class ModelProviderRankingPolicy {
 
-  private static final Comparator<ModelProviderScore> ELIGIBLE_ORDER =
-      Comparator.comparingDouble(ModelProviderScore::qualityScore)
-          .reversed()
-          .thenComparingDouble(ModelProviderScore::costPerMillionTokens)
-          .thenComparingLong(ModelProviderScore::latencyP50Ms)
-          .thenComparingLong(ModelProviderScore::latencyP95Ms)
-          .thenComparing(ModelProviderScore::provider)
-          .thenComparing(ModelProviderScore::model);
+  public static final double DEFAULT_QUALITY_TIE_BAND = 1.0;
+
+  private final double qualityTieBand;
+
+  public ModelProviderRankingPolicy() {
+    this(DEFAULT_QUALITY_TIE_BAND);
+  }
+
+  public ModelProviderRankingPolicy(double qualityTieBand) {
+    this.qualityTieBand = Math.max(0.0, qualityTieBand);
+  }
 
   public ModelProviderRankingDecision rank(List<ModelProviderScore> candidates) {
     if (candidates == null || candidates.isEmpty()) {
@@ -43,7 +48,7 @@ public class ModelProviderRankingPolicy {
       }
     }
 
-    eligible.sort(ELIGIBLE_ORDER);
+    eligible = orderEligible(eligible);
     rejected.sort(
         Comparator.comparing(ModelProviderScore::provider)
             .thenComparing(ModelProviderScore::model));
@@ -58,12 +63,13 @@ public class ModelProviderRankingPolicy {
     reasons.add(
         String.format(
             Locale.ROOT,
-            "selected %s for %s: quality %.2f >= threshold %.2f; ranked by quality desc, cost asc,"
-                + " latency asc",
+            "selected %s for %s: quality %.2f >= threshold %.2f; ranked by quality desc outside"
+                + " %.2f quality points, then cost asc, latency asc inside that band",
             selected.label(),
             selected.taskCategory(),
             selected.qualityScore(),
-            selected.requiredQualityThreshold()));
+            selected.requiredQualityThreshold(),
+            qualityTieBand));
     if (!rejected.isEmpty()) {
       reasons.add(rejected.size() + " candidate(s) rejected below quality threshold");
     }
@@ -77,5 +83,38 @@ public class ModelProviderRankingPolicy {
     }
     return rejected.size()
         + " candidate(s) rejected below required quality threshold; no model/provider selected";
+  }
+
+  private List<ModelProviderScore> orderEligible(List<ModelProviderScore> candidates) {
+    List<ModelProviderScore> byQuality = new ArrayList<>(candidates);
+    byQuality.sort(
+        Comparator.comparingDouble(ModelProviderScore::qualityScore)
+            .reversed()
+            .thenComparingDouble(ModelProviderScore::costPerMillionTokens)
+            .thenComparingLong(ModelProviderScore::latencyP50Ms)
+            .thenComparingLong(ModelProviderScore::latencyP95Ms)
+            .thenComparing(ModelProviderScore::provider)
+            .thenComparing(ModelProviderScore::model));
+
+    List<ModelProviderScore> ordered = new ArrayList<>();
+    int index = 0;
+    while (index < byQuality.size()) {
+      double bandAnchorQuality = byQuality.get(index).qualityScore();
+      List<ModelProviderScore> band = new ArrayList<>();
+      while (index < byQuality.size()
+          && bandAnchorQuality - byQuality.get(index).qualityScore() <= qualityTieBand) {
+        band.add(byQuality.get(index));
+        index++;
+      }
+      band.sort(
+          Comparator.comparingDouble(ModelProviderScore::costPerMillionTokens)
+              .thenComparingLong(ModelProviderScore::latencyP50Ms)
+              .thenComparingLong(ModelProviderScore::latencyP95Ms)
+              .thenComparing(Comparator.comparingDouble(ModelProviderScore::qualityScore).reversed())
+              .thenComparing(ModelProviderScore::provider)
+              .thenComparing(ModelProviderScore::model));
+      ordered.addAll(band);
+    }
+    return ordered;
   }
 }

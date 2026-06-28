@@ -131,6 +131,7 @@ execution:
   continuation:
     enabled: true
     required-quality-threshold: 70.0
+    quality-tie-band: 1.0
     required-quality-thresholds:
       task-low: -1
       task-medium: -1
@@ -224,6 +225,9 @@ Ranking rule:
 5. If no candidate meets the threshold, prefer `STOP_BLOCKED` / `require user confirmation` over silently running a cheaper weaker model.
 
 This is intentionally lexicographic, not a blended weighted average. Quality dominates cost and latency. Cheaper/faster below threshold is invalid.
+The near-quality band is intentionally narrow and anchored from the best remaining quality score: it
+prevents a 0.1-point measurement artifact from forcing a materially more expensive/slower model,
+while still letting clear quality gaps win.
 
 Quality score should be category-specific and explainable:
 
@@ -927,6 +931,14 @@ and `requireBenchmarkPriorForAutomaticContinuation` into `RunOrchestrator.submit
 orchestrator applies the Redis markers after persisting the run and before `pool.submit(...)`.
 This removes the race where the controller wrote those flags after `submitRun` returned while the
 pipeline thread could already be starting and consuming server defaults.
+
+Seventy-ninth slice 2026-06-28: candidate ranking now implements the documented near-quality tie
+rule instead of requiring exact equal quality scores before cost and latency matter. `ModelProviderRankingPolicy`
+keeps the hard quality threshold, builds anchored quality bands from the best remaining score using
+`execution.continuation.quality-tie-band` (default 1.0), and uses cost then latency inside each
+narrow band. `GoalContinuationAdvisor` persists `rankingQualityTieBand` in continuation policy JSON
+so operators can audit whether an upgrade chose a slightly cheaper/faster near-quality candidate or
+a clearly higher-quality one.
 
 ## Open Questions
 
