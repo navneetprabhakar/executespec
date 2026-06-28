@@ -921,6 +921,13 @@ the selected quality-ranked candidate to auto-run inside the existing provider a
 escalation ceilings. Approved blocked-continuation retries preserve the stored policy from the
 proposal.
 
+Seventy-eighth slice 2026-06-28: submit-time continuation policy markers are now written before the
+async pipeline can consume them. REST submit passes `requireConfirmationBeforeExpensiveContinuation`
+and `requireBenchmarkPriorForAutomaticContinuation` into `RunOrchestrator.submitRun`; the
+orchestrator applies the Redis markers after persisting the run and before `pool.submit(...)`.
+This removes the race where the controller wrote those flags after `submitRun` returned while the
+pipeline thread could already be starting and consuming server defaults.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

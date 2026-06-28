@@ -227,9 +227,10 @@ unless noted otherwise.
    overloads exist for callsite back-compat) stamps `runId`, `provider`, `model`,
    `plannerDbModel` (tier-resolved via `ModelResolver.resolve("OutlinePlannerAgent")`),
    `reviewerDbModel`, `harnessVersion="v2"`, `createdByUserId`, `orgId`, `projectId`.
-   These ownership fields are stamped *before* the async pipeline thread starts
-   (race-condition fix from 2026-04). Persists `pipeline_run` with `status=PLANNING`,
-   publishes `PipelineEvent.RunStarted`, submits the pipeline future.
+   These ownership fields and submit-time continuation policy markers are stamped *before* the
+   async pipeline thread starts (race-condition fix from 2026-04 / RL-2026-06-227). Persists
+   `pipeline_run` with `status=PLANNING`, publishes `PipelineEvent.RunStarted`, submits the
+   pipeline future.
 
 ### Pipeline phases (background thread)
 

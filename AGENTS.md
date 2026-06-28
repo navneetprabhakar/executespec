@@ -161,7 +161,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 ### Patterns: MUST follow
 
 - LLM calls go through `LlmRouter` (or `FallbackLlmRouter` for legacy non-tool agents). Never call providers directly.
-- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) stamped BEFORE async pipeline thread starts (race-condition fix).
+- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) and submit-time continuation policy markers stamped BEFORE async pipeline thread starts (race-condition fix).
 - Gate-loss fallback: `approve()` → if gate missing → auto-fail with message.
 - Sliding-window LLM context: first 2 + last 18 messages.
 - Token-cost control: `readFile` full reads cap at 60KB/2000 lines with **head-first** truncation at a line boundary (output is byte-exact from line 1 so `editFile` can match it; range reads untruncated) — RL-2026-05-062 replaced the old 5KB head+tail-with-a-hole that made `editFile` unable to match any region the model never saw. `shell` / `buildProject` 6k chars inline (`ToolOutput.budget` — full log spilled to disk + a `readFile` path). NOTE: the V2 worker keeps its FULL conversation history (no sliding window); `ToolOutputCompactor` + `WorkerHistoryCompactor` (default OFF, `worker.tool-compactor.enabled` / `worker.history-compaction.enabled`) are the context-compaction levers. The "first 2 + last 18" sliding window applies only to legacy `FallbackLlmRouter` non-tool agents.
