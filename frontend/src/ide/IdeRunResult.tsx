@@ -229,6 +229,15 @@ function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
   if (policy.routePinned) {
     details.push('route pinned');
   }
+  if (policy.lowComplexityWorkerStartTierEffective) {
+    const effective = policy.lowComplexityWorkerStartTierEffective.toLowerCase();
+    const configured = policy.lowComplexityWorkerStartTierConfigured?.toLowerCase();
+    details.push(
+      configured && configured !== effective
+        ? `LOW starts on ${effective} (${configured} ignored)`
+        : `LOW starts on ${effective}`,
+    );
+  }
   return details;
 }
 

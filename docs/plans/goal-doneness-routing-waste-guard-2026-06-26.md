@@ -1028,6 +1028,14 @@ simple tasks on DeepSeek Flash / mini / Haiku and let the existing automatic con
 step up to a stronger model when completion or final quality is weak. Invalid values fail closed to
 `WORKHORSE`. `SequentialExecutorTierConfigTest` pins default, opt-in, and invalid-value behavior.
 
+Ninety-first slice 2026-06-28: the cheap-start setting is now visible in persisted continuation
+policy evidence. `SequentialExecutor` adds `lowComplexityWorkerStartTierConfigured` and
+`lowComplexityWorkerStartTierEffective` to the policy JSON consumed by SSE, `TaskSummary`, and run
+detail reloads. The IDE Steps ranking panel renders the effective LOW start tier and shows invalid
+configured values as ignored/fallen-back evidence. This is observability only: routing remains the
+same, with `LIGHTWEIGHT` as the only accepted cheap-start opt-in and invalid values falling back to
+`WORKHORSE`.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

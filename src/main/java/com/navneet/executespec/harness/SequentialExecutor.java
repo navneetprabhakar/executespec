@@ -2651,6 +2651,8 @@ to boot — skip it for those.""";
     data.put("maxEditChurn", maxEditChurn());
     data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
+    data.put("lowComplexityWorkerStartTierConfigured", configuredLowComplexityWorkerStartTier());
+    data.put("lowComplexityWorkerStartTierEffective", lowComplexityWorkerStartTier().name());
     data.put("providerBehaviorPoor", providerBehaviorPoor);
     data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     data.put("userConfirmedExpensiveContinuation", confirmationScope.confirmed());
@@ -3612,6 +3614,13 @@ to boot — skip it for those.""";
           lowComplexityWorkerStartTier);
       return AgentTier.WORKHORSE;
     }
+  }
+
+  private String configuredLowComplexityWorkerStartTier() {
+    if (lowComplexityWorkerStartTier == null || lowComplexityWorkerStartTier.isBlank()) {
+      return AgentTier.WORKHORSE.name();
+    }
+    return lowComplexityWorkerStartTier.trim().toUpperCase(Locale.ROOT);
   }
 
   @org.springframework.transaction.annotation.Transactional

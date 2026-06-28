@@ -9,6 +9,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 import java.lang.reflect.Method;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.PlannedTask;
@@ -138,6 +139,14 @@ class SequentialExecutorTierConfigTest {
     return accessor.invoke(record);
   }
 
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> continuationPolicyData(SequentialExecutor exec)
+      throws Exception {
+    Method m = SequentialExecutor.class.getDeclaredMethod("continuationPolicyData");
+    m.setAccessible(true);
+    return (Map<String, Object>) m.invoke(exec);
+  }
+
   @Test
   void medium_fresh_run_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "claude-foo", false);
@@ -180,6 +189,17 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
+  void continuation_policy_exposes_low_worker_start_tier() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");
+
+    Map<String, Object> policy = continuationPolicyData(exec);
+
+    assertEquals("LIGHTWEIGHT", policy.get("lowComplexityWorkerStartTierConfigured"));
+    assertEquals("LIGHTWEIGHT", policy.get("lowComplexityWorkerStartTierEffective"));
+  }
+
+  @Test
   void invalid_low_worker_start_tier_fallsBackTo_workhorse() throws Exception {
     SequentialExecutor exec = newExecutorWithTierResolvingModel();
     ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "CHEAPEST");
@@ -187,6 +207,10 @@ class SequentialExecutorTierConfigTest {
     Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
 
     assertEquals("workhorse", c.model);
+
+    Map<String, Object> policy = continuationPolicyData(exec);
+    assertEquals("CHEAPEST", policy.get("lowComplexityWorkerStartTierConfigured"));
+    assertEquals("WORKHORSE", policy.get("lowComplexityWorkerStartTierEffective"));
   }
 
   @Test
