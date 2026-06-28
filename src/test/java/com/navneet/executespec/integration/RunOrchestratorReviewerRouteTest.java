@@ -9,6 +9,8 @@ import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
+import com.navneet.executespec.report.entity.PipelineResult;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelProviderScore;
 
@@ -156,6 +158,39 @@ class RunOrchestratorReviewerRouteTest {
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
     assertThat(decision.reason()).contains("FINAL_BUILD_FAILED");
     assertThat(decision.evidence()).contains("reviewerVerdict=FINAL_BUILD_FAILED");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
+  void lowVerifiedScoreCountsAsValidationReportQualityFailure() {
+    ValidationReport report =
+        ValidationReport.builder().verifiedScore(64).pipelineResult(PipelineResult.PASSED).build();
+
+    assertThat(RunOrchestrator.validationReportQualityFailed(report, 70)).isTrue();
+  }
+
+  @Test
+  void highVerifiedScoreDoesNotCountAsValidationReportQualityFailure() {
+    ValidationReport report =
+        ValidationReport.builder().verifiedScore(86).pipelineResult(PipelineResult.PASSED).build();
+
+    assertThat(RunOrchestrator.validationReportQualityFailed(report, 70)).isFalse();
+  }
+
+  @Test
+  void failedValidationReportBuildsLowQualityGoalDecision() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .verifiedScore(62)
+            .pipelineResult(PipelineResult.NEEDS_ATTENTION)
+            .build();
+
+    var decision = RunOrchestrator.validationReportLowQualityGoalDecision(report, 70);
+
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.reason()).contains("verifiedScore=62");
+    assertThat(decision.reason()).contains("requiredQualityThreshold=70.0");
+    assertThat(decision.evidence()).contains("pipelineResult=NEEDS_ATTENTION");
     assertThat(decision.anotherModelProviderMightHelp()).isTrue();
   }
 

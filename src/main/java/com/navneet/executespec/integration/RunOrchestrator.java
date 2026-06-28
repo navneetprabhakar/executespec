@@ -66,6 +66,7 @@ import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.AvailableProviderResolver;
@@ -1828,28 +1829,58 @@ public class RunOrchestrator implements RunControlPort {
           featureFlagService.isEnabled("scoring.v2-verified")
               ? srDerived
               : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
-      if (sr.reason() != null) {
-        try {
-          runRepo
-              .findById(runId)
-              .ifPresent(
-                  r -> {
-                    r.setStatusReason(sr.reason());
-                    runRepo.save(r);
-                  });
-        } catch (Exception statusReasonEx) {
-          // Non-fatal — terminate() will retry the same write a few lines
-          // below. Worst case: report uses the heuristic for this one run.
-          log.warn(
-              "RunOrchestrator run={} pre-stamp statusReason failed: {}",
-              runId,
-              statusReasonEx.getMessage());
-        }
-      }
+      stampRunStatusReason(runId, sr);
 
       // 5. Generate validation report + kick off test generation
-      validationKickoff.generateValidationReport(
+      Optional<ValidationReport> validationReport =
+          validationKickoff.generateValidationReport(
           runId, execResult, reviewResult, plan, contractBreakingIssues);
+      Optional<PostReviewContinuation> postValidationContinuation =
+          maybeEmitPostValidationContinuationDecision(
+              runId,
+              execResult,
+              validationReport.orElse(null),
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              routePinned);
+      Optional<PostReviewContinuationResult> postValidationContinuationResult =
+          maybeActOnPostReviewContinuation(
+              runId,
+              plan,
+              rootCtx,
+              execResult,
+              postValidationContinuation,
+              costTracker.snapshot(runId),
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              designBlock,
+              projectId,
+              selectedRepoIds,
+              skipWiring,
+              reviewerMaxIter);
+      if (postValidationContinuationResult.isPresent()) {
+        PostReviewContinuationResult result = postValidationContinuationResult.get();
+        execResult = result.execResult();
+        reviewResult = result.reviewResult();
+        srDerived = resolveTerminalStatus(execResult, reviewResult);
+        sr =
+            featureFlagService.isEnabled("scoring.v2-verified")
+                ? srDerived
+                : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
+        stampRunStatusReason(runId, sr);
+        Optional<ValidationReport> rerunValidationReport =
+            validationKickoff.generateValidationReport(
+                runId, execResult, reviewResult, plan, contractBreakingIssues);
+        if (validationReportQualityFailed(
+            rerunValidationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+          sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
+          stampRunStatusReason(runId, sr);
+        }
+      } else if (validationReportQualityFailed(
+          validationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+        sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
+        stampRunStatusReason(runId, sr);
+      }
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
       // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
       // projects that does not apply; skip until the dedicated CLI stdin/stdout
@@ -2699,6 +2730,28 @@ public class RunOrchestrator implements RunControlPort {
     return Math.min(platformCap, userCostCap);
   }
 
+  private void stampRunStatusReason(String runId, StatusAndReason statusReason) {
+    if (statusReason == null || statusReason.reason() == null) {
+      return;
+    }
+    try {
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              r -> {
+                r.setStatusReason(statusReason.reason());
+                runRepo.save(r);
+              });
+    } catch (Exception statusReasonEx) {
+      // Non-fatal — terminate() will retry the same write later. Worst case: report uses the
+      // heuristic for this one run.
+      log.warn(
+          "RunOrchestrator run={} pre-stamp statusReason failed: {}",
+          runId,
+          statusReasonEx.getMessage());
+    }
+  }
+
   private Optional<PostReviewContinuation> maybeEmitPostReviewContinuationDecision(
       String runId,
       ExecutionResult execResult,
@@ -2748,6 +2801,7 @@ public class RunOrchestrator implements RunControlPort {
                 .modelStepDownsUsed(modelStepDownsUsed(task))
                 .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
                 .build());
+    decision = withContinuationSource(decision, "POST_REVIEW");
 
     String summary =
         "Post-review continuation decision: "
@@ -2768,10 +2822,108 @@ public class RunOrchestrator implements RunControlPort {
             task.taskId(),
             summary,
             postReviewContinuationDecisionData(
-                decision, confirmationRequired, benchmarkPriorRequired, routePinned)));
+                decision,
+                confirmationRequired,
+                benchmarkPriorRequired,
+                routePinned,
+                "POST_REVIEW")));
     broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
     persistPostReviewContinuationDecision(
-        runId, task.taskId(), decision, confirmationRequired, benchmarkPriorRequired, routePinned);
+        runId,
+        task.taskId(),
+        decision,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        "POST_REVIEW");
+    return Optional.of(new PostReviewContinuation(task, decision));
+  }
+
+  private Optional<PostReviewContinuation> maybeEmitPostValidationContinuationDecision(
+      String runId,
+      ExecutionResult execResult,
+      ValidationReport report,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
+    if (!postReviewContinuationEnabled
+        || !validationReportQualityFailed(report, postReviewRequiredQualityThreshold)) {
+      return Optional.empty();
+    }
+    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
+    if (target.isEmpty()) {
+      log.warn(
+          "RunOrchestrator run={} post-validation continuation skipped: no retryable worker task",
+          runId);
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              null,
+              "Post-validation continuation skipped: low validation score but no retryable task was"
+                  + " found"));
+      return Optional.empty();
+    }
+
+    TaskOutcome task = target.get();
+    GoalDonenessDecision goalDecision =
+        validationReportLowQualityGoalDecision(report, postReviewRequiredQualityThreshold);
+    GoalContinuationPolicyDecision decision =
+        goalContinuationAdvisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(goalDecision)
+                .currentProvider(task.dispatchedProvider())
+                .currentModel(task.dispatchedModel())
+                .taskCategory("PROJECT_PATCH")
+                .requiredQualityThreshold(postReviewRequiredQualityThreshold)
+                .providerAvailability(providerAvailability(runId))
+                .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
+                .qualityInsufficient(true)
+                .routePinned(routePinned)
+                .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
+                .providerSwitchesUsed(providerSwitchesUsed(execResult))
+                .maxProviderSwitches(Math.max(0, postReviewMaxProviderSwitches))
+                .modelStepUpsUsed(modelStepUpsUsed(task))
+                .maxModelStepUps(Math.max(0, postReviewMaxModelStepUps))
+                .modelStepDownsUsed(modelStepDownsUsed(task))
+                .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
+                .build());
+    decision = withContinuationSource(decision, "POST_VALIDATION_REPORT");
+
+    String summary =
+        "Post-validation continuation decision: "
+            + decision.decision()
+            + " ("
+            + firstReason(decision)
+            + ")";
+    log.warn(
+        "RunOrchestrator run={} task={} post-validation continuation decision={} reason={}",
+        runId,
+        task.taskId(),
+        decision.decision(),
+        firstReason(decision));
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationDecision(
+            runId,
+            task.taskId(),
+            summary,
+            postReviewContinuationDecisionData(
+                decision,
+                confirmationRequired,
+                benchmarkPriorRequired,
+                routePinned,
+                "POST_VALIDATION_REPORT")));
+    broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
+    persistPostReviewContinuationDecision(
+        runId,
+        task.taskId(),
+        decision,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        "POST_VALIDATION_REPORT");
     return Optional.of(new PostReviewContinuation(task, decision));
   }
 
@@ -3058,7 +3210,7 @@ public class RunOrchestrator implements RunControlPort {
       action.put("limitName", limitData.limitName());
       action.put("usedLimit", limitData.used());
       action.put("maxLimit", limitData.max());
-      action.put("source", "POST_REVIEW");
+      action.put("source", continuationActionSource(decision));
       action.put("attempt", actions.size());
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepo.saveAndFlush(task);
@@ -3069,6 +3221,11 @@ public class RunOrchestrator implements RunControlPort {
           ex.getMessage(),
           ex);
     }
+  }
+
+  private static String continuationActionSource(GoalContinuationPolicyDecision decision) {
+    Object source = decision == null || decision.policy() == null ? null : decision.policy().get("source");
+    return source == null || source.toString().isBlank() ? "POST_REVIEW" : source.toString();
   }
 
   private ArrayNode readContinuationActions(String json)
@@ -3143,6 +3300,52 @@ public class RunOrchestrator implements RunControlPort {
     return Boolean.FALSE.equals(reviewResult.finalBuildPassed())
         || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
         || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
+  }
+
+  static boolean validationReportQualityFailed(
+      ValidationReport report, double requiredQualityThreshold) {
+    if (report == null) {
+      return false;
+    }
+    if (report.getPipelineResult() == com.navneet.executespec.report.entity.PipelineResult.FAILED
+        || report.getPipelineResult()
+            == com.navneet.executespec.report.entity.PipelineResult.NEEDS_ATTENTION) {
+      return true;
+    }
+    Integer verifiedScore = report.getVerifiedScore();
+    return verifiedScore != null
+        && verifiedScore < sanitizeRequiredQualityThreshold(requiredQualityThreshold);
+  }
+
+  private static double sanitizeRequiredQualityThreshold(double requiredQualityThreshold) {
+    return requiredQualityThreshold <= 0.0 ? 70.0 : Math.min(100.0, requiredQualityThreshold);
+  }
+
+  static GoalDonenessDecision validationReportLowQualityGoalDecision(
+      ValidationReport report, double requiredQualityThreshold) {
+    int score = report == null || report.getVerifiedScore() == null ? -1 : report.getVerifiedScore();
+    String result =
+        report == null || report.getPipelineResult() == null
+            ? "UNKNOWN"
+            : report.getPipelineResult().name();
+    double threshold = sanitizeRequiredQualityThreshold(requiredQualityThreshold);
+    String scoreText = score < 0 ? "unknown" : String.valueOf(score);
+    return new GoalDonenessDecision(
+        GoalDonenessState.FAILED,
+        RunContinuationDecision.STOP_FAILED,
+        "final validation report quality is below threshold: verifiedScore="
+            + scoreText
+            + ", requiredQualityThreshold="
+            + threshold
+            + ", pipelineResult="
+            + result,
+        "final validation report",
+        List.of(),
+        List.of("validation report did not prove acceptable output quality"),
+        List.of("verifiedScore=" + scoreText, "pipelineResult=" + result),
+        List.of("a stronger model/provider may be needed to improve final quality evidence"),
+        false,
+        true);
   }
 
   static GoalDonenessDecision reviewerLowQualityGoalDecision(
@@ -3263,7 +3466,8 @@ public class RunOrchestrator implements RunControlPort {
       GoalContinuationPolicyDecision decision,
       boolean confirmationRequired,
       boolean benchmarkPriorRequired,
-      boolean routePinned) {
+      boolean routePinned,
+      String source) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("decision", decision.decision().name());
     data.put("reasons", decision.reasons());
@@ -3280,7 +3484,7 @@ public class RunOrchestrator implements RunControlPort {
     policy.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     policy.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
     policy.put("routePinned", routePinned);
-    policy.put("source", "POST_REVIEW");
+    policy.put("source", continuationSource(source));
     data.put("policy", policy);
     decision
         .selectedCandidate()
@@ -3289,8 +3493,26 @@ public class RunOrchestrator implements RunControlPort {
     if (approvalRequiredReason != null) {
       data.put("approvalRequiredReason", approvalRequiredReason);
     }
-    data.put("source", "POST_REVIEW");
+    data.put("source", continuationSource(source));
     return data;
+  }
+
+  private static String continuationSource(String source) {
+    return source == null || source.isBlank() ? "POST_REVIEW" : source;
+  }
+
+  private static GoalContinuationPolicyDecision withContinuationSource(
+      GoalContinuationPolicyDecision decision, String source) {
+    if (decision == null) {
+      return null;
+    }
+    Map<String, Object> policy = new LinkedHashMap<>();
+    if (decision.policy() != null) {
+      policy.putAll(decision.policy());
+    }
+    policy.put("source", continuationSource(source));
+    return new GoalContinuationPolicyDecision(
+        decision.decision(), decision.selectedCandidate(), decision.reasons(), policy);
   }
 
   private static String postReviewContinuationApprovalRequiredReason(
@@ -3320,7 +3542,8 @@ public class RunOrchestrator implements RunControlPort {
       GoalContinuationPolicyDecision decision,
       boolean confirmationRequired,
       boolean benchmarkPriorRequired,
-      boolean routePinned) {
+      boolean routePinned,
+      String source) {
     if (runId == null || taskId == null || decision == null) {
       return;
     }
@@ -3337,7 +3560,8 @@ public class RunOrchestrator implements RunControlPort {
                               decision,
                               confirmationRequired,
                               benchmarkPriorRequired,
-                              routePinned)));
+                              routePinned,
+                              source)));
                   taskRepo.saveAndFlush(task);
                 } catch (Exception ex) {
                   throw new IllegalStateException(ex);

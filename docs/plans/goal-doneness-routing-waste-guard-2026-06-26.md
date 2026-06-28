@@ -987,6 +987,15 @@ with the selected stronger provider/model. The low-quality goal evidence is labe
 `FINAL_BUILD_FAILED` so run events and durable task policy distinguish it from reviewer exceptions
 or unresolved semantic issues.
 
+Eighty-sixth slice 2026-06-28: low final validation reports now enter automatic continuation before
+terminal status. `RunValidationKickoff.generateValidationReport` returns the saved report to
+`RunOrchestrator`; if the report result is `FAILED` / `NEEDS_ATTENTION` or `verifiedScore` is below
+`execution.continuation.post-review.required-quality-threshold`, the orchestrator emits a
+`POST_VALIDATION_REPORT` continuation decision for the latest usable worker task. Eligible
+`STEP_UP_MODEL` / `CHANGE_PROVIDER` actions rerun the task, rerun reviewer, and regenerate the
+validation report. If no action runs, terminal status is stamped `PARTIAL` with
+`VALIDATION_REPORT_LOW_QUALITY` instead of leaving a low-score run as clean completion.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
