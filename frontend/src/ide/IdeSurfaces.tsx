@@ -10,6 +10,7 @@ import {useIsMobile} from '@/hooks/useIsMobile';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
+import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -615,21 +616,20 @@ export function IdeCompose() {
     setBusy(true);
     setErr('');
     try {
-      const body: Parameters<typeof api.createRun>[0] = {
-        userRequest: spec.trim(),
-        aiProvider: provider,
-        executionMode: mode,
-      };
-      if (projectId) body.projectId = projectId;
-      if (selectedRepoIds.length > 0) body.selectedRepoIds = selectedRepoIds;
-      if (costCap > 0) body.userCostCap = costCap;
-      if (tddMode) body.tddMode = true;
-      if (confirmModelUpgrades) body.requireConfirmationBeforeExpensiveContinuation = true;
-      body.requireBenchmarkPriorForAutomaticContinuation = requireBenchmarkedUpgrades;
-      if (figmaUrl.trim()) body.figmaUrl = figmaUrl.trim();
-      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
-      // and '' means "Default (org / system matrix)" → send no modelName at all.
-      if (tier === 'ENTERPRISE' && modelName) body.modelName = modelName;
+      const body = buildIdeComposeRunRequest({
+        spec,
+        provider,
+        mode,
+        projectId,
+        selectedRepoIds,
+        costCap,
+        tddMode,
+        confirmModelUpgrades,
+        requireBenchmarkedUpgrades,
+        figmaUrl,
+        tier,
+        modelName,
+      });
       const res = await api.createRun(body);
       navigate(`/plan/${res.runId}`);
     } catch (e: unknown) {

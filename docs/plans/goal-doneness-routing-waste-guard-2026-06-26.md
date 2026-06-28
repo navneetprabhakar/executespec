@@ -921,10 +921,9 @@ run. `RunRequest.requireBenchmarkPriorForAutomaticContinuation` is stored as a o
 `RunContinuationBenchmarkPriorFlag`, consumed by `RunOrchestrator`, carried through
 `ExecutionRequest`, and applied by `SequentialExecutor` / post-review continuation decisions
 instead of blindly using only the server default. Web Compose exposes this as "Require benchmark
-evidence": checked keeps unbenchmarked selected candidates blocked for approval; unchecked permits
-the selected quality-ranked candidate to auto-run inside the existing provider availability and
-escalation ceilings. Approved blocked-continuation retries preserve the stored policy from the
-proposal.
+evidence": checked sends the one-shot `true` override and keeps unbenchmarked selected candidates
+blocked for approval; unchecked omits the field and leaves the server default in control. Approved
+blocked-continuation retries preserve the stored policy from the proposal.
 
 Seventy-eighth slice 2026-06-28: submit-time continuation policy markers are now written before the
 async pipeline can consume them. REST submit passes `requireConfirmationBeforeExpensiveContinuation`
@@ -966,6 +965,12 @@ Eighty-third slice 2026-06-28: automatic upgrade no longer requires benchmark pr
 Compose opens with "Require benchmark evidence" unchecked. This lets the quality-first ranking use
 YAML/local/available benchmark evidence automatically before every model has a compatible benchmark
 row, while preserving benchmark-required mode as an explicit per-run/server guard.
+
+Eighty-fourth slice 2026-06-28: web Compose no longer sends a negative benchmark-prior override
+when "Require benchmark evidence" is unchecked. `buildIdeComposeRunRequest` omits
+`requireBenchmarkPriorForAutomaticContinuation` unless the checkbox is checked, so unchecked means
+"use the server default" instead of forcibly disabling an operator-level benchmark-required config.
+`IdeSurfaces.test` pins both unchecked omission and checked `true` emission.
 
 ## Open Questions
 
