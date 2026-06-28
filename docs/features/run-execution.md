@@ -4,7 +4,7 @@
 
 ExecuteSpec's production run path is the V2 BUILD pipeline:
 
-1. `RunController.submit` accepts a run request and stamps owner/org/project fields before async execution.
+1. `RunController.submit` accepts a run request and `RunOrchestrator.submitRun` stamps owner/org/project fields plus submit-time continuation policy markers before async execution.
 2. `RunOrchestrator` classifies the spec, creates the plan, pauses at the plan gate for production runs, executes tasks, reviews the workspace, computes score/report data, and starts post-run validation/preview work.
 3. `SequentialExecutor` routes each task by complexity into `WorkerAgent`.
 4. `WorkerAgent` executes a native tool-calling loop over file, shell, build, test, git, and completion tools.
@@ -75,7 +75,7 @@ Billing boundary: run credits are charged only through the plan-approval path. S
 - Worker tools are schema-bound only when their feature flags are enabled.
 - File writes and edits pass through `CodeAbuseScanner`.
 - Shell commands pass through `ShellSandboxPolicy`.
-- Run ownership is stamped before async work starts.
+- Run ownership and submit-time continuation policy markers are stamped before async work starts.
 - A high `verifiedScore` must be backed by the ledger; failed reviewer/build/test
   signals cap the headline even when other slots are strong.
 - `localExecution=true` is accepted only from PAT-authenticated (CLI/VS Code) requests, never browser/JWT sessions. If an operator turns `worker.local-hands.enabled` OFF, local execution fails closed before quota/billing. Accepted summaries echo `localExecutionAccepted=true`.

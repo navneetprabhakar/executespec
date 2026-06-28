@@ -31,7 +31,6 @@ import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.router.ModelAccessService;
-import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -98,13 +97,6 @@ public class RunController {
 
   /** P3 local-hands (RL-2026-06-014) — per-run LOCAL-execution marker. */
   private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
-
-  /** Per-run continuation-spend confirmation marker. */
-  private final com.navneet.executespec.run.RunContinuationConfirmationFlag
-      runContinuationConfirmationFlag;
-
-  /** Per-run continuation benchmark-prior override marker. */
-  private final RunContinuationBenchmarkPriorFlag runContinuationBenchmarkPriorFlag;
 
   /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
   private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
@@ -224,7 +216,9 @@ public class RunController {
             req.figmaUrl(),
             Boolean.TRUE.equals(req.tddMode()),
             req.branch(),
-            req.prReviewComments());
+            req.prReviewComments(),
+            req.requireConfirmationBeforeExpensiveContinuation(),
+            req.requireBenchmarkPriorForAutomaticContinuation());
 
     // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
@@ -253,14 +247,6 @@ public class RunController {
     // call, default behaviour (auto-push) resumes naturally.
     if (Boolean.TRUE.equals(req.skipAutoPush())) {
       runSkipPushFlag.mark(run.getRunId());
-    }
-
-    if (Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation())) {
-      runContinuationConfirmationFlag.mark(run.getRunId());
-    }
-    if (req.requireBenchmarkPriorForAutomaticContinuation() != null) {
-      runContinuationBenchmarkPriorFlag.mark(
-          run.getRunId(), req.requireBenchmarkPriorForAutomaticContinuation());
     }
 
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;

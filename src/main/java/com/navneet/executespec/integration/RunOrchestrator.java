@@ -77,6 +77,7 @@ import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
+import com.navneet.executespec.run.RunContinuationConfirmationFlag;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -229,8 +230,7 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
 
   /** Per-run marker for confirmation-required automatic continuation spend. */
-  private final com.navneet.executespec.run.RunContinuationConfirmationFlag
-      runContinuationConfirmationFlag;
+  private final RunContinuationConfirmationFlag runContinuationConfirmationFlag;
 
   /** Per-run marker for benchmark-prior automatic continuation policy. */
   private final RunContinuationBenchmarkPriorFlag runContinuationBenchmarkPriorFlag;
@@ -567,6 +567,57 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   /**
+   * BUILD-mode submit overload with per-run continuation options. Used by REST submit so those
+   * options are marked before the async pipeline can consume them.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        com.navneet.executespec.state.RunMode.BUILD,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation);
+  }
+
+  /**
    * V182 (2026-05-08) — full signature with {@code runMode}. Bench services (swebench /
    * programbench) call this overload directly with {@code RunMode.PATCH} to opt into the thin
    * single-agent loop. Every product entry point uses the 19-arg forwarder above and stays on
@@ -593,6 +644,58 @@ public class RunOrchestrator implements RunControlPort {
       String branchOverride,
       String prReviewComments,
       String runMode) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        null,
+        null);
+  }
+
+  /**
+   * Full submit signature with continuation policy options that must be visible before the async
+   * pipeline thread can consume per-run markers.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation) {
     String runId = UUID.randomUUID().toString();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
@@ -718,6 +821,13 @@ public class RunOrchestrator implements RunControlPort {
     // attach per-run state that the worker tools will observe on first invocation.
     eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
 
+    applyContinuationSubmitOptions(
+        runId,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        runContinuationConfirmationFlag,
+        runContinuationBenchmarkPriorFlag);
+
     // Kick off the pipeline on a background thread. The returned PipelineRun is the
     // initial state; the frontend polls GET /api/runs/{id} to observe progression.
     final String runIdFinal = runId;
@@ -765,6 +875,20 @@ public class RunOrchestrator implements RunControlPort {
             });
     activeRuns.put(runIdFinal, future);
     return run;
+  }
+
+  static void applyContinuationSubmitOptions(
+      String runId,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      RunContinuationConfirmationFlag confirmationFlag,
+      RunContinuationBenchmarkPriorFlag benchmarkPriorFlag) {
+    if (Boolean.TRUE.equals(requireConfirmationBeforeExpensiveContinuation)) {
+      confirmationFlag.mark(runId);
+    }
+    if (requireBenchmarkPriorForAutomaticContinuation != null) {
+      benchmarkPriorFlag.mark(runId, requireBenchmarkPriorForAutomaticContinuation);
+    }
   }
 
   // pipeline (background thread)
