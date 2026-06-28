@@ -3144,8 +3144,14 @@ to boot — skip it for those.""";
   }
 
   private static boolean providerBehaviorPoor(WorkerResult workerResult, String failureReason) {
-    if (workerResult != null && workerResult.outcome() == WorkerResult.Outcome.ERROR) {
-      return true;
+    if (workerResult != null) {
+      if (workerResult.outcome() == WorkerResult.Outcome.ERROR) {
+        return true;
+      }
+      if (countFileWrites(workerResult.toolCallLog()) == 0
+          && providerBreakdownOutcome(workerResult.outcome())) {
+        return true;
+      }
     }
     String text =
         ((failureReason == null ? "" : failureReason)
@@ -3166,6 +3172,13 @@ to boot — skip it for those.""";
         "timeout",
         "connection reset",
         "api error");
+  }
+
+  private static boolean providerBreakdownOutcome(WorkerResult.Outcome outcome) {
+    return outcome == WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE
+        || outcome == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
+        || outcome == WorkerResult.Outcome.COMPLETED_BY_STAGNATION
+        || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
   }
 
   private static String mutationPathSignature(String entry) {
