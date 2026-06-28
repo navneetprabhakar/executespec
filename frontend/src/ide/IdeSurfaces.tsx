@@ -342,7 +342,7 @@ export function IdeCompose() {
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
   const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
-  const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(true);
+  const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);

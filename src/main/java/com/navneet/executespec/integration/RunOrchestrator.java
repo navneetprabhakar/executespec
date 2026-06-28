@@ -288,8 +288,8 @@ public class RunOrchestrator implements RunControlPort {
   @Value("${execution.continuation.max-model-step-downs-per-task:1}")
   private int postReviewMaxModelStepDowns = 1;
 
-  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:true}")
-  private boolean postReviewRequireBenchmarkPriorForAutomaticContinuation = true;
+  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:false}")
+  private boolean postReviewRequireBenchmarkPriorForAutomaticContinuation = false;
 
   // --- RunControlPort: the narrow seam RunLifecycleService reaches the orchestrator through.
   // activeRuns ownership stays here (the submit + runPipeline path register/unregister through the

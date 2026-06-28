@@ -4194,6 +4194,7 @@ components:
             requirement from server configuration.
         requireBenchmarkPriorForAutomaticContinuation:
           type: boolean
+          default: false
           description: >
             Optional per-run benchmark-confidence guard for automatic continuation. When true,
             selected-candidate model/provider reruns require a compatible benchmark quality prior.

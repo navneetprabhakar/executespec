@@ -161,6 +161,7 @@ execution:
     max-task-wall-clock-seconds-medium: 2700
     max-task-wall-clock-seconds-high: 4500
     require-confirmation-before-expensive-continuation: false
+    require-benchmark-prior-for-automatic-continuation: false
     acting:
       enabled: true
     max-reruns-per-task: 1
@@ -958,6 +959,13 @@ upgrades in the pre-smoke retry path. `SequentialExecutor.approvalBlockedContinu
 now returns true only for benchmark-prior or expensive-confirmation blocks. When a pinned route
 blocks the stronger candidate, the old same-provider/model build retry is still allowed instead of
 immediately marking the task `PARTIAL`.
+
+Eighty-third slice 2026-06-28: automatic upgrade no longer requires benchmark priors by default.
+`execution.continuation.require-benchmark-prior-for-automatic-continuation` now defaults false in
+`application.yml`, the task-boundary and post-review `@Value` fallbacks match that default, and web
+Compose opens with "Require benchmark evidence" unchecked. This lets the quality-first ranking use
+YAML/local/available benchmark evidence automatically before every model has a compatible benchmark
+row, while preserving benchmark-required mode as an explicit per-run/server guard.
 
 ## Open Questions
 
