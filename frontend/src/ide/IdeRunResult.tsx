@@ -184,6 +184,22 @@ function rankingLabel(policy?: string | null): string {
     : policy || 'Model ranking';
 }
 
+function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
+  const details: string[] = [];
+  if (
+    typeof policy.rankingQualityTieBand === 'number' &&
+    Number.isFinite(policy.rankingQualityTieBand)
+  ) {
+    details.push(`near-quality band ${policy.rankingQualityTieBand.toFixed(1)} pts`);
+  }
+  if (policy.requireBenchmarkPriorForAutomaticContinuation === true) {
+    details.push('unbenchmarked upgrades need approval');
+  } else if (policy.requireBenchmarkPriorForAutomaticContinuation === false) {
+    details.push('unbenchmarked upgrades can auto-run');
+  }
+  return details;
+}
+
 function candidateLabel(c: RankingCandidate): string {
   const provider = providerLabel(c.provider) || c.provider || 'Provider';
   return `${provider}/${c.model || 'model'}`;
@@ -1411,6 +1427,7 @@ export default function IdeRunResult() {
                   const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
+                  const rankingDetails = policy ? rankingPolicyDetails(policy) : [];
                   const rejectedRankingCount =
                     policy?.rejectedBelowQualityThresholdCount ??
                     policy?.topRejectedCandidates?.length ??
@@ -1530,6 +1547,9 @@ export default function IdeRunResult() {
                           >
                             <span style={{color: 'var(--ide-fg-bright)'}}>Model ranking</span>
                             <span className='ide-mono'>{rankingLabel(policy.rankingPolicy)}</span>
+                            {rankingDetails.map((detail) => (
+                              <span key={detail}>{detail}</span>
+                            ))}
                             {rejectedRankingCount > 0 && (
                               <span>{rejectedRankingCount} below quality bar</span>
                             )}

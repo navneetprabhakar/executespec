@@ -940,6 +940,11 @@ narrow band. `GoalContinuationAdvisor` persists `rankingQualityTieBand` in conti
 so operators can audit whether an upgrade chose a slightly cheaper/faster near-quality candidate or
 a clearly higher-quality one.
 
+Eightieth slice 2026-06-28: the run-detail Steps ranking panel now renders the applied quality tie
+band and benchmark-confidence mode beside the candidate order. This makes the unbenchmarked-model
+behavior explicit: operators can see whether unbenchmarked upgrades need approval or are allowed to
+auto-run for that submitted run, alongside the candidate's `bench` / `no bench` marker.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
