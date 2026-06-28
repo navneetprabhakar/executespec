@@ -1350,6 +1350,53 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void pre_retry_route_pinned_block_keeps_same_provider_retry() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=0\nbuild ok"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_BLOCKED,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of(
+                    "run is pinned to the selected provider/model; proposed action"
+                        + " STEP_UP_MODEL requires changing that route -> openai/gpt-5.4"),
+                Map.of(
+                    "proposedAction",
+                    "STEP_UP_MODEL",
+                    "blockedAutomaticContinuationReason",
+                    "ROUTE_PINNED",
+                    "routePinned",
+                    true)));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    assertEquals(TaskOutcome.Status.SUCCESS_AFTER_RETRY, result.perTask().get(0).status());
+    assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
+    assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class));
+    verify(buildProjectTool, times(2)).execute(any(), any());
+    assertTrue(
+        saveLog.stream()
+            .noneMatch(
+                s ->
+                    "run-soft_T1".equals(s.taskKey())
+                        && "PARTIAL".equals(s.status())
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("ROUTE_PINNED")),
+        "Route-pinned blocked upgrade must not suppress the same-provider retry. Saw: " + saveLog);
+  }
+
+  @Test
   void continuation_decision_carries_user_confirmed_continuation_to_advisorAndPolicy() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));

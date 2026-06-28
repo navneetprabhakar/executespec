@@ -953,6 +953,12 @@ actions as `STOP_BLOCKED` with `blockedAutomaticContinuationReason=ROUTE_PINNED`
 better candidate visible. This closes the silent override gap without deciding the separate product
 question of whether a future explicit user approval may override a pinned route.
 
+Eighty-second slice 2026-06-28: route-pinned blocks no longer masquerade as approval-blocked
+upgrades in the pre-smoke retry path. `SequentialExecutor.approvalBlockedContinuationProposal`
+now returns true only for benchmark-prior or expensive-confirmation blocks. When a pinned route
+blocks the stronger candidate, the old same-provider/model build retry is still allowed instead of
+immediately marking the task `PARTIAL`.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
