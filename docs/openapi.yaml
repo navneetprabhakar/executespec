@@ -4192,6 +4192,13 @@ components:
             model step-up / step-down / provider-change recommendations stop as confirmation-required
             before spending on the rerun. This cannot disable an operator-level confirmation
             requirement from server configuration.
+        requireBenchmarkPriorForAutomaticContinuation:
+          type: boolean
+          description: >
+            Optional per-run benchmark-confidence guard for automatic continuation. When true,
+            selected-candidate model/provider reruns require a compatible benchmark quality prior.
+            When false, the run may automatically use the quality-ranked selected candidate even
+            when it is unbenchmarked for the task category. Omit to use the server default.
 
     RunSummary:
       type: object

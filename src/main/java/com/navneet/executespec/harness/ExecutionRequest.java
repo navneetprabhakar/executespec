@@ -22,6 +22,9 @@ import lombok.Builder;
  * @param requireConfirmationBeforeExpensiveContinuation per-run tightening override that blocks
  *     model/provider continuation spend until a client confirms it. Null/false leaves the server
  *     YAML default in control.
+ * @param requireBenchmarkPriorForAutomaticContinuation optional per-run override for whether
+ *     automatic model/provider continuation requires a compatible benchmark quality prior. Null
+ *     leaves the server YAML default in control.
  * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
  *     user approved a blocked continuation proposal. This lets the retry spend on the approved
  *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
@@ -47,6 +50,7 @@ public record ExecutionRequest(
     Boolean enableSmokeTests,
     Boolean localHandsMode,
     Boolean requireConfirmationBeforeExpensiveContinuation,
+    Boolean requireBenchmarkPriorForAutomaticContinuation,
     Boolean userConfirmedExpensiveContinuation,
     RunContinuationDecision userConfirmedContinuationAction,
     String userConfirmedContinuationProvider,

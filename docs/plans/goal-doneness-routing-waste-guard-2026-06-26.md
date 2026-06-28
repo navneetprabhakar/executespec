@@ -911,6 +911,16 @@ The reason distinguishes missing compatible benchmark evidence (`BENCHMARK_PRIOR
 explicit spend confirmation (`EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED`). The run-detail Steps tab renders the reason beside the Approve
 upgrade action, with policy-based fallback inference for older persisted decisions.
 
+Seventy-seventh slice 2026-06-28: benchmark-confidence gating is now configurable per submitted
+run. `RunRequest.requireBenchmarkPriorForAutomaticContinuation` is stored as a one-shot
+`RunContinuationBenchmarkPriorFlag`, consumed by `RunOrchestrator`, carried through
+`ExecutionRequest`, and applied by `SequentialExecutor` / post-review continuation decisions
+instead of blindly using only the server default. Web Compose exposes this as "Require benchmark
+evidence": checked keeps unbenchmarked selected candidates blocked for approval; unchecked permits
+the selected quality-ranked candidate to auto-run inside the existing provider availability and
+escalation ceilings. Approved blocked-continuation retries preserve the stored policy from the
+proposal.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

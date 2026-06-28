@@ -340,6 +340,9 @@ to boot — skip it for those.""";
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> continuationConfirmationRequiredByRun =
       new ConcurrentHashMap<>();
+
+  private final ConcurrentMap<String, Boolean> continuationBenchmarkPriorRequiredByRun =
+      new ConcurrentHashMap<>();
   private final ConcurrentMap<String, ContinuationConfirmationScope>
       continuationConfirmationScopeByRun =
       new ConcurrentHashMap<>();
@@ -483,6 +486,11 @@ to boot — skip it for those.""";
         runId,
         requireConfirmationBeforeExpensiveContinuation
             || Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation()));
+    continuationBenchmarkPriorRequiredByRun.put(
+        runId,
+        req.requireBenchmarkPriorForAutomaticContinuation() == null
+            ? requireBenchmarkPriorForAutomaticContinuation
+            : req.requireBenchmarkPriorForAutomaticContinuation());
     continuationConfirmationScopeByRun.put(runId, ContinuationConfirmationScope.from(req));
     seedInitialContinuationActionState(runId, req, resume);
 
@@ -630,6 +638,7 @@ to boot — skip it for those.""";
       return result;
     } finally {
       continuationConfirmationRequiredByRun.remove(runId);
+      continuationBenchmarkPriorRequiredByRun.remove(runId);
       continuationConfirmationScopeByRun.remove(runId);
     }
   }
@@ -2168,6 +2177,7 @@ to boot — skip it for those.""";
     String taskCategory = taskCategory(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
+    boolean benchmarkPriorRequired = requireBenchmarkPriorForAutomaticContinuation(runId);
     ContinuationConfirmationScope confirmationScope = continuationConfirmationScope(runId);
     int providerSwitchesUsed = providerSwitchesUsed(runId);
     int modelStepUpsUsed = modelStepUpsUsed(runId, task.id());
@@ -2178,6 +2188,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          benchmarkPriorRequired,
           providerBehaviorPoor,
           confirmationScope,
           providerSwitchesUsed,
@@ -2198,8 +2209,7 @@ to boot — skip it for those.""";
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .providerBehaviorPoor(providerBehaviorPoor)
                   .expensiveContinuationRequiresConfirmation(confirmationRequired)
-                  .benchmarkQualityPriorRequiredForAutomaticContinuation(
-                      requireBenchmarkPriorForAutomaticContinuation)
+                  .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
                   .userConfirmedExpensiveContinuation(confirmationScope.confirmed())
                   .userConfirmedContinuationAction(confirmationScope.action())
                   .userConfirmedContinuationProvider(confirmationScope.provider())
@@ -2216,6 +2226,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          benchmarkPriorRequired,
           providerBehaviorPoor,
           confirmationScope,
           providerSwitchesUsed,
@@ -2234,6 +2245,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          benchmarkPriorRequired,
           providerBehaviorPoor,
           confirmationScope,
           providerSwitchesUsed,
@@ -2247,6 +2259,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
       boolean providerBehaviorPoor,
       ContinuationConfirmationScope confirmationScope,
       int providerSwitchesUsed,
@@ -2257,8 +2270,7 @@ to boot — skip it for those.""";
             GoalContinuationRequest.builder()
                 .goalDecision(decision)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
-                .benchmarkQualityPriorRequiredForAutomaticContinuation(
-                    requireBenchmarkPriorForAutomaticContinuation)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
                 .userConfirmedExpensiveContinuation(confirmationScope.confirmed())
                 .userConfirmedContinuationAction(confirmationScope.action())
                 .userConfirmedContinuationProvider(confirmationScope.provider())
@@ -2274,6 +2286,7 @@ to boot — skip it for those.""";
           taskCategory,
           requiredQualityThreshold,
           confirmationRequired,
+          benchmarkPriorRequired,
           providerBehaviorPoor,
           confirmationScope,
           providerSwitchesUsed,
@@ -2286,6 +2299,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
       boolean providerBehaviorPoor,
       ContinuationConfirmationScope confirmationScope,
       int providerSwitchesUsed,
@@ -2303,6 +2317,7 @@ to boot — skip it for those.""";
             taskCategory,
             requiredQualityThreshold,
             confirmationRequired,
+            benchmarkPriorRequired,
             providerBehaviorPoor,
             confirmationScope,
             providerSwitchesUsed,
@@ -2539,19 +2554,22 @@ to boot — skip it for those.""";
         decision,
         taskCategory,
         requiredQualityThreshold,
-        requireConfirmationBeforeExpensiveContinuation);
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation);
   }
 
   private Map<String, Object> continuationPolicyData(
       GoalContinuationPolicyDecision decision,
       String taskCategory,
       double requiredQualityThreshold,
-      boolean confirmationRequired) {
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired) {
     return continuationPolicyData(
         decision,
         taskCategory,
         requiredQualityThreshold,
         confirmationRequired,
+        benchmarkPriorRequired,
         false,
         new ContinuationConfirmationScope(false, null, null, null),
         0,
@@ -2564,6 +2582,7 @@ to boot — skip it for those.""";
       String taskCategory,
       double requiredQualityThreshold,
       boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
       boolean providerBehaviorPoor,
       ContinuationConfirmationScope confirmationScope,
       int providerSwitchesUsed,
@@ -2604,8 +2623,7 @@ to boot — skip it for those.""";
       data.put("userConfirmedContinuationModel", confirmationScope.model());
     }
     data.put(
-        "requireBenchmarkPriorForAutomaticContinuation",
-        requireBenchmarkPriorForAutomaticContinuation);
+        "requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
     data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
     data.put("maxTotalTokens", maxGoalTotalTokens());
     data.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
@@ -2617,6 +2635,11 @@ to boot — skip it for those.""";
   private boolean requireConfirmationBeforeExpensiveContinuation(String runId) {
     return continuationConfirmationRequiredByRun.getOrDefault(
         runId, requireConfirmationBeforeExpensiveContinuation);
+  }
+
+  private boolean requireBenchmarkPriorForAutomaticContinuation(String runId) {
+    return continuationBenchmarkPriorRequiredByRun.getOrDefault(
+        runId, requireBenchmarkPriorForAutomaticContinuation);
   }
 
   private ContinuationConfirmationScope continuationConfirmationScope(String runId) {

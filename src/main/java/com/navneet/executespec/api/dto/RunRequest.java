@@ -136,6 +136,13 @@ public record RunRequest(
      */
     Boolean requireConfirmationBeforeExpensiveContinuation,
     /**
+     * Optional per-run benchmark-confidence guard for automatic continuation. When true,
+     * model/provider continuation requires a compatible benchmark quality prior before automatic
+     * rerun. When false, the run may auto-spend on the quality-ranked selected candidate even if it
+     * is unbenchmarked for that task category. Null leaves the server YAML default in control.
+     */
+    Boolean requireBenchmarkPriorForAutomaticContinuation,
+    /**
      * P3 local-hands (RL-2026-06-014) — when true AND the {@code worker.local-hands.enabled} flag
      * is on, the run executes in LOCAL mode: the server-side brain (classifier → planner → worker)
      * runs as normal, but every worker tool call is proxied to the caller's machine (the CLI's

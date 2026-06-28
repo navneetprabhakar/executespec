@@ -76,6 +76,7 @@ import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -230,6 +231,9 @@ public class RunOrchestrator implements RunControlPort {
   /** Per-run marker for confirmation-required automatic continuation spend. */
   private final com.navneet.executespec.run.RunContinuationConfirmationFlag
       runContinuationConfirmationFlag;
+
+  /** Per-run marker for benchmark-prior automatic continuation policy. */
+  private final RunContinuationBenchmarkPriorFlag runContinuationBenchmarkPriorFlag;
 
   private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
@@ -1010,6 +1014,10 @@ public class RunOrchestrator implements RunControlPort {
           featureFlagService.isEnabled("worker.local-hands.enabled")
               && runLocalExecutionFlag.consume(runId);
       boolean requireContinuationConfirmation = runContinuationConfirmationFlag.consume(runId);
+      boolean requireContinuationBenchmarkPrior =
+          runContinuationBenchmarkPriorFlag
+              .consume(runId)
+              .orElse(postReviewRequireBenchmarkPriorForAutomaticContinuation);
 
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
@@ -1423,6 +1431,7 @@ public class RunOrchestrator implements RunControlPort {
                     .enableSmokeTests(!localRun)
                     .localHandsMode(localRun)
                     .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
+                    .requireBenchmarkPriorForAutomaticContinuation(requireContinuationBenchmarkPrior)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -1597,7 +1606,12 @@ public class RunOrchestrator implements RunControlPort {
       RunCostTracker.Snapshot afterInitialReview = costTracker.snapshot(runId);
       Optional<PostReviewContinuation> postReviewContinuation =
           maybeEmitPostReviewContinuationDecision(
-              runId, execResult, reviewResult, reviewerErrored, requireContinuationConfirmation);
+              runId,
+              execResult,
+              reviewResult,
+              reviewerErrored,
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior);
       Optional<PostReviewContinuationResult> postReviewContinuationResult =
           maybeActOnPostReviewContinuation(
               runId,
@@ -1607,6 +1621,7 @@ public class RunOrchestrator implements RunControlPort {
               postReviewContinuation,
               afterInitialReview,
               requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
               designBlock,
               projectId,
               selectedRepoIds,
@@ -2561,7 +2576,8 @@ public class RunOrchestrator implements RunControlPort {
       ExecutionResult execResult,
       ReviewerResult reviewResult,
       boolean reviewerErrored,
-      boolean confirmationRequired) {
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired) {
     if (!postReviewContinuationEnabled || !reviewerQualityFailed(reviewResult, reviewerErrored)) {
       return Optional.empty();
     }
@@ -2594,8 +2610,7 @@ public class RunOrchestrator implements RunControlPort {
                 .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
                 .qualityInsufficient(true)
                 .expensiveContinuationRequiresConfirmation(confirmationRequired)
-                .benchmarkQualityPriorRequiredForAutomaticContinuation(
-                    postReviewRequireBenchmarkPriorForAutomaticContinuation)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
                 .providerSwitchesUsed(providerSwitchesUsed(execResult))
                 .maxProviderSwitches(Math.max(0, postReviewMaxProviderSwitches))
                 .modelStepUpsUsed(modelStepUpsUsed(task))
@@ -2622,9 +2637,11 @@ public class RunOrchestrator implements RunControlPort {
             runId,
             task.taskId(),
             summary,
-            postReviewContinuationDecisionData(decision, confirmationRequired)));
+            postReviewContinuationDecisionData(
+                decision, confirmationRequired, benchmarkPriorRequired)));
     broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
-    persistPostReviewContinuationDecision(runId, task.taskId(), decision, confirmationRequired);
+    persistPostReviewContinuationDecision(
+        runId, task.taskId(), decision, confirmationRequired, benchmarkPriorRequired);
     return Optional.of(new PostReviewContinuation(task, decision));
   }
 
@@ -2639,6 +2656,7 @@ public class RunOrchestrator implements RunControlPort {
       Optional<PostReviewContinuation> continuation,
       RunCostTracker.Snapshot beforePostReviewAction,
       boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
       String designBlock,
       String projectId,
       List<UUID> selectedRepoIds,
@@ -2731,6 +2749,7 @@ public class RunOrchestrator implements RunControlPort {
                   .maxIterationsPerTask(null)
                   .enableSmokeTests(true)
                   .requireConfirmationBeforeExpensiveContinuation(confirmationRequired)
+                  .requireBenchmarkPriorForAutomaticContinuation(benchmarkPriorRequired)
                   .initialProviderSwitchesUsed(seededUsage.providerSwitches())
                   .initialModelStepUpsUsed(seededUsage.modelStepUps())
                   .initialModelStepDownsUsed(seededUsage.modelStepDowns())
@@ -3108,7 +3127,9 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   private Map<String, Object> postReviewContinuationDecisionData(
-      GoalContinuationPolicyDecision decision, boolean confirmationRequired) {
+      GoalContinuationPolicyDecision decision,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("decision", decision.decision().name());
     data.put("reasons", decision.reasons());
@@ -3123,9 +3144,7 @@ public class RunOrchestrator implements RunControlPort {
     policy.put("maxModelStepUps", Math.max(0, postReviewMaxModelStepUps));
     policy.put("maxModelStepDowns", Math.max(0, postReviewMaxModelStepDowns));
     policy.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
-    policy.put(
-        "requireBenchmarkPriorForAutomaticContinuation",
-        postReviewRequireBenchmarkPriorForAutomaticContinuation);
+    policy.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
     policy.put("source", "POST_REVIEW");
     data.put("policy", policy);
     decision
@@ -3161,7 +3180,8 @@ public class RunOrchestrator implements RunControlPort {
       String runId,
       String taskId,
       GoalContinuationPolicyDecision decision,
-      boolean confirmationRequired) {
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired) {
     if (runId == null || taskId == null || decision == null) {
       return;
     }
@@ -3174,7 +3194,8 @@ public class RunOrchestrator implements RunControlPort {
                 try {
                   task.setContinuationDecisionJson(
                       objectMapper.writeValueAsString(
-                          postReviewContinuationDecisionData(decision, confirmationRequired)));
+                          postReviewContinuationDecisionData(
+                              decision, confirmationRequired, benchmarkPriorRequired)));
                   taskRepo.saveAndFlush(task);
                 } catch (Exception ex) {
                   throw new IllegalStateException(ex);

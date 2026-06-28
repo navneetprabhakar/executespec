@@ -88,6 +88,11 @@ export const createRun = (body: {
    * rerun. This is a per-run tightening guard and does not override stricter server policy.
    */
   requireConfirmationBeforeExpensiveContinuation?: boolean;
+  /**
+   * When true, automatic model/provider continuation needs a compatible benchmark prior. When
+   * false, the selected quality-ranked candidate may run even if unbenchmarked for that task type.
+   */
+  requireBenchmarkPriorForAutomaticContinuation?: boolean;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 export const approveRun = (

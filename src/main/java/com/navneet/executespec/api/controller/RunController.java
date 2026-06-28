@@ -31,6 +31,7 @@ import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -101,6 +102,9 @@ public class RunController {
   /** Per-run continuation-spend confirmation marker. */
   private final com.navneet.executespec.run.RunContinuationConfirmationFlag
       runContinuationConfirmationFlag;
+
+  /** Per-run continuation benchmark-prior override marker. */
+  private final RunContinuationBenchmarkPriorFlag runContinuationBenchmarkPriorFlag;
 
   /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
   private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
@@ -253,6 +257,10 @@ public class RunController {
 
     if (Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation())) {
       runContinuationConfirmationFlag.mark(run.getRunId());
+    }
+    if (req.requireBenchmarkPriorForAutomaticContinuation() != null) {
+      runContinuationBenchmarkPriorFlag.mark(
+          run.getRunId(), req.requireBenchmarkPriorForAutomaticContinuation());
     }
 
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
