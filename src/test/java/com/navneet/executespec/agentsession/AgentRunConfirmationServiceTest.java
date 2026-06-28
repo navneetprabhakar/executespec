@@ -89,7 +89,7 @@ class AgentRunConfirmationServiceTest {
     when(turnRepo.findById("client-turn-2")).thenReturn(Optional.of(turn));
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("client-turn-2"))
         .thenReturn(List.of(orchestratorDecisionEvent("client-turn-2", runDecision("p-action"))));
-    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any()))
+    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
         .thenReturn(new AgentRunSubmissionGate.Submission("run-123", true, "SUBMITTED"));
 
     var response = service.confirm(session, request("client-turn-2"), user());
@@ -100,7 +100,8 @@ class AgentRunConfirmationServiceTest {
     assertThat(turn.getLinkedRunId()).isEqualTo("run-123");
     assertThat(turn.getStatus()).isEqualTo("RUN_SUBMITTED");
     verify(projectAccessGuard).assertCanWrite(eq("p-action"), any(AppUserDetails.class));
-    verify(runSubmissionGate).submitConfirmed(eq(session), eq(turn), any(), any(), any());
+    verify(runSubmissionGate)
+        .submitConfirmed(eq(session), eq(turn), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
     verify(turnRepo).save(turn);
     verify(sessionRepo).save(session);
 

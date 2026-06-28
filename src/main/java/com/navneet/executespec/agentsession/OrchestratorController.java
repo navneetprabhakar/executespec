@@ -1,10 +1,13 @@
 package com.navneet.executespec.agentsession;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,7 +34,13 @@ public class OrchestratorController {
   @PostMapping("/turn/confirm")
   public OrchestratorRunConfirmationResponse confirmRun(
       @AuthenticationPrincipal AppUserDetails user,
-      @RequestBody OrchestratorRunConfirmationRequest request) {
-    return orchestratorService.confirmRunSubmission(request, user);
+      @RequestBody OrchestratorRunConfirmationRequest request,
+      HttpServletRequest httpRequest) {
+    return orchestratorService.confirmRunSubmission(request, user, isPatAuthenticated(httpRequest));
+  }
+
+  private static boolean isPatAuthenticated(HttpServletRequest request) {
+    return JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(
+        request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE));
   }
 }

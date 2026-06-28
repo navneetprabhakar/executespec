@@ -1397,7 +1397,7 @@ paths:
         When the session carries a `projectId`, the project/code tool surface is bound so the turn
         can answer grounded project questions in addition to run-control proposals.
         Event names: `ack` ({session_id, turn_id}), `route_decision` ({route, confidence,
-        reason_code}), `proposal` ({action, proposal_id, summary, spec, requires_confirmation}),
+        reason_code}), `proposal` ({action, action_type, summary, spec, requires_confirmation}),
         `token` ({delta}), `tool_call` ({tool, args, id}), `tool_result` ({id, result}),
         `done` ({session_id, turn_id, turn_count, cost_usd, input_tokens, output_tokens,
         reasoning_tokens}), `error` ({session_id, turn_id, message}).
@@ -5023,6 +5023,21 @@ components:
           type: number
           format: double
           nullable: true
+        executionMode:
+          type: string
+          enum: [PRODUCTION, PROTOTYPE]
+          nullable: true
+          description: Optional pipeline execution mode. Unknown values default to PRODUCTION.
+        localExecution:
+          type: boolean
+          nullable: true
+          description: >
+            When true, requests local-hands execution for the confirmed run. Requires
+            worker.local-hands.enabled and a PAT-authenticated CLI or VS Code session.
+        spec:
+          type: string
+          nullable: true
+          description: Optional user-edited spec override for the stored proposal.
 
     OrchestratorRunConfirmationResponse:
       type: object

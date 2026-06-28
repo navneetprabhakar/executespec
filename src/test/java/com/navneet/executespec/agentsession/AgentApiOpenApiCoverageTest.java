@@ -71,7 +71,7 @@ class AgentApiOpenApiCoverageTest {
         .contains(
             "Event names: `ack`",
             "`route_decision` ({route, confidence,",
-            "`proposal` ({action, proposal_id, summary, spec, requires_confirmation})",
+            "`proposal` ({action, action_type, summary, spec, requires_confirmation})",
             "attachmentIds:",
             "Optional uploaded attachment ids owned by this agent session");
   }
