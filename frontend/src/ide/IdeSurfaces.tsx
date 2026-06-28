@@ -342,6 +342,7 @@ export function IdeCompose() {
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
   const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
+  const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(true);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -624,6 +625,7 @@ export function IdeCompose() {
       if (costCap > 0) body.userCostCap = costCap;
       if (tddMode) body.tddMode = true;
       if (confirmModelUpgrades) body.requireConfirmationBeforeExpensiveContinuation = true;
+      body.requireBenchmarkPriorForAutomaticContinuation = requireBenchmarkedUpgrades;
       if (figmaUrl.trim()) body.figmaUrl = figmaUrl.trim();
       // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
       // and '' means "Default (org / system matrix)" → send no modelName at all.
@@ -1001,6 +1003,22 @@ export function IdeCompose() {
                     />
                     Confirm model upgrades
                   </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={requireBenchmarkedUpgrades}
+                      onChange={(e) => setRequireBenchmarkedUpgrades(e.target.checked)}
+                    />
+                    Require benchmark evidence
+                  </label>
                   <div style={{flex: 1, minWidth: 220}}>
                     <label
                       htmlFor='compose-figma-url'
@@ -1102,6 +1120,10 @@ export function IdeCompose() {
               <div className='ide-kv'>
                 <span>Model upgrades</span>
                 <span>{confirmModelUpgrades ? 'Ask first' : 'Automatic within policy'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Benchmark guard</span>
+                <span>{requireBenchmarkedUpgrades ? 'Required' : 'Can use unbenchmarked'}</span>
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>

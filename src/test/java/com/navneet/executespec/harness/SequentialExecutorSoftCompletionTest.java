@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -272,6 +273,16 @@ class SequentialExecutorSoftCompletionTest {
       boolean enableSmoke,
       boolean requireContinuationConfirmation,
       boolean userConfirmedContinuation) {
+    return req(
+        plan, enableSmoke, requireContinuationConfirmation, userConfirmedContinuation, null);
+  }
+
+  private static ExecutionRequest req(
+      Plan plan,
+      boolean enableSmoke,
+      boolean requireContinuationConfirmation,
+      boolean userConfirmedContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation) {
     return ExecutionRequest.builder()
         .plan(plan)
         .provider("anthropic")
@@ -279,6 +290,8 @@ class SequentialExecutorSoftCompletionTest {
         .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
         .enableSmokeTests(enableSmoke)
         .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
+        .requireBenchmarkPriorForAutomaticContinuation(
+            requireBenchmarkPriorForAutomaticContinuation)
         .userConfirmedExpensiveContinuation(userConfirmedContinuation)
         .userConfirmedContinuationAction(
             userConfirmedContinuation ? RunContinuationDecision.CHANGE_PROVIDER : null)
@@ -1053,6 +1066,55 @@ class SequentialExecutorSoftCompletionTest {
                                 "quality is insufficient; stronger eligible model clears"
                                     + " threshold")
                         && ((java.util.Map<?, ?>) event.data().get("policy")).containsValue(70.0)));
+  }
+
+  @Test
+  void continuation_decision_honors_per_run_benchmark_prior_override() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(2), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=0\nbuild ok"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STEP_UP_MODEL,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of("quality is insufficient; unbenchmarked upgrade allowed for this run")),
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_DONE,
+                Optional.empty(),
+                List.of("goal satisfied with validation evidence and required outputs present")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), true, false, false, false));
+
+    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    assertEquals("openai", result.perTask().get(0).dispatchedProvider());
+    assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor, times(2)).advise(requestCaptor.capture());
+    assertFalse(
+        requestCaptor
+            .getAllValues()
+            .get(0)
+            .benchmarkQualityPriorRequiredForAutomaticContinuation());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")
+                        && s.continuationDecisionJson()
+                            .contains(
+                                "\"requireBenchmarkPriorForAutomaticContinuation\":false")),
+        "Expected per-run benchmark override in persisted continuation JSON. Saw: " + saveLog);
   }
 
   @Test

@@ -627,6 +627,7 @@ public class RunLifecycleService {
             approval.provider(),
             approval.model(),
             approval.proposedAction(),
+            approval.benchmarkPriorRequired(),
             approval.postReview()));
     return approval;
   }
@@ -720,6 +721,8 @@ public class RunLifecycleService {
                             .userConfirmedContinuationProvider(
                                 override == null ? null : override.provider())
                             .userConfirmedContinuationModel(override == null ? null : override.model())
+                            .requireBenchmarkPriorForAutomaticContinuation(
+                                override == null ? null : override.benchmarkPriorRequired())
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
                             .initialModelStepUpsUsed(approvedUsage.modelStepUps())
                             .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
@@ -862,7 +865,11 @@ public class RunLifecycleService {
             "Continuation approval requires a proposed provider and model.");
       }
       return new ContinuationApproval(
-          provider, model, proposedAction, "POST_REVIEW".equalsIgnoreCase(source));
+          provider,
+          model,
+          proposedAction,
+          benchmarkPriorRequired,
+          "POST_REVIEW".equalsIgnoreCase(source));
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
@@ -1033,10 +1040,18 @@ public class RunLifecycleService {
   }
 
   public record ContinuationApproval(
-      String provider, String model, RunContinuationDecision proposedAction, boolean postReview) {}
+      String provider,
+      String model,
+      RunContinuationDecision proposedAction,
+      boolean benchmarkPriorRequired,
+      boolean postReview) {}
 
   private record RetryProviderOverride(
-      String provider, String model, RunContinuationDecision proposedAction, boolean postReview) {}
+      String provider,
+      String model,
+      RunContinuationDecision proposedAction,
+      boolean benchmarkPriorRequired,
+      boolean postReview) {}
 
   private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
     static ContinuationUsage none() {
