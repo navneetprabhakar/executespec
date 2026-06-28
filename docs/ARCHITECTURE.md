@@ -327,7 +327,10 @@ iterates plan tasks. Per task:
 - `tierConfigFor(complexity, runProvider, runModel, projectRun)` returns a
   `TierConfig(provider, model, maxIter, maxTokens, stagnationWarnAfter,
   stagnationForceAfter, wallClockSeconds)`.
-  - `LOW` → LIGHTWEIGHT tier, 60 iters, 4096 tokens, stagnationForce=16, 30-min wall.
+  - `LOW` → WORKHORSE by default, or LIGHTWEIGHT when
+    `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` or a run submit carries
+    `lowComplexityWorkerStartTier=LIGHTWEIGHT`; 60 iters, 4096 tokens, stagnationForce=16,
+    30-min wall.
   - `MEDIUM` → WORKHORSE, 120 iters, 8192 tokens, stagnationForce=28, 45-min wall.
   - `HIGH` → PLANNING tier (full Sonnet/Pro/gpt-5.4), 180 iters, 16384 tokens,
     stagnationForce=40, 75-min wall.
@@ -888,6 +891,9 @@ Run submit can override the benchmark-confidence guard for one run through
 `RunRequest.requireBenchmarkPriorForAutomaticContinuation`; the default does not require compatible
 benchmark evidence before automatic unapproved upgrades, while enabling it keeps unbenchmarked
 selected candidates approval-gated inside the normal provider/model ceilings.
+Run submit can also set `RunRequest.lowComplexityWorkerStartTier=LIGHTWEIGHT` from Web Compose,
+agent/session confirmation, or spec-chat `submit_run` to start LOW tasks cheap without setting a
+route-pinning `modelName`.
 Repeated assistant explanations without new file-write or validation proof are recorded as
 `staleExplanationCount=current/max` using `execution.continuation.max-stale-explanations`.
 For run-scoped agent sessions, `AgentRunEventBridge` mirrors the typed task-wave and

@@ -59,7 +59,7 @@ class OrchestratorControllerTest {
     OrchestratorService service = mock(OrchestratorService.class);
     OrchestratorController controller = new OrchestratorController(service);
     OrchestratorRunConfirmationRequest request =
-        new OrchestratorRunConfirmationRequest("s1", "client-turn-1", true, null, null, null);
+        new OrchestratorRunConfirmationRequest("s1", "client-turn-1", true, null, null, null, null);
     OrchestratorRunConfirmationResponse expected =
         new OrchestratorRunConfirmationResponse(
             "s1", "client-turn-1", "run-1", "CODE_RUN_REQUIRED", true, "orch_trace_2", "SUBMITTED");

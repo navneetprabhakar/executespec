@@ -165,6 +165,7 @@ public final class AgentSessionDtos {
       Boolean confirmed,
       String aiProvider,
       String modelName,
+      String lowComplexityWorkerStartTier,
       Double userCostCap) {}
 
   public record OrchestratorRunConfirmationResponse(

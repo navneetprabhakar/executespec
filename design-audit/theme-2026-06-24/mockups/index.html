@@ -1,0 +1,1427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ExecuteSpec Merge Rail Mockups</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper-0: #f6f7f8;
+        --paper-1: #ffffff;
+        --paper-2: #eef1f5;
+        --paper-3: #dce2eb;
+        --ink-0: #0f1217;
+        --ink-1: #252a33;
+        --ink-2: #5f6878;
+        --ink-3: #8b94a3;
+        --graphite-0: #0b0d10;
+        --graphite-1: #10141b;
+        --graphite-2: #151a23;
+        --graphite-3: #1d2430;
+        --graphite-4: #2c3544;
+        --graphite-5: #485363;
+        --blue: #4f7fe7;
+        --blue-2: #7aa5f5;
+        --teal: #2bb7a8;
+        --teal-2: #7ad1c8;
+        --amber: #b88700;
+        --amber-2: #f5c451;
+        --red: #d14b4b;
+        --violet: #7c6be8;
+        --ready-bg: #ddf5f1;
+        --ready-fg: #176d64;
+        --review-bg: #f4e8bf;
+        --review-fg: #674c00;
+        --failed-bg: #f5dada;
+        --failed-fg: #8f2f2f;
+        --shadow-soft: 0 22px 70px rgba(17, 19, 24, 0.12);
+        --shadow-dark: 0 24px 80px rgba(0, 0, 0, 0.38);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #dfe4ec;
+        color: var(--ink-0);
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      .mockup {
+        width: 1440px;
+        min-height: 1024px;
+        margin: 0 auto 48px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .font-display {
+        font-family: "Space Grotesk", Inter, sans-serif;
+      }
+
+      .mono {
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 750;
+        letter-spacing: -0.02em;
+      }
+
+      .brand img {
+        width: 28px;
+        height: 28px;
+        display: block;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 7px 11px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        min-height: 42px;
+        padding: 0 18px;
+        border-radius: 999px;
+        border: 0;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .btn.primary {
+        background: var(--ink-0);
+        color: white;
+        box-shadow: 0 12px 30px rgba(15, 18, 23, 0.2);
+      }
+
+      .btn.blue {
+        background: var(--blue);
+        color: white;
+        box-shadow: 0 12px 30px rgba(79, 127, 231, 0.24);
+      }
+
+      .btn.secondary {
+        color: var(--ink-0);
+        border: 1px solid var(--paper-3);
+        background: rgba(255, 255, 255, 0.66);
+      }
+
+      .rail {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 0;
+        position: relative;
+      }
+
+      .rail::before {
+        content: "";
+        position: absolute;
+        left: 38px;
+        right: 38px;
+        top: 19px;
+        height: 2px;
+        background: linear-gradient(90deg, var(--teal), var(--blue), var(--teal));
+        opacity: 0.95;
+      }
+
+      .rail-step {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        z-index: 1;
+      }
+
+      .rail-node {
+        width: 40px;
+        height: 40px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        color: white;
+        font-size: 12px;
+        font-weight: 800;
+        border: 3px solid var(--paper-1);
+        box-shadow: 0 8px 18px rgba(17, 19, 24, 0.18);
+      }
+
+      .rail-node.ready {
+        background: var(--teal);
+      }
+
+      .rail-node.active {
+        background: var(--blue);
+      }
+
+      .rail-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+      }
+
+      .rail-detail {
+        font-size: 12px;
+        color: var(--ink-3);
+        text-align: center;
+      }
+
+      .verdict-card {
+        background: var(--paper-1);
+        border: 1px solid rgba(17, 19, 24, 0.08);
+        border-radius: 22px;
+        box-shadow: var(--shadow-soft);
+        overflow: hidden;
+      }
+
+      .verdict-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 22px 22px 16px;
+        border-bottom: 1px solid var(--paper-3);
+      }
+
+      .verdict-label {
+        color: var(--ready-fg);
+        background: var(--ready-bg);
+      }
+
+      .score {
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-size: 62px;
+        line-height: 0.9;
+        font-weight: 700;
+        letter-spacing: -0.05em;
+        color: var(--ink-0);
+      }
+
+      .score span {
+        font-family: Inter, sans-serif;
+        font-size: 16px;
+        letter-spacing: 0;
+        color: var(--ink-3);
+      }
+
+      .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+      }
+
+      .evidence {
+        padding: 16px;
+        border-right: 1px solid var(--paper-3);
+      }
+
+      .evidence:last-child {
+        border-right: 0;
+      }
+
+      .evidence .k {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        background: var(--teal);
+      }
+
+      .evidence .v {
+        margin-top: 8px;
+        font-size: 15px;
+        font-weight: 750;
+        color: var(--ink-0);
+      }
+
+      .evidence .s {
+        margin-top: 5px;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+
+      /* Mockup 1: website hero */
+      .home {
+        background:
+          radial-gradient(circle at 80% 14%, rgba(79, 127, 231, 0.1), transparent 28%),
+          linear-gradient(180deg, #f9fafb 0%, var(--paper-0) 72%, #edf1f6 100%);
+        padding: 0 96px;
+      }
+
+      .home-nav {
+        height: 68px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--paper-3);
+      }
+
+      .home-nav nav {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        color: var(--ink-2);
+        font-size: 14px;
+        font-weight: 550;
+      }
+
+      .home-main {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(560px, 1.08fr);
+        gap: 56px;
+        align-items: center;
+        min-height: 760px;
+      }
+
+      .home h1 {
+        margin: 0;
+        font-size: 78px;
+        line-height: 0.94;
+        letter-spacing: -0.065em;
+        font-weight: 700;
+        max-width: 640px;
+      }
+
+      .home h1 span {
+        color: var(--blue);
+      }
+
+      .home-copy {
+        margin: 26px 0 0;
+        color: var(--ink-2);
+        font-size: 19px;
+        line-height: 1.62;
+        max-width: 620px;
+      }
+
+      .home-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 34px;
+      }
+
+      .home-artifact {
+        padding: 22px;
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(17, 19, 24, 0.08);
+        box-shadow: var(--shadow-soft);
+        backdrop-filter: blur(20px);
+      }
+
+      .artifact-window {
+        background: var(--graphite-0);
+        color: #e8edf5;
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: var(--shadow-dark);
+      }
+
+      .window-bar {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background: #111722;
+      }
+
+      .window-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .mini-lights {
+        display: flex;
+        gap: 7px;
+      }
+
+      .mini-lights i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #ef6a61;
+      }
+
+      .mini-lights i:nth-child(2) {
+        background: #f5c451;
+      }
+
+      .mini-lights i:nth-child(3) {
+        background: #7ad1c8;
+      }
+
+      .artifact-body {
+        padding: 24px;
+      }
+
+      .dark-verdict {
+        display: grid;
+        grid-template-columns: 1fr 150px;
+        gap: 18px;
+        padding: 20px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, #151c29, #10141b);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .dark-verdict .score {
+        color: white;
+        text-align: right;
+      }
+
+      .dark-verdict h3 {
+        margin: 13px 0 8px;
+        font-size: 23px;
+        letter-spacing: -0.025em;
+      }
+
+      .dark-verdict p {
+        margin: 0;
+        color: #9ea8b8;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .dark-rail {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 8px;
+      }
+
+      .dark-stage {
+        min-height: 86px;
+        padding: 12px;
+        border-radius: 14px;
+        background: #141a24;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .dark-stage .k {
+        color: #7f8a9b;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .dark-stage .v {
+        margin-top: 9px;
+        color: white;
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .dark-stage.ready {
+        border-color: rgba(122, 209, 200, 0.35);
+        box-shadow: inset 0 0 0 1px rgba(122, 209, 200, 0.12);
+      }
+
+      .dark-ledger {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        border-radius: 15px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .dark-ledger div {
+        padding: 13px 14px;
+        background: #111722;
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .dark-ledger div:last-child {
+        border-right: 0;
+      }
+
+      .dark-ledger .k {
+        font-size: 10px;
+        color: #7f8a9b;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 800;
+      }
+
+      .dark-ledger .v {
+        margin-top: 5px;
+        font-size: 14px;
+        color: white;
+        font-weight: 750;
+      }
+
+      .home-strip {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        bottom: 52px;
+        display: grid;
+        grid-template-columns: 1.4fr repeat(4, 1fr);
+        border-top: 1px solid var(--paper-3);
+        padding-top: 24px;
+        gap: 28px;
+      }
+
+      .home-strip .label {
+        color: var(--ink-2);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .home-strip .value {
+        color: var(--ink-0);
+        font-weight: 780;
+        font-size: 16px;
+      }
+
+      /* Mockup 2: app result */
+      .app {
+        display: grid;
+        grid-template-columns: 222px 1fr;
+        background: var(--graphite-0);
+        color: #c9d1db;
+      }
+
+      .sidebar {
+        background: #10151d;
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 18px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .sidebar .brand {
+        color: white;
+        padding: 0 8px 12px;
+      }
+
+      .side-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .side-label {
+        padding: 10px 8px 4px;
+        color: #667386;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      .side-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 8px;
+        color: #aeb8c8;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .side-item.active {
+        color: white;
+        background: #192338;
+      }
+
+      .app-main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .topbar {
+        height: 52px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        color: #8b96a7;
+        font-size: 13px;
+      }
+
+      .app-content {
+        padding: 28px 34px;
+      }
+
+      .crumbs {
+        color: #7e899b;
+        font-size: 12px;
+        margin-bottom: 14px;
+      }
+
+      .result-hero {
+        display: grid;
+        grid-template-columns: 1fr 330px;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .dark-card {
+        background: linear-gradient(180deg, #151a23, #10141b);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      .result-verdict {
+        padding: 24px;
+      }
+
+      .result-title-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .result-verdict h1 {
+        margin: 15px 0 8px;
+        color: white;
+        font-size: 33px;
+        line-height: 1.05;
+        letter-spacing: -0.04em;
+      }
+
+      .result-verdict p {
+        margin: 0;
+        color: #9aa5b7;
+        font-size: 14px;
+        max-width: 660px;
+        line-height: 1.55;
+      }
+
+      .result-score {
+        color: white;
+        font-size: 74px;
+        line-height: 0.9;
+        letter-spacing: -0.06em;
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      .result-score span {
+        font-family: Inter, sans-serif;
+        font-size: 15px;
+        color: #7e899b;
+        letter-spacing: 0;
+      }
+
+      .result-score-caption {
+        margin-top: 8px;
+        color: #7e899b;
+        font-family: Inter, sans-serif;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        line-height: 1.1;
+        text-transform: uppercase;
+      }
+
+      .result-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .dark-evidence {
+        margin-top: 24px;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+      }
+
+      .dark-evidence .item {
+        background: #111722;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .dark-evidence .k {
+        color: #7e899b;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      .dark-evidence .v {
+        margin-top: 8px;
+        color: white;
+        font-size: 14px;
+        font-weight: 750;
+      }
+
+      .cost-card {
+        padding: 22px;
+      }
+
+      .cost-card h3,
+      .rail-card h3,
+      .ledger-card h3 {
+        margin: 0 0 14px;
+        color: white;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .cost-big {
+        color: white;
+        font-size: 42px;
+        letter-spacing: -0.04em;
+        font-weight: 750;
+      }
+
+      .cost-sub {
+        color: #8d98aa;
+        font-size: 13px;
+        margin-top: 4px;
+      }
+
+      .meter {
+        height: 8px;
+        border-radius: 99px;
+        background: #232c3b;
+        overflow: hidden;
+        margin: 18px 0;
+      }
+
+      .meter span {
+        display: block;
+        height: 100%;
+        width: 21%;
+        background: linear-gradient(90deg, var(--blue), var(--teal));
+      }
+
+      .cost-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .cost-row {
+        display: flex;
+        justify-content: space-between;
+        color: #9aa5b7;
+        font-size: 13px;
+      }
+
+      .cost-row strong {
+        color: white;
+      }
+
+      .below-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .rail-card,
+      .ledger-card {
+        padding: 22px;
+      }
+
+      .vertical-rail {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 14px;
+      }
+
+      .vline {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .vline::before {
+        content: "";
+        position: absolute;
+        top: 12px;
+        bottom: 12px;
+        width: 2px;
+        background: linear-gradient(var(--teal), var(--blue), var(--teal));
+      }
+
+      .vnode {
+        width: 22px;
+        height: 22px;
+        border-radius: 99px;
+        background: var(--teal);
+        border: 3px solid #151a23;
+        z-index: 1;
+        margin-bottom: 24px;
+      }
+
+      .vstage {
+        height: 46px;
+        color: white;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .vstage span {
+        display: block;
+        margin-top: 3px;
+        color: #8490a2;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .ledger-table {
+        display: grid;
+        gap: 0;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .ledger-row {
+        display: grid;
+        grid-template-columns: 1fr 130px 100px;
+        gap: 14px;
+        padding: 12px 14px;
+        background: #111722;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 13px;
+      }
+
+      .ledger-row:last-child {
+        border-bottom: 0;
+      }
+
+      .ledger-row .kind {
+        color: #7e899b;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      .ledger-row .result {
+        color: var(--teal-2);
+        font-weight: 800;
+        text-align: right;
+      }
+
+      /* Mockup 3: compose */
+      .compose {
+        display: grid;
+        grid-template-columns: 222px 1fr;
+        background: var(--graphite-0);
+        color: #c9d1db;
+      }
+
+      .compose .app-content {
+        padding: 30px 34px;
+      }
+
+      .compose-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 18px;
+      }
+
+      .composer-card {
+        padding: 24px;
+      }
+
+      .composer-card h1 {
+        margin: 0 0 8px;
+        color: white;
+        font-size: 34px;
+        letter-spacing: -0.04em;
+      }
+
+      .composer-card p {
+        margin: 0 0 22px;
+        color: #98a4b6;
+        font-size: 14px;
+      }
+
+      .spec-box {
+        min-height: 300px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #0f131a;
+        padding: 18px;
+        color: #e8edf5;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      .spec-placeholder {
+        color: #6f7b8d;
+      }
+
+      .context-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .context-chip {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #121822;
+        color: #aeb8c8;
+        border-radius: 999px;
+        padding: 9px 13px;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .context-chip.active {
+        color: white;
+        border-color: rgba(122, 209, 200, 0.42);
+        background: rgba(43, 183, 168, 0.13);
+      }
+
+      .contract-card {
+        padding: 22px;
+      }
+
+      .contract-card h2 {
+        margin: 0 0 8px;
+        color: white;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+      }
+
+      .contract-copy {
+        color: #8d98aa;
+        font-size: 13px;
+        line-height: 1.5;
+        margin-bottom: 18px;
+      }
+
+      .contract-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .contract-item {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 12px;
+        background: #111722;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .contract-item .check {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(43, 183, 168, 0.18);
+        color: var(--teal-2);
+        font-weight: 900;
+        font-size: 12px;
+      }
+
+      .contract-item .k {
+        color: white;
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .contract-item .v {
+        margin-top: 3px;
+        color: #8d98aa;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .expected-rail {
+        margin-top: 18px;
+        padding: 16px;
+        border-radius: 14px;
+        background: #0f131a;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .mini-rail {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 7px;
+      }
+
+      .mini-stage {
+        height: 54px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        color: #9aa5b7;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: #151a23;
+      }
+
+      .compose-action {
+        margin-top: 18px;
+        display: flex;
+        gap: 10px;
+      }
+
+      @media (max-width: 900px) {
+        body {
+          background: var(--paper-0);
+        }
+
+        .mockup {
+          width: 390px;
+          min-height: 844px;
+          margin-bottom: 24px;
+        }
+
+        .home {
+          padding: 0 20px;
+        }
+
+        .home-nav {
+          height: 58px;
+        }
+
+        .home-nav nav,
+        .home-strip {
+          display: none;
+        }
+
+        .home-main {
+          display: block;
+          min-height: auto;
+          padding: 42px 0 20px;
+        }
+
+        .home h1 {
+          font-size: 42px;
+          line-height: 0.98;
+          max-width: 360px;
+        }
+
+        .home-copy {
+          font-size: 15px;
+          line-height: 1.55;
+          margin-top: 16px;
+        }
+
+        .home-actions {
+          margin-top: 22px;
+        }
+
+        .home-actions .secondary {
+          display: none;
+        }
+
+        .home-artifact {
+          margin-top: 28px;
+          padding: 10px;
+          border-radius: 22px;
+        }
+
+        .artifact-window {
+          border-radius: 16px;
+        }
+
+        .dark-verdict {
+          grid-template-columns: 1fr;
+        }
+
+        .dark-verdict .score {
+          text-align: left;
+          font-size: 54px;
+        }
+
+        .window-bar .mono {
+          display: none;
+        }
+
+        .dark-rail {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .dark-ledger {
+          grid-template-columns: 1fr;
+        }
+
+        .app,
+        .compose {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .topbar {
+          padding: 0 16px;
+        }
+
+        .app-content,
+        .compose .app-content {
+          padding: 18px 16px;
+        }
+
+        .result-hero,
+        .compose-layout,
+        .below-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .dark-evidence {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .ledger-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="mockup home" id="website-hero">
+      <header class="home-nav">
+        <div class="brand">
+          <img src="../../../website/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg" alt="" />
+          ExecuteSpec
+        </div>
+        <nav>
+          <span>Product</span>
+          <span>Docs</span>
+          <span>Pricing</span>
+          <span>Customers</span>
+        </nav>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:13px;font-weight:700">Sign in</span>
+          <a class="btn primary" href="#">Run sandbox PR</a>
+        </div>
+      </header>
+
+      <main class="home-main">
+        <div>
+          <div class="pill mono" style="background:var(--ready-bg);color:var(--ready-fg);margin-bottom:20px">
+            Verified merge pipeline
+          </div>
+          <h1 class="font-display">The verified PR pipeline for <span>AI coding</span> work.</h1>
+          <p class="home-copy">
+            Write the spec. Approve the plan. Watch agents execute. Merge only when build, tests,
+            review, and token ledger agree.
+          </p>
+          <div class="home-actions">
+            <a class="btn primary" href="#">Run a sandbox PR</a>
+            <a class="btn secondary" href="#">See verification</a>
+          </div>
+        </div>
+
+        <div class="home-artifact">
+          <div class="artifact-window">
+            <div class="window-bar">
+              <div class="window-title">
+                <span class="mini-lights"><i></i><i></i><i></i></span>
+                Run R-4429 · OAuth callback hardening
+              </div>
+              <span class="mono" style="font-size:11px;color:#7f8a9b">github.com/acme/web/pull/248</span>
+            </div>
+            <div class="artifact-body">
+              <div class="dark-verdict">
+                <div>
+                  <div class="pill mono" style="background:rgba(43,183,168,.16);color:var(--teal-2)">
+                    Ready to merge
+                  </div>
+                  <h3 class="font-display">All gates passed. PR opened with evidence.</h3>
+                  <p>
+                    Build green, reviewer clean, 38 tests passed. Final ledger: $0.42 actual against a $2.00 cap.
+                  </p>
+                </div>
+                <div class="score">94<span> / 100</span></div>
+              </div>
+
+              <div class="dark-rail">
+                <div class="dark-stage ready"><div class="k">Spec</div><div class="v">Accepted</div></div>
+                <div class="dark-stage ready"><div class="k">Plan</div><div class="v">Approved</div></div>
+                <div class="dark-stage ready"><div class="k">Execute</div><div class="v">4/4 tasks</div></div>
+                <div class="dark-stage ready"><div class="k">Review</div><div class="v">Clean</div></div>
+                <div class="dark-stage ready"><div class="k">Validate</div><div class="v">38/38 tests</div></div>
+                <div class="dark-stage ready"><div class="k">PR</div><div class="v">Opened</div></div>
+              </div>
+
+              <div class="dark-ledger">
+                <div><div class="k">Provider</div><div class="v">Anthropic · Sonnet</div></div>
+                <div><div class="k">Token ledger</div><div class="v">31% cache saved</div></div>
+                <div><div class="k">Cost</div><div class="v">$0.42 / $2.00 cap</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <div class="home-strip">
+        <div>
+          <div class="value">What "verified" means</div>
+          <div class="label">Every verdict names the evidence source. No magic score.</div>
+        </div>
+        <div><div class="value">Build</div><div class="label">Deterministic</div></div>
+        <div><div class="value">Tests</div><div class="label">38/38 passed</div></div>
+        <div><div class="value">Reviewer</div><div class="label">Wiring + general</div></div>
+        <div><div class="value">Ledger</div><div class="label">Provider usage</div></div>
+      </div>
+    </section>
+
+    <section class="mockup app" id="run-result">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="../../../website/assets/brand/merge-rail/executespec-merge-rail-mark.svg" alt="" />
+          ExecuteSpec
+        </div>
+        <div class="side-group">
+          <div class="side-label">Lifecycle</div>
+          <div class="side-item">Create</div>
+          <div class="side-item">Approvals <span>1</span></div>
+          <div class="side-item active">Runs</div>
+          <div class="side-item">Projects</div>
+          <div class="side-item">Reports</div>
+        </div>
+        <div class="side-group">
+          <div class="side-label">Workspace</div>
+          <div class="side-item">Team</div>
+          <div class="side-item">Settings</div>
+        </div>
+      </aside>
+      <main class="app-main">
+        <div class="topbar">
+          <span class="mono">Runs / R-4429 / Result</span>
+          <span>Team · Anthropic · $0.42 actual</span>
+        </div>
+        <div class="app-content">
+          <div class="crumbs">Work / Software Foundry Platform / OAuth callback hardening</div>
+
+          <div class="result-hero">
+            <section class="dark-card result-verdict">
+              <div class="result-title-row">
+                <div>
+                  <div class="pill mono" style="background:rgba(43,183,168,.16);color:var(--teal-2)">
+                    Ready to merge
+                  </div>
+                  <h1 class="font-display">OAuth callback hardening shipped as a verified PR.</h1>
+                  <p>
+                    The run completed all pipeline stages. Evidence is visible before opening the pull request.
+                  </p>
+                </div>
+                <div class="result-score">94<div class="result-score-caption">verified score</div></div>
+              </div>
+
+              <div class="dark-evidence">
+                <div class="item"><div class="k">Build</div><div class="v">Green</div></div>
+                <div class="item"><div class="k">Tests</div><div class="v">38/38</div></div>
+                <div class="item"><div class="k">Reviewer</div><div class="v">Clean</div></div>
+                <div class="item"><div class="k">Criticals</div><div class="v">0</div></div>
+                <div class="item"><div class="k">Files</div><div class="v">7 changed</div></div>
+              </div>
+
+              <div class="result-actions">
+                <a class="btn blue" href="#">Open PR</a>
+                <a class="btn secondary" style="background:#111722;color:#dbe4f2;border-color:rgba(255,255,255,.12)" href="#">Download report</a>
+                <a class="btn secondary" style="background:#111722;color:#dbe4f2;border-color:rgba(255,255,255,.12)" href="#">Iterate</a>
+              </div>
+            </section>
+
+            <aside class="dark-card cost-card">
+              <h3>Cost ledger</h3>
+              <div class="cost-big">$0.42</div>
+              <div class="cost-sub">actual against $2.00 approved cap</div>
+              <div class="meter"><span></span></div>
+              <div class="cost-list">
+                <div class="cost-row"><span>Provider</span><strong>Anthropic</strong></div>
+                <div class="cost-row"><span>Planner</span><strong>$0.05</strong></div>
+                <div class="cost-row"><span>Worker</span><strong>$0.29</strong></div>
+                <div class="cost-row"><span>Reviewer</span><strong>$0.08</strong></div>
+                <div class="cost-row"><span>Cache saved</span><strong>31%</strong></div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="below-grid">
+            <section class="dark-card rail-card">
+              <h3>Run rail</h3>
+              <div class="vertical-rail">
+                <div class="vline">
+                  <div class="vnode"></div><div class="vnode"></div><div class="vnode"></div>
+                  <div class="vnode"></div><div class="vnode"></div><div class="vnode"></div>
+                </div>
+                <div>
+                  <div class="vstage">Spec accepted <span>One-line OAuth callback hardening request</span></div>
+                  <div class="vstage">Plan approved <span>4 tasks · $2 cap · Production mode</span></div>
+                  <div class="vstage">Execution complete <span>Auth filter, tests, config, docs</span></div>
+                  <div class="vstage">Reviewer clean <span>General + wiring pass</span></div>
+                  <div class="vstage">Validation passed <span>Build green · 38 tests passed</span></div>
+                  <div class="vstage">PR opened <span>github.com/acme/web/pull/248</span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="dark-card ledger-card">
+              <h3>Evidence ledger</h3>
+              <div class="ledger-table">
+                <div class="ledger-row"><span>Build status</span><span class="kind">Deterministic</span><span class="result">Green</span></div>
+                <div class="ledger-row"><span>Unit tests</span><span class="kind">Deterministic</span><span class="result">38/38</span></div>
+                <div class="ledger-row"><span>Reviewer pass</span><span class="kind">LLM reviewer</span><span class="result">Clean</span></div>
+                <div class="ledger-row"><span>Critical issues</span><span class="kind">Formula</span><span class="result">0</span></div>
+                <div class="ledger-row"><span>Token cost</span><span class="kind">Provider ledger</span><span class="result">$0.42</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="mockup compose" id="compose-contract">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="../../../website/assets/brand/merge-rail/executespec-merge-rail-mark.svg" alt="" />
+          ExecuteSpec
+        </div>
+        <div class="side-group">
+          <div class="side-label">Lifecycle</div>
+          <div class="side-item active">Create</div>
+          <div class="side-item">Approvals <span>1</span></div>
+          <div class="side-item">Runs</div>
+          <div class="side-item">Projects</div>
+          <div class="side-item">Reports</div>
+        </div>
+      </aside>
+      <main class="app-main">
+        <div class="topbar">
+          <span class="mono">Create / Verified PR</span>
+          <span>Team · default provider Anthropic</span>
+        </div>
+        <div class="app-content">
+          <div class="compose-layout">
+            <section class="dark-card composer-card">
+              <div class="pill mono" style="background:rgba(79,127,231,.16);color:var(--blue-2);margin-bottom:18px">
+                New verified run
+              </div>
+              <h1 class="font-display">Create verified PR</h1>
+              <p>
+                Describe the change. ExecuteSpec will produce a plan first and ask before coding.
+              </p>
+              <div class="spec-box">
+                <span class="spec-placeholder">
+                  e.g. Harden OAuth callback handling so stale or missing state cookies fail with a clear error, add tests for parallel provider attempts, and update auth docs.
+                </span>
+              </div>
+              <div class="context-row">
+                <div class="context-chip active">Software Foundry Platform</div>
+                <div class="context-chip">Sandbox</div>
+                <div class="context-chip">Data Pipeline Builder</div>
+              </div>
+            </section>
+
+            <aside class="dark-card contract-card">
+              <h2>Run contract</h2>
+              <div class="contract-copy">
+                This is what you approve before worker tokens are spent.
+              </div>
+              <div class="contract-list">
+                <div class="contract-item">
+                  <div class="check">✓</div>
+                  <div><div class="k">Output</div><div class="v">Pull request with Ready / Needs review / Failed verdict.</div></div>
+                </div>
+                <div class="contract-item">
+                  <div class="check">✓</div>
+                  <div><div class="k">Approval gate</div><div class="v">Plan must be approved before execution starts.</div></div>
+                </div>
+                <div class="contract-item">
+                  <div class="check">✓</div>
+                  <div><div class="k">Validation</div><div class="v">Build, tests, reviewer, criticals, and evidence ledger.</div></div>
+                </div>
+                <div class="contract-item">
+                  <div class="check">✓</div>
+                  <div><div class="k">Cost cap</div><div class="v">$2.00 approved cap · Anthropic provider.</div></div>
+                </div>
+              </div>
+
+              <div class="expected-rail">
+                <div class="mini-rail">
+                  <div class="mini-stage">Spec</div>
+                  <div class="mini-stage">Plan</div>
+                  <div class="mini-stage">Execute</div>
+                  <div class="mini-stage">Review</div>
+                  <div class="mini-stage">Validate</div>
+                  <div class="mini-stage">PR</div>
+                </div>
+              </div>
+
+              <div class="compose-action">
+                <a class="btn blue" href="#" style="flex:1">Create plan</a>
+                <a class="btn secondary" href="#" style="background:#111722;color:#dbe4f2;border-color:rgba(255,255,255,.12)">Improve spec</a>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </section>
+  </body>
+</html>

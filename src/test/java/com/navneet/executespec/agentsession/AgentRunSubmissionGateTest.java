@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -131,7 +132,10 @@ class AgentRunSubmissionGateTest {
             isNull(),
             anyBoolean(),
             isNull(),
-            isNull()))
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
         .thenReturn(PipelineRun.builder().runId("run-1").createdByUserId("u1").build());
 
     var submission =
@@ -164,13 +168,86 @@ class AgentRunSubmissionGateTest {
             null,
             false,
             null,
-            null);
+            null,
+            (Boolean) null,
+            (Boolean) null,
+            (String) null);
     verify(usageTrackingService).increment("u1", "RUNS", 1);
     verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-1");
   }
 
+  @Test
+  void confirmedRunCanStartLowComplexityWorkersOnLightweightTier() {
+    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+        .thenReturn(Optional.empty());
+    when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
+    when(runOrchestrator.submitRun(
+            anyString(),
+            anyString(),
+            isNull(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            anyBoolean(),
+            isNull(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            isNull(),
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            anyString()))
+        .thenReturn(PipelineRun.builder().runId("run-2").createdByUserId("u1").build());
+
+    var submission =
+        gate.submitConfirmed(
+            session(),
+            turn("Implement OAuth login"),
+            decision("CODE_RUN_REQUIRED", true),
+            requestWithLowTier("lightweight"),
+            user());
+
+    assertThat(submission.runId()).isEqualTo("run-2");
+    verify(runOrchestrator)
+        .submitRun(
+            "Implement OAuth login",
+            "AGENT_ORCHESTRATOR",
+            null,
+            "EXISTING",
+            null,
+            null,
+            false,
+            false,
+            null,
+            "DEEPSEEK",
+            "u1",
+            "org-1",
+            "p1",
+            "PRODUCTION",
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+            null,
+            "LIGHTWEIGHT");
+  }
+
   private static OrchestratorRunConfirmationRequest request(boolean confirmed) {
-    return new OrchestratorRunConfirmationRequest("s1", "turn-1", confirmed, null, null, null);
+    return new OrchestratorRunConfirmationRequest("s1", "turn-1", confirmed, null, null, null, null);
+  }
+
+  private static OrchestratorRunConfirmationRequest requestWithLowTier(String lowStartTier) {
+    return new OrchestratorRunConfirmationRequest(
+        "s1", "turn-1", true, null, null, lowStartTier, null);
   }
 
   private static OrchestratorTurnResponse decision(String route, boolean runAllowed) {

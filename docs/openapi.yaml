@@ -1396,9 +1396,11 @@ paths:
         flag for real chat output; when off, the stream still completes with an explanatory `done`.
         When the session carries a `projectId`, the project/code tool surface is bound so the turn
         can answer grounded project questions in addition to run-control proposals.
-        Event names: `ack`, `token` ({delta}), `tool_call` ({tool, args, id}),
-        `tool_result` ({id, result}), `done` ({session_id, turn_id, turn_count, cost_usd,
-        input_tokens, output_tokens, reasoning_tokens}), `error` ({session_id, turn_id, message}).
+        Event names: `ack` ({session_id, turn_id}), `route_decision` ({route, confidence,
+        reason_code}), `proposal` ({action, proposal_id, summary, spec, requires_confirmation}),
+        `token` ({delta}), `tool_call` ({tool, args, id}), `tool_result` ({id, result}),
+        `done` ({session_id, turn_id, turn_count, cost_usd, input_tokens, output_tokens,
+        reasoning_tokens}), `error` ({session_id, turn_id, message}).
       parameters:
         - $ref: "#/components/parameters/sessionId"
       requestBody:
@@ -1536,7 +1538,8 @@ paths:
         Explicit confirmation endpoint for a prior `CODE_RUN_REQUIRED` decision. The server replays
         the stored `ORCHESTRATOR_DECISION`, rejects non-run routes and missing confirmation, then
         submits through the confirmed run-submission gate exactly once and links the agent turn to
-        the created run.
+        the created run. Confirmation may also supply provider/model/cost-cap overrides and the
+        non-pinning LOW-task start tier.
       requestBody:
         required: true
         content:
@@ -4200,6 +4203,13 @@ components:
             selected-candidate model/provider reruns require a compatible benchmark quality prior.
             When false, the run may automatically use the quality-ranked selected candidate even
             when it is unbenchmarked for the task category. Omit to use the server default.
+        lowComplexityWorkerStartTier:
+          type: string
+          enum: [WORKHORSE, LIGHTWEIGHT]
+          description: >
+            Optional non-pinning LOW-task start tier. LIGHTWEIGHT starts LOW worker tasks on the
+            cheap tier while preserving automatic model/provider continuation. Omit to use the
+            server default. Unlike modelName, this is not a route pin.
 
     RunSummary:
       type: object
@@ -4809,6 +4819,14 @@ components:
           $ref: "#/components/schemas/ClientCapabilities"
         providerOverride:
           type: string
+        attachmentIds:
+          type: array
+          description: >
+            Optional uploaded attachment ids owned by this agent session. The server resolves these
+            ids into bounded, sanitized attachment context; clients never send raw attachment bytes
+            in the streaming turn request.
+          items:
+            type: string
 
     TypedAction:
       type: object
@@ -4993,6 +5011,14 @@ components:
         modelName:
           type: string
           nullable: true
+        lowComplexityWorkerStartTier:
+          type: string
+          enum: [WORKHORSE, LIGHTWEIGHT]
+          nullable: true
+          description: >
+            Optional non-pinning LOW-task start tier for the confirmed cloud run. LIGHTWEIGHT starts
+            LOW worker tasks on the cheap tier while preserving automatic model/provider
+            continuation. Unlike modelName, this is not a route pin.
         userCostCap:
           type: number
           format: double
