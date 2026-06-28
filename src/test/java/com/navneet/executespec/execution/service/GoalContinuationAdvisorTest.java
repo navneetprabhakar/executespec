@@ -257,6 +257,34 @@ class GoalContinuationAdvisorTest {
     assertThat(decision.selectedCandidate()).contains(approvedLower);
   }
 
+  @Test
+  void unpinnedDeepseekFlashCanStepUpToDeepseekProWithoutBenchmarkPrior() {
+    ModelProviderScore flash =
+        score("deepseek", "deepseek-v4-flash-native", 76, 70, 0.30, false);
+    ModelProviderScore pro =
+        score("deepseek", "deepseek-v4-pro-native", 86, 70, 1.37, false);
+    when(candidateService.buildCandidates(any())).thenReturn(List.of(flash, pro));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("deepseek")
+                .currentModel("deepseek-v4-flash-native")
+                .taskCategory("BUG_FIX")
+                .qualityInsufficient(true)
+                .maxModelStepUps(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
+    assertThat(decision.selectedCandidate()).contains(pro);
+
+    ArgumentCaptor<ModelProviderCandidateRequest> captor =
+        ArgumentCaptor.forClass(ModelProviderCandidateRequest.class);
+    verify(candidateService).buildCandidates(captor.capture());
+    assertThat(captor.getValue().modelAllowList()).isEmpty();
+  }
+
   private static GoalDonenessDecision progressing() {
     return new GoalDonenessDecision(
         GoalDonenessState.NOT_DONE_BUT_PROGRESSING,
