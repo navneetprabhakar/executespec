@@ -159,26 +159,11 @@ npm run lint:fix                # eslint --fix
 
 ## Where to go next
 
-| Doc                                                            | What's in it                                                        |
-| -------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | V2 pipeline, agents, tools, scoring, container model                |
-| [`docs/CODEMAP.md`](docs/CODEMAP.md)                           | Package map, key files, migration trail                             |
-| [`docs/PRD.md`](docs/PRD.md)                                   | Product requirements + user stories                                 |
-| [`docs/business/`](docs/business/)                              | Investor deck outline, BRD, one-page writeup, and billing assessment |
-| [`docs/RBAC.md`](docs/RBAC.md)                                 | Roles, tenant-access guards, scoped SSE tokens                      |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                     | GCE + Cloud Run deploy mechanics                                    |
-| [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)                       | End-to-end run + autofix workflows                                  |
-| [`docs/features/`](docs/features/)                             | Current-state feature docs by product area                          |
-| [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md)                   | Customer-facing usage reference                                     |
-| [`docs/JAVADOC.md`](docs/JAVADOC.md)                           | Generated Javadoc index (may lag — see project notes)               |
-| [`docs/openapi.yaml`](docs/openapi.yaml)                       | REST API spec                                                       |
-| [`docs/frontend-api-usage.md`](docs/frontend-api-usage.md)     | Frontend API client conventions                                     |
-| [`docs/operations/`](docs/operations/)                         | SLOs, local test playbook, on-call docs                             |
-| [`docs/design/`](docs/design/)                                 | UI tokens, code-style, design references                            |
-| [`docs/document_map.md`](docs/document_map.md)                 | Map of everything under `docs/`                                     |
-| [`docs/enterprise-sla.md`](docs/enterprise-sla.md)             | Enterprise SLA terms                                                |
-| [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md)           | SSO / SAML setup                                                    |
-| [`docs/billing-workflows.html`](docs/billing-workflows.html)   | Razorpay / Stripe billing flows                                     |
+The long-form documentation now lives in the central docs repo — see [`DOCS.md`](DOCS.md):
+
+→ **https://github.com/navneetprabhakar/executespec-docs/tree/main/backend** — architecture · product · operations · security · design · plans · ADRs · reason-logs · business · competitive analysis · reference.
+
+The REST API spec remains in this repo at [`docs/openapi.yaml`](docs/openapi.yaml).
 
 ## Required environment variables
 
