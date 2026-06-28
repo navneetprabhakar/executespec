@@ -34,6 +34,7 @@ import com.navneet.executespec.security.ContextSanitizer;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -106,6 +107,7 @@ public class WebSearchChatTools {
   private final ContextSanitizer contextSanitizer;
   private final GuardedFetcher fetcher;
 
+  @Autowired
   public WebSearchChatTools(ObjectMapper json, ContextSanitizer contextSanitizer) {
     this(json, contextSanitizer, new PinnedHttpFetcher());
   }
