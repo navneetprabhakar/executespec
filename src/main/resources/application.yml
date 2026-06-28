@@ -125,7 +125,7 @@ execution:
     max-total-tokens: -1
     max-task-wall-clock-ms: -1
     require-confirmation-before-expensive-continuation: false
-    require-benchmark-prior-for-automatic-continuation: true
+    require-benchmark-prior-for-automatic-continuation: false
     acting:
       enabled: true
     max-reruns-per-task: 1

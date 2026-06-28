@@ -115,7 +115,7 @@ npm run dev                                # http://localhost:5173
 
 The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
 
-Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Leaving benchmark evidence required keeps unbenchmarked model/provider upgrades approval-gated; disabling it allows the quality-ranked selected candidate to run automatically within the normal continuation ceilings.
+Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Benchmark evidence is not required by default, so the quality-ranked selected candidate can run automatically within the normal continuation ceilings; enabling the guard approval-gates unbenchmarked model/provider upgrades.
 
 **Local observability (optional)**
 

@@ -429,7 +429,7 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
-  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:true}")
+  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:false}")
   private boolean requireBenchmarkPriorForAutomaticContinuation = false;
 
   @Value("${execution.continuation.max-total-cost-usd:-1}")
