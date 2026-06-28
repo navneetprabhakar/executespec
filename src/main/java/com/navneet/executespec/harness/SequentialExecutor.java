@@ -426,6 +426,9 @@ to boot — skip it for those.""";
   @Value("${execution.continuation.max-parallel-tasks:3}")
   private int maxGoalParallelTasks = 3;
 
+  @Value("${execution.continuation.low-complexity-worker-start-tier:WORKHORSE}")
+  private String lowComplexityWorkerStartTier = "WORKHORSE";
+
   @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
   private boolean requireConfirmationBeforeExpensiveContinuation = false;
 
@@ -3474,12 +3477,9 @@ to boot — skip it for those.""";
         // (2026-05-08) with empty workspace + 100/100 programbench score (which
         // counted the cleanroom's original binary).
       case LOW -> {
-        // RL-2026-06-052 — the worker stays on the flagship even for LOW tasks. The LIGHTWEIGHT
-        // tier model is now a cheap model (Haiku / -mini / flash) reserved for the genuinely-light
-        // NON-worker agents; routing the worker there reintroduces the prior cheap-tier eval
-        // regression. So LOW keeps its smaller iteration/token caps but resolves the WORKHORSE
-        // (flagship) model — decoupling worker quality from the lightweight-agent cost tier.
-        tier = AgentTier.WORKHORSE;
+        // Default remains WORKHORSE after the cheap-tier eval regression, but operators can opt
+        // LOW tasks into LIGHTWEIGHT starts and rely on continuation policy to step up.
+        tier = lowComplexityWorkerStartTier();
         // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
         // quality ceiling. The dollar cap and stagnation guard remain the real runaway
         // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
@@ -3595,6 +3595,22 @@ to boot — skip it for those.""";
           stagnationForceAfter,
           wallClockSeconds,
           forceSalvageTool);
+    }
+  }
+
+  private AgentTier lowComplexityWorkerStartTier() {
+    if (lowComplexityWorkerStartTier == null || lowComplexityWorkerStartTier.isBlank()) {
+      return AgentTier.WORKHORSE;
+    }
+    try {
+      AgentTier tier =
+          AgentTier.valueOf(lowComplexityWorkerStartTier.trim().toUpperCase(Locale.ROOT));
+      return tier == AgentTier.LIGHTWEIGHT ? AgentTier.LIGHTWEIGHT : AgentTier.WORKHORSE;
+    } catch (IllegalArgumentException ex) {
+      log.warn(
+          "Invalid execution.continuation.low-complexity-worker-start-tier='{}'; using WORKHORSE",
+          lowComplexityWorkerStartTier);
+      return AgentTier.WORKHORSE;
     }
   }
 

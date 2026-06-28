@@ -1021,6 +1021,13 @@ by default, so stronger same-provider candidates remain visible. Docs now call o
 rule: use YAML/org matrix defaults to start cheap and allow automatic step-up; a per-run `modelName`
 pin means "do not silently change this route."
 
+Ninetieth slice 2026-06-28: LOW-complexity worker starts are now configurable without turning them
+into route pins. `execution.continuation.low-complexity-worker-start-tier` defaults to `WORKHORSE`
+to preserve the post-regression safe default, but accepts `LIGHTWEIGHT` so an operator can start
+simple tasks on DeepSeek Flash / mini / Haiku and let the existing automatic continuation policy
+step up to a stronger model when completion or final quality is weak. Invalid values fail closed to
+`WORKHORSE`. `SequentialExecutorTierConfigTest` pins default, opt-in, and invalid-value behavior.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
