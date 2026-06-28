@@ -996,6 +996,14 @@ terminal status. `RunValidationKickoff.generateValidationReport` returns the sav
 validation report. If no action runs, terminal status is stamped `PARTIAL` with
 `VALIDATION_REPORT_LOW_QUALITY` instead of leaving a low-score run as clean completion.
 
+Eighty-seventh slice 2026-06-28: run-detail continuation visibility now includes the proposal/action
+source. `TaskSummary`'s frontend type includes `continuationDecision.source`,
+`continuationDecision.policy.source`, and `continuationActions[].source`; the IDE Steps tab formats
+`POST_REVIEW` as reviewer/build-triggered and `POST_VALIDATION_REPORT` as final-validation-triggered
+in the goal line, approval reason, action history, and ranking panel. This keeps automatic step-up
+behavior inspectable after reload: operators can tell whether the rerun came from task execution,
+reviewer/build failure, or low final validation quality.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

@@ -52,15 +52,31 @@ function taskGoalLine(t: api.TaskSummary): string | null {
   const goal = t.goalDoneness;
   const continuation = t.continuationDecision;
   if (!goal && !continuation) return null;
+  const source = continuationSourceLabel(continuation?.source || continuation?.policy?.source);
   const goalPart =
     goal?.state && goal?.recommendedDecision
       ? `Goal ${goal.state} -> ${goal.recommendedDecision}`
       : goal?.state
         ? `Goal ${goal.state}`
         : null;
-  const nextPart = continuation?.decision ? `Next ${continuation.decision}` : null;
+  const nextPart = continuation?.decision
+    ? `${source ? `${source} · ` : ''}Next ${continuation.decision}`
+    : null;
   const reason = continuation?.reasons?.[0] || goal?.reason || null;
   return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
+}
+
+function continuationSourceLabel(source?: string | null): string | null {
+  switch ((source || '').toUpperCase()) {
+    case 'POST_REVIEW':
+      return 'Reviewer/build trigger';
+    case 'POST_VALIDATION_REPORT':
+      return 'Final validation trigger';
+    case 'TASK_BOUNDARY':
+      return 'Task trigger';
+    default:
+      return source ? source.replace(/_/g, ' ').toLowerCase() : null;
+  }
 }
 
 function continuationApprovalCandidate(t: api.TaskSummary) {
@@ -84,15 +100,17 @@ function continuationApprovalCandidate(t: api.TaskSummary) {
 function continuationApprovalReason(t: api.TaskSummary): string | null {
   const continuation = t.continuationDecision;
   if (continuation?.decision !== 'STOP_BLOCKED') return null;
+  const source = continuationSourceLabel(continuation.source || continuation.policy?.source);
+  const prefix = source ? `${source}: ` : '';
   switch ((continuation.approvalRequiredReason || '').toUpperCase()) {
     case 'BENCHMARK_PRIOR_REQUIRED':
-      return 'Approval needed: no usable benchmark prior for this model on this task category.';
+      return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
     case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
-      return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+      return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
     case 'ROUTE_PINNED':
-      return 'Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.';
+      return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
     case 'APPROVAL_REQUIRED':
-      return 'Approval needed before this model/provider upgrade can run.';
+      return `${prefix}Approval needed before this model/provider upgrade can run.`;
     default:
       break;
   }
@@ -101,13 +119,13 @@ function continuationApprovalReason(t: api.TaskSummary): string | null {
     continuation.policy?.requireBenchmarkPriorForAutomaticContinuation &&
     candidate?.benchmarkQualityPriorAvailable === false
   ) {
-    return 'Approval needed: no usable benchmark prior for this model on this task category.';
+    return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
   }
   if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
-    return 'Approval needed: this run requires confirmation before model/provider upgrade spend.';
+    return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
   }
   if (continuation.policy?.routePinned) {
-    return 'Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.';
+    return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
   }
   return null;
 }
@@ -119,11 +137,13 @@ function latestContinuationAction(t: api.TaskSummary): string | null {
   const rawStatus = (action.status || '').toUpperCase();
   const status =
     rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
+  const source = continuationSourceLabel(action.source);
+  const sourcePart = source ? `${source}: ` : '';
   const limit =
     action.limitName && action.maxLimit != null
       ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`
       : '';
-  return `${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
+  return `${sourcePart}${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
 }
 
 function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
@@ -191,6 +211,10 @@ function rankingLabel(policy?: string | null): string {
 
 function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
   const details: string[] = [];
+  const source = continuationSourceLabel(policy.source);
+  if (source) {
+    details.push(source);
+  }
   if (
     typeof policy.rankingQualityTieBand === 'number' &&
     Number.isFinite(policy.rankingQualityTieBand)

@@ -290,6 +290,8 @@ export interface TaskSummary {
   /** Structured continuation / step-up / provider-change advice from the executor. */
   continuationDecision?: {
     decision?: string;
+    /** Where this continuation proposal came from, e.g. task boundary, reviewer, validation report. */
+    source?: string;
     approvalRequiredReason?: string;
     selectedCandidate?: {
       provider?: string;
@@ -324,6 +326,8 @@ export interface TaskSummary {
       userConfirmedContinuationProvider?: string;
       userConfirmedContinuationModel?: string;
       routePinned?: boolean;
+      /** Mirrors continuationDecision.source for persisted policy/action audits. */
+      source?: string;
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
       rankingPolicy?: string;
@@ -366,6 +370,7 @@ export interface TaskSummary {
         usedLimit?: number;
         maxLimit?: number;
         attempt?: number;
+        source?: string;
       }[]
     | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
