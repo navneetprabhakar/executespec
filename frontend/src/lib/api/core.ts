@@ -326,6 +326,7 @@ export interface TaskSummary {
       actingEnabled?: boolean;
       maxRerunsPerTask?: number;
       rankingPolicy?: string;
+      rankingQualityTieBand?: number;
       rankingReasons?: string[];
       eligibleCandidateCount?: number;
       rejectedBelowQualityThresholdCount?: number;
