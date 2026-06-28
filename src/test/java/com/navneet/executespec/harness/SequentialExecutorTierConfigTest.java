@@ -16,12 +16,16 @@ import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.project.rag.RetrievalService;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Pins the tier-config tuning that keeps iteration limits as a safety net, not the primary quality
@@ -50,6 +54,10 @@ class SequentialExecutorTierConfigTest {
     lenient()
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
+    return newExecutor(modelResolver);
+  }
+
+  private SequentialExecutor newExecutor(ModelResolver modelResolver) {
     return new SequentialExecutor(
         mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(BuildProjectTool.class),
@@ -67,6 +75,24 @@ class SequentialExecutorTierConfigTest {
         mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
         mock(com.navneet.executespec.router.AvailableProviderResolver.class),
         null);
+  }
+
+  private SequentialExecutor newExecutorWithTierResolvingModel() {
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    lenient()
+        .when(modelResolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenAnswer(
+            invocation -> {
+              LlmProvider provider = invocation.getArgument(1);
+              AgentTier tier = invocation.getArgument(2);
+              return ResolvedModel.builder()
+                  .requestedProvider(provider)
+                  .actualProvider(provider)
+                  .agentTier(tier)
+                  .model(tier.name().toLowerCase())
+                  .build();
+            });
+    return newExecutor(modelResolver);
   }
 
   /** Reflectively invoke {@code tierConfigFor} and return field-by-field for assertion. */
@@ -128,6 +154,39 @@ class SequentialExecutorTierConfigTest {
   void low_project_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "claude-foo", true);
     assertEquals(120, c.maxIter, "LOW iter cap 60; project ×2 = 120");
+  }
+
+  @Test
+  void low_worker_start_tier_defaults_to_workhorse() throws Exception {
+    Cfg c =
+        invoke(
+            newExecutorWithTierResolvingModel(),
+            PlannedTask.Complexity.LOW,
+            "deepseek",
+            "fallback",
+            false);
+
+    assertEquals("workhorse", c.model);
+  }
+
+  @Test
+  void low_worker_start_tier_can_optInto_lightweight() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");
+
+    Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
+
+    assertEquals("lightweight", c.model);
+  }
+
+  @Test
+  void invalid_low_worker_start_tier_fallsBackTo_workhorse() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "CHEAPEST");
+
+    Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
+
+    assertEquals("workhorse", c.model);
   }
 
   @Test

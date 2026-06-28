@@ -119,6 +119,9 @@ execution:
     benchmark-min-sample-tasks: 20
     parallel-read-tools-enabled: true
     parallel-provider-evaluation-enabled: true
+    # Default keeps LOW worker tasks on WORKHORSE after the cheap-tier regression. Operators can
+    # set LIGHTWEIGHT to start cheap/light and rely on automatic continuation to step up.
+    low-complexity-worker-start-tier: WORKHORSE
     post-review:
       enabled: true
     max-total-cost-usd: -1
@@ -182,10 +185,11 @@ model-matrix:
   providers:
     # RL-2026-06-052 — LIGHTWEIGHT is now a genuinely cheaper model per provider (was all-flagship
     # since 2026-06-02). It serves the genuinely-light NON-worker agents (classifier / chat
-    # compactors / titles / ledger). The WORKER never lands here: SequentialExecutor.tierConfigFor
-    # routes LOW-complexity worker tasks to WORKHORSE (flagship), so re-tiering LIGHTWEIGHT cheap
-    # does NOT reintroduce the prior cheap-worker eval regression. SpecChatService is bumped to
-    # WORKHORSE in agent-tier-map so the user-facing spec-build chat stays on the flagship.
+    # compactors / titles / ledger). The WORKER does not land here by default:
+    # SequentialExecutor.tierConfigFor routes LOW-complexity worker tasks to WORKHORSE unless
+    # execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT is deliberately set.
+    # SpecChatService is bumped to WORKHORSE in agent-tier-map so the user-facing spec-build chat
+    # stays on the flagship.
     anthropic:
       planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
