@@ -133,6 +133,33 @@ class RunOrchestratorReviewerRouteTest {
   }
 
   @Test
+  void finalReviewerBuildFailureCountsAsQualityFailure() {
+    ReviewerResult review =
+        ReviewerResult.builder()
+            .overall(ReviewerResult.Overall.FIXED_ISSUES)
+            .finalBuildPassed(false)
+            .build();
+
+    assertThat(RunOrchestrator.reviewerQualityFailed(review, false)).isTrue();
+  }
+
+  @Test
+  void finalReviewerBuildFailureBuildsLowQualityGoalDecision() {
+    var decision =
+        RunOrchestrator.reviewerLowQualityGoalDecision(
+            ReviewerResult.builder()
+                .overall(ReviewerResult.Overall.FIXED_ISSUES)
+                .finalBuildPassed(false)
+                .build(),
+            false);
+
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.reason()).contains("FINAL_BUILD_FAILED");
+    assertThat(decision.evidence()).contains("reviewerVerdict=FINAL_BUILD_FAILED");
+    assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
   void reviewerFailureResultPreservesReviewerFailedTerminalReason() {
     ReviewerResult review = RunOrchestrator.reviewerFailedResult(new RuntimeException("boom"));
 
