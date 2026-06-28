@@ -824,6 +824,13 @@ metrics, benchmark-prior marker, and rejected-below-quality-threshold count. Thi
 where the backend persisted ranking evidence but operators still had to inspect raw JSON to see why
 one model/provider was preferred over another.
 
+Sixty-fifth slice 2026-06-28: no-write worker stalls now count as provider/model breakdown
+evidence. `SequentialExecutor` sets `providerBehaviorPoor=true` not only for hard worker `ERROR`
+and provider/router/timeout text, but also for zero-write `STOPPED_WITHOUT_COMPLETE`,
+`ITERATION_LIMIT_EXCEEDED`, `COMPLETED_BY_STAGNATION`, and `WALL_CLOCK_EXCEEDED` outcomes. If the
+worker made real file edits, the same terminal outcomes are still treated as partial-progress
+evidence rather than automatic provider breakdown.
+
 Sixty-fifth slice 2026-06-27: provider-breakdown escalation is now pinned against the benchmark
 confidence guard. Focused policy/advisor tests cover the DeepSeek-style failure mode: when the
 current provider breaks down and benchmark-prior gating is enabled, the policy auto-selects a

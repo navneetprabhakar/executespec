@@ -1151,6 +1151,67 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void no_write_iteration_limit_sets_provider_behavior_poor_for_continuation_advisor() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_FAILED,
+                Optional.empty(),
+                List.of("provider stalled without useful work and no safe escalation is available")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    assertEquals(TaskOutcome.Status.WORKER_FAILED, result.perTask().get(0).status());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    assertTrue(requestCaptor.getValue().providerBehaviorPoor());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"providerBehaviorPoor\":true")),
+        "Expected providerBehaviorPoor in persisted continuation policy. Saw: " + saveLog);
+  }
+
+  @Test
+  void iteration_limit_with_file_writes_does_not_mark_provider_behavior_poor() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_DONE,
+                Optional.empty(),
+                List.of("goal satisfied with validation evidence and required outputs present")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    assertFalse(requestCaptor.getValue().providerBehaviorPoor());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && s.continuationDecisionJson() != null
+                        && s.continuationDecisionJson().contains("\"providerBehaviorPoor\":false")),
+        "Expected providerBehaviorPoor=false in persisted continuation policy. Saw: " + saveLog);
+  }
+
+  @Test
   void continuation_decision_uses_configured_advisory_limits() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
