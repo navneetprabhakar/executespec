@@ -39,12 +39,24 @@ describe('planUtils', () => {
   it('builds the managed-AI plan card copy from balance fields', () => {
     expect(
       formatManagedAiPlanMessage({
+        managed: true,
         aiCreditsRemaining: 1200,
         frontierRawCapUsd: 4,
         cheapOnlyAfterRawUsd: 12,
       }),
     ).toBe(
       '1200 ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.',
+    );
+  });
+
+  it('explains BYOK accounts without making zero managed credits look blocking', () => {
+    expect(
+      formatManagedAiPlanMessage({
+        managed: false,
+        aiCreditsRemaining: 0,
+      }),
+    ).toBe(
+      'Using your own provider keys. Managed ES AI credits are not applicable to this work; run credits and your provider account still apply.',
     );
   });
 });

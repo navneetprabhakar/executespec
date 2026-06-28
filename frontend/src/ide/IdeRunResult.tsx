@@ -689,6 +689,10 @@ export default function IdeRunResult() {
   const canResume = statusUpper === 'PAUSED';
   const score = report?.verifiedScore ?? null;
   const v = verdictFor(score, run?.status);
+  const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
+  const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
+  const testsMeasured = measuredTestsTotal != null && measuredTestsTotal > 0;
+  const scoredWithoutMeasuredTests = score != null && !testsMeasured;
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
@@ -889,7 +893,16 @@ export default function IdeRunResult() {
                         : '—'
                     }
                   />
-                  <Kv k='Tests' v={tests ? `${tests.passed}/${tests.totalTests}` : '—'} />
+                  <Kv
+                    k='Tests'
+                    v={
+                      testsMeasured
+                        ? `${measuredTestsPassed ?? 0}/${measuredTestsTotal}`
+                        : score != null
+                          ? 'not measured'
+                          : '—'
+                    }
+                  />
                   <Kv
                     k='Reviewer'
                     v={
@@ -903,6 +916,23 @@ export default function IdeRunResult() {
                   <Kv k='Issues' v={issues.length} />
                   <Kv k='Files' v={report?.filesGenerated ?? files.length} />
                   <Kv k='Pipeline' v={report?.pipelineResult ?? '—'} />
+                  {scoredWithoutMeasuredTests && (
+                    <div
+                      className='ide-card'
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
+                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
+                        color: 'var(--ide-fg-muted)',
+                        fontSize: 12.5,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Tests were not measured for this score. Treat the headline as build/reviewer
+                      evidence, not a fully test-backed result.
+                    </div>
+                  )}
                 </div>
               )}
               <div className='ide-card' style={{flex: 1, minWidth: 240}}>
