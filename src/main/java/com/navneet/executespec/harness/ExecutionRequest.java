@@ -27,6 +27,9 @@ import lombok.Builder;
  *     leaves the server YAML default in control.
  * @param routePinned true when the run is bound to a validated explicit provider/model pin; pinned
  *     runs may surface better candidates but must not automatically change provider/model.
+ * @param lowComplexityWorkerStartTier optional LOW-task start tier override. {@code LIGHTWEIGHT}
+ *     starts LOW tasks on the provider's cheap tier without pinning provider/model; null leaves the
+ *     server YAML default in control.
  * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
  *     user approved a blocked continuation proposal. This lets the retry spend on the approved
  *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
@@ -54,6 +57,7 @@ public record ExecutionRequest(
     Boolean requireConfirmationBeforeExpensiveContinuation,
     Boolean requireBenchmarkPriorForAutomaticContinuation,
     Boolean routePinned,
+    String lowComplexityWorkerStartTier,
     Boolean userConfirmedExpensiveContinuation,
     RunContinuationDecision userConfirmedContinuationAction,
     String userConfirmedContinuationProvider,

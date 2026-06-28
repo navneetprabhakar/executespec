@@ -344,6 +344,7 @@ export function IdeCompose() {
   const [tddMode, setTddMode] = useState(false);
   const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
   const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(false);
+  const [startLowTasksOnCheapTier, setStartLowTasksOnCheapTier] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -626,6 +627,7 @@ export function IdeCompose() {
         tddMode,
         confirmModelUpgrades,
         requireBenchmarkedUpgrades,
+        startLowTasksOnCheapTier,
         figmaUrl,
         tier,
         modelName,
@@ -1019,6 +1021,22 @@ export function IdeCompose() {
                     />
                     Require benchmark evidence
                   </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={startLowTasksOnCheapTier}
+                      onChange={(e) => setStartLowTasksOnCheapTier(e.target.checked)}
+                    />
+                    Start LOW tasks on cheap tier
+                  </label>
                   <div style={{flex: 1, minWidth: 220}}>
                     <label
                       htmlFor='compose-figma-url'
@@ -1124,6 +1142,10 @@ export function IdeCompose() {
               <div className='ide-kv'>
                 <span>Benchmark guard</span>
                 <span>{requireBenchmarkedUpgrades ? 'Required' : 'Can use unbenchmarked'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>LOW start tier</span>
+                <span>{startLowTasksOnCheapTier ? 'Cheap tier' : 'Server default'}</span>
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>

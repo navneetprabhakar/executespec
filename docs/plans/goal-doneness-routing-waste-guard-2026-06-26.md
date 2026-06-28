@@ -1036,6 +1036,14 @@ configured values as ignored/fallen-back evidence. This is observability only: r
 same, with `LIGHTWEIGHT` as the only accepted cheap-start opt-in and invalid values falling back to
 `WORKHORSE`.
 
+Ninety-second slice 2026-06-28: cheap LOW starts can now be requested per run without using a hard
+model pin. `RunRequest.lowComplexityWorkerStartTier` accepts `WORKHORSE|LIGHTWEIGHT`; Web Compose
+exposes it as "Start LOW tasks on cheap tier" and sends `LIGHTWEIGHT` only when checked. The value
+threads through `RunController` → `RunOrchestrator` → `ExecutionRequest` → `SequentialExecutor`.
+LOW tasks then resolve via that tier for this run, while `routePinned` stays false and automatic
+`STEP_UP_MODEL` / `CHANGE_PROVIDER` remains available. Unchecked UI/default submit leaves the
+server YAML default in control.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

@@ -143,6 +143,13 @@ public record RunRequest(
      */
     Boolean requireBenchmarkPriorForAutomaticContinuation,
     /**
+     * Optional per-run LOW-task start-tier override. Use {@code LIGHTWEIGHT} to start simple tasks
+     * on the cheaper tier while preserving automatic step-up; unlike {@link #modelName}, this is
+     * not a provider/model route pin.
+     */
+    @Pattern(regexp = "WORKHORSE|LIGHTWEIGHT", message = "Invalid LOW worker start tier")
+        String lowComplexityWorkerStartTier,
+    /**
      * P3 local-hands (RL-2026-06-014) — when true AND the {@code worker.local-hands.enabled} flag
      * is on, the run executes in LOCAL mode: the server-side brain (classifier → planner → worker)
      * runs as normal, but every worker tool call is proxied to the caller's machine (the CLI's

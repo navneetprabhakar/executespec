@@ -10,6 +10,7 @@ export type ComposeRunRequestInput = {
   tddMode: boolean;
   confirmModelUpgrades: boolean;
   requireBenchmarkedUpgrades: boolean;
+  startLowTasksOnCheapTier: boolean;
   figmaUrl: string;
   tier: string;
   modelName: string;
@@ -30,6 +31,9 @@ export function buildIdeComposeRunRequest(
   if (input.confirmModelUpgrades) body.requireConfirmationBeforeExpensiveContinuation = true;
   if (input.requireBenchmarkedUpgrades) {
     body.requireBenchmarkPriorForAutomaticContinuation = true;
+  }
+  if (input.startLowTasksOnCheapTier) {
+    body.lowComplexityWorkerStartTier = 'LIGHTWEIGHT';
   }
   if (input.figmaUrl.trim()) body.figmaUrl = input.figmaUrl.trim();
   // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
