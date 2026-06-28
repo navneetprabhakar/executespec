@@ -170,7 +170,7 @@ class AgentRunConfirmationServiceTest {
   }
 
   private static OrchestratorRunConfirmationRequest request(String turnId) {
-    return new OrchestratorRunConfirmationRequest("s1", turnId, true, null, null, null);
+    return new OrchestratorRunConfirmationRequest("s1", turnId, true, null, null, null, null);
   }
 
   private static OrchestratorTurnResponse nonRunDecision() {

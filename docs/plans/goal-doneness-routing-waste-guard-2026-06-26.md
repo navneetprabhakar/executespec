@@ -1044,6 +1044,15 @@ LOW tasks then resolve via that tier for this run, while `routePinned` stays fal
 `STEP_UP_MODEL` / `CHANGE_PROVIDER` remains available. Unchecked UI/default submit leaves the
 server YAML default in control.
 
+Ninety-third slice 2026-06-28: the same cheap-start hint now reaches chat and agent submissions.
+Spec-chat `submit_run` accepts `lowComplexityWorkerStartTier=WORKHORSE|LIGHTWEIGHT` plus the
+`startLowTasksOnCheapTier` alias, and passes the value through the full `RunOrchestrator.submitRun`
+overload instead of using a hard model pin. `/api/orchestrator/turn/confirm` adds
+`OrchestratorRunConfirmationRequest.lowComplexityWorkerStartTier`; `AgentRunSubmissionGate`
+normalizes it and forwards it into the run submit path. This closes the product loop for web,
+CLI, VS Code, and chat flows: start LOW tasks cheap when requested, but keep automatic step-up and
+provider-change available.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

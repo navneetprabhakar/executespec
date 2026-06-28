@@ -392,7 +392,7 @@ class AgentSessionServiceActionLifecycleTest {
             () ->
                 service.confirmRunSubmission(
                     new OrchestratorRunConfirmationRequest(
-                        "s1", "client-turn-4", true, null, null, null),
+                        "s1", "client-turn-4", true, null, null, null, null),
                     user()))
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
         .hasMessageContaining("not a run route");
@@ -428,7 +428,8 @@ class AgentSessionServiceActionLifecycleTest {
 
     var response =
         service.confirmRunSubmission(
-            new OrchestratorRunConfirmationRequest("s1", "client-turn-5", true, null, null, null),
+            new OrchestratorRunConfirmationRequest(
+                "s1", "client-turn-5", true, null, null, null, null),
             user());
 
     assertThat(response.runId()).isEqualTo("run-123");
@@ -461,7 +462,8 @@ class AgentSessionServiceActionLifecycleTest {
 
     var response =
         service.confirmRunSubmission(
-            new OrchestratorRunConfirmationRequest("s1", "client-turn-6", true, null, null, null),
+            new OrchestratorRunConfirmationRequest(
+                "s1", "client-turn-6", true, null, null, null, null),
             user());
 
     assertThat(response.runId()).isEqualTo("run-existing");

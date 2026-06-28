@@ -105,6 +105,8 @@ public class AgentRunSubmissionGate {
 
     String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
+    String lowStartTier =
+        request == null ? null : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
     // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
     managedAiUsageService.assertCanStartRun(
         user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
@@ -137,7 +139,10 @@ public class AgentRunSubmissionGate {
             null,
             false,
             null,
-            null);
+            null,
+            null,
+            null,
+            lowStartTier);
 
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
@@ -148,4 +153,12 @@ public class AgentRunSubmissionGate {
   }
 
   public record Submission(String runId, boolean calledRunApi, String status) {}
+
+  static String normalizeLowComplexityWorkerStartTier(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+    return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
+  }
 }
