@@ -3,6 +3,8 @@ package com.navneet.executespec.integration;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.run.RunContinuationConfirmationFlag;
@@ -33,5 +35,13 @@ class RunOrchestratorContinuationSubmitOptionsTest {
     verify(confirmationFlag, never()).mark("run-2");
     verify(benchmarkPriorFlag, never()).mark("run-2", true);
     verify(benchmarkPriorFlag, never()).mark("run-2", false);
+  }
+
+  @Test
+  void normalizeLowComplexityWorkerStartTier_allowsOnlySupportedRunValues() {
+    assertEquals("LIGHTWEIGHT", RunOrchestrator.normalizeLowComplexityWorkerStartTier("lightweight"));
+    assertEquals("WORKHORSE", RunOrchestrator.normalizeLowComplexityWorkerStartTier(" WORKHORSE "));
+    assertNull(RunOrchestrator.normalizeLowComplexityWorkerStartTier(null));
+    assertNull(RunOrchestrator.normalizeLowComplexityWorkerStartTier("cheapest"));
   }
 }

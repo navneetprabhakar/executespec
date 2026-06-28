@@ -93,6 +93,11 @@ export const createRun = (body: {
    * false, the selected quality-ranked candidate may run even if unbenchmarked for that task type.
    */
   requireBenchmarkPriorForAutomaticContinuation?: boolean;
+  /**
+   * Optional LOW-task start tier. LIGHTWEIGHT starts simple worker tasks cheaper while preserving
+   * automatic step-up; unlike modelName this is not a route pin.
+   */
+  lowComplexityWorkerStartTier?: 'WORKHORSE' | 'LIGHTWEIGHT';
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 export const approveRun = (

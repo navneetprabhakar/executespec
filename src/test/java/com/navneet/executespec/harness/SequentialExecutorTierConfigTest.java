@@ -113,15 +113,27 @@ class SequentialExecutorTierConfigTest {
       String model,
       boolean projectRun)
       throws Exception {
+    return invoke(exec, complexity, provider, model, projectRun, null);
+  }
+
+  private Cfg invoke(
+      SequentialExecutor exec,
+      PlannedTask.Complexity complexity,
+      String provider,
+      String model,
+      boolean projectRun,
+      String lowComplexityWorkerStartTierOverride)
+      throws Exception {
     Method m =
         SequentialExecutor.class.getDeclaredMethod(
             "tierConfigFor",
             PlannedTask.Complexity.class,
             String.class,
             String.class,
-            boolean.class);
+            boolean.class,
+            String.class);
     m.setAccessible(true);
-    Object cfg = m.invoke(exec, complexity, provider, model, projectRun);
+    Object cfg = m.invoke(exec, complexity, provider, model, projectRun, lowComplexityWorkerStartTierOverride);
     assertNotNull(cfg);
     return new Cfg(
         (String) recordField(cfg, "provider"),
@@ -184,6 +196,20 @@ class SequentialExecutorTierConfigTest {
     ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");
 
     Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
+
+    assertEquals("lightweight", c.model);
+  }
+
+  @Test
+  void low_worker_start_tier_can_use_perRun_lightweight_override() throws Exception {
+    Cfg c =
+        invoke(
+            newExecutorWithTierResolvingModel(),
+            PlannedTask.Complexity.LOW,
+            "deepseek",
+            "fallback",
+            false,
+            "LIGHTWEIGHT");
 
     assertEquals("lightweight", c.model);
   }

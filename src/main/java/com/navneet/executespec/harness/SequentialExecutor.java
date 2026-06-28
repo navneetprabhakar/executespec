@@ -345,6 +345,10 @@ to boot — skip it for those.""";
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> continuationRoutePinnedByRun =
       new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> lowComplexityWorkerStartTierConfiguredByRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> lowComplexityWorkerStartTierEffectiveByRun =
+      new ConcurrentHashMap<>();
   private final ConcurrentMap<String, ContinuationConfirmationScope>
       continuationConfirmationScopeByRun =
       new ConcurrentHashMap<>();
@@ -497,6 +501,10 @@ to boot — skip it for those.""";
             ? requireBenchmarkPriorForAutomaticContinuation
             : req.requireBenchmarkPriorForAutomaticContinuation());
     continuationRoutePinnedByRun.put(runId, Boolean.TRUE.equals(req.routePinned()));
+    lowComplexityWorkerStartTierConfiguredByRun.put(
+        runId, configuredLowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()));
+    lowComplexityWorkerStartTierEffectiveByRun.put(
+        runId, lowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()).name());
     continuationConfirmationScopeByRun.put(runId, ContinuationConfirmationScope.from(req));
     seedInitialContinuationActionState(runId, req, resume);
 
@@ -646,6 +654,8 @@ to boot — skip it for those.""";
       continuationConfirmationRequiredByRun.remove(runId);
       continuationBenchmarkPriorRequiredByRun.remove(runId);
       continuationRoutePinnedByRun.remove(runId);
+      lowComplexityWorkerStartTierConfiguredByRun.remove(runId);
+      lowComplexityWorkerStartTierEffectiveByRun.remove(runId);
       continuationConfirmationScopeByRun.remove(runId);
     }
   }
@@ -1290,7 +1300,11 @@ to boot — skip it for those.""";
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
     TierConfig cfg =
         tierConfigFor(
-            task.complexity(), requestedProvider, requestedModel, req.projectId() != null);
+            task.complexity(),
+            requestedProvider,
+            requestedModel,
+            req.projectId() != null,
+            req.lowComplexityWorkerStartTier());
     if (providerModelOverride != null) {
       cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
     }
@@ -2214,6 +2228,7 @@ to boot — skip it for those.""";
     int modelStepDownsUsed = modelStepDownsUsed(runId, task.id());
     if (goalContinuationAdvisor == null) {
       return decideContinuationFallback(
+          runId,
           decision,
           taskCategory,
           requiredQualityThreshold,
@@ -2264,7 +2279,8 @@ to boot — skip it for those.""";
           confirmationScope,
           providerSwitchesUsed,
           modelStepUpsUsed,
-          modelStepDownsUsed);
+          modelStepDownsUsed,
+          runId);
     } catch (RuntimeException ex) {
       log.warn(
           "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
@@ -2274,6 +2290,7 @@ to boot — skip it for those.""";
           model,
           ex);
       return decideContinuationFallback(
+          runId,
           decision,
           taskCategory,
           requiredQualityThreshold,
@@ -2289,6 +2306,7 @@ to boot — skip it for those.""";
   }
 
   private GoalContinuationPolicyDecision decideContinuationFallback(
+      String runId,
       GoalDonenessDecision decision,
       String taskCategory,
       double requiredQualityThreshold,
@@ -2328,7 +2346,8 @@ to boot — skip it for those.""";
           confirmationScope,
           providerSwitchesUsed,
           modelStepUpsUsed,
-          modelStepDownsUsed);
+          modelStepDownsUsed,
+          runId);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
@@ -2342,7 +2361,8 @@ to boot — skip it for those.""";
       ContinuationConfirmationScope confirmationScope,
       int providerSwitchesUsed,
       int modelStepUpsUsed,
-      int modelStepDownsUsed) {
+      int modelStepDownsUsed,
+      String runId) {
     if (decision == null) {
       return null;
     }
@@ -2361,7 +2381,8 @@ to boot — skip it for those.""";
             confirmationScope,
             providerSwitchesUsed,
             modelStepUpsUsed,
-            modelStepDownsUsed));
+            modelStepDownsUsed,
+            runId));
   }
 
   private List<String> providerPreferenceOrder(String currentProvider) {
@@ -2614,7 +2635,8 @@ to boot — skip it for those.""";
         new ContinuationConfirmationScope(false, null, null, null),
         0,
         0,
-        0);
+        0,
+        null);
   }
 
   private Map<String, Object> continuationPolicyData(
@@ -2629,6 +2651,34 @@ to boot — skip it for those.""";
       int providerSwitchesUsed,
       int modelStepUpsUsed,
       int modelStepDownsUsed) {
+    return continuationPolicyData(
+        decision,
+        taskCategory,
+        requiredQualityThreshold,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        providerBehaviorPoor,
+        confirmationScope,
+        providerSwitchesUsed,
+        modelStepUpsUsed,
+        modelStepDownsUsed,
+        null);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      boolean providerBehaviorPoor,
+      ContinuationConfirmationScope confirmationScope,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed,
+      String runId) {
     Map<String, Object> data = new LinkedHashMap<>();
     if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
       data.putAll(decision.policy());
@@ -2651,8 +2701,10 @@ to boot — skip it for those.""";
     data.put("maxEditChurn", maxEditChurn());
     data.put("maxStaleExplanations", maxStaleExplanations());
     data.put("maxParallelTasks", maxParallelTasks());
-    data.put("lowComplexityWorkerStartTierConfigured", configuredLowComplexityWorkerStartTier());
-    data.put("lowComplexityWorkerStartTierEffective", lowComplexityWorkerStartTier().name());
+    data.put(
+        "lowComplexityWorkerStartTierConfigured",
+        configuredLowComplexityWorkerStartTierForRun(runId));
+    data.put("lowComplexityWorkerStartTierEffective", effectiveLowComplexityWorkerStartTier(runId));
     data.put("providerBehaviorPoor", providerBehaviorPoor);
     data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     data.put("userConfirmedExpensiveContinuation", confirmationScope.confirmed());
@@ -2688,6 +2740,26 @@ to boot — skip it for those.""";
 
   private boolean continuationRoutePinned(String runId) {
     return continuationRoutePinnedByRun.getOrDefault(runId, false);
+  }
+
+  private String configuredLowComplexityWorkerStartTierForRun(String runId) {
+    if (runId != null) {
+      String configured = lowComplexityWorkerStartTierConfiguredByRun.get(runId);
+      if (hasText(configured)) {
+        return configured;
+      }
+    }
+    return configuredLowComplexityWorkerStartTier();
+  }
+
+  private String effectiveLowComplexityWorkerStartTier(String runId) {
+    if (runId != null) {
+      String effective = lowComplexityWorkerStartTierEffectiveByRun.get(runId);
+      if (hasText(effective)) {
+        return effective;
+      }
+    }
+    return lowComplexityWorkerStartTier(null).name();
   }
 
   private ContinuationConfirmationScope continuationConfirmationScope(String runId) {
@@ -3450,6 +3522,15 @@ to boot — skip it for those.""";
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
+    return tierConfigFor(complexity, runProvider, runModel, projectRun, null);
+  }
+
+  private TierConfig tierConfigFor(
+      PlannedTask.Complexity complexity,
+      String runProvider,
+      String runModel,
+      boolean projectRun,
+      String lowComplexityWorkerStartTierOverride) {
     AgentTier tier;
     int maxIter;
     int maxTokens;
@@ -3481,7 +3562,7 @@ to boot — skip it for those.""";
       case LOW -> {
         // Default remains WORKHORSE after the cheap-tier eval regression, but operators can opt
         // LOW tasks into LIGHTWEIGHT starts and rely on continuation policy to step up.
-        tier = lowComplexityWorkerStartTier();
+        tier = lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride);
         // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
         // quality ceiling. The dollar cap and stagnation guard remain the real runaway
         // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
@@ -3601,26 +3682,35 @@ to boot — skip it for those.""";
   }
 
   private AgentTier lowComplexityWorkerStartTier() {
-    if (lowComplexityWorkerStartTier == null || lowComplexityWorkerStartTier.isBlank()) {
+    return lowComplexityWorkerStartTier(null);
+  }
+
+  private AgentTier lowComplexityWorkerStartTier(String override) {
+    String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
+    if (configured == null || configured.isBlank()) {
       return AgentTier.WORKHORSE;
     }
     try {
-      AgentTier tier =
-          AgentTier.valueOf(lowComplexityWorkerStartTier.trim().toUpperCase(Locale.ROOT));
+      AgentTier tier = AgentTier.valueOf(configured.trim().toUpperCase(Locale.ROOT));
       return tier == AgentTier.LIGHTWEIGHT ? AgentTier.LIGHTWEIGHT : AgentTier.WORKHORSE;
     } catch (IllegalArgumentException ex) {
       log.warn(
           "Invalid execution.continuation.low-complexity-worker-start-tier='{}'; using WORKHORSE",
-          lowComplexityWorkerStartTier);
+          configured);
       return AgentTier.WORKHORSE;
     }
   }
 
   private String configuredLowComplexityWorkerStartTier() {
-    if (lowComplexityWorkerStartTier == null || lowComplexityWorkerStartTier.isBlank()) {
+    return configuredLowComplexityWorkerStartTier(null);
+  }
+
+  private String configuredLowComplexityWorkerStartTier(String override) {
+    String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
+    if (configured == null || configured.isBlank()) {
       return AgentTier.WORKHORSE.name();
     }
-    return lowComplexityWorkerStartTier.trim().toUpperCase(Locale.ROOT);
+    return configured.trim().toUpperCase(Locale.ROOT);
   }
 
   @org.springframework.transaction.annotation.Transactional
@@ -4087,7 +4177,8 @@ to boot — skip it for those.""";
       return null;
     }
     TierConfig altCfg =
-        tierConfigFor(task.complexity(), altProvider, null, req.projectId() != null);
+        tierConfigFor(
+            task.complexity(), altProvider, null, req.projectId() != null, req.lowComplexityWorkerStartTier());
     if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
       // adaptive routing or strict-provider re-resolved back to the primary — abandon.
       log.info(

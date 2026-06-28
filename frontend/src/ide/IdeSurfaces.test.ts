@@ -14,6 +14,7 @@ describe('buildIdeComposeRunRequest', () => {
       tddMode: false,
       confirmModelUpgrades: false,
       requireBenchmarkedUpgrades: false,
+      startLowTasksOnCheapTier: false,
       figmaUrl: '',
       tier: 'PRO',
       modelName: '',
@@ -21,6 +22,7 @@ describe('buildIdeComposeRunRequest', () => {
 
     expect(body.userRequest).toBe('fix the failing login test');
     expect(body.requireBenchmarkPriorForAutomaticContinuation).toBeUndefined();
+    expect(body.lowComplexityWorkerStartTier).toBeUndefined();
   });
 
   it('sends an explicit benchmark-prior guard only when checked', () => {
@@ -34,6 +36,7 @@ describe('buildIdeComposeRunRequest', () => {
       tddMode: true,
       confirmModelUpgrades: true,
       requireBenchmarkedUpgrades: true,
+      startLowTasksOnCheapTier: true,
       figmaUrl: 'https://figma.example/file/1',
       tier: 'ENTERPRISE',
       modelName: 'gpt-5.4',
@@ -48,6 +51,7 @@ describe('buildIdeComposeRunRequest', () => {
       tddMode: true,
       requireConfirmationBeforeExpensiveContinuation: true,
       requireBenchmarkPriorForAutomaticContinuation: true,
+      lowComplexityWorkerStartTier: 'LIGHTWEIGHT',
       figmaUrl: 'https://figma.example/file/1',
       modelName: 'gpt-5.4',
     });

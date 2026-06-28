@@ -592,7 +592,8 @@ public class RunOrchestrator implements RunControlPort {
       String branchOverride,
       String prReviewComments,
       Boolean requireConfirmationBeforeExpensiveContinuation,
-      Boolean requireBenchmarkPriorForAutomaticContinuation) {
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier) {
     return submitRun(
         userRequest,
         source,
@@ -615,7 +616,8 @@ public class RunOrchestrator implements RunControlPort {
         prReviewComments,
         com.navneet.executespec.state.RunMode.BUILD,
         requireConfirmationBeforeExpensiveContinuation,
-        requireBenchmarkPriorForAutomaticContinuation);
+        requireBenchmarkPriorForAutomaticContinuation,
+        lowComplexityWorkerStartTier);
   }
 
   /**
@@ -667,6 +669,7 @@ public class RunOrchestrator implements RunControlPort {
         prReviewComments,
         runMode,
         null,
+        null,
         null);
   }
 
@@ -697,6 +700,56 @@ public class RunOrchestrator implements RunControlPort {
       String runMode,
       Boolean requireConfirmationBeforeExpensiveContinuation,
       Boolean requireBenchmarkPriorForAutomaticContinuation) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        null);
+  }
+
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier) {
     String runId = UUID.randomUUID().toString();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
@@ -844,6 +897,8 @@ public class RunOrchestrator implements RunControlPort {
         (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
     final String prReviewCommentsFinal =
         (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
+    final String lowComplexityWorkerStartTierFinal =
+        normalizeLowComplexityWorkerStartTier(lowComplexityWorkerStartTier);
     // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). The raw, caller-supplied
     // modelName is the ONLY unambiguous signal of an explicit pin: `model` above is already
     // defaulted to defaultModelFor(provider) when modelName is blank, so we capture modelName
@@ -869,7 +924,8 @@ public class RunOrchestrator implements RunControlPort {
                     tddModeFinal,
                     branchOverrideFinal,
                     prReviewCommentsFinal,
-                    pinnedModelFinal);
+                    pinnedModelFinal,
+                    lowComplexityWorkerStartTierFinal);
               } finally {
                 activeRuns.remove(runIdFinal);
               }
@@ -890,6 +946,14 @@ public class RunOrchestrator implements RunControlPort {
     if (requireBenchmarkPriorForAutomaticContinuation != null) {
       benchmarkPriorFlag.mark(runId, requireBenchmarkPriorForAutomaticContinuation);
     }
+  }
+
+  static String normalizeLowComplexityWorkerStartTier(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String normalized = value.trim().toUpperCase(Locale.ROOT);
+    return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
   }
 
   // pipeline (background thread)
@@ -988,6 +1052,7 @@ public class RunOrchestrator implements RunControlPort {
         branchOverride,
         null,
         // No per-run model pin on the resume / re-plan path — pinning is a submit-time concept.
+        null,
         null);
   }
 
@@ -1007,7 +1072,8 @@ public class RunOrchestrator implements RunControlPort {
       // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Non-null only when the
       // caller supplied an explicit RunRequest.modelName. Overlaid onto the org override map at the
       // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
-      String pinnedModel) {
+      String pinnedModel,
+      String lowComplexityWorkerStartTierOverride) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -1560,6 +1626,7 @@ public class RunOrchestrator implements RunControlPort {
                     .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
                     .requireBenchmarkPriorForAutomaticContinuation(requireContinuationBenchmarkPrior)
                     .routePinned(routePinned)
+                    .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
