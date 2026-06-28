@@ -94,6 +94,7 @@ execution:
     # Goal continuation policy knobs. Selected-candidate step-up / step-down / provider-change
     # reruns are automatic by default, bounded by the limits below, unless confirmation is required.
     required-quality-threshold: 70.0
+    quality-tie-band: 1.0
     required-quality-thresholds:
       task-low: -1
       task-medium: -1

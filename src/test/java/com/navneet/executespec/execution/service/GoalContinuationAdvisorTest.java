@@ -48,7 +48,9 @@ class GoalContinuationAdvisorTest {
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
     assertThat(decision.selectedCandidate()).contains(score("anthropic", "sonnet", 91, 70, 8.0));
-    assertThat(decision.policy()).containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
+    assertThat(decision.policy())
+        .containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc")
+        .containsEntry("rankingQualityTieBand", 1.0);
   }
 
   @Test
@@ -146,7 +148,9 @@ class GoalContinuationAdvisorTest {
                 .build());
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
-    assertThat(decision.policy()).containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
+    assertThat(decision.policy())
+        .containsEntry("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc")
+        .containsEntry("rankingQualityTieBand", 1.0);
     assertThat(decision.policy()).containsEntry("eligibleCandidateCount", 2);
     assertThat(decision.policy()).containsEntry("rejectedBelowQualityThresholdCount", 1);
     assertThat(decision.policy()).containsKey("rankingReasons");
