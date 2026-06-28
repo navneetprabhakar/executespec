@@ -315,6 +315,8 @@ export interface TaskSummary {
       maxModelStepUps?: number;
       modelStepDownsUsed?: number;
       maxModelStepDowns?: number;
+      lowComplexityWorkerStartTierConfigured?: string;
+      lowComplexityWorkerStartTierEffective?: string;
       requireConfirmationBeforeExpensiveContinuation?: boolean;
       requireBenchmarkPriorForAutomaticContinuation?: boolean;
       maxTotalCostUsd?: number;
