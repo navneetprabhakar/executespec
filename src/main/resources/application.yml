@@ -547,6 +547,7 @@ model-matrix:
     kimi-k2p6-fw:
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32768
       display-label: "Kimi K2.6 (Fireworks)"
@@ -558,6 +559,7 @@ model-matrix:
     "[glm-5.1-fw]": # bracket-wrapped: dotted key (5.1) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 202000
       max-output-tokens: 25344
       display-label: "GLM 5.1 (Fireworks)"
@@ -575,6 +577,7 @@ model-matrix:
     "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 202000
       max-output-tokens: 25344
       display-label: "GLM 5.2 (Fireworks)"
@@ -586,6 +589,7 @@ model-matrix:
     minimax-m3-fw:
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M3 (Fireworks)"
@@ -597,6 +601,7 @@ model-matrix:
     "[minimax-m2.7-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M2.7 (Fireworks)"
@@ -608,6 +613,7 @@ model-matrix:
     "[kimi-k2.7-code-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 16384
       display-label: "Kimi K2.7 Code (Fireworks)"
@@ -619,6 +625,7 @@ model-matrix:
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Devstral 2 (OpenRouter)"
@@ -630,6 +637,7 @@ model-matrix:
     codestral-2508:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 256000
       max-output-tokens: 32000
       display-label: "Codestral 2508 (OpenRouter)"
@@ -641,6 +649,7 @@ model-matrix:
     minimax-m3:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 524288
       max-output-tokens: 32000
       display-label: "MiniMax M3 (OpenRouter)"
@@ -652,6 +661,7 @@ model-matrix:
     "[gpt-5.3-codex]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: PREMIUM
       context-limit: 400000
       max-output-tokens: 32000
       display-label: "GPT-5.3 Codex (OpenRouter)"
@@ -663,6 +673,7 @@ model-matrix:
     "[grok-4.20]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: PREMIUM
       context-limit: 2000000
       max-output-tokens: 32000
       display-label: "Grok 4.20 (OpenRouter)"
@@ -674,6 +685,7 @@ model-matrix:
     "[glm-5.2]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "GLM 5.2 (OpenRouter)"
@@ -685,6 +697,7 @@ model-matrix:
     "[kimi-k2.7-code]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 16384
       display-label: "Kimi K2.7 Code (OpenRouter)"
@@ -696,6 +709,7 @@ model-matrix:
     "[minimax-m2.7]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M2.7 (OpenRouter)"
@@ -707,6 +721,7 @@ model-matrix:
     qwen3-coder-next:
       provider: openrouter
       chain-tier: UTILITY
+      quality-class: STANDARD
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Qwen3-Coder-Next (OpenRouter)"
@@ -718,6 +733,7 @@ model-matrix:
     "[kimi-k2.6]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Kimi K2.6 (OpenRouter)"
@@ -729,6 +745,7 @@ model-matrix:
     qwen3-coder:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Qwen3-Coder (OpenRouter)"
@@ -740,6 +757,7 @@ model-matrix:
     "[mimo-v2.5-pro]": # bracket-wrapped: the dotted key (v2.5) would otherwise bind as a nested path (cf. kimi-k2.6)
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: STANDARD
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "Xiaomi MiMo v2.5 Pro (OpenRouter)"

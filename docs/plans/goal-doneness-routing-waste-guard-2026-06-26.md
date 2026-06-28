@@ -1004,6 +1004,15 @@ in the goal line, approval reason, action history, and ranking panel. This keeps
 behavior inspectable after reload: operators can tell whether the rerun came from task execution,
 reviewer/build failure, or low final validation quality.
 
+Eighty-eighth slice 2026-06-28: unbenchmarked gateway coding models now have explicit YAML quality
+fallbacks for automatic continuation ranking. The candidate scorer already falls back to
+`quality-class` before `chain-tier` / `cost-class` when benchmark/local/validation signals are
+missing; this slice fills the missing `quality-class` metadata for the newer OpenRouter/Fireworks
+coding rows, including the `UTILITY`-tier `qwen3-coder-next` row that would otherwise fall below the
+default 70 quality threshold despite being a viable coder. The result is deterministic
+quality-first ranking for unbenchmarked candidates while `benchmarkQualityPriorAvailable=false`
+still keeps benchmark-required mode approval-gated.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

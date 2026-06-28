@@ -69,6 +69,10 @@ class ModelProviderCandidateServiceTest {
         .contains(
             "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
                 + " fallback/local/validation signals only");
+
+    ModelProviderScore mini = find(candidates, "openai", "gpt-5.4-mini");
+    assertThat(mini.qualityScore()).isEqualTo(76.0);
+    assertThat(mini.meetsQualityThreshold()).isTrue();
   }
 
   @Test
