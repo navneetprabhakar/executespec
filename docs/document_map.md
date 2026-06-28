@@ -1,7 +1,7 @@
 # Documentation Map
 
 > Authoritative index of every document under `docs/` plus the four entry-point files at the repo root.
-> Updated 2026-06-27: indexed the goal doneness / routing / waste-guard approach and current V251 run-level goal-proof visibility surface.
+> Updated 2026-06-28: indexed the backend dependency security audit and current goal doneness / routing / waste-guard approach.
 
 This file is the routing table for the documentation surface. Each entry below has a one-line description of what the document covers and a note on when you should reach for it. If you don't know which file to open first, start here.
 
@@ -39,6 +39,7 @@ Everything you need to ship, run, and stay-up-to-the-SLO. Read in order on a fir
 | Local test playbook | [`docs/operations/local-test-playbook.md`](operations/local-test-playbook.md) | The local smoke-test recipe: Flyway migrate against a clean Postgres, Spring Boot startup, frontend `npm run dev`, end-to-end run submission, expected timing budgets. | Before pushing to `dev` — the rule is local-first, CI is not authoritative. |
 | Service-level objectives | [`docs/operations/slos.md`](operations/slos.md) | The 5 published SLOs: terminal-in-15-min, verified-score correctness, cost-estimate accuracy, webhook latency, hot-path 5xx. With measurement methodology and on-call escalation. | When auditing reliability or pricing a customer SLA. |
 | Cost optimization 2026-05-29 | [`docs/operations/cost-optimization-2026-05-29.md`](operations/cost-optimization-2026-05-29.md) | Handoff: dev-environment cost audit that found Cloud SQL + VM provisioned 4× over utilization. What was resized/deleted (Cloud SQL `db-custom-4-16384`→`db-custom-1-3840`, `preview-gw` VM + IP, `dev-workspaces` bucket → us-east4) and runbooks for the remaining `dev-deploy` + `tfstate` bucket migrations. Saved ~$158/mo. | When auditing GCP spend, planning further right-sizing, or completing the deferred bucket migrations. |
+| Backend dependency security audit 2026-06-28 | [`docs/operations/backend-dependency-security-audit-2026-06-28.md`](operations/backend-dependency-security-audit-2026-06-28.md) | OWASP Dependency-Check backend Maven audit: commands run, scanner caveats, complete vulnerable dependency/CVE table, dependency-hygiene findings, and remediation queue. | When triaging backend library CVEs, adding a CI vulnerability gate, or reviewing security posture before release. |
 | Status and health | [`docs/status-page.md`](status-page.md) | Current health, readiness, Actuator, Prometheus, and incident-check surfaces. Notes that a separate public status-page product is not implemented here. | When health checks, probes, metrics, or incident handling are in scope. |
 | Tech-debt register | [`docs/tech-debt.md`](tech-debt.md) | Current live-risk register after the 2026-06-10 cleanup: benchmark proof, preview/verifyBoot, payment proof, tenant ORM isolation, orchestration/frontend debt, and doc drift. | When planning a hardening cleanup pass, before a big refactor, or when deciding what technical debt still matters. |
 
