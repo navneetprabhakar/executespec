@@ -1013,6 +1013,14 @@ default 70 quality threshold despite being a viable coder. The result is determi
 quality-first ranking for unbenchmarked candidates while `benchmarkQualityPriorAvailable=false`
 still keeps benchmark-required mode approval-gated.
 
+Eighty-ninth slice 2026-06-28: the advisor now has regression coverage for the cheap-DeepSeek
+starting route. A current `deepseek-v4-flash-native` candidate with insufficient quality can select
+`deepseek-v4-pro-native` as `STEP_UP_MODEL` when the run is not route-pinned and benchmark-prior
+approval mode is not enabled. The test also asserts that the advisor does not pass a model allow-list
+by default, so stronger same-provider candidates remain visible. Docs now call out the operational
+rule: use YAML/org matrix defaults to start cheap and allow automatic step-up; a per-run `modelName`
+pin means "do not silently change this route."
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the
