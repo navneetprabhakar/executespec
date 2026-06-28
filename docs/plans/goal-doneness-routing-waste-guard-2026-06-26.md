@@ -979,6 +979,14 @@ when "Require benchmark evidence" is unchecked. `buildIdeComposeRunRequest` omit
 "use the server default" instead of forcibly disabling an operator-level benchmark-required config.
 `IdeSurfaces.test` pins both unchecked omission and checked `true` emission.
 
+Eighty-fifth slice 2026-06-28: final reviewer build failure now enters post-review automatic
+continuation. If the BUILD-mode reviewer completes but still reports `finalBuildPassed=false` after
+its normal fix-build pass, `RunOrchestrator` treats that as reviewer low-quality evidence, emits the
+same post-review continuation decision, and can automatically rerun the latest usable worker task
+with the selected stronger provider/model. The low-quality goal evidence is labelled
+`FINAL_BUILD_FAILED` so run events and durable task policy distinguish it from reviewer exceptions
+or unresolved semantic issues.
+
 ## Open Questions
 
 - Should the planner emit an explicit `taskCategory` field in `PlannedTask`, or should the

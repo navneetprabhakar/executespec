@@ -3140,7 +3140,8 @@ public class RunOrchestrator implements RunControlPort {
     if (reviewResult == null || reviewResult.overall() == null) {
       return false;
     }
-    return reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
+    return Boolean.FALSE.equals(reviewResult.finalBuildPassed())
+        || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
         || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
   }
 
@@ -3149,7 +3150,9 @@ public class RunOrchestrator implements RunControlPort {
     String verdict =
         reviewerErrored
             ? "REVIEWER_EXCEPTION"
-            : reviewResult == null || reviewResult.overall() == null
+            : reviewResult != null && Boolean.FALSE.equals(reviewResult.finalBuildPassed())
+                ? "FINAL_BUILD_FAILED"
+                : reviewResult == null || reviewResult.overall() == null
                 ? "UNKNOWN"
                 : reviewResult.overall().name();
     return new GoalDonenessDecision(
