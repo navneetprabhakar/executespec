@@ -2119,7 +2119,29 @@ to boot — skip it for those.""";
       GoalContinuationPolicyDecision decision) {
     return decision != null
         && decision.decision() == RunContinuationDecision.STOP_BLOCKED
-        && decision.selectedCandidate().isPresent();
+        && decision.selectedCandidate().isPresent()
+        && approvalEligibleBlockedReason(decision);
+  }
+
+  private static boolean approvalEligibleBlockedReason(GoalContinuationPolicyDecision decision) {
+    Map<String, Object> policy = decision.policy();
+    Object blockedReason = policy == null ? null : policy.get("blockedAutomaticContinuationReason");
+    if ("ROUTE_PINNED".equals(String.valueOf(blockedReason))) {
+      return false;
+    }
+    if ("BENCHMARK_PRIOR_REQUIRED".equals(String.valueOf(blockedReason))
+        || "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED".equals(String.valueOf(blockedReason))) {
+      return true;
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
+    if (candidate == null || policy == null) {
+      return false;
+    }
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return true;
+    }
+    return Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"));
   }
 
   private static TaskOutcome preRetryContinuationOutcome(
