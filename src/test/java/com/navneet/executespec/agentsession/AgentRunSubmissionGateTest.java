@@ -31,6 +31,7 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
+import com.navneet.executespec.run.RunLocalExecutionFlag;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -56,6 +57,7 @@ class AgentRunSubmissionGateTest {
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock RunIdempotencyService runIdempotencyService;
   @Mock StateStore stateStore;
+  @Mock RunLocalExecutionFlag runLocalExecutionFlag;
 
   private AgentRunSubmissionGate gate;
 
@@ -73,7 +75,8 @@ class AgentRunSubmissionGateTest {
             managedAiUsageService,
             aiProviderPreferenceService,
             runIdempotencyService,
-            stateStore);
+            stateStore,
+            runLocalExecutionFlag);
   }
 
   @Test
@@ -239,6 +242,121 @@ class AgentRunSubmissionGateTest {
             null,
             null,
             "LIGHTWEIGHT");
+  }
+
+  @Test
+  void confirmedRunPropagatesPrototypeExecutionModeAndEditedSpec() {
+    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+        .thenReturn(Optional.empty());
+    when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
+    when(runOrchestrator.submitRun(
+            anyString(),
+            anyString(),
+            isNull(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            anyBoolean(),
+            isNull(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            isNull(),
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
+        .thenReturn(PipelineRun.builder().runId("run-3").createdByUserId("u1").build());
+
+    gate.submitConfirmed(
+        session(),
+        turn("original"),
+        decision("CODE_RUN_REQUIRED", true),
+        new OrchestratorRunConfirmationRequest(
+            "s1", "turn-1", true, null, null, null, null, "PROTOTYPE", null, "edited spec"),
+        user());
+
+    verify(runOrchestrator)
+        .submitRun(
+            "edited spec",
+            "AGENT_ORCHESTRATOR",
+            null,
+            "EXISTING",
+            null,
+            null,
+            false,
+            false,
+            null,
+            "DEEPSEEK",
+            "u1",
+            "org-1",
+            "p1",
+            "PROTOTYPE",
+            null,
+            null,
+            false,
+            null,
+            null,
+            (Boolean) null,
+            (Boolean) null,
+            (String) null);
+  }
+
+  @Test
+  void confirmedLocalRunRequiresPatAndMarksLocalExecutionFlag() {
+    when(featureFlagService.isEnabled("worker.local-hands.enabled")).thenReturn(true);
+    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+        .thenReturn(Optional.empty());
+    when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
+    when(runOrchestrator.submitRun(
+            anyString(),
+            anyString(),
+            isNull(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            anyBoolean(),
+            isNull(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            isNull(),
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
+        .thenReturn(PipelineRun.builder().runId("run-local").createdByUserId("u1").build());
+
+    var request =
+        new OrchestratorRunConfirmationRequest(
+            "s1", "turn-1", true, null, null, null, null, null, true, null);
+    gate.submitConfirmed(session(), turn("Implement OAuth login"), decision("CODE_RUN_REQUIRED", true), request, user(), true);
+
+    verify(runLocalExecutionFlag).mark("run-local");
+
+    assertThatThrownBy(
+            () ->
+                gate.submitConfirmed(
+                    session(),
+                    turn("Implement OAuth login"),
+                    decision("CODE_RUN_REQUIRED", true),
+                    request,
+                    user(),
+                    false))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Personal Access Token");
   }
 
   private static OrchestratorRunConfirmationRequest request(boolean confirmed) {

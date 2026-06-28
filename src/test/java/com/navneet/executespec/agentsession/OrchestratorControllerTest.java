@@ -5,6 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationResponse;
@@ -12,6 +14,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTur
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 
 import org.junit.jupiter.api.Test;
 
@@ -64,12 +67,15 @@ class OrchestratorControllerTest {
         new OrchestratorRunConfirmationResponse(
             "s1", "client-turn-1", "run-1", "CODE_RUN_REQUIRED", true, "orch_trace_2", "SUBMITTED");
     AppUserDetails user = user();
-    when(service.confirmRunSubmission(request, user)).thenReturn(expected);
+    HttpServletRequest httpRequest = mock(HttpServletRequest.class);
+    when(httpRequest.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE))
+        .thenReturn(JwtAuthenticationFilter.AUTH_SOURCE_PAT);
+    when(service.confirmRunSubmission(request, user, true)).thenReturn(expected);
 
-    OrchestratorRunConfirmationResponse actual = controller.confirmRun(user, request);
+    OrchestratorRunConfirmationResponse actual = controller.confirmRun(user, request, httpRequest);
 
     assertThat(actual).isEqualTo(expected);
-    verify(service).confirmRunSubmission(request, user);
+    verify(service).confirmRunSubmission(request, user, true);
   }
 
   private static AppUserDetails user() {

@@ -117,6 +117,12 @@ public class AgentSessionService {
   @Transactional
   public OrchestratorRunConfirmationResponse confirmRunSubmission(
       OrchestratorRunConfirmationRequest request, AppUserDetails user) {
+    return confirmRunSubmission(request, user, false);
+  }
+
+  @Transactional
+  public OrchestratorRunConfirmationResponse confirmRunSubmission(
+      OrchestratorRunConfirmationRequest request, AppUserDetails user, boolean patAuthenticated) {
     if (request == null
         || request.sessionId() == null
         || request.sessionId().isBlank()
@@ -126,7 +132,7 @@ public class AgentSessionService {
           HttpStatus.BAD_REQUEST, "sessionId and turnId are required");
     }
     AgentSession session = requireSession(request.sessionId(), user);
-    return runConfirmationService.confirm(session, request, user);
+    return runConfirmationService.confirm(session, request, user, patAuthenticated);
   }
 
   @Transactional
