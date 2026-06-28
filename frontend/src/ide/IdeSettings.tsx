@@ -72,7 +72,7 @@ export function IdeIntegrations() {
       case 'github':
         return {
           title: 'Connect GitHub (token)',
-          body: 'Paste a GitHub personal access token (classic or fine-grained, scopes: repo + workflow). Used to clone and push your repositories. Stored encrypted at rest.',
+          body: 'Paste a GitHub personal access token (classic or fine-grained, scopes: repo + workflow). Used to clone and push your repositories. Stored server-side under this deployment crypto policy.',
           fields: [
             {
               name: 'githubPat',
@@ -93,7 +93,7 @@ export function IdeIntegrations() {
       case 'jira':
         return {
           title: 'Connect Jira',
-          body: 'Paste your Jira Cloud credentials. The API token is stored encrypted at rest.',
+          body: 'Paste your Jira Cloud credentials. The API token is stored server-side under this deployment crypto policy.',
           fields: [
             {
               name: 'baseUrl',
@@ -116,7 +116,7 @@ export function IdeIntegrations() {
       case 'confluence':
         return {
           title: 'Connect Confluence',
-          body: 'Paste your Confluence Cloud credentials. The API token is stored encrypted at rest.',
+          body: 'Paste your Confluence Cloud credentials. The API token is stored server-side under this deployment crypto policy.',
           fields: [
             {
               name: 'baseUrl',

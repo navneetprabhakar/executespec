@@ -11,6 +11,7 @@ import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
+import {formatManagedAiPlanMessage} from '@/ide/planUtils';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -585,17 +586,19 @@ export function IdeCompose() {
 
   const providerModels = modelsByProvider[provider.toLowerCase()] || [];
   const managedAiMessage =
-    managedAi?.routingState === 'EXHAUSTED'
-      ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
-      : managedAi?.routingState === 'CHEAP_ONLY'
-        ? 'Cheap-only mode is active. Frontier and balanced calls can step down during execution.'
-        : managedAi?.routingState === 'FRONTIER_LOCKED'
-          ? 'Frontier models are paused for this cycle; lower-cost routed models remain available.'
-          : managedAi?.routingState === 'VALUE_MODE'
-            ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
-            : managedAi
-              ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
-              : 'Managed-AI balance unavailable; backend policy still applies.';
+    managedAi?.managed === false
+      ? formatManagedAiPlanMessage(managedAi)
+      : managedAi?.routingState === 'EXHAUSTED'
+        ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
+        : managedAi?.routingState === 'CHEAP_ONLY'
+          ? 'Cheap-only mode is active. Frontier and balanced calls can step down during execution.'
+          : managedAi?.routingState === 'FRONTIER_LOCKED'
+            ? 'Frontier models are paused for this cycle; lower-cost routed models remain available.'
+            : managedAi?.routingState === 'VALUE_MODE'
+              ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
+              : managedAi
+                ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
+                : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {
     setProjectId(id);
@@ -962,8 +965,12 @@ export function IdeCompose() {
                 >
                   <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI routing</strong>
                   {managedAi && (
-                    <IdeBadge kind={managedKind(managedAi.routingState)}>
-                      {managedAi.routingState}
+                    <IdeBadge
+                      kind={
+                        managedAi.managed === false ? 'ok' : managedKind(managedAi.routingState)
+                      }
+                    >
+                      {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
                     </IdeBadge>
                   )}
                 </div>
