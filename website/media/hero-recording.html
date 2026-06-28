@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ExecuteSpec hero recording source</title>
+  <style>
+    :root {
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --panel2: #eef1f5;
+      --ink: #111318;
+      --muted: #657081;
+      --faint: #94a0b1;
+      --line: #dce2eb;
+      --line2: #c8d0dc;
+      --blue: #4f7fe7;
+      --blue2: #274fba;
+      --teal: #2bb7a8;
+      --teal2: #176d64;
+      --green: #139a67;
+      --warn: #b88700;
+      --violet: #7c6be8;
+      --dark: #0b0d10;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 1280px;
+      height: 800px;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .stage {
+      width: 1280px;
+      height: 800px;
+      padding: 36px 48px;
+      position: relative;
+    }
+    .window {
+      width: 1184px;
+      height: 728px;
+      border: 1px solid #d4dbe7;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #fbfcfe;
+      box-shadow: 0 28px 70px rgba(17, 19, 24, 0.10);
+      position: relative;
+    }
+    .chrome {
+      height: 56px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      display: flex;
+      align-items: center;
+      padding: 0 22px;
+      gap: 16px;
+      font-weight: 700;
+    }
+    .dots { display: flex; gap: 8px; }
+    .dot { width: 12px; height: 12px; border-radius: 999px; }
+    .red { background: #ff5f57; }
+    .yellow { background: #ffbd2e; }
+    .green { background: #28c840; }
+    .app {
+      height: 672px;
+      display: grid;
+      grid-template-columns: 168px 1fr;
+    }
+    .side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 18px 14px;
+      color: #384252;
+      font-size: 14px;
+    }
+    .navitem {
+      height: 36px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-radius: 7px;
+      margin-bottom: 8px;
+    }
+    .navitem.active { background: #e9eefc; outline: 1px solid #cfd8f6; }
+    .side h5 {
+      margin: 28px 14px 10px;
+      font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--faint);
+      letter-spacing: .12em;
+    }
+    .side small { display: block; margin: 10px 14px; color: #687385; }
+    .main {
+      position: relative;
+      padding: 34px;
+      overflow: hidden;
+    }
+    .top-actions {
+      position: absolute;
+      right: 32px;
+      top: 24px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      color: #8590a1;
+    }
+    .start {
+      background: var(--blue);
+      color: #fff;
+      height: 34px;
+      padding: 0 18px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      font-weight: 800;
+      box-shadow: 0 6px 18px rgba(79,127,231,.24);
+    }
+    h1 {
+      font-size: 34px;
+      line-height: 1.05;
+      margin: 0 0 8px;
+      letter-spacing: -.03em;
+    }
+    .sub {
+      margin: 0 0 28px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .label {
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em;
+      color: #687385;
+      text-transform: uppercase;
+    }
+    .compose-grid {
+      display: grid;
+      grid-template-columns: 1.7fr 1fr;
+      gap: 20px;
+      max-width: 930px;
+    }
+    .compose-card { padding: 22px; min-height: 330px; }
+    .textarea {
+      margin-top: 14px;
+      height: 180px;
+      border: 1px solid var(--line2);
+      border-radius: 8px;
+      padding: 18px;
+      color: #303947;
+      font-size: 17px;
+      line-height: 1.5;
+      background: #fff;
+    }
+    .btn-outline {
+      display: inline-flex;
+      margin-top: 18px;
+      height: 44px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0 18px;
+      font-weight: 800;
+      background: #fff;
+    }
+    .field { margin-top: 16px; }
+    .field .name { color: var(--muted); font-size: 14px; margin-bottom: 7px; }
+    .select {
+      height: 44px;
+      border: 1px solid var(--line2);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      justify-content: space-between;
+      background: #fff;
+      font-size: 15px;
+    }
+    .ledger-strip {
+      margin-top: 20px;
+      padding: 18px 22px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      max-width: 930px;
+      background: #f9fbff;
+      border-color: #cfdcf8;
+    }
+    .metric .k {
+      color: var(--faint);
+      font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    .metric .v { font-size: 25px; font-weight: 850; letter-spacing: -.03em; }
+    .metric.cost .v { color: var(--green); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 930px;
+    }
+    .run-card {
+      padding: 18px;
+      min-height: 120px;
+    }
+    .run-card b { display: block; font-size: 16px; margin-bottom: 16px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      height: 27px;
+      padding: 0 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 850;
+      color: var(--green);
+      background: rgba(19,154,103,.13);
+    }
+    .score { float: right; color: var(--green); font-weight: 850; }
+    .plan-grid, .live-grid, .result-grid {
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 22px;
+      max-width: 930px;
+    }
+    .plan, .summary, .tasks, .token-panel, .signals, .final-ledger { padding: 24px; }
+    .task {
+      height: 56px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      display: grid;
+      grid-template-columns: 30px 1fr auto;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      margin-top: 14px;
+      background: #fbfcfe;
+    }
+    .num {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #eef3ff;
+      color: var(--blue2);
+      display: grid;
+      place-items: center;
+      font-weight: 850;
+      font-size: 12px;
+    }
+    .task small, .row small { color: var(--faint); font-weight: 650; }
+    .approve {
+      margin-top: 22px;
+      height: 44px;
+      border-radius: 9px;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 850;
+    }
+    .guard {
+      padding: 18px;
+      background: #f7fbfa;
+      border: 1px solid #bfe9df;
+      border-radius: 10px;
+      color: var(--teal2);
+      font-weight: 850;
+      margin: 16px 0 22px;
+    }
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #edf0f5;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .kv strong { color: var(--ink); }
+    .kv strong.money { color: var(--green); }
+    .task-row {
+      height: 43px;
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 13px;
+      margin-top: 12px;
+      background: #fbfcfe;
+    }
+    .state { width: 11px; height: 11px; border-radius: 999px; background: #bdc5d1; }
+    .state.done { background: var(--green); }
+    .state.work { background: var(--warn); }
+    .status { font: 800 10px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--faint); }
+    .status.done { color: var(--green); }
+    .status.work { color: var(--warn); }
+    .log {
+      margin-top: 30px;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #3d4654;
+      line-height: 2;
+    }
+    .log span { color: var(--blue2); margin-right: 14px; }
+    .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #e6eaf1;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .fill {
+      height: 100%;
+      width: var(--w, 50%);
+      border-radius: 999px;
+      background: var(--c, var(--blue));
+    }
+    .token-line { margin-top: 20px; }
+    .token-line .v { font-size: 28px; font-weight: 900; letter-spacing: -.03em; }
+    .spend {
+      margin-top: 26px;
+      background: #f7fbfa;
+      border: 1px solid #bfe9df;
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .spend strong { color: var(--green); font-size: 28px; }
+    .result-title { display: flex; align-items: center; gap: 12px; }
+    .ledger-row {
+      display: grid;
+      grid-template-columns: 1fr 88px 88px 62px;
+      gap: 10px;
+      align-items: center;
+      height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 14px;
+      margin-top: 12px;
+      background: #fbfcfe;
+      font-size: 13px;
+    }
+    .ledger-row code { color: var(--muted); font-size: 11px; }
+    .total {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 10px;
+      background: #f7fbfa;
+      border: 1px solid #bfe9df;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--teal2);
+      font-weight: 850;
+    }
+    .total strong { color: var(--green); font-size: 28px; }
+    .pr {
+      max-width: 930px;
+      padding: 34px;
+      background: #0f131a;
+      color: #edf2f7;
+      border: 1px solid #283241;
+      border-radius: 14px;
+      min-height: 520px;
+    }
+    .pr h2 { font-size: 34px; margin: 18px 0 8px; letter-spacing: -.03em; }
+    .prbox {
+      border: 1px solid #263241;
+      background: #151b24;
+      border-radius: 10px;
+      padding: 22px;
+      margin-top: 22px;
+      color: #cbd5e1;
+    }
+    .pr code {
+      display: block;
+      font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+      line-height: 2;
+      color: #cbd5e1;
+    }
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      min-width: 540px;
+      max-width: 760px;
+      height: 36px;
+      border: 1px solid #cfd8e8;
+      border-radius: 10px;
+      background: rgba(255,255,255,.96);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-weight: 850;
+      font-size: 14px;
+      box-shadow: 0 8px 22px rgba(17,19,24,.08);
+      white-space: nowrap;
+    }
+    .caption::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      background: var(--green);
+      border-radius: 999px;
+    }
+    [data-scene] { display: none; }
+    [data-scene].active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="window">
+      <div class="chrome">
+        <div class="dots"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+        <span id="title">Start · ExecuteSpec</span>
+      </div>
+      <div class="app">
+        <aside class="side">
+          <div class="navitem" data-nav="Start">+ <span>Start</span></div>
+          <div class="navitem" data-nav="Work">◦ <span>Work</span></div>
+          <div class="navitem" data-nav="Projects">◦ <span>Projects</span></div>
+          <div class="navitem">◦ <span>Team</span></div>
+          <div class="navitem">◦ <span>Setup</span></div>
+          <h5>RECENT WORK</h5>
+          <small>Token ledger export</small>
+          <small>OAuth callback hardening</small>
+          <small>CI autofix checks</small>
+          <h5>PROJECTS</h5>
+          <small>Checkout API</small>
+          <small>Surface Test</small>
+          <h5>OPERATOR</h5>
+          <small>Admin</small>
+          <small>Benchmarks</small>
+        </aside>
+        <main class="main">
+          <div class="top-actions"><span class="start">+ Start</span><span>⌘</span><span>☼</span><span>○</span></div>
+
+          <section data-scene="workspace">
+            <h1>Start work</h1>
+            <p class="sub">Describe the change. We keep technical defaults out of the way.</p>
+            <div class="cards">
+              <div class="panel run-card"><b>Add OAuth2 callback hardening</b><span class="pill">COMPLETE</span><span class="score">91</span></div>
+              <div class="panel run-card"><b>Token ledger export for runs</b><span class="pill">COMPLETE</span><span class="score">88</span></div>
+              <div class="panel run-card"><b>CI autofix for failed checks</b><span class="pill">COMPLETE</span><span class="score">94</span></div>
+              <div class="panel run-card"><b>Architecture refresh</b><span class="pill">COMPLETE</span><span class="score">91</span></div>
+              <div class="panel run-card"><b>Verified score report polish</b><span class="pill">COMPLETE</span><span class="score">88</span></div>
+              <div class="panel run-card"><b>Background job cleanup</b><span class="pill">COMPLETE</span><span class="score">94</span></div>
+            </div>
+          </section>
+
+          <section data-scene="compose">
+            <h1>Start work</h1>
+            <p class="sub">Ask before coding. Show spend before execution.</p>
+            <div class="compose-grid">
+              <div class="panel compose-card">
+                <div class="label">What should change?</div>
+                <div class="textarea" id="prompt"></div>
+                <div class="btn-outline">✦ Improve request</div>
+              </div>
+              <div class="panel compose-card">
+                <div class="label">Run setup</div>
+                <div class="field"><div class="name">Provider</div><div class="select">DeepSeek · Cheap-fast <span>⌄</span></div></div>
+                <div class="field"><div class="name">Model · Beta</div><div class="select">Recommended <span>⌄</span></div></div>
+                <div class="field"><div class="name">Approval</div><div class="select">Ask before coding <span>⌄</span></div></div>
+              </div>
+            </div>
+            <div class="panel ledger-strip">
+              <div class="metric"><div class="k">Input</div><div class="v">42.8k</div></div>
+              <div class="metric"><div class="k">Output</div><div class="v">5.4k</div></div>
+              <div class="metric"><div class="k">Cache read</div><div class="v">18.1k</div></div>
+              <div class="metric cost"><div class="k">Est. cost</div><div class="v">$0.07</div></div>
+            </div>
+          </section>
+
+          <section data-scene="plan">
+            <h1>Approve the plan before execution starts</h1>
+            <p class="sub">Task list, token estimate, route, and cap are visible before coding.</p>
+            <div class="plan-grid">
+              <div class="panel plan">
+                <div class="label">Plan</div>
+                <div class="task"><span class="num">1</span><b>Expose token ledger fields</b><small>LOW</small></div>
+                <div class="task"><span class="num">2</span><b>Render live spend meter</b><small>MEDIUM</small></div>
+                <div class="task"><span class="num">3</span><b>Attach final provider ledger</b><small>MEDIUM</small></div>
+                <div class="task"><span class="num">4</span><b>Add visibility tests</b><small>LOW</small></div>
+              </div>
+              <div class="panel summary">
+                <div class="label">Approval summary</div>
+                <div class="guard">No execution tokens spent yet</div>
+                <div class="kv"><span>Estimated input</span><strong>189k</strong></div>
+                <div class="kv"><span>Estimated output</span><strong>22k</strong></div>
+                <div class="kv"><span>Cache read target</span><strong>40–55%</strong></div>
+                <div class="kv"><span>Hard cap</span><strong class="money">$2.00</strong></div>
+                <div class="approve">Approve and run</div>
+              </div>
+            </div>
+          </section>
+
+          <section data-scene="live">
+            <h1>Live run · R-c79e84</h1>
+            <p class="sub"><span id="live-sub">2/4 tasks · $0.20 spent</span></p>
+            <div class="live-grid">
+              <div class="panel tasks">
+                <div class="label">Tasks</div>
+                <div class="task-row"><span class="state done"></span><b>DTO + API fields</b><span class="status done">DONE</span></div>
+                <div class="task-row"><span class="state done"></span><b>Live token panel</b><span class="status done">DONE</span></div>
+                <div class="task-row"><span class="state work"></span><b>Final report ledger</b><span class="status work">WORKING</span></div>
+                <div class="task-row"><span class="state"></span><b>Regression tests</b><span class="status">QUEUED</span></div>
+                <div class="log">
+                  <div><span>00:01 planner</span>approved plan; cap=$2.00</div>
+                  <div><span>02:14 worker</span>readFile ValidationReportService.java</div>
+                  <div><span>05:40 worker</span>editFile RunCostTracker.java</div>
+                  <div><span>09:18 build</span>mvn test -Dtest=RunTokenLedgerTest</div>
+                </div>
+              </div>
+              <div class="panel token-panel">
+                <div class="label">Token transparency</div>
+                <div class="token-line"><div class="metric"><div class="k">Input tokens</div><div class="v" id="inTok">129,572</div></div><div class="bar"><div class="fill" id="inBar"></div></div></div>
+                <div class="token-line"><div class="metric"><div class="k">Cache read</div><div class="v" id="cacheTok">69,272</div></div><div class="bar"><div class="fill" id="cacheBar" style="--c:var(--teal)"></div></div></div>
+                <div class="token-line"><div class="metric"><div class="k">Output tokens</div><div class="v" id="outTok">15,681</div></div><div class="bar"><div class="fill" id="outBar" style="--c:var(--violet)"></div></div></div>
+                <div class="spend"><span>Live spend<br><small>against approved $2.00 cap</small></span><strong id="spend">$0.20</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <section data-scene="result">
+            <div class="result-title"><h1>Token transparency panel shipped</h1><span class="pill">READY</span></div>
+            <p class="sub">Verified score 91/100 · clean completion</p>
+            <div class="result-grid">
+              <div class="panel signals">
+                <div class="label">Signals</div>
+                <div class="kv"><span>Build</span><strong class="money">green</strong></div>
+                <div class="kv"><span>Tests</span><strong class="money">28/28 passing</strong></div>
+                <div class="kv"><span>Reviewer</span><strong class="money">clean</strong></div>
+                <div class="kv"><span>Files changed</span><strong>6</strong></div>
+                <div class="kv"><span>Pipeline</span><strong>PASSED_WITH_FIXES</strong></div>
+              </div>
+              <div class="panel final-ledger">
+                <div class="label">Final token ledger</div>
+                <div class="ledger-row"><b>Planner</b><code>42.8k in</code><code>5.4k out</code><b>$0.07</b></div>
+                <div class="ledger-row"><b>Worker</b><code>146k in</code><code>17.3k out</code><b>$0.21</b></div>
+                <div class="ledger-row"><b>Reviewer</b><code>38.9k in</code><code>4.1k out</code><b>$0.04</b></div>
+                <div class="ledger-row"><b>Cache saved</b><code>104.2k</code><code>45.7%</code><b style="color:var(--green)">-$0.09</b></div>
+                <div class="total"><span>Total billed</span><strong>$0.32</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <section data-scene="pr">
+            <div class="pr">
+              <small>navneet/checkout-api</small>
+              <h2>Add token transparency panel to run detail</h2>
+              <span class="pill">Ready to merge</span>
+              <span class="pill" style="background:#172b55;color:#9dbbff">verified score 91</span>
+              <div class="prbox"><b>ExecuteSpec verdict</b><br>Build green · 28 tests passed · reviewer clean · final token ledger attached</div>
+              <div class="prbox">
+                <code>Planner tokens: 42.8k input / 5.4k output / $0.07</code>
+                <code>Worker tokens: 146.0k input / 17.3k output / $0.21</code>
+                <code>Reviewer tokens: 38.9k input / 4.1k output / $0.04</code>
+                <code>Cache read: 104.2k tokens saved</code>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <div class="caption" id="caption">Ship PRs your team will actually merge.</div>
+  </div>
+
+  <script>
+    const promptText = 'Add token transparency to every run: estimate before approval, live input/output/cache tokens while coding, and final cost by provider.';
+    const scenes = [
+      ['workspace', 0, 6, 'Ship PRs your team will actually merge.', 'Start · ExecuteSpec', 'Start'],
+      ['compose', 6, 15, 'Write the change in plain English. See estimated tokens before execution.', 'Start · ExecuteSpec', 'Start'],
+      ['plan', 15, 24, 'Approve the task list, model route, token estimate, and hard dollar cap.', 'Plan gate · ExecuteSpec', 'Work'],
+      ['live', 24, 38, 'Watch input, output, cache-read tokens, and spend while agents work.', 'Live · ExecuteSpec', 'Work'],
+      ['result', 38, 47, 'The final report explains the score and provider cost ledger.', 'Result · ExecuteSpec', 'Work'],
+      ['pr', 47, 54, 'A real PR, with validation and token transparency attached.', 'Pull request · GitHub', 'Projects'],
+    ];
+    const fmt = n => Math.round(n).toLocaleString('en-US');
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const ease = x => 0.5 - 0.5 * Math.cos(Math.PI * clamp(x, 0, 1));
+    function setScene(name) {
+      document.querySelectorAll('[data-scene]').forEach(el => el.classList.toggle('active', el.dataset.scene === name));
+    }
+    function renderAt(t) {
+      const scene = scenes.find(s => t >= s[1] && t < s[2]) || scenes[scenes.length - 1];
+      setScene(scene[0]);
+      document.getElementById('caption').textContent = scene[3];
+      document.getElementById('title').textContent = scene[4];
+      document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === scene[5]));
+
+      const composeP = ease((t - 7) / 6);
+      document.getElementById('prompt').textContent = promptText.slice(0, Math.floor(promptText.length * composeP));
+
+      const liveP = ease((t - 24) / 14);
+      const input = 42800 + 146000 * liveP;
+      const cache = 18100 + 86100 * liveP;
+      const output = 5400 + 17300 * liveP;
+      const spend = 0.03 + 0.29 * liveP;
+      document.getElementById('inTok').textContent = fmt(input);
+      document.getElementById('cacheTok').textContent = fmt(cache);
+      document.getElementById('outTok').textContent = fmt(output);
+      document.getElementById('spend').textContent = '$' + spend.toFixed(2);
+      document.getElementById('live-sub').textContent = `${Math.min(4, Math.floor(1 + liveP * 4))}/4 tasks · $${spend.toFixed(2)} spent`;
+      document.getElementById('inBar').style.setProperty('--w', `${Math.min(100, input / 210000 * 100)}%`);
+      document.getElementById('cacheBar').style.setProperty('--w', `${Math.min(100, cache / 125000 * 100)}%`);
+      document.getElementById('outBar').style.setProperty('--w', `${Math.min(100, output / 26000 * 100)}%`);
+    }
+    window.renderAt = renderAt;
+    renderAt(0);
+  </script>
+</body>
+</html>

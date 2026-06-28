@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- 2026-05-10 (mobile audit) — `viewport-fit=cover` opts the page into
+         iOS Safari's safe-area inset support so the body draws under the
+         notch / home-indicator and we can offset content with
+         env(safe-area-inset-*). Pairs with the safe-area rules added in
+         the global stylesheet below. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>ExecuteSpec — AI that ships pull requests your team actually merges</title>
+    
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-Y6JSSQ2Y83');
+    </script>
+
+    <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
+    <meta name="description" content="Write a spec in plain English. ExecuteSpec plans it, codes it across one repo or twenty, runs your tests, reviews it, and opens a pull request with a deterministic Ready / Needs review / Failed verdict. Free 200 ES AI credits/mo · Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
+    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
+    <meta name="author" content="ExecuteSpec">
+    <meta name="publisher" content="ExecuteSpec">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="rating" content="General">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="format-detection" content="telephone=no">
+    <!-- R-303 (Wave 6) — both theme-color values now match --c-graphite-0
+         (#0B0D10) so the browser address-bar tint, the page background,
+         and the PWA manifest background all stop drifting. -->
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#0B0D10">
+    <meta name="color-scheme" content="dark">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ExecuteSpec">
+    <meta name="application-name" content="ExecuteSpec">
+    <meta name="generator" content="ExecuteSpec">
+    <link rel="icon" type="image/svg+xml" href="assets/brand/merge-rail/executespec-merge-rail-favicon.svg">
+    <link rel="alternate icon" type="image/png" href="assets/brand/merge-rail/executespec-merge-rail-app-icon-192.png">
+    <link rel="apple-touch-icon" href="assets/brand/merge-rail/executespec-merge-rail-app-icon-192.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="canonical" href="https://executespec.ai/">
+    <link rel="alternate" hreflang="en" href="https://executespec.ai/">
+    <link rel="alternate" hreflang="x-default" href="https://executespec.ai/">
+
+    <!-- ── Agentic Search / LLM Crawler Policy ──────────────────────────────── -->
+    <!-- Signals to major LLM crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended,
+         AppleBot-Extended) that this page is cleared for indexing + snippet use in AI
+         answers. Training restrictions are set via /robots.txt (separate file). -->
+    <meta name="GPTBot" content="index, follow">
+    <meta name="ClaudeBot" content="index, follow">
+    <meta name="PerplexityBot" content="index, follow">
+    <meta name="Google-Extended" content="index, follow">
+    <meta name="AppleBot-Extended" content="index, follow">
+    <meta name="CCBot" content="index, follow">
+
+    <!-- ── Open Graph / Twitter for Social Sharing + Chatbot Previews ───────── -->
+    <meta property="og:site_name" content="ExecuteSpec">
+    <meta property="og:title" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
+    <meta property="og:description" content="Plan, build, test, review, open a PR. We attach the verdict (Ready / Needs review / Failed) to every one of yours. Pro $29/mo · Team $39/seat BYOK · Enterprise custom.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://executespec.ai/">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:image" content="https://executespec.ai/images/og-hero.png">
+    <meta property="og:image:secure_url" content="https://executespec.ai/images/og-hero.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@executespec">
+    <meta name="twitter:creator" content="@executespec">
+    <meta name="twitter:title" content="ExecuteSpec — AI that ships pull requests your team will merge">
+    <meta name="twitter:description" content="Plan, build, test, review, open PR. Pro $29/mo. Team $39/seat BYOK. Enterprise custom contract + DPA.">
+    <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
+    <meta name="twitter:image:alt" content="ExecuteSpec — AI that ships PRs your team will merge.">
+
+    <!-- Structured Data for Agentic Search (GEO/SEO) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "ExecuteSpec",
+      "alternateName": "ExecuteSpec — AI that ships pull requests your team will actually merge",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Cloud, Web",
+      "description": "ExecuteSpec is an AI coding platform that ships pull requests your team will actually merge. Unlike prompt-based AI coding tools that produce diffs, ExecuteSpec runs a full pipeline — planner → approval gate → executor → reviewer → final build + tests → PR — and publishes a Ready / Needs review / Failed verdict on every run. Designed as a reliable alternative to Cursor, GitHub Copilot, Devin, Lovable, Bolt.new, v0, Sourcegraph Cody, and Claude Code.",
+      "offers": {
+        "@type": "AggregateOffer",
+        "lowPrice": "0",
+        "highPrice": "39",
+        "priceCurrency": "USD"
+      },
+      "creator": {
+        "@type": "Organization",
+        "name": "ExecuteSpec",
+        "url": "https://executespec.ai"
+      },
+      "featureList": [
+        "AI pipeline that opens real PRs with a deterministic Ready / Needs review / Failed verdict",
+        "Autonomous CI/CD pipeline (syntax, type, lint, unit test gates)",
+        "Single pipeline: planner → plan-approval gate → executor → reviewer → build + test gate → PR with verdict",
+        "Multi-repo project workspace with architecture docs + per-repo codemaps",
+        "Token transparency with plan-time estimates, live input/output/cache token counters, and final provider cost ledger",
+        "Project memory with auto-compaction (every new run starts from your current state)",
+        "Project chat with RAG over repos and uploaded docs",
+        "Tech debt panel with category, severity, and file hotspot tracking",
+        "Figma URL to design-compliance score",
+        "React Native + Expo codegen for Android and iOS",
+        "TDD mode (test-first task decomposition)",
+        "Bring Your Own Keys (BYOK) for Anthropic, OpenAI, and Gemini, plus OpenRouter as an Enterprise gateway",
+        "Agentic code review with auto-fix (wiring + general passes)",
+        "Per-org model matrix override and per-run provider + model pin (Enterprise)",
+        "JIRA and Confluence integration (Enterprise)",
+        "Org governance: spend caps, approval thresholds, repo allowlists (Team+)",
+        "RBAC + org audit trail (Enterprise)"
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [{
+        "@type": "Question",
+        "name": "What does ExecuteSpec actually do?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ExecuteSpec runs your feature request through a pipeline — planner → plan-approval gate → executor → reviewer (general + wiring passes) → final build + test gate — and opens a pull request on your repo with a deterministic verdict (Ready / Needs review / Failed) attached. Unlike inline AI coding tools that produce diffs you have to validate yourself, ExecuteSpec runs the validation and shows you the result."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How is ExecuteSpec different from inline AI coding tools (Cursor, Copilot, Continue)?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and only opens a PR when those gates pass (or labels it Needs review / Failed when they don't). The output is a real merge-able PR, not a diff suggestion."
+        }
+      }, {
+        "@type": "Question",
+        "name": "What makes ExecuteSpec different from other AI coding tools?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Unlike standard text-to-code generators, ExecuteSpec runs every AI-generated task through a deterministic validation chain — Syntax, Type, Lint, and Unit Tests — before the pull request is opened. The PR you receive carries a Ready / Needs review / Failed verdict from that chain, not the LLM's self-rating."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare as an alternative to Lovable, Bolt.new, emergent.sh, Cursor, or Windsurf?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Lovable, Bolt.new, v0, and emergent.sh are excellent for rapid zero-to-one prototyping in their own sandboxes. Cursor, Windsurf, and Claude Code are great inline copilots in your IDE. ExecuteSpec is neither — it's the merge-validated alternative: takes a feature request, runs autonomous code generation, runs the CI/CD validation chain (Syntax, Type, Lint, Test, reviewer), and opens a real PR on your repo with a verdict attached. Built for the merge step, not the typing step."
+        }
+      }, {
+        "@type": "Question",
+        "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. The Team tier ($39/seat/month, from 1 seat) and Enterprise are both BYOK — plug in your own Anthropic, OpenAI, or Google API keys, get unlimited managed-AI usage with zero per-run markup from us, and pay providers directly. Enterprise can also route through OpenRouter as a gateway. The Pro tier ($29/mo) uses managed keys — we pay the LLM costs and you get 2,000 ES AI credits per month. The Free tier (200 ES AI credits per month, no credit card) uses our managed-AI grant."
+        }
+      }, {
+        "@type": "Question",
+        "name": "What enterprise use cases does ExecuteSpec support?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ExecuteSpec excels at clearing engineering tech debt through merge-validated AI runs. Key use cases include automated unit test coverage generation, clearing JIRA backlogs autonomously, and modernizing legacy frameworks (e.g., migrating Spring Boot 2.x to 3.x). Each run opens a PR with a Ready / Needs review / Failed verdict so reviewers know where to start."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Cursor?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Cursor is an AI-powered IDE — you edit code inline with the model as a pair programmer. ExecuteSpec is a hosted delivery pipeline — you write a spec, the platform generates a plan, executes tasks, runs validation gates, and produces a PR with a Ready / Needs review / Failed verdict. Cursor shines for line-level editing; ExecuteSpec shines when you want a structured spec to produce merged, tested code without sitting at the keyboard. Many teams use both."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Windsurf?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a task plan, validates the work against build + test gates, and opens a PR with a deterministic verdict. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a merged PR with a deterministic verdict."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Claude Code?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Claude Code is Anthropic's terminal-first coding agent — run locally, reads/writes files in your current workspace, pay Anthropic directly by token. ExecuteSpec is a hosted multi-agent platform with a browser UI, multi-repo project workspaces, architecture doc generation, tech-debt tracking, and team features (RBAC, org audit trail). Both support BYOK for Anthropic. Claude Code is the minimalist CLI; ExecuteSpec is the workbench around it."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to GitHub Copilot?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "GitHub Copilot is primarily an autocomplete and chat assistant inside your IDE. ExecuteSpec operates at a higher altitude: you give it a spec, it plans the decomposition, executes multi-step tasks across one or more repos, runs CI validation, and ships a PR. Copilot is great for 'finish this function'; ExecuteSpec is for 'ship this feature'. Copilot has deeper IDE integration; ExecuteSpec has deeper verification, project context, and multi-repo orchestration."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Lovable, Bolt.new, or v0?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Lovable, Bolt.new, and v0 are zero-to-one web prototyping tools — type a prompt, get a running web app in minutes. Optimised for greenfield demos. Their output often struggles with complex business logic, multi-repo codebases, test coverage, and day-two maintenance. ExecuteSpec enters where those leave off: operates on existing codebases, enforces validation gates on every task, tracks tech debt over time, supports multi-repo projects, generates architecture documentation. Use Bolt for a 10-minute prototype; use ExecuteSpec for verified production code."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Devin?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Devin (from Cognition Labs) is an autonomous coding agent that goes from ticket to merged PR with minimal human input. ExecuteSpec shares the ambition but differs on transparency and pricing. ExecuteSpec always pauses at a plan-approval gate before burning compute, surfaces every tool call via live SSE, produces a deterministic Ready / Needs review / Failed verdict from real signals (build status, test pass rate, reviewer outcome — not LLM self-rating), and starts free, then $29/mo. Devin starts at $500+/mo and is optimised for full autonomy. Choose Devin for pure autonomy; ExecuteSpec for autonomy with a reviewable plan gate and transparent scoring."
+        }
+      }]
+    }
+    </script>
+
+    <!-- HowTo Schema for Agentic Search (AEO) — explains the ExecuteSpec PR-pipeline workflow -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to ship a merge-ready pull request with ExecuteSpec",
+      "description": "A step-by-step guide: write a feature request, let ExecuteSpec's AI pipeline generate + validate the code, review the PR with its deterministic Ready / Needs review / Failed verdict, and merge.",
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Write a specification",
+          "text": "Write your feature request in plain English — what you want built, any constraints, the tech stack. ExecuteSpec's planner turns it into a structured plan you read + approve before any code is written."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Review the AI-generated task plan",
+          "text": "ExecuteSpec's planning agent decomposes your feature request into a sequenced DAG of atomic tasks. The plan-approval gate pauses the run there — you read + edit + approve the plan before any compute is burned."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Autonomous code generation with validation",
+          "text": "Worker agents execute each task and every output passes through a deterministic validation chain: Syntax Check, Type Check, Strict Linting, and Automated Unit Tests. Failed gates trigger automatic retries with error context injection."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Agentic code review and merge",
+          "text": "After all tasks pass validation, ReviewerAgentV2 inspects the merged codebase for critical issues and auto-fixes them. The integration branch is fast-forwarded into main only on full success."
+        }
+      ]
+    }
+    </script>
+
+    <!-- Organization Schema — named-entity resolution for LLM answer engines -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": "https://executespec.ai/#organization",
+      "name": "ExecuteSpec",
+      "alternateName": "ExecuteSpec AI",
+      "url": "https://executespec.ai/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://executespec.ai/assets/brand/merge-rail/executespec-merge-rail-app-icon-512.png",
+        "width": 512,
+        "height": 512
+      },
+      "description": "ExecuteSpec is an AI coding platform that ships pull requests your team can actually merge — for one repo or for twenty. Multi-repo project workspaces, deterministic Ready / Needs review / Failed verdict on every PR, and autonomous CI/CD validation.",
+      "foundingDate": "2025",
+      "contactPoint": [
+        {
+          "@type": "ContactPoint",
+          "email": "admin@executespec.ai",
+          "contactType": "sales"
+        },
+        {
+          "@type": "ContactPoint",
+          "email": "admin@executespec.ai",
+          "contactType": "customer support"
+        }
+      ],
+      "sameAs": [
+        "https://www.linkedin.com/company/executespec",
+        "https://www.linkedin.com/in/navneetprabhakar/"
+      ],
+      "founder": {
+        "@type": "Person",
+        "name": "Navneet Prabhakar",
+        "jobTitle": "Founder",
+        "sameAs": "https://www.linkedin.com/in/navneetprabhakar/"
+      }
+    }
+    </script>
+
+    <!-- WebSite Schema — enables Google sitelinks search box + canonical entity -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": "https://executespec.ai/#website",
+      "url": "https://executespec.ai/",
+      "name": "ExecuteSpec",
+      "description": "AI that ships PRs your team merges — multi-repo, plan-approval gate, deterministic Ready / Needs review / Failed verdict on every run.",
+      "publisher": { "@id": "https://executespec.ai/#organization" },
+      "inLanguage": "en-US"
+    }
+    </script>
+
+    <!-- Product Schema with per-tier Offers — gives LLMs precise pricing to cite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      "name": "ExecuteSpec",
+      "description": "AI coding platform that ships pull requests your team will actually merge. Four tiers — Free (200 ES AI credits/month, no card), Pro $29/mo (2,000 ES AI credits/month), Team $39/seat (from 1 seat, BYOK + per-seat collaboration + audit trail), Enterprise (custom contract + signed DPA).",
+      "brand": { "@id": "https://executespec.ai/#organization" },
+      "category": "Developer Tools",
+      "image": "https://executespec.ai/images/og-hero.png",
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Free",
+          "description": "200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, verified 0-100 score on every run.",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "0",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Pro",
+          "description": "2,000 ES AI credits per month for one developer. Managed keys (we pay the LLM), all providers, 2 projects, 2 repos per project, plan & review gate, priority email support.",
+          "price": "29",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "29",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Team",
+          "description": "Per-seat collaboration — from 1 seat, up to 20 seats. BYOK runs (route through your own Anthropic / OpenAI / Google keys, zero per-run markup from us), org spend caps + approval thresholds, audit log export, activity feed, shared spec templates. $39 per seat per month.",
+          "price": "39",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "39",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "referenceQuantity": {
+              "@type": "QuantitativeValue",
+              "value": "1",
+              "unitCode": "C62",
+              "unitText": "seat"
+            },
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Enterprise",
+          "description": "Everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, repo allowlists + spend approval thresholds, JIRA + Confluence integration, priority support.",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "mailto:admin@executespec.ai",
+          "priceSpecification": {
+            "@type": "PriceSpecification",
+            "priceCurrency": "USD",
+            "description": "Custom enterprise pricing — contact admin@executespec.ai"
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- BreadcrumbList — helps crawlers understand the single-page structure -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://executespec.ai/" },
+        { "@type": "ListItem", "position": 2, "name": "Project Workspace", "item": "https://executespec.ai/#project-workspace" },
+        { "@type": "ListItem", "position": 3, "name": "Dual-Mode Execution", "item": "https://executespec.ai/#dual-mode" },
+        { "@type": "ListItem", "position": 4, "name": "Quality Gates", "item": "https://executespec.ai/#quality" },
+        { "@type": "ListItem", "position": 5, "name": "Pricing", "item": "https://executespec.ai/#pricing" },
+        { "@type": "ListItem", "position": 6, "name": "FAQ", "item": "https://executespec.ai/#faq" }
+      ]
+    }
+    </script>
+
+    <!-- DefinedTermSet — glossary of terms LLMs often mis-define. Helps GEO (Generative
+         Engine Optimization) by giving answer engines our canonical definition of each
+         domain term so citations come back accurate. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "DefinedTermSet",
+      "name": "ExecuteSpec Glossary",
+      "hasDefinedTerm": [
+        {
+          "@type": "DefinedTerm",
+          "name": "Merge-validated AI run",
+          "description": "An ExecuteSpec run from feature request to opened pull request, gated by a deterministic validation pipeline (planner → plan-approval → executor → reviewer → final build + tests). The PR carries a Ready / Needs review / Failed verdict from the gate, not the LLM's self-rating. Built for the merge step, not the typing step.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Run verdict",
+          "description": "The label ExecuteSpec attaches to every PR it opens: Ready (build green, tests pass, reviewer CLEAN), Needs review (some signals failed but the diff is recoverable), or Failed (build broke or reviewer found unresolved blockers). Derived from real signals — final-build status, test pass rate, reviewer verdict (CLEAN / FIXED / UNRESOLVED / FAILED) — not from the LLM rating itself.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Project workspace",
+          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Pro, Team, and Enterprise tiers.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Plan-approval gate",
+          "description": "The human-in-the-loop step in every ExecuteSpec run. The planner emits a structured plan (task DAG + estimated cost + hard constraints); the run pauses there until you approve. Lets you edit or reject before compute is burned. Devin runs in the dark; ExecuteSpec shows you the plan.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "ES AI Credit",
+          "description": "The unit of managed-AI allowance on ExecuteSpec. $1 = 100 ES AI credits. Managed-AI LLM calls debit credits from your monthly grant at real model cost; frontier models step down automatically near your cap and failed calls are not charged. Free includes 200 credits/month, Pro 2,000; Team and Enterprise are BYOK and bypass the grant.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "BYOK",
+          "description": "Bring Your Own Keys. ExecuteSpec's Team tier ($39/seat/month, from 1 seat) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Google API keys; Enterprise can additionally route through OpenRouter as a gateway. ExecuteSpec adds zero per-run markup to provider costs; customers pay the LLM provider directly and ExecuteSpec only for the seat or platform fee.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Execution View",
+          "description": "An Enterprise-tier feature for multi-repo, multi-solution launches. Decomposes a single feature across multiple linked repos, tracks cross-repo handovers and dependencies, and opens coordinated pull requests per repo with cross-links. Backend, frontend, and infra move together in one launch.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        }
+      ]
+    }
+    </script>
+
+    <!-- Preconnect hints for third-party origins used on this page -->
+    <link rel="preconnect" href="https://dev.executespec.ai" crossorigin>
+    <link rel="dns-prefetch" href="https://dev.executespec.ai">
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+    <link rel="dns-prefetch" href="https://www.google-analytics.com">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- 2026-05-11 — DM Sans family request retired alongside the
+         brand unification on JetBrains Mono. JetBrains is requested
+         with weight 500 added so the existing 500-weight CSS rules
+         resolve (DM Sans 500 was the implicit source on the old chain). -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+
+    <style>
+        /* ─────────────────────────────────────────────────────────────
+           ExecuteSpec public site.
+           Mobile-first. Brand system follows the Merge Rail logo direction:
+           graphite, ink, rail-blue, rail-teal, and restrained semantic colors.
+           ───────────────────────────────────────────────────────────── */
+        :root {
+            --bg: #F6F7F8;
+            --card-bg: #FFFFFF;
+            --card-elev: #EEF1F5;
+            --ink: #111318;
+            --ink-soft: #252A33;
+            --text-dim: #5F6673;
+            --text-mute: #8B93A0;
+            --hairline: #DDE2EA;
+            --hairline-strong: #B8C0CC;
+
+            --hero-bg-1: #0B0D10;
+            --hero-bg-2: #171B22;
+            --hero-text: #ECEEF2;
+            --hero-text-dim: rgba(236, 238, 242, 0.66);
+
+            --rail-blue: #4F7FE7;
+            --rail-blue-soft: #E8EEFF;
+            --rail-blue-text: #274FBA;
+            --rail-teal: #2BB7A8;
+            --rail-teal-soft: #DDF5F1;
+            --rail-teal-text: #176D64;
+            --success: #139A67;
+            --success-soft: #DCF3E9;
+            --warning: #B88700;
+            --warning-soft: #F4E8BF;
+            --danger: #D14B4B;
+            --danger-soft: #F5DADA;
+            --violet: #7C6BE8;
+            --violet-soft: #E7E4FB;
+
+            --signal-y: var(--warning);
+            --signal-y-soft: var(--warning-soft);
+            --signal-y-text: #674C00;
+            --coral: var(--danger);
+            --coral-soft: var(--danger-soft);
+            --coral-text: #8F2F2F;
+            --mint: var(--rail-teal);
+            --mint-soft: var(--rail-teal-soft);
+            --mint-text: #0B0D10;
+            --mint-text-on-light: var(--success);
+            --lavender: var(--violet);
+            --lavender-soft: var(--violet-soft);
+
+            --r-sm: 10px;
+            --r-md: 16px;
+            --r-lg: 22px;
+            --r-xl: 28px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0B0D10;
+                --card-bg: #14171C;
+                --card-elev: #1B1F26;
+                --ink: #ECEEF2;
+                --ink-soft: #C9D1DB;
+                --text-dim: #9EA7B6;
+                --text-mute: #737C8B;
+                --hairline: rgba(255, 255, 255, 0.08);
+                --hairline-strong: rgba(255, 255, 255, 0.16);
+
+                --rail-blue-soft: rgba(91, 141, 239, 0.16);
+                --rail-blue-text: #9DBBFF;
+                --rail-teal-soft: rgba(122, 209, 200, 0.15);
+                --rail-teal-text: #7AD1C8;
+                --success-soft: rgba(16, 185, 129, 0.14);
+                --warning-soft: rgba(251, 191, 36, 0.14);
+                --danger-soft: rgba(209, 75, 75, 0.16);
+                --violet-soft: rgba(124, 107, 232, 0.16);
+
+                --signal-y-soft: var(--warning-soft);
+                --signal-y-text: #FBBF24;
+                --coral-soft: var(--danger-soft);
+                --coral-text: #F08A8A;
+                --mint-soft: var(--rail-teal-soft);
+                --mint-text-on-light: #7AD1C8;
+                --lavender-soft: var(--violet-soft);
+            }
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            font-size: 16px;
+            line-height: 1.55;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        a { color: inherit; text-decoration: none; }
+        .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+        ::selection { background: var(--rail-blue); color: #FFFFFF; }
+
+        /* ─────────── Top nav ─────────── */
+        .nav {
+            position: sticky; top: 0; z-index: 30;
+            background: rgba(246, 247, 248, 0.88);
+            backdrop-filter: saturate(180%) blur(16px);
+            -webkit-backdrop-filter: saturate(180%) blur(16px);
+            border-bottom: 1px solid var(--hairline);
+        }
+        @media (prefers-color-scheme: dark) { .nav { background: rgba(15, 16, 20, 0.88); } }
+        .nav .nav-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 14px 24px;
+            display: flex; align-items: center; gap: 16px;
+        }
+        .nav .logo {
+            display: flex; align-items: center; gap: 10px;
+            font-weight: 700; font-size: 17px; letter-spacing: -0.01em;
+        }
+        .logo-mark {
+            width: 32px; height: 32px;
+            display: block;
+            flex: 0 0 auto;
+        }
+        .nav .links {
+            display: none; gap: 24px;
+            margin-left: 24px;
+            font-size: 14px; color: var(--text-dim);
+        }
+        @media (min-width: 900px) { .nav .links { display: flex; } }
+        .nav .links a:hover { color: var(--ink); }
+        .nav .cta-row {
+            margin-left: auto;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .nav .cta-row .btn-sm {
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 13px; font-weight: 600;
+            background: transparent;
+            color: var(--ink);
+            white-space: nowrap;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+        }
+        .nav .cta-row .btn-sm.primary {
+            background: var(--ink); color: var(--bg);
+            font-weight: 700;
+            padding: 8px 18px;
+            box-shadow: 0 4px 14px rgba(14, 15, 18, 0.18);
+        }
+        .nav .cta-row .btn-sm.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 7px 20px rgba(14, 15, 18, 0.24), 0 0 0 3px rgba(79, 127, 231, 0.22);
+            opacity: 1;
+        }
+        .nav .cta-row .btn-sm:not(.primary):hover { opacity: 0.7; }
+        @media (max-width: 480px) {
+            .nav .nav-inner { padding: 12px 14px; gap: 6px; }
+            .nav .logo { font-size: 15px; }
+            .logo-mark { width: 28px; height: 28px; }
+            .nav .cta-row .btn-sm { padding: 7px 12px; font-size: 12px; }
+            /* Drop the bare "Sign in" link on very narrow screens — the primary CTA is enough. */
+            .nav .cta-row .btn-sm:not(.primary) { display: none; }
+        }
+
+        /* ─────────── Common container ─────────── */
+        .wrap { max-width: 1180px; min-width: 0; margin: 0 auto; padding: 0 24px; }
+        @media (max-width: 480px) { .wrap { padding: 0 18px; } }
+
+        /* ─────────── Hero ─────────── */
+        .hero {
+            padding: 80px 0 60px;
+            position: relative;
+            overflow: hidden;
+        }
+        @media (min-width: 920px) { .hero { padding: 112px 0 80px; } }
+        .hero .eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--signal-y-soft);
+            color: var(--signal-y-text);
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; font-weight: 600;
+            letter-spacing: 0.06em;
+            margin-bottom: 18px;
+        }
+        .hero h1 {
+            font-size: clamp(36px, 7vw, 76px);
+            font-weight: 600;
+            letter-spacing: -0.035em;
+            line-height: 0.98;
+            margin: 0 0 22px;
+            max-width: 18ch;
+        }
+        .hero h1 em {
+            font-style: normal;
+            color: var(--rail-blue);
+        }
+        .hero .lede {
+            font-size: clamp(16px, 1.4vw, 19px);
+            color: var(--text-dim);
+            max-width: 36em;
+            line-height: 1.55;
+            margin: 0 0 30px;
+        }
+        .hero .lede strong { color: var(--ink); font-weight: 600; }
+        .hero .cta-row {
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+        .hero .btn {
+            padding: 14px 22px;
+            border-radius: 999px;
+            font-size: 15px; font-weight: 600;
+            display: inline-flex; align-items: center; gap: 8px;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+        }
+        .hero .btn:active { transform: scale(0.98); }
+        .hero .btn.primary {
+            position: relative;
+            overflow: hidden;
+            background: var(--ink); color: var(--bg);
+            padding: 15px 28px;
+            font-weight: 700;
+            box-shadow: 0 8px 22px rgba(14, 15, 18, 0.2);
+        }
+        .hero .btn.primary:hover {
+            background: var(--ink-soft);
+            transform: translateY(-2px);
+            box-shadow: 0 14px 32px rgba(14, 15, 18, 0.24), 0 0 0 4px rgba(79, 127, 231, 0.2);
+        }
+        .hero .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--hairline-strong); }
+        .hero .btn.secondary:hover { background: var(--card-elev); }
+        .hero .pip {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; color: var(--text-mute);
+            margin-left: 6px;
+        }
+
+        .hero-stats {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 18px;
+            margin-top: 56px;
+            padding-top: 28px;
+            border-top: 1px solid var(--hairline);
+        }
+        .hero-stats .stat .v {
+            font-size: 28px; font-weight: 600;
+            letter-spacing: -0.025em;
+            color: var(--ink);
+        }
+        .hero-stats .stat .v.signal { color: var(--rail-blue-text); }
+        .hero-stats .stat .v.mint { color: var(--mint-text-on-light); }
+        .hero-stats .stat .v.coral { color: var(--violet); }
+        .hero-stats .stat .lbl {
+            font-size: 12px; color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        /* ─────────── Section heading ─────────── */
+        .section {
+            padding: 80px 0;
+            border-top: 1px solid var(--hairline);
+        }
+        @media (max-width: 600px) { .section { padding: 56px 0; } }
+        .section-eyebrow {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--text-mute);
+            margin-bottom: 14px;
+        }
+        .section-eyebrow.signal { color: var(--signal-y-text); }
+        .section-eyebrow.mint { color: var(--mint-text-on-light); }
+        .section-eyebrow.coral { color: var(--violet); }
+        .section h2 {
+            font-size: clamp(28px, 4vw, 44px);
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            line-height: 1.05;
+            margin: 0 0 14px;
+            max-width: 22ch;
+        }
+        .section .lede {
+            font-size: clamp(15px, 1.2vw, 17px);
+            color: var(--text-dim);
+            line-height: 1.55;
+            max-width: 56ch;
+            margin: 0 0 40px;
+        }
+
+        /* ─────────── How it works (pipeline cards) ─────────── */
+        .pipeline-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        @media (min-width: 720px) { .pipeline-grid { grid-template-columns: repeat(4, 1fr); } }
+        .pipe-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 24px;
+            position: relative;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .pipe-card:hover { transform: translateY(-2px); border-color: var(--hairline-strong); }
+        .pipe-card .num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; color: var(--text-mute);
+            letter-spacing: 0.1em;
+            margin-bottom: 14px;
+        }
+        .pipe-card .icon-bg {
+            width: 38px; height: 38px;
+            border-radius: 10px;
+            display: grid; place-items: center;
+            margin-bottom: 14px;
+            font-size: 18px;
+        }
+        .pipe-card.s1 .icon-bg { background: var(--signal-y-soft); }
+        .pipe-card.s2 .icon-bg { background: var(--coral-soft); }
+        .pipe-card.s3 .icon-bg { background: var(--lavender-soft); }
+        .pipe-card.s4 .icon-bg { background: var(--mint-soft); }
+        .pipe-card h3 {
+            font-size: 17px; font-weight: 600;
+            letter-spacing: -0.015em;
+            margin: 0 0 6px;
+        }
+        .pipe-card p {
+            font-size: 13.5px;
+            color: var(--text-dim);
+            line-height: 1.55;
+            margin: 0;
+        }
+
+        /* ─────────── Demo + token transparency ─────────── */
+        .demo-shell {
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(127,127,127,.18);
+            box-shadow: 0 24px 60px rgba(0,0,0,.18);
+            background: #0b0d10;
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        .demo-caption {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-dim);
+            margin: 14px auto 0;
+            max-width: 74ch;
+        }
+        .demo-caption strong { color: var(--ink); font-weight: 600; }
+        .token-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+            gap: 12px;
+            margin-top: 28px;
+        }
+        .token-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 22px;
+        }
+        .token-card .k {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            color: var(--text-mute);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .token-card .v {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            color: var(--ink);
+            margin-bottom: 8px;
+        }
+        .token-card p {
+            font-size: 13.5px;
+            line-height: 1.55;
+            color: var(--text-dim);
+            margin: 0;
+        }
+        .token-card.highlight {
+            background: linear-gradient(135deg, var(--hero-bg-1), var(--hero-bg-2));
+            border-color: var(--hero-bg-1);
+            color: var(--hero-text);
+        }
+        .token-card.highlight .k,
+        .token-card.highlight p { color: var(--hero-text-dim); }
+        .token-card.highlight .v { color: var(--hero-text); }
+
+        /* ─────────── Phone mock (mobile-first showcase) ─────────── */
+        .phone-mock-section {
+            background: linear-gradient(180deg, transparent, var(--card-elev));
+            padding: 80px 0 100px;
+            border-top: 1px solid var(--hairline);
+        }
+        .phone-mock-grid {
+            display: grid; gap: 48px;
+            grid-template-columns: 1fr;
+            align-items: center;
+        }
+        @media (min-width: 920px) {
+            .phone-mock-grid { grid-template-columns: 1fr 320px; gap: 80px; }
+        }
+        .phone-mock {
+            margin: 0 auto;
+            width: 290px;
+            background: var(--ink);
+            border-radius: 40px;
+            padding: 10px;
+            box-shadow: 0 24px 64px -16px rgba(14, 15, 18, 0.18), 0 60px 120px -20px rgba(14, 15, 18, 0.08);
+            position: relative;
+        }
+        .phone-mock::before {
+            content: ""; position: absolute;
+            top: 10px; left: 50%; transform: translateX(-50%);
+            width: 100px; height: 26px;
+            background: var(--ink); border-radius: 0 0 18px 18px;
+            z-index: 10;
+        }
+        .phone-mock .screen {
+            background: var(--bg);
+            border-radius: 30px;
+            padding: 40px 16px 16px;
+            overflow: hidden;
+            min-height: 540px;
+        }
+        .phone-mock .screen .hero-card {
+            background: linear-gradient(135deg, var(--hero-bg-1), var(--hero-bg-2));
+            color: var(--hero-text);
+            border-radius: 22px;
+            padding: 18px;
+            margin-bottom: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+        .phone-mock .screen .hero-card::before {
+            content: ""; position: absolute;
+            top: -30px; right: -30px;
+            width: 140px; height: 140px;
+            background: radial-gradient(circle, rgba(79, 127, 231, 0.18), transparent 65%);
+        }
+        .phone-mock .screen .hero-card .ribbon {
+            font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
+            text-transform: uppercase; color: var(--signal-y);
+            margin-bottom: 8px;
+        }
+        .phone-mock .screen .hero-card h4 {
+            font-size: 16px; font-weight: 600; margin: 0 0 12px; line-height: 1.25;
+        }
+        .phone-mock .screen .hero-card .bar {
+            height: 4px; background: rgba(255,255,255,0.14); border-radius: 2px; overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .phone-mock .screen .hero-card .bar .fill { width: 62%; height: 100%; background: linear-gradient(90deg, var(--signal-y), var(--mint)); }
+        .phone-mock .screen .hero-card .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 9px; color: rgba(251, 250, 246, 0.6); }
+        .phone-mock .screen .hero-card .stats b { display: block; font-size: 15px; color: var(--hero-text); font-weight: 600; letter-spacing: -0.02em; }
+        .phone-mock .screen .hero-card .stats .v-signal { color: var(--signal-y); }
+        .phone-mock .screen .hero-card .stats .v-mint { color: var(--mint); }
+        .phone-mock .screen .row {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: 14px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            display: grid;
+            grid-template-columns: 16px 1fr auto;
+            gap: 10px;
+            align-items: center;
+            font-size: 11px;
+        }
+        .phone-mock .screen .row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); margin: 0 auto; }
+        .phone-mock .screen .row .dot.s { background: var(--signal-y); }
+        .phone-mock .screen .row .title { font-weight: 500; }
+        .phone-mock .screen .row .score { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--mint-text-on-light); font-size: 11px; }
+        .phone-mock .screen .row .score.s { color: var(--signal-y-text); }
+
+        .phone-side h3 {
+            font-size: clamp(22px, 3vw, 30px);
+            font-weight: 600; letter-spacing: -0.02em;
+            margin: 0 0 12px;
+        }
+        .phone-side p {
+            font-size: 15px; color: var(--text-dim);
+            line-height: 1.55; max-width: 32ch;
+            margin: 0 0 24px;
+        }
+        .phone-side .feature-list {
+            list-style: none; padding: 0; margin: 0;
+            display: grid; gap: 14px;
+        }
+        .phone-side .feature-list li {
+            display: flex; gap: 12px;
+            font-size: 14px;
+        }
+        .phone-side .feature-list li .ic {
+            width: 26px; height: 26px;
+            border-radius: 8px;
+            background: var(--mint-soft);
+            color: var(--mint-text-on-light);
+            display: grid; place-items: center;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .phone-side .feature-list li b { font-weight: 600; display: block; margin-bottom: 2px; }
+        .phone-side .feature-list li span { color: var(--text-dim); font-size: 13px; line-height: 1.45; }
+
+        /* ─────────── Library cards ─────────── */
+        .library-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+            gap: 12px;
+        }
+        .lib-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-md);
+            padding: 18px;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .lib-card:hover { transform: translateY(-2px); border-color: var(--hairline-strong); }
+        .lib-card .icon {
+            width: 36px; height: 36px;
+            border-radius: 10px;
+            display: grid; place-items: center;
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+        .lib-card .icon.m { background: var(--mint-soft); }
+        .lib-card .icon.s { background: var(--signal-y-soft); }
+        .lib-card .icon.c { background: var(--coral-soft); }
+        .lib-card .icon.l { background: var(--lavender-soft); }
+        .lib-card h4 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+        .lib-card p { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; line-height: 1.45; }
+        .lib-card .meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-mute); }
+
+        /* ─────────── Pricing ─────────── */
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        @media (min-width: 720px) { .pricing-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (min-width: 1100px) { .pricing-grid { grid-template-columns: repeat(4, 1fr); } }
+        .price-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            padding: 24px;
+            position: relative;
+        }
+        .price-card.best { border-color: var(--ink); }
+        .price-card .best-pip {
+            position: absolute;
+            top: -10px; right: 18px;
+            background: var(--signal-y);
+            color: var(--signal-y-text);
+            font-size: 10px; font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 999px;
+            letter-spacing: 0.06em;
+        }
+        .price-card .tier { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; }
+        .price-card .price {
+            font-size: 36px; font-weight: 600;
+            letter-spacing: -0.03em;
+            line-height: 1.05;
+            margin: 8px 0 2px;
+        }
+        .price-card .unit { font-size: 13px; color: var(--text-dim); }
+        .price-card .sub { font-size: 13px; color: var(--text-dim); margin-bottom: 18px; }
+        .price-card ul { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 8px; font-size: 13.5px; }
+        .price-card ul li { display: flex; gap: 8px; }
+        .price-card ul li::before { content: "✓"; color: var(--mint-text-on-light); font-weight: 700; }
+        .price-card .btn {
+            display: block; width: 100%;
+            padding: 12px;
+            border-radius: 14px;
+            font-size: 14px; font-weight: 600;
+            text-align: center;
+            background: var(--card-elev); color: var(--ink);
+            border: 1px solid var(--hairline-strong);
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+        }
+        .price-card .btn:hover {
+            background: var(--hairline);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(14, 15, 18, 0.12);
+            border-color: var(--ink);
+        }
+        .price-card.best .btn {
+            background: var(--ink); color: var(--bg); border-color: var(--ink);
+            font-weight: 700;
+            padding: 13px;
+            box-shadow: 0 8px 22px rgba(14, 15, 18, 0.22);
+        }
+        .price-card.best .btn:hover {
+            background: var(--ink-soft);
+            transform: translateY(-2px);
+            box-shadow: 0 14px 30px rgba(14, 15, 18, 0.26), 0 0 0 4px rgba(79, 127, 231, 0.2);
+        }
+        /* Currency toggle */
+        .cur-wrap { text-align: center; margin-bottom: 22px; }
+        .cur-toggle {
+            display: inline-flex; gap: 2px; padding: 3px;
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: 999px;
+        }
+        .cur-toggle button {
+            appearance: none; border: 0; background: transparent;
+            color: var(--text-dim); font: inherit;
+            font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+            padding: 6px 18px; border-radius: 999px; cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .cur-toggle button.active { background: var(--ink); color: var(--bg); }
+        .price .cur.inr { display: none; }
+        .pricing-grid.show-inr .cur.usd { display: none; }
+        .pricing-grid.show-inr .cur.inr { display: inline; }
+
+        /* ─────────── Compare table (mobile-friendly) ─────────── */
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        @media (min-width: 720px) { .compare-grid { grid-template-columns: 1fr 1fr; } }
+        @media (min-width: 1100px) { .compare-grid { grid-template-columns: repeat(4, 1fr); } }
+        .compare-card {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-md);
+            padding: 18px;
+        }
+        .compare-card .name {
+            font-size: 14px; font-weight: 700; letter-spacing: -0.005em;
+            margin-bottom: 10px;
+        }
+        /* "us" card stays dark in both themes so the rail accents retain contrast. */
+        .compare-card.us {
+            background: linear-gradient(135deg, var(--hero-bg-1), var(--hero-bg-2));
+            color: var(--hero-text);
+            border-color: var(--hero-bg-1);
+        }
+        .compare-card.us .name { color: var(--hero-text); }
+        .compare-card.us .name::after {
+            content: "us"; font-family: 'JetBrains Mono', monospace;
+            font-size: 9px; color: var(--signal-y);
+            margin-left: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+        }
+        .compare-card .row-c {
+            font-size: 12px; color: var(--text-dim);
+            display: flex; justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px dashed var(--hairline);
+        }
+        .compare-card.us .row-c { color: var(--hero-text-dim); border-color: rgba(255,255,255,0.1); }
+        .compare-card .row-c:last-child { border-bottom: 0; }
+        .compare-card .row-c .v { color: var(--ink); font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+        .compare-card.us .row-c .v { color: var(--hero-text); }
+        .compare-card .row-c .v.good { color: var(--mint-text-on-light); }
+        .compare-card .row-c .v.bad { color: var(--coral-text); }
+        .compare-card.us .row-c .v.good { color: var(--mint); }
+        .compare-card.us .row-c .v.bad { color: var(--coral); }
+
+        /* ─────────── FAQ ─────────── */
+        .faq-list { display: grid; gap: 8px; }
+        .faq-item {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-md);
+        }
+        .faq-item summary {
+            padding: 16px 20px;
+            font-size: 15px; font-weight: 600;
+            cursor: pointer;
+            list-style: none;
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 14px;
+        }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after {
+            content: "+"; font-family: 'JetBrains Mono', monospace;
+            font-size: 18px; font-weight: 500;
+            color: var(--text-mute);
+            transition: transform 0.15s;
+        }
+        .faq-item[open] summary::after { content: "−"; }
+        .faq-item .answer {
+            padding: 0 20px 18px;
+            font-size: 14.5px;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        /* ─────────── CTA block ─────────── */
+        .cta-block {
+            background: linear-gradient(135deg, var(--hero-bg-1), var(--hero-bg-2));
+            color: var(--hero-text);
+            border-radius: var(--r-xl);
+            padding: 56px 32px;
+            margin: 56px 0 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .cta-block::before {
+            content: ""; position: absolute;
+            top: -80px; right: -80px;
+            width: 320px; height: 320px;
+            background: radial-gradient(circle, rgba(79, 127, 231, 0.18), transparent 65%);
+        }
+        .cta-block h2 {
+            color: var(--hero-text);
+            font-size: clamp(28px, 4vw, 40px);
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            margin: 0 0 14px;
+        }
+        .cta-block h2 em { font-style: normal; color: var(--rail-teal); }
+        .cta-block p {
+            font-size: 16px; color: var(--hero-text-dim);
+            max-width: 36em; margin: 0 auto 28px;
+            line-height: 1.5;
+        }
+        .cta-block .btn-cta {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--rail-blue); color: #FFFFFF;
+            padding: 16px 34px;
+            border-radius: 999px;
+            font-size: 15px; font-weight: 700;
+            box-shadow: 0 10px 30px rgba(79, 127, 231, 0.28);
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+        }
+        .cta-block .btn-cta:hover {
+            background: #3F6FDB;
+            transform: translateY(-2px);
+            box-shadow: 0 16px 36px rgba(79, 127, 231, 0.32);
+        }
+        .cta-block .btn-cta:active { transform: scale(0.98); }
+
+        /* ─────────── Footer ─────────── */
+        footer {
+            border-top: 1px solid var(--hairline);
+            padding: 56px 24px 32px;
+            font-size: 13.5px;
+            color: var(--text-dim);
+        }
+        footer .grid {
+            max-width: 1180px; margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 32px;
+        }
+        @media (min-width: 720px) {
+            footer .grid { grid-template-columns: 1.5fr 1fr 1fr 1fr; }
+        }
+        footer h5 {
+            font-size: 11px; font-weight: 700;
+            letter-spacing: 0.14em; text-transform: uppercase;
+            color: var(--text-mute);
+            margin: 0 0 12px;
+        }
+        footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+        footer ul li a { color: var(--text-dim); }
+        footer ul li a:hover { color: var(--ink); }
+        footer .colophon { font-size: 13px; color: var(--text-dim); line-height: 1.55; max-width: 30em; }
+        footer .colophon .brand-mini {
+            display: flex; align-items: center; gap: 10px;
+            font-weight: 700; font-size: 17px; letter-spacing: -0.01em;
+            color: var(--ink);
+            margin-bottom: 14px;
+        }
+        footer .colophon .brand-mini .logo-mark {
+            width: 28px; height: 28px;
+        }
+        footer .legal {
+            max-width: 1180px; margin: 32px auto 0;
+            padding-top: 24px;
+            border-top: 1px solid var(--hairline);
+            display: flex; gap: 18px; flex-wrap: wrap;
+            font-size: 12px; color: var(--text-mute);
+        }
+        footer .legal .pip { opacity: 0.5; }
+    </style>
+</head>
+<body>
+
+<header class='nav'>
+    <div class='nav-inner'>
+        <div class='logo'>
+            <picture>
+                <source media='(prefers-color-scheme: dark)' srcset='assets/brand/merge-rail/executespec-merge-rail-mark.svg'>
+                <img class='logo-mark' src='assets/brand/merge-rail/executespec-merge-rail-mark-light.svg' alt='ExecuteSpec logo'>
+            </picture>
+            ExecuteSpec
+        </div>
+        <nav class='links'>
+            <a href='#how'>How it works</a>
+            <a href='#tokens'>Token ledger</a>
+            <a href='#workspace'>Workspace</a>
+            <a href='#library'>Library</a>
+            <a href='#pricing'>Pricing</a>
+            <a href='#compare'>Compare</a>
+            <a href='#faq'>FAQ</a>
+        </nav>
+        <div class='cta-row'>
+            <a class='btn-sm' href='https://dev.executespec.ai/login'>Sign in</a>
+            <a class='btn-sm primary' href='https://dev.executespec.ai/signup'>Start free</a>
+        </div>
+    </div>
+</header>
+
+<section class='hero'>
+    <div class='wrap'>
+        <h1>AI that ships <em>pull requests</em> your team actually merges.</h1>
+        <p class='lede'>
+            Write a one-line spec. We plan it, code it across one repo or twenty, run the tests, review it, and open a pull request with a deterministic <strong>Ready / Needs review / Failed</strong> verdict attached. <strong>You merge it.</strong>
+        </p>
+        <div class='cta-row'>
+            <a class='btn primary' href='https://dev.executespec.ai/signup'>
+                Start free
+                <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
+            </a>
+            <a class='btn secondary' href='https://dev.executespec.ai/welcome'>Try the sandbox</a>
+            <span class='pip'>No card required · 200 ES AI credits / mo</span>
+        </div>
+
+        <div class='hero-stats'>
+            <div class='stat'><div class='v mint'>0–100</div><div class='lbl'>Verified score, every run</div></div>
+            <div class='stat'><div class='v signal'>5–20 min</div><div class='lbl'>Typical run time</div></div>
+            <div class='stat'><div class='v'>Tokens</div><div class='lbl'>Estimate, live meter, final ledger</div></div>
+            <div class='stat'><div class='v coral'>BYOK</div><div class='lbl'>Bypass cost cap</div></div>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='demo' style='padding-top:8px'>
+    <div class='wrap'>
+        <div class='demo-shell'>
+            <video src='/media/hero.webm' autoplay loop muted playsinline preload='metadata' poster='/media/hero-poster.png' aria-label='ExecuteSpec product walkthrough with token transparency' style='display:block;width:100%;height:auto'></video>
+        </div>
+        <p class='demo-caption'>A run story, end to end — describe it, approve the plan, watch the agents work, then review the verified score, pull request, and <strong>token ledger</strong>.</p>
+    </div>
+</section>
+
+<section class='section' id='tokens'>
+    <div class='wrap'>
+        <div class='section-eyebrow mint'>Token transparency</div>
+        <h2>Know what the agents spend before, during, and after the run.</h2>
+        <p class='lede'>
+            ExecuteSpec does not hide LLM usage behind a vague credit counter. Every production run exposes the estimate you approved, the live token stream while agents work, and the final provider-cost ledger your team can audit.
+        </p>
+        <div class='token-grid'>
+            <div class='token-card'>
+                <div class='k'>Before approval</div>
+                <div class='v'>Plan-time estimate</div>
+                <p>See expected input, output, cache-read tokens, provider route, and dollar cap before execution starts. Reject or revise without burning worker tokens.</p>
+            </div>
+            <div class='token-card highlight'>
+                <div class='k'>During execution</div>
+                <div class='v'>Live spend meter</div>
+                <p>Watch input, output, cache-read, reasoning tokens, and cost move task by task beside the live tool log.</p>
+            </div>
+            <div class='token-card'>
+                <div class='k'>After completion</div>
+                <div class='v'>Final token ledger</div>
+                <p>The run report and PR summary keep the provider-level ledger: planner, worker, reviewer, cache savings, total cost, and approved cap.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='how'>
+    <div class='wrap'>
+        <div class='section-eyebrow signal'>How it works · 4 steps</div>
+        <h2>From a spec to a merge-able PR.</h2>
+        <p class='lede'>
+            One pipeline, four checkpoints. Every run carries a verdict, a cost breakdown, and a diff your team can read.
+        </p>
+        <div class='pipeline-grid'>
+            <div class='pipe-card s1'>
+                <div class='num'>01 · PLAN</div>
+                <div class='icon-bg'>📝</div>
+                <h3>You write one line</h3>
+                <p>A natural-English spec. We classify it as SMALL/MEDIUM/LARGE and build a task plan with a cost estimate. You approve before any LLM tokens are spent on execution.</p>
+            </div>
+            <div class='pipe-card s2'>
+                <div class='num'>02 · EXECUTE</div>
+                <div class='icon-bg'>⚡</div>
+                <h3>An agent per task</h3>
+                <p>One agent works each task in turn. Tool-calling: readFile, writeFile, editFile, shell, buildProject. Live log streams every action with timestamp + cost.</p>
+            </div>
+            <div class='pipe-card s3'>
+                <div class='num'>03 · VERIFY</div>
+                <div class='icon-bg'>🔍</div>
+                <h3>Tests + reviewer + build</h3>
+                <p>Smoke test after every task. Final reviewer pass (general + wiring) on the whole change, plus a fix-the-build pass if needed. Additive verified score (0–100).</p>
+            </div>
+            <div class='pipe-card s4'>
+                <div class='num'>04 · SHIP</div>
+                <div class='icon-bg'>🚀</div>
+                <h3>PR with a verdict</h3>
+                <p>A real PR on your repo, opened from your connected GitHub account, with the verified score attached. CI runs your gates too. You merge.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class='phone-mock-section' id='workspace'>
+    <div class='wrap'>
+        <div class='section-eyebrow mint'>Your workspace</div>
+        <h2 style='margin-bottom: 56px;'>A real IDE, in the browser.</h2>
+
+        <div class='phone-mock-grid'>
+            <div class='phone-mock'>
+                <div class='screen'>
+                    <div class='hero-card'>
+                        <div class='ribbon'>● RUNNING NOW · R-4429</div>
+                        <h4>Add OAuth2 to checkout, support Google &amp; GitHub.</h4>
+                        <div class='bar'><div class='fill'></div></div>
+                        <div class='stats'>
+                            <div><b class='v-signal'>3/4</b>TASKS</div>
+                            <div><b>14m</b>ELAPSED</div>
+                            <div><b class='v-mint'>$0.42</b>SPENT</div>
+                        </div>
+                    </div>
+                    <div class='row'><span class='dot'></span><span class='title'>Move logs to pino</span><span class='score'>92%</span></div>
+                    <div class='row'><span class='dot'></span><span class='title'>Migrate jobs to BullMQ</span><span class='score'>96%</span></div>
+                    <div class='row'><span class='dot s'></span><span class='title'>Admin search w/ fuzzy</span><span class='score s'>73%</span></div>
+                </div>
+            </div>
+
+            <div class='phone-side'>
+                <h3>A workspace, not a dashboard.</h3>
+                <p>A VS Code-style IDE: activity bar, Explorer, editor, and a real code &amp; diff viewer — so you read the change the way you'd read a teammate's PR. Runs take 5–20 minutes; watch one live or walk away.</p>
+                <ul class='feature-list'>
+                    <li>
+                        <span class='ic'>✓</span>
+                        <div><b>Explorer + code &amp; diff viewer</b><span>Browse the file tree, open any file, read every diff inline — no leaving the page.</span></div>
+                    </li>
+                    <li>
+                        <span class='ic'>✓</span>
+                        <div><b>⌘K command palette</b><span>Jump to a run, a project, or an action without touching the mouse.</span></div>
+                    </li>
+                    <li>
+                        <span class='ic'>✓</span>
+                        <div><b>Project chat with memory</b><span>Ask "why did March's refactor hit 94% and this one is at 87%?" — the agent knows.</span></div>
+                    </li>
+                    <li>
+                        <span class='ic'>✓</span>
+                        <div><b>Light &amp; dark, follows your system</b><span>Plus push notifications — plan ready, run shipped, cost-cap warnings — when you step away.</span></div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='library'>
+    <div class='wrap'>
+        <div class='section-eyebrow coral'>Library + Migrations</div>
+        <h2>Skip the boilerplate. Ship the readymade.</h2>
+        <p class='lede'>
+            28 solutions and 11 migrations, each pre-tuned to ship to your stack. Pick one, tweak the spec, approve the plan. Average 5 minutes from click to PR.
+        </p>
+
+        <div class='library-grid'>
+            <div class='lib-card'>
+                <div class='icon m'>⚡</div>
+                <h4>Stripe checkout</h4>
+                <p>Subscription + one-time + webhook signature verify</p>
+                <div class='meta'>~6m</div>
+            </div>
+            <div class='lib-card'>
+                <div class='icon s'>🔐</div>
+                <h4>OAuth login</h4>
+                <p>Google + GitHub + email-password fallback</p>
+                <div class='meta'>~4m</div>
+            </div>
+            <div class='lib-card'>
+                <div class='icon c'>🧠</div>
+                <h4>RAG with pgvector</h4>
+                <p>Tika extraction → embeddings → retrieval</p>
+                <div class='meta'>~9m</div>
+            </div>
+            <div class='lib-card'>
+                <div class='icon l'>🛠</div>
+                <h4>GitHub Actions CI</h4>
+                <p>Build · test · lint · containerize · push</p>
+                <div class='meta'>~3m</div>
+            </div>
+            <div class='lib-card'>
+                <div class='icon m'>📦</div>
+                <h4>Docker compose dev</h4>
+                <p>Postgres + Redis + app · hot reload</p>
+                <div class='meta'>~2m</div>
+            </div>
+            <div class='lib-card'>
+                <div class='icon s'>💳</div>
+                <h4>Razorpay checkout</h4>
+                <p>India payments · UPI · cards · auth webhooks</p>
+                <div class='meta'>~5m</div>
+            </div>
+        </div>
+
+        <div style='margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap;'>
+            <a class='btn primary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; background:var(--ink); color:var(--bg); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/library'>
+                Browse 28 solutions
+                <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
+            </a>
+            <a class='btn secondary' style='padding:12px 20px; border-radius:999px; font-size:14px; font-weight:600; color:var(--ink); border:1px solid var(--hairline-strong); display:inline-flex; align-items:center; gap:8px;' href='https://dev.executespec.ai/migrations'>
+                11 modernization recipes
+            </a>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='pricing'>
+    <div class='wrap'>
+        <div class='section-eyebrow signal'>Pricing</div>
+        <h2>Simple. Start free. Scale up.</h2>
+        <p class='lede'>
+            Managed AI is metered in ES AI credits as your run works — failed calls aren't charged. BYOK removes the managed-AI cap entirely. Cancel any time. Pro annual saves 17%.
+        </p>
+
+        <div class='cur-wrap'>
+            <div class='cur-toggle' role='group' aria-label='Currency'>
+                <button type='button' class='active' data-cur='usd'>USD</button>
+                <button type='button' data-cur='inr'>INR</button>
+            </div>
+        </div>
+
+        <div class='pricing-grid'>
+            <div class='price-card'>
+                <div class='tier'>FREE</div>
+                <div class='price'><span class='cur usd'>$0</span><span class='cur inr'>₹0</span></div>
+                <div class='sub'>No card required</div>
+                <ul>
+                    <li>200 ES AI credits / month</li>
+                    <li>Small specs only</li>
+                    <li>Managed-AI cap</li>
+                    <li>1 project · 1 repo</li>
+                    <li>Email support</li>
+                </ul>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Start free</a>
+            </div>
+            <div class='price-card'>
+                <div class='tier'>PRO</div>
+                <div class='price'><span class='cur usd'>$29<span class='unit'>/mo</span></span><span class='cur inr'>₹2,499<span class='unit'>/mo</span></span></div>
+                <div class='sub'>Indie devs · $289/yr (save 17%)</div>
+                <ul>
+                    <li>2,000 ES AI credits / month</li>
+                    <li>Managed keys — Anthropic · OpenAI · Gemini</li>
+                    <li>PR review + code review (4 scans/mo)</li>
+                    <li>2 projects · 2 repos each</li>
+                    <li>Managed-AI cap · BYOK lifts it</li>
+                    <li>Library + migrations</li>
+                </ul>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Get started</a>
+            </div>
+            <div class='price-card best'>
+                <div class='best-pip'>RECOMMENDED</div>
+                <div class='tier'>TEAM</div>
+                <div class='price'><span class='cur usd'>$39<span class='unit'>/seat/mo</span></span><span class='cur inr'>₹3,399<span class='unit'>/seat/mo</span></span></div>
+                <div class='sub'>From 1 seat · monthly</div>
+                <ul>
+                    <li>Unlimited on your own keys (BYOK)</li>
+                    <li>No managed-AI cap · zero markup</li>
+                    <li>BYOK — Anthropic · OpenAI · Gemini</li>
+                    <li>Org spend caps + approval thresholds</li>
+                    <li>Cross-repo + sharing</li>
+                    <li>Autofix: PR review · tech debt · code scans</li>
+                </ul>
+                <a class='btn' href='https://dev.executespec.ai/signup'>Get started</a>
+            </div>
+            <div class='price-card'>
+                <div class='tier'>ENTERPRISE</div>
+                <div class='price'>Custom</div>
+                <div class='sub'>Custom contract · DPA</div>
+                <ul>
+                    <li>Unlimited · no managed-AI cap</li>
+                    <li>BYOK + OpenRouter gateway</li>
+                    <li>Model matrix override + per-run pin</li>
+                    <li>Standards · Contracts · ADRs</li>
+                    <li>Org governance + audit trail</li>
+                    <li>Dedicated support</li>
+                </ul>
+                <a class='btn' href='mailto:sales@executespec.ai'>Talk to sales</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='compare'>
+    <div class='wrap'>
+        <div class='section-eyebrow coral'>Honest comparison</div>
+        <h2>How we differ from inline AI coding tools.</h2>
+        <p class='lede'>
+            Cursor, Copilot, Continue — they suggest code at the cursor. <strong>You</strong> validate it. ExecuteSpec runs the validation itself and only opens a PR when it passes.
+        </p>
+
+        <div class='compare-grid'>
+            <div class='compare-card us'>
+                <div class='name'>ExecuteSpec</div>
+                <div class='row-c'><span>Output</span><span class='v good'>Real PR + verdict</span></div>
+                <div class='row-c'><span>Approval gate</span><span class='v good'>Plan-level</span></div>
+                <div class='row-c'><span>Validation</span><span class='v good'>Built-in</span></div>
+                <div class='row-c'><span>Multi-repo</span><span class='v good'>Native</span></div>
+                <div class='row-c'><span>BYOK</span><span class='v good'>3 providers</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v good'>Yes</span></div>
+            </div>
+            <div class='compare-card'>
+                <div class='name'>Cursor / Copilot</div>
+                <div class='row-c'><span>Output</span><span class='v bad'>Diff suggestion</span></div>
+                <div class='row-c'><span>Approval gate</span><span class='v bad'>Per-edit</span></div>
+                <div class='row-c'><span>Validation</span><span class='v bad'>Your CI</span></div>
+                <div class='row-c'><span>Multi-repo</span><span class='v bad'>One repo</span></div>
+                <div class='row-c'><span>BYOK</span><span class='v'>Yes</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v'>Yes</span></div>
+            </div>
+            <div class='compare-card'>
+                <div class='name'>Devin / Lovable</div>
+                <div class='row-c'><span>Output</span><span class='v'>Long-form</span></div>
+                <div class='row-c'><span>Approval gate</span><span class='v bad'>Optional</span></div>
+                <div class='row-c'><span>Validation</span><span class='v'>Partial</span></div>
+                <div class='row-c'><span>Multi-repo</span><span class='v bad'>Limited</span></div>
+                <div class='row-c'><span>BYOK</span><span class='v bad'>No</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v'>Some</span></div>
+            </div>
+            <div class='compare-card'>
+                <div class='name'>v0 / Bolt</div>
+                <div class='row-c'><span>Output</span><span class='v bad'>UI snippet</span></div>
+                <div class='row-c'><span>Approval gate</span><span class='v bad'>None</span></div>
+                <div class='row-c'><span>Validation</span><span class='v bad'>Preview only</span></div>
+                <div class='row-c'><span>Multi-repo</span><span class='v bad'>No</span></div>
+                <div class='row-c'><span>BYOK</span><span class='v bad'>No</span></div>
+                <div class='row-c'><span>DPA + GDPR export</span><span class='v bad'>No</span></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class='section' id='faq'>
+    <div class='wrap'>
+        <div class='section-eyebrow mint'>FAQ</div>
+        <h2>What people ask before they sign up.</h2>
+
+        <div class='faq-list'>
+            <details class='faq-item'>
+                <summary>Do you train models on my source code?</summary>
+                <div class='answer'>
+                    No. Your source code lives in a workspace that's wiped at run end. We never train any model on it, never share it beyond the LLM provider you picked, and never read it without a run-scoped JWT that proves you authorized the access. See <a href='/trust.html' style='color: var(--coral);'>Trust &amp; Security</a> for the full sub-processor list.
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>What does "Bring Your Own Keys (BYOK)" mean?</summary>
+                <div class='answer'>
+                    On TEAM and ENTERPRISE, you can connect your own Anthropic, OpenAI, and/or Google AI keys — and ENTERPRISE can also route through OpenRouter as a gateway. Calls against your keys bypass the managed-AI cap entirely (we still track cache-hit rates for optimization). Your keys are encrypted at rest, never logged, and can be replaced any time from org settings.
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>How is this different from Cursor / Copilot / Continue?</summary>
+                <div class='answer'>
+                    Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and only opens a PR when those gates pass (or labels it Needs review / Failed when they don't). The output is a real merge-able PR, not a diff suggestion.
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>What's the verified score?</summary>
+                <div class='answer'>
+                    A deterministic 0–100 score attached to every PR, computed from real signals — not the model grading itself. It's an additive weighted score across five slots: <span class='mono' style='font-size: 13px;'>code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5)</span>, averaged over whichever slots actually fired. Tests come from running your own test suite in the workspace; build and reviewer from the real passes. The verdict pill (Ready / Needs review / Failed / Blocked) is derived from the score.
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>Can I cancel any time?</summary>
+                <div class='answer'>
+                    Yes. Cancel from <span class='mono' style='font-size: 13px;'>Account → Billing</span>. Your data stays available for 30 days after cancellation. GDPR export gives you everything as a ZIP.
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>What languages and stacks do you support?</summary>
+                <div class='answer'>
+                    Anything an LLM can read. We have battle-tested support for Java/Spring, TypeScript/Node, Python/FastAPI, Go, React, Vue, and React Native. The agent's behavior is the same regardless of stack; the test framework is what differs (JUnit/pytest/Vitest/Go test).
+                </div>
+            </details>
+            <details class='faq-item'>
+                <summary>Does it work for monorepos?</summary>
+                <div class='answer'>
+                    Yes — that's where we shine. The TEAM and ENTERPRISE tiers support multi-repo runs natively: per-repo codemaps, per-repo architecture docs, cross-repo contracts with drift detection, per-repo PRs that cross-link in the run report.
+                </div>
+            </details>
+        </div>
+
+        <div class='cta-block'>
+            <h2>Stop reviewing diffs. <em>Start merging PRs.</em></h2>
+            <p>200 free ES AI credits a month. No card. Five minutes to your first verified PR.</p>
+            <a class='btn-cta' href='https://dev.executespec.ai/signup'>
+                Start free
+                <svg viewBox='0 0 24 24' style='width:14px;height:14px' fill='none' stroke='currentColor' stroke-width='2.4' stroke-linecap='round'><path d='M5 12h14M12 5l7 7-7 7'/></svg>
+            </a>
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class='grid'>
+        <div class='colophon'>
+            <div class='brand-mini'>
+                <picture>
+                    <source media='(prefers-color-scheme: dark)' srcset='assets/brand/merge-rail/executespec-merge-rail-mark.svg'>
+                    <img class='logo-mark' src='assets/brand/merge-rail/executespec-merge-rail-mark-light.svg' alt='ExecuteSpec logo'>
+                </picture>
+                ExecuteSpec
+            </div>
+            <p>AI that ships pull requests your team actually merges. Built in India, used worldwide. v1.0.0-M1.</p>
+        </div>
+        <div>
+            <h5>Product</h5>
+            <ul>
+                <li><a href='#how'>How it works</a></li>
+                <li><a href='#tokens'>Token ledger</a></li>
+                <li><a href='#workspace'>Workspace</a></li>
+                <li><a href='#library'>Library</a></li>
+                <li><a href='#pricing'>Pricing</a></li>
+                <li><a href='#compare'>Compare</a></li>
+            </ul>
+        </div>
+        <div>
+            <h5>Company</h5>
+            <ul>
+                <li><a href='https://dev.executespec.ai/trust'>Trust &amp; security</a></li>
+                <li><a href='/terms'>Terms</a></li>
+                <li><a href='/privacy'>Privacy</a></li>
+                <li><a href='/dpa'>DPA</a></li>
+                <li><a href='mailto:hello@executespec.ai'>Contact</a></li>
+            </ul>
+        </div>
+        <div>
+            <h5>Get started</h5>
+            <ul>
+                <li><a href='https://dev.executespec.ai/signup'>Start free</a></li>
+                <li><a href='https://dev.executespec.ai/login'>Sign in</a></li>
+                <li><a href='https://dev.executespec.ai/welcome'>Try the sandbox</a></li>
+                <li><a href='https://dev.executespec.ai/library'>Browse library</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class='legal'>
+        <span>© 2026 ExecuteSpec</span>
+        <span class='pip'>·</span>
+        <span>Made with care in Bangalore</span>
+        <span class='pip'>·</span>
+        <a href='/terms'>Terms</a>
+        <span class='pip'>·</span>
+        <a href='/privacy'>Privacy</a>
+        <span class='pip'>·</span>
+        <a href='/dpa'>DPA</a>
+    </div>
+</footer>
+
+<script>
+  (function () {
+    var grid = document.querySelector('.pricing-grid');
+    var btns = document.querySelectorAll('.cur-toggle button');
+    if (!grid || !btns.length) return;
+    btns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        grid.classList.toggle('show-inr', b.getAttribute('data-cur') === 'inr');
+        btns.forEach(function (x) { x.classList.toggle('active', x === b); });
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

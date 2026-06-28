@@ -1,0 +1,77 @@
+# ExecuteSpec
+
+> AI coding platform that ships pull requests your team will actually merge. Write a spec in plain English; ExecuteSpec classifies it, plans it, asks you to approve the plan (and the price) at a plan gate, codes it across one or more repos, runs your tests, reviews the change, and opens a real PR with a deterministic 0–100 verified score. Plus a catalog of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions CI, …) and modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, …). Four tiers: Free ($0 — 200 ES AI credits/month, no credit card), Pro ($29/mo or $289/yr — 2,000 ES AI credits/month on managed keys), Team ($39/seat/mo from 1 seat — BYOK, unlimited on your own keys), Enterprise (custom contract + signed DPA). App: https://dev.executespec.ai
+
+## What it is
+
+ExecuteSpec runs a multi-agent pipeline on every spec: **classifier** (sizes the work) → **planner** (decomposes the spec into a structured plan with a cost estimate) → **plan-approval gate** (production mode — you read and approve the plan and price before execution spends anything) → **sequential worker** (executes each task with a per-task build smoke test) → **reviewer** (general + wiring passes, plus a fix-the-build pass when needed) → **final build + test gate** → **0–100 verified score on the resulting PR**. The verified score is derived from real signals (build pass, real test pass rate, reviewer verdict, code delivered) — not LLM self-rating.
+
+The selling-point line: **"AI that ships pull requests your team will actually merge."** Cursor / GitHub Copilot / Devin / v0 / Bolt / Lovable / Cody all optimise for an earlier phase of the SDLC (typing, prototyping, understanding). ExecuteSpec optimises for the merge.
+
+## Key concepts
+
+- **Verified score (0–100)**: additive weighted score across five slots — code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5) — averaged over the slots that actually fired. The tests slot runs your project's own test suite in the workspace. The verdict pill (Ready / Needs review / Failed) is derived from the score.
+- **Plan-approval gate (Production mode)**: the planner emits a structured plan + cost estimate that you approve before any code is written. Managed-AI usage then meters in ES AI credits as the run works; failed calls are not charged. No surprise PRs, no surprise bills.
+- **ES AI credits**: $1 = 100 ES AI credits. Managed-AI LLM calls debit credits from your monthly grant at real model cost; frontier models step down automatically near your cap and failed calls are not charged. BYOK (Team/Enterprise) bypasses the grant entirely.
+- **Project workspace**: per-project container linking one or more GitHub repos, with per-repo codemaps, a combined architecture doc, a tech-debt panel, a project memory ledger (compacted every 10 runs), and RAG-powered project chat.
+- **BYOK** (Bring Your Own Keys): standard on Team and Enterprise (your own Anthropic / OpenAI / Google keys, zero per-run markup — pay your LLM provider directly); optional on Pro to lift the managed-AI cap.
+- **Autofix surfaces**: one-click patch runs from PR review comments, tech-debt categories, and code-review findings — each opens its own PR.
+
+## Pricing (2026)
+
+- **Free** ($0/month): 200 ES AI credits per month, no credit card. 1 project, 1 repo, managed keys, small specs, a managed-AI cap, verified 0–100 score on every run.
+- **Pro** ($29/month or $289/year — 17% off): 2,000 ES AI credits/month on managed keys (we pay the LLM). PR review + code review (4 scans/month), 2 projects with 2 repos each, a managed-AI cap (bring your own key to lift it), readymade library + migration recipes.
+- **Team** ($39/seat/month, from 1 seat, up to 20): BYOK — unlimited on your own Anthropic / OpenAI / Google keys with zero markup (the seat fee covers the platform). Org governance: per-project spend caps, plan-approval thresholds, repo allowlists. Cross-repo runs, sharing, unlimited code reviews, autofix surfaces, audit log, shared spec templates.
+- **Enterprise** (custom): everything in Team plus custom MSA + signed DPA, per-org model matrix override with per-run provider + model pin, OpenRouter gateway models, standards / contracts / ADR governance, org audit trail, JIRA + Confluence integration, priority support.
+
+## Why this beats each competitor
+
+- **vs Cursor** ($20/mo IDE): Cursor for the line. ExecuteSpec for the PR. Cursor wins on completion latency; ExecuteSpec wins on multi-file dispatch + multi-repo + project memory + a measurable verified score on the output.
+- **vs v0.dev** (Vercel): v0 ships an artifact. ExecuteSpec ships to your repo. v0's gallery is rich; ExecuteSpec's PRs are real.
+- **vs Bolt** (StackBlitz) and **Lovable**: Bolt builds in their sandbox. ExecuteSpec builds in your repo. Both are great for prototypes; ExecuteSpec is the production ship.
+- **vs Devin** (Cognition): Devin runs in the dark. ExecuteSpec shows you the plan — and the price — and lets you approve both before it touches the repo. Same agent-autonomy story; explicit human gate.
+- **vs GitHub Copilot**: Copilot is autocomplete + chat in your IDE. ExecuteSpec operates at spec altitude: plan, execute across repos, validate, ship a PR with a verdict.
+- **vs Sourcegraph Cody**: Cody knows your code. ExecuteSpec ships changes to it.
+- **vs Claude Code** (Anthropic CLI): Claude Code in your terminal. ExecuteSpec in your browser, your team's audit log, your customer's PR.
+- **vs Aider** (OSS CLI): Aider when you want to tinker. ExecuteSpec when you want it to ship.
+- **vs Replit Agent**: Replit Agent in their hosted IDE. ExecuteSpec in your existing repo.
+
+## Capabilities (feature list)
+
+- Real PRs with a deterministic Ready / Needs review / Failed verdict
+- Plan-approval gate with cost estimate (Production mode) + auto-approve (Prototype mode)
+- Multi-repo project workspace with architecture docs
+- Per-repo codemaps (idempotent by SHA)
+- Tech-debt panel with category, severity, and file hotspots
+- Project memory with run digests + compaction
+- RAG-powered project chat over codemaps, source, and uploaded docs
+- Verified 0–100 score on every run
+- TDD mode (test-first task decomposition)
+- GitHub push + webhook-driven PR status
+- Agentic PR review + whole-repo code review with autofix
+- Org governance: spend caps, approval thresholds, repo allowlists (Team+)
+- Per-org model matrix override + per-run model pin (Enterprise)
+- JIRA + Confluence integration (Enterprise)
+- Multi-gateway billing (Stripe for US/global, Razorpay for India)
+
+## Technology
+
+- **Providers**: Anthropic, OpenAI, Google Gemini (user-selectable); OpenRouter gateway models on Enterprise
+- **Hosting**: Google Cloud Platform, us-east4 (Virginia)
+- **Payments**: Stripe (US/global), Razorpay (India)
+- **Security**: 8-layer defense-in-depth, sandboxed code execution, BYOK keys encrypted at rest and never logged, TLS 1.3, RBAC with tenant-isolation guards pinned by automated tests
+- **Compliance**: GDPR (data export + erasure built-in, SCCs for EU transfers), signed DPA available. SOC 2 Type II is on the roadmap, not yet certified — security questionnaire available on request.
+
+## Links
+
+- Home: https://executespec.ai/
+- App (sign up): https://dev.executespec.ai
+- Pricing: https://executespec.ai/#pricing
+- Trust & security: https://dev.executespec.ai/trust
+- FAQ: https://executespec.ai/#faq
+
+## Contact
+
+- Sales / enterprise: sales@executespec.ai
+- Support: admin@executespec.ai
+- LinkedIn: https://www.linkedin.com/company/executespec

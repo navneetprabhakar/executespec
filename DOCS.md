@@ -13,7 +13,7 @@ The long-form ExecuteSpec **backend** documentation has moved to the central doc
 | [`backend/design`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/design) · [`design-audit`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/design-audit) | Design tokens, code style, design audit |
 | [`backend/plans`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/plans) · [`adr`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/adr) · [`reason-log`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/reason-log) | Plans, architecture decisions, reason logs |
 | [`backend/business`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/business) · [`competitive-analysis`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/competitive-analysis) · [`reference`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/reference) | Business, competitive analysis, catalog formats |
-| [`website`](https://github.com/navneetprabhakar/executespec-docs/tree/main/website) | Marketing site — HTML + brand/press assets (Cloudflare Wrangler) |
 
 **Stays in this repo:** `README.md`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, and the API
-specification at `docs/openapi.yaml`.
+specification at `docs/openapi.yaml`. The marketing `website/` tree also remains here (it is a site,
+not docs — a candidate for its own repo).

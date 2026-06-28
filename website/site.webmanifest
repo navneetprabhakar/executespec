@@ -1,0 +1,68 @@
+{
+  "name": "ExecuteSpec",
+  "short_name": "ExecuteSpec",
+  "description": "AI that ships pull requests your team will actually merge — for one repo or for twenty. Multi-repo project workspaces, plan-approval gate, and a Ready / Needs review / Failed verdict on every PR.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B0D10",
+  "theme_color": "#0B0D10",
+  "lang": "en-US",
+  "dir": "ltr",
+  "categories": ["developer", "productivity", "business"],
+  "icons": [
+    {
+      "src": "/assets/brand/merge-rail/executespec-merge-rail-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/merge-rail/executespec-merge-rail-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/merge-rail/executespec-merge-rail-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/assets/brand/merge-rail/executespec-merge-rail-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "screenshots": [
+    {
+      "src": "/images/og-hero.png",
+      "sizes": "1200x630",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "ExecuteSpec — AI that ships PRs your team will merge."
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Pricing",
+      "short_name": "Pricing",
+      "url": "/#pricing"
+    },
+    {
+      "name": "Project Workspace",
+      "short_name": "Projects",
+      "url": "/#project-workspace"
+    },
+    {
+      "name": "Start Free",
+      "short_name": "Sign Up",
+      "url": "https://dev.executespec.ai"
+    }
+  ]
+}
