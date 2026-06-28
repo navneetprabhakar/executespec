@@ -328,6 +328,12 @@ class RunLifecycleServiceContinuationApprovalTest {
   }
 
   @Test
+  void postValidationReportProposalUsesHeavyApprovalPath() {
+    assertThat(RunLifecycleService.heavyContinuationApprovalSource("POST_VALIDATION_REPORT"))
+        .isTrue();
+  }
+
+  @Test
   void approveContinuation_rejectsNonConfirmationProposalBeforeRetry() {
     AgentTask task =
         AgentTask.builder()

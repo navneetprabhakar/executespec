@@ -869,12 +869,17 @@ public class RunLifecycleService {
           model,
           proposedAction,
           benchmarkPriorRequired,
-          "POST_REVIEW".equalsIgnoreCase(source));
+          heavyContinuationApprovalSource(source));
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
       throw new IllegalStateException("Continuation proposal JSON is corrupted: " + e.getMessage());
     }
+  }
+
+  static boolean heavyContinuationApprovalSource(String source) {
+    return "POST_REVIEW".equalsIgnoreCase(source)
+        || "POST_VALIDATION_REPORT".equalsIgnoreCase(source);
   }
 
   private void appendApprovedContinuationAction(
