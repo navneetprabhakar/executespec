@@ -65,6 +65,9 @@ PATCH mode: `RunOrchestrator.runPatchPipeline` calls `CodeGenEngine.solve`, whic
 ## Patterns
 
 - Run ownership (`userId`, `orgId`, `projectId`) stamped BEFORE the async pipeline thread starts.
+- Local-hands intent must also be known before the async pipeline thread starts. REST and
+  agent-session confirmed submissions pass the boolean into `RunOrchestrator.submitRun(...)`;
+  `RunLocalExecutionFlag` is fallback-only and must not be used as the primary post-submit signal.
 - `.agent-context/project.json` written from planner output — used by preview / deploy for project-type detection.
 - `gitCommit` denied for workers via `ToolRegistry.bindForWorker(ctx)` — auto-push happens at run-end.
 - Cost estimate + credits computed after planner emits the plan; persisted to `creditsCharged` + `hardCapUsd` via `RunOrchestrator.persistEstimate` (clamps with `userCostCap` when present; skips the platform cap entirely for BYOK orgs).

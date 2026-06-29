@@ -17,7 +17,6 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
-import com.navneet.executespec.run.RunLocalExecutionFlag;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -51,7 +50,6 @@ public class AgentRunSubmissionGate {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final RunIdempotencyService runIdempotencyService;
   private final StateStore stateStore;
-  private final RunLocalExecutionFlag runLocalExecutionFlag;
 
   public Submission submitConfirmed(
       AgentSession session,
@@ -173,14 +171,12 @@ public class AgentRunSubmissionGate {
             null,
             null,
             null,
-            lowStartTier);
+            lowStartTier,
+            localExecutionRequested);
 
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
-    }
-    if (localExecutionRequested) {
-      runLocalExecutionFlag.mark(run.getRunId());
     }
     runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
     return new Submission(run.getRunId(), true, "SUBMITTED");

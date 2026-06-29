@@ -157,8 +157,9 @@ public record RunRequest(
      * post-task smoke build, the reviewer, and the auto-push — nothing is published; the diff lives
      * in the client's tree.
      *
-     * <p>Transient like {@link #skipAutoPush}: carried per-submit via a Redis key, not persisted.
-     * The shipped CLI sends this on {@code run local}; older backends drop it (default false →
-     * today's remote execution). Inert unless the feature flag is on.
+     * <p>The shipped CLI sends this on {@code run local}. The submit path threads the intent into
+     * the async pipeline before it starts, because accepting LOCAL and then silently running
+     * server-side tools would corrupt the user's evidence bundle. Inert unless the feature flag is
+     * on.
      */
     Boolean localExecution) {}

@@ -614,10 +614,62 @@ public class RunOrchestrator implements RunControlPort {
         tddMode,
         branchOverride,
         prReviewComments,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        lowComplexityWorkerStartTier,
+        false);
+  }
+
+  /** BUILD-mode submit overload with local-hands intent available before async start. */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier,
+      boolean localExecutionRequested) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
         com.navneet.executespec.state.RunMode.BUILD,
         requireConfirmationBeforeExpensiveContinuation,
         requireBenchmarkPriorForAutomaticContinuation,
-        lowComplexityWorkerStartTier);
+        lowComplexityWorkerStartTier,
+        localExecutionRequested);
   }
 
   /**
@@ -750,6 +802,63 @@ public class RunOrchestrator implements RunControlPort {
       Boolean requireConfirmationBeforeExpensiveContinuation,
       Boolean requireBenchmarkPriorForAutomaticContinuation,
       String lowComplexityWorkerStartTier) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        lowComplexityWorkerStartTier,
+        false);
+  }
+
+  /**
+   * Full submit signature with local-hands intent carried before the async pipeline starts. This
+   * avoids a race where the caller receives a local-execution ACK but the pipeline consumes the
+   * transient Redis marker before the controller writes it.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier,
+      boolean localExecutionRequested) {
     String runId = UUID.randomUUID().toString();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
@@ -899,6 +1008,7 @@ public class RunOrchestrator implements RunControlPort {
         (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
     final String lowComplexityWorkerStartTierFinal =
         normalizeLowComplexityWorkerStartTier(lowComplexityWorkerStartTier);
+    final boolean localExecutionRequestedFinal = localExecutionRequested;
     // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). The raw, caller-supplied
     // modelName is the ONLY unambiguous signal of an explicit pin: `model` above is already
     // defaulted to defaultModelFor(provider) when modelName is blank, so we capture modelName
@@ -925,7 +1035,8 @@ public class RunOrchestrator implements RunControlPort {
                     branchOverrideFinal,
                     prReviewCommentsFinal,
                     pinnedModelFinal,
-                    lowComplexityWorkerStartTierFinal);
+                    lowComplexityWorkerStartTierFinal,
+                    localExecutionRequestedFinal);
               } finally {
                 activeRuns.remove(runIdFinal);
               }
@@ -1074,6 +1185,43 @@ public class RunOrchestrator implements RunControlPort {
       // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
       String pinnedModel,
       String lowComplexityWorkerStartTierOverride) {
+    runPipeline(
+        runId,
+        provider,
+        model,
+        userRequest,
+        skipApproval,
+        executionMode,
+        projectId,
+        selectedRepoIds,
+        githubPat,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        pinnedModel,
+        lowComplexityWorkerStartTierOverride,
+        false);
+  }
+
+  private void runPipeline(
+      String runId,
+      String provider,
+      String model,
+      String userRequest,
+      boolean skipApproval,
+      String executionMode,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String githubPat,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Non-null only when the
+      // caller supplied an explicit RunRequest.modelName. Overlaid onto the org override map at the
+      // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
+      String pinnedModel,
+      String lowComplexityWorkerStartTierOverride,
+      boolean localExecutionRequested) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -1198,14 +1346,18 @@ public class RunOrchestrator implements RunControlPort {
       // V2 runs: the endpoint assumes the workspace already has git history.
       workspaceInit.ensureRunWorkspace(runId);
 
-      // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. When on, the
-      // worker's tool calls are proxied to the caller's machine (clone / smoke / reviewer / push
-      // are
-      // all skipped below). Flag OFF ⇒ false ⇒ every branch below is inert and prod is
-      // byte-identical.
-      localRun =
-          featureFlagService.isEnabled("worker.local-hands.enabled")
-              && runLocalExecutionFlag.consume(runId);
+      // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. New callers
+      // pass the intent directly before the async pipeline starts; the Redis marker remains only as
+      // a legacy fallback. If LOCAL was requested but the feature flag is now off, fail closed
+      // instead of silently executing server-side tools against the VM workspace.
+      boolean markerRequestedLocalRun = runLocalExecutionFlag.consume(runId);
+      boolean requestedLocalRun = localExecutionRequested || markerRequestedLocalRun;
+      localRun = featureFlagService.isEnabled("worker.local-hands.enabled") && requestedLocalRun;
+      if (requestedLocalRun && !localRun) {
+        log.error("RunOrchestrator run={} requested LOCAL-hands but feature flag is disabled", runId);
+        terminate(runId, "FAILED", "local-hands disabled before pipeline start", startedAt);
+        return;
+      }
       boolean requireContinuationConfirmation = runContinuationConfirmationFlag.consume(runId);
       boolean requireContinuationBenchmarkPrior =
           runContinuationBenchmarkPriorFlag
