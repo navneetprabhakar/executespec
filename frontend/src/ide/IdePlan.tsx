@@ -180,8 +180,12 @@ export default function IdePlan() {
             >
               <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI</strong>
               {managedAi && (
-                <IdeBadge kind={managedAiBadgeKind(managedAi.routingState)}>
-                  {managedAi.routingState}
+                <IdeBadge
+                  kind={
+                    managedAi.managed === false ? 'ok' : managedAiBadgeKind(managedAi.routingState)
+                  }
+                >
+                  {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
                 </IdeBadge>
               )}
             </div>

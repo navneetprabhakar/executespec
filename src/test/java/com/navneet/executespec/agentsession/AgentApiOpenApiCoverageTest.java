@@ -62,4 +62,17 @@ class AgentApiOpenApiCoverageTest {
             "ManagedAiBalance:",
             "ManagedAiPolicy:");
   }
+
+  @Test
+  void openApiDocumentsStreamingTurnEventAndAttachmentContract() throws IOException {
+    String openApi = Files.readString(Path.of("docs/openapi.yaml"));
+
+    assertThat(openApi)
+        .contains(
+            "Event names: `ack`",
+            "`route_decision` ({route, confidence,",
+            "`proposal` ({action, action_type, summary, spec, requires_confirmation})",
+            "attachmentIds:",
+            "Optional uploaded attachment ids owned by this agent session");
+  }
 }

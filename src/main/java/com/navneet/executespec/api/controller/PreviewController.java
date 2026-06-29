@@ -97,7 +97,7 @@ public class PreviewController {
       @PathVariable String runId,
       @RequestBody(required = false) PreviewStartRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/preview/start", runId);
 
     try {
@@ -129,7 +129,7 @@ public class PreviewController {
   @PostMapping("/{runId}/preview/rebuild")
   public ResponseEntity<PreviewStatusDto> rebuild(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/preview/rebuild", runId);
 
     try {
@@ -159,7 +159,7 @@ public class PreviewController {
   @DeleteMapping("/{runId}/preview/stop")
   public ResponseEntity<Void> stop(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}/preview/stop", runId);
     previewService.stop(runId);
     return ResponseEntity.ok().build();
@@ -258,7 +258,7 @@ public class PreviewController {
       @PathVariable String runId,
       @RequestBody ExecRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/preview/exec cmd={}", runId, request.cmd());
 
     try {

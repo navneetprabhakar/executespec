@@ -1,5 +1,7 @@
 package com.navneet.executespec.agentsession;
 
+import java.util.Locale;
+
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
@@ -15,6 +17,7 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
+import com.navneet.executespec.run.RunLocalExecutionFlag;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -48,6 +51,7 @@ public class AgentRunSubmissionGate {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final RunIdempotencyService runIdempotencyService;
   private final StateStore stateStore;
+  private final RunLocalExecutionFlag runLocalExecutionFlag;
 
   public Submission submitConfirmed(
       AgentSession session,
@@ -55,6 +59,16 @@ public class AgentRunSubmissionGate {
       OrchestratorTurnResponse decision,
       OrchestratorRunConfirmationRequest request,
       AppUserDetails user) {
+    return submitConfirmed(session, turn, decision, request, user, false);
+  }
+
+  public Submission submitConfirmed(
+      AgentSession session,
+      AgentTurn turn,
+      OrchestratorTurnResponse decision,
+      OrchestratorRunConfirmationRequest request,
+      AppUserDetails user,
+      boolean patAuthenticated) {
     if (!"CODE_RUN_REQUIRED".equals(decision.route())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "stored orchestrator decision is not a run route");
@@ -72,7 +86,10 @@ public class AgentRunSubmissionGate {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "no cloud-run action is proposed");
     }
 
-    String spec = AgentActionArguments.stringArg(action.arguments(), "spec");
+    String spec = request == null ? null : AgentText.blankToNull(request.spec());
+    if (spec == null) {
+      spec = AgentActionArguments.stringArg(action.arguments(), "spec");
+    }
     if (spec == null || spec.isBlank()) {
       spec = turn.getUserMessage();
     }
@@ -85,6 +102,19 @@ public class AgentRunSubmissionGate {
             session.getProjectId());
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
+    }
+    boolean localExecutionRequested = request != null && Boolean.TRUE.equals(request.localExecution());
+    if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Local-hands execution is not enabled on this backend. Use remote run submit or ask an"
+              + " operator to enable worker.local-hands.enabled.");
+    }
+    if (localExecutionRequested && !patAuthenticated) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
+              + " runs execute remotely.");
     }
 
     String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
@@ -105,6 +135,8 @@ public class AgentRunSubmissionGate {
 
     String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
+    String lowStartTier =
+        request == null ? null : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
     // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
     managedAiUsageService.assertCanStartRun(
         user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
@@ -116,6 +148,7 @@ public class AgentRunSubmissionGate {
         providerOverride != null
             ? aiProviderPreferenceService.updatePreferredProvider(user, providerOverride)
             : aiProviderPreferenceService.preferredProvider(user);
+    String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
 
     PipelineRun run =
         runOrchestrator.submitRun(
@@ -132,20 +165,46 @@ public class AgentRunSubmissionGate {
             user.getUser().getId(),
             user.getUser().getOrgId(),
             projectId,
-            "PRODUCTION",
+            executionMode,
             null,
             null,
             false,
             null,
-            null);
+            null,
+            null,
+            null,
+            lowStartTier);
 
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
+    }
+    if (localExecutionRequested) {
+      runLocalExecutionFlag.mark(run.getRunId());
     }
     runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
     return new Submission(run.getRunId(), true, "SUBMITTED");
   }
 
   public record Submission(String runId, boolean calledRunApi, String status) {}
+
+  static String normalizeLowComplexityWorkerStartTier(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+    return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
+  }
+
+  static String normalizeExecutionMode(String value) {
+    if (value == null || value.isBlank()) {
+      return "PRODUCTION";
+    }
+    String normalized = value.trim().toUpperCase(Locale.ROOT);
+    return switch (normalized) {
+      case "PROTOTYPE" -> "PROTOTYPE";
+      case "PRODUCTION" -> "PRODUCTION";
+      default -> "PRODUCTION";
+    };
+  }
 }

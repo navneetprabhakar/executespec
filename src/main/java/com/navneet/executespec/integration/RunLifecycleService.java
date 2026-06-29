@@ -9,12 +9,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -88,6 +93,7 @@ public class RunLifecycleService {
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
   private final RunCostTracker costTracker;
+  private final RunTokenAttributor tokenAttributor;
   private final RunKeyContextStore keyContextStore;
   private final WorkspaceRestoreService workspaceRestoreService;
   private final RunPersistenceWriter persistenceWriter;
@@ -602,6 +608,31 @@ public class RunLifecycleService {
    * @throws IllegalStateException if the run is not in a retryable state
    */
   public void retryTask(String runId, String taskId) {
+    retryTaskInternal(runId, taskId, null);
+  }
+
+  /**
+   * Approves a previously blocked model/provider continuation proposal for one task, then
+   * dispatches the normal retry path with the proposed provider/model. This only accepts proposals
+   * that were explicitly stopped by the continuation-confirmation guard; generic blocked tasks
+   * still require a normal retry or a fresh run.
+   */
+  public ContinuationApproval approveContinuation(String runId, String taskId) {
+    var task = findTask(runId, taskId);
+    ContinuationApproval approval = parseContinuationApproval(task);
+    retryTaskInternal(
+        runId,
+        taskId,
+        new RetryProviderOverride(
+            approval.provider(),
+            approval.model(),
+            approval.proposedAction(),
+            approval.benchmarkPriorRequired(),
+            approval.postReview()));
+    return approval;
+  }
+
+  private void retryTaskInternal(String runId, String taskId, RetryProviderOverride override) {
     var run =
         runRepo
             .findById(runId)
@@ -611,11 +642,7 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Task retry requires PARTIAL / FAILED / COMPLETE run (current: " + status + ")");
     }
-    String key = runId.substring(0, 8) + "_" + taskId;
-    var task =
-        taskRepo
-            .findById(key)
-            .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+    var task = findTask(runId, taskId);
 
     java.nio.file.Path workspace =
         java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
@@ -636,10 +663,12 @@ public class RunLifecycleService {
     }
 
     log.info(
-        "RunOrchestrator retryTask: run={} task={} dispatching real re-execution via"
-            + " SequentialExecutor.execute(req, ResumeRequest)",
+        "RunOrchestrator retryTask: run={} task={} override={}/{} dispatching real re-execution"
+            + " via SequentialExecutor.execute(req, ResumeRequest)",
         runId,
-        taskId);
+        taskId,
+        override == null ? "-" : override.provider(),
+        override == null ? "-" : override.model());
 
     task.setStatus("PENDING");
     task.setStartedAt(null);
@@ -653,11 +682,7 @@ public class RunLifecycleService {
     runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
     broadcaster.emit(
-        runId,
-        RunEvent.log(
-            runId,
-            "retry",
-            "Retrying task " + taskId + " (run was " + prevRunStatus + " → now WORKING)"));
+        runId, RunEvent.log(runId, "retry", retryMessage(taskId, prevRunStatus, override)));
 
     final java.nio.file.Path retryWorkspace = workspace;
     final String fullTargetTaskId = task.getTaskId(); // already prefixed with runId-short
@@ -669,11 +694,17 @@ public class RunLifecycleService {
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
                 String model = row == null ? null : row.getWorkerModel();
+                if (override != null) {
+                  provider = override.provider();
+                  model = override.model();
+                }
+                ContinuationUsage approvedUsage = continuationUsageFor(row, override);
 
                 ExecutionContext rootCtx =
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
+                RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
 
                 ExecutionResult result =
                     executor.execute(
@@ -684,6 +715,17 @@ public class RunLifecycleService {
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
                             .enableSmokeTests(true)
+                            .userConfirmedExpensiveContinuation(override != null)
+                            .userConfirmedContinuationAction(
+                                override == null ? null : override.proposedAction())
+                            .userConfirmedContinuationProvider(
+                                override == null ? null : override.provider())
+                            .userConfirmedContinuationModel(override == null ? null : override.model())
+                            .requireBenchmarkPriorForAutomaticContinuation(
+                                override == null ? null : override.benchmarkPriorRequired())
+                            .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
+                            .initialModelStepUpsUsed(approvedUsage.modelStepUps())
+                            .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
                             .designBlock(null)
                             .projectId(row == null ? null : row.getProjectId())
                             .workspaceSummary(
@@ -693,13 +735,40 @@ public class RunLifecycleService {
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
+                RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
+                tokenAttributor.attributeWorkerAdditionalTask(
+                    runId,
+                    fullTargetTaskId,
+                    afterRetry.inputTokens() - beforeRetry.inputTokens(),
+                    afterRetry.outputTokens() - beforeRetry.outputTokens(),
+                    provider.toUpperCase(),
+                    model);
 
-                var terminal = RunOrchestrator.resolveTerminalStatus(result, null);
+                ReviewerResult reviewResult =
+                    override != null && override.postReview()
+                        ? runReviewerAfterApprovedPostReviewContinuation(
+                            runId, plan, rootCtx, provider, model, result, afterRetry)
+                        : null;
+                if (override != null && override.postReview()) {
+                  try {
+                    validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
+                  } catch (Exception e) {
+                    log.warn(
+                        "approved post-review continuation validation failed run={}: {}",
+                        runId,
+                        e.getMessage());
+                  }
+                }
+
+                var terminal = RunOrchestrator.resolveTerminalStatus(result, reviewResult);
                 controlPort.terminate(
                     runId,
                     terminal.status(),
                     terminal.reason(),
-                    "retry final status: " + terminal.reason(),
+                    (override != null && override.postReview()
+                            ? "approved post-review continuation final status: "
+                            : "retry final status: ")
+                        + terminal.reason(),
                     null);
               } catch (Exception e) {
                 log.error(
@@ -709,7 +778,290 @@ public class RunLifecycleService {
                 controlPort.removeActiveRun(runId);
               }
             });
+    if (override != null) {
+      appendApprovedContinuationAction(task, override);
+    }
     controlPort.putActiveRun(runId, future);
+  }
+
+  private ReviewerResult runReviewerAfterApprovedPostReviewContinuation(
+      String runId,
+      Plan plan,
+      ExecutionContext rootCtx,
+      String approvedProvider,
+      String approvedModel,
+      ExecutionResult result,
+      RunCostTracker.Snapshot beforeReview) {
+    persistenceWriter.updateStatus(runId, "REVIEWING");
+    RunOrchestrator.ProviderModel reviewerRoute =
+        RunOrchestrator.reviewerRouteFor(approvedProvider, approvedModel, result);
+    try {
+      ReviewerResult reviewResult =
+          reviewer.review(
+              ReviewerRequest.builder()
+                  .provider(reviewerRoute.provider())
+                  .model(reviewerRoute.model())
+                  .context(rootCtx)
+                  .buildCommand(plan.buildCommand())
+                  .skipWiringPass(false)
+                  .build());
+      persistenceWriter.persistReview(runId, reviewResult);
+      RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
+      tokenAttributor.attributePhaseAdditional(
+          runId,
+          RunTokenAttributor.Phase.REVIEWER,
+          afterReview.inputTokens() - beforeReview.inputTokens(),
+          afterReview.outputTokens() - beforeReview.outputTokens(),
+          reviewerRoute.provider().toUpperCase(),
+          reviewerRoute.model());
+      return reviewResult;
+    } catch (Exception e) {
+      log.warn(
+          "approved post-review continuation reviewer failed run={}: {}", runId, e.getMessage());
+      persistenceWriter.persistReviewFailure(runId, e);
+      return RunOrchestrator.reviewerFailedResult(e);
+    }
+  }
+
+  private com.navneet.executespec.state.entity.AgentTask findTask(String runId, String taskId) {
+    if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
+      throw new IllegalArgumentException("Task not found: " + taskId);
+    }
+    String runPrefix = runId.substring(0, 8) + "_";
+    String key = taskId.startsWith(runPrefix) ? taskId : runPrefix + taskId;
+    return taskRepo
+        .findById(key)
+        .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+  }
+
+  private ContinuationApproval parseContinuationApproval(
+      com.navneet.executespec.state.entity.AgentTask task) {
+    String json = task.getContinuationDecisionJson();
+    if (json == null || json.isBlank()) {
+      throw new IllegalStateException("No continuation proposal is recorded for this task.");
+    }
+    try {
+      JsonNode root = objectMapper.readTree(json);
+      String decision = root.path("decision").asText("");
+      String source = root.path("policy").path("source").asText(root.path("source").asText(""));
+      boolean explicitConfirmationRequired =
+          root.path("policy").path("requireConfirmationBeforeExpensiveContinuation").asBoolean();
+      JsonNode candidate = root.path("selectedCandidate");
+      String provider = candidate.path("provider").asText("");
+      String model = candidate.path("model").asText("");
+      RunContinuationDecision proposedAction = proposedContinuationAction(root);
+      boolean benchmarkPriorRequired =
+          root.path("policy").path("requireBenchmarkPriorForAutomaticContinuation").asBoolean();
+      boolean candidateHasBenchmarkPrior =
+          candidate.path("benchmarkQualityPriorAvailable").asBoolean(false);
+      boolean benchmarkConfidenceBlocked = benchmarkPriorRequired && !candidateHasBenchmarkPrior;
+      if (!"STOP_BLOCKED".equals(decision)
+          || (!explicitConfirmationRequired && !benchmarkConfidenceBlocked)) {
+        throw new IllegalStateException(
+            "Continuation approval requires an approval-blocked continuation proposal.");
+      }
+      if (provider.isBlank() || model.isBlank()) {
+        throw new IllegalStateException(
+            "Continuation approval requires a proposed provider and model.");
+      }
+      return new ContinuationApproval(
+          provider,
+          model,
+          proposedAction,
+          benchmarkPriorRequired,
+          heavyContinuationApprovalSource(source));
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("Continuation proposal JSON is corrupted: " + e.getMessage());
+    }
+  }
+
+  static boolean heavyContinuationApprovalSource(String source) {
+    return "POST_REVIEW".equalsIgnoreCase(source)
+        || "POST_VALIDATION_REPORT".equalsIgnoreCase(source);
+  }
+
+  private void appendApprovedContinuationAction(
+      com.navneet.executespec.state.entity.AgentTask task, RetryProviderOverride override) {
+    if (task == null || override == null) {
+      return;
+    }
+    try {
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode action = actions.addObject();
+      action.put("status", "APPROVED");
+      action.put(
+          "decision",
+          override.proposedAction() == null ? "UNKNOWN" : override.proposedAction().name());
+      action.put("provider", override.provider());
+      action.put("model", override.model());
+      action.put("reason", "user approved blocked continuation");
+      action.put("limitName", "userApproval");
+      action.put("usedLimit", 1);
+      action.put("maxLimit", 1);
+      action.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+      broadcaster.emit(
+          task.getRunId(),
+          RunEvent.continuationAction(
+              task.getRunId(),
+              task.getTaskId(),
+              "Continuation action approved: "
+                  + (override.proposedAction() == null ? "UNKNOWN" : override.proposedAction())
+                  + " -> "
+                  + override.provider()
+                  + "/"
+                  + override.model(),
+              override.proposedAction() == null ? "UNKNOWN" : override.proposedAction().name(),
+              override.provider(),
+              override.model(),
+              "user approved blocked continuation",
+              actions.size(),
+              1,
+              "userApproval",
+              1,
+              1,
+              "APPROVED"));
+    } catch (Exception ex) {
+      log.warn(
+          "approveContinuation: failed to append action history for task {}: {}",
+          task.getTaskId(),
+          ex.getMessage(),
+          ex);
+    }
+  }
+
+  private ArrayNode readContinuationActions(String json)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return objectMapper.createArrayNode();
+    }
+    JsonNode parsed = objectMapper.readTree(json);
+    if (parsed != null && parsed.isArray()) {
+      ArrayNode copy = objectMapper.createArrayNode();
+      parsed.forEach(copy::add);
+      return copy;
+    }
+    return objectMapper.createArrayNode();
+  }
+
+  private static String retryMessage(
+      String taskId, String prevRunStatus, RetryProviderOverride override) {
+    String base = "Retrying task " + taskId + " (run was " + prevRunStatus + " → now WORKING)";
+    if (override == null) {
+      return base;
+    }
+    return base
+        + " with approved continuation model "
+        + override.provider()
+        + "/"
+        + override.model();
+  }
+
+  private static RunContinuationDecision proposedContinuationAction(JsonNode root) {
+    String explicit = root.path("policy").path("proposedAction").asText("");
+    if (explicit.isBlank()) {
+      explicit = root.path("proposedAction").asText("");
+    }
+    RunContinuationDecision parsed = parseContinuationAction(explicit);
+    if (parsed != null) {
+      return parsed;
+    }
+    JsonNode reasons = root.path("reasons");
+    if (reasons.isArray()) {
+      for (JsonNode reason : reasons) {
+        parsed = proposedContinuationActionFromText(reason.asText(""));
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static RunContinuationDecision proposedContinuationActionFromText(String text) {
+    if (text == null || text.isBlank()) {
+      return null;
+    }
+    for (RunContinuationDecision candidate :
+        List.of(
+            RunContinuationDecision.STEP_UP_MODEL,
+            RunContinuationDecision.STEP_DOWN_MODEL,
+            RunContinuationDecision.CHANGE_PROVIDER)) {
+      if (text.contains("proposed action " + candidate.name())) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static RunContinuationDecision parseContinuationAction(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      RunContinuationDecision decision = RunContinuationDecision.valueOf(value.trim());
+      return switch (decision) {
+        case STEP_UP_MODEL, STEP_DOWN_MODEL, CHANGE_PROVIDER -> decision;
+        case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+            null;
+      };
+    } catch (IllegalArgumentException ex) {
+      return null;
+    }
+  }
+
+  private static ContinuationUsage continuationUsageFor(
+      PipelineRun row, RetryProviderOverride override) {
+    if (override == null) {
+      return ContinuationUsage.none();
+    }
+    RunContinuationDecision action = override.proposedAction();
+    if (action == RunContinuationDecision.CHANGE_PROVIDER) {
+      return new ContinuationUsage(1, 0, 0);
+    }
+    if (action == RunContinuationDecision.STEP_UP_MODEL) {
+      return new ContinuationUsage(0, 1, 0);
+    }
+    if (action == RunContinuationDecision.STEP_DOWN_MODEL) {
+      return new ContinuationUsage(0, 0, 1);
+    }
+    String currentProvider = row == null ? "" : blankToEmpty(row.getAiProvider());
+    if (!currentProvider.isBlank()
+        && !currentProvider.equalsIgnoreCase(blankToEmpty(override.provider()))) {
+      return new ContinuationUsage(1, 0, 0);
+    }
+    String currentModel = row == null ? "" : blankToEmpty(row.getWorkerModel());
+    if (!currentModel.isBlank() && !currentModel.equals(blankToEmpty(override.model()))) {
+      return new ContinuationUsage(0, 1, 0);
+    }
+    return ContinuationUsage.none();
+  }
+
+  private static String blankToEmpty(String value) {
+    return value == null ? "" : value.trim();
+  }
+
+  public record ContinuationApproval(
+      String provider,
+      String model,
+      RunContinuationDecision proposedAction,
+      boolean benchmarkPriorRequired,
+      boolean postReview) {}
+
+  private record RetryProviderOverride(
+      String provider,
+      String model,
+      RunContinuationDecision proposedAction,
+      boolean benchmarkPriorRequired,
+      boolean postReview) {}
+
+  private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
+    static ContinuationUsage none() {
+      return new ContinuationUsage(0, 0, 0);
+    }
   }
 
   /**

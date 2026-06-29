@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import lombok.Builder;
@@ -18,6 +19,31 @@ import lombok.Builder;
  *     has no buildable project)
  * @param localHandsMode when true, the worker is editing the caller's local working tree through
  *     proxied tools; prompt discipline should avoid unsolicited scaffold/test files.
+ * @param requireConfirmationBeforeExpensiveContinuation per-run tightening override that blocks
+ *     model/provider continuation spend until a client confirms it. Null/false leaves the server
+ *     YAML default in control.
+ * @param requireBenchmarkPriorForAutomaticContinuation optional per-run override for whether
+ *     automatic model/provider continuation requires a compatible benchmark quality prior. Null
+ *     leaves the server YAML default in control.
+ * @param routePinned true when the run is bound to a validated explicit provider/model pin; pinned
+ *     runs may surface better candidates but must not automatically change provider/model.
+ * @param lowComplexityWorkerStartTier optional LOW-task start tier override. {@code LIGHTWEIGHT}
+ *     starts LOW tasks on the provider's cheap tier without pinning provider/model; null leaves the
+ *     server YAML default in control.
+ * @param userConfirmedExpensiveContinuation true only for a retry that is being executed after a
+ *     user approved a blocked continuation proposal. This lets the retry spend on the approved
+ *     provider/model without weakening the run's default confirmation or benchmark-prior policy.
+ * @param userConfirmedContinuationAction approved continuation action scope. Confirmation applies
+ *     only when the later policy proposal matches this action, provider, and model.
+ * @param userConfirmedContinuationProvider approved continuation provider scope.
+ * @param userConfirmedContinuationModel approved continuation model scope.
+ * @param initialProviderSwitchesUsed initial run-level provider-switch count to seed before
+ *     continuation advice. Used by approved blocked continuation retries so the approved action
+ *     counts against the same ceiling as automatic reruns.
+ * @param initialModelStepUpsUsed initial target-task model-step-up count to seed before continuation
+ *     advice.
+ * @param initialModelStepDownsUsed initial target-task model-step-down count to seed before
+ *     continuation advice.
  */
 @Builder
 public record ExecutionRequest(
@@ -28,6 +54,17 @@ public record ExecutionRequest(
     Integer maxIterationsPerTask,
     Boolean enableSmokeTests,
     Boolean localHandsMode,
+    Boolean requireConfirmationBeforeExpensiveContinuation,
+    Boolean requireBenchmarkPriorForAutomaticContinuation,
+    Boolean routePinned,
+    String lowComplexityWorkerStartTier,
+    Boolean userConfirmedExpensiveContinuation,
+    RunContinuationDecision userConfirmedContinuationAction,
+    String userConfirmedContinuationProvider,
+    String userConfirmedContinuationModel,
+    Integer initialProviderSwitchesUsed,
+    Integer initialModelStepUpsUsed,
+    Integer initialModelStepDownsUsed,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
@@ -59,5 +96,15 @@ public record ExecutionRequest(
     if (runContext == null) throw new IllegalArgumentException("runContext required");
     if (enableSmokeTests == null) enableSmokeTests = true;
     if (localHandsMode == null) localHandsMode = false;
+    if (requireConfirmationBeforeExpensiveContinuation == null)
+      requireConfirmationBeforeExpensiveContinuation = false;
+    if (routePinned == null) routePinned = false;
+    if (userConfirmedExpensiveContinuation == null) userConfirmedExpensiveContinuation = false;
+    if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
+    if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;
+    if (initialModelStepDownsUsed == null) initialModelStepDownsUsed = 0;
+    initialProviderSwitchesUsed = Math.max(0, initialProviderSwitchesUsed);
+    initialModelStepUpsUsed = Math.max(0, initialModelStepUpsUsed);
+    initialModelStepDownsUsed = Math.max(0, initialModelStepDownsUsed);
   }
 }

@@ -53,17 +53,19 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision.                                                                                                           |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. Confirmed submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override.                              |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionService.java`                 | Session access checks, high-level orchestration, and API-facing service delegation.                                                                                                                                 |
 | `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, and stored trace hydration.                                                                       |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |
 | `AgentOrchestratorTurnService.java`        | Creates structured orchestrator turns: idempotent replay, request policy downgrade, project read check, turn persistence, trace event append, and session title/timestamp update.                                   |
-| `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. |
+| `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
+| `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
+| `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |
 | `AgentTracePayloadFactory.java`            | Builds orchestrator trace payloads with route, policy, prompt, cost-run-call, and message-hash evidence.                                                                                                            |
 | `AgentContextResolver.java`                | Resolves local Git remotes/repo names to accessible linked projects without leaking unreadable project links.                                                                                                       |
 | `AgentGateDecisionCardFactory.java`        | Builds plan-gate decision cards from `PipelineRun` plus project metadata and plan JSON; keeps task/risk/model fallback logic out of the session service.                                                            |
@@ -128,6 +130,8 @@ turns separately from runs.
 - `AgentRunLifecycleIntentsTest` pins lifecycle command routing directly: approve/reject/cancel
   require run ids and confirmation actions, list-runs/list-gates stays read-only, and unrelated
   prompts are not claimed by lifecycle routing.
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency and propagation of
+  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
   missing/blank project context cannot call the run API.
@@ -159,7 +163,9 @@ turns separately from runs.
 - `AgentAttachmentServiceTest` pins the upload gate: clean text is accepted/extracted/stored, image
   and oversize/empty files are rejected, and an `InputSanitizer` injection hit propagates as 400 with
   no store write. `specchat/WebSearchChatToolsTest` pins the `web_fetch` SSRF guards (scheme,
-  localhost/`*.internal`, loopback/link-local/metadata IPs) and required-arg rejection.
+  localhost/`*.internal`, loopback/link-local/metadata IPs), suspicious egress-query rejection,
+  default-port-only enforcement, pinned-address handoff, content-type/length response guards, and
+  required-arg rejection.
 - `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
   routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, owned-session loading,
@@ -180,6 +186,11 @@ turns separately from runs.
   append.
 - `AgentEventRecorderTest` pins session/turn-scoped event metadata, payload JSON, and null payload
   handling for durable action events.
+- `AgentRunEventBridgeTest` pins run-scoped action-event surfacing for typed task-wave and
+  goal/continuation run events and verifies unrelated run events do not write agent-session
+  records.
+- `AgentValidationReportEventBridgeTest` pins run-scoped action-event surfacing for final
+  validation-report evidence ledgers and verifies events without a run id do not write records.
 - `AgentTracePayloadFactoryTest` pins route/policy/run metadata, deterministic prompt metadata,
   message hashes, policy decision evidence, and blocked-route fallback fields.
 - `AgentContextResolverTest` pins Git remote normalization, nested repo-context fallback,
