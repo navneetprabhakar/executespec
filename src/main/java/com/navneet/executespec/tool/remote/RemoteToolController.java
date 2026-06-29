@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import lombok.RequiredArgsConstructor;
 
@@ -26,6 +28,10 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/runs")
 @RequiredArgsConstructor
 public class RemoteToolController {
+
+  static final int MAX_RESULT_CONTENT_CHARS = 64_000;
+  static final int MAX_RESULT_MESSAGE_CHARS = 4_000;
+  static final int MAX_RESULT_KIND_CHARS = 80;
 
   private final RemoteToolDispatcher dispatcher;
   private final RunAccessGuard guard;
@@ -45,7 +51,18 @@ public class RemoteToolController {
       return ResponseEntity.badRequest().build();
     }
     String envelope = normalizeEnvelope(body.result()).toString();
-    dispatcher.complete(runId, body.callId(), envelope);
+    RemoteToolDispatcher.CompletionResult result = dispatcher.complete(runId, body.callId(), envelope);
+    switch (result.status()) {
+      case ACCEPTED -> {
+        return ResponseEntity.noContent().build();
+      }
+      case DUPLICATE ->
+          throw new ResponseStatusException(HttpStatus.CONFLICT, result.message());
+      case UNKNOWN_SESSION ->
+          throw new ResponseStatusException(HttpStatus.CONFLICT, result.message());
+      case UNKNOWN_CALL ->
+          throw new ResponseStatusException(HttpStatus.NOT_FOUND, result.message());
+    }
     return ResponseEntity.noContent().build();
   }
 
@@ -61,7 +78,11 @@ public class RemoteToolController {
     out.put("ok", ok);
     if (ok) {
       JsonNode content = result.get("content");
-      out.put("content", content == null || content.isNull() ? "" : contentText(content));
+      out.put(
+          "content",
+          content == null || content.isNull()
+              ? ""
+              : capText(contentText(content), MAX_RESULT_CONTENT_CHARS));
       return out;
     }
     JsonNode kind = result.get("kind");
@@ -69,11 +90,12 @@ public class RemoteToolController {
     out.put(
         "kind",
         kind == null || kind.isNull() || kind.asText().isBlank() ? "INTERNAL" : kind.asText());
+    out.put("kind", capText(out.get("kind").asText(), MAX_RESULT_KIND_CHARS));
     out.put(
         "message",
         message == null || message.isNull() || message.asText().isBlank()
             ? "client tool failed without a message"
-            : message.asText());
+            : capText(message.asText(), MAX_RESULT_MESSAGE_CHARS));
     return out;
   }
 
@@ -87,5 +109,11 @@ public class RemoteToolController {
 
   private String contentText(JsonNode content) {
     return content.isTextual() ? content.asText() : content.toString();
+  }
+
+  private static String capText(String value, int maxChars) {
+    if (value == null) return "";
+    if (value.length() <= maxChars) return value;
+    return value.substring(0, maxChars) + "\n...[truncated by backend]";
   }
 }

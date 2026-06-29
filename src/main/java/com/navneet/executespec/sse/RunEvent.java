@@ -272,6 +272,33 @@ public record RunEvent(
   }
 
   /**
+   * Local-hands tool-result status. Emitted after the backend accepts/rejects a client tool result,
+   * or when a pending call times out / is interrupted / is closed with the run session. Payload is a
+   * compact status string for older log consumers; structured clients should read {@code data}.
+   */
+  public static RunEvent toolResultStatus(
+      String runId,
+      String taskId,
+      String callId,
+      String toolName,
+      String status,
+      String reason) {
+    return withData(
+        "TOOL_RESULT_STATUS",
+        runId,
+        taskId,
+        status == null ? "UNKNOWN" : status,
+        "callId",
+        callId,
+        "toolName",
+        toolName,
+        "status",
+        status,
+        "reason",
+        reason);
+  }
+
+  /**
    * 2026-05-07 — emitted by {@link com.navneet.executespec.lint.LintPass} after the deterministic
    * auto-fixers run between executor and reviewer. Payload is a one-line summary (e.g. {@code
    * "prettier+spotless-maven · 14 file(s) changed in 3.2s"}). LogPane on the v3 RunSidePanel

@@ -162,7 +162,10 @@ public class RunController {
           log.info(
               "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
               prior.get().getRunId());
-          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
+          return ResponseEntity.status(HttpStatus.ACCEPTED)
+              .body(
+                  mapper.toSummary(
+                      prior.get(), localExecutionRequested, localExecutionRequested));
         }
       }
     }

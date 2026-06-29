@@ -57,8 +57,35 @@ public class RemoteToolDispatcher {
     this.toolTimeoutMs = toolTimeoutMs;
   }
 
+  public enum CompletionStatus {
+    ACCEPTED,
+    DUPLICATE,
+    UNKNOWN_SESSION,
+    UNKNOWN_CALL
+  }
+
+  public record CompletionResult(CompletionStatus status, String message) {
+    static CompletionResult accepted() {
+      return new CompletionResult(CompletionStatus.ACCEPTED, "accepted");
+    }
+
+    static CompletionResult duplicate() {
+      return new CompletionResult(CompletionStatus.DUPLICATE, "tool result already completed");
+    }
+
+    static CompletionResult unknownSession() {
+      return new CompletionResult(CompletionStatus.UNKNOWN_SESSION, "no active local-hands session");
+    }
+
+    static CompletionResult unknownCall() {
+      return new CompletionResult(CompletionStatus.UNKNOWN_CALL, "unknown or expired tool call id");
+    }
+  }
+
+  private record PendingCall(CompletableFuture<String> future, String taskId, String toolName) {}
+
   private static final class Session {
-    final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    final Map<String, PendingCall> pending = new ConcurrentHashMap<>();
   }
 
   /**
@@ -73,7 +100,11 @@ public class RemoteToolDispatcher {
   public void unregister(String runId) {
     Session s = sessions.remove(runId);
     if (s != null) {
-      s.pending.values().forEach(f -> f.complete(errorEnvelope("INTERNAL", "run session closed")));
+      s.pending.forEach(
+          (callId, pending) -> {
+            pending.future().complete(errorEnvelope("INTERNAL", "run session closed"));
+            emitToolResultStatus(runId, pending.taskId(), callId, pending.toolName(), "SESSION_CLOSED", null);
+          });
       log.info("[RemoteTool] unregistered local-execution session for run {}", runId);
     }
   }
@@ -95,21 +126,29 @@ public class RemoteToolDispatcher {
     }
     String callId = UUID.randomUUID().toString();
     CompletableFuture<String> future = new CompletableFuture<>();
-    s.pending.put(callId, future);
+    s.pending.put(callId, new PendingCall(future, taskId, toolName));
     try {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
+      if (frameJson.length() > 256_000) {
+        s.pending.remove(callId);
+        return errorEnvelope(
+            "INVALID_ARGS", "remote tool frame exceeded 256000 characters; refusing to emit");
+      }
       broadcaster.emit(
           runId,
           RunEvent.toolCall(
               runId, taskId, frameJson, callId, toolName, argsJson, permissionKind(toolName)));
       return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
+      emitToolResultStatus(runId, taskId, callId, toolName, "TIMEOUT", "client did not answer");
       return errorEnvelope(
           "INTERNAL", "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      emitToolResultStatus(runId, taskId, callId, toolName, "INTERRUPTED", null);
       return errorEnvelope("INTERNAL", "interrupted awaiting client tool '" + toolName + "'");
     } catch (Exception e) {
+      emitToolResultStatus(runId, taskId, callId, toolName, "DISPATCH_FAILED", e.getClass().getSimpleName());
       return errorEnvelope(
           "INTERNAL", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
     } finally {
@@ -118,18 +157,26 @@ public class RemoteToolDispatcher {
   }
 
   /** Called by {@code RemoteToolController} when the client returns a tool result. */
-  public void complete(String runId, String callId, String resultEnvelopeJson) {
+  public CompletionResult complete(String runId, String callId, String resultEnvelopeJson) {
     Session s = sessions.get(runId);
     if (s == null) {
       log.debug("[RemoteTool] result for unknown session (run={}, callId={})", runId, callId);
-      return;
+      emitToolResultStatus(runId, null, callId, null, "REJECTED", "unknown_session");
+      return CompletionResult.unknownSession();
     }
-    CompletableFuture<String> f = s.pending.get(callId);
-    if (f != null) {
-      f.complete(resultEnvelopeJson);
-    } else {
+    PendingCall pending = s.pending.get(callId);
+    if (pending == null) {
       log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
+      emitToolResultStatus(runId, null, callId, null, "REJECTED", "unknown_call");
+      return CompletionResult.unknownCall();
     }
+    boolean completed = pending.future().complete(resultEnvelopeJson);
+    if (!completed) {
+      emitToolResultStatus(runId, pending.taskId(), callId, pending.toolName(), "DUPLICATE", null);
+      return CompletionResult.duplicate();
+    }
+    emitToolResultStatus(runId, pending.taskId(), callId, pending.toolName(), "ACCEPTED", null);
+    return CompletionResult.accepted();
   }
 
   private String frame(
@@ -225,5 +272,20 @@ public class RemoteToolDispatcher {
     env.put("kind", kind);
     env.put("message", message);
     return env.toString();
+  }
+
+  private void emitToolResultStatus(
+      String runId, String taskId, String callId, String toolName, String status, String reason) {
+    try {
+      broadcaster.emit(
+          runId,
+          RunEvent.toolResultStatus(runId, taskId, callId, toolName, status, reason));
+    } catch (Exception e) {
+      log.debug(
+          "[RemoteTool] failed to emit tool-result status for run={} callId={}: {}",
+          runId,
+          callId,
+          e.getMessage());
+    }
   }
 }
