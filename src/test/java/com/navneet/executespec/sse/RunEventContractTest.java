@@ -56,6 +56,29 @@ class RunEventContractTest {
   }
 
   @Test
+  void toolResultStatusCarriesTypedReplayableLocalHandsFields() {
+    RunEvent event =
+        RunEvent.toolResultStatus("run-1", "task-1", "call-1", "shell", "ACCEPTED", null);
+
+    assertEquals("TOOL_RESULT_STATUS", event.type());
+    assertEquals("task-1", event.taskId());
+    assertEquals("ACCEPTED", event.payload());
+    assertEquals("call-1", event.data().get("callId"));
+    assertEquals("shell", event.data().get("toolName"));
+    assertEquals("ACCEPTED", event.data().get("status"));
+    assertNull(event.data().get("reason"));
+  }
+
+  @Test
+  void toolResultStatusNormalizesBlankStatusForTypedClients() {
+    RunEvent event = RunEvent.toolResultStatus("run-1", null, "call-1", null, " ", "missing");
+
+    assertEquals("UNKNOWN", event.payload());
+    assertEquals("UNKNOWN", event.data().get("status"));
+    assertEquals("missing", event.data().get("reason"));
+  }
+
+  @Test
   void goalDecisionCarriesTypedDecisionEnvelope() {
     RunEvent event =
         RunEvent.goalDecision(

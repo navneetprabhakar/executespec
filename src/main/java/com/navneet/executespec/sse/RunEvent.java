@@ -283,17 +283,18 @@ public record RunEvent(
       String toolName,
       String status,
       String reason) {
+    String normalizedStatus = status == null || status.isBlank() ? "UNKNOWN" : status;
     return withData(
         "TOOL_RESULT_STATUS",
         runId,
         taskId,
-        status == null ? "UNKNOWN" : status,
+        normalizedStatus,
         "callId",
         callId,
         "toolName",
         toolName,
         "status",
-        status,
+        normalizedStatus,
         "reason",
         reason);
   }
