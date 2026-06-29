@@ -17,9 +17,10 @@ Scope: backend hardening handoff for CLI/TUI local-hands support across
 | 2026-06-29 18:xx | Codex | Final local consistency | Re-read the objective, rechecked all three repo worktrees, and ran `git diff --check` in backend, CLI, and docs. | Goal is not complete until deployed dev/prod smoke is performed or explicitly deferred. | Whitespace checks clean; PDF and live capability evidence artifacts present. |
 | 2026-06-29 18:xx | Telegram | Final local status update | Attempted to send the final local consistency and remaining deployed-smoke status update. | Telegram API returned HTTP 403; credentials were not printed or committed. | Codex-side update log retained the failed send status. |
 | 2026-06-29 18:xx | Codex | Deploy preflight | Ran `scripts/deploy-local.sh --dry-run` for dev. | Real deploy not run from dirty working tree. | Dev VM reachable, deploy bucket readable, config keys present, SSH/IAP OK, current dev SHA `8adc2c8fdbbe30891d1aaf5cd55414c1a8475f15`. |
+| 2026-06-29 18:xx | Codex | Dev deploy | Ran `CONFIRM_DEPLOY=YES scripts/deploy-local.sh --deploy`. | Deploy builds with tests skipped by script design; local backend tests had already passed before deploy. | Dev health passed and provider check showed Anthropic/OpenAI/Google/OpenRouter/DeepSeek configured. Deployed SHA `a599c799d42fbad003e006a78fa94e2faeadf883`. |
+| 2026-06-29 18:xx | Codex | Deployed smoke | Ran rebuilt CLI doctor and a real local-hands run against `https://dev.executespec.ai`. | Production smoke not run. | Doctor detected `2026-06-local-hands-v1`; run `b14e8437-b16c-4332-bfc9-b35685ed8daa` completed `LOCAL_EXECUTION`; `npm test` passed 5/5; evidence/diff/export/revert logs captured. |
 
 Telegram message ids recorded during the session: `1365`, `1366`, and `1367`.
 
-Remaining gap before calling this deployed-ready: deploy the patched backend to the target dev/prod
-environment, then rerun `executespec doctor --validate-backend-capability` and one small real
-local-hands run against that deployed host.
+Remaining gap before calling this production-ready: run the same smoke against production after an
+intentional production deploy. Dev is deployed and smoke-tested.
