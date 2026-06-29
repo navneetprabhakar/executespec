@@ -208,6 +208,50 @@ class RunOrchestratorReviewerRouteTest {
   }
 
   @Test
+  void localHandsTerminalStatusDoesNotReportCompleteForFailedWorkerExecution() {
+    RunOrchestrator.StatusAndReason terminal =
+        RunOrchestrator.resolveLocalHandsTerminalStatus(
+            ExecutionResult.builder()
+                .overall(ExecutionResult.Overall.FAILED)
+                .tasksExecuted(1)
+                .tasksSuccessful(0)
+                .tasksFailed(1)
+                .build());
+
+    assertThat(terminal.status()).isEqualTo("FAILED");
+    assertThat(terminal.reason()).isEqualTo("LOCAL_EXECUTION_FAILED");
+  }
+
+  @Test
+  void localHandsTerminalStatusPreservesCleanAndWarningOutcomes() {
+    RunOrchestrator.StatusAndReason clean =
+        RunOrchestrator.resolveLocalHandsTerminalStatus(
+            ExecutionResult.builder()
+                .overall(ExecutionResult.Overall.ALL_SUCCESS)
+                .tasksExecuted(1)
+                .tasksSuccessful(1)
+                .build());
+    RunOrchestrator.StatusAndReason warning =
+        RunOrchestrator.resolveLocalHandsTerminalStatus(
+            ExecutionResult.builder()
+                .overall(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS)
+                .tasksExecuted(1)
+                .tasksSuccessful(0)
+                .tasksWithWarning(1)
+                .build());
+    RunOrchestrator.StatusAndReason aborted =
+        RunOrchestrator.resolveLocalHandsTerminalStatus(
+            ExecutionResult.builder().overall(ExecutionResult.Overall.ABORTED).build());
+
+    assertThat(clean.status()).isEqualTo("COMPLETE");
+    assertThat(clean.reason()).isEqualTo("LOCAL_EXECUTION");
+    assertThat(warning.status()).isEqualTo("PARTIAL");
+    assertThat(warning.reason()).isEqualTo("LOCAL_EXECUTION_WITH_WARNINGS");
+    assertThat(aborted.status()).isEqualTo("FAILED");
+    assertThat(aborted.reason()).isEqualTo("EXECUTION_ABORTED");
+  }
+
+  @Test
   void reviewerContinuationTargetUsesLatestUsableWorkerTask() {
     var target =
         RunOrchestrator.reviewerContinuationTarget(

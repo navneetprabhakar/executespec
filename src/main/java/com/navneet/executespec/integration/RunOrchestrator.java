@@ -1840,14 +1840,19 @@ public class RunOrchestrator implements RunControlPort {
       // for
       // a normal run.
       if (localRun) {
+        StatusAndReason localTerminal = resolveLocalHandsTerminalStatus(execResult);
         broadcaster.emit(
             runId,
             RunEvent.log(
-                runId, null, "Local-hands run complete — changes are in your working tree"));
+                runId,
+                null,
+                "Local-hands run terminal status "
+                    + localTerminal.status()
+                    + " — changes, if any, are in your working tree"));
         terminate(
             runId,
-            "COMPLETE",
-            "LOCAL_EXECUTION",
+            localTerminal.status(),
+            localTerminal.reason(),
             "local-hands run; diff in the client working tree (server-side steps skipped)",
             startedAt);
         return;
@@ -3952,6 +3957,19 @@ public class RunOrchestrator implements RunControlPort {
     // know — the reviewer didn't deliver a usable verdict — so dashboards +
     // retry logic can branch on it instead of treating it as "we have no idea".
     return new StatusAndReason(mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
+  }
+
+  static StatusAndReason resolveLocalHandsTerminalStatus(ExecutionResult exec) {
+    if (exec == null || exec.overall() == null) {
+      return new StatusAndReason("FAILED", "LOCAL_EXECUTION_FAILED");
+    }
+    return switch (exec.overall()) {
+      case ALL_SUCCESS -> new StatusAndReason("COMPLETE", "LOCAL_EXECUTION");
+      case PARTIAL_WITH_WARNINGS ->
+          new StatusAndReason("PARTIAL", "LOCAL_EXECUTION_WITH_WARNINGS");
+      case FAILED -> new StatusAndReason("FAILED", "LOCAL_EXECUTION_FAILED");
+      case ABORTED -> new StatusAndReason("FAILED", "EXECUTION_ABORTED");
+    };
   }
 
   /**
