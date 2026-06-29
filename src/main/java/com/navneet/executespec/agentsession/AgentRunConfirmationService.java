@@ -13,6 +13,7 @@ import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.run.RunIdempotencyService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,7 @@ class AgentRunConfirmationService {
   private final AgentSessionRepository sessionRepo;
   private final ProjectAccessGuard projectAccessGuard;
   private final AgentRunSubmissionGate runSubmissionGate;
+  private final RunIdempotencyService runIdempotencyService;
 
   OrchestratorRunConfirmationResponse confirm(
       AgentSession session, OrchestratorRunConfirmationRequest request, AppUserDetails user) {
@@ -51,6 +53,13 @@ class AgentRunConfirmationService {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
     if (turn.getLinkedRunId() != null && !turn.getLinkedRunId().isBlank()) {
+      Boolean localExecutionAccepted =
+          runIdempotencyService
+              .lookupEntry(
+                  user.getUser().getId(), AgentRunSubmissionGate.idempotencyKeyForTurn(turn.getId()))
+              .filter(entry -> turn.getLinkedRunId().equals(entry.runId()))
+              .map(RunIdempotencyService.Entry::localExecutionAccepted)
+              .orElse(null);
       return new OrchestratorRunConfirmationResponse(
           session.getId(),
           turn.getId(),
@@ -58,7 +67,9 @@ class AgentRunConfirmationService {
           turn.getIntentType(),
           false,
           "orch_trace_" + UUID.randomUUID(),
-          "ALREADY_SUBMITTED");
+          "ALREADY_SUBMITTED",
+          request.localExecution(),
+          localExecutionAccepted);
     }
 
     OrchestratorTurnResponse decision =
@@ -102,7 +113,9 @@ class AgentRunConfirmationService {
             decision.route(),
             submission.calledRunApi(),
             traceId,
-            submission.status());
+            submission.status(),
+            submission.localExecutionRequested(),
+            submission.localExecutionAccepted());
     Map<String, Object> payload =
         tracePayloadFactory.build(
             decision,

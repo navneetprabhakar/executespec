@@ -200,7 +200,20 @@ public final class AgentSessionDtos {
       String route,
       boolean calledRunApi,
       String traceId,
-      String status) {}
+      String status,
+      Boolean localExecutionRequested,
+      Boolean localExecutionAccepted) {
+    public OrchestratorRunConfirmationResponse(
+        String sessionId,
+        String turnId,
+        String runId,
+        String route,
+        boolean calledRunApi,
+        String traceId,
+        String status) {
+      this(sessionId, turnId, runId, route, calledRunApi, traceId, status, null, null);
+    }
+  }
 
   public record IntentDecision(
       String intent,

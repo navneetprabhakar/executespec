@@ -113,7 +113,7 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunSubmitsExactlyOnceAndRecordsUsage() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:turn-1"))
         .thenReturn(Optional.empty());
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
@@ -151,6 +151,8 @@ class AgentRunSubmissionGateTest {
 
     assertThat(submission.runId()).isEqualTo("run-1");
     assertThat(submission.calledRunApi()).isTrue();
+    assertThat(submission.localExecutionRequested()).isFalse();
+    assertThat(submission.localExecutionAccepted()).isFalse();
     verify(runOrchestrator)
         .submitRun(
             "Implement OAuth login",
@@ -176,12 +178,12 @@ class AgentRunSubmissionGateTest {
             (Boolean) null,
             (String) null);
     verify(usageTrackingService).increment("u1", "RUNS", 1);
-    verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-1");
+    verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-1", false);
   }
 
   @Test
   void confirmedRunCanStartLowComplexityWorkersOnLightweightTier() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:turn-1"))
         .thenReturn(Optional.empty());
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
@@ -246,7 +248,7 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunPropagatesPrototypeExecutionModeAndEditedSpec() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:turn-1"))
         .thenReturn(Optional.empty());
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
@@ -311,7 +313,7 @@ class AgentRunSubmissionGateTest {
   @Test
   void confirmedLocalRunRequiresPatAndMarksLocalExecutionFlag() {
     when(featureFlagService.isEnabled("worker.local-hands.enabled")).thenReturn(true);
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:turn-1"))
         .thenReturn(Optional.empty());
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
@@ -342,9 +344,19 @@ class AgentRunSubmissionGateTest {
     var request =
         new OrchestratorRunConfirmationRequest(
             "s1", "turn-1", true, null, null, null, null, null, true, null);
-    gate.submitConfirmed(session(), turn("Implement OAuth login"), decision("CODE_RUN_REQUIRED", true), request, user(), true);
+    var submission =
+        gate.submitConfirmed(
+            session(),
+            turn("Implement OAuth login"),
+            decision("CODE_RUN_REQUIRED", true),
+            request,
+            user(),
+            true);
 
     verify(runLocalExecutionFlag).mark("run-local");
+    verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-local", true);
+    assertThat(submission.localExecutionRequested()).isTrue();
+    assertThat(submission.localExecutionAccepted()).isTrue();
 
     assertThatThrownBy(
             () ->
@@ -359,8 +371,36 @@ class AgentRunSubmissionGateTest {
         .hasMessageContaining("Personal Access Token");
   }
 
+  @Test
+  void idempotentLocalRetryReturnsPriorRunWithAcceptedLocalMetadata() {
+    when(featureFlagService.isEnabled("worker.local-hands.enabled")).thenReturn(true);
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:turn-1"))
+        .thenReturn(Optional.of(new RunIdempotencyService.Entry("run-local", true)));
+    when(stateStore.findRun("run-local"))
+        .thenReturn(
+            Optional.of(PipelineRun.builder().runId("run-local").createdByUserId("u1").build()));
+
+    var submission =
+        gate.submitConfirmed(
+            session(),
+            turn("Implement OAuth login"),
+            decision("CODE_RUN_REQUIRED", true),
+            new OrchestratorRunConfirmationRequest(
+                "s1", "turn-1", true, null, null, null, null, null, true, null),
+            user(),
+            true);
+
+    assertThat(submission.runId()).isEqualTo("run-local");
+    assertThat(submission.calledRunApi()).isFalse();
+    assertThat(submission.status()).isEqualTo("ALREADY_SUBMITTED");
+    assertThat(submission.localExecutionRequested()).isTrue();
+    assertThat(submission.localExecutionAccepted()).isTrue();
+    verifyNoInteractions(runOrchestrator);
+  }
+
   private static OrchestratorRunConfirmationRequest request(boolean confirmed) {
-    return new OrchestratorRunConfirmationRequest("s1", "turn-1", confirmed, null, null, null, null);
+    return new OrchestratorRunConfirmationRequest(
+        "s1", "turn-1", confirmed, null, null, null, null);
   }
 
   private static OrchestratorRunConfirmationRequest requestWithLowTier(String lowStartTier) {

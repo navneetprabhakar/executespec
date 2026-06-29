@@ -60,7 +60,7 @@ turns separately from runs.
 | `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, and stored trace hydration.                                                                       |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |
 | `AgentOrchestratorTurnService.java`        | Creates structured orchestrator turns: idempotent replay, request policy downgrade, project read check, turn persistence, trace event append, and session title/timestamp update.                                   |
-| `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
+| `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap, non-pinning LOW-start confirmation fields, and the `localExecutionRequested` / `localExecutionAccepted` handshake echoed from the run submission gate. |
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
@@ -130,8 +130,10 @@ turns separately from runs.
 - `AgentRunLifecycleIntentsTest` pins lifecycle command routing directly: approve/reject/cancel
   require run ids and confirmation actions, list-runs/list-gates stays read-only, and unrelated
   prompts are not claimed by lifecycle routing.
-- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency and propagation of
-  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency, propagation of
+  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint, and
+  preservation of `localExecutionAccepted` on idempotent local-hands retries so clients never infer
+  remote fallback from a duplicate submit response.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
   missing/blank project context cannot call the run API.
@@ -180,7 +182,7 @@ turns separately from runs.
   idempotent replay, conflicting turn-id rejection, project read checks, and trace event append.
 - `AgentRunConfirmationServiceTest` pins confirmed run-submission wrapping: non-run rejection,
   linked-run idempotency, turn ownership rejection, project write checks, gate invocation, turn
-  linking, and `ORCHESTRATOR_RUN_SUBMITTED` trace events.
+  linking, local-hands handshake echoing, and `ORCHESTRATOR_RUN_SUBMITTED` trace events.
 - `AgentRecordedTurnServiceTest` pins legacy recorded-turn persistence: deterministic intent/route
   output, initial turn rows, title update behavior, null-request handling, and `INTENT` event
   append.

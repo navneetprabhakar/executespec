@@ -52,7 +52,42 @@ class RunEventContractTest {
     assertEquals("c1", event.data().get("callId"));
     assertEquals("readFile", event.data().get("toolName"));
     assertEquals("{}", event.data().get("argsJson"));
+    assertEquals(2, event.data().get("argsOriginalChars"));
+    assertEquals(false, event.data().get("argsTruncated"));
     assertEquals("read", event.data().get("permissionKind"));
+  }
+
+  @Test
+  void toolCallTypedArgsAreRedactedAndBoundedForReplay() {
+    String secret = "{\"cmd\":\"echo sk-1234567890abcdef1234567890abcdef\"}";
+    String longArgs = secret + "x".repeat(9_000);
+
+    RunEvent event =
+        RunEvent.toolCall(
+            "run-1", "task-1", "{\"callId\":\"c1\"}", "c1", "shell", longArgs, "shell");
+
+    String args = (String) event.data().get("argsJson");
+    assertTrue(args.contains("[REDACTED_SECRET]"));
+    assertTrue(args.contains("[truncated: original_chars="));
+    assertTrue(args.length() < longArgs.length());
+    assertEquals(longArgs.length(), event.data().get("argsOriginalChars"));
+    assertEquals(true, event.data().get("argsTruncated"));
+  }
+
+  @Test
+  void toolResultCarriesTypedRemoteToolAcknowledgement() {
+    RunEvent event =
+        RunEvent.toolResult(
+            "run-1", "task-1", "c1", "readFile", "read", "ACCEPTED", "client_result_accepted");
+
+    assertEquals("TOOL_RESULT", event.type());
+    assertEquals("task-1", event.taskId());
+    assertEquals("callId=c1,status=ACCEPTED,reason=client_result_accepted", event.payload());
+    assertEquals("c1", event.data().get("callId"));
+    assertEquals("readFile", event.data().get("toolName"));
+    assertEquals("read", event.data().get("permissionKind"));
+    assertEquals("ACCEPTED", event.data().get("status"));
+    assertEquals("client_result_accepted", event.data().get("reason"));
   }
 
   @Test

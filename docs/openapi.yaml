@@ -101,6 +101,28 @@ tags:
 
 paths:
   # ──────────────────────────────────────────────────
+  # CLIENT CAPABILITIES / COMPATIBILITY
+  # ──────────────────────────────────────────────────
+  /v3/client-capabilities:
+    get:
+      tags: [Agent Sessions]
+      summary: Runtime backend compatibility contract for CLI / VS Code clients
+      description: >
+        Authenticated read endpoint that lets split local clients discover backend REST/SSE
+        contract support before entering local-hands mode. This is not the model-visible action
+        catalog; it reports fail-closed runtime capabilities such as PAT-only local execution,
+        tool-result envelope limits, event replay, provider catalog, managed-AI, governance, and
+        guarded web fetch support.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackendClientCapabilities"
+        "401":
+          description: Authentication required
+
+  # ──────────────────────────────────────────────────
   # AUTH
   # ──────────────────────────────────────────────────
   /auth/register:
@@ -5056,6 +5078,14 @@ components:
           type: string
         status:
           type: string
+        localExecutionRequested:
+          type: boolean
+          nullable: true
+          description: True when the confirmed agent action requested CLI local-hands execution.
+        localExecutionAccepted:
+          type: boolean
+          nullable: true
+          description: True only when the backend accepted LOCAL mode; clients must not treat null/false as remote fallback.
 
     IntentDecision:
       type: object
@@ -5192,6 +5222,166 @@ components:
           type: array
           items:
             type: string
+
+    BackendClientCapabilities:
+      type: object
+      properties:
+        schemaVersion:
+          type: integer
+          example: 1
+        contractVersion:
+          type: string
+          example: 2026-06-local-hands-v1
+        generatedAt:
+          type: string
+          format: date-time
+        authSource:
+          type: string
+          description: Current authenticated request source, for example PAT or JWT.
+        localHands:
+          $ref: "#/components/schemas/BackendLocalHandsCapability"
+        endpoints:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/BackendEndpointCapability"
+        eventContracts:
+          $ref: "#/components/schemas/BackendEventContractCapability"
+        toolResultContract:
+          $ref: "#/components/schemas/BackendToolResultContractCapability"
+        webFetch:
+          $ref: "#/components/schemas/BackendWebFetchCapability"
+        providerCatalog:
+          $ref: "#/components/schemas/BackendProviderCatalogCapability"
+        governance:
+          $ref: "#/components/schemas/BackendGovernanceCapability"
+        managedAi:
+          $ref: "#/components/schemas/BackendManagedAiCapability"
+
+    BackendLocalHandsCapability:
+      type: object
+      properties:
+        supported:
+          type: boolean
+        enabled:
+          type: boolean
+        requiredAuthSource:
+          type: string
+          example: PAT
+        currentAuthSourceAllowed:
+          type: boolean
+        currentRequestCanSubmitLocalHands:
+          type: boolean
+        submitPath:
+          type: string
+        toolResultsPath:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+
+    BackendEndpointCapability:
+      type: object
+      properties:
+        method:
+          type: string
+        path:
+          type: string
+        authenticated:
+          type: boolean
+        note:
+          type: string
+
+    BackendEventContractCapability:
+      type: object
+      properties:
+        typedEventsSupported:
+          type: boolean
+        schemaVersion:
+          type: integer
+        eventTypes:
+          type: array
+          items:
+            type: string
+        typedPayloadMaxChars:
+          type: integer
+        redactedDisplayMetadata:
+          type: boolean
+
+    BackendToolResultContractCapability:
+      type: object
+      properties:
+        strictEnvelope:
+          type: boolean
+        duplicateOutcomeDeterministic:
+          type: boolean
+        unknownCallRejected:
+          type: boolean
+        terminalRunRejected:
+          type: boolean
+        successContentMaxChars:
+          type: integer
+        errorMessageMaxChars:
+          type: integer
+        secretRedaction:
+          type: boolean
+        dispatcherOutcomes:
+          type: array
+          items:
+            type: string
+
+    BackendWebFetchCapability:
+      type: object
+      properties:
+        explicitActionOnly:
+          type: boolean
+        blocksLoopbackAndPrivateIp:
+          type: boolean
+        blocksRedirectToPrivateIp:
+          type: boolean
+        rejectsSecretBearingUrls:
+          type: boolean
+        responseBounded:
+          type: boolean
+        trustLabel:
+          type: string
+          example: untrusted
+        implementation:
+          type: string
+
+    BackendProviderCatalogCapability:
+      type: object
+      properties:
+        available:
+          type: boolean
+        path:
+          type: string
+        disabledProviders:
+          type: array
+          items:
+            type: string
+        providerErrorsRedacted:
+          type: boolean
+        note:
+          type: string
+
+    BackendGovernanceCapability:
+      type: object
+      properties:
+        available:
+          type: boolean
+        path:
+          type: string
+
+    BackendManagedAiCapability:
+      type: object
+      properties:
+        balanceAvailable:
+          type: boolean
+        balancePath:
+          type: string
+        policyPath:
+          type: string
 
     InterpretIntentRequest:
       type: object

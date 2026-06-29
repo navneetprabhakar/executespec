@@ -103,7 +103,8 @@ public class AgentRunSubmissionGate {
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
-    boolean localExecutionRequested = request != null && Boolean.TRUE.equals(request.localExecution());
+    boolean localExecutionRequested =
+        request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -117,12 +118,17 @@ public class AgentRunSubmissionGate {
               + " runs execute remotely.");
     }
 
-    String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
-    var priorRunId = runIdempotencyService.lookup(user.getUser().getId(), idempotencyKey);
-    if (priorRunId.isPresent()) {
-      var prior = stateStore.findRun(priorRunId.get());
+    String idempotencyKey = idempotencyKeyForTurn(turn.getId());
+    var priorEntry = runIdempotencyService.lookupEntry(user.getUser().getId(), idempotencyKey);
+    if (priorEntry.isPresent()) {
+      var prior = stateStore.findRun(priorEntry.get().runId());
       if (prior.isPresent() && user.getUser().getId().equals(prior.get().getCreatedByUserId())) {
-        return new Submission(prior.get().getRunId(), false, "ALREADY_SUBMITTED");
+        return new Submission(
+            prior.get().getRunId(),
+            false,
+            "ALREADY_SUBMITTED",
+            localExecutionRequested,
+            priorEntry.get().localExecutionAccepted());
       }
     }
 
@@ -136,7 +142,9 @@ public class AgentRunSubmissionGate {
     String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
     String lowStartTier =
-        request == null ? null : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
+        request == null
+            ? null
+            : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
     // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
     managedAiUsageService.assertCanStartRun(
         user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
@@ -182,11 +190,22 @@ public class AgentRunSubmissionGate {
     if (localExecutionRequested) {
       runLocalExecutionFlag.mark(run.getRunId());
     }
-    runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
-    return new Submission(run.getRunId(), true, "SUBMITTED");
+    runIdempotencyService.record(
+        user.getUser().getId(), idempotencyKey, run.getRunId(), localExecutionRequested);
+    return new Submission(
+        run.getRunId(), true, "SUBMITTED", localExecutionRequested, localExecutionRequested);
   }
 
-  public record Submission(String runId, boolean calledRunApi, String status) {}
+  public record Submission(
+      String runId,
+      boolean calledRunApi,
+      String status,
+      boolean localExecutionRequested,
+      boolean localExecutionAccepted) {}
+
+  static String idempotencyKeyForTurn(String turnId) {
+    return IDEMPOTENCY_PREFIX + turnId;
+  }
 
   static String normalizeLowComplexityWorkerStartTier(String value) {
     if (value == null || value.isBlank()) {

@@ -37,6 +37,18 @@ class RunIdempotencyServiceTest {
     when(redis.opsForValue()).thenReturn(ops);
     when(ops.get("run:idem:u1:k1")).thenReturn("run-1");
     assertThat(svc.lookup("u1", "k1")).contains("run-1");
+    assertThat(svc.lookupEntry("u1", "k1"))
+        .contains(new RunIdempotencyService.Entry("run-1", false));
+  }
+
+  @Test
+  void lookupEntryReturnsLocalExecutionMetadata() {
+    RunIdempotencyService svc = withRedis();
+    when(redis.opsForValue()).thenReturn(ops);
+    when(ops.get("run:idem:u1:k1")).thenReturn("run-1|local=true");
+    assertThat(svc.lookup("u1", "k1")).contains("run-1");
+    assertThat(svc.lookupEntry("u1", "k1"))
+        .contains(new RunIdempotencyService.Entry("run-1", true));
   }
 
   @Test
@@ -52,7 +64,15 @@ class RunIdempotencyServiceTest {
     RunIdempotencyService svc = withRedis();
     when(redis.opsForValue()).thenReturn(ops);
     svc.record("u1", "k1", "run-1");
-    verify(ops).set("run:idem:u1:k1", "run-1", Duration.ofHours(24));
+    verify(ops).set("run:idem:u1:k1", "run-1|local=false", Duration.ofHours(24));
+  }
+
+  @Test
+  void recordCanPersistLocalExecutionAcceptance() {
+    RunIdempotencyService svc = withRedis();
+    when(redis.opsForValue()).thenReturn(ops);
+    svc.record("u1", "k1", "run-1", true);
+    verify(ops).set("run:idem:u1:k1", "run-1|local=true", Duration.ofHours(24));
   }
 
   @Test

@@ -50,11 +50,22 @@ public class RunIdempotencyService {
     this.redis = redis;
   }
 
+  public record Entry(String runId, boolean localExecutionAccepted) {}
+
   /** The runId previously created for this {@code (user, key)}, if any (and Redis is up). */
   public Optional<String> lookup(String userId, String idempotencyKey) {
+    return lookupEntry(userId, idempotencyKey).map(Entry::runId);
+  }
+
+  /**
+   * The run previously created for this {@code (user, key)} plus the local-hands acceptance bit.
+   * Values written before the metadata bit existed remain valid and parse as remote.
+   */
+  public Optional<Entry> lookupEntry(String userId, String idempotencyKey) {
     if (redis == null || isBlank(userId) || isBlank(idempotencyKey)) return Optional.empty();
     try {
-      return Optional.ofNullable(redis.opsForValue().get(key(userId, idempotencyKey)));
+      return Optional.ofNullable(redis.opsForValue().get(key(userId, idempotencyKey)))
+          .map(RunIdempotencyService::parse);
     } catch (Exception e) {
       log.debug("RunIdempotency lookup failed (fail-open): {}", e.getMessage());
       return Optional.empty();
@@ -63,9 +74,17 @@ public class RunIdempotencyService {
 
   /** Record the runId created for this {@code (user, key)}. Best-effort, 24h TTL. */
   public void record(String userId, String idempotencyKey, String runId) {
+    record(userId, idempotencyKey, runId, false);
+  }
+
+  /** Record the runId and whether this submit was explicitly accepted for local-hands execution. */
+  public void record(
+      String userId, String idempotencyKey, String runId, boolean localExecutionAccepted) {
     if (redis == null || isBlank(userId) || isBlank(idempotencyKey) || isBlank(runId)) return;
     try {
-      redis.opsForValue().set(key(userId, idempotencyKey), runId, TTL);
+      redis
+          .opsForValue()
+          .set(key(userId, idempotencyKey), runId + "|local=" + localExecutionAccepted, TTL);
     } catch (Exception e) {
       log.debug("RunIdempotency record failed (fail-open): {}", e.getMessage());
     }
@@ -77,5 +96,15 @@ public class RunIdempotencyService {
 
   private static boolean isBlank(String s) {
     return s == null || s.isBlank();
+  }
+
+  private static Entry parse(String raw) {
+    int marker = raw.indexOf("|local=");
+    if (marker < 0) {
+      return new Entry(raw, false);
+    }
+    String runId = raw.substring(0, marker);
+    boolean localAccepted = Boolean.parseBoolean(raw.substring(marker + "|local=".length()));
+    return new Entry(runId, localAccepted);
   }
 }

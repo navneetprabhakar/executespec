@@ -3,6 +3,7 @@ package com.navneet.executespec.sse;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import com.navneet.executespec.cost.RunCostTracker;
 
@@ -15,6 +16,13 @@ public record RunEvent(
     Instant timestamp,
     int schemaVersion,
     Map<String, Object> data) {
+  private static final int MAX_REMOTE_TOOL_EVENT_CHARS = 8_000;
+  private static final Pattern SECRET_PATTERN =
+      Pattern.compile(
+          "(?i)(es_pat_[A-Za-z0-9_-]+|sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]+|"
+              + "xox[baprs]-[A-Za-z0-9-]+|AIza[A-Za-z0-9_-]{20,}|anthropic-[A-Za-z0-9_-]{20,}|"
+              + "(api[_-]?key|access[_-]?token|secret|password)=([^\\s&]+))");
+
   public RunEvent(String type, String runId, String taskId, String payload, Instant timestamp) {
     this(type, runId, taskId, payload, timestamp, 1, Map.of());
   }
@@ -256,6 +264,7 @@ public record RunEvent(
       String toolName,
       String argsJson,
       String permissionKind) {
+    String safeArgs = safeRemoteToolEventText(argsJson);
     return withData(
         "TOOL_CALL",
         runId,
@@ -266,9 +275,53 @@ public record RunEvent(
         "toolName",
         toolName,
         "argsJson",
-        argsJson,
+        safeArgs,
+        "argsOriginalChars",
+        argsJson == null ? 0 : argsJson.length(),
+        "argsTruncated",
+        argsJson != null && safeArgs.length() < redactSecrets(argsJson).length(),
         "permissionKind",
         permissionKind);
+  }
+
+  /**
+   * Local-hands/remote-brain result acknowledgement. This is emitted for accepted client tool
+   * results and deterministic rejection/timeout/cancel outcomes so CLI/TUI clients can reconcile
+   * replayed state without inferring result state from log text.
+   */
+  public static RunEvent toolResult(
+      String runId,
+      String taskId,
+      String callId,
+      String toolName,
+      String permissionKind,
+      String status,
+      String reason) {
+    String safeStatus =
+        safeRemoteToolEventText(status == null || status.isBlank() ? "UNKNOWN" : status);
+    String safeReason = safeRemoteToolEventText(reason);
+    String payload =
+        "callId="
+            + (callId == null ? "" : callId)
+            + ",status="
+            + safeStatus
+            + ",reason="
+            + (safeReason == null ? "" : safeReason);
+    return withData(
+        "TOOL_RESULT",
+        runId,
+        taskId,
+        payload,
+        "callId",
+        callId,
+        "toolName",
+        toolName,
+        "permissionKind",
+        permissionKind,
+        "status",
+        safeStatus,
+        "reason",
+        safeReason);
   }
 
   /**
@@ -638,6 +691,22 @@ public record RunEvent(
   private static RunEvent withData(
       String type, String runId, String taskId, String payload, Object... pairs) {
     return new RunEvent(type, runId, taskId, payload, Instant.now(), 1, data(pairs));
+  }
+
+  private static String safeRemoteToolEventText(String value) {
+    if (value == null) return null;
+    String redacted = redactSecrets(value);
+    if (redacted.length() <= MAX_REMOTE_TOOL_EVENT_CHARS) return redacted;
+    return redacted.substring(0, MAX_REMOTE_TOOL_EVENT_CHARS)
+        + "\n[truncated: original_chars="
+        + redacted.length()
+        + " limit="
+        + MAX_REMOTE_TOOL_EVENT_CHARS
+        + "]";
+  }
+
+  private static String redactSecrets(String value) {
+    return SECRET_PATTERN.matcher(value == null ? "" : value).replaceAll("[REDACTED_SECRET]");
   }
 
   private static Map<String, Object> data(Object... pairs) {

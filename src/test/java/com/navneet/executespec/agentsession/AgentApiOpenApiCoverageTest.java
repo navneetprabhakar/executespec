@@ -38,7 +38,8 @@ class AgentApiOpenApiCoverageTest {
             "/admin/test-managed-ai-email:",
             "/billing/managed-ai/balance:",
             "/billing/managed-ai/events:",
-            "/billing/managed-ai/policy:");
+            "/billing/managed-ai/policy:",
+            "/v3/client-capabilities:");
 
     assertThat(openApi).contains(requiredPaths.toArray(String[]::new));
   }
@@ -60,7 +61,10 @@ class AgentApiOpenApiCoverageTest {
             "OrchestratorTurnRequest:",
             "OrchestratorTurnResponse:",
             "ManagedAiBalance:",
-            "ManagedAiPolicy:");
+            "ManagedAiPolicy:",
+            "BackendClientCapabilities:",
+            "BackendLocalHandsCapability:",
+            "BackendToolResultContractCapability:");
   }
 
   @Test

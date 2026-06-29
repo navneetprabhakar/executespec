@@ -39,6 +39,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.stereotype.Component;
 
@@ -81,6 +82,7 @@ public class RunLifecycleService {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final SseBroadcaster broadcaster;
+  private final RemoteToolDispatcher remoteToolDispatcher;
   private final Metrics metrics;
   private final GateStore gateStore;
   private final RunControlPort controlPort;
@@ -126,6 +128,10 @@ public class RunLifecycleService {
       run.setFailureReason("Cancelled by user from status " + status);
     }
     runRepo.save(run);
+    // Local-hands runs may have a worker blocked waiting for a client tool result. Tear down the
+    // remote session before completing SSE so clients can replay the deterministic TOOL_RESULT
+    // cancellation event instead of seeing only a terminal run status.
+    remoteToolDispatcher.unregister(runId);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
     broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
     broadcaster.complete(runId);
@@ -720,7 +726,8 @@ public class RunLifecycleService {
                                 override == null ? null : override.proposedAction())
                             .userConfirmedContinuationProvider(
                                 override == null ? null : override.provider())
-                            .userConfirmedContinuationModel(override == null ? null : override.model())
+                            .userConfirmedContinuationModel(
+                                override == null ? null : override.model())
                             .requireBenchmarkPriorForAutomaticContinuation(
                                 override == null ? null : override.benchmarkPriorRequired())
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())

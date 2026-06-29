@@ -155,14 +155,20 @@ public class RunController {
     // only ever resolve to the caller's own run; fail-open if Redis is down.
     final String userId = userDetails.getUser().getId();
     if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      java.util.Optional<String> priorRunId = runIdempotencyService.lookup(userId, idempotencyKey);
-      if (priorRunId.isPresent()) {
-        java.util.Optional<PipelineRun> prior = stateStore.findRun(priorRunId.get());
+      java.util.Optional<com.navneet.executespec.run.RunIdempotencyService.Entry> priorEntry =
+          runIdempotencyService.lookupEntry(userId, idempotencyKey);
+      if (priorEntry.isPresent()) {
+        java.util.Optional<PipelineRun> prior = stateStore.findRun(priorEntry.get().runId());
         if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
           log.info(
               "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
               prior.get().getRunId());
-          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
+          return ResponseEntity.status(HttpStatus.ACCEPTED)
+              .body(
+                  mapper.toSummary(
+                      prior.get(),
+                      localExecutionRequested,
+                      priorEntry.get().localExecutionAccepted()));
         }
       }
     }
@@ -225,7 +231,7 @@ public class RunController {
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
     // present when the client's backoff retry arrives; best-effort (no-op if Redis is down).
     if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      runIdempotencyService.record(userId, idempotencyKey, run.getRunId());
+      runIdempotencyService.record(userId, idempotencyKey, run.getRunId(), localExecutionRequested);
     }
 
     // Run count incremented atomically inside `assertAndIncrementRunCount` above. The

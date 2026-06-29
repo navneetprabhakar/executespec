@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -69,7 +70,8 @@ class RemoteToolDispatcherTest {
             inv -> {
               RunEvent ev = inv.getArgument(1);
               String callId = om.readTree(ev.payload()).get("callId").asText();
-              dispatcher.complete("r1", callId, "{\"ok\":true,\"content\":\"hello\"}");
+              assertThat(dispatcher.complete("r1", callId, "{\"ok\":true,\"content\":\"hello\"}"))
+                  .isEqualTo(RemoteToolDispatcher.CompletionOutcome.ACCEPTED);
               return null;
             })
         .when(broadcaster)
@@ -80,22 +82,37 @@ class RemoteToolDispatcherTest {
     assertThat(result.get("content").asText()).isEqualTo("hello");
 
     ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
-    verify(broadcaster).emit(eq("r1"), cap.capture());
-    assertThat(cap.getValue().type()).isEqualTo("TOOL_CALL");
-    JsonNode frame = om.readTree(cap.getValue().payload());
+    verify(broadcaster, atLeastOnce()).emit(eq("r1"), cap.capture());
+    RunEvent toolCall =
+        cap.getAllValues().stream()
+            .filter(ev -> "TOOL_CALL".equals(ev.type()))
+            .findFirst()
+            .orElseThrow();
+    RunEvent toolResult =
+        cap.getAllValues().stream()
+            .filter(ev -> "TOOL_RESULT".equals(ev.type()))
+            .findFirst()
+            .orElseThrow();
+    JsonNode frame = om.readTree(toolCall.payload());
     assertThat(frame.get("runId").asText()).isEqualTo("r1");
     assertThat(frame.get("name").asText()).isEqualTo("readFile");
     assertThat(frame.get("permissionKind").asText()).isEqualTo("read");
     assertThat(frame.get("args").get("path").asText()).isEqualTo("x");
     assertThat(frame.get("callId").asText()).isNotBlank();
-    assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("read");
+    assertThat(toolCall.data().get("permissionKind")).isEqualTo("read");
+    assertThat(toolResult.data().get("status")).isEqualTo("ACCEPTED");
+    assertThat(toolResult.data().get("reason")).isEqualTo("client_result_accepted");
   }
 
   @Test
-  void complete_onUnknownSessionOrCall_isNoop() {
+  void complete_onUnknownSessionOrCall_isDeterministic() {
     assertThatCode(() -> dispatcher.complete("nope", "c1", "{}")).doesNotThrowAnyException();
+    assertThat(dispatcher.complete("nope", "c1", "{}"))
+        .isEqualTo(RemoteToolDispatcher.CompletionOutcome.UNKNOWN_SESSION);
     dispatcher.register("r1");
     assertThatCode(() -> dispatcher.complete("r1", "unknown", "{}")).doesNotThrowAnyException();
+    assertThat(dispatcher.complete("r1", "unknown", "{}"))
+        .isEqualTo(RemoteToolDispatcher.CompletionOutcome.UNKNOWN_CALL);
   }
 
   @Test
@@ -105,8 +122,12 @@ class RemoteToolDispatcherTest {
             inv -> {
               RunEvent ev = inv.getArgument(1);
               String callId = om.readTree(ev.payload()).get("callId").asText();
-              dispatcher.complete(
-                  "r1", callId, "{\"ok\":false,\"kind\":\"INVALID_ARGS\",\"message\":\"unknown\"}");
+              assertThat(
+                      dispatcher.complete(
+                          "r1",
+                          callId,
+                          "{\"ok\":false,\"kind\":\"INVALID_ARGS\",\"message\":\"unknown\"}"))
+                  .isEqualTo(RemoteToolDispatcher.CompletionOutcome.ACCEPTED);
               return null;
             })
         .when(broadcaster)
@@ -115,10 +136,15 @@ class RemoteToolDispatcherTest {
     dispatcher.dispatch("r1", "t1", "futureDangerousTool", "{}");
 
     ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
-    verify(broadcaster).emit(eq("r1"), cap.capture());
-    JsonNode frame = om.readTree(cap.getValue().payload());
+    verify(broadcaster, atLeastOnce()).emit(eq("r1"), cap.capture());
+    RunEvent toolCall =
+        cap.getAllValues().stream()
+            .filter(ev -> "TOOL_CALL".equals(ev.type()))
+            .findFirst()
+            .orElseThrow();
+    JsonNode frame = om.readTree(toolCall.payload());
     assertThat(frame.get("permissionKind").asText()).isEqualTo("shell");
-    assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("shell");
+    assertThat(toolCall.data().get("permissionKind")).isEqualTo("shell");
   }
 
   @Test
@@ -146,8 +172,13 @@ class RemoteToolDispatcherTest {
     dispatcher.dispatch("r1", "t1", toolName, "{}");
 
     ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
-    verify(broadcaster).emit(eq("r1"), cap.capture());
-    JsonNode frame = om.readTree(cap.getValue().payload());
+    verify(broadcaster, atLeastOnce()).emit(eq("r1"), cap.capture());
+    RunEvent toolCall =
+        cap.getAllValues().stream()
+            .filter(ev -> "TOOL_CALL".equals(ev.type()))
+            .findFirst()
+            .orElseThrow();
+    JsonNode frame = om.readTree(toolCall.payload());
     assertThat(frame.get("permissionKind").asText()).isEqualTo(expected);
   }
 }

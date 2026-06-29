@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,11 +39,13 @@ import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 class RunLifecycleServiceContinuationApprovalTest {
 
@@ -55,6 +58,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
   private final AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
   private final SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+  private final RemoteToolDispatcher remoteToolDispatcher = mock(RemoteToolDispatcher.class);
   private final Metrics metrics = mock(Metrics.class);
   private final GateStore gateStore = mock(GateStore.class);
   private final RunControlPort controlPort = mock(RunControlPort.class);
@@ -86,6 +90,7 @@ class RunLifecycleServiceContinuationApprovalTest {
             runRepo,
             taskRepo,
             broadcaster,
+            remoteToolDispatcher,
             metrics,
             gateStore,
             controlPort,
@@ -103,6 +108,20 @@ class RunLifecycleServiceContinuationApprovalTest {
             validationKickoff,
             modelResolver,
             validationReportRepository);
+  }
+
+  @Test
+  void cancel_unregistersRemoteToolSessionBeforeClosingSse() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).status("WORKING").build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+
+    boolean cancelled = service.cancel(RUN_ID);
+
+    assertThat(cancelled).isTrue();
+    InOrder inOrder = inOrder(remoteToolDispatcher, broadcaster);
+    inOrder.verify(remoteToolDispatcher).unregister(RUN_ID);
+    inOrder.verify(broadcaster, atLeastOnce()).emit(eq(RUN_ID), any(RunEvent.class));
+    inOrder.verify(broadcaster).complete(RUN_ID);
   }
 
   @Test
@@ -168,7 +187,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
-    assertApprovedContinuationAction(task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
+    assertApprovedContinuationAction(
+        task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     assertApprovedContinuationEvent(RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
@@ -233,8 +253,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().userConfirmedContinuationAction())
         .isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
     assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("anthropic");
-    assertThat(request.getValue().userConfirmedContinuationModel())
-        .isEqualTo("claude-sonnet-4-6");
+    assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("claude-sonnet-4-6");
     assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
     assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
@@ -289,7 +308,10 @@ class RunLifecycleServiceContinuationApprovalTest {
     ExecutionResult retryResult =
         ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
     ReviewerResult reviewResult =
-        ReviewerResult.builder().overall(ReviewerResult.Overall.CLEAN).finalBuildPassed(true).build();
+        ReviewerResult.builder()
+            .overall(ReviewerResult.Overall.CLEAN)
+            .finalBuildPassed(true)
+            .build();
 
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));

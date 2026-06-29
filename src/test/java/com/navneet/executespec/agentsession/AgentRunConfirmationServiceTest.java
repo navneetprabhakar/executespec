@@ -27,6 +27,7 @@ import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.run.RunIdempotencyService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,7 @@ class AgentRunConfirmationServiceTest {
   @Mock AgentSessionRepository sessionRepo;
   @Mock ProjectAccessGuard projectAccessGuard;
   @Mock AgentRunSubmissionGate runSubmissionGate;
+  @Mock RunIdempotencyService runIdempotencyService;
 
   private AgentRunConfirmationService service;
 
@@ -60,7 +62,8 @@ class AgentRunConfirmationServiceTest {
             new AgentTracePayloadFactory(),
             sessionRepo,
             projectAccessGuard,
-            runSubmissionGate);
+            runSubmissionGate,
+            runIdempotencyService);
     lenient().when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
     lenient()
         .when(eventRepo.save(any(AgentActionEvent.class)))
@@ -89,19 +92,24 @@ class AgentRunConfirmationServiceTest {
     when(turnRepo.findById("client-turn-2")).thenReturn(Optional.of(turn));
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("client-turn-2"))
         .thenReturn(List.of(orchestratorDecisionEvent("client-turn-2", runDecision("p-action"))));
-    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
-        .thenReturn(new AgentRunSubmissionGate.Submission("run-123", true, "SUBMITTED"));
+    when(runSubmissionGate.submitConfirmed(
+            any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
+        .thenReturn(
+            new AgentRunSubmissionGate.Submission("run-123", true, "SUBMITTED", true, true));
 
     var response = service.confirm(session, request("client-turn-2"), user());
 
     assertThat(response.runId()).isEqualTo("run-123");
     assertThat(response.calledRunApi()).isTrue();
     assertThat(response.status()).isEqualTo("SUBMITTED");
+    assertThat(response.localExecutionRequested()).isTrue();
+    assertThat(response.localExecutionAccepted()).isTrue();
     assertThat(turn.getLinkedRunId()).isEqualTo("run-123");
     assertThat(turn.getStatus()).isEqualTo("RUN_SUBMITTED");
     verify(projectAccessGuard).assertCanWrite(eq("p-action"), any(AppUserDetails.class));
     verify(runSubmissionGate)
-        .submitConfirmed(eq(session), eq(turn), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
+        .submitConfirmed(
+            eq(session), eq(turn), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
     verify(turnRepo).save(turn);
     verify(sessionRepo).save(session);
 
@@ -118,12 +126,16 @@ class AgentRunConfirmationServiceTest {
     AgentTurn turn = turn("client-turn-3", "CODE_RUN_REQUIRED");
     turn.setLinkedRunId("run-existing");
     when(turnRepo.findById("client-turn-3")).thenReturn(Optional.of(turn));
+    when(runIdempotencyService.lookupEntry("u1", "agent-orchestrator:client-turn-3"))
+        .thenReturn(Optional.of(new RunIdempotencyService.Entry("run-existing", true)));
 
-    var response = service.confirm(session(), request("client-turn-3"), user());
+    var response = service.confirm(session(), localRequest("client-turn-3"), user());
 
     assertThat(response.runId()).isEqualTo("run-existing");
     assertThat(response.calledRunApi()).isFalse();
     assertThat(response.status()).isEqualTo("ALREADY_SUBMITTED");
+    assertThat(response.localExecutionRequested()).isTrue();
+    assertThat(response.localExecutionAccepted()).isTrue();
     verifyNoInteractions(runSubmissionGate);
   }
 
@@ -172,6 +184,11 @@ class AgentRunConfirmationServiceTest {
 
   private static OrchestratorRunConfirmationRequest request(String turnId) {
     return new OrchestratorRunConfirmationRequest("s1", turnId, true, null, null, null, null);
+  }
+
+  private static OrchestratorRunConfirmationRequest localRequest(String turnId) {
+    return new OrchestratorRunConfirmationRequest(
+        "s1", turnId, true, null, null, null, null, "LOCAL", true, null);
   }
 
   private static OrchestratorTurnResponse nonRunDecision() {
