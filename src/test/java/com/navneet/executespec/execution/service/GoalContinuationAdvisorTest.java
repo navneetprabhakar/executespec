@@ -200,12 +200,10 @@ class GoalContinuationAdvisorTest {
 
   @Test
   void providerBreakdownAutoChangesToBenchmarkBackedProviderBeforeHigherUnbenchmarkedCandidate() {
-    ModelProviderScore current =
-        score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
+    ModelProviderScore current = score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
     ModelProviderScore higherUnbenchmarked =
         score("anthropic", "opus-preview", 96, 70, 22.0, false);
-    ModelProviderScore benchmarkBacked =
-        score("openai", "gpt-5.4", 90, 70, 16.0, true);
+    ModelProviderScore benchmarkBacked = score("openai", "gpt-5.4", 90, 70, 16.0, true);
     when(candidateService.buildCandidates(any()))
         .thenReturn(List.of(current, higherUnbenchmarked, benchmarkBacked));
 
@@ -228,12 +226,9 @@ class GoalContinuationAdvisorTest {
 
   @Test
   void approvedContinuationScopeCanSelectMatchingUnbenchmarkedCandidate() {
-    ModelProviderScore current =
-        score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
-    ModelProviderScore unapprovedTop =
-        score("anthropic", "opus-preview", 96, 70, 22.0, false);
-    ModelProviderScore approvedLower =
-        score("openai", "gpt-5.4", 90, 70, 16.0, false);
+    ModelProviderScore current = score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
+    ModelProviderScore unapprovedTop = score("anthropic", "opus-preview", 96, 70, 22.0, false);
+    ModelProviderScore approvedLower = score("openai", "gpt-5.4", 90, 70, 16.0, false);
     when(candidateService.buildCandidates(any()))
         .thenReturn(List.of(current, unapprovedTop, approvedLower));
 
@@ -259,10 +254,8 @@ class GoalContinuationAdvisorTest {
 
   @Test
   void unpinnedDeepseekFlashCanStepUpToDeepseekProWithoutBenchmarkPrior() {
-    ModelProviderScore flash =
-        score("deepseek", "deepseek-v4-flash-native", 76, 70, 0.30, false);
-    ModelProviderScore pro =
-        score("deepseek", "deepseek-v4-pro-native", 86, 70, 1.37, false);
+    ModelProviderScore flash = score("deepseek", "deepseek-v4-flash-native", 76, 70, 0.30, false);
+    ModelProviderScore pro = score("deepseek", "deepseek-v4-pro-native", 86, 70, 1.37, false);
     when(candidateService.buildCandidates(any())).thenReturn(List.of(flash, pro));
 
     var decision =

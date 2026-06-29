@@ -161,8 +161,7 @@ public class RunController {
               prior.get().getRunId());
           return ResponseEntity.status(HttpStatus.ACCEPTED)
               .body(
-                  mapper.toSummary(
-                      prior.get(), localExecutionRequested, localExecutionRequested));
+                  mapper.toSummary(prior.get(), localExecutionRequested, localExecutionRequested));
         }
       }
     }

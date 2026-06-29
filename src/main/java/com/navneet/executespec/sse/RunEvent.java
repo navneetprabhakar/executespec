@@ -273,16 +273,11 @@ public record RunEvent(
 
   /**
    * Local-hands tool-result status. Emitted after the backend accepts/rejects a client tool result,
-   * or when a pending call times out / is interrupted / is closed with the run session. Payload is a
-   * compact status string for older log consumers; structured clients should read {@code data}.
+   * or when a pending call times out / is interrupted / is closed with the run session. Payload is
+   * a compact status string for older log consumers; structured clients should read {@code data}.
    */
   public static RunEvent toolResultStatus(
-      String runId,
-      String taskId,
-      String callId,
-      String toolName,
-      String status,
-      String reason) {
+      String runId, String taskId, String callId, String toolName, String status, String reason) {
     String normalizedStatus = status == null || status.isBlank() ? "UNKNOWN" : status;
     return withData(
         "TOOL_RESULT_STATUS",

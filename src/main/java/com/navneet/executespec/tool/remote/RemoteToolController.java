@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,7 +15,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.http.HttpStatus;
 
 import lombok.RequiredArgsConstructor;
 
@@ -51,13 +51,13 @@ public class RemoteToolController {
       return ResponseEntity.badRequest().build();
     }
     String envelope = normalizeEnvelope(body.result()).toString();
-    RemoteToolDispatcher.CompletionResult result = dispatcher.complete(runId, body.callId(), envelope);
+    RemoteToolDispatcher.CompletionResult result =
+        dispatcher.complete(runId, body.callId(), envelope);
     switch (result.status()) {
       case ACCEPTED -> {
         return ResponseEntity.noContent().build();
       }
-      case DUPLICATE ->
-          throw new ResponseStatusException(HttpStatus.CONFLICT, result.message());
+      case DUPLICATE -> throw new ResponseStatusException(HttpStatus.CONFLICT, result.message());
       case UNKNOWN_SESSION ->
           throw new ResponseStatusException(HttpStatus.CONFLICT, result.message());
       case UNKNOWN_CALL ->

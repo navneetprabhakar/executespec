@@ -101,7 +101,8 @@ public class AgentRunSubmissionGate {
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
-    boolean localExecutionRequested = request != null && Boolean.TRUE.equals(request.localExecution());
+    boolean localExecutionRequested =
+        request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -134,7 +135,9 @@ public class AgentRunSubmissionGate {
     String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
     String lowStartTier =
-        request == null ? null : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
+        request == null
+            ? null
+            : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
     // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
     managedAiUsageService.assertCanStartRun(
         user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));

@@ -74,7 +74,8 @@ public class RemoteToolDispatcher {
     }
 
     static CompletionResult unknownSession() {
-      return new CompletionResult(CompletionStatus.UNKNOWN_SESSION, "no active local-hands session");
+      return new CompletionResult(
+          CompletionStatus.UNKNOWN_SESSION, "no active local-hands session");
     }
 
     static CompletionResult unknownCall() {
@@ -103,7 +104,8 @@ public class RemoteToolDispatcher {
       s.pending.forEach(
           (callId, pending) -> {
             pending.future().complete(errorEnvelope("INTERNAL", "run session closed"));
-            emitToolResultStatus(runId, pending.taskId(), callId, pending.toolName(), "SESSION_CLOSED", null);
+            emitToolResultStatus(
+                runId, pending.taskId(), callId, pending.toolName(), "SESSION_CLOSED", null);
           });
       log.info("[RemoteTool] unregistered local-execution session for run {}", runId);
     }
@@ -148,7 +150,8 @@ public class RemoteToolDispatcher {
       emitToolResultStatus(runId, taskId, callId, toolName, "INTERRUPTED", null);
       return errorEnvelope("INTERNAL", "interrupted awaiting client tool '" + toolName + "'");
     } catch (Exception e) {
-      emitToolResultStatus(runId, taskId, callId, toolName, "DISPATCH_FAILED", e.getClass().getSimpleName());
+      emitToolResultStatus(
+          runId, taskId, callId, toolName, "DISPATCH_FAILED", e.getClass().getSimpleName());
       return errorEnvelope(
           "INTERNAL", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
     } finally {
@@ -278,8 +281,7 @@ public class RemoteToolDispatcher {
       String runId, String taskId, String callId, String toolName, String status, String reason) {
     try {
       broadcaster.emit(
-          runId,
-          RunEvent.toolResultStatus(runId, taskId, callId, toolName, status, reason));
+          runId, RunEvent.toolResultStatus(runId, taskId, callId, toolName, status, reason));
     } catch (Exception e) {
       log.debug(
           "[RemoteTool] failed to emit tool-result status for run={} callId={}: {}",

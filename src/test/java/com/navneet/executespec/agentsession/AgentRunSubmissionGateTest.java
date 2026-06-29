@@ -346,7 +346,13 @@ class AgentRunSubmissionGateTest {
     var request =
         new OrchestratorRunConfirmationRequest(
             "s1", "turn-1", true, null, null, null, null, null, true, null);
-    gate.submitConfirmed(session(), turn("Implement OAuth login"), decision("CODE_RUN_REQUIRED", true), request, user(), true);
+    gate.submitConfirmed(
+        session(),
+        turn("Implement OAuth login"),
+        decision("CODE_RUN_REQUIRED", true),
+        request,
+        user(),
+        true);
 
     verify(runOrchestrator)
         .submitRun(
@@ -388,7 +394,8 @@ class AgentRunSubmissionGateTest {
   }
 
   private static OrchestratorRunConfirmationRequest request(boolean confirmed) {
-    return new OrchestratorRunConfirmationRequest("s1", "turn-1", confirmed, null, null, null, null);
+    return new OrchestratorRunConfirmationRequest(
+        "s1", "turn-1", confirmed, null, null, null, null);
   }
 
   private static OrchestratorRunConfirmationRequest requestWithLowTier(String lowStartTier) {

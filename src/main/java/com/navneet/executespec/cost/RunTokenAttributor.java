@@ -74,8 +74,8 @@ public class RunTokenAttributor {
 
   /**
    * Attribute an additional pass for a phase that may run more than once. Unlike {@link
-   * #attributePhase}, this adds to the phase-specific columns instead of replacing them, while still
-   * adding only the provided delta to the run total.
+   * #attributePhase}, this adds to the phase-specific columns instead of replacing them, while
+   * still adding only the provided delta to the run total.
    */
   public void attributePhaseAdditional(
       String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
@@ -179,17 +179,12 @@ public class RunTokenAttributor {
 
   /**
    * Attribute an additional worker pass for one resumed task. Resume-aware executor results include
-   * synthetic SKIPPED outcomes for earlier terminal tasks, so the normal aggregate distributor would
-   * revisit unrelated rows. This method records the run-total delta and rewrites only the target
-   * task row from its real task snapshot.
+   * synthetic SKIPPED outcomes for earlier terminal tasks, so the normal aggregate distributor
+   * would revisit unrelated rows. This method records the run-total delta and rewrites only the
+   * target task row from its real task snapshot.
    */
   public void attributeWorkerAdditionalTask(
-      String runId,
-      String taskId,
-      int totalIn,
-      int totalOut,
-      String providerUpper,
-      String model) {
+      String runId, String taskId, int totalIn, int totalOut, String providerUpper, String model) {
     if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
       return;
     }

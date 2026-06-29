@@ -1,8 +1,8 @@
 package com.navneet.executespec.harness;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
@@ -350,8 +350,7 @@ to boot — skip it for those.""";
   private final ConcurrentMap<String, String> lowComplexityWorkerStartTierEffectiveByRun =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, ContinuationConfirmationScope>
-      continuationConfirmationScopeByRun =
-      new ConcurrentHashMap<>();
+      continuationConfirmationScopeByRun = new ConcurrentHashMap<>();
 
   private record ContinuationConfirmationScope(
       boolean confirmed, RunContinuationDecision action, String provider, String model) {
@@ -1175,7 +1174,8 @@ to boot — skip it for those.""";
     }
     if (req.initialModelStepUpsUsed() > 0) {
       continuationModelStepUpsPerTask.put(
-          continuationTaskKey(runId, targetTaskId), new AtomicInteger(req.initialModelStepUpsUsed()));
+          continuationTaskKey(runId, targetTaskId),
+          new AtomicInteger(req.initialModelStepUpsUsed()));
     }
     if (req.initialModelStepDownsUsed() > 0) {
       continuationModelStepDownsPerTask.put(
@@ -1189,9 +1189,10 @@ to boot — skip it for those.""";
       return null;
     }
     String target = resume.targetTaskId();
-    String prefix =
-        runId != null && runId.length() >= 8 ? runId.substring(0, 8) + "_" : "";
-    return !prefix.isBlank() && target.startsWith(prefix) ? target.substring(prefix.length()) : target;
+    String prefix = runId != null && runId.length() >= 8 ? runId.substring(0, 8) + "_" : "";
+    return !prefix.isBlank() && target.startsWith(prefix)
+        ? target.substring(prefix.length())
+        : target;
   }
 
   private int providerSwitchesUsed(String runId) {
@@ -2093,12 +2094,7 @@ to boot — skip it for those.""";
     GoalDonenessDecision goalDecision =
         goalDonenessEvaluator.evaluate(
             buildGoalEvidence(
-                runId,
-                task,
-                primary,
-                TaskOutcome.Status.COMPLETED_WITH_WARNING,
-                false,
-                reason));
+                runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(
             runId,
@@ -2337,17 +2333,17 @@ to boot — skip it for those.""";
                 .modelStepDownsUsed(modelStepDownsUsed)
                 .maxModelStepDowns(maxModelStepDowns())
                 .build()),
-          taskCategory,
-          requiredQualityThreshold,
-          confirmationRequired,
-          benchmarkPriorRequired,
-          routePinned,
-          providerBehaviorPoor,
-          confirmationScope,
-          providerSwitchesUsed,
-          modelStepUpsUsed,
-          modelStepDownsUsed,
-          runId);
+        taskCategory,
+        requiredQualityThreshold,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        providerBehaviorPoor,
+        confirmationScope,
+        providerSwitchesUsed,
+        modelStepUpsUsed,
+        modelStepDownsUsed,
+        runId);
   }
 
   private GoalContinuationPolicyDecision withAppliedPolicy(
@@ -2717,8 +2713,7 @@ to boot — skip it for those.""";
     if (hasText(confirmationScope.model())) {
       data.put("userConfirmedContinuationModel", confirmationScope.model());
     }
-    data.put(
-        "requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
+    data.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
     data.put("routePinned", routePinned);
     data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
     data.put("maxTotalTokens", maxGoalTotalTokens());
@@ -2943,7 +2938,8 @@ to boot — skip it for those.""";
       candidateNode.put("costPerMillionTokens", candidate.costPerMillionTokens());
       candidateNode.put("latencyP50Ms", candidate.latencyP50Ms());
       candidateNode.put("latencyP95Ms", candidate.latencyP95Ms());
-      candidateNode.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
+      candidateNode.put(
+          "benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
       var candidateReasons = candidateNode.putArray("reasons");
       candidate.reasons().forEach(candidateReasons::add);
     }
@@ -4178,7 +4174,11 @@ to boot — skip it for those.""";
     }
     TierConfig altCfg =
         tierConfigFor(
-            task.complexity(), altProvider, null, req.projectId() != null, req.lowComplexityWorkerStartTier());
+            task.complexity(),
+            altProvider,
+            null,
+            req.projectId() != null,
+            req.lowComplexityWorkerStartTier());
     if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
       // adaptive routing or strict-provider re-resolved back to the primary — abandon.
       log.info(

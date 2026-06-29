@@ -38,8 +38,7 @@ class ValidationReportGoalProofEvaluatorTest {
             passingLedger());
 
     assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
-    assertThat(decision.goalSummary())
-        .isEqualTo("run goal: add billing export with CSV download");
+    assertThat(decision.goalSummary()).isEqualTo("run goal: add billing export with CSV download");
   }
 
   @Test

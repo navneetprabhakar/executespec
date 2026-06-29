@@ -46,8 +46,7 @@ class SseBroadcasterReplayLogTest {
         .thenAnswer(invocation -> List.of("{malformed", storedJson.get()));
 
     SseBroadcaster broadcaster =
-        new SseBroadcaster(
-            mapper, publisher, new SimpleMeterRegistry(), redis, listenerContainer);
+        new SseBroadcaster(mapper, publisher, new SimpleMeterRegistry(), redis, listenerContainer);
 
     broadcaster.emit(
         "run-1",

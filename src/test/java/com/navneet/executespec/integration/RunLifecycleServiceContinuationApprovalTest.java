@@ -168,7 +168,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
-    assertApprovedContinuationAction(task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
+    assertApprovedContinuationAction(
+        task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     assertApprovedContinuationEvent(RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
@@ -233,8 +234,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().userConfirmedContinuationAction())
         .isEqualTo(RunContinuationDecision.STEP_UP_MODEL);
     assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("anthropic");
-    assertThat(request.getValue().userConfirmedContinuationModel())
-        .isEqualTo("claude-sonnet-4-6");
+    assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("claude-sonnet-4-6");
     assertThat(request.getValue().initialProviderSwitchesUsed()).isZero();
     assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
@@ -289,7 +289,10 @@ class RunLifecycleServiceContinuationApprovalTest {
     ExecutionResult retryResult =
         ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
     ReviewerResult reviewResult =
-        ReviewerResult.builder().overall(ReviewerResult.Overall.CLEAN).finalBuildPassed(true).build();
+        ReviewerResult.builder()
+            .overall(ReviewerResult.Overall.CLEAN)
+            .finalBuildPassed(true)
+            .build();
 
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));

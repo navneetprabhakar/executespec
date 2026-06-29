@@ -62,17 +62,17 @@ import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
-import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.AvailableProviderResolver;
+import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProviderAvailabilityMap;
@@ -1354,7 +1354,8 @@ public class RunOrchestrator implements RunControlPort {
       boolean requestedLocalRun = localExecutionRequested || markerRequestedLocalRun;
       localRun = featureFlagService.isEnabled("worker.local-hands.enabled") && requestedLocalRun;
       if (requestedLocalRun && !localRun) {
-        log.error("RunOrchestrator run={} requested LOCAL-hands but feature flag is disabled", runId);
+        log.error(
+            "RunOrchestrator run={} requested LOCAL-hands but feature flag is disabled", runId);
         terminate(runId, "FAILED", "local-hands disabled before pipeline start", startedAt);
         return;
       }
@@ -1776,7 +1777,8 @@ public class RunOrchestrator implements RunControlPort {
                     .enableSmokeTests(!localRun)
                     .localHandsMode(localRun)
                     .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
-                    .requireBenchmarkPriorForAutomaticContinuation(requireContinuationBenchmarkPrior)
+                    .requireBenchmarkPriorForAutomaticContinuation(
+                        requireContinuationBenchmarkPrior)
                     .routePinned(routePinned)
                     .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
                     .designBlock(designBlock)
@@ -2053,7 +2055,7 @@ public class RunOrchestrator implements RunControlPort {
       // 5. Generate validation report + kick off test generation
       Optional<ValidationReport> validationReport =
           validationKickoff.generateValidationReport(
-          runId, execResult, reviewResult, plan, contractBreakingIssues);
+              runId, execResult, reviewResult, plan, contractBreakingIssues);
       Optional<PostReviewContinuation> postValidationContinuation =
           maybeEmitPostValidationContinuationDecision(
               runId,
@@ -2085,7 +2087,8 @@ public class RunOrchestrator implements RunControlPort {
         sr =
             featureFlagService.isEnabled("scoring.v2-verified")
                 ? srDerived
-                : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
+                : new StatusAndReason(
+                    mapOverallToV1Status(execResult.overall()), srDerived.reason());
         stampRunStatusReason(runId, sr);
         Optional<ValidationReport> rerunValidationReport =
             validationKickoff.generateValidationReport(
@@ -3175,7 +3178,9 @@ public class RunOrchestrator implements RunControlPort {
     if (candidate == null
         || action.targetTask() == null
         || sameProviderModel(
-            candidate, action.targetTask().dispatchedProvider(), action.targetTask().dispatchedModel())) {
+            candidate,
+            action.targetTask().dispatchedProvider(),
+            action.targetTask().dispatchedModel())) {
       return Optional.empty();
     }
 
@@ -3274,7 +3279,8 @@ public class RunOrchestrator implements RunControlPort {
 
       maybeRunLintAutofix(runId, rootCtx.workspaceRoot());
 
-      ProviderModel reviewerRoute = reviewerRouteFor(candidate.provider(), candidate.model(), rerunResult);
+      ProviderModel reviewerRoute =
+          reviewerRouteFor(candidate.provider(), candidate.model(), rerunResult);
       ReviewerResult rerunReviewResult = null;
       try {
         rerunReviewResult =
@@ -3300,7 +3306,8 @@ public class RunOrchestrator implements RunControlPort {
             reviewerRoute.model());
       } catch (Exception ex) {
         log.warn(
-            "RunOrchestrator run={} post-review continuation reviewer failed — recording partial review",
+            "RunOrchestrator run={} post-review continuation reviewer failed — recording partial"
+                + " review",
             runId,
             ex);
         rerunReviewResult = reviewerFailedResult(ex);
@@ -3317,11 +3324,13 @@ public class RunOrchestrator implements RunControlPort {
       broadcaster.emit(
           runId,
           RunEvent.log(
-              runId,
-              targetTaskId,
-              "Post-review continuation action failed: " + ex.getMessage()));
+              runId, targetTaskId, "Post-review continuation action failed: " + ex.getMessage()));
       restoreTaskTerminalState(
-          targetTaskKey, previousStatus, previousStartedAt, previousCompletedAt, previousDurationMs);
+          targetTaskKey,
+          previousStatus,
+          previousStartedAt,
+          previousCompletedAt,
+          previousDurationMs);
       return Optional.empty();
     }
   }
@@ -3361,7 +3370,9 @@ public class RunOrchestrator implements RunControlPort {
   private static boolean sameProviderModel(
       ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
     return candidate != null
-        && candidate.provider().equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
+        && candidate
+            .provider()
+            .equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
         && candidate.model().equalsIgnoreCase(dispatchedModel == null ? "" : dispatchedModel);
   }
 
@@ -3443,7 +3454,8 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   private static String continuationActionSource(GoalContinuationPolicyDecision decision) {
-    Object source = decision == null || decision.policy() == null ? null : decision.policy().get("source");
+    Object source =
+        decision == null || decision.policy() == null ? null : decision.policy().get("source");
     return source == null || source.toString().isBlank() ? "POST_REVIEW" : source.toString();
   }
 
@@ -3468,7 +3480,8 @@ public class RunOrchestrator implements RunControlPort {
     try {
       com.navneet.executespec.lint.LintPass.LintReport lintReport = lintPass.run(workspaceRoot);
       if (lintReport.changedAnything()) {
-        log.info("RunOrchestrator run={} post-review lint auto-fix: {}", runId, lintReport.summary());
+        log.info(
+            "RunOrchestrator run={} post-review lint auto-fix: {}", runId, lintReport.summary());
         broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
       } else if (!lintReport.skipped()) {
         log.debug("RunOrchestrator run={} post-review lint auto-fix: no changes", runId);
@@ -3542,7 +3555,8 @@ public class RunOrchestrator implements RunControlPort {
 
   static GoalDonenessDecision validationReportLowQualityGoalDecision(
       ValidationReport report, double requiredQualityThreshold) {
-    int score = report == null || report.getVerifiedScore() == null ? -1 : report.getVerifiedScore();
+    int score =
+        report == null || report.getVerifiedScore() == null ? -1 : report.getVerifiedScore();
     String result =
         report == null || report.getPipelineResult() == null
             ? "UNKNOWN"
@@ -3575,8 +3589,8 @@ public class RunOrchestrator implements RunControlPort {
             : reviewResult != null && Boolean.FALSE.equals(reviewResult.finalBuildPassed())
                 ? "FINAL_BUILD_FAILED"
                 : reviewResult == null || reviewResult.overall() == null
-                ? "UNKNOWN"
-                : reviewResult.overall().name();
+                    ? "UNKNOWN"
+                    : reviewResult.overall().name();
     return new GoalDonenessDecision(
         GoalDonenessState.FAILED,
         RunContinuationDecision.STOP_FAILED,
@@ -3795,7 +3809,10 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   private static int providerSwitchesUsedFromPolicy(GoalContinuationPolicyDecision decision) {
-    Object value = decision == null || decision.policy() == null ? null : decision.policy().get("providerSwitchesUsed");
+    Object value =
+        decision == null || decision.policy() == null
+            ? null
+            : decision.policy().get("providerSwitchesUsed");
     if (value instanceof Number number) {
       return Math.max(0, number.intValue());
     }

@@ -273,8 +273,7 @@ class SequentialExecutorSoftCompletionTest {
       boolean enableSmoke,
       boolean requireContinuationConfirmation,
       boolean userConfirmedContinuation) {
-    return req(
-        plan, enableSmoke, requireContinuationConfirmation, userConfirmedContinuation, null);
+    return req(plan, enableSmoke, requireContinuationConfirmation, userConfirmedContinuation, null);
   }
 
   private static ExecutionRequest req(
@@ -1112,8 +1111,7 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson() != null
                         && s.continuationDecisionJson().contains("\"decision\":\"STEP_UP_MODEL\"")
                         && s.continuationDecisionJson()
-                            .contains(
-                                "\"requireBenchmarkPriorForAutomaticContinuation\":false")),
+                            .contains("\"requireBenchmarkPriorForAutomaticContinuation\":false")),
         "Expected per-run benchmark override in persisted continuation JSON. Saw: " + saveLog);
   }
 
@@ -1160,7 +1158,8 @@ class SequentialExecutorSoftCompletionTest {
             new GoalContinuationPolicyDecision(
                 RunContinuationDecision.STOP_FAILED,
                 Optional.empty(),
-                List.of("provider stalled without useful work and no safe escalation is available")));
+                List.of(
+                    "provider stalled without useful work and no safe escalation is available")));
 
     SequentialExecutor executor = newExecutor(advisor);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
@@ -1402,8 +1401,7 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationDecisionJson().contains("\"provider\":\"openai\"")
                         && s.continuationDecisionJson().contains("\"model\":\"gpt-5.4\"")
                         && s.continuationDecisionJson()
-                            .contains(
-                                "\"approvalRequiredReason\":\"BENCHMARK_PRIOR_REQUIRED\"")
+                            .contains("\"approvalRequiredReason\":\"BENCHMARK_PRIOR_REQUIRED\"")
                         && s.continuationDecisionJson()
                             .contains("\"proposedAction\":\"STEP_UP_MODEL\"")),
         "Expected PARTIAL task with persisted blocked continuation proposal before retry. Saw: "
