@@ -32,6 +32,188 @@ public record RunEvent(
   }
 
   /**
+   * Machine-readable task goal-doneness decision. The payload remains a compact human summary for
+   * older log consumers; structured clients should read {@code data}.
+   */
+  public static RunEvent goalDecision(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "GOAL_DECISION",
+        runId,
+        taskId,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
+   * Machine-readable continuation / step-up / step-down / provider-change advice emitted after goal
+   * evaluation. This is advisory unless a later executor component explicitly acts on it.
+   */
+  public static RunEvent continuationDecision(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "CONTINUATION_DECISION",
+        runId,
+        taskId,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
+   * Machine-readable task wave plan for safe-parallelism analysis. This does not mean the executor
+   * is running tasks concurrently; clients should read {@code data.executionMode}.
+   */
+  public static RunEvent taskWavePlan(String runId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "TASK_WAVE_PLAN",
+        runId,
+        null,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
+   * Machine-readable continuation action emitted when the system acts on a continuation
+   * recommendation, for example by rerunning the same task with an advisor-selected provider/model
+   * or accepting a user-approved blocked continuation. The {@code status} data field distinguishes
+   * automatic execution from approval.
+   */
+  public static RunEvent continuationAction(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      int attempt,
+      int maxAttempts) {
+    return continuationAction(
+        runId,
+        taskId,
+        summary,
+        decision,
+        selectedProvider,
+        selectedModel,
+        reason,
+        attempt,
+        maxAttempts,
+        null,
+        0,
+        0,
+        "EXECUTED");
+  }
+
+  public static RunEvent continuationAction(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      int attempt,
+      int maxAttempts,
+      String limitName,
+      int usedLimit,
+      int maxLimit) {
+    return continuationAction(
+        runId,
+        taskId,
+        summary,
+        decision,
+        selectedProvider,
+        selectedModel,
+        reason,
+        attempt,
+        maxAttempts,
+        limitName,
+        usedLimit,
+        maxLimit,
+        "EXECUTED");
+  }
+
+  public static RunEvent continuationAction(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      int attempt,
+      int maxAttempts,
+      String limitName,
+      int usedLimit,
+      int maxLimit,
+      String status) {
+    return withData(
+        "CONTINUATION_ACTION",
+        runId,
+        taskId,
+        summary,
+        "decision",
+        decision,
+        "selectedProvider",
+        selectedProvider,
+        "selectedModel",
+        selectedModel,
+        "reason",
+        reason,
+        "attempt",
+        attempt,
+        "maxAttempts",
+        maxAttempts,
+        "limitName",
+        limitName,
+        "usedLimit",
+        usedLimit,
+        "maxLimit",
+        maxLimit,
+        "status",
+        status == null || status.isBlank() ? "EXECUTED" : status);
+  }
+
+  /** Emitted when a continuation recommendation is actionable but runtime limits block it. */
+  public static RunEvent continuationActionSkipped(
+      String runId,
+      String taskId,
+      String summary,
+      String decision,
+      String selectedProvider,
+      String selectedModel,
+      String reason,
+      String limitName,
+      int usedLimit,
+      int maxLimit) {
+    return withData(
+        "CONTINUATION_ACTION_SKIPPED",
+        runId,
+        taskId,
+        summary,
+        "decision",
+        decision,
+        "selectedProvider",
+        selectedProvider,
+        "selectedModel",
+        selectedModel,
+        "reason",
+        reason,
+        "limitName",
+        limitName,
+        "usedLimit",
+        usedLimit,
+        "maxLimit",
+        maxLimit);
+  }
+
+  /**
    * PR-C (2026-05-13) — emitted by {@link com.navneet.executespec.tool.WriteFileTool} and {@link
    * com.navneet.executespec.tool.EditFileTool} after every successful write. Payload is the
    * workspace-relative path so the v2/v3 RunDetail file-tree can update the moment a tool call

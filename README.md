@@ -9,7 +9,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Project           | `1.0.0-M1`          | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V247`              | `src/main/resources/db/migration/V247_*.sql`                           |
+| Flyway head       | `V250`              | `src/main/resources/db/migration/V250_*.sql`                           |
 | Frontend          | `1.0.0-M1`          | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -22,7 +22,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V247                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V250                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -60,7 +60,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │   └── ... (76 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V247, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V250, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -115,6 +115,10 @@ npm run dev                                # http://localhost:5173
 
 The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
 
+Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Benchmark evidence is not required by default, so the quality-ranked selected candidate can run automatically within the normal continuation ceilings; checking the benchmark guard sends an explicit per-run `true` override that approval-gates unbenchmarked model/provider upgrades.
+
+Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
+
 **Local observability (optional)**
 
 ```bash
@@ -155,26 +159,11 @@ npm run lint:fix                # eslint --fix
 
 ## Where to go next
 
-| Doc                                                            | What's in it                                                        |
-| -------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | V2 pipeline, agents, tools, scoring, container model                |
-| [`docs/CODEMAP.md`](docs/CODEMAP.md)                           | Package map, key files, migration trail                             |
-| [`docs/PRD.md`](docs/PRD.md)                                   | Product requirements + user stories                                 |
-| [`docs/business/`](docs/business/)                              | Investor deck outline, BRD, one-page writeup, and billing assessment |
-| [`docs/RBAC.md`](docs/RBAC.md)                                 | Roles, tenant-access guards, scoped SSE tokens                      |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                     | GCE + Cloud Run deploy mechanics                                    |
-| [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)                       | End-to-end run + autofix workflows                                  |
-| [`docs/features/`](docs/features/)                             | Current-state feature docs by product area                          |
-| [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md)                   | Customer-facing usage reference                                     |
-| [`docs/JAVADOC.md`](docs/JAVADOC.md)                           | Generated Javadoc index (may lag — see project notes)               |
-| [`docs/openapi.yaml`](docs/openapi.yaml)                       | REST API spec                                                       |
-| [`docs/frontend-api-usage.md`](docs/frontend-api-usage.md)     | Frontend API client conventions                                     |
-| [`docs/operations/`](docs/operations/)                         | SLOs, local test playbook, on-call docs                             |
-| [`docs/design/`](docs/design/)                                 | UI tokens, code-style, design references                            |
-| [`docs/document_map.md`](docs/document_map.md)                 | Map of everything under `docs/`                                     |
-| [`docs/enterprise-sla.md`](docs/enterprise-sla.md)             | Enterprise SLA terms                                                |
-| [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md)           | SSO / SAML setup                                                    |
-| [`docs/billing-workflows.html`](docs/billing-workflows.html)   | Razorpay / Stripe billing flows                                     |
+The long-form documentation now lives in the central docs repo — see [`DOCS.md`](DOCS.md):
+
+→ **https://github.com/navneetprabhakar/executespec-docs/tree/main/backend** — architecture · product · operations · security · design · plans · ADRs · reason-logs · business · competitive analysis · reference.
+
+The REST API spec remains in this repo at [`docs/openapi.yaml`](docs/openapi.yaml).
 
 ## Required environment variables
 

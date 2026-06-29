@@ -216,7 +216,10 @@ public class RunController {
             req.figmaUrl(),
             Boolean.TRUE.equals(req.tddMode()),
             req.branch(),
-            req.prReviewComments());
+            req.prReviewComments(),
+            req.requireConfirmationBeforeExpensiveContinuation(),
+            req.requireBenchmarkPriorForAutomaticContinuation(),
+            req.lowComplexityWorkerStartTier());
 
     // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
@@ -421,7 +424,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody ApprovalRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    PipelineRun approveRun = guard.requireRunAccess(runId, userDetails);
+    PipelineRun approveRun = guard.requireRunWriteAccess(runId, userDetails);
     log.info(
         "POST /api/runs/{}/approve — approved={}, creditsConfirmed={}, executionMode={},"
             + " harness={}",
@@ -546,7 +549,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody ClarificationRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE,
         "Clarification gate removed in V2 — this endpoint is no longer supported.");
@@ -557,7 +560,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody ApprovalRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "V2 auto-merges; explicit merge gate removed.");
   }
@@ -565,7 +568,7 @@ public class RunController {
   @PostMapping("/{runId}/retry")
   public ResponseEntity<Void> retryRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "Run retry not yet supported in V2 — submit a fresh run instead.");
   }
@@ -600,6 +603,10 @@ public class RunController {
     managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(forkerId));
     tierEnforcementService.incrementRunCountForAnalytics(forkerId);
     apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
+    modelAccessService.assertModelAllowed(forkerId, source.getPlannerModel());
+    if (source.getAiProvider() != null && !source.getAiProvider().isBlank()) {
+      aiProviderPreferenceService.normalizeProvider(source.getAiProvider());
+    }
 
     String userRequest =
         overrides != null && overrides.userRequest() != null && !overrides.userRequest().isBlank()
@@ -656,7 +663,7 @@ public class RunController {
   @PostMapping("/{runId}/pause")
   public ResponseEntity<Void> pauseRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     if (!featureFlagService.isEnabled("v2.pause.enabled")) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
@@ -676,7 +683,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody EditAndRestartRequest body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "Edit-and-restart not supported in V2 — submit a fresh run.");
   }
@@ -691,7 +698,7 @@ public class RunController {
   @PostMapping("/{runId}/resume")
   public ResponseEntity<Void> resumeRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     if (!featureFlagService.isEnabled("v2.pause.enabled")) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
@@ -727,7 +734,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "NEW") String repoMode) {
-    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/push-github — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
@@ -794,7 +801,7 @@ public class RunController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String runId,
       @RequestParam(value = "branch", required = false) String branch) {
-    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     if (!List.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -827,7 +834,7 @@ public class RunController {
   @PostMapping("/{runId}/sync/original")
   public ResponseEntity<Map<String, Object>> syncRunToOriginal(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
-    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     if (!List.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -854,7 +861,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
-    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/push-scm — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
@@ -912,8 +919,11 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     String newProjectId = body.get("projectId");
+    if (newProjectId != null && !newProjectId.isBlank()) {
+      projectAccessGuard.assertCanWrite(newProjectId, userDetails);
+    }
     run.setProjectId(newProjectId != null && !newProjectId.isBlank() ? newProjectId : null);
     stateStore.save(run);
     log.info("PATCH /api/runs/{}/project — projectId={}", runId, run.getProjectId());
@@ -924,7 +934,7 @@ public class RunController {
   @DeleteMapping("/{runId}")
   public ResponseEntity<Void> cancel(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}", runId);
     boolean cancelled = runLifecycleService.cancel(runId);
     return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
@@ -940,7 +950,7 @@ public class RunController {
   @PostMapping("/{runId}/archive")
   public ResponseEntity<Map<String, String>> archiveRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/archive (actor={})", runId, userDetails.getUser().getId());
     try {
       PipelineRun run = stateStore.archiveRun(runId);
@@ -969,7 +979,7 @@ public class RunController {
   @PostMapping("/{runId}/unarchive")
   public ResponseEntity<Map<String, String>> unarchiveRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/unarchive (actor={})", runId, userDetails.getUser().getId());
     try {
       stateStore.unarchiveRun(runId);
@@ -1001,7 +1011,7 @@ public class RunController {
   @PostMapping("/{runId}/soft-delete")
   public ResponseEntity<Map<String, String>> softDeleteRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/soft-delete (actor={})", runId, userDetails.getUser().getId());
     try {
       PipelineRun run = stateStore.softDeleteRun(runId);
@@ -1032,10 +1042,10 @@ public class RunController {
   @PostMapping("/{runId}/restore")
   public ResponseEntity<Map<String, String>> restoreRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    // requireRunAccess() pulls the run by id including soft-deleted rows (visibility guards
+    // requireRunWriteAccess() pulls the run by id including soft-deleted rows (visibility guards
     // operate on org + project membership, not on the deletedAt tombstone). Confirmed by
     // reading PipelineRunRepository.findById which is the standard JPA finder.
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/restore (actor={})", runId, userDetails.getUser().getId());
     try {
       stateStore.restoreRun(runId);
@@ -1065,7 +1075,7 @@ public class RunController {
       @PathVariable String runId,
       @PathVariable String taskId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/tasks/{}/retry", runId, taskId);
     try {
       runLifecycleService.retryTask(runId, taskId);
@@ -1091,10 +1101,43 @@ public class RunController {
     }
   }
 
+  @PostMapping("/{runId}/tasks/{taskId}/continuation/approve")
+  public ResponseEntity<Map<String, Object>> approveContinuation(
+      @PathVariable String runId,
+      @PathVariable String taskId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunWriteAccess(runId, userDetails);
+    log.info("POST /api/runs/{}/tasks/{}/continuation/approve", runId, taskId);
+    try {
+      var approval = runLifecycleService.approveContinuation(runId, taskId);
+      return ResponseEntity.accepted()
+          .body(
+              Map.of(
+                  "status",
+                  "queued",
+                  "runId",
+                  runId,
+                  "taskId",
+                  taskId,
+                  "provider",
+                  approval.provider(),
+                  "model",
+                  approval.model(),
+                  "postReview",
+                  approval.postReview(),
+                  "message",
+                  "Approved continuation queued — watch the run feed for progress."));
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+  }
+
   @PostMapping("/{runId}/implement-suggestions")
   public ResponseEntity<Void> implementSuggestions(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "Implement-suggestions not yet supported in V2.");
   }
@@ -1102,14 +1145,14 @@ public class RunController {
   @PostMapping("/{runId}/rework")
   public ResponseEntity<Void> reworkRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(HttpStatus.GONE, "Rework not yet supported in V2.");
   }
 
   @PostMapping("/{runId}/reopen-merge")
   public ResponseEntity<Void> reopenMerge(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "V2 auto-merges; merge gate / reopen-merge removed.");
   }
@@ -1122,7 +1165,7 @@ public class RunController {
   @PostMapping("/{runId}/retry-validation")
   public ResponseEntity<Void> retryValidation(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     log.info("POST /api/runs/{}/retry-validation", runId);
     try {
       runLifecycleService.retryValidation(runId);
@@ -1380,7 +1423,7 @@ public class RunController {
       @PathVariable String runId,
       @RequestBody com.navneet.executespec.api.dto.EditPlanRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE,
         "In-place plan editing not yet supported in V2 — reject the plan and submit a fresh run"

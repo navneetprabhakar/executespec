@@ -392,7 +392,7 @@ class AgentSessionServiceActionLifecycleTest {
             () ->
                 service.confirmRunSubmission(
                     new OrchestratorRunConfirmationRequest(
-                        "s1", "client-turn-4", true, null, null, null),
+                        "s1", "client-turn-4", true, null, null, null, null),
                     user()))
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
         .hasMessageContaining("not a run route");
@@ -423,19 +423,20 @@ class AgentSessionServiceActionLifecycleTest {
             "orch_trace_existing");
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("client-turn-5"))
         .thenReturn(List.of(orchestratorDecisionEvent("client-turn-5", decision)));
-    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any()))
+    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
         .thenReturn(new AgentRunSubmissionGate.Submission("run-123", true, "SUBMITTED"));
 
     var response =
         service.confirmRunSubmission(
-            new OrchestratorRunConfirmationRequest("s1", "client-turn-5", true, null, null, null),
+            new OrchestratorRunConfirmationRequest(
+                "s1", "client-turn-5", true, null, null, null, null),
             user());
 
     assertThat(response.runId()).isEqualTo("run-123");
     assertThat(response.calledRunApi()).isTrue();
     assertThat(existing.getLinkedRunId()).isEqualTo("run-123");
     assertThat(existing.getStatus()).isEqualTo("RUN_SUBMITTED");
-    verify(runSubmissionGate).submitConfirmed(any(), any(), any(), any(), any());
+    verify(runSubmissionGate).submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
     verify(turnRepo).save(existing);
 
     var events = ArgumentCaptor.forClass(AgentActionEvent.class);
@@ -461,7 +462,8 @@ class AgentSessionServiceActionLifecycleTest {
 
     var response =
         service.confirmRunSubmission(
-            new OrchestratorRunConfirmationRequest("s1", "client-turn-6", true, null, null, null),
+            new OrchestratorRunConfirmationRequest(
+                "s1", "client-turn-6", true, null, null, null, null),
             user());
 
     assertThat(response.runId()).isEqualTo("run-existing");

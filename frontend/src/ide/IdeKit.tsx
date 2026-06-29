@@ -277,7 +277,7 @@ export function FolderIcon({open = false}: {open?: boolean}) {
 type TreeNode = {name: string; path: string; dir: boolean; children: TreeNode[]};
 function buildTree(paths: string[]): TreeNode {
   const root: TreeNode = {name: '', path: '', dir: true, children: []};
-  for (const p of paths) {
+  for (const p of [...new Set(paths)]) {
     const parts = p.split('/').filter(Boolean);
     let cur = root;
     parts.forEach((part, i) => {
@@ -320,7 +320,7 @@ export function IdeFileTree({
   const render = (nodes: TreeNode[], depth: number): React.ReactNode =>
     nodes.map((n) =>
       n.dir ? (
-        <div key={n.path}>
+        <div key={`dir:${n.path}`}>
           <button
             className='ide-tree-item'
             style={{paddingLeft: 8 + depth * 12}}
@@ -334,7 +334,7 @@ export function IdeFileTree({
         </div>
       ) : (
         <button
-          key={n.path}
+          key={`file:${n.path}`}
           className={`ide-tree-item${activePath === n.path ? ' active' : ''}`}
           style={{paddingLeft: 8 + depth * 12 + 14}}
           onClick={() => onOpen(n.path)}

@@ -3,10 +3,12 @@ package com.navneet.executespec.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -23,6 +25,7 @@ import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -80,6 +83,11 @@ class WorkerAgentToolDispatchTest {
    * @param unknownTool when non-null, registry.find returns null for this tool name.
    */
   private WorkerAgent newWorker(List<ChatResponse> seq, String unknownTool) {
+    return newWorker(seq, unknownTool, mock(SseBroadcaster.class));
+  }
+
+  private WorkerAgent newWorker(
+      List<ChatResponse> seq, String unknownTool, SseBroadcaster broadcaster) {
     LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
@@ -113,7 +121,7 @@ class WorkerAgentToolDispatchTest {
         metrics,
         costTracker,
         runRepo,
-        mock(com.navneet.executespec.sse.SseBroadcaster.class),
+        broadcaster,
         null,
         null,
         // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
@@ -150,6 +158,9 @@ class WorkerAgentToolDispatchTest {
         result.outcome(),
         "Un-parseable tool args must yield an INVALID_ARGS envelope the model recovers from, not a"
             + " crash.");
+    assertTrue(
+        result.toolCallLog().stream().anyMatch(s -> s.contains("readFile") && s.contains("-> ERR")),
+        "Malformed tool args must be recorded as an ERR tool-call log entry for waste guards.");
   }
 
   @Test
@@ -169,6 +180,10 @@ class WorkerAgentToolDispatchTest {
         WorkerResult.Outcome.COMPLETED,
         result.outcome(),
         "An unknown-tool call must yield an error envelope the model recovers from, not a crash.");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("bogusTool") && s.contains("-> ERR")),
+        "Unknown tool calls must be recorded as ERR tool-call log entries for waste guards.");
   }
 
   @Test
@@ -201,6 +216,7 @@ class WorkerAgentToolDispatchTest {
   void pure_read_batch_parallel() {
     // [readFile, searchFiles] is an all-read-only batch (>=2) → maybeParallelReadDispatch runs both
     // concurrently and the loop consumes the cached envelopes; results must be correct + complete.
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     WorkerAgent worker =
         newWorker(
             List.of(
@@ -208,7 +224,8 @@ class WorkerAgentToolDispatchTest {
                     toolCall("readFile", "{\"path\":\"a\"}"),
                     toolCall("searchFiles", "{\"pattern\":\"x\"}")),
                 responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}"))),
-            null);
+            null,
+            broadcaster);
 
     WorkerResult result = worker.run(req());
 
@@ -219,5 +236,23 @@ class WorkerAgentToolDispatchTest {
     assertTrue(
         result.toolCallLog().stream().anyMatch(s -> s.contains("searchFiles")),
         "the parallel-dispatched searchFiles must still be recorded in the tool log in order");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("readFile") && s.contains("-> OK")),
+        "the parallel-dispatched readFile must be recorded as an OK tool-call log entry");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(s -> s.contains("searchFiles") && s.contains("-> OK")),
+        "the parallel-dispatched searchFiles must be recorded as an OK tool-call log entry");
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && "LOG".equals(event.type())
+                        && event.payload().contains("Parallel read batch done")
+                        && event.payload().contains("readFile=ok")
+                        && event.payload().contains("searchFiles=ok")));
   }
 }

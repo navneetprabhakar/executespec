@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -155,7 +156,15 @@ class ProjectChatActionToolsTest {
             eq("u1"),
             eq("o"),
             eq("p"),
-            eq("PRODUCTION")))
+            eq("PRODUCTION"),
+            any(),
+            any(),
+            eq(false),
+            any(),
+            any(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
         .thenReturn(submitted);
 
     JsonNode out = env(tool("submit_run").call("{\"spec\":\"create a codemap\"}"));
@@ -176,6 +185,78 @@ class ProjectChatActionToolsTest {
             eq("u1"),
             eq("o"),
             eq("p"),
-            eq("PRODUCTION"));
+            eq("PRODUCTION"),
+            any(),
+            any(),
+            eq(false),
+            any(),
+            any(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class));
+  }
+
+  @Test
+  void submitRun_canRequestCheapLowTaskStartWithoutPinningModel() throws Exception {
+    AppUser caller = mock(AppUser.class);
+    when(caller.getId()).thenReturn("u1");
+    when(userDetails.getUser()).thenReturn(caller);
+    PipelineRun submitted = mock(PipelineRun.class);
+    when(submitted.getRunId()).thenReturn("r-light");
+    when(submitted.getStatus()).thenReturn("AWAITING_APPROVAL");
+    when(runOrchestrator.submitRun(
+            anyString(),
+            eq("spec-chat"),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            eq("deepseek"),
+            eq("u1"),
+            eq("o"),
+            eq("p"),
+            eq("PRODUCTION"),
+            any(),
+            any(),
+            eq(false),
+            any(),
+            any(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            eq("LIGHTWEIGHT")))
+        .thenReturn(submitted);
+
+    JsonNode out =
+        env(tool("submit_run")
+            .call("{\"spec\":\"create a codemap\",\"startLowTasksOnCheapTier\":true}"));
+
+    assertThat(out.get("ok").asBoolean()).isTrue();
+    verify(runOrchestrator)
+        .submitRun(
+            eq("create a codemap"),
+            eq("spec-chat"),
+            any(),
+            any(),
+            any(),
+            any(),
+            eq(false),
+            eq(false),
+            any(),
+            eq("deepseek"),
+            eq("u1"),
+            eq("o"),
+            eq("p"),
+            eq("PRODUCTION"),
+            any(),
+            any(),
+            eq(false),
+            any(),
+            any(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            eq("LIGHTWEIGHT"));
   }
 }

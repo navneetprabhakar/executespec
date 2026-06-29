@@ -1,6 +1,7 @@
 package com.navneet.executespec.specchat;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -102,6 +103,15 @@ public class ProjectChatActionTools {
     "model": {
       "type": "string",
       "description": "Optional model name override; defaults to the tier-routed default for the provider."
+    },
+    "lowComplexityWorkerStartTier": {
+      "type": "string",
+      "enum": ["WORKHORSE", "LIGHTWEIGHT"],
+      "description": "Optional non-pinning LOW-task start tier. LIGHTWEIGHT starts simple tasks cheap while preserving automatic step-up."
+    },
+    "startLowTasksOnCheapTier": {
+      "type": "boolean",
+      "description": "Convenience alias for lowComplexityWorkerStartTier=LIGHTWEIGHT."
     }
   },
   "required": ["spec"]
@@ -117,6 +127,7 @@ public class ProjectChatActionTools {
           }
           String provider = firstNonBlank(textOrNull(args, "provider"), ctx.defaultProvider());
           String model = firstNonBlank(textOrNull(args, "model"), ctx.defaultModel());
+          String lowStartTier = lowComplexityWorkerStartTier(args);
 
           PipelineRun submitted =
               runOrchestrator.submitRun(
@@ -137,7 +148,15 @@ public class ProjectChatActionTools {
                   // (skipApproval=false above), so PRODUCTION. Run LOCALITY (REMOTE/LOCAL) is a
                   // separate axis that moves to PipelineRun.executionLocality in Phase 3 — it must
                   // not be passed in the executionMode slot (design §10 defect #2).
-                  "PRODUCTION");
+                  "PRODUCTION",
+                  null, // selectedRepoIds
+                  null, // figmaUrl
+                  false, // tddMode
+                  null, // branchOverride
+                  null, // prReviewComments
+                  null, // requireConfirmationBeforeExpensiveContinuation
+                  null, // requireBenchmarkPriorForAutomaticContinuation
+                  lowStartTier);
 
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
@@ -383,6 +402,18 @@ public class ProjectChatActionTools {
       if (value != null && !value.isBlank()) return value.trim();
     }
     return null;
+  }
+
+  private static String lowComplexityWorkerStartTier(JsonNode args) {
+    if (args != null && args.path("startLowTasksOnCheapTier").asBoolean(false)) {
+      return "LIGHTWEIGHT";
+    }
+    String tier = textOrNull(args, "lowComplexityWorkerStartTier");
+    if (tier == null) {
+      return null;
+    }
+    String normalized = tier.trim().toUpperCase(Locale.ROOT);
+    return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
   }
 
   private static int intOrDefault(JsonNode args, String field, int dflt) {

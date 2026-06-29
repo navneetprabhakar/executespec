@@ -38,7 +38,7 @@ export function TrustPage() {
             pairs={[
               {k: 'At rest', v: 'AES-256 (managed Cloud SQL)'},
               {k: 'In transit', v: 'TLS 1.3'},
-              {k: 'API keys (BYOK)', v: 'Encrypted at rest · never logged'},
+              {k: 'API keys (BYOK)', v: 'Server-side storage · never logged'},
               {k: 'Source code', v: 'Workspace-local · cleared at run end'},
               {k: 'Backups', v: 'Daily · 30d retention · encrypted'},
             ]}

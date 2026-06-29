@@ -118,14 +118,20 @@ public class AgentStreamTurnRunner {
       SseEmitter emitter, AgentSessionService.StreamTurnContext ctx) {
     String summary = ctx.decision().assistantReply() == null ? "" : ctx.decision().assistantReply();
     if (ctx.decision().proposedAction() != null) {
+      var action = ctx.decision().proposedAction();
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("session_id", ctx.sessionId());
+      payload.put("turn_id", ctx.turnId());
+      payload.put("route", ctx.decision().route());
+      payload.put("action", action);
+      payload.put("action_type", action.type());
+      payload.put("requires_confirmation", action.requiresConfirmation());
+      payload.put("summary", action.confirmationPrompt());
+      payload.put("spec", AgentActionArguments.stringArg(action.arguments(), "spec"));
       send(
           emitter,
           "proposal",
-          Map.of(
-              "session_id", ctx.sessionId(),
-              "turn_id", ctx.turnId(),
-              "route", ctx.decision().route(),
-              "action", ctx.decision().proposedAction()));
+          payload);
     }
     if (!summary.isBlank()) {
       send(emitter, "token", Map.of("delta", summary));

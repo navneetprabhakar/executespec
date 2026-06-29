@@ -10,6 +10,8 @@ import {useIsMobile} from '@/hooks/useIsMobile';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
+import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
+import {formatManagedAiPlanMessage} from '@/ide/planUtils';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -341,6 +343,9 @@ export function IdeCompose() {
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [tddMode, setTddMode] = useState(false);
+  const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
+  const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(false);
+  const [startLowTasksOnCheapTier, setStartLowTasksOnCheapTier] = useState(false);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -581,17 +586,19 @@ export function IdeCompose() {
 
   const providerModels = modelsByProvider[provider.toLowerCase()] || [];
   const managedAiMessage =
-    managedAi?.routingState === 'EXHAUSTED'
-      ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
-      : managedAi?.routingState === 'CHEAP_ONLY'
-        ? 'Cheap-only mode is active. Frontier and balanced calls can step down during execution.'
-        : managedAi?.routingState === 'FRONTIER_LOCKED'
-          ? 'Frontier models are paused for this cycle; lower-cost routed models remain available.'
-          : managedAi?.routingState === 'VALUE_MODE'
-            ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
-            : managedAi
-              ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
-              : 'Managed-AI balance unavailable; backend policy still applies.';
+    managedAi?.managed === false
+      ? formatManagedAiPlanMessage(managedAi)
+      : managedAi?.routingState === 'EXHAUSTED'
+        ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
+        : managedAi?.routingState === 'CHEAP_ONLY'
+          ? 'Cheap-only mode is active. Frontier and balanced calls can step down during execution.'
+          : managedAi?.routingState === 'FRONTIER_LOCKED'
+            ? 'Frontier models are paused for this cycle; lower-cost routed models remain available.'
+            : managedAi?.routingState === 'VALUE_MODE'
+              ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
+              : managedAi
+                ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
+                : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {
     setProjectId(id);
@@ -613,19 +620,21 @@ export function IdeCompose() {
     setBusy(true);
     setErr('');
     try {
-      const body: Parameters<typeof api.createRun>[0] = {
-        userRequest: spec.trim(),
-        aiProvider: provider,
-        executionMode: mode,
-      };
-      if (projectId) body.projectId = projectId;
-      if (selectedRepoIds.length > 0) body.selectedRepoIds = selectedRepoIds;
-      if (costCap > 0) body.userCostCap = costCap;
-      if (tddMode) body.tddMode = true;
-      if (figmaUrl.trim()) body.figmaUrl = figmaUrl.trim();
-      // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Only ENTERPRISE may pin,
-      // and '' means "Default (org / system matrix)" → send no modelName at all.
-      if (tier === 'ENTERPRISE' && modelName) body.modelName = modelName;
+      const body = buildIdeComposeRunRequest({
+        spec,
+        provider,
+        mode,
+        projectId,
+        selectedRepoIds,
+        costCap,
+        tddMode,
+        confirmModelUpgrades,
+        requireBenchmarkedUpgrades,
+        startLowTasksOnCheapTier,
+        figmaUrl,
+        tier,
+        modelName,
+      });
       const res = await api.createRun(body);
       navigate(`/plan/${res.runId}`);
     } catch (e: unknown) {
@@ -956,8 +965,12 @@ export function IdeCompose() {
                 >
                   <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI routing</strong>
                   {managedAi && (
-                    <IdeBadge kind={managedKind(managedAi.routingState)}>
-                      {managedAi.routingState}
+                    <IdeBadge
+                      kind={
+                        managedAi.managed === false ? 'ok' : managedKind(managedAi.routingState)
+                      }
+                    >
+                      {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
                     </IdeBadge>
                   )}
                 </div>
@@ -982,6 +995,54 @@ export function IdeCompose() {
                       onChange={(e) => setTddMode(e.target.checked)}
                     />
                     TDD mode
+                  </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={confirmModelUpgrades}
+                      onChange={(e) => setConfirmModelUpgrades(e.target.checked)}
+                    />
+                    Confirm model upgrades
+                  </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={requireBenchmarkedUpgrades}
+                      onChange={(e) => setRequireBenchmarkedUpgrades(e.target.checked)}
+                    />
+                    Require benchmark evidence
+                  </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type='checkbox'
+                      checked={startLowTasksOnCheapTier}
+                      onChange={(e) => setStartLowTasksOnCheapTier(e.target.checked)}
+                    />
+                    Start LOW tasks on cheap tier
                   </label>
                   <div style={{flex: 1, minWidth: 220}}>
                     <label
@@ -1080,6 +1141,18 @@ export function IdeCompose() {
               <div className='ide-kv'>
                 <span>Approval</span>
                 <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Model upgrades</span>
+                <span>{confirmModelUpgrades ? 'Ask first' : 'Automatic within policy'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>Benchmark guard</span>
+                <span>{requireBenchmarkedUpgrades ? 'Required' : 'Can use unbenchmarked'}</span>
+              </div>
+              <div className='ide-kv'>
+                <span>LOW start tier</span>
+                <span>{startLowTasksOnCheapTier ? 'Cheap tier' : 'Server default'}</span>
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>

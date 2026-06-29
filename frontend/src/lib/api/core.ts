@@ -285,6 +285,96 @@ export interface TaskSummary {
   readmeUpdated: boolean;
   /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
   failureReason?: string | null;
+  /** Structured goal-doneness decision from the executor task boundary. */
+  goalDoneness?: GoalDonenessDecisionData | null;
+  /** Structured continuation / step-up / provider-change advice from the executor. */
+  continuationDecision?: {
+    decision?: string;
+    /** Where this continuation proposal came from, e.g. task boundary, reviewer, validation report. */
+    source?: string;
+    approvalRequiredReason?: string;
+    selectedCandidate?: {
+      provider?: string;
+      model?: string;
+      taskCategory?: string;
+      qualityScore?: number;
+      requiredQualityThreshold?: number;
+      costPerMillionTokens?: number;
+      latencyP50Ms?: number;
+      latencyP95Ms?: number;
+      benchmarkQualityPriorAvailable?: boolean;
+      reasons?: string[];
+    } | null;
+    policy?: {
+      taskCategory?: string;
+      requiredQualityThreshold?: number;
+      defaultRequiredQualityThreshold?: number;
+      providerSwitchesUsed?: number;
+      maxProviderSwitches?: number;
+      modelStepUpsUsed?: number;
+      maxModelStepUps?: number;
+      modelStepDownsUsed?: number;
+      maxModelStepDowns?: number;
+      lowComplexityWorkerStartTierConfigured?: string;
+      lowComplexityWorkerStartTierEffective?: string;
+      requireConfirmationBeforeExpensiveContinuation?: boolean;
+      requireBenchmarkPriorForAutomaticContinuation?: boolean;
+      maxTotalCostUsd?: number;
+      maxTotalTokens?: number;
+      maxTaskWallClockMs?: number;
+      providerBehaviorPoor?: boolean;
+      userConfirmedExpensiveContinuation?: boolean;
+      userConfirmedContinuationAction?: string;
+      userConfirmedContinuationProvider?: string;
+      userConfirmedContinuationModel?: string;
+      routePinned?: boolean;
+      /** Mirrors continuationDecision.source for persisted policy/action audits. */
+      source?: string;
+      actingEnabled?: boolean;
+      maxRerunsPerTask?: number;
+      rankingPolicy?: string;
+      rankingQualityTieBand?: number;
+      rankingReasons?: string[];
+      eligibleCandidateCount?: number;
+      rejectedBelowQualityThresholdCount?: number;
+      topEligibleCandidates?: {
+        provider?: string;
+        model?: string;
+        qualityScore?: number;
+        requiredQualityThreshold?: number;
+        costPerMillionTokens?: number;
+        latencyP50Ms?: number;
+        latencyP95Ms?: number;
+        benchmarkQualityPriorAvailable?: boolean;
+      }[];
+      topRejectedCandidates?: {
+        provider?: string;
+        model?: string;
+        qualityScore?: number;
+        requiredQualityThreshold?: number;
+        costPerMillionTokens?: number;
+        latencyP50Ms?: number;
+        latencyP95Ms?: number;
+        benchmarkQualityPriorAvailable?: boolean;
+      }[];
+    };
+    reasons?: string[];
+  } | null;
+  /** Durable history of continuation actions actually executed or skipped for this task. */
+  continuationActions?:
+    | {
+        status?: string;
+        decision?: string;
+        provider?: string;
+        model?: string;
+        reason?: string;
+        limitName?: string;
+        usedLimit?: number;
+        maxLimit?: number;
+        attempt?: number;
+        source?: string;
+      }[]
+    | null;
   /** The planner's objective/description for this task — shown in the expanded card. */
   objective?: string | null;
   /** The worker's summary of what was implemented. */
@@ -295,6 +385,29 @@ export interface TaskSummary {
   subtaskIndex?: number | null;
   /** Total number of subtasks in the parent. */
   subtaskTotal?: number | null;
+}
+
+export interface GoalDonenessDecisionData {
+  state?: string;
+  recommendedDecision?: string;
+  reason?: string;
+  recommendedNextStep?: string;
+  goalSummary?: string;
+  completedItems?: string[];
+  incompleteItems?: string[];
+  evidence?: string[];
+  risks?: string[];
+  budgetCeilingReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  wallClockMs?: number;
+  userInputRequired?: boolean;
+  anotherModelProviderMightHelp?: boolean;
 }
 
 // Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue)
@@ -352,6 +465,8 @@ export interface RunDetail extends RunSummary {
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
+  /** Durable final run-level proof derived from the validation-report ledger. */
+  runGoalDoneness?: GoalDonenessDecisionData | null;
   integrationSource: {sourceType: string; sourceId: string; sourceUrl: string} | null;
   failureReason?: string | null;
   currentGate?: string | null;
@@ -1140,6 +1255,8 @@ export interface ValidationReportData {
   rubricScore?: number | null;
   /** Auditable evidence behind verifiedScore. Source/confidence make self-scored signals explicit. */
   verificationLedger?: VerificationEvidence[];
+  /** Conservative run-level proof derived from the final validation ledger. */
+  runGoalDecision?: GoalDonenessDecisionData | null;
 }
 
 export interface VerificationEvidence {

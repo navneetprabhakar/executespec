@@ -14,6 +14,8 @@ import lombok.Builder;
  *     outcomes)
  * @param finalAssistantText last assistant text emitted (useful when outcome is
  *     STOPPED_WITHOUT_COMPLETE)
+ * @param repeatedAssistantTextCount highest count for the same normalized assistant text seen
+ *     during the worker loop
  * @param toolCallLog ordered log of {tool name, args preview, ok/err} per dispatched call
  * @param totalLatencyMs wall-clock time across the whole loop
  */
@@ -24,6 +26,7 @@ public record WorkerResult(
     int toolCallsDispatched,
     String completionSummary,
     String finalAssistantText,
+    int repeatedAssistantTextCount,
     List<String> toolCallLog,
     long totalLatencyMs) {
 
