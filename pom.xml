@@ -8,11 +8,11 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <!-- 2026-05-16: Dependabot #132 bumped 3.3.0 → 3.5.14 (2 minor versions).
+    <!-- 2026-05-16: Dependabot #132 bumped 3.3.0 → 3.5.16 (2 minor versions).
          Spring Boot 3.4/3.5 changes that touch us: Jackson 2.18/2.19 (compatible
          API), Tomcat 11 baseline (we already require Java 21), tightened auto-
          config metadata. Validated by `mvn test` (all 1295 tests pass). -->
-    <version>3.5.14</version>
+    <version>3.5.16</version>
     <relativePath/>
   </parent>
 
@@ -101,12 +101,12 @@
     <dependency>
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-core</artifactId>
-      <version>3.3.0</version>
+      <version>3.3.1</version>
     </dependency>
     <dependency>
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-parsers-standard-package</artifactId>
-      <version>3.3.0</version>
+      <version>3.3.1</version>
     </dependency>
 
     <!-- Jackson -->
@@ -182,21 +182,21 @@
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-storage</artifactId>
-      <version>2.68.0</version>
+      <version>2.69.0</version>
     </dependency>
 
     <!-- Google Cloud Run Admin v2 — deploy engine: deploy to user's Cloud Run. -->
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-run</artifactId>
-      <version>0.92.0</version>
+      <version>0.93.0</version>
     </dependency>
 
     <!-- Google Cloud Build — deploy engine: build images in user's GCP project. -->
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-build</artifactId>
-      <version>3.94.0</version>
+      <version>3.95.0</version>
     </dependency>
 
     <!-- Apache Commons Compress — tar.gz for Cloud Build source upload.
@@ -213,21 +213,21 @@
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-artifact-registry</artifactId>
-      <version>1.91.0</version>
+      <version>1.92.0</version>
     </dependency>
 
     <!-- Google Cloud Resource Manager — deploy engine: IAM permission validation -->
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-resourcemanager</artifactId>
-      <version>1.94.0</version>
+      <version>1.95.0</version>
     </dependency>
 
     <!-- Google Cloud Secret Manager — externalized secrets (API keys, credentials) -->
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-secretmanager</artifactId>
-      <version>2.92.0</version>
+      <version>2.93.0</version>
     </dependency>
 
     <!-- Redis (Lettuce client) — gate signaling across instances + ShedLock provider -->
@@ -326,13 +326,13 @@
     <dependency>
       <groupId>com.google.cloud.opentelemetry</groupId>
       <artifactId>exporter-trace</artifactId>
-      <version>0.36.0</version>
+      <version>0.37.0</version>
     </dependency>
     <!-- GCP Cloud Monitoring exporter -->
     <dependency>
       <groupId>com.google.cloud.opentelemetry</groupId>
       <artifactId>exporter-metrics</artifactId>
-      <version>0.36.0</version>
+      <version>0.37.0</version>
     </dependency>
     <!-- Structured JSON logging with trace/span IDs -->
     <dependency>
@@ -422,7 +422,7 @@
     <dependency>
       <groupId>com.github.javaparser</groupId>
       <artifactId>javaparser-core</artifactId>
-      <version>3.28.1</version>
+      <version>3.28.2</version>
     </dependency>
   </dependencies>
 
@@ -462,10 +462,10 @@
         <artifactId>spotless-maven-plugin</artifactId>
         <!-- 2026-05-16: Dependabot #134 bumped 2.43 → 3.4 (major; config schema unchanged
              for the slots we use: googleJavaFormat, removeUnusedImports, importOrder,
-             formatAnnotations). 2026-05-22: Dependabot #149 bumped 3.4 → 3.5.1 (minor;
+             formatAnnotations). 2026-05-22: Dependabot #149 bumped 3.4 → 3.7.0 (minor;
              google-java-format stays pinned at 1.22.0 below, so the bump changes plugin
              behaviour only — no codebase reformat). -->
-        <version>3.5.1</version>
+        <version>3.7.0</version>
         <configuration>
           <java>
             <includes>
@@ -497,7 +497,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.14</version>
+        <version>0.8.15</version>
         <executions>
           <execution>
             <id>prepare-agent</id>
