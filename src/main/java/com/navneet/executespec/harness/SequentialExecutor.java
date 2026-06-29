@@ -1,19 +1,41 @@
 package com.navneet.executespec.harness;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
+import com.navneet.executespec.execution.model.GoalContinuationRequest;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
+import com.navneet.executespec.execution.model.GoalEvidence;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
+import com.navneet.executespec.execution.service.GoalContinuationPolicy;
+import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -22,6 +44,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -305,6 +328,132 @@ to boot — skip it for those.""";
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService
       gcsTaskCheckpointService;
 
+  private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
+  private final GoalContinuationAdvisor goalContinuationAdvisor;
+  private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
+  private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
+  private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationModelStepDownsPerTask =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Boolean> continuationConfirmationRequiredByRun =
+      new ConcurrentHashMap<>();
+
+  private final ConcurrentMap<String, Boolean> continuationBenchmarkPriorRequiredByRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Boolean> continuationRoutePinnedByRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> lowComplexityWorkerStartTierConfiguredByRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, String> lowComplexityWorkerStartTierEffectiveByRun =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, ContinuationConfirmationScope>
+      continuationConfirmationScopeByRun =
+      new ConcurrentHashMap<>();
+
+  private record ContinuationConfirmationScope(
+      boolean confirmed, RunContinuationDecision action, String provider, String model) {
+    static ContinuationConfirmationScope from(ExecutionRequest req) {
+      if (req == null || !Boolean.TRUE.equals(req.userConfirmedExpensiveContinuation())) {
+        return new ContinuationConfirmationScope(false, null, null, null);
+      }
+      return new ContinuationConfirmationScope(
+          true,
+          req.userConfirmedContinuationAction(),
+          req.userConfirmedContinuationProvider(),
+          req.userConfirmedContinuationModel());
+    }
+  }
+
+  @Value("${execution.continuation.required-quality-threshold:70.0}")
+  private double goalRequiredQualityThreshold = 70.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.task-low:-1}")
+  private double goalRequiredQualityThresholdTaskLow = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.task-medium:-1}")
+  private double goalRequiredQualityThresholdTaskMedium = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.task-high:-1}")
+  private double goalRequiredQualityThresholdTaskHigh = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.greenfield-build:-1}")
+  private double goalRequiredQualityThresholdGreenfieldBuild = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.project-patch:-1}")
+  private double goalRequiredQualityThresholdProjectPatch = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.bug-fix:-1}")
+  private double goalRequiredQualityThresholdBugFix = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.test-fix:-1}")
+  private double goalRequiredQualityThresholdTestFix = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.refactor:-1}")
+  private double goalRequiredQualityThresholdRefactor = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.benchmark-patch:-1}")
+  private double goalRequiredQualityThresholdBenchmarkPatch = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.terminal-task:-1}")
+  private double goalRequiredQualityThresholdTerminalTask = -1.0;
+
+  @Value("${execution.continuation.required-quality-thresholds.read-only-help:-1}")
+  private double goalRequiredQualityThresholdReadOnlyHelp = -1.0;
+
+  @Value("${execution.continuation.max-provider-switches-per-run:1}")
+  private int advisoryProviderSwitchLimit = 1;
+
+  @Value("${execution.continuation.max-model-step-ups-per-task:1}")
+  private int advisoryModelStepUpLimit = 1;
+
+  @Value("${execution.continuation.max-model-step-downs-per-task:1}")
+  private int advisoryModelStepDownLimit = 1;
+
+  @Value("${execution.continuation.max-no-progress-iterations:28}")
+  private int maxGoalNoProgressIterations = 28;
+
+  @Value("${execution.continuation.max-false-done-claims:2}")
+  private int maxGoalFalseDoneClaims = 2;
+
+  @Value("${execution.continuation.max-repeated-failures:3}")
+  private int maxGoalRepeatedFailures = 3;
+
+  @Value("${execution.continuation.max-edit-churn:6}")
+  private int maxGoalEditChurn = 6;
+
+  @Value("${execution.continuation.max-stale-explanations:2}")
+  private int maxGoalStaleExplanations = 2;
+
+  @Value("${execution.continuation.max-parallel-tasks:3}")
+  private int maxGoalParallelTasks = 3;
+
+  @Value("${execution.continuation.low-complexity-worker-start-tier:WORKHORSE}")
+  private String lowComplexityWorkerStartTier = "WORKHORSE";
+
+  @Value("${execution.continuation.require-confirmation-before-expensive-continuation:false}")
+  private boolean requireConfirmationBeforeExpensiveContinuation = false;
+
+  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:false}")
+  private boolean requireBenchmarkPriorForAutomaticContinuation = false;
+
+  @Value("${execution.continuation.max-total-cost-usd:-1}")
+  private double maxGoalTotalCostUsd = -1.0;
+
+  @Value("${execution.continuation.max-total-tokens:-1}")
+  private int maxGoalTotalTokens = -1;
+
+  @Value("${execution.continuation.max-task-wall-clock-ms:-1}")
+  private long maxGoalTaskWallClockMs = -1L;
+
+  @Value("${execution.continuation.acting.enabled:true}")
+  private boolean continuationActingEnabled = true;
+
+  @Value("${execution.continuation.max-reruns-per-task:1}")
+  private int continuationRerunLimit = 1;
+
   /**
    * Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the planner's budget
    * (k=3, 1500) so per-task cost stays bounded across many tasks.
@@ -341,109 +490,235 @@ to boot — skip it for those.""";
     List<TaskOutcome> outcomes = new ArrayList<>();
     Plan plan = req.plan();
     String runId = req.runContext().runId();
-
-    log.info(
-        "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={} resumeTarget={}",
-        resume == null ? "START" : "RESUME",
+    boolean abortedByGoalDecision = false;
+    continuationConfirmationRequiredByRun.put(
         runId,
-        plan.tasks().size(),
-        req.provider(),
-        req.model(),
-        req.enableSmokeTests(),
-        resume == null ? null : resume.targetTaskId());
+        requireConfirmationBeforeExpensiveContinuation
+            || Boolean.TRUE.equals(req.requireConfirmationBeforeExpensiveContinuation()));
+    continuationBenchmarkPriorRequiredByRun.put(
+        runId,
+        req.requireBenchmarkPriorForAutomaticContinuation() == null
+            ? requireBenchmarkPriorForAutomaticContinuation
+            : req.requireBenchmarkPriorForAutomaticContinuation());
+    continuationRoutePinnedByRun.put(runId, Boolean.TRUE.equals(req.routePinned()));
+    lowComplexityWorkerStartTierConfiguredByRun.put(
+        runId, configuredLowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()));
+    lowComplexityWorkerStartTierEffectiveByRun.put(
+        runId, lowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()).name());
+    continuationConfirmationScopeByRun.put(runId, ContinuationConfirmationScope.from(req));
+    seedInitialContinuationActionState(runId, req, resume);
 
-    int taskCount = plan.tasks().size();
-    for (int i = 0; i < taskCount; i++) {
-      // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
-      // calls {@code future.cancel(true)} which interrupts THIS thread, but
-      // the only place the interrupt actually surfaces is the next blocking
-      // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
-      // Without a top-of-loop check, every remaining task gets dispatched in
-      // turn — each one starts the worker, the very first LLM call throws
-      // {@code BackOffInterruptedException}, persistTaskStatus stamps it
-      // FAILED, the loop body returns, and we walk straight into the next
-      // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
-      // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
-      // their original PARTIAL / FAILED-stagnation reasons with a generic
-      // "Thread interrupted while sleeping" message and clobbering the
-      // COMPLETE state of T13–T16, T20.
-      //
-      // Re-asserting the interrupt flag with {@code Thread.currentThread()
-      // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
-      // {@code activeRuns} future) still sees it as cancelled.
-      if (Thread.currentThread().isInterrupted()) {
-        log.info(
-            "SequentialExecutor cancel detected at task index {}/{}, breaking loop", i, taskCount);
-        Thread.currentThread().interrupt();
-        break;
-      }
+    try {
+      log.info(
+          "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={}"
+              + " resumeTarget={}",
+          resume == null ? "START" : "RESUME",
+          runId,
+          plan.tasks().size(),
+          req.provider(),
+          req.model(),
+          req.enableSmokeTests(),
+          resume == null ? null : resume.targetTaskId());
+      emitTaskWavePlan(runId, plan);
 
-      PlannedTask task = plan.tasks().get(i);
-      boolean isFinalTask = (i == taskCount - 1);
-
-      // Resume bookkeeping: figure out what to do with this task BEFORE running anything.
-      //   - skip it (already terminal in DB) → emit synthetic outcome
-      //   - resume it (snapshot present) → executeOne with snapshot
-      //   - run fresh
-      TaskOutcome outcome;
-      if (resume != null) {
-        ResumeAction action = resolveResumeAction(runId, task.id(), resume);
-        switch (action.kind()) {
-          case SKIP_TERMINAL -> {
-            log.info(
-                "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                task.id(),
-                action.persistedStatus());
-            outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
-          }
-          case RESUME_FROM_SNAPSHOT -> {
-            log.info(
-                "Executor RESUME task={} from snapshot iter={}",
-                task.id(),
-                action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-            outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
-          }
-          case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
-          default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+      int taskCount = plan.tasks().size();
+      for (int i = 0; i < taskCount; i++) {
+        // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
+        // calls {@code future.cancel(true)} which interrupts THIS thread, but
+        // the only place the interrupt actually surfaces is the next blocking
+        // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
+        // Without a top-of-loop check, every remaining task gets dispatched in
+        // turn — each one starts the worker, the very first LLM call throws
+        // {@code BackOffInterruptedException}, persistTaskStatus stamps it
+        // FAILED, the loop body returns, and we walk straight into the next
+        // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
+        // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
+        // their original PARTIAL / FAILED-stagnation reasons with a generic
+        // "Thread interrupted while sleeping" message and clobbering the
+        // COMPLETE state of T13–T16, T20.
+        //
+        // Re-asserting the interrupt flag with {@code Thread.currentThread()
+        // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
+        // {@code activeRuns} future) still sees it as cancelled.
+        if (Thread.currentThread().isInterrupted()) {
+          log.info(
+              "SequentialExecutor cancel detected at task index {}/{}, breaking loop",
+              i,
+              taskCount);
+          Thread.currentThread().interrupt();
+          break;
         }
-      } else {
-        outcome = executeOne(task, plan, req, isFinalTask, null);
+
+        PlannedTask task = plan.tasks().get(i);
+        boolean isFinalTask = (i == taskCount - 1);
+
+        // Resume bookkeeping: figure out what to do with this task BEFORE running anything.
+        //   - skip it (already terminal in DB) → emit synthetic outcome
+        //   - resume it (snapshot present) → executeOne with snapshot
+        //   - run fresh
+        TaskOutcome outcome;
+        if (resume != null) {
+          ResumeAction action = resolveResumeAction(runId, task.id(), resume);
+          switch (action.kind()) {
+            case SKIP_TERMINAL -> {
+              log.info(
+                  "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+                  task.id(),
+                  action.persistedStatus());
+              outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+            }
+            case RESUME_FROM_SNAPSHOT -> {
+              log.info(
+                  "Executor RESUME task={} from snapshot iter={}",
+                  task.id(),
+                  action.snapshot() == null ? "n/a" : action.snapshot().iteration());
+              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
+            }
+            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
+            default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+          }
+        } else {
+          outcome = executeOne(task, plan, req, isFinalTask, null);
+        }
+
+        if (resume == null) {
+          outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+        }
+
+        outcomes.add(outcome);
+        metrics.recordTaskStatus(outcome.status().name());
+        metrics.recordTaskLatency(
+            outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
+
+        // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
+        // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
+        gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
+
+        GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
+        if (shouldEnforceGoalStop(goalDecision)) {
+          int remaining = taskCount - i - 1;
+          log.warn(
+              "SequentialExecutor goal-stop enforced run={} task={} decision={} state={}"
+                  + " remaining={}",
+              runId,
+              task.id(),
+              goalDecision.recommendedDecision(),
+              goalDecision.state(),
+              remaining);
+          broadcaster.emit(
+              runId,
+              RunEvent.log(
+                  runId,
+                  task.id(),
+                  "Goal stop enforced: "
+                      + goalDecision.recommendedDecision()
+                      + " ("
+                      + goalDecision.reason()
+                      + "); skipping "
+                      + remaining
+                      + " remaining task"
+                      + (remaining == 1 ? "" : "s")));
+          appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
+          abortedByGoalDecision = true;
+          break;
+        }
       }
 
-      outcomes.add(outcome);
-      metrics.recordTaskStatus(outcome.status().name());
-      metrics.recordTaskLatency(
-          outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
+      ExecutionResult result =
+          summarize(outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision);
+      log.info(
+          "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
+              + " latency={}ms",
+          runId,
+          result.overall(),
+          result.tasksSuccessful(),
+          result.tasksExecuted(),
+          result.tasksWithWarning(),
+          result.tasksFailed(),
+          result.totalLatencyMs());
 
-      // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
-      // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
-      gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
+      // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
+      // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
+      // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
+      // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
+      // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
+      // state gets the same cleanup. Both calls are best-effort; failures are logged only.
+      if (contextStore != null) {
+        contextStore.deleteAll(runId);
+      }
+      clearCrossProviderState(runId);
+      clearContinuationActionState(runId);
+
+      return result;
+    } finally {
+      continuationConfirmationRequiredByRun.remove(runId);
+      continuationBenchmarkPriorRequiredByRun.remove(runId);
+      continuationRoutePinnedByRun.remove(runId);
+      lowComplexityWorkerStartTierConfiguredByRun.remove(runId);
+      lowComplexityWorkerStartTierEffectiveByRun.remove(runId);
+      continuationConfirmationScopeByRun.remove(runId);
     }
+  }
 
-    ExecutionResult result = summarize(outcomes, System.currentTimeMillis() - runStart);
+  private void emitTaskWavePlan(String runId, Plan plan) {
+    if (plan == null || plan.tasks().isEmpty()) {
+      return;
+    }
+    TaskWaveScheduler.BoundedResult schedule =
+        TaskWaveScheduler.scheduleBounded(
+            taskIds(plan), dependsOnByTask(plan), touchesFilesByTask(plan), maxParallelTasks());
+    int maxWaveWidth = schedule.waves().stream().mapToInt(List::size).max().orElse(0);
+    boolean parallelEligible = schedule.waves().stream().anyMatch(wave -> wave.size() > 1);
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("executionMode", "SEQUENTIAL_ADVISORY");
+    data.put("maxParallelTasks", maxParallelTasks());
+    data.put("taskCount", plan.tasks().size());
+    data.put("waveCount", schedule.waves().size());
+    data.put("maxWaveWidth", maxWaveWidth);
+    data.put("parallelEligible", parallelEligible);
+    data.put("waves", schedule.waves());
+    data.put("serializedTasks", schedule.serializedTasks());
+    data.put("unscheduledTasks", schedule.unscheduled());
+    data.put("missingDependencies", schedule.missingDependencies());
+    String summary =
+        "Task wave plan: "
+            + schedule.waves().size()
+            + " bounded wave"
+            + (schedule.waves().size() == 1 ? "" : "s")
+            + " · maxParallelTasks="
+            + maxParallelTasks()
+            + " · execution=sequential-advisory";
     log.info(
-        "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
-            + " latency={}ms",
+        "SequentialExecutor taskWavePlan run={} waves={} maxParallelTasks={} serialized={} "
+            + "unscheduled={} missingDeps={}",
         runId,
-        result.overall(),
-        result.tasksSuccessful(),
-        result.tasksExecuted(),
-        result.tasksWithWarning(),
-        result.tasksFailed(),
-        result.totalLatencyMs());
+        schedule.waves(),
+        maxParallelTasks(),
+        schedule.serializedTasks(),
+        schedule.unscheduled(),
+        schedule.missingDependencies());
+    broadcaster.emit(runId, RunEvent.taskWavePlan(runId, summary, data));
+    broadcaster.emit(runId, RunEvent.log(runId, null, summary));
+  }
 
-    // 2026-05-28 (RL-2026-05-052, T3.14) — Redis cleanup hygiene. Per-task agent-ctx snapshots
-    // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
-    // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
-    // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
-    // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
-    // state gets the same cleanup. Both calls are best-effort; failures are logged only.
-    if (contextStore != null) {
-      contextStore.deleteAll(runId);
+  private static List<String> taskIds(Plan plan) {
+    return plan.tasks().stream().map(PlannedTask::id).toList();
+  }
+
+  private static Map<String, List<String>> dependsOnByTask(Plan plan) {
+    Map<String, List<String>> dependsOn = new LinkedHashMap<>();
+    for (PlannedTask task : plan.tasks()) {
+      dependsOn.put(task.id(), task.dependsOn());
     }
-    clearCrossProviderState(runId);
+    return dependsOn;
+  }
 
-    return result;
+  private static Map<String, List<String>> touchesFilesByTask(Plan plan) {
+    Map<String, List<String>> touchesFiles = new LinkedHashMap<>();
+    for (PlannedTask task : plan.tasks()) {
+      touchesFiles.put(task.id(), task.touchesFiles());
+    }
+    return touchesFiles;
   }
 
   /**
@@ -580,6 +855,403 @@ to boot — skip it for those.""";
         .build();
   }
 
+  private void appendSkippedGoalStopOutcomes(
+      List<TaskOutcome> outcomes, Plan plan, int firstSkippedIndex) {
+    for (int j = firstSkippedIndex; j < plan.tasks().size(); j++) {
+      PlannedTask skipped = plan.tasks().get(j);
+      outcomes.add(
+          TaskOutcome.builder()
+              .taskId(skipped.id())
+              .taskTitle(skipped.title())
+              .status(TaskOutcome.Status.SKIPPED)
+              .totalLatencyMs(0L)
+              .toolCallsDispatched(0)
+              .build());
+    }
+  }
+
+  private boolean shouldEnforceGoalStop(GoalDonenessDecision decision) {
+    if (decision == null) {
+      return false;
+    }
+    if (featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_GOAL_DECISION_ENFORCEMENT)) {
+      return false;
+    }
+    return switch (decision.recommendedDecision()) {
+      case STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD -> true;
+      case STOP_DONE,
+              CONTINUE_SAME_MODEL_PROVIDER,
+              STEP_UP_MODEL,
+              STEP_DOWN_MODEL,
+              CHANGE_PROVIDER ->
+          false;
+    };
+  }
+
+  private TaskOutcome maybeActOnContinuation(
+      PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask, TaskOutcome outcome) {
+    if (!continuationActingEnabled || maxContinuationReruns() <= 0 || outcome == null) {
+      return outcome;
+    }
+    GoalContinuationPolicyDecision decision = outcome.continuationDecision();
+    if (!actionableContinuationDecision(decision)) {
+      return outcome;
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
+    if (candidate == null) {
+      return outcome;
+    }
+    if (sameProviderModel(candidate, outcome.dispatchedProvider(), outcome.dispatchedModel())) {
+      return outcome;
+    }
+
+    return executeContinuationAction(
+        task, plan, req, isFinalTask, outcome, decision, candidate, true);
+  }
+
+  private TaskOutcome executeContinuationAction(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      TaskOutcome outcome,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      boolean keepOriginalWhenSkipped) {
+    String runId = req.runContext().runId();
+    ContinuationActionLimit actionLimit = reserveContinuationAction(runId, task.id(), decision);
+    if (!actionLimit.allowed()) {
+      emitContinuationActionSkipped(runId, task.id(), decision, candidate, actionLimit);
+      return keepOriginalWhenSkipped ? outcome : null;
+    }
+
+    String reason = firstReason(decision);
+    String summary =
+        "Continuation action: "
+            + decision.decision()
+            + " -> rerun task with "
+            + candidate.label()
+            + " ("
+            + reason
+            + ")";
+    log.warn(
+        "SequentialExecutor continuation action run={} task={} decision={} selected={} reason={}",
+        runId,
+        task.id(),
+        decision.decision(),
+        candidate.label(),
+        reason);
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationAction(
+            runId,
+            task.id(),
+            summary,
+            decision.decision().name(),
+            candidate.provider(),
+            candidate.model(),
+            reason,
+            1,
+            maxContinuationReruns(),
+            actionLimit.limitName(),
+            actionLimit.usedAfterReserve(),
+            actionLimit.maxAllowed()));
+    broadcaster.emit(runId, RunEvent.log(runId, task.id(), summary));
+    appendContinuationActionHistory(
+        runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
+
+    TaskOutcome rerun =
+        executeOne(
+            task,
+            plan,
+            req,
+            isFinalTask,
+            null,
+            new ProviderModelOverride(
+                candidate.provider(), candidate.model(), decision.decision()));
+    return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+  }
+
+  private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
+    if (decision == null) {
+      return false;
+    }
+    return switch (decision.decision()) {
+      case STEP_UP_MODEL, STEP_DOWN_MODEL, CHANGE_PROVIDER ->
+          decision.selectedCandidate().isPresent();
+      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+          false;
+    };
+  }
+
+  private static boolean sameProviderModel(
+      ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
+    return candidate
+            .provider()
+            .equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
+        && candidate.model().equals(dispatchedModel);
+  }
+
+  private int maxContinuationReruns() {
+    return Math.min(1, Math.max(0, continuationRerunLimit));
+  }
+
+  private ContinuationActionLimit reserveContinuationAction(
+      String runId, String taskId, GoalContinuationPolicyDecision decision) {
+    return switch (decision.decision()) {
+      case CHANGE_PROVIDER ->
+          reserveLimit(
+              continuationProviderSwitchesPerRun,
+              runId,
+              "maxProviderSwitches",
+              maxProviderSwitches());
+      case STEP_UP_MODEL ->
+          reserveLimit(
+              continuationModelStepUpsPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxModelStepUps",
+              maxModelStepUps());
+      case STEP_DOWN_MODEL ->
+          reserveLimit(
+              continuationModelStepDownsPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxModelStepDowns",
+              maxModelStepDowns());
+      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+          new ContinuationActionLimit("notActionable", 0, 0, false);
+    };
+  }
+
+  private static ContinuationActionLimit reserveLimit(
+      ConcurrentMap<String, AtomicInteger> counters, String key, String limitName, int maxAllowed) {
+    if (maxAllowed <= 0) {
+      int used = counters.getOrDefault(key, new AtomicInteger(0)).get();
+      return new ContinuationActionLimit(limitName, used, maxAllowed, false);
+    }
+    AtomicInteger counter = counters.computeIfAbsent(key, ignored -> new AtomicInteger(0));
+    while (true) {
+      int used = counter.get();
+      if (used >= maxAllowed) {
+        return new ContinuationActionLimit(limitName, used, maxAllowed, false);
+      }
+      if (counter.compareAndSet(used, used + 1)) {
+        return new ContinuationActionLimit(limitName, used + 1, maxAllowed, true);
+      }
+    }
+  }
+
+  private void emitContinuationActionSkipped(
+      String runId,
+      String taskId,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      ContinuationActionLimit actionLimit) {
+    String reason =
+        actionLimit.limitName()
+            + " limit reached (used="
+            + actionLimit.usedAfterReserve()
+            + ", max="
+            + actionLimit.maxAllowed()
+            + ")";
+    String summary =
+        "Continuation action skipped: "
+            + decision.decision()
+            + " -> "
+            + candidate.label()
+            + " ("
+            + reason
+            + ")";
+    log.warn(
+        "SequentialExecutor continuation action skipped run={} task={} decision={} selected={}"
+            + " limit={} used={} max={}",
+        runId,
+        taskId,
+        decision.decision(),
+        candidate.label(),
+        actionLimit.limitName(),
+        actionLimit.usedAfterReserve(),
+        actionLimit.maxAllowed());
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationActionSkipped(
+            runId,
+            taskId,
+            summary,
+            decision.decision().name(),
+            candidate.provider(),
+            candidate.model(),
+            firstReason(decision),
+            actionLimit.limitName(),
+            actionLimit.usedAfterReserve(),
+            actionLimit.maxAllowed()));
+    broadcaster.emit(runId, RunEvent.log(runId, taskId, summary));
+    appendContinuationActionHistory(
+        runId, taskId, decision, candidate, actionLimit, "SKIPPED", reason);
+  }
+
+  private void appendContinuationActionHistory(
+      String runId,
+      String taskIdShort,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      ContinuationActionLimit actionLimit,
+      String status,
+      String reason) {
+    if (taskRepo == null
+        || objectMapper == null
+        || runId == null
+        || runId.length() < 8
+        || taskIdShort == null
+        || taskIdShort.isBlank()
+        || decision == null
+        || candidate == null
+        || actionLimit == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    try {
+      var existing = taskRepo.findById(key);
+      if (existing.isEmpty()) {
+        log.debug("appendContinuationActionHistory: row not found id={}", key);
+        return;
+      }
+      var task = existing.get();
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode action = actions.addObject();
+      action.put("status", status == null || status.isBlank() ? "UNKNOWN" : status);
+      action.put("decision", decision.decision().name());
+      action.put("provider", candidate.provider());
+      action.put("model", candidate.model());
+      action.put("reason", reason == null ? "" : reason);
+      action.put("limitName", actionLimit.limitName());
+      action.put("usedLimit", actionLimit.usedAfterReserve());
+      action.put("maxLimit", actionLimit.maxAllowed());
+      action.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn("appendContinuationActionHistory: {} failed: {}", key, ex.getMessage(), ex);
+    }
+  }
+
+  private ArrayNode readContinuationActions(String json)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return objectMapper.createArrayNode();
+    }
+    JsonNode parsed = objectMapper.readTree(json);
+    if (parsed != null && parsed.isArray()) {
+      ArrayNode copy = objectMapper.createArrayNode();
+      parsed.forEach(copy::add);
+      return copy;
+    }
+    return objectMapper.createArrayNode();
+  }
+
+  private void clearContinuationActionState(String runId) {
+    continuationProviderSwitchesPerRun.remove(runId);
+    String prefix = continuationTaskKey(runId, "");
+    continuationModelStepUpsPerTask.keySet().removeIf(key -> key.startsWith(prefix));
+    continuationModelStepDownsPerTask.keySet().removeIf(key -> key.startsWith(prefix));
+  }
+
+  private static String continuationTaskKey(String runId, String taskId) {
+    return (runId == null ? "" : runId) + ":" + (taskId == null ? "" : taskId);
+  }
+
+  private void seedInitialContinuationActionState(
+      String runId, ExecutionRequest req, ResumeRequest resume) {
+    if (runId == null || runId.isBlank() || req == null) {
+      return;
+    }
+    if (req.initialProviderSwitchesUsed() > 0) {
+      continuationProviderSwitchesPerRun.put(
+          runId, new AtomicInteger(req.initialProviderSwitchesUsed()));
+    }
+    String targetTaskId = resumeTargetShortTaskId(runId, resume);
+    if (targetTaskId == null || targetTaskId.isBlank()) {
+      return;
+    }
+    if (req.initialModelStepUpsUsed() > 0) {
+      continuationModelStepUpsPerTask.put(
+          continuationTaskKey(runId, targetTaskId), new AtomicInteger(req.initialModelStepUpsUsed()));
+    }
+    if (req.initialModelStepDownsUsed() > 0) {
+      continuationModelStepDownsPerTask.put(
+          continuationTaskKey(runId, targetTaskId),
+          new AtomicInteger(req.initialModelStepDownsUsed()));
+    }
+  }
+
+  private static String resumeTargetShortTaskId(String runId, ResumeRequest resume) {
+    if (resume == null || resume.targetTaskId() == null || resume.targetTaskId().isBlank()) {
+      return null;
+    }
+    String target = resume.targetTaskId();
+    String prefix =
+        runId != null && runId.length() >= 8 ? runId.substring(0, 8) + "_" : "";
+    return !prefix.isBlank() && target.startsWith(prefix) ? target.substring(prefix.length()) : target;
+  }
+
+  private int providerSwitchesUsed(String runId) {
+    if (runId == null || runId.isBlank()) {
+      return 0;
+    }
+    AtomicInteger used = continuationProviderSwitchesPerRun.get(runId);
+    return used == null ? 0 : Math.max(0, used.get());
+  }
+
+  private int modelStepUpsUsed(String runId, String taskId) {
+    return continuationTaskCounterValue(continuationModelStepUpsPerTask, runId, taskId);
+  }
+
+  private int modelStepDownsUsed(String runId, String taskId) {
+    return continuationTaskCounterValue(continuationModelStepDownsPerTask, runId, taskId);
+  }
+
+  private int continuationTaskCounterValue(
+      ConcurrentMap<String, AtomicInteger> counters, String runId, String taskId) {
+    if (runId == null || runId.isBlank() || taskId == null || taskId.isBlank()) {
+      return 0;
+    }
+    AtomicInteger used = counters.get(continuationTaskKey(runId, taskId));
+    return used == null ? 0 : Math.max(0, used.get());
+  }
+
+  private record ContinuationActionLimit(
+      String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
+
+  private static TaskOutcome mergeContinuationAttempt(
+      TaskOutcome initial,
+      TaskOutcome rerun,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate) {
+    if (rerun == null) {
+      return initial;
+    }
+    return TaskOutcome.builder()
+        .taskId(rerun.taskId())
+        .taskTitle(rerun.taskTitle())
+        .status(rerun.status())
+        .workerOutcome(rerun.workerOutcome())
+        .retryAttempted(rerun.retryAttempted())
+        .retryWorkerOutcome(rerun.retryWorkerOutcome())
+        .smokeTestPassed(rerun.smokeTestPassed())
+        .smokeTestExitCode(rerun.smokeTestExitCode())
+        .smokeTestOutput(rerun.smokeTestOutput())
+        .totalLatencyMs(initial.totalLatencyMs() + rerun.totalLatencyMs())
+        .toolCallsDispatched(initial.toolCallsDispatched() + rerun.toolCallsDispatched())
+        .dispatchedProvider(rerun.dispatchedProvider())
+        .dispatchedModel(rerun.dispatchedModel())
+        .goalDonenessDecision(rerun.goalDonenessDecision())
+        .continuationDecision(rerun.continuationDecision())
+        .continuationAction(decision == null ? null : decision.decision())
+        .continuationActionProvider(candidate == null ? null : candidate.provider())
+        .continuationActionModel(candidate == null ? null : candidate.model())
+        .build();
+  }
+
   private TaskOutcome executeOne(
       PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask) {
     return executeOne(task, plan, req, isFinalTask, null);
@@ -591,9 +1263,23 @@ to boot — skip it for those.""";
       ExecutionRequest req,
       boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom) {
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      ProviderModelOverride providerModelOverride) {
     long taskStart = System.currentTimeMillis();
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
+    String requestedProvider =
+        providerModelOverride == null ? req.provider() : providerModelOverride.provider();
+    String requestedModel =
+        providerModelOverride == null ? req.model() : providerModelOverride.model();
 
     String refDocs = fetchReferenceDocs(req.projectId(), task);
     String systemPrompt =
@@ -603,7 +1289,7 @@ to boot — skip it for those.""";
             refDocs,
             req.plan() == null ? null : req.plan().projectType(),
             req.workspaceSummary(),
-            req.provider(),
+            requestedProvider,
             req.localHandsMode());
     String userPrompt = composeUserPrompt(task, null);
 
@@ -613,7 +1299,15 @@ to boot — skip it for those.""";
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "WORKING"));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
     TierConfig cfg =
-        tierConfigFor(task.complexity(), req.provider(), req.model(), req.projectId() != null);
+        tierConfigFor(
+            task.complexity(),
+            requestedProvider,
+            requestedModel,
+            req.projectId() != null,
+            req.lowComplexityWorkerStartTier());
+    if (providerModelOverride != null) {
+      cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
+    }
     // 2026-05-04 — quirky pre-dispatch log so the Live Log tab has more than just
     // token counters during long worker loops. Format mirrors the "Starting task:" line so
     // the rendering stays uniform; copy varies by complexity to surface what the user is
@@ -746,6 +1440,7 @@ to boot — skip it for those.""";
             task.id(),
             primary.outcome(),
             primary.iterations());
+        String failureReason = describeWorkerFailure(primary);
         // v2.5.12 — populate a concrete failureReason for every terminal
         // worker outcome so RunMapper doesn't have to fall back to
         // "unknown — see worker logs". This closes Bug D from the eval.
@@ -756,9 +1451,19 @@ to boot — skip it for those.""";
             runId,
             task.id(),
             "FAILED",
-            describeWorkerFailure(primary),
+            failureReason,
             buildFailureDiagnosticJson(primary, cfg.maxIter));
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
+        GoalTaskDecision goalDecision =
+            emitGoalDecision(
+                runId,
+                task,
+                primary,
+                TaskOutcome.Status.WORKER_FAILED,
+                null,
+                failureReason,
+                cfg.provider,
+                cfg.model);
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
@@ -768,6 +1473,8 @@ to boot — skip it for those.""";
             .toolCallsDispatched(primary.toolCallsDispatched())
             .dispatchedProvider(cfg.provider)
             .dispatchedModel(cfg.model)
+            .goalDonenessDecision(goalDecision.doneness())
+            .continuationDecision(goalDecision.continuation())
             .build();
       }
       // Soft completion: worker wrote files; fall through to smoke gate.
@@ -791,6 +1498,8 @@ to boot — skip it for those.""";
     }
 
     if (!req.enableSmokeTests()) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {}{}",
           task.id(),
@@ -798,18 +1507,20 @@ to boot — skip it for those.""";
           " (smoke tests disabled)");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
@@ -821,6 +1532,8 @@ to boot — skip it for those.""";
     // statuses on tasks whose code is later wired up correctly.
     boolean multiTask = plan.tasks().size() > 1;
     if (multiTask && !isFinalTask) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {} (intermediate smoke skipped — multi-task plan, final task +"
               + " reviewer are authoritative)",
@@ -828,23 +1541,27 @@ to boot — skip it for those.""";
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
     SmokeTestResult smoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (smoke.passed()) {
+      TaskOutcome.Status status =
+          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
       log.info(
           "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
@@ -853,13 +1570,13 @@ to boot — skip it for those.""";
           smoke.latencyMs());
       persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(
-              softCompletion
-                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
-                  : TaskOutcome.Status.SUCCESS)
+          .status(status)
           .workerOutcome(primary)
           .smokeTestPassed(true)
           .smokeTestExitCode(smoke.exitCode())
@@ -868,6 +1585,8 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
@@ -890,6 +1609,16 @@ to boot — skip it for those.""";
       log.warn("Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              primary,
+              TaskOutcome.Status.COMPLETED_WITH_WARNING,
+              false,
+              reason,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -902,7 +1631,16 @@ to boot — skip it for those.""";
           .toolCallsDispatched(primary.toolCallsDispatched())
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
+    }
+
+    TaskOutcome continuationBeforeRetry =
+        maybeActOnContinuationBeforeSmokeRetry(
+            task, plan, req, isFinalTask, taskStart, primary, smoke, cfg);
+    if (continuationBeforeRetry != null) {
+      return continuationBeforeRetry;
     }
 
     log.warn(
@@ -1004,6 +1742,16 @@ to boot — skip it for those.""";
               crossProviderRetry.provider());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          GoalTaskDecision goalDecision =
+              emitGoalDecision(
+                  runId,
+                  task,
+                  crossProviderRetry.result(),
+                  TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+                  true,
+                  null,
+                  crossProviderRetry.provider(),
+                  crossProviderRetry.model());
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1018,6 +1766,8 @@ to boot — skip it for those.""";
               .toolCallsDispatched(totalToolCalls)
               .dispatchedProvider(crossProviderRetry.provider())
               .dispatchedModel(crossProviderRetry.model())
+              .goalDonenessDecision(goalDecision.doneness())
+              .continuationDecision(goalDecision.continuation())
               .build();
         }
       } else if (crossProviderRetry != null) {
@@ -1027,6 +1777,17 @@ to boot — skip it for those.""";
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
           retry.outcome());
+      String retryFailureReason = describeWorkerFailure(retry);
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.COMPLETED_WITH_WARNING,
+              false,
+              retryFailureReason,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1041,6 +1802,8 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
@@ -1050,6 +1813,16 @@ to boot — skip it for those.""";
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+              true,
+              null,
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1064,6 +1837,8 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
@@ -1082,6 +1857,17 @@ to boot — skip it for those.""";
           task.id());
       persistTaskStatus(runId, task.id(), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      GoalTaskDecision goalDecision =
+          emitGoalDecision(
+              runId,
+              task,
+              retry,
+              TaskOutcome.Status.SUCCESS,
+              false,
+              "Smoke failed after retry but no files were written; treated as"
+                  + " verify-only/environmental",
+              cfg.provider,
+              cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -1096,6 +1882,8 @@ to boot — skip it for those.""";
           .toolCallsDispatched(totalToolCalls)
           .dispatchedProvider(cfg.provider)
           .dispatchedModel(cfg.model)
+          .goalDonenessDecision(goalDecision.doneness())
+          .continuationDecision(goalDecision.continuation())
           .build();
     }
 
@@ -1135,6 +1923,16 @@ to boot — skip it for those.""";
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
           persistTaskStatus(runId, task.id(), "COMPLETE");
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          GoalTaskDecision goalDecision =
+              emitGoalDecision(
+                  runId,
+                  task,
+                  retry2,
+                  TaskOutcome.Status.SUCCESS_AFTER_RETRY,
+                  true,
+                  null,
+                  cfg.provider,
+                  cfg.model);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -1149,6 +1947,8 @@ to boot — skip it for those.""";
               .toolCallsDispatched(totalToolCalls2)
               .dispatchedProvider(cfg.provider)
               .dispatchedModel(cfg.model)
+              .goalDonenessDecision(goalDecision.doneness())
+              .continuationDecision(goalDecision.continuation())
               .build();
         }
         // retry-2 completed but smoke STILL fails → fall through to COMPLETED_WITH_WARNING
@@ -1182,6 +1982,16 @@ to boot — skip it for those.""";
             + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
     persistTaskStatus(runId, task.id(), "PARTIAL", reason);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+    GoalTaskDecision goalDecision =
+        emitGoalDecision(
+            runId,
+            task,
+            retry,
+            TaskOutcome.Status.COMPLETED_WITH_WARNING,
+            false,
+            reason,
+            cfg.provider,
+            cfg.model);
     return TaskOutcome.builder()
         .taskId(task.id())
         .taskTitle(task.title())
@@ -1196,7 +2006,1460 @@ to boot — skip it for those.""";
         .toolCallsDispatched(totalToolCalls)
         .dispatchedProvider(cfg.provider)
         .dispatchedModel(cfg.model)
+        .goalDonenessDecision(goalDecision.doneness())
+        .continuationDecision(goalDecision.continuation())
         .build();
+  }
+
+  private GoalTaskDecision emitGoalDecision(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason,
+      String dispatchedProvider,
+      String dispatchedModel) {
+    GoalDonenessDecision decision =
+        goalDonenessEvaluator.evaluate(
+            buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
+    GoalContinuationPolicyDecision continuationDecision =
+        decideContinuation(
+            runId,
+            task,
+            decision,
+            dispatchedProvider,
+            dispatchedModel,
+            providerBehaviorPoor(workerResult, failureReason));
+    emitGoalAndContinuationDecision(runId, task, decision, continuationDecision);
+    return new GoalTaskDecision(decision, continuationDecision);
+  }
+
+  private void emitGoalAndContinuationDecision(
+      String runId,
+      PlannedTask task,
+      GoalDonenessDecision decision,
+      GoalContinuationPolicyDecision continuationDecision) {
+    persistGoalAndContinuationDecision(runId, task.id(), decision, continuationDecision);
+    log.info(
+        "Executor task={} goalDecision state={} decision={} reason={}",
+        task.id(),
+        decision.state(),
+        decision.recommendedDecision(),
+        decision.reason());
+    String goalSummary =
+        "Goal decision: "
+            + decision.state()
+            + " -> "
+            + decision.recommendedDecision()
+            + " ("
+            + decision.reason()
+            + ")";
+    broadcaster.emit(
+        runId, RunEvent.goalDecision(runId, task.id(), goalSummary, goalDecisionData(decision)));
+    broadcaster.emit(runId, RunEvent.log(runId, task.id(), goalSummary));
+    log.info(
+        "Executor task={} continuationDecision decision={} reason={}",
+        task.id(),
+        continuationDecision.decision(),
+        firstReason(continuationDecision));
+    String continuationSummary =
+        "Continuation decision: "
+            + continuationDecision.decision()
+            + " ("
+            + firstReason(continuationDecision)
+            + ")";
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationDecision(
+            runId, task.id(), continuationSummary, continuationDecisionData(continuationDecision)));
+    broadcaster.emit(runId, RunEvent.log(runId, task.id(), continuationSummary));
+  }
+
+  private TaskOutcome maybeActOnContinuationBeforeSmokeRetry(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      long taskStart,
+      WorkerResult primary,
+      SmokeTestResult smoke,
+      TierConfig cfg) {
+    if (!continuationActingEnabled || maxContinuationReruns() <= 0 || primary == null) {
+      return null;
+    }
+    String runId = req.runContext().runId();
+    String reason = smokeFailureReason(smoke, "before same-model retry");
+    GoalDonenessDecision goalDecision =
+        goalDonenessEvaluator.evaluate(
+            buildGoalEvidence(
+                runId,
+                task,
+                primary,
+                TaskOutcome.Status.COMPLETED_WITH_WARNING,
+                false,
+                reason));
+    GoalContinuationPolicyDecision continuationDecision =
+        decideContinuation(
+            runId,
+            task,
+            goalDecision,
+            cfg.provider,
+            cfg.model,
+            providerBehaviorPoor(primary, reason));
+    if (approvalBlockedContinuationProposal(continuationDecision)) {
+      persistTaskStatus(runId, task.id(), "PARTIAL", reason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+      emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+      return preRetryContinuationOutcome(
+          task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+    }
+    if (!actionableContinuationDecision(continuationDecision)) {
+      return null;
+    }
+    ModelProviderScore candidate = continuationDecision.selectedCandidate().orElse(null);
+    if (candidate == null || sameProviderModel(candidate, cfg.provider, cfg.model)) {
+      return null;
+    }
+    if (!continuationActionCapacityAvailable(runId, task.id(), continuationDecision.decision())) {
+      return null;
+    }
+    emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+    TaskOutcome preRetryOutcome =
+        preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+    return executeContinuationAction(
+        task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
+  }
+
+  private static boolean approvalBlockedContinuationProposal(
+      GoalContinuationPolicyDecision decision) {
+    return decision != null
+        && decision.decision() == RunContinuationDecision.STOP_BLOCKED
+        && decision.selectedCandidate().isPresent()
+        && approvalEligibleBlockedReason(decision);
+  }
+
+  private static boolean approvalEligibleBlockedReason(GoalContinuationPolicyDecision decision) {
+    Map<String, Object> policy = decision.policy();
+    Object blockedReason = policy == null ? null : policy.get("blockedAutomaticContinuationReason");
+    if ("ROUTE_PINNED".equals(String.valueOf(blockedReason))) {
+      return false;
+    }
+    if ("BENCHMARK_PRIOR_REQUIRED".equals(String.valueOf(blockedReason))
+        || "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED".equals(String.valueOf(blockedReason))) {
+      return true;
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
+    if (candidate == null || policy == null) {
+      return false;
+    }
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return true;
+    }
+    return Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"));
+  }
+
+  private static TaskOutcome preRetryContinuationOutcome(
+      PlannedTask task,
+      long taskStart,
+      WorkerResult primary,
+      SmokeTestResult smoke,
+      TierConfig cfg,
+      GoalDonenessDecision goalDecision,
+      GoalContinuationPolicyDecision continuationDecision) {
+    return TaskOutcome.builder()
+        .taskId(task.id())
+        .taskTitle(task.title())
+        .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
+        .workerOutcome(primary)
+        .smokeTestPassed(false)
+        .smokeTestExitCode(smoke.exitCode())
+        .smokeTestOutput(smoke.output())
+        .totalLatencyMs(System.currentTimeMillis() - taskStart)
+        .toolCallsDispatched(primary.toolCallsDispatched())
+        .dispatchedProvider(cfg.provider)
+        .dispatchedModel(cfg.model)
+        .goalDonenessDecision(goalDecision)
+        .continuationDecision(continuationDecision)
+        .build();
+  }
+
+  private boolean continuationActionCapacityAvailable(
+      String runId, String taskId, RunContinuationDecision decision) {
+    return switch (decision) {
+      case CHANGE_PROVIDER -> providerSwitchesUsed(runId) < maxProviderSwitches();
+      case STEP_UP_MODEL -> modelStepUpsUsed(runId, taskId) < maxModelStepUps();
+      case STEP_DOWN_MODEL -> modelStepDownsUsed(runId, taskId) < maxModelStepDowns();
+      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+          false;
+    };
+  }
+
+  private static String smokeFailureReason(SmokeTestResult smoke, String phase) {
+    String smokeTail = smoke == null || smoke.output() == null ? "" : smoke.output();
+    if (smokeTail.length() > 240) {
+      smokeTail = smokeTail.substring(smokeTail.length() - 240);
+    }
+    String suffix = smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " ");
+    return "Build smoke failed (exit "
+        + (smoke == null ? "unknown" : smoke.exitCode())
+        + ") "
+        + phase
+        + suffix;
+  }
+
+  private GoalContinuationPolicyDecision decideContinuation(
+      String runId,
+      PlannedTask task,
+      GoalDonenessDecision decision,
+      String provider,
+      String model,
+      boolean providerBehaviorPoor) {
+    String taskCategory = taskCategory(task);
+    double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
+    boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
+    boolean benchmarkPriorRequired = requireBenchmarkPriorForAutomaticContinuation(runId);
+    boolean routePinned = continuationRoutePinned(runId);
+    ContinuationConfirmationScope confirmationScope = continuationConfirmationScope(runId);
+    int providerSwitchesUsed = providerSwitchesUsed(runId);
+    int modelStepUpsUsed = modelStepUpsUsed(runId, task.id());
+    int modelStepDownsUsed = modelStepDownsUsed(runId, task.id());
+    if (goalContinuationAdvisor == null) {
+      return decideContinuationFallback(
+          runId,
+          decision,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          benchmarkPriorRequired,
+          routePinned,
+          providerBehaviorPoor,
+          confirmationScope,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
+    }
+    try {
+      GoalContinuationPolicyDecision advised =
+          goalContinuationAdvisor.advise(
+              GoalContinuationAdvisorRequest.builder()
+                  .goalDecision(decision)
+                  .currentProvider(provider)
+                  .currentModel(model)
+                  .taskCategory(taskCategory)
+                  .requiredQualityThreshold(requiredQualityThreshold)
+                  .providerAvailability(providerAvailability(runId))
+                  .providerPreferenceOrder(providerPreferenceOrder(provider))
+                  .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
+                  .providerBehaviorPoor(providerBehaviorPoor)
+                  .routePinned(routePinned)
+                  .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                  .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
+                  .userConfirmedExpensiveContinuation(confirmationScope.confirmed())
+                  .userConfirmedContinuationAction(confirmationScope.action())
+                  .userConfirmedContinuationProvider(confirmationScope.provider())
+                  .userConfirmedContinuationModel(confirmationScope.model())
+                  .providerSwitchesUsed(providerSwitchesUsed)
+                  .maxProviderSwitches(maxProviderSwitches())
+                  .modelStepUpsUsed(modelStepUpsUsed)
+                  .maxModelStepUps(maxModelStepUps())
+                  .modelStepDownsUsed(modelStepDownsUsed)
+                  .maxModelStepDowns(maxModelStepDowns())
+                  .build());
+      return withAppliedPolicy(
+          advised,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          benchmarkPriorRequired,
+          routePinned,
+          providerBehaviorPoor,
+          confirmationScope,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed,
+          runId);
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Goal continuation advisor failed for task={} provider={} model={}; falling back to pure"
+              + " policy",
+          task.id(),
+          provider,
+          model,
+          ex);
+      return decideContinuationFallback(
+          runId,
+          decision,
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          benchmarkPriorRequired,
+          routePinned,
+          providerBehaviorPoor,
+          confirmationScope,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed);
+    }
+  }
+
+  private GoalContinuationPolicyDecision decideContinuationFallback(
+      String runId,
+      GoalDonenessDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      boolean providerBehaviorPoor,
+      ContinuationConfirmationScope confirmationScope,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed) {
+    return withAppliedPolicy(
+        goalContinuationPolicy.decide(
+            GoalContinuationRequest.builder()
+                .goalDecision(decision)
+                .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
+                .routePinned(routePinned)
+                .userConfirmedExpensiveContinuation(confirmationScope.confirmed())
+                .userConfirmedContinuationAction(confirmationScope.action())
+                .userConfirmedContinuationProvider(confirmationScope.provider())
+                .userConfirmedContinuationModel(confirmationScope.model())
+                .providerBehaviorPoor(providerBehaviorPoor)
+                .providerSwitchesUsed(providerSwitchesUsed)
+                .maxProviderSwitches(maxProviderSwitches())
+                .modelStepUpsUsed(modelStepUpsUsed)
+                .maxModelStepUps(maxModelStepUps())
+                .modelStepDownsUsed(modelStepDownsUsed)
+                .maxModelStepDowns(maxModelStepDowns())
+                .build()),
+          taskCategory,
+          requiredQualityThreshold,
+          confirmationRequired,
+          benchmarkPriorRequired,
+          routePinned,
+          providerBehaviorPoor,
+          confirmationScope,
+          providerSwitchesUsed,
+          modelStepUpsUsed,
+          modelStepDownsUsed,
+          runId);
+  }
+
+  private GoalContinuationPolicyDecision withAppliedPolicy(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      boolean providerBehaviorPoor,
+      ContinuationConfirmationScope confirmationScope,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed,
+      String runId) {
+    if (decision == null) {
+      return null;
+    }
+    return new GoalContinuationPolicyDecision(
+        decision.decision(),
+        decision.selectedCandidate(),
+        decision.reasons(),
+        continuationPolicyData(
+            decision,
+            taskCategory,
+            requiredQualityThreshold,
+            confirmationRequired,
+            benchmarkPriorRequired,
+            routePinned,
+            providerBehaviorPoor,
+            confirmationScope,
+            providerSwitchesUsed,
+            modelStepUpsUsed,
+            modelStepDownsUsed,
+            runId));
+  }
+
+  private List<String> providerPreferenceOrder(String currentProvider) {
+    List<String> order = new ArrayList<>();
+    if (currentProvider == null || currentProvider.isBlank()) {
+      return order;
+    }
+    addProvider(order, currentProvider);
+    if (matrixProps == null || matrixProps.getFailoverOrder() == null) {
+      return order;
+    }
+    List<String> failovers =
+        matrixProps.getFailoverOrder().get(currentProvider.toLowerCase(Locale.ROOT));
+    if (failovers != null) {
+      failovers.forEach(provider -> addProvider(order, provider));
+    }
+    return order;
+  }
+
+  private Map<String, Boolean> providerAvailability(String runId) {
+    if (availableProviderResolver == null) {
+      return Map.of();
+    }
+    try {
+      Set<LlmProvider> available = availableProviderResolver.resolve(runId);
+      return ProviderAvailabilityMap.fromAvailableProviders(available, knownProviderNames());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Goal continuation provider availability lookup failed for run={}: {}",
+          runId,
+          ex.getMessage());
+      return Map.of();
+    }
+  }
+
+  private Set<String> knownProviderNames() {
+    Set<String> providers = new LinkedHashSet<>();
+    if (matrixProps != null && matrixProps.getProviders() != null) {
+      providers.addAll(matrixProps.getProviders().keySet());
+    }
+    if (matrixProps != null && matrixProps.getModels() != null) {
+      matrixProps.getModels().values().stream()
+          .filter(config -> config != null && config.getProvider() != null)
+          .map(com.navneet.executespec.router.ModelMatrixProperties.ModelConfig::getProvider)
+          .forEach(providers::add);
+    }
+    return providers;
+  }
+
+  private static void addProvider(List<String> order, String provider) {
+    if (provider == null || provider.isBlank()) {
+      return;
+    }
+    String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    if (!order.contains(normalized)) {
+      order.add(normalized);
+    }
+  }
+
+  private static String taskCategory(PlannedTask task) {
+    if (task == null || task.complexity() == null) {
+      return "TASK_MEDIUM";
+    }
+    String text = normalizedTaskText(task);
+    if (containsAny(text, "swe-bench", "terminal-bench", "programbench", "benchmark")) {
+      return "BENCHMARK_PATCH";
+    }
+    if (touchesTestFiles(task)
+        || containsAny(
+            text,
+            "failing test",
+            "test failure",
+            "fix test",
+            "unit test",
+            "integration test",
+            "pytest",
+            "junit",
+            "jest")) {
+      return "TEST_FIX";
+    }
+    if (containsAny(
+        text,
+        "bug",
+        "fix",
+        "error",
+        "exception",
+        "failure",
+        "regression",
+        "broken",
+        "failing",
+        "crash")) {
+      return "BUG_FIX";
+    }
+    if (containsAny(
+        text, "refactor", "cleanup", "clean up", "rename", "extract", "restructure", "decompose")) {
+      return "REFACTOR";
+    }
+    if (containsAny(text, "terminal", "cli", "command-line", "command line", "shell", "script")) {
+      return "TERMINAL_TASK";
+    }
+    if (containsAny(
+        text, "read-only", "read only", "investigate", "analyze", "analyse", "explain")) {
+      return "READ_ONLY_HELP";
+    }
+    if (containsAny(text, "create", "implement", "build", "add", "new", "scaffold", "generate")) {
+      return "GREENFIELD_BUILD";
+    }
+    if (!taskValues(task.touchesFiles()).isEmpty()) {
+      return "PROJECT_PATCH";
+    }
+    return "TASK_" + task.complexity().name();
+  }
+
+  private static String normalizedTaskText(PlannedTask task) {
+    StringBuilder text = new StringBuilder();
+    appendTaskText(text, task.title());
+    appendTaskText(text, task.description());
+    taskValues(task.hardConstraints()).forEach(value -> appendTaskText(text, value));
+    taskValues(task.touchesFiles()).forEach(value -> appendTaskText(text, value));
+    return text.toString().toLowerCase(Locale.ROOT);
+  }
+
+  private static List<String> taskValues(List<String> values) {
+    return values == null ? List.of() : values;
+  }
+
+  private static void appendTaskText(StringBuilder text, String value) {
+    if (value != null && !value.isBlank()) {
+      text.append(' ').append(value);
+    }
+  }
+
+  private static boolean containsAny(String text, String... needles) {
+    if (text == null || text.isBlank()) {
+      return false;
+    }
+    for (String needle : needles) {
+      if (needle != null && !needle.isBlank() && text.contains(needle)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean touchesTestFiles(PlannedTask task) {
+    return taskValues(task.touchesFiles()).stream()
+        .map(value -> value == null ? "" : value.toLowerCase(Locale.ROOT))
+        .anyMatch(
+            path ->
+                path.contains("/test/")
+                    || path.contains("/tests/")
+                    || path.contains("__tests__")
+                    || path.endsWith("test.java")
+                    || path.endsWith("tests.java")
+                    || path.endsWith(".test.ts")
+                    || path.endsWith(".test.tsx")
+                    || path.endsWith(".spec.ts")
+                    || path.endsWith(".spec.tsx")
+                    || path.endsWith("_test.go")
+                    || path.startsWith("test_")
+                    || path.endsWith("_test.py"));
+  }
+
+  private static Map<String, Object> goalDecisionData(GoalDonenessDecision decision) {
+    if (decision == null) {
+      return Map.of("state", "UNKNOWN", "reason", "goal decision missing");
+    }
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("state", decision.state().name());
+    data.put("recommendedDecision", decision.recommendedDecision().name());
+    data.put("reason", decision.reason());
+    data.put("recommendedNextStep", decision.recommendedNextStep());
+    data.put("goalSummary", decision.goalSummary());
+    data.put("completedItems", decision.completedItems());
+    data.put("incompleteItems", decision.incompleteItems());
+    data.put("evidence", decision.evidence());
+    data.put("risks", decision.risks());
+    data.put("budgetCeilingReason", decision.budgetCeilingReason());
+    data.put("inputTokens", decision.inputTokens());
+    data.put("outputTokens", decision.outputTokens());
+    data.put("cacheReadTokens", decision.cacheReadTokens());
+    data.put("cacheWriteTokens", decision.cacheWriteTokens());
+    data.put("reasoningTokens", decision.reasoningTokens());
+    data.put("totalTokens", decision.totalTokens());
+    data.put("costUsd", decision.costUsd());
+    data.put("wallClockMs", decision.wallClockMs());
+    data.put("userInputRequired", decision.userInputRequired());
+    data.put("anotherModelProviderMightHelp", decision.anotherModelProviderMightHelp());
+    return data;
+  }
+
+  private Map<String, Object> continuationDecisionData(GoalContinuationPolicyDecision decision) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    if (decision == null) {
+      data.put("decision", "UNKNOWN");
+      data.put("reasons", List.of("continuation decision missing"));
+      data.put("policy", continuationPolicyData());
+      return data;
+    }
+    data.put("decision", decision.decision().name());
+    decision
+        .selectedCandidate()
+        .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
+    String approvalRequiredReason = continuationApprovalRequiredReason(decision);
+    if (approvalRequiredReason != null) {
+      data.put("approvalRequiredReason", approvalRequiredReason);
+    }
+    data.put("reasons", decision.reasons());
+    data.put("policy", continuationPolicyData(decision));
+    return data;
+  }
+
+  private Map<String, Object> continuationPolicyData(GoalContinuationPolicyDecision decision) {
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      return decision.policy();
+    }
+    return continuationPolicyData();
+  }
+
+  private Map<String, Object> continuationPolicyData() {
+    return continuationPolicyData(null, "UNKNOWN", requiredGoalQualityThreshold());
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold) {
+    return continuationPolicyData(
+        decision,
+        taskCategory,
+        requiredQualityThreshold,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired) {
+    return continuationPolicyData(
+        decision,
+        taskCategory,
+        requiredQualityThreshold,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        false,
+        false,
+        new ContinuationConfirmationScope(false, null, null, null),
+        0,
+        0,
+        0,
+        null);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      boolean providerBehaviorPoor,
+      ContinuationConfirmationScope confirmationScope,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed) {
+    return continuationPolicyData(
+        decision,
+        taskCategory,
+        requiredQualityThreshold,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        providerBehaviorPoor,
+        confirmationScope,
+        providerSwitchesUsed,
+        modelStepUpsUsed,
+        modelStepDownsUsed,
+        null);
+  }
+
+  private Map<String, Object> continuationPolicyData(
+      GoalContinuationPolicyDecision decision,
+      String taskCategory,
+      double requiredQualityThreshold,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      boolean providerBehaviorPoor,
+      ContinuationConfirmationScope confirmationScope,
+      int providerSwitchesUsed,
+      int modelStepUpsUsed,
+      int modelStepDownsUsed,
+      String runId) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      data.putAll(decision.policy());
+    }
+    data.put(
+        "taskCategory", taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory);
+    data.put(
+        "requiredQualityThreshold", sanitizeRequiredQualityThreshold(requiredQualityThreshold));
+    data.put("defaultRequiredQualityThreshold", requiredGoalQualityThreshold());
+    data.put("requiredQualityThresholds", requiredQualityThresholdsByCategory());
+    data.put("providerSwitchesUsed", Math.max(0, providerSwitchesUsed));
+    data.put("maxProviderSwitches", maxProviderSwitches());
+    data.put("modelStepUpsUsed", Math.max(0, modelStepUpsUsed));
+    data.put("maxModelStepUps", maxModelStepUps());
+    data.put("modelStepDownsUsed", Math.max(0, modelStepDownsUsed));
+    data.put("maxModelStepDowns", maxModelStepDowns());
+    data.put("maxNoProgressIterations", maxNoProgressIterations());
+    data.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    data.put("maxRepeatedFailures", maxRepeatedFailures());
+    data.put("maxEditChurn", maxEditChurn());
+    data.put("maxStaleExplanations", maxStaleExplanations());
+    data.put("maxParallelTasks", maxParallelTasks());
+    data.put(
+        "lowComplexityWorkerStartTierConfigured",
+        configuredLowComplexityWorkerStartTierForRun(runId));
+    data.put("lowComplexityWorkerStartTierEffective", effectiveLowComplexityWorkerStartTier(runId));
+    data.put("providerBehaviorPoor", providerBehaviorPoor);
+    data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
+    data.put("userConfirmedExpensiveContinuation", confirmationScope.confirmed());
+    if (confirmationScope.action() != null) {
+      data.put("userConfirmedContinuationAction", confirmationScope.action().name());
+    }
+    if (hasText(confirmationScope.provider())) {
+      data.put("userConfirmedContinuationProvider", confirmationScope.provider());
+    }
+    if (hasText(confirmationScope.model())) {
+      data.put("userConfirmedContinuationModel", confirmationScope.model());
+    }
+    data.put(
+        "requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
+    data.put("routePinned", routePinned);
+    data.put("maxTotalCostUsd", maxGoalTotalCostUsd());
+    data.put("maxTotalTokens", maxGoalTotalTokens());
+    data.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
+    data.put("actingEnabled", continuationActingEnabled);
+    data.put("maxRerunsPerTask", maxContinuationReruns());
+    return data;
+  }
+
+  private boolean requireConfirmationBeforeExpensiveContinuation(String runId) {
+    return continuationConfirmationRequiredByRun.getOrDefault(
+        runId, requireConfirmationBeforeExpensiveContinuation);
+  }
+
+  private boolean requireBenchmarkPriorForAutomaticContinuation(String runId) {
+    return continuationBenchmarkPriorRequiredByRun.getOrDefault(
+        runId, requireBenchmarkPriorForAutomaticContinuation);
+  }
+
+  private boolean continuationRoutePinned(String runId) {
+    return continuationRoutePinnedByRun.getOrDefault(runId, false);
+  }
+
+  private String configuredLowComplexityWorkerStartTierForRun(String runId) {
+    if (runId != null) {
+      String configured = lowComplexityWorkerStartTierConfiguredByRun.get(runId);
+      if (hasText(configured)) {
+        return configured;
+      }
+    }
+    return configuredLowComplexityWorkerStartTier();
+  }
+
+  private String effectiveLowComplexityWorkerStartTier(String runId) {
+    if (runId != null) {
+      String effective = lowComplexityWorkerStartTierEffectiveByRun.get(runId);
+      if (hasText(effective)) {
+        return effective;
+      }
+    }
+    return lowComplexityWorkerStartTier(null).name();
+  }
+
+  private ContinuationConfirmationScope continuationConfirmationScope(String runId) {
+    return continuationConfirmationScopeByRun.getOrDefault(
+        runId, new ContinuationConfirmationScope(false, null, null, null));
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
+  private double requiredGoalQualityThreshold() {
+    return sanitizeRequiredQualityThreshold(goalRequiredQualityThreshold);
+  }
+
+  private double requiredGoalQualityThreshold(String taskCategory) {
+    double override =
+        switch (taskCategory == null ? "" : taskCategory.trim().toUpperCase(Locale.ROOT)) {
+          case "TASK_LOW" -> goalRequiredQualityThresholdTaskLow;
+          case "TASK_MEDIUM" -> goalRequiredQualityThresholdTaskMedium;
+          case "TASK_HIGH" -> goalRequiredQualityThresholdTaskHigh;
+          case "GREENFIELD_BUILD" -> goalRequiredQualityThresholdGreenfieldBuild;
+          case "PROJECT_PATCH" -> goalRequiredQualityThresholdProjectPatch;
+          case "BUG_FIX" -> goalRequiredQualityThresholdBugFix;
+          case "TEST_FIX" -> goalRequiredQualityThresholdTestFix;
+          case "REFACTOR" -> goalRequiredQualityThresholdRefactor;
+          case "BENCHMARK_PATCH" -> goalRequiredQualityThresholdBenchmarkPatch;
+          case "TERMINAL_TASK" -> goalRequiredQualityThresholdTerminalTask;
+          case "READ_ONLY_HELP" -> goalRequiredQualityThresholdReadOnlyHelp;
+          default -> -1.0;
+        };
+    if (Double.isFinite(override) && override > 0.0) {
+      return sanitizeRequiredQualityThreshold(override);
+    }
+    return requiredGoalQualityThreshold();
+  }
+
+  private Map<String, Object> requiredQualityThresholdsByCategory() {
+    Map<String, Object> thresholds = new LinkedHashMap<>();
+    thresholds.put("TASK_LOW", requiredGoalQualityThreshold("TASK_LOW"));
+    thresholds.put("TASK_MEDIUM", requiredGoalQualityThreshold("TASK_MEDIUM"));
+    thresholds.put("TASK_HIGH", requiredGoalQualityThreshold("TASK_HIGH"));
+    thresholds.put("GREENFIELD_BUILD", requiredGoalQualityThreshold("GREENFIELD_BUILD"));
+    thresholds.put("PROJECT_PATCH", requiredGoalQualityThreshold("PROJECT_PATCH"));
+    thresholds.put("BUG_FIX", requiredGoalQualityThreshold("BUG_FIX"));
+    thresholds.put("TEST_FIX", requiredGoalQualityThreshold("TEST_FIX"));
+    thresholds.put("REFACTOR", requiredGoalQualityThreshold("REFACTOR"));
+    thresholds.put("BENCHMARK_PATCH", requiredGoalQualityThreshold("BENCHMARK_PATCH"));
+    thresholds.put("TERMINAL_TASK", requiredGoalQualityThreshold("TERMINAL_TASK"));
+    thresholds.put("READ_ONLY_HELP", requiredGoalQualityThreshold("READ_ONLY_HELP"));
+    return thresholds;
+  }
+
+  private static double sanitizeRequiredQualityThreshold(double threshold) {
+    if (!Double.isFinite(threshold) || threshold <= 0.0) {
+      return 70.0;
+    }
+    return Math.min(100.0, threshold);
+  }
+
+  private int maxProviderSwitches() {
+    return Math.max(0, advisoryProviderSwitchLimit);
+  }
+
+  private int maxModelStepUps() {
+    return Math.max(0, advisoryModelStepUpLimit);
+  }
+
+  private int maxModelStepDowns() {
+    return Math.max(0, advisoryModelStepDownLimit);
+  }
+
+  private int maxNoProgressIterations() {
+    return maxGoalNoProgressIterations;
+  }
+
+  private int maxFalseDoneClaims() {
+    return maxGoalFalseDoneClaims;
+  }
+
+  private int maxRepeatedFailures() {
+    return maxGoalRepeatedFailures;
+  }
+
+  private int maxEditChurn() {
+    return maxGoalEditChurn;
+  }
+
+  private int maxStaleExplanations() {
+    return maxGoalStaleExplanations;
+  }
+
+  private int maxParallelTasks() {
+    return Math.max(1, maxGoalParallelTasks);
+  }
+
+  private static Map<String, Object> selectedCandidateData(
+      com.navneet.executespec.router.ModelProviderScore candidate) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("provider", candidate.provider());
+    data.put("model", candidate.model());
+    data.put("taskCategory", candidate.taskCategory());
+    data.put("qualityScore", candidate.qualityScore());
+    data.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+    data.put("costPerMillionTokens", candidate.costPerMillionTokens());
+    data.put("latencyP50Ms", candidate.latencyP50Ms());
+    data.put("latencyP95Ms", candidate.latencyP95Ms());
+    data.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
+    data.put("reasons", candidate.reasons());
+    return data;
+  }
+
+  private String continuationApprovalRequiredReason(GoalContinuationPolicyDecision decision) {
+    if (decision == null
+        || decision.decision() != RunContinuationDecision.STOP_BLOCKED
+        || decision.selectedCandidate().isEmpty()) {
+      return null;
+    }
+    Map<String, Object> policy = continuationPolicyData(decision);
+    if (Boolean.TRUE.equals(policy.get("routePinned"))) {
+      return "ROUTE_PINNED";
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().get();
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return "BENCHMARK_PRIOR_REQUIRED";
+    }
+    if (Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"))) {
+      return "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED";
+    }
+    return null;
+  }
+
+  private void persistGoalAndContinuationDecision(
+      String runId,
+      String taskIdShort,
+      GoalDonenessDecision goalDecision,
+      GoalContinuationPolicyDecision continuationDecision) {
+    if (taskRepo == null
+        || objectMapper == null
+        || runId == null
+        || runId.length() < 8
+        || taskIdShort == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    try {
+      var existing = taskRepo.findById(key);
+      if (existing.isEmpty()) {
+        log.debug("persistGoalDecision: row not found id={}", key);
+        return;
+      }
+      var task = existing.get();
+      task.setGoalDonenessJson(objectMapper.writeValueAsString(goalDecision));
+      task.setContinuationDecisionJson(serializeContinuationDecision(continuationDecision));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn("persistGoalDecision: {} failed: {}", key, ex.getMessage(), ex);
+    }
+  }
+
+  private String serializeContinuationDecision(GoalContinuationPolicyDecision decision)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    ObjectNode node = objectMapper.createObjectNode();
+    if (decision == null) {
+      node.put("decision", "UNKNOWN");
+      node.putArray("reasons").add("continuation decision missing");
+      writeContinuationPolicy(node.putObject("policy"), null);
+      return objectMapper.writeValueAsString(node);
+    }
+    node.put("decision", decision.decision().name());
+    var selected = decision.selectedCandidate();
+    if (selected.isPresent()) {
+      var candidate = selected.get();
+      ObjectNode candidateNode = node.putObject("selectedCandidate");
+      candidateNode.put("provider", candidate.provider());
+      candidateNode.put("model", candidate.model());
+      candidateNode.put("taskCategory", candidate.taskCategory());
+      candidateNode.put("qualityScore", candidate.qualityScore());
+      candidateNode.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+      candidateNode.put("costPerMillionTokens", candidate.costPerMillionTokens());
+      candidateNode.put("latencyP50Ms", candidate.latencyP50Ms());
+      candidateNode.put("latencyP95Ms", candidate.latencyP95Ms());
+      candidateNode.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
+      var candidateReasons = candidateNode.putArray("reasons");
+      candidate.reasons().forEach(candidateReasons::add);
+    }
+    String approvalRequiredReason = continuationApprovalRequiredReason(decision);
+    if (approvalRequiredReason != null) {
+      node.put("approvalRequiredReason", approvalRequiredReason);
+    }
+    var reasons = node.putArray("reasons");
+    decision.reasons().forEach(reasons::add);
+    writeContinuationPolicy(node.putObject("policy"), decision);
+    return objectMapper.writeValueAsString(node);
+  }
+
+  private void writeContinuationPolicy(
+      ObjectNode policyNode, GoalContinuationPolicyDecision decision) {
+    if (decision != null && decision.policy() != null && !decision.policy().isEmpty()) {
+      objectMapper
+          .valueToTree(decision.policy())
+          .fields()
+          .forEachRemaining(entry -> policyNode.set(entry.getKey(), entry.getValue()));
+      return;
+    }
+    policyNode.put("taskCategory", "UNKNOWN");
+    policyNode.put("requiredQualityThreshold", requiredGoalQualityThreshold());
+    policyNode.put("defaultRequiredQualityThreshold", requiredGoalQualityThreshold());
+    ObjectNode thresholds = policyNode.putObject("requiredQualityThresholds");
+    requiredQualityThresholdsByCategory()
+        .forEach((category, threshold) -> thresholds.put(category, (Double) threshold));
+    policyNode.put("providerSwitchesUsed", providerSwitchesUsed(null));
+    policyNode.put("maxProviderSwitches", maxProviderSwitches());
+    policyNode.put("modelStepUpsUsed", modelStepUpsUsed(null, null));
+    policyNode.put("maxModelStepUps", maxModelStepUps());
+    policyNode.put("modelStepDownsUsed", modelStepDownsUsed(null, null));
+    policyNode.put("maxModelStepDowns", maxModelStepDowns());
+    policyNode.put("maxNoProgressIterations", maxNoProgressIterations());
+    policyNode.put("maxFalseDoneClaims", maxFalseDoneClaims());
+    policyNode.put("maxRepeatedFailures", maxRepeatedFailures());
+    policyNode.put("maxEditChurn", maxEditChurn());
+    policyNode.put("maxParallelTasks", maxParallelTasks());
+    policyNode.put("providerBehaviorPoor", false);
+    policyNode.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        requireConfirmationBeforeExpensiveContinuation);
+    policyNode.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        requireBenchmarkPriorForAutomaticContinuation);
+    policyNode.put("maxTotalCostUsd", maxGoalTotalCostUsd());
+    policyNode.put("maxTotalTokens", maxGoalTotalTokens());
+    policyNode.put("maxTaskWallClockMs", maxGoalTaskWallClockMs());
+    policyNode.put("actingEnabled", continuationActingEnabled);
+    policyNode.put("maxRerunsPerTask", maxContinuationReruns());
+  }
+
+  private static String firstReason(GoalContinuationPolicyDecision decision) {
+    if (decision == null || decision.reasons().isEmpty()) {
+      return "no continuation reason supplied";
+    }
+    return decision.reasons().getFirst();
+  }
+
+  private GoalEvidence buildGoalEvidence(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason) {
+    int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    RunCostTracker.Snapshot cost = costSnapshot(runId);
+    int totalTokens = totalTrackedTokens(cost);
+    long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
+    boolean completeTaskClaimed =
+        workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
+    boolean validationAttempted = smokePassed != null;
+    boolean validationPassed = Boolean.TRUE.equals(smokePassed);
+    boolean statusClean =
+        finalStatus == TaskOutcome.Status.SUCCESS
+            || finalStatus == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
+    List<String> completed = new ArrayList<>();
+    if (completeTaskClaimed) {
+      completed.add("worker called completeTask");
+    }
+    if (fileWrites > 0) {
+      completed.add(fileWrites + " file write" + (fileWrites == 1 ? "" : "s"));
+    }
+    if (validationPassed) {
+      completed.add("smoke validation passed");
+    }
+
+    List<String> incomplete = new ArrayList<>();
+    if (!statusClean) {
+      incomplete.add("task status is " + finalStatus);
+    }
+    if (validationAttempted && !validationPassed) {
+      incomplete.add("smoke validation failed");
+    }
+    if (failureReason != null && !failureReason.isBlank()) {
+      incomplete.add(failureReason);
+    }
+
+    List<String> evidence = new ArrayList<>();
+    evidence.add("taskStatus=" + finalStatus);
+    if (workerResult != null) {
+      evidence.add("workerOutcome=" + workerResult.outcome());
+      evidence.add("iterations=" + workerResult.iterations());
+      evidence.add("toolCalls=" + workerResult.toolCallsDispatched());
+      evidence.add("fileWrites=" + fileWrites);
+      evidence.add("wallClockMs=" + wallClockMs);
+    }
+    evidence.add("inputTokens=" + cost.inputTokens());
+    evidence.add("outputTokens=" + cost.outputTokens());
+    evidence.add("cacheReadTokens=" + cost.cacheReadTokens());
+    evidence.add("cacheWriteTokens=" + cost.cacheWriteTokens());
+    evidence.add("reasoningTokens=" + cost.reasoningTokens());
+    evidence.add("totalTrackedTokens=" + totalTokens);
+    evidence.add("costUsd=" + String.format(Locale.ROOT, "%.6f", cost.costUsd()));
+    if (smokePassed != null) {
+      evidence.add("smokePassed=" + smokePassed);
+    }
+
+    String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
+    boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
+    boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
+    boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
+    boolean completionConfidenceLow = fileWrites > 0 && (!completeTaskClaimed || !statusClean);
+    int noProgressIterations =
+        fileWrites == 0 && !completeTaskClaimed && workerResult != null
+            ? Math.max(0, workerResult.iterations())
+            : 0;
+    int falseDoneClaims = completeTaskClaimed && validationAttempted && !validationPassed ? 1 : 0;
+    int repeatedFailureCount =
+        repeatedFailureCount(workerResult, validationAttempted, validationPassed, failureReason);
+    int editChurnCount = editChurnCount(workerResult);
+    int staleExplanationCount = staleExplanationCount(workerResult, fileWrites, validationPassed);
+    evidence.add("noProgressIterations=" + noProgressIterations + "/" + maxNoProgressIterations());
+    evidence.add("falseDoneClaims=" + falseDoneClaims + "/" + maxFalseDoneClaims());
+    evidence.add("repeatedFailureCount=" + repeatedFailureCount + "/" + maxRepeatedFailures());
+    evidence.add("editChurnCount=" + editChurnCount + "/" + maxEditChurn());
+    evidence.add("staleExplanationCount=" + staleExplanationCount + "/" + maxStaleExplanations());
+    if (blockedByEnvironment) {
+      evidence.add("blockedByEnvironment=true");
+    }
+    if (unsafeContinuation) {
+      evidence.add("unsafeContinuation=true");
+    }
+    if (completionConfidenceLow) {
+      evidence.add("completionConfidenceLow=true");
+      incomplete.add("completion confidence is low despite meaningful changes");
+    }
+
+    return GoalEvidence.builder()
+        .goalSummary(goalSummary(task))
+        .goalCriteriaSatisfied(completeTaskClaimed && validationPassed && statusClean)
+        .validationAttempted(validationAttempted)
+        .validationPassed(smokePassed)
+        .requiredOutputsPresent(validationPassed && statusClean)
+        .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
+        .meaningfulDiffCount(fileWrites)
+        .noProgressIterations(noProgressIterations)
+        .maxNoProgressIterations(maxNoProgressIterations())
+        .falseDoneClaims(falseDoneClaims)
+        .maxFalseDoneClaims(maxFalseDoneClaims())
+        .repeatedFailureCount(repeatedFailureCount)
+        .maxRepeatedFailures(maxRepeatedFailures())
+        .editChurnCount(editChurnCount)
+        .maxEditChurn(maxEditChurn())
+        .staleExplanationCount(staleExplanationCount)
+        .maxStaleExplanations(maxStaleExplanations())
+        .budgetCeilingReached(budgetCeilingReached)
+        .budgetCeilingReason(budgetCeilingReason)
+        .inputTokens(cost.inputTokens())
+        .outputTokens(cost.outputTokens())
+        .cacheReadTokens(cost.cacheReadTokens())
+        .cacheWriteTokens(cost.cacheWriteTokens())
+        .reasoningTokens(cost.reasoningTokens())
+        .totalTokens(totalTokens)
+        .costUsd(cost.costUsd())
+        .wallClockMs(wallClockMs)
+        .blockedByEnvironment(blockedByEnvironment)
+        .unsafeContinuation(unsafeContinuation)
+        .completionConfidenceLow(completionConfidenceLow)
+        .completeTaskClaimed(completeTaskClaimed)
+        .completedItems(completed)
+        .incompleteItems(incomplete)
+        .evidence(evidence)
+        .risks(risksFor(workerResult, failureReason, budgetCeilingReason, completionConfidenceLow))
+        .build();
+  }
+
+  private static int repeatedFailureCount(
+      WorkerResult workerResult,
+      boolean validationAttempted,
+      boolean validationPassed,
+      String failureReason) {
+    int max = 0;
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        String signature = repeatedFailureSignature(entry);
+        if (signature == null) {
+          continue;
+        }
+        int count = counts.getOrDefault(signature, 0) + 1;
+        counts.put(signature, count);
+        max = Math.max(max, count);
+      }
+    }
+    if (validationAttempted
+        && !validationPassed
+        && failureReason != null
+        && failureReason.toLowerCase(Locale.ROOT).contains("after one retry")) {
+      max = Math.max(max, 2);
+    }
+    return max;
+  }
+
+  private static String repeatedFailureSignature(String entry) {
+    if (entry == null || entry.isBlank()) {
+      return null;
+    }
+    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
+    String lower = normalized.toLowerCase(Locale.ROOT);
+    boolean failure =
+        lower.contains("refused")
+            || lower.contains("-> err")
+            || lower.contains("critic")
+            || lower.contains("verify-before-complete");
+    if (!failure) {
+      return null;
+    }
+    String commandSignature = repeatedCommandFailureSignature(normalized);
+    return commandSignature == null ? normalized : commandSignature;
+  }
+
+  private static String repeatedCommandFailureSignature(String normalized) {
+    String lower = normalized.toLowerCase(Locale.ROOT);
+    if (!(lower.startsWith("shell(")
+        || lower.startsWith("bash(")
+        || lower.startsWith("buildproject(")
+        || lower.startsWith("runtests("))) {
+      return null;
+    }
+    int status = lower.indexOf("->");
+    String call = status < 0 ? normalized : normalized.substring(0, status).trim();
+    return call.isBlank() ? null : call;
+  }
+
+  private static int editChurnCount(WorkerResult workerResult) {
+    int max = 0;
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    if (workerResult == null || workerResult.toolCallLog() == null) {
+      return 0;
+    }
+    for (String entry : workerResult.toolCallLog()) {
+      String path = mutationPathSignature(entry);
+      if (path == null) {
+        continue;
+      }
+      int count = counts.getOrDefault(path, 0) + 1;
+      counts.put(path, count);
+      max = Math.max(max, count);
+    }
+    return max;
+  }
+
+  private static int staleExplanationCount(
+      WorkerResult workerResult, int fileWrites, boolean validationPassed) {
+    if (workerResult == null || fileWrites > 0 || validationPassed) {
+      return 0;
+    }
+    if (workerResult.finalAssistantText() == null || workerResult.finalAssistantText().isBlank()) {
+      return 0;
+    }
+    return Math.max(0, workerResult.repeatedAssistantTextCount());
+  }
+
+  private static boolean providerBehaviorPoor(WorkerResult workerResult, String failureReason) {
+    if (workerResult != null) {
+      if (workerResult.outcome() == WorkerResult.Outcome.ERROR) {
+        return true;
+      }
+      if (countFileWrites(workerResult.toolCallLog()) == 0
+          && providerBreakdownOutcome(workerResult.outcome())) {
+        return true;
+      }
+    }
+    String text =
+        ((failureReason == null ? "" : failureReason)
+                + " "
+                + (workerResult == null || workerResult.finalAssistantText() == null
+                    ? ""
+                    : workerResult.finalAssistantText()))
+            .toLowerCase(Locale.ROOT);
+    return containsAny(
+        text,
+        "llm",
+        "model provider",
+        "provider error",
+        "router",
+        "rate limit",
+        "429",
+        "5xx",
+        "timeout",
+        "connection reset",
+        "api error");
+  }
+
+  private static boolean providerBreakdownOutcome(WorkerResult.Outcome outcome) {
+    return outcome == WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE
+        || outcome == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
+        || outcome == WorkerResult.Outcome.COMPLETED_BY_STAGNATION
+        || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+  }
+
+  private static String mutationPathSignature(String entry) {
+    if (entry == null || entry.isBlank()) {
+      return null;
+    }
+    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
+    if (!(normalized.startsWith("writeFile")
+        || normalized.startsWith("write_file")
+        || normalized.startsWith("editFile")
+        || normalized.startsWith("edit_file")
+        || normalized.startsWith("multiEdit")
+        || normalized.startsWith("multi_edit"))) {
+      return null;
+    }
+    String path = quotedJsonPath(normalized);
+    if (path == null) {
+      path = keyValuePath(normalized);
+    }
+    return path == null || path.isBlank() ? null : path;
+  }
+
+  private static String quotedJsonPath(String text) {
+    int key = text.indexOf("\"path\"");
+    if (key < 0) {
+      return null;
+    }
+    int colon = text.indexOf(':', key);
+    int start = colon < 0 ? -1 : text.indexOf('"', colon + 1);
+    int end = start < 0 ? -1 : text.indexOf('"', start + 1);
+    return end > start ? text.substring(start + 1, end) : null;
+  }
+
+  private static String keyValuePath(String text) {
+    int key = text.indexOf("path=");
+    if (key < 0) {
+      return null;
+    }
+    int start = key + "path=".length();
+    int comma = text.indexOf(',', start);
+    int paren = text.indexOf(')', start);
+    int end = comma < 0 ? paren : paren < 0 ? comma : Math.min(comma, paren);
+    return end > start ? text.substring(start, end).trim() : text.substring(start).trim();
+  }
+
+  private static boolean blockedByEnvironment(WorkerResult workerResult, String failureReason) {
+    StringBuilder combined = new StringBuilder();
+    if (failureReason != null) {
+      combined.append(failureReason).append('\n');
+    }
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        if (entry != null) {
+          combined.append(entry).append('\n');
+        }
+      }
+    }
+    String lower = combined.toString().toLowerCase(Locale.ROOT);
+    return lower.contains("missing credential")
+        || lower.contains("missing api key")
+        || lower.contains("api key missing")
+        || lower.contains("api_key")
+        || lower.contains("not configured")
+        || lower.contains("authentication failed")
+        || lower.contains("unauthorized")
+        || lower.contains("permission denied")
+        || lower.contains("access denied")
+        || lower.contains("network unreachable")
+        || lower.contains("could not resolve host")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("connection timed out")
+        || lower.contains("missing required file");
+  }
+
+  private static boolean unsafeContinuation(WorkerResult workerResult, String failureReason) {
+    StringBuilder combined = new StringBuilder();
+    if (failureReason != null) {
+      combined.append(failureReason).append('\n');
+    }
+    if (workerResult != null && workerResult.toolCallLog() != null) {
+      for (String entry : workerResult.toolCallLog()) {
+        if (entry != null) {
+          combined.append(entry).append('\n');
+        }
+      }
+    }
+    String lower = combined.toString().toLowerCase(Locale.ROOT);
+    return lower.contains("path traversal not allowed")
+        || lower.contains("outside workspace")
+        || lower.contains("blocked by sandbox")
+        || lower.contains("command not allowed")
+        || lower.contains("destructive command")
+        || lower.contains("refused to overwrite")
+        || lower.contains("code abuse")
+        || lower.contains("exfiltration")
+        || lower.contains("cloud metadata")
+        || lower.contains("sandbox policy");
+  }
+
+  private static String goalSummary(PlannedTask task) {
+    if (task == null) {
+      return "unspecified task goal";
+    }
+    if (task.description() == null || task.description().isBlank()) {
+      return task.title();
+    }
+    return task.title() + " — " + task.description();
+  }
+
+  private static boolean workerStoppedOnCeiling(WorkerResult workerResult) {
+    if (workerResult == null) {
+      return false;
+    }
+    return workerResult.outcome() == WorkerResult.Outcome.BUDGET_EXCEEDED
+        || workerResult.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
+        || workerResult.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+  }
+
+  private RunCostTracker.Snapshot costSnapshot(String runId) {
+    if (costTracker == null) {
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+    try {
+      RunCostTracker.Snapshot snapshot = costTracker.snapshot(runId);
+      return snapshot == null ? new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0) : snapshot;
+    } catch (Exception ex) {
+      log.debug("goalEvidence: cost snapshot failed for run={}: {}", runId, ex.getMessage());
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+  }
+
+  private String budgetCeilingReason(
+      WorkerResult workerResult, RunCostTracker.Snapshot cost, int totalTokens, long wallClockMs) {
+    if (workerStoppedOnCeiling(workerResult)) {
+      return "worker outcome " + workerResult.outcome() + " reached an execution ceiling";
+    }
+    if (maxGoalTotalCostUsd() > 0.0 && cost != null && cost.costUsd() >= maxGoalTotalCostUsd()) {
+      return "configured total cost ceiling reached ($"
+          + String.format(Locale.ROOT, "%.6f", cost.costUsd())
+          + " >= $"
+          + String.format(Locale.ROOT, "%.6f", maxGoalTotalCostUsd())
+          + ")";
+    }
+    if (maxGoalTotalTokens() > 0 && totalTokens >= maxGoalTotalTokens()) {
+      return "configured total token ceiling reached ("
+          + totalTokens
+          + " >= "
+          + maxGoalTotalTokens()
+          + ")";
+    }
+    if (maxGoalTaskWallClockMs() > 0 && wallClockMs >= maxGoalTaskWallClockMs()) {
+      return "configured task wall-clock ceiling reached ("
+          + wallClockMs
+          + "ms >= "
+          + maxGoalTaskWallClockMs()
+          + "ms)";
+    }
+    return null;
+  }
+
+  private static int totalTrackedTokens(RunCostTracker.Snapshot cost) {
+    if (cost == null) {
+      return 0;
+    }
+    long total =
+        (long) cost.inputTokens()
+            + cost.outputTokens()
+            + cost.cacheReadTokens()
+            + cost.cacheWriteTokens()
+            + cost.reasoningTokens();
+    return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+  }
+
+  private double maxGoalTotalCostUsd() {
+    return Double.isFinite(maxGoalTotalCostUsd) ? maxGoalTotalCostUsd : -1.0;
+  }
+
+  private int maxGoalTotalTokens() {
+    return maxGoalTotalTokens;
+  }
+
+  private long maxGoalTaskWallClockMs() {
+    return maxGoalTaskWallClockMs;
+  }
+
+  private static List<String> risksFor(
+      WorkerResult workerResult,
+      String failureReason,
+      String budgetCeilingReason,
+      boolean completionConfidenceLow) {
+    List<String> risks = new ArrayList<>();
+    if (workerResult != null && workerResult.outcome() != WorkerResult.Outcome.COMPLETED) {
+      risks.add("workerOutcome=" + workerResult.outcome());
+    }
+    if (completionConfidenceLow) {
+      risks.add("completion confidence is low despite meaningful changes");
+    }
+    if (budgetCeilingReason != null && !budgetCeilingReason.isBlank()) {
+      risks.add(budgetCeilingReason);
+    }
+    if (failureReason != null && !failureReason.isBlank()) {
+      risks.add(failureReason);
+    }
+    return List.copyOf(risks);
   }
 
   /**
@@ -1237,10 +3500,37 @@ to boot — skip it for those.""";
       int stagnationWarnAfter,
       int stagnationForceAfter,
       int wallClockSeconds,
-      boolean forceToolChoiceOnSalvage) {}
+      boolean forceToolChoiceOnSalvage) {
+    TierConfig withProviderModel(String provider, String model) {
+      return new TierConfig(
+          provider,
+          model,
+          maxIter,
+          maxTokens,
+          stagnationWarnAfter,
+          stagnationForceAfter,
+          wallClockSeconds,
+          forceToolChoiceOnSalvage);
+    }
+  }
+
+  private record ProviderModelOverride(
+      String provider, String model, RunContinuationDecision decision) {}
+
+  private record GoalTaskDecision(
+      GoalDonenessDecision doneness, GoalContinuationPolicyDecision continuation) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
+    return tierConfigFor(complexity, runProvider, runModel, projectRun, null);
+  }
+
+  private TierConfig tierConfigFor(
+      PlannedTask.Complexity complexity,
+      String runProvider,
+      String runModel,
+      boolean projectRun,
+      String lowComplexityWorkerStartTierOverride) {
     AgentTier tier;
     int maxIter;
     int maxTokens;
@@ -1270,12 +3560,9 @@ to boot — skip it for those.""";
         // (2026-05-08) with empty workspace + 100/100 programbench score (which
         // counted the cleanroom's original binary).
       case LOW -> {
-        // RL-2026-06-052 — the worker stays on the flagship even for LOW tasks. The LIGHTWEIGHT
-        // tier model is now a cheap model (Haiku / -mini / flash) reserved for the genuinely-light
-        // NON-worker agents; routing the worker there reintroduces the prior cheap-tier eval
-        // regression. So LOW keeps its smaller iteration/token caps but resolves the WORKHORSE
-        // (flagship) model — decoupling worker quality from the lightweight-agent cost tier.
-        tier = AgentTier.WORKHORSE;
+        // Default remains WORKHORSE after the cheap-tier eval regression, but operators can opt
+        // LOW tasks into LIGHTWEIGHT starts and rely on continuation policy to step up.
+        tier = lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride);
         // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
         // quality ceiling. The dollar cap and stagnation guard remain the real runaway
         // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
@@ -1392,6 +3679,38 @@ to boot — skip it for those.""";
           wallClockSeconds,
           forceSalvageTool);
     }
+  }
+
+  private AgentTier lowComplexityWorkerStartTier() {
+    return lowComplexityWorkerStartTier(null);
+  }
+
+  private AgentTier lowComplexityWorkerStartTier(String override) {
+    String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
+    if (configured == null || configured.isBlank()) {
+      return AgentTier.WORKHORSE;
+    }
+    try {
+      AgentTier tier = AgentTier.valueOf(configured.trim().toUpperCase(Locale.ROOT));
+      return tier == AgentTier.LIGHTWEIGHT ? AgentTier.LIGHTWEIGHT : AgentTier.WORKHORSE;
+    } catch (IllegalArgumentException ex) {
+      log.warn(
+          "Invalid execution.continuation.low-complexity-worker-start-tier='{}'; using WORKHORSE",
+          configured);
+      return AgentTier.WORKHORSE;
+    }
+  }
+
+  private String configuredLowComplexityWorkerStartTier() {
+    return configuredLowComplexityWorkerStartTier(null);
+  }
+
+  private String configuredLowComplexityWorkerStartTier(String override) {
+    String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
+    if (configured == null || configured.isBlank()) {
+      return AgentTier.WORKHORSE.name();
+    }
+    return configured.trim().toUpperCase(Locale.ROOT);
   }
 
   @org.springframework.transaction.annotation.Transactional
@@ -1670,6 +3989,14 @@ to boot — skip it for those.""";
       "worker.retry-context-retention.enabled";
 
   /**
+   * Goal-decision enforcement flag (RL-2026-06-198). When ON, negative goal stop decisions at task
+   * boundaries abort the remaining sequential tasks instead of continuing to spend tokens on work
+   * the evaluator already classified as blocked, failed, or waste-risk. Default OFF, V249.
+   */
+  public static final String FLAG_GOAL_DECISION_ENFORCEMENT =
+      "execution.goal-decision.enforcement.enabled";
+
+  /**
    * Forced-tool-call salvage flag (RL-2026-05-059). When ON, the worker's Lever-B salvage call
    * restricts its tool set to write/edit/completeTask AND sets {@code tool_choice="required"} so a
    * model that would otherwise return reasoning-only text (the verified 4/10 native-DeepSeek
@@ -1850,7 +4177,8 @@ to boot — skip it for those.""";
       return null;
     }
     TierConfig altCfg =
-        tierConfigFor(task.complexity(), altProvider, null, req.projectId() != null);
+        tierConfigFor(
+            task.complexity(), altProvider, null, req.projectId() != null, req.lowComplexityWorkerStartTier());
     if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
       // adaptive routing or strict-provider re-resolved back to the primary — abandon.
       log.info(
@@ -2108,7 +4436,8 @@ to boot — skip it for those.""";
 
   private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
 
-  private ExecutionResult summarize(List<TaskOutcome> outcomes, long totalLatency) {
+  private ExecutionResult summarize(
+      List<TaskOutcome> outcomes, long totalLatency, boolean abortedByGoalDecision) {
     int succ = 0, warn = 0, fail = 0, skip = 0;
     for (var o : outcomes) {
       switch (o.status()) {
@@ -2119,7 +4448,8 @@ to boot — skip it for those.""";
       }
     }
     ExecutionResult.Overall overall;
-    if (fail > 0) overall = ExecutionResult.Overall.FAILED;
+    if (abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
+    else if (fail > 0) overall = ExecutionResult.Overall.FAILED;
     else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
     else overall = ExecutionResult.Overall.ALL_SUCCESS;
 

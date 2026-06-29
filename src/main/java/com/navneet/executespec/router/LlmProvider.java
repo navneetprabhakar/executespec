@@ -16,12 +16,9 @@ public enum LlmProvider {
   // models (DeepSeek / Kimi / GLM). Added to A/B against OpenRouter latency on Chinese models.
   // ENTERPRISE BYOK; not in the failover chain (deliberate operator route).
   FIREWORKS("Fast-US"),
-  // 2026-06-21 — Sarvam AI (api.sarvam.ai), OpenAI-wire-compatible Indian-language provider
-  // (sarvam-105b / sarvam-30b). Native tool calling + JSON + reasoning_content (verified live
-  // 2026-06-21: Bearer auth → 200, tool_calls emitted in OpenAI schema). India-market /
-  // sovereign-AI
-  // + eval/benchmark route; ENTERPRISE/BYOK, intentionally NOT in the failover chain (deliberate
-  // operator route, like deepseek/openrouter/fireworks).
+  // 2026-06-26 — Sarvam is disabled/dark only. Keep the enum so stale persisted preferences and
+  // model ids resolve to a known provider and fail closed; do not expose it in catalogs or route
+  // production traffic until quality evals pass.
   SARVAM("Indic");
 
   private final String tag;

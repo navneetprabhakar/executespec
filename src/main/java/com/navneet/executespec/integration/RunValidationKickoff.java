@@ -15,6 +15,7 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.report.ValidationReportService;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.AccuracyAssessmentService;
@@ -58,9 +59,9 @@ class RunValidationKickoff {
   private final com.navneet.executespec.deployment.preview.verify.PreviewVerifier previewVerifier;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
-  void generateValidationReport(
+  java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
-    generateValidationReport(runId, execResult, reviewResult, plan, java.util.List.of());
+    return generateValidationReport(runId, execResult, reviewResult, plan, java.util.List.of());
   }
 
   /**
@@ -68,7 +69,7 @@ class RunValidationKickoff {
    * contract gate) to append to the report's issue list so they surface in the run Issues panel.
    * The 4-arg form delegates here with an empty list.
    */
-  void generateValidationReport(
+  java.util.Optional<ValidationReport> generateValidationReport(
       String runId,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
@@ -76,7 +77,7 @@ class RunValidationKickoff {
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues) {
     try {
       var run = runRepo.findById(runId).orElse(null);
-      if (run == null) return;
+      if (run == null) return java.util.Optional.empty();
       var tasks = taskRepo.findByRunId(runId);
 
       // Enumerate files actually produced by the run so `filesGenerated` /
@@ -242,10 +243,13 @@ class RunValidationKickoff {
       // so the reroute guarded a code path that isn't taken for OpenAI while introducing a
       // billing-attribution hazard (any reader of run.aiProvider during the swap saw the wrong
       // provider). The report now generates on the run's actual provider, entity untouched.
-      validationReportService.generateAndPersist(runId, input);
+      java.util.Optional<ValidationReport> savedReport =
+          validationReportService.generateAndPersist(runId, input);
       log.info("RunOrchestrator run={} validation report generated", runId);
+      return savedReport;
     } catch (Exception e) {
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);
+      return java.util.Optional.empty();
     }
   }
 

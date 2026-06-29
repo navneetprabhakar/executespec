@@ -42,7 +42,7 @@ public class ValidationReportController {
   public ResponseEntity<Map<String, String>> shareReport(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
 
-    runAccessGuard.requireRunAccess(runId, userDetails);
+    runAccessGuard.requireRunWriteAccess(runId, userDetails);
 
     var report =
         reportService

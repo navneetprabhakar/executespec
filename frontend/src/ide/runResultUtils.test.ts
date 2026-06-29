@@ -34,6 +34,8 @@ describe('runResultUtils', () => {
 
   it('formats log rows and skips noisy run-detail events', () => {
     expect(logIcon('TOOL_CALL')).toBe('🔧');
+    expect(logIcon('TASK_WAVE_PLAN')).toBe('≋');
+    expect(logIcon('GOAL_DECISION')).toBe('🧭');
     expect(logIcon('UNKNOWN')).toBe('·');
     expect(isNoisyLogEvent({type: 'RUN_DETAIL'} as api.RunLogEvent)).toBe(true);
     expect(

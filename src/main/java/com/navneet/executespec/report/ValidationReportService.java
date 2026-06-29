@@ -12,6 +12,7 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator;
 import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.BootVerification;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ReportInput;
@@ -26,20 +27,21 @@ import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ValidationReportService {
 
   private final ValidationReportRepository repository;
@@ -49,6 +51,48 @@ public class ValidationReportService {
   private final StateStore stateStore;
   private final ReviewScoringService reviewScoringService;
   private final FeatureFlagService featureFlagService;
+  private final ApplicationEventPublisher eventPublisher;
+  private final ValidationReportGoalProofEvaluator goalProofEvaluator =
+      new ValidationReportGoalProofEvaluator();
+
+  @Autowired
+  public ValidationReportService(
+      ValidationReportRepository repository,
+      ValidationReportGenerator generator,
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry,
+      StateStore stateStore,
+      ReviewScoringService reviewScoringService,
+      FeatureFlagService featureFlagService,
+      ApplicationEventPublisher eventPublisher) {
+    this.repository = repository;
+    this.generator = generator;
+    this.objectMapper = objectMapper;
+    this.meterRegistry = meterRegistry;
+    this.stateStore = stateStore;
+    this.reviewScoringService = reviewScoringService;
+    this.featureFlagService = featureFlagService;
+    this.eventPublisher = eventPublisher;
+  }
+
+  ValidationReportService(
+      ValidationReportRepository repository,
+      ValidationReportGenerator generator,
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry,
+      StateStore stateStore,
+      ReviewScoringService reviewScoringService,
+      FeatureFlagService featureFlagService) {
+    this(
+        repository,
+        generator,
+        objectMapper,
+        meterRegistry,
+        stateStore,
+        reviewScoringService,
+        featureFlagService,
+        null);
+  }
 
   /**
    * v2.5.10 — when enabled, ReviewScoringService anchors on verifiedScore (build + tests + verdict)
@@ -251,6 +295,15 @@ public class ValidationReportService {
       // Delete any existing report for this run (rework edge case)
       repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
       var saved = repository.save(report);
+      List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
+      GoalDonenessDecision runGoalDecision =
+          goalProofEvaluator.evaluate(
+              saved.getRunId(),
+              runGoalSummary(input.run()),
+              saved.getPipelineResult(),
+              verificationLedger);
+      persistRunGoalDecision(input.run(), runGoalDecision);
+      publishEvidenceEvent(saved, verificationLedger, runGoalDecision);
 
       // 5. Metrics
       meterRegistry
@@ -284,6 +337,39 @@ public class ValidationReportService {
           .counter("executespec.report.errors", "error_type", e.getClass().getSimpleName())
           .increment();
       return Optional.empty();
+    }
+  }
+
+  private void persistRunGoalDecision(PipelineRun run, GoalDonenessDecision decision) {
+    if (run == null || decision == null || stateStore == null || objectMapper == null) {
+      return;
+    }
+    try {
+      run.setRunGoalDonenessJson(objectMapper.writeValueAsString(decision));
+      stateStore.save(run);
+    } catch (Exception ex) {
+      log.debug(
+          "Failed to persist run-level goal decision for run={}: {}",
+          run.getRunId(),
+          ex.getMessage());
+    }
+  }
+
+  private void publishEvidenceEvent(
+      ValidationReport saved,
+      List<VerificationEvidenceDTO> verificationLedger,
+      GoalDonenessDecision runGoalDecision) {
+    if (eventPublisher == null || saved == null) {
+      return;
+    }
+    try {
+      eventPublisher.publishEvent(
+          ValidationReportEvidenceEvent.from(saved, verificationLedger, runGoalDecision));
+    } catch (RuntimeException ex) {
+      log.debug(
+          "Failed to publish validation evidence event for run={}: {}",
+          saved.getRunId(),
+          ex.getMessage());
     }
   }
 
@@ -630,6 +716,7 @@ public class ValidationReportService {
 
   private ValidationReportDTO toDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
+    List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -672,9 +759,47 @@ public class ValidationReportService {
         entity.getTestsTotal(),
         entity.getReviewerVerdict(),
         entity.getVerifiedScore(),
-        buildVerificationLedger(entity, issues),
+        verificationLedger,
+        goalProofEvaluator.evaluate(
+            entity.getRunId(),
+            runGoalSummary(findRunForReport(entity.getRunId())),
+            entity.getPipelineResult(),
+            verificationLedger),
         entity.getRubricScore(),
         entity.getPreviewUrl());
+  }
+
+  private PipelineRun findRunForReport(String runId) {
+    if (runId == null || runId.isBlank() || stateStore == null) {
+      return null;
+    }
+    try {
+      return stateStore.findRun(runId).orElse(null);
+    } catch (RuntimeException ex) {
+      log.debug("Failed to load run goal summary for report run={}: {}", runId, ex.getMessage());
+      return null;
+    }
+  }
+
+  private static String runGoalSummary(PipelineRun run) {
+    if (run == null) {
+      return null;
+    }
+    if (run.getUserRequest() != null && !run.getUserRequest().isBlank()) {
+      return "run goal: " + singleLine(run.getUserRequest());
+    }
+    if (run.getRunTitle() != null && !run.getRunTitle().isBlank()) {
+      String title = singleLine(run.getRunTitle());
+      if (run.getRunSummary() != null && !run.getRunSummary().isBlank()) {
+        return "run goal: " + title + " — " + singleLine(run.getRunSummary());
+      }
+      return "run goal: " + title;
+    }
+    return null;
+  }
+
+  private static String singleLine(String value) {
+    return value == null ? "" : value.replaceAll("\\s+", " ").strip();
   }
 
   List<VerificationEvidenceDTO> buildVerificationLedger(

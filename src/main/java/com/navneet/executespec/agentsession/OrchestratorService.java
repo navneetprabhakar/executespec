@@ -28,7 +28,7 @@ public class OrchestratorService {
   }
 
   public OrchestratorRunConfirmationResponse confirmRunSubmission(
-      OrchestratorRunConfirmationRequest request, AppUserDetails user) {
-    return agentSessionService.confirmRunSubmission(request, user);
+      OrchestratorRunConfirmationRequest request, AppUserDetails user, boolean patAuthenticated) {
+    return agentSessionService.confirmRunSubmission(request, user, patAuthenticated);
   }
 }

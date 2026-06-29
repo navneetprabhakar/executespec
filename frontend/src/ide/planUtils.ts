@@ -53,9 +53,13 @@ export function planStatusPhrase(status: string): string {
 }
 
 export function formatManagedAiPlanMessage(input: {
+  managed?: boolean | null;
   aiCreditsRemaining: number;
   frontierRawCapUsd?: number | null;
   cheapOnlyAfterRawUsd?: number | null;
 }): string {
+  if (input.managed === false) {
+    return 'Using your own provider keys. Managed ES AI credits are not applicable to this work; run credits and your provider account still apply.';
+  }
   return `${input.aiCreditsRemaining} ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.`;
 }

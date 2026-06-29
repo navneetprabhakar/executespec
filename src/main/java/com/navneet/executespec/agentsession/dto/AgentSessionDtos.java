@@ -165,7 +165,33 @@ public final class AgentSessionDtos {
       Boolean confirmed,
       String aiProvider,
       String modelName,
-      Double userCostCap) {}
+      String lowComplexityWorkerStartTier,
+      Double userCostCap,
+      String executionMode,
+      Boolean localExecution,
+      String spec) {
+    /** Back-compat constructor for tests and clients that predate execution target fields. */
+    public OrchestratorRunConfirmationRequest(
+        String sessionId,
+        String turnId,
+        Boolean confirmed,
+        String aiProvider,
+        String modelName,
+        String lowComplexityWorkerStartTier,
+        Double userCostCap) {
+      this(
+          sessionId,
+          turnId,
+          confirmed,
+          aiProvider,
+          modelName,
+          lowComplexityWorkerStartTier,
+          userCostCap,
+          null,
+          null,
+          null);
+    }
+  }
 
   public record OrchestratorRunConfirmationResponse(
       String sessionId,

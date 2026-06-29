@@ -34,6 +34,14 @@ class AgentRunConfirmationService {
 
   OrchestratorRunConfirmationResponse confirm(
       AgentSession session, OrchestratorRunConfirmationRequest request, AppUserDetails user) {
+    return confirm(session, request, user, false);
+  }
+
+  OrchestratorRunConfirmationResponse confirm(
+      AgentSession session,
+      OrchestratorRunConfirmationRequest request,
+      AppUserDetails user,
+      boolean patAuthenticated) {
     AgentTurn turn =
         turnRepo
             .findById(request.turnId())
@@ -80,7 +88,7 @@ class AgentRunConfirmationService {
     }
 
     AgentRunSubmissionGate.Submission submission =
-        runSubmissionGate.submitConfirmed(session, turn, decision, request, user);
+        runSubmissionGate.submitConfirmed(session, turn, decision, request, user, patAuthenticated);
     turn.setLinkedRunId(submission.runId());
     turn.setStatus("RUN_SUBMITTED");
     turnRepo.save(turn);

@@ -65,7 +65,9 @@ class SequentialExecutorResumeKeyTest {
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(ContextStore.class),
         null /* costTracker */,
-        null /* gcsTaskCheckpointService */);
+        null /* gcsTaskCheckpointService */,
+        null /* availableProviderResolver */,
+        null /* goalContinuationAdvisor */);
   }
 
   /**

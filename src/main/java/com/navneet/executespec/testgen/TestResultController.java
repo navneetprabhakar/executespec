@@ -180,7 +180,7 @@ public class TestResultController {
     // GA-readiness P4.1-followup — multi-tenant access guard. Closes the legacy gap
     // where this endpoint mutated run state (manual test execution) without an org
     // check, so a caller in org B could trigger tests on a run from org A.
-    runAccessGuard.requireRunAccess(runId, userDetails);
+    runAccessGuard.requireRunWriteAccess(runId, userDetails);
 
     PipelineRun run =
         stateStore
@@ -237,7 +237,7 @@ public class TestResultController {
     // ordering) AND so AccessGuardCoverageTest ArchUnit pin still sees a guard call on this
     // run-scoped endpoint. The guard call is cheap (one indexed DB lookup) and we still
     // throw 410 immediately after.
-    runAccessGuard.requireRunAccess(runId, userDetails);
+    runAccessGuard.requireRunWriteAccess(runId, userDetails);
     throw new org.springframework.web.server.ResponseStatusException(
         org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
     // Original logic preserved below for the V2 wire-up follow-up. Currently unreachable.
