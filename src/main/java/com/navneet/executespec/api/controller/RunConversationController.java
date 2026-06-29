@@ -118,7 +118,7 @@ public class RunConversationController {
       @PathVariable String runId,
       @RequestBody ChatMessageBody body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     if (body == null || body.message() == null || body.message().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message is required");
     }
@@ -205,7 +205,7 @@ public class RunConversationController {
       @PathVariable String runId,
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    guard.requireRunWriteAccess(runId, userDetails);
     throw new ResponseStatusException(
         HttpStatus.GONE, "Iterate-from-run not yet supported in V2 — submit a fresh run instead.");
   }

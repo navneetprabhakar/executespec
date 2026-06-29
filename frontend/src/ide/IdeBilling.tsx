@@ -32,6 +32,7 @@ import {
   type PaymentRowLite,
   type PlanCard,
 } from '@/ide/billingUtils';
+import {formatManagedAiPlanMessage} from '@/ide/planUtils';
 
 function SectionTitle({children}: {children: React.ReactNode}) {
   return <div className='ide-h2'>{children}</div>;
@@ -252,9 +253,14 @@ export function IdeBilling() {
                       thresholds.
                     </div>
                   </div>
-                  <IdeBadge kind={managedKind(managedAi.routingState)}>
-                    {managedAi.routingState}
+                  <IdeBadge
+                    kind={managedAi.managed === false ? 'ok' : managedKind(managedAi.routingState)}
+                  >
+                    {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
                   </IdeBadge>
+                </div>
+                <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+                  {formatManagedAiPlanMessage(managedAi)}
                 </div>
                 <div
                   style={{
@@ -267,9 +273,16 @@ export function IdeBilling() {
                 >
                   <Stat
                     label='Credits used'
-                    value={`${managedAi.aiCreditsUsed} / ${managedAi.includedAiCredits}`}
+                    value={
+                      managedAi.managed === false
+                        ? 'Not applicable'
+                        : `${managedAi.aiCreditsUsed} / ${managedAi.includedAiCredits}`
+                    }
                   />
-                  <Stat label='Credits left' value={managedAi.aiCreditsRemaining} />
+                  <Stat
+                    label={managedAi.managed === false ? 'Credit mode' : 'Credits left'}
+                    value={managedAi.managed === false ? 'Own keys' : managedAi.aiCreditsRemaining}
+                  />
                 </div>
                 {managedAiEvents.length > 0 && (
                   <div style={{marginTop: 14, borderTop: '1px solid var(--ide-border)'}}>

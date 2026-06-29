@@ -101,6 +101,14 @@ public class PipelineRun {
   @Column(columnDefinition = "TEXT")
   private String reviewJson; // TaskReviewReport JSON
 
+  /**
+   * V251 (RL-2026-06-198) — final run-level goal proof derived from the validation report ledger.
+   * This is a durable cache for run detail clients; the validation report remains the source of
+   * proof.
+   */
+  @Column(name = "run_goal_doneness_json", columnDefinition = "TEXT")
+  private String runGoalDonenessJson;
+
   private String plannerModel;
   private String workerModel;
   private String reviewerModel;

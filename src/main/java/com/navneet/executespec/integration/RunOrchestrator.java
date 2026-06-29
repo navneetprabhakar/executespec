@@ -11,15 +11,23 @@ import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Future;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Classification;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
@@ -38,10 +46,17 @@ import com.navneet.executespec.engine.CodeGenEngine;
 import com.navneet.executespec.engine.EngineRequest;
 import com.navneet.executespec.engine.EngineResult;
 import com.navneet.executespec.engine.VerifyMode;
+import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
+import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
+import com.navneet.executespec.execution.model.GoalDonenessDecision;
+import com.navneet.executespec.execution.model.GoalDonenessState;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.observability.Metrics;
@@ -51,13 +66,19 @@ import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
+import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
+import com.navneet.executespec.run.RunContinuationConfirmationFlag;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -66,6 +87,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.testgen.TestGenOrchestrator;
 import com.navneet.executespec.tool.ExecutionContext;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -115,6 +137,7 @@ public class RunOrchestrator implements RunControlPort {
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SequentialExecutor executor;
+  private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
 
@@ -150,6 +173,7 @@ public class RunOrchestrator implements RunControlPort {
   private final PerkyMessenger perky;
   private final GateStore gateStore;
   private final ModelResolver modelResolver;
+  private final AvailableProviderResolver availableProviderResolver;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final com.navneet.executespec.smoketest.CliSmokeRunner cliSmokeRunner;
@@ -206,6 +230,12 @@ public class RunOrchestrator implements RunControlPort {
    */
   private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
 
+  /** Per-run marker for confirmation-required automatic continuation spend. */
+  private final RunContinuationConfirmationFlag runContinuationConfirmationFlag;
+
+  /** Per-run marker for benchmark-prior automatic continuation policy. */
+  private final RunContinuationBenchmarkPriorFlag runContinuationBenchmarkPriorFlag;
+
   private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
@@ -243,6 +273,24 @@ public class RunOrchestrator implements RunControlPort {
 
   /** runId → in-flight pipeline future; the cancel/pause/halt interrupt handle (invariant #4). */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
+
+  @Value("${execution.continuation.post-review.enabled:true}")
+  private boolean postReviewContinuationEnabled = true;
+
+  @Value("${execution.continuation.required-quality-threshold:70.0}")
+  private double postReviewRequiredQualityThreshold = 70.0;
+
+  @Value("${execution.continuation.max-provider-switches-per-run:1}")
+  private int postReviewMaxProviderSwitches = 1;
+
+  @Value("${execution.continuation.max-model-step-ups-per-task:1}")
+  private int postReviewMaxModelStepUps = 1;
+
+  @Value("${execution.continuation.max-model-step-downs-per-task:1}")
+  private int postReviewMaxModelStepDowns = 1;
+
+  @Value("${execution.continuation.require-benchmark-prior-for-automatic-continuation:false}")
+  private boolean postReviewRequireBenchmarkPriorForAutomaticContinuation = false;
 
   // --- RunControlPort: the narrow seam RunLifecycleService reaches the orchestrator through.
   // activeRuns ownership stays here (the submit + runPipeline path register/unregister through the
@@ -520,6 +568,59 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   /**
+   * BUILD-mode submit overload with per-run continuation options. Used by REST submit so those
+   * options are marked before the async pipeline can consume them.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        com.navneet.executespec.state.RunMode.BUILD,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        lowComplexityWorkerStartTier);
+  }
+
+  /**
    * V182 (2026-05-08) — full signature with {@code runMode}. Bench services (swebench /
    * programbench) call this overload directly with {@code RunMode.PATCH} to opt into the thin
    * single-agent loop. Every product entry point uses the 19-arg forwarder above and stays on
@@ -546,6 +647,109 @@ public class RunOrchestrator implements RunControlPort {
       String branchOverride,
       String prReviewComments,
       String runMode) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        null,
+        null,
+        null);
+  }
+
+  /**
+   * Full submit signature with continuation policy options that must be visible before the async
+   * pipeline thread can consume per-run markers.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        null);
+  }
+
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier) {
     String runId = UUID.randomUUID().toString();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
@@ -671,6 +875,13 @@ public class RunOrchestrator implements RunControlPort {
     // attach per-run state that the worker tools will observe on first invocation.
     eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
 
+    applyContinuationSubmitOptions(
+        runId,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        runContinuationConfirmationFlag,
+        runContinuationBenchmarkPriorFlag);
+
     // Kick off the pipeline on a background thread. The returned PipelineRun is the
     // initial state; the frontend polls GET /api/runs/{id} to observe progression.
     final String runIdFinal = runId;
@@ -686,6 +897,8 @@ public class RunOrchestrator implements RunControlPort {
         (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
     final String prReviewCommentsFinal =
         (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
+    final String lowComplexityWorkerStartTierFinal =
+        normalizeLowComplexityWorkerStartTier(lowComplexityWorkerStartTier);
     // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). The raw, caller-supplied
     // modelName is the ONLY unambiguous signal of an explicit pin: `model` above is already
     // defaulted to defaultModelFor(provider) when modelName is blank, so we capture modelName
@@ -711,13 +924,36 @@ public class RunOrchestrator implements RunControlPort {
                     tddModeFinal,
                     branchOverrideFinal,
                     prReviewCommentsFinal,
-                    pinnedModelFinal);
+                    pinnedModelFinal,
+                    lowComplexityWorkerStartTierFinal);
               } finally {
                 activeRuns.remove(runIdFinal);
               }
             });
     activeRuns.put(runIdFinal, future);
     return run;
+  }
+
+  static void applyContinuationSubmitOptions(
+      String runId,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      RunContinuationConfirmationFlag confirmationFlag,
+      RunContinuationBenchmarkPriorFlag benchmarkPriorFlag) {
+    if (Boolean.TRUE.equals(requireConfirmationBeforeExpensiveContinuation)) {
+      confirmationFlag.mark(runId);
+    }
+    if (requireBenchmarkPriorForAutomaticContinuation != null) {
+      benchmarkPriorFlag.mark(runId, requireBenchmarkPriorForAutomaticContinuation);
+    }
+  }
+
+  static String normalizeLowComplexityWorkerStartTier(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String normalized = value.trim().toUpperCase(Locale.ROOT);
+    return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
   }
 
   // pipeline (background thread)
@@ -816,6 +1052,7 @@ public class RunOrchestrator implements RunControlPort {
         branchOverride,
         null,
         // No per-run model pin on the resume / re-plan path — pinning is a submit-time concept.
+        null,
         null);
   }
 
@@ -835,7 +1072,8 @@ public class RunOrchestrator implements RunControlPort {
       // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Non-null only when the
       // caller supplied an explicit RunRequest.modelName. Overlaid onto the org override map at the
       // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
-      String pinnedModel) {
+      String pinnedModel,
+      String lowComplexityWorkerStartTierOverride) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -882,6 +1120,7 @@ public class RunOrchestrator implements RunControlPort {
       // overrides and the YAML defaults for every role (planner / worker / reviewer) on that
       // provider. This RunModelOverrides overlay is the single authoritative routing mechanism —
       // the worker no longer silently re-resolves to the tier default and ignores the pin.
+      boolean routePinned = false;
       try {
         PipelineRun ovProbe = runRepo.findById(runId).orElse(null);
         String orgId = ovProbe != null ? ovProbe.getOrgId() : null;
@@ -932,6 +1171,7 @@ public class RunOrchestrator implements RunControlPort {
         }
 
         if (validatedPin != null) {
+          routePinned = true;
           log.info(
               "V2 run={} ENTERPRISE per-run pin: {} ({}) overrides org+YAML for all tiers",
               runId,
@@ -966,6 +1206,11 @@ public class RunOrchestrator implements RunControlPort {
       localRun =
           featureFlagService.isEnabled("worker.local-hands.enabled")
               && runLocalExecutionFlag.consume(runId);
+      boolean requireContinuationConfirmation = runContinuationConfirmationFlag.consume(runId);
+      boolean requireContinuationBenchmarkPrior =
+          runContinuationBenchmarkPriorFlag
+              .consume(runId)
+              .orElse(postReviewRequireBenchmarkPriorForAutomaticContinuation);
 
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
@@ -1378,6 +1623,10 @@ public class RunOrchestrator implements RunControlPort {
                     .maxIterationsPerTask(null) // per-complexity caps applied in SequentialExecutor
                     .enableSmokeTests(!localRun)
                     .localHandsMode(localRun)
+                    .requireConfirmationBeforeExpensiveContinuation(requireContinuationConfirmation)
+                    .requireBenchmarkPriorForAutomaticContinuation(requireContinuationBenchmarkPrior)
+                    .routePinned(routePinned)
+                    .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -1478,6 +1727,7 @@ public class RunOrchestrator implements RunControlPort {
       persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
+      boolean reviewerErrored = false;
       // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
       // errors. Default cap is 70 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
       // gemini run 84252898 hit ITERATION_LIMIT_EXCEEDED with the build still unfixed.
@@ -1507,11 +1757,22 @@ public class RunOrchestrator implements RunControlPort {
             plan.classification());
       }
       try {
+        ProviderModel reviewerRoute = reviewerRouteFor(provider, model, execResult);
+        if (!sameRoute(provider, model, reviewerRoute)) {
+          log.info(
+              "RunOrchestrator run={} reviewer route promoted after continuation action:"
+                  + " {}/{} -> {}/{}",
+              runId,
+              provider,
+              model,
+              reviewerRoute.provider(),
+              reviewerRoute.model());
+        }
         reviewResult =
             reviewer.review(
                 ReviewerRequest.builder()
-                    .provider(provider)
-                    .model(model)
+                    .provider(reviewerRoute.provider())
+                    .model(reviewerRoute.model())
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(skipWiring)
@@ -1527,13 +1788,45 @@ public class RunOrchestrator implements RunControlPort {
             com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,
             reviewerIn,
             reviewerOut,
-            upperProvider,
-            model);
+            reviewerRoute.provider().toUpperCase(Locale.ROOT),
+            reviewerRoute.model());
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} reviewer failed — recording partial review", runId, e);
+        reviewerErrored = true;
+        reviewResult = reviewerFailedResult(e);
         // Review failure is non-fatal; the execution already succeeded or partially
         // succeeded. Record the failure in reviewJson so the UI can surface it.
         persistenceWriter.persistReviewFailure(runId, e);
+      }
+      RunCostTracker.Snapshot afterInitialReview = costTracker.snapshot(runId);
+      Optional<PostReviewContinuation> postReviewContinuation =
+          maybeEmitPostReviewContinuationDecision(
+              runId,
+              execResult,
+              reviewResult,
+              reviewerErrored,
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              routePinned);
+      Optional<PostReviewContinuationResult> postReviewContinuationResult =
+          maybeActOnPostReviewContinuation(
+              runId,
+              plan,
+              rootCtx,
+              execResult,
+              postReviewContinuation,
+              afterInitialReview,
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              designBlock,
+              projectId,
+              selectedRepoIds,
+              skipWiring,
+              reviewerMaxIter);
+      if (postReviewContinuationResult.isPresent()) {
+        PostReviewContinuationResult result = postReviewContinuationResult.get();
+        execResult = result.execResult();
+        reviewResult = result.reviewResult();
       }
 
       // 3b. Enterprise enforcement (project runs only) — make the formerly
@@ -1603,28 +1896,58 @@ public class RunOrchestrator implements RunControlPort {
           featureFlagService.isEnabled("scoring.v2-verified")
               ? srDerived
               : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
-      if (sr.reason() != null) {
-        try {
-          runRepo
-              .findById(runId)
-              .ifPresent(
-                  r -> {
-                    r.setStatusReason(sr.reason());
-                    runRepo.save(r);
-                  });
-        } catch (Exception statusReasonEx) {
-          // Non-fatal — terminate() will retry the same write a few lines
-          // below. Worst case: report uses the heuristic for this one run.
-          log.warn(
-              "RunOrchestrator run={} pre-stamp statusReason failed: {}",
-              runId,
-              statusReasonEx.getMessage());
-        }
-      }
+      stampRunStatusReason(runId, sr);
 
       // 5. Generate validation report + kick off test generation
-      validationKickoff.generateValidationReport(
+      Optional<ValidationReport> validationReport =
+          validationKickoff.generateValidationReport(
           runId, execResult, reviewResult, plan, contractBreakingIssues);
+      Optional<PostReviewContinuation> postValidationContinuation =
+          maybeEmitPostValidationContinuationDecision(
+              runId,
+              execResult,
+              validationReport.orElse(null),
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              routePinned);
+      Optional<PostReviewContinuationResult> postValidationContinuationResult =
+          maybeActOnPostReviewContinuation(
+              runId,
+              plan,
+              rootCtx,
+              execResult,
+              postValidationContinuation,
+              costTracker.snapshot(runId),
+              requireContinuationConfirmation,
+              requireContinuationBenchmarkPrior,
+              designBlock,
+              projectId,
+              selectedRepoIds,
+              skipWiring,
+              reviewerMaxIter);
+      if (postValidationContinuationResult.isPresent()) {
+        PostReviewContinuationResult result = postValidationContinuationResult.get();
+        execResult = result.execResult();
+        reviewResult = result.reviewResult();
+        srDerived = resolveTerminalStatus(execResult, reviewResult);
+        sr =
+            featureFlagService.isEnabled("scoring.v2-verified")
+                ? srDerived
+                : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
+        stampRunStatusReason(runId, sr);
+        Optional<ValidationReport> rerunValidationReport =
+            validationKickoff.generateValidationReport(
+                runId, execResult, reviewResult, plan, contractBreakingIssues);
+        if (validationReportQualityFailed(
+            rerunValidationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+          sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
+          stampRunStatusReason(runId, sr);
+        }
+      } else if (validationReportQualityFailed(
+          validationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+        sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
+        stampRunStatusReason(runId, sr);
+      }
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
       // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
       // projects that does not apply; skip until the dedicated CLI stdin/stdout
@@ -2474,6 +2797,942 @@ public class RunOrchestrator implements RunControlPort {
     return Math.min(platformCap, userCostCap);
   }
 
+  private void stampRunStatusReason(String runId, StatusAndReason statusReason) {
+    if (statusReason == null || statusReason.reason() == null) {
+      return;
+    }
+    try {
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              r -> {
+                r.setStatusReason(statusReason.reason());
+                runRepo.save(r);
+              });
+    } catch (Exception statusReasonEx) {
+      // Non-fatal — terminate() will retry the same write later. Worst case: report uses the
+      // heuristic for this one run.
+      log.warn(
+          "RunOrchestrator run={} pre-stamp statusReason failed: {}",
+          runId,
+          statusReasonEx.getMessage());
+    }
+  }
+
+  private Optional<PostReviewContinuation> maybeEmitPostReviewContinuationDecision(
+      String runId,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      boolean reviewerErrored,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
+    if (!postReviewContinuationEnabled || !reviewerQualityFailed(reviewResult, reviewerErrored)) {
+      return Optional.empty();
+    }
+    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
+    if (target.isEmpty()) {
+      log.warn(
+          "RunOrchestrator run={} post-review continuation skipped: no retryable worker task",
+          runId);
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              null,
+              "Post-review continuation skipped: reviewer failed but no retryable task was found"));
+      return Optional.empty();
+    }
+
+    TaskOutcome task = target.get();
+    GoalDonenessDecision goalDecision =
+        reviewerLowQualityGoalDecision(reviewResult, reviewerErrored);
+    GoalContinuationPolicyDecision decision =
+        goalContinuationAdvisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(goalDecision)
+                .currentProvider(task.dispatchedProvider())
+                .currentModel(task.dispatchedModel())
+                .taskCategory("PROJECT_PATCH")
+                .requiredQualityThreshold(postReviewRequiredQualityThreshold)
+                .providerAvailability(providerAvailability(runId))
+                .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
+                .qualityInsufficient(true)
+                .routePinned(routePinned)
+                .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
+                .providerSwitchesUsed(providerSwitchesUsed(execResult))
+                .maxProviderSwitches(Math.max(0, postReviewMaxProviderSwitches))
+                .modelStepUpsUsed(modelStepUpsUsed(task))
+                .maxModelStepUps(Math.max(0, postReviewMaxModelStepUps))
+                .modelStepDownsUsed(modelStepDownsUsed(task))
+                .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
+                .build());
+    decision = withContinuationSource(decision, "POST_REVIEW");
+
+    String summary =
+        "Post-review continuation decision: "
+            + decision.decision()
+            + " ("
+            + firstReason(decision)
+            + ")";
+    log.warn(
+        "RunOrchestrator run={} task={} post-review continuation decision={} reason={}",
+        runId,
+        task.taskId(),
+        decision.decision(),
+        firstReason(decision));
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationDecision(
+            runId,
+            task.taskId(),
+            summary,
+            postReviewContinuationDecisionData(
+                decision,
+                confirmationRequired,
+                benchmarkPriorRequired,
+                routePinned,
+                "POST_REVIEW")));
+    broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
+    persistPostReviewContinuationDecision(
+        runId,
+        task.taskId(),
+        decision,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        "POST_REVIEW");
+    return Optional.of(new PostReviewContinuation(task, decision));
+  }
+
+  private Optional<PostReviewContinuation> maybeEmitPostValidationContinuationDecision(
+      String runId,
+      ExecutionResult execResult,
+      ValidationReport report,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned) {
+    if (!postReviewContinuationEnabled
+        || !validationReportQualityFailed(report, postReviewRequiredQualityThreshold)) {
+      return Optional.empty();
+    }
+    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
+    if (target.isEmpty()) {
+      log.warn(
+          "RunOrchestrator run={} post-validation continuation skipped: no retryable worker task",
+          runId);
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              null,
+              "Post-validation continuation skipped: low validation score but no retryable task was"
+                  + " found"));
+      return Optional.empty();
+    }
+
+    TaskOutcome task = target.get();
+    GoalDonenessDecision goalDecision =
+        validationReportLowQualityGoalDecision(report, postReviewRequiredQualityThreshold);
+    GoalContinuationPolicyDecision decision =
+        goalContinuationAdvisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(goalDecision)
+                .currentProvider(task.dispatchedProvider())
+                .currentModel(task.dispatchedModel())
+                .taskCategory("PROJECT_PATCH")
+                .requiredQualityThreshold(postReviewRequiredQualityThreshold)
+                .providerAvailability(providerAvailability(runId))
+                .providerPreferenceOrder(reviewerProviderPreferenceOrder(task.dispatchedProvider()))
+                .qualityInsufficient(true)
+                .routePinned(routePinned)
+                .expensiveContinuationRequiresConfirmation(confirmationRequired)
+                .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
+                .providerSwitchesUsed(providerSwitchesUsed(execResult))
+                .maxProviderSwitches(Math.max(0, postReviewMaxProviderSwitches))
+                .modelStepUpsUsed(modelStepUpsUsed(task))
+                .maxModelStepUps(Math.max(0, postReviewMaxModelStepUps))
+                .modelStepDownsUsed(modelStepDownsUsed(task))
+                .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
+                .build());
+    decision = withContinuationSource(decision, "POST_VALIDATION_REPORT");
+
+    String summary =
+        "Post-validation continuation decision: "
+            + decision.decision()
+            + " ("
+            + firstReason(decision)
+            + ")";
+    log.warn(
+        "RunOrchestrator run={} task={} post-validation continuation decision={} reason={}",
+        runId,
+        task.taskId(),
+        decision.decision(),
+        firstReason(decision));
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationDecision(
+            runId,
+            task.taskId(),
+            summary,
+            postReviewContinuationDecisionData(
+                decision,
+                confirmationRequired,
+                benchmarkPriorRequired,
+                routePinned,
+                "POST_VALIDATION_REPORT")));
+    broadcaster.emit(runId, RunEvent.log(runId, task.taskId(), summary));
+    persistPostReviewContinuationDecision(
+        runId,
+        task.taskId(),
+        decision,
+        confirmationRequired,
+        benchmarkPriorRequired,
+        routePinned,
+        "POST_VALIDATION_REPORT");
+    return Optional.of(new PostReviewContinuation(task, decision));
+  }
+
+  private record PostReviewContinuation(
+      TaskOutcome targetTask, GoalContinuationPolicyDecision decision) {}
+
+  private Optional<PostReviewContinuationResult> maybeActOnPostReviewContinuation(
+      String runId,
+      Plan plan,
+      ExecutionContext rootCtx,
+      ExecutionResult previousExecResult,
+      Optional<PostReviewContinuation> continuation,
+      RunCostTracker.Snapshot beforePostReviewAction,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      String designBlock,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      boolean skipWiring,
+      Integer reviewerMaxIter) {
+    if (continuation == null || continuation.isEmpty()) {
+      return Optional.empty();
+    }
+    PostReviewContinuation action = continuation.get();
+    GoalContinuationPolicyDecision decision = action.decision();
+    if (!actionablePostReviewContinuationDecision(decision)) {
+      return Optional.empty();
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
+    if (candidate == null
+        || action.targetTask() == null
+        || sameProviderModel(
+            candidate, action.targetTask().dispatchedProvider(), action.targetTask().dispatchedModel())) {
+      return Optional.empty();
+    }
+
+    String targetTaskId = action.targetTask().taskId();
+    String targetTaskKey = fullTaskKey(runId, targetTaskId);
+    var taskRow = taskRepo.findById(targetTaskKey);
+    if (taskRow.isEmpty()) {
+      log.warn(
+          "RunOrchestrator run={} post-review continuation skipped: task row not found {}",
+          runId,
+          targetTaskKey);
+      return Optional.empty();
+    }
+
+    String reason = firstReason(decision);
+    String summary =
+        "Post-review continuation action: "
+            + decision.decision()
+            + " -> rerun task with "
+            + candidate.label()
+            + " ("
+            + reason
+            + ")";
+    log.warn(
+        "RunOrchestrator run={} task={} post-review continuation action={} selected={} reason={}",
+        runId,
+        targetTaskId,
+        decision.decision(),
+        candidate.label(),
+        reason);
+    ContinuationUsage seededUsage =
+        postReviewContinuationUsage(previousExecResult, action.targetTask(), decision);
+    ContinuationLimitData limitData =
+        postReviewContinuationLimitData(action.targetTask(), decision, seededUsage);
+    broadcaster.emit(
+        runId,
+        RunEvent.continuationAction(
+            runId,
+            targetTaskId,
+            summary,
+            decision.decision().name(),
+            candidate.provider(),
+            candidate.model(),
+            reason,
+            1,
+            1,
+            limitData.limitName(),
+            limitData.used(),
+            limitData.max()));
+    broadcaster.emit(runId, RunEvent.log(runId, targetTaskId, summary));
+    appendPostReviewContinuationAction(taskRow.get(), decision, candidate, limitData, reason);
+
+    var task = taskRow.get();
+    String previousStatus = task.getStatus();
+    Instant previousStartedAt = task.getStartedAt();
+    Instant previousCompletedAt = task.getCompletedAt();
+    Long previousDurationMs = task.getDurationMs();
+    task.setStatus("PENDING");
+    task.setStartedAt(null);
+    task.setCompletedAt(null);
+    taskRepo.save(task);
+    broadcaster.emit(runId, RunEvent.taskStatus(runId, targetTaskId, "PENDING"));
+
+    try {
+      ExecutionResult rerunResult =
+          executor.execute(
+              ExecutionRequest.builder()
+                  .plan(plan)
+                  .provider(candidate.provider())
+                  .model(candidate.model())
+                  .runContext(rootCtx)
+                  .maxIterationsPerTask(null)
+                  .enableSmokeTests(true)
+                  .requireConfirmationBeforeExpensiveContinuation(confirmationRequired)
+                  .requireBenchmarkPriorForAutomaticContinuation(benchmarkPriorRequired)
+                  .initialProviderSwitchesUsed(seededUsage.providerSwitches())
+                  .initialModelStepUpsUsed(seededUsage.modelStepUps())
+                  .initialModelStepDownsUsed(seededUsage.modelStepDowns())
+                  .designBlock(designBlock)
+                  .projectId(projectId)
+                  .workspaceSummary(
+                      contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
+                  .build(),
+              new SequentialExecutor.ResumeRequest(targetTaskKey));
+      persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
+      RunCostTracker.Snapshot afterPostReviewExec = costTracker.snapshot(runId);
+      int workerIn = afterPostReviewExec.inputTokens() - beforePostReviewAction.inputTokens();
+      int workerOut = afterPostReviewExec.outputTokens() - beforePostReviewAction.outputTokens();
+      tokenAttributor.attributeWorkerAdditionalTask(
+          runId,
+          targetTaskId,
+          workerIn,
+          workerOut,
+          candidate.provider().toUpperCase(Locale.ROOT),
+          candidate.model());
+
+      maybeRunLintAutofix(runId, rootCtx.workspaceRoot());
+
+      ProviderModel reviewerRoute = reviewerRouteFor(candidate.provider(), candidate.model(), rerunResult);
+      ReviewerResult rerunReviewResult = null;
+      try {
+        rerunReviewResult =
+            reviewer.review(
+                ReviewerRequest.builder()
+                    .provider(reviewerRoute.provider())
+                    .model(reviewerRoute.model())
+                    .context(rootCtx)
+                    .buildCommand(plan.buildCommand())
+                    .skipWiringPass(skipWiring)
+                    .maxIterationsPerPass(reviewerMaxIter)
+                    .build());
+        persistenceWriter.persistReview(runId, rerunReviewResult);
+        RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
+        int reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
+        int reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
+        tokenAttributor.attributePhaseAdditional(
+            runId,
+            com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,
+            reviewerIn,
+            reviewerOut,
+            reviewerRoute.provider().toUpperCase(Locale.ROOT),
+            reviewerRoute.model());
+      } catch (Exception ex) {
+        log.warn(
+            "RunOrchestrator run={} post-review continuation reviewer failed — recording partial review",
+            runId,
+            ex);
+        rerunReviewResult = reviewerFailedResult(ex);
+        persistenceWriter.persistReviewFailure(runId, ex);
+      }
+      return Optional.of(new PostReviewContinuationResult(rerunResult, rerunReviewResult));
+    } catch (Exception ex) {
+      log.warn(
+          "RunOrchestrator run={} post-review continuation action failed for task={}: {}",
+          runId,
+          targetTaskId,
+          ex.getMessage(),
+          ex);
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              targetTaskId,
+              "Post-review continuation action failed: " + ex.getMessage()));
+      restoreTaskTerminalState(
+          targetTaskKey, previousStatus, previousStartedAt, previousCompletedAt, previousDurationMs);
+      return Optional.empty();
+    }
+  }
+
+  private record PostReviewContinuationResult(
+      ExecutionResult execResult, ReviewerResult reviewResult) {}
+
+  static ReviewerResult reviewerFailedResult(Exception ex) {
+    String message =
+        ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
+            ? "reviewer failed"
+            : ex.getMessage();
+    return ReviewerResult.builder()
+        .overall(ReviewerResult.Overall.REVIEW_FAILED)
+        .generalPassSummary("Reviewer failed: " + truncate(message, 500))
+        .finalBuildPassed(false)
+        .finalBuildOutput(truncate(message, 2000))
+        .build();
+  }
+
+  static boolean actionablePostReviewContinuationDecision(GoalContinuationPolicyDecision decision) {
+    if (decision == null || decision.selectedCandidate().isEmpty()) {
+      return false;
+    }
+    return switch (decision.decision()) {
+      case STEP_UP_MODEL, CHANGE_PROVIDER -> true;
+      case STEP_DOWN_MODEL,
+              CONTINUE_SAME_MODEL_PROVIDER,
+              STOP_DONE,
+              STOP_BLOCKED,
+              STOP_FAILED,
+              STOP_WASTE_GUARD ->
+          false;
+    };
+  }
+
+  private static boolean sameProviderModel(
+      ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
+    return candidate != null
+        && candidate.provider().equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
+        && candidate.model().equalsIgnoreCase(dispatchedModel == null ? "" : dispatchedModel);
+  }
+
+  static String fullTaskKey(String runId, String taskId) {
+    if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
+      return taskId;
+    }
+    String prefix = runId.substring(0, 8) + "_";
+    return taskId.startsWith(prefix) ? taskId : prefix + taskId;
+  }
+
+  static ContinuationUsage postReviewContinuationUsage(
+      ExecutionResult execResult, TaskOutcome task, GoalContinuationPolicyDecision decision) {
+    int providerSwitches = providerSwitchesUsed(execResult);
+    int modelStepUps = modelStepUpsUsed(task);
+    int modelStepDowns = modelStepDownsUsed(task);
+    if (decision != null && decision.decision() == RunContinuationDecision.CHANGE_PROVIDER) {
+      providerSwitches++;
+    } else if (decision != null && decision.decision() == RunContinuationDecision.STEP_UP_MODEL) {
+      modelStepUps++;
+    } else if (decision != null && decision.decision() == RunContinuationDecision.STEP_DOWN_MODEL) {
+      modelStepDowns++;
+    }
+    return new ContinuationUsage(providerSwitches, modelStepUps, modelStepDowns);
+  }
+
+  private ContinuationLimitData postReviewContinuationLimitData(
+      TaskOutcome task, GoalContinuationPolicyDecision decision, ContinuationUsage seededUsage) {
+    if (decision != null && decision.decision() == RunContinuationDecision.CHANGE_PROVIDER) {
+      return new ContinuationLimitData(
+          "maxProviderSwitches",
+          seededUsage.providerSwitches(),
+          Math.max(0, postReviewMaxProviderSwitches));
+    }
+    if (decision != null && decision.decision() == RunContinuationDecision.STEP_UP_MODEL) {
+      return new ContinuationLimitData(
+          "maxModelStepUps", seededUsage.modelStepUps(), Math.max(0, postReviewMaxModelStepUps));
+    }
+    if (decision != null && decision.decision() == RunContinuationDecision.STEP_DOWN_MODEL) {
+      return new ContinuationLimitData(
+          "maxModelStepDowns",
+          seededUsage.modelStepDowns(),
+          Math.max(0, postReviewMaxModelStepDowns));
+    }
+    return new ContinuationLimitData("postReview", 1, 1);
+  }
+
+  private void appendPostReviewContinuationAction(
+      com.navneet.executespec.state.entity.AgentTask task,
+      GoalContinuationPolicyDecision decision,
+      ModelProviderScore candidate,
+      ContinuationLimitData limitData,
+      String reason) {
+    if (task == null || decision == null || candidate == null || limitData == null) {
+      return;
+    }
+    try {
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode action = actions.addObject();
+      action.put("status", "EXECUTED");
+      action.put("decision", decision.decision().name());
+      action.put("provider", candidate.provider());
+      action.put("model", candidate.model());
+      action.put("reason", reason == null ? "" : reason);
+      action.put("limitName", limitData.limitName());
+      action.put("usedLimit", limitData.used());
+      action.put("maxLimit", limitData.max());
+      action.put("source", continuationActionSource(decision));
+      action.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+    } catch (Exception ex) {
+      log.warn(
+          "post-review continuation: failed to append action history for task {}: {}",
+          task.getTaskId(),
+          ex.getMessage(),
+          ex);
+    }
+  }
+
+  private static String continuationActionSource(GoalContinuationPolicyDecision decision) {
+    Object source = decision == null || decision.policy() == null ? null : decision.policy().get("source");
+    return source == null || source.toString().isBlank() ? "POST_REVIEW" : source.toString();
+  }
+
+  private ArrayNode readContinuationActions(String json)
+      throws com.fasterxml.jackson.core.JsonProcessingException {
+    if (json == null || json.isBlank()) {
+      return objectMapper.createArrayNode();
+    }
+    JsonNode parsed = objectMapper.readTree(json);
+    if (parsed != null && parsed.isArray()) {
+      ArrayNode copy = objectMapper.createArrayNode();
+      parsed.forEach(copy::add);
+      return copy;
+    }
+    return objectMapper.createArrayNode();
+  }
+
+  private void maybeRunLintAutofix(String runId, Path workspaceRoot) {
+    if (!featureFlagService.isEnabled("lint.autofix.enabled")) {
+      return;
+    }
+    try {
+      com.navneet.executespec.lint.LintPass.LintReport lintReport = lintPass.run(workspaceRoot);
+      if (lintReport.changedAnything()) {
+        log.info("RunOrchestrator run={} post-review lint auto-fix: {}", runId, lintReport.summary());
+        broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
+      } else if (!lintReport.skipped()) {
+        log.debug("RunOrchestrator run={} post-review lint auto-fix: no changes", runId);
+      }
+    } catch (Exception e) {
+      log.warn(
+          "RunOrchestrator run={} post-review lint auto-fix failed (continuing): {}",
+          runId,
+          e.getMessage());
+    }
+  }
+
+  private void restoreTaskTerminalState(
+      String taskKey, String status, Instant startedAt, Instant completedAt, Long durationMs) {
+    if (taskKey == null || taskKey.isBlank()) {
+      return;
+    }
+    try {
+      taskRepo
+          .findById(taskKey)
+          .ifPresent(
+              task -> {
+                task.setStatus(status);
+                task.setStartedAt(startedAt);
+                task.setCompletedAt(completedAt);
+                task.setDurationMs(durationMs);
+                taskRepo.save(task);
+              });
+    } catch (RuntimeException ex) {
+      log.warn(
+          "post-review continuation: failed to restore task state for {}: {}",
+          taskKey,
+          ex.getMessage());
+    }
+  }
+
+  record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {}
+
+  private record ContinuationLimitData(String limitName, int used, int max) {}
+
+  static boolean reviewerQualityFailed(ReviewerResult reviewResult, boolean reviewerErrored) {
+    if (reviewerErrored) {
+      return true;
+    }
+    if (reviewResult == null || reviewResult.overall() == null) {
+      return false;
+    }
+    return Boolean.FALSE.equals(reviewResult.finalBuildPassed())
+        || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
+        || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
+  }
+
+  static boolean validationReportQualityFailed(
+      ValidationReport report, double requiredQualityThreshold) {
+    if (report == null) {
+      return false;
+    }
+    if (report.getPipelineResult() == com.navneet.executespec.report.entity.PipelineResult.FAILED
+        || report.getPipelineResult()
+            == com.navneet.executespec.report.entity.PipelineResult.NEEDS_ATTENTION) {
+      return true;
+    }
+    Integer verifiedScore = report.getVerifiedScore();
+    return verifiedScore != null
+        && verifiedScore < sanitizeRequiredQualityThreshold(requiredQualityThreshold);
+  }
+
+  private static double sanitizeRequiredQualityThreshold(double requiredQualityThreshold) {
+    return requiredQualityThreshold <= 0.0 ? 70.0 : Math.min(100.0, requiredQualityThreshold);
+  }
+
+  static GoalDonenessDecision validationReportLowQualityGoalDecision(
+      ValidationReport report, double requiredQualityThreshold) {
+    int score = report == null || report.getVerifiedScore() == null ? -1 : report.getVerifiedScore();
+    String result =
+        report == null || report.getPipelineResult() == null
+            ? "UNKNOWN"
+            : report.getPipelineResult().name();
+    double threshold = sanitizeRequiredQualityThreshold(requiredQualityThreshold);
+    String scoreText = score < 0 ? "unknown" : String.valueOf(score);
+    return new GoalDonenessDecision(
+        GoalDonenessState.FAILED,
+        RunContinuationDecision.STOP_FAILED,
+        "final validation report quality is below threshold: verifiedScore="
+            + scoreText
+            + ", requiredQualityThreshold="
+            + threshold
+            + ", pipelineResult="
+            + result,
+        "final validation report",
+        List.of(),
+        List.of("validation report did not prove acceptable output quality"),
+        List.of("verifiedScore=" + scoreText, "pipelineResult=" + result),
+        List.of("a stronger model/provider may be needed to improve final quality evidence"),
+        false,
+        true);
+  }
+
+  static GoalDonenessDecision reviewerLowQualityGoalDecision(
+      ReviewerResult reviewResult, boolean reviewerErrored) {
+    String verdict =
+        reviewerErrored
+            ? "REVIEWER_EXCEPTION"
+            : reviewResult != null && Boolean.FALSE.equals(reviewResult.finalBuildPassed())
+                ? "FINAL_BUILD_FAILED"
+                : reviewResult == null || reviewResult.overall() == null
+                ? "UNKNOWN"
+                : reviewResult.overall().name();
+    return new GoalDonenessDecision(
+        GoalDonenessState.FAILED,
+        RunContinuationDecision.STOP_FAILED,
+        "final reviewer produced low-quality evidence: " + verdict,
+        "final BUILD-mode reviewer",
+        List.of(),
+        List.of("reviewer did not prove the implementation is acceptable"),
+        List.of("reviewerVerdict=" + verdict),
+        List.of("a stronger model/provider may be needed to finish or repair the implementation"),
+        false,
+        true);
+  }
+
+  static Optional<TaskOutcome> reviewerContinuationTarget(ExecutionResult execResult) {
+    if (execResult == null || execResult.perTask() == null || execResult.perTask().isEmpty()) {
+      return Optional.empty();
+    }
+    List<TaskOutcome> perTask = execResult.perTask();
+    for (int i = perTask.size() - 1; i >= 0; i--) {
+      TaskOutcome task = perTask.get(i);
+      if (successfulEnoughForReviewPromotion(task)
+          && hasText(task.dispatchedProvider())
+          && hasText(task.dispatchedModel())) {
+        return Optional.of(task);
+      }
+    }
+    return Optional.empty();
+  }
+
+  static List<String> reviewerProviderPreferenceOrder(String currentProvider) {
+    List<String> providers = new ArrayList<>();
+    addProviderPreference(providers, currentProvider);
+    addProviderPreference(providers, "anthropic");
+    addProviderPreference(providers, "openai");
+    addProviderPreference(providers, "gemini");
+    addProviderPreference(providers, "deepseek");
+    addProviderPreference(providers, "openrouter");
+    addProviderPreference(providers, "fireworks");
+    return List.copyOf(providers);
+  }
+
+  private Map<String, Boolean> providerAvailability(String runId) {
+    if (availableProviderResolver == null) {
+      return Map.of();
+    }
+    try {
+      Set<LlmProvider> available = availableProviderResolver.resolve(runId);
+      return ProviderAvailabilityMap.fromAvailableProviders(available, knownProviderNames());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Post-review continuation provider availability lookup failed for run={}: {}",
+          runId,
+          ex.getMessage());
+      return Map.of();
+    }
+  }
+
+  private Set<String> knownProviderNames() {
+    Set<String> providers = new LinkedHashSet<>();
+    if (modelRegistry != null && modelRegistry.allModels() != null) {
+      modelRegistry.allModels().values().stream()
+          .filter(config -> config != null && hasText(config.getProvider()))
+          .map(com.navneet.executespec.router.ModelMatrixProperties.ModelConfig::getProvider)
+          .forEach(providers::add);
+    }
+    return providers;
+  }
+
+  private static void addProviderPreference(List<String> providers, String provider) {
+    if (!hasText(provider)) {
+      return;
+    }
+    boolean alreadyPresent =
+        providers.stream().anyMatch(existing -> existing.equalsIgnoreCase(provider));
+    if (!alreadyPresent) {
+      providers.add(provider);
+    }
+  }
+
+  private static int providerSwitchesUsed(ExecutionResult execResult) {
+    if (execResult == null || execResult.perTask() == null) {
+      return 0;
+    }
+    return (int)
+        execResult.perTask().stream()
+            .filter(
+                task ->
+                    task != null
+                        && task.continuationAction() == RunContinuationDecision.CHANGE_PROVIDER)
+            .count();
+  }
+
+  private static int modelStepUpsUsed(TaskOutcome task) {
+    return task != null && task.continuationAction() == RunContinuationDecision.STEP_UP_MODEL
+        ? 1
+        : 0;
+  }
+
+  private static int modelStepDownsUsed(TaskOutcome task) {
+    return task != null && task.continuationAction() == RunContinuationDecision.STEP_DOWN_MODEL
+        ? 1
+        : 0;
+  }
+
+  private Map<String, Object> postReviewContinuationDecisionData(
+      GoalContinuationPolicyDecision decision,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      String source) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("decision", decision.decision().name());
+    data.put("reasons", decision.reasons());
+    Map<String, Object> policy = new LinkedHashMap<>();
+    if (decision.policy() != null) {
+      policy.putAll(decision.policy());
+    }
+    policy.put("taskCategory", "PROJECT_PATCH");
+    policy.put("requiredQualityThreshold", postReviewRequiredQualityThreshold);
+    policy.put("providerSwitchesUsed", Math.max(0, providerSwitchesUsedFromPolicy(decision)));
+    policy.put("maxProviderSwitches", Math.max(0, postReviewMaxProviderSwitches));
+    policy.put("maxModelStepUps", Math.max(0, postReviewMaxModelStepUps));
+    policy.put("maxModelStepDowns", Math.max(0, postReviewMaxModelStepDowns));
+    policy.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
+    policy.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
+    policy.put("routePinned", routePinned);
+    policy.put("source", continuationSource(source));
+    data.put("policy", policy);
+    decision
+        .selectedCandidate()
+        .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
+    String approvalRequiredReason = postReviewContinuationApprovalRequiredReason(decision, policy);
+    if (approvalRequiredReason != null) {
+      data.put("approvalRequiredReason", approvalRequiredReason);
+    }
+    data.put("source", continuationSource(source));
+    return data;
+  }
+
+  private static String continuationSource(String source) {
+    return source == null || source.isBlank() ? "POST_REVIEW" : source;
+  }
+
+  private static GoalContinuationPolicyDecision withContinuationSource(
+      GoalContinuationPolicyDecision decision, String source) {
+    if (decision == null) {
+      return null;
+    }
+    Map<String, Object> policy = new LinkedHashMap<>();
+    if (decision.policy() != null) {
+      policy.putAll(decision.policy());
+    }
+    policy.put("source", continuationSource(source));
+    return new GoalContinuationPolicyDecision(
+        decision.decision(), decision.selectedCandidate(), decision.reasons(), policy);
+  }
+
+  private static String postReviewContinuationApprovalRequiredReason(
+      GoalContinuationPolicyDecision decision, Map<String, Object> policy) {
+    if (decision == null
+        || decision.decision() != RunContinuationDecision.STOP_BLOCKED
+        || decision.selectedCandidate().isEmpty()) {
+      return null;
+    }
+    ModelProviderScore candidate = decision.selectedCandidate().get();
+    if (Boolean.TRUE.equals(policy.get("routePinned"))) {
+      return "ROUTE_PINNED";
+    }
+    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
+        && !candidate.benchmarkQualityPriorAvailable()) {
+      return "BENCHMARK_PRIOR_REQUIRED";
+    }
+    if (Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"))) {
+      return "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED";
+    }
+    return null;
+  }
+
+  private void persistPostReviewContinuationDecision(
+      String runId,
+      String taskId,
+      GoalContinuationPolicyDecision decision,
+      boolean confirmationRequired,
+      boolean benchmarkPriorRequired,
+      boolean routePinned,
+      String source) {
+    if (runId == null || taskId == null || decision == null) {
+      return;
+    }
+    String taskKey = fullTaskKey(runId, taskId);
+    try {
+      taskRepo
+          .findById(taskKey)
+          .ifPresent(
+              task -> {
+                try {
+                  task.setContinuationDecisionJson(
+                      objectMapper.writeValueAsString(
+                          postReviewContinuationDecisionData(
+                              decision,
+                              confirmationRequired,
+                              benchmarkPriorRequired,
+                              routePinned,
+                              source)));
+                  taskRepo.saveAndFlush(task);
+                } catch (Exception ex) {
+                  throw new IllegalStateException(ex);
+                }
+              });
+    } catch (RuntimeException ex) {
+      log.warn(
+          "post-review continuation: failed to persist decision for task {}: {}",
+          taskKey,
+          ex.getMessage());
+    }
+  }
+
+  private static int providerSwitchesUsedFromPolicy(GoalContinuationPolicyDecision decision) {
+    Object value = decision == null || decision.policy() == null ? null : decision.policy().get("providerSwitchesUsed");
+    if (value instanceof Number number) {
+      return Math.max(0, number.intValue());
+    }
+    return 0;
+  }
+
+  private static Map<String, Object> selectedCandidateData(ModelProviderScore candidate) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("provider", candidate.provider());
+    data.put("model", candidate.model());
+    data.put("taskCategory", candidate.taskCategory());
+    data.put("qualityScore", candidate.qualityScore());
+    data.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
+    data.put("costPerMillionTokens", candidate.costPerMillionTokens());
+    data.put("latencyP50Ms", candidate.latencyP50Ms());
+    data.put("latencyP95Ms", candidate.latencyP95Ms());
+    data.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
+    data.put("reasons", candidate.reasons());
+    return data;
+  }
+
+  private static String firstReason(GoalContinuationPolicyDecision decision) {
+    if (decision == null || decision.reasons().isEmpty()) {
+      return "no continuation reason supplied";
+    }
+    return decision.reasons().get(0);
+  }
+
+  record ProviderModel(String provider, String model) {}
+
+  static ProviderModel reviewerRouteFor(
+      String defaultProvider, String defaultModel, ExecutionResult exec) {
+    ProviderModel fallback = new ProviderModel(defaultProvider, defaultModel);
+    if (exec == null || exec.perTask() == null || exec.perTask().isEmpty()) {
+      return fallback;
+    }
+    List<TaskOutcome> perTask = exec.perTask();
+    for (int i = perTask.size() - 1; i >= 0; i--) {
+      TaskOutcome task = perTask.get(i);
+      if (!successfulEnoughForReviewPromotion(task) || !qualityContinuationAction(task)) {
+        continue;
+      }
+      ProviderModel candidate =
+          new ProviderModel(task.continuationActionProvider(), task.continuationActionModel());
+      if (sameRoute(defaultProvider, defaultModel, candidate)) {
+        return fallback;
+      }
+      return candidate;
+    }
+    return fallback;
+  }
+
+  private static boolean successfulEnoughForReviewPromotion(TaskOutcome task) {
+    if (task == null || task.status() == null) {
+      return false;
+    }
+    return switch (task.status()) {
+      case SUCCESS, SUCCESS_AFTER_RETRY, COMPLETED_WITH_WARNING -> true;
+      case WORKER_FAILED, SKIPPED -> false;
+    };
+  }
+
+  private static boolean qualityContinuationAction(TaskOutcome task) {
+    if (!hasText(task.continuationActionProvider()) || !hasText(task.continuationActionModel())) {
+      return false;
+    }
+    RunContinuationDecision action = task.continuationAction();
+    return action == RunContinuationDecision.STEP_UP_MODEL
+        || action == RunContinuationDecision.CHANGE_PROVIDER;
+  }
+
+  private static boolean sameRoute(String provider, String model, ProviderModel route) {
+    if (route == null) {
+      return false;
+    }
+    return equalsIgnoreCase(provider, route.provider()) && equalsIgnoreCase(model, route.model());
+  }
+
+  private static boolean equalsIgnoreCase(String left, String right) {
+    if (left == null || right == null) {
+      return left == right;
+    }
+    return left.equalsIgnoreCase(right);
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
   /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
   record StatusAndReason(String status, String reason) {}
 
@@ -2505,14 +3764,14 @@ public class RunOrchestrator implements RunControlPort {
       return new StatusAndReason(
           "COMPLETE", anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
     }
+    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
+      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
+    }
     if (review != null && !buildPassed) {
       return new StatusAndReason("PARTIAL", "FINAL_BUILD_FAILED");
     }
     if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.UNRESOLVED_ISSUES) {
       return new StatusAndReason("PARTIAL", "REVIEWER_UNRESOLVED");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
     }
     if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
       return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");

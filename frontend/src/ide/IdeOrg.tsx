@@ -212,7 +212,8 @@ export function IdeApiKeys() {
 
       <InfoCard>
         When you connect a provider key, work using that provider{' '}
-        <strong>bypass our cost cap</strong> entirely. Keys are encrypted at rest. Available on
+        <strong>bypass our cost cap</strong> entirely. Keys are stored server-side under this
+        deployment's configured crypto policy and are never shown again. Available on
         PRO/TEAM/ENTERPRISE tiers.
       </InfoCard>
 
@@ -1269,8 +1270,9 @@ export function IdeOrgSettings() {
       <div className='ide-h2'>AI provider keys</div>
       <InfoCard>
         Org-wide provider keys shared by every member. Work using a provider you supply a key for
-        bypasses the platform cost cap. Keys are encrypted at rest and never shown again — paste a
-        new value to replace one, or leave a field blank to keep the current key.
+        bypasses the platform cost cap. Keys are stored server-side under this deployment's
+        configured crypto policy and are never shown again — paste a new value to replace one, or
+        leave a field blank to keep the current key.
       </InfoCard>
       <div className='ide-card' style={{padding: 0}}>
         {orgKeyRows.map((row, i) => (

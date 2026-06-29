@@ -89,6 +89,50 @@ spring:
       base-url: https://api.sarvam.ai/v1
       api-key: ""
 
+execution:
+  continuation:
+    # Goal continuation policy knobs. Selected-candidate step-up / step-down / provider-change
+    # reruns are automatic by default, bounded by the limits below, unless confirmation is required.
+    required-quality-threshold: 70.0
+    quality-tie-band: 1.0
+    required-quality-thresholds:
+      task-low: -1
+      task-medium: -1
+      task-high: -1
+      greenfield-build: -1
+      project-patch: -1
+      bug-fix: -1
+      test-fix: -1
+      refactor: -1
+      benchmark-patch: -1
+      terminal-task: -1
+      read-only-help: -1
+    max-provider-switches-per-run: 1
+    max-model-step-ups-per-task: 1
+    max-model-step-downs-per-task: 1
+    max-no-progress-iterations: 28
+    max-false-done-claims: 2
+    max-repeated-failures: 3
+    max-edit-churn: 6
+    max-stale-explanations: 2
+    max-parallel-tasks: 3
+    benchmark-min-sample-tasks: 20
+    parallel-read-tools-enabled: true
+    parallel-provider-evaluation-enabled: true
+    # Default keeps LOW worker tasks on WORKHORSE after the cheap-tier regression. Operators can
+    # set LIGHTWEIGHT to start cheap/light and rely on automatic continuation to step up.
+    low-complexity-worker-start-tier: WORKHORSE
+    post-review:
+      enabled: true
+    max-total-cost-usd: -1
+    max-total-tokens: -1
+    max-task-wall-clock-ms: -1
+    require-confirmation-before-expensive-continuation: false
+    require-benchmark-prior-for-automatic-continuation: false
+    acting:
+      enabled: true
+    max-reruns-per-task: 1
+
 managed-ai:
   enabled: true
   tiers:
@@ -141,10 +185,11 @@ model-matrix:
   providers:
     # RL-2026-06-052 — LIGHTWEIGHT is now a genuinely cheaper model per provider (was all-flagship
     # since 2026-06-02). It serves the genuinely-light NON-worker agents (classifier / chat
-    # compactors / titles / ledger). The WORKER never lands here: SequentialExecutor.tierConfigFor
-    # routes LOW-complexity worker tasks to WORKHORSE (flagship), so re-tiering LIGHTWEIGHT cheap
-    # does NOT reintroduce the prior cheap-worker eval regression. SpecChatService is bumped to
-    # WORKHORSE in agent-tier-map so the user-facing spec-build chat stays on the flagship.
+    # compactors / titles / ledger). The WORKER does not land here by default:
+    # SequentialExecutor.tierConfigFor routes LOW-complexity worker tasks to WORKHORSE unless
+    # execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT is deliberately set.
+    # SpecChatService is bumped to WORKHORSE in agent-tier-map so the user-facing spec-build chat
+    # stays on the flagship.
     anthropic:
       planning: claude-sonnet-4-6
       workhorse: claude-sonnet-4-6
@@ -175,9 +220,9 @@ model-matrix:
       workhorse: deepseek-v4-pro-fw
       lightweight: deepseek-v4-flash-fw
     sarvam:
-      # 2026-06-21 — Sarvam AI (api.sarvam.ai), OpenAI-wire-compatible Indian-language provider.
-      # sarvam-105b for planning/workhorse, sarvam-30b for the light tier. Eval/benchmark + India-
-      # market BYOK route; intentionally NOT in failover-order (operator-picked, like deepseek).
+      # 2026-06-26 — disabled/dark only. Sarvam quality is not production-ready (worker eval
+      # produced zero-byte patches), so ModelAccessService rejects the provider and ModelController
+      # hides it from catalogs. Keep matrix breadcrumbs only so explicit stale ids fail closed.
       planning: sarvam-105b
       workhorse: sarvam-105b
       lightweight: sarvam-30b
@@ -436,8 +481,9 @@ model-matrix:
         cached-input-per-1m: 0.029
         output-per-1m: 0.188
       notes: |
+        DISABLED/DARK ONLY as of 2026-06-26. Kept as metadata so stale explicit model ids resolve to provider=sarvam and fail closed via ModelAccessService instead of becoming unknown paid-tier models.
         Sarvam AI api.sarvam.ai flagship (105B, 128K ctx) — OpenAI-wire-compatible, native tool calling + JSON + reasoning_content (verified live 2026-06-21: Bearer->200, tool_calls in OpenAI schema). India-market / sovereign-AI + eval/benchmark route; ENTERPRISE/BYOK, NOT in failover-order.
-        managed-ai-enabled:false so benchmark calls on the system key bypass the ES-AI-credit ledger (ManagedAiUsageService.authorizeCall passes through non-managed models).
+        managed-ai-enabled:false because this route must not consume ES managed-AI credits while disabled.
         Pricing converted from Sarvam INR rates (Rs4 in / Rs2.5 cached / Rs16 out per 1M) at ~Rs85/$ (2026-06). Independent capability is sub-frontier (Artificial Analysis Intelligence Index v4.1 ~= 12; agentic ~= 25) — benchmark before routing real worker traffic.
         VERIFY: max_tokens ceiling (docs default 2048; sent via extraBody), cache-token reporting (usage.prompt_tokens_details was null on the 2026-06-21 smoke).
     sarvam-30b:
@@ -455,6 +501,7 @@ model-matrix:
         cached-input-per-1m: 0.018
         output-per-1m: 0.118
       notes: |
+        DISABLED/DARK ONLY as of 2026-06-26. Kept as metadata so stale explicit model ids resolve to provider=sarvam and fail closed via ModelAccessService.
         Sarvam AI api.sarvam.ai (30B, 64K ctx) — OpenAI-wire-compatible, native tool calling. Light-tier / cheap-fast lane (~167 t/s). Pricing from INR (Rs2.5 in / Rs1.5 cached / Rs10 out per 1M) at ~Rs85/$. ENTERPRISE/BYOK, NOT in failover-order, managed-ai-enabled:false.
     deepseek-v4-flash:
       provider: openrouter
@@ -504,6 +551,7 @@ model-matrix:
     kimi-k2p6-fw:
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32768
       display-label: "Kimi K2.6 (Fireworks)"
@@ -515,6 +563,7 @@ model-matrix:
     "[glm-5.1-fw]": # bracket-wrapped: dotted key (5.1) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 202000
       max-output-tokens: 25344
       display-label: "GLM 5.1 (Fireworks)"
@@ -532,6 +581,7 @@ model-matrix:
     "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 202000
       max-output-tokens: 25344
       display-label: "GLM 5.2 (Fireworks)"
@@ -543,6 +593,7 @@ model-matrix:
     minimax-m3-fw:
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M3 (Fireworks)"
@@ -554,6 +605,7 @@ model-matrix:
     "[minimax-m2.7-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M2.7 (Fireworks)"
@@ -565,6 +617,7 @@ model-matrix:
     "[kimi-k2.7-code-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 16384
       display-label: "Kimi K2.7 Code (Fireworks)"
@@ -576,6 +629,7 @@ model-matrix:
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Devstral 2 (OpenRouter)"
@@ -587,6 +641,7 @@ model-matrix:
     codestral-2508:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 256000
       max-output-tokens: 32000
       display-label: "Codestral 2508 (OpenRouter)"
@@ -598,6 +653,7 @@ model-matrix:
     minimax-m3:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 524288
       max-output-tokens: 32000
       display-label: "MiniMax M3 (OpenRouter)"
@@ -609,6 +665,7 @@ model-matrix:
     "[gpt-5.3-codex]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: PREMIUM
       context-limit: 400000
       max-output-tokens: 32000
       display-label: "GPT-5.3 Codex (OpenRouter)"
@@ -620,6 +677,7 @@ model-matrix:
     "[grok-4.20]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: PREMIUM
       context-limit: 2000000
       max-output-tokens: 32000
       display-label: "Grok 4.20 (OpenRouter)"
@@ -631,6 +689,7 @@ model-matrix:
     "[glm-5.2]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "GLM 5.2 (OpenRouter)"
@@ -642,6 +701,7 @@ model-matrix:
     "[kimi-k2.7-code]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 16384
       display-label: "Kimi K2.7 Code (OpenRouter)"
@@ -653,6 +713,7 @@ model-matrix:
     "[minimax-m2.7]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 196608
       max-output-tokens: 32000
       display-label: "MiniMax M2.7 (OpenRouter)"
@@ -664,6 +725,7 @@ model-matrix:
     qwen3-coder-next:
       provider: openrouter
       chain-tier: UTILITY
+      quality-class: STANDARD
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Qwen3-Coder-Next (OpenRouter)"
@@ -675,6 +737,7 @@ model-matrix:
     "[kimi-k2.6]":
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Kimi K2.6 (OpenRouter)"
@@ -686,6 +749,7 @@ model-matrix:
     qwen3-coder:
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: HIGH
       context-limit: 262144
       max-output-tokens: 32000
       display-label: "Qwen3-Coder (OpenRouter)"
@@ -697,6 +761,7 @@ model-matrix:
     "[mimo-v2.5-pro]": # bracket-wrapped: the dotted key (v2.5) would otherwise bind as a nested path (cf. kimi-k2.6)
       provider: openrouter
       chain-tier: CAPABLE
+      quality-class: STANDARD
       context-limit: 1048576
       max-output-tokens: 32000
       display-label: "Xiaomi MiMo v2.5 Pro (OpenRouter)"

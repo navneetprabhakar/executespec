@@ -48,6 +48,212 @@ function Kv({k, v}: {k: string; v: React.ReactNode}) {
   );
 }
 
+function taskGoalLine(t: api.TaskSummary): string | null {
+  const goal = t.goalDoneness;
+  const continuation = t.continuationDecision;
+  if (!goal && !continuation) return null;
+  const source = continuationSourceLabel(continuation?.source || continuation?.policy?.source);
+  const goalPart =
+    goal?.state && goal?.recommendedDecision
+      ? `Goal ${goal.state} -> ${goal.recommendedDecision}`
+      : goal?.state
+        ? `Goal ${goal.state}`
+        : null;
+  const nextPart = continuation?.decision
+    ? `${source ? `${source} · ` : ''}Next ${continuation.decision}`
+    : null;
+  const reason = continuation?.reasons?.[0] || goal?.reason || null;
+  return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
+}
+
+function continuationSourceLabel(source?: string | null): string | null {
+  switch ((source || '').toUpperCase()) {
+    case 'POST_REVIEW':
+      return 'Reviewer/build trigger';
+    case 'POST_VALIDATION_REPORT':
+      return 'Final validation trigger';
+    case 'TASK_BOUNDARY':
+      return 'Task trigger';
+    default:
+      return source ? source.replace(/_/g, ' ').toLowerCase() : null;
+  }
+}
+
+function continuationApprovalCandidate(t: api.TaskSummary) {
+  const continuation = t.continuationDecision;
+  const candidate = continuation?.selectedCandidate;
+  const explicitConfirmation = continuation?.policy?.requireConfirmationBeforeExpensiveContinuation;
+  const benchmarkConfidenceBlocked =
+    continuation?.policy?.requireBenchmarkPriorForAutomaticContinuation &&
+    candidate?.benchmarkQualityPriorAvailable === false;
+  if (
+    continuation?.decision !== 'STOP_BLOCKED' ||
+    (!explicitConfirmation && !benchmarkConfidenceBlocked) ||
+    !candidate?.provider ||
+    !candidate?.model
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+function continuationApprovalReason(t: api.TaskSummary): string | null {
+  const continuation = t.continuationDecision;
+  if (continuation?.decision !== 'STOP_BLOCKED') return null;
+  const source = continuationSourceLabel(continuation.source || continuation.policy?.source);
+  const prefix = source ? `${source}: ` : '';
+  switch ((continuation.approvalRequiredReason || '').toUpperCase()) {
+    case 'BENCHMARK_PRIOR_REQUIRED':
+      return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
+    case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
+      return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
+    case 'ROUTE_PINNED':
+      return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
+    case 'APPROVAL_REQUIRED':
+      return `${prefix}Approval needed before this model/provider upgrade can run.`;
+    default:
+      break;
+  }
+  const candidate = continuation.selectedCandidate;
+  if (
+    continuation.policy?.requireBenchmarkPriorForAutomaticContinuation &&
+    candidate?.benchmarkQualityPriorAvailable === false
+  ) {
+    return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
+  }
+  if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
+    return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
+  }
+  if (continuation.policy?.routePinned) {
+    return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
+  }
+  return null;
+}
+
+function latestContinuationAction(t: api.TaskSummary): string | null {
+  const actions = t.continuationActions || [];
+  const action = actions.length > 0 ? actions[actions.length - 1] : null;
+  if (!action?.decision || !action?.provider || !action?.model) return null;
+  const rawStatus = (action.status || '').toUpperCase();
+  const status =
+    rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
+  const source = continuationSourceLabel(action.source);
+  const sourcePart = source ? `${source}: ` : '';
+  const limit =
+    action.limitName && action.maxLimit != null
+      ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`
+      : '';
+  return `${sourcePart}${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
+}
+
+function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
+  const s = (state || '').toUpperCase();
+  if (s === 'DONE') return 'ok';
+  if (s === 'FAILED' || s === 'BLOCKED' || s === 'WASTE_RISK') return 'bad';
+  return 'warn';
+}
+
+function preciseUsd(n?: number | null): string {
+  if (n == null) return '—';
+  if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
+  return usd(n);
+}
+
+function positive(n?: number | null): number | null {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
+  const goal = t.goalDoneness;
+  if (!goal) return [];
+  const policy = t.continuationDecision?.policy || {};
+  const facts: {k: string; v: string}[] = [];
+  const cost = positive(goal.costUsd);
+  const costLimit = positive(policy.maxTotalCostUsd);
+  if (cost != null || costLimit != null) {
+    facts.push({
+      k: 'Cost',
+      v: costLimit != null ? `${preciseUsd(cost)} / ${preciseUsd(costLimit)}` : preciseUsd(cost),
+    });
+  }
+  const tokens = positive(goal.totalTokens);
+  const tokenLimit = positive(policy.maxTotalTokens);
+  if (tokens != null || tokenLimit != null) {
+    facts.push({
+      k: 'Tokens',
+      v: tokenLimit != null ? `${num(tokens)} / ${num(tokenLimit)}` : num(tokens),
+    });
+  }
+  const wall = positive(goal.wallClockMs);
+  const wallLimit = positive(policy.maxTaskWallClockMs);
+  if (wall != null || wallLimit != null) {
+    facts.push({
+      k: 'Time',
+      v: wallLimit != null ? `${fmtDur(wall)} / ${fmtDur(wallLimit)}` : fmtDur(wall),
+    });
+  }
+  if (goal.budgetCeilingReason) {
+    facts.push({k: 'Ceiling', v: goal.budgetCeilingReason});
+  }
+  return facts;
+}
+
+type ContinuationPolicy = NonNullable<
+  NonNullable<api.TaskSummary['continuationDecision']>['policy']
+>;
+type RankingCandidate = NonNullable<ContinuationPolicy['topEligibleCandidates']>[number];
+
+function rankingLabel(policy?: string | null): string {
+  return policy === 'quality_desc_then_cost_asc_then_latency_asc'
+    ? 'Quality > cost > latency'
+    : policy || 'Model ranking';
+}
+
+function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
+  const details: string[] = [];
+  const source = continuationSourceLabel(policy.source);
+  if (source) {
+    details.push(source);
+  }
+  if (
+    typeof policy.rankingQualityTieBand === 'number' &&
+    Number.isFinite(policy.rankingQualityTieBand)
+  ) {
+    details.push(`near-quality band ${policy.rankingQualityTieBand.toFixed(1)} pts`);
+  }
+  if (policy.requireBenchmarkPriorForAutomaticContinuation === true) {
+    details.push('unbenchmarked upgrades need approval');
+  } else if (policy.requireBenchmarkPriorForAutomaticContinuation === false) {
+    details.push('unbenchmarked upgrades can auto-run');
+  }
+  if (policy.routePinned) {
+    details.push('route pinned');
+  }
+  if (policy.lowComplexityWorkerStartTierEffective) {
+    const effective = policy.lowComplexityWorkerStartTierEffective.toLowerCase();
+    const configured = policy.lowComplexityWorkerStartTierConfigured?.toLowerCase();
+    details.push(
+      configured && configured !== effective
+        ? `LOW starts on ${effective} (${configured} ignored)`
+        : `LOW starts on ${effective}`,
+    );
+  }
+  return details;
+}
+
+function candidateLabel(c: RankingCandidate): string {
+  const provider = providerLabel(c.provider) || c.provider || 'Provider';
+  return `${provider}/${c.model || 'model'}`;
+}
+
+function candidateMetrics(c: RankingCandidate): string {
+  const q = c.qualityScore == null ? 'Q —' : `Q ${Math.round(c.qualityScore)}`;
+  const cost = c.costPerMillionTokens == null ? '$—/M' : `$${c.costPerMillionTokens.toFixed(2)}/M`;
+  const latency = c.latencyP50Ms == null ? 'p50 —' : `p50 ${fmtDur(c.latencyP50Ms)}`;
+  const benchmark = c.benchmarkQualityPriorAvailable ? 'bench' : 'no bench';
+  return `${q} · ${cost} · ${latency} · ${benchmark}`;
+}
+
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -483,6 +689,10 @@ export default function IdeRunResult() {
   const canResume = statusUpper === 'PAUSED';
   const score = report?.verifiedScore ?? null;
   const v = verdictFor(score, run?.status);
+  const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
+  const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
+  const testsMeasured = measuredTestsTotal != null && measuredTestsTotal > 0;
+  const scoredWithoutMeasuredTests = score != null && !testsMeasured;
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
@@ -683,7 +893,16 @@ export default function IdeRunResult() {
                         : '—'
                     }
                   />
-                  <Kv k='Tests' v={tests ? `${tests.passed}/${tests.totalTests}` : '—'} />
+                  <Kv
+                    k='Tests'
+                    v={
+                      testsMeasured
+                        ? `${measuredTestsPassed ?? 0}/${measuredTestsTotal}`
+                        : score != null
+                          ? 'not measured'
+                          : '—'
+                    }
+                  />
                   <Kv
                     k='Reviewer'
                     v={
@@ -697,6 +916,23 @@ export default function IdeRunResult() {
                   <Kv k='Issues' v={issues.length} />
                   <Kv k='Files' v={report?.filesGenerated ?? files.length} />
                   <Kv k='Pipeline' v={report?.pipelineResult ?? '—'} />
+                  {scoredWithoutMeasuredTests && (
+                    <div
+                      className='ide-card'
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
+                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
+                        color: 'var(--ide-fg-muted)',
+                        fontSize: 12.5,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Tests were not measured for this score. Treat the headline as build/reviewer
+                      evidence, not a fully test-backed result.
+                    </div>
+                  )}
                 </div>
               )}
               <div className='ide-card' style={{flex: 1, minWidth: 240}}>
@@ -1226,65 +1462,267 @@ export default function IdeRunResult() {
         {tab === 'Tasks' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <div className='ide-h1'>Steps</div>
+            {run?.runGoalDoneness && (
+              <div className='ide-card' style={{marginBottom: 12}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                  <IdeBadge kind={goalStateKind(run.runGoalDoneness.state)}>
+                    {run.runGoalDoneness.state || 'UNKNOWN'}
+                  </IdeBadge>
+                  {run.runGoalDoneness.recommendedDecision && (
+                    <span className='ide-mono' style={{fontSize: 12}}>
+                      {run.runGoalDoneness.recommendedDecision}
+                    </span>
+                  )}
+                </div>
+                {run.runGoalDoneness.reason && (
+                  <div style={{fontSize: 13, marginTop: 8}}>{run.runGoalDoneness.reason}</div>
+                )}
+                {run.runGoalDoneness.recommendedNextStep && (
+                  <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                    Next: {run.runGoalDoneness.recommendedNextStep}
+                  </div>
+                )}
+              </div>
+            )}
             {!run?.tasks?.length ? (
               <div className='ide-empty'>No steps.</div>
             ) : (
               <div className='ide-card' style={{padding: 0}}>
-                {run.tasks.map((t, i) => (
-                  <div
-                    key={t.taskId}
-                    style={{
-                      padding: '12px 16px',
-                      borderBottom:
-                        i < run.tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    }}
-                  >
-                    <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                      <IdeBadge
-                        kind={
-                          t.status === 'COMPLETE' || t.status === 'SUCCESS'
-                            ? 'ok'
-                            : t.status === 'FAILED'
-                              ? 'bad'
-                              : 'warn'
-                        }
-                      >
-                        {t.status}
-                      </IdeBadge>
-                      <span style={{flex: 1, fontWeight: 500}}>{t.title}</span>
-                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                        {fmtDur(t.durationMs)}
-                      </span>
-                      {(t.status === 'FAILED' ||
-                        t.status === 'PARTIAL' ||
-                        t.status === 'BLOCKED') && (
-                        <button
-                          className='ide-btn ghost'
-                          style={{padding: '3px 8px'}}
-                          disabled={busy === t.taskId}
-                          onClick={() =>
-                            action(
-                              t.taskId,
-                              () => api.retryTask(runId, t.taskId),
-                              () => 'Retry started.',
-                            )
+                {run.tasks.map((t, i) => {
+                  const goalLine = taskGoalLine(t);
+                  const continuationActionLine = latestContinuationAction(t);
+                  const budgetFacts = taskBudgetFacts(t);
+                  const incompleteItems = t.goalDoneness?.incompleteItems || [];
+                  const risks = t.goalDoneness?.risks || [];
+                  const approvalCandidate = continuationApprovalCandidate(t);
+                  const approvalReason = continuationApprovalReason(t);
+                  const policy = t.continuationDecision?.policy;
+                  const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
+                  const rankingDetails = policy ? rankingPolicyDetails(policy) : [];
+                  const rejectedRankingCount =
+                    policy?.rejectedBelowQualityThresholdCount ??
+                    policy?.topRejectedCandidates?.length ??
+                    0;
+                  return (
+                    <div
+                      key={t.taskId}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom:
+                          i < run.tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      }}
+                    >
+                      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+                        <IdeBadge
+                          kind={
+                            t.status === 'COMPLETE' || t.status === 'SUCCESS'
+                              ? 'ok'
+                              : t.status === 'FAILED'
+                                ? 'bad'
+                                : 'warn'
                           }
                         >
-                          Retry
-                        </button>
+                          {t.status}
+                        </IdeBadge>
+                        <span style={{flex: 1, fontWeight: 500}}>{t.title}</span>
+                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          {fmtDur(t.durationMs)}
+                        </span>
+                        {(t.status === 'FAILED' ||
+                          t.status === 'PARTIAL' ||
+                          t.status === 'BLOCKED') && (
+                          <button
+                            className='ide-btn ghost'
+                            style={{padding: '3px 8px'}}
+                            disabled={busy === t.taskId}
+                            onClick={() =>
+                              action(
+                                t.taskId,
+                                () => api.retryTask(runId, t.taskId),
+                                () => 'Retry started.',
+                              )
+                            }
+                          >
+                            Retry
+                          </button>
+                        )}
+                        {approvalCandidate && (
+                          <button
+                            className='ide-btn primary'
+                            style={{padding: '3px 8px'}}
+                            disabled={busy === `continuation-${t.taskId}`}
+                            title={`Approve continuation with ${approvalCandidate.provider}/${approvalCandidate.model}`}
+                            onClick={() =>
+                              action(
+                                `continuation-${t.taskId}`,
+                                () => api.approveContinuation(runId, t.taskId),
+                                (r) =>
+                                  typeof r === 'object' && r && 'message' in r
+                                    ? String(r.message)
+                                    : 'Continuation approved.',
+                              )
+                            }
+                          >
+                            Approve upgrade
+                          </button>
+                        )}
+                      </div>
+                      {t.failureReason && (
+                        <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}>
+                          {t.failureReason}
+                        </div>
+                      )}
+                      <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                        {(t.provider || '').toLowerCase()} · {t.model || t.assignedModel} ·{' '}
+                        {num(t.inputTokens + t.outputTokens)} tok
+                      </div>
+                      {goalLine && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          {goalLine}
+                        </div>
+                      )}
+                      {approvalReason && (
+                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                          {approvalReason}
+                        </div>
+                      )}
+                      {continuationActionLine && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          {continuationActionLine}
+                        </div>
+                      )}
+                      {t.goalDoneness?.recommendedNextStep && (
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                          Next: {t.goalDoneness.recommendedNextStep}
+                        </div>
+                      )}
+                      {policy?.rankingPolicy && rankingCandidates.length > 0 && (
+                        <div
+                          style={{
+                            border: '1px solid var(--ide-border)',
+                            borderRadius: 6,
+                            padding: '7px 8px',
+                            marginTop: 8,
+                            fontSize: 11,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 8,
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              marginBottom: 5,
+                            }}
+                          >
+                            <span style={{color: 'var(--ide-fg-bright)'}}>Model ranking</span>
+                            <span className='ide-mono'>{rankingLabel(policy.rankingPolicy)}</span>
+                            {rankingDetails.map((detail) => (
+                              <span key={detail}>{detail}</span>
+                            ))}
+                            {rejectedRankingCount > 0 && (
+                              <span>{rejectedRankingCount} below quality bar</span>
+                            )}
+                          </div>
+                          <div style={{display: 'grid', gap: 4}}>
+                            {rankingCandidates.map((candidate, idx) => (
+                              <div
+                                key={`${candidate.provider || 'provider'}:${candidate.model || idx}`}
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                                  gap: 8,
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span className='ide-mono' style={{overflowWrap: 'anywhere'}}>
+                                  {idx + 1}. {candidateLabel(candidate)}
+                                </span>
+                                <span>{candidateMetrics(candidate)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {budgetFacts.length > 0 && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                            gap: 6,
+                            marginTop: 8,
+                          }}
+                        >
+                          {budgetFacts.map((fact) => (
+                            <div
+                              key={fact.k}
+                              style={{
+                                border: '1px solid var(--ide-border)',
+                                borderRadius: 6,
+                                padding: '6px 8px',
+                                minWidth: 0,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: 'var(--ide-fg-muted)',
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {fact.k}
+                              </div>
+                              <div
+                                className='ide-mono'
+                                style={{
+                                  fontSize: 11,
+                                  color: 'var(--ide-fg)',
+                                  overflowWrap: 'anywhere',
+                                }}
+                              >
+                                {fact.v}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(incompleteItems.length > 0 || risks.length > 0) && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                            gap: 8,
+                            marginTop: 8,
+                            fontSize: 11,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          {incompleteItems.length > 0 && (
+                            <div>
+                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
+                                Remaining
+                              </div>
+                              {incompleteItems.slice(0, 3).map((item) => (
+                                <div key={item}>- {item}</div>
+                              ))}
+                            </div>
+                          )}
+                          {risks.length > 0 && (
+                            <div>
+                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
+                                Risks
+                              </div>
+                              {risks.slice(0, 3).map((risk) => (
+                                <div key={risk}>- {risk}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
-                    {t.failureReason && (
-                      <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}>
-                        {t.failureReason}
-                      </div>
-                    )}
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                      {(t.provider || '').toLowerCase()} · {t.model || t.assignedModel} ·{' '}
-                      {num(t.inputTokens + t.outputTokens)} tok
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1523,6 +1961,64 @@ export default function IdeRunResult() {
                   <Kv k='Review failures' v={report.reviewFailures} />
                   <Kv k='Issues caught' v={report.issuesCaught} />
                 </div>
+                {report.runGoalDecision && (
+                  <>
+                    <div className='ide-h2'>Final goal proof</div>
+                    <div className='ide-card'>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                        <IdeBadge kind={goalStateKind(report.runGoalDecision.state)}>
+                          {report.runGoalDecision.state || 'UNKNOWN'}
+                        </IdeBadge>
+                        {report.runGoalDecision.recommendedDecision && (
+                          <span className='ide-mono' style={{fontSize: 12}}>
+                            {report.runGoalDecision.recommendedDecision}
+                          </span>
+                        )}
+                      </div>
+                      {report.runGoalDecision.reason && (
+                        <div style={{fontSize: 13, marginTop: 8}}>
+                          {report.runGoalDecision.reason}
+                        </div>
+                      )}
+                      {report.runGoalDecision.recommendedNextStep && (
+                        <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                          Next: {report.runGoalDecision.recommendedNextStep}
+                        </div>
+                      )}
+                      {report.runGoalDecision.incompleteItems &&
+                        report.runGoalDecision.incompleteItems.length > 0 && (
+                          <div style={{marginTop: 10}}>
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            >
+                              Remaining proof
+                            </div>
+                            <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                              {report.runGoalDecision.incompleteItems.slice(0, 4).map((item, i) => (
+                                <li key={i}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      {report.runGoalDecision.risks && report.runGoalDecision.risks.length > 0 && (
+                        <div style={{marginTop: 10}}>
+                          <div
+                            className='ide-mono'
+                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                          >
+                            Risks
+                          </div>
+                          <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                            {report.runGoalDecision.risks.slice(0, 4).map((risk, i) => (
+                              <li key={i}>{risk}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
                 {report.verificationLedger && report.verificationLedger.length > 0 && (
                   <>
                     <div className='ide-h2'>Evidence ledger</div>

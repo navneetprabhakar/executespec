@@ -119,6 +119,8 @@ export function logIcon(type?: string): string {
   if (t.includes('FAIL') || t.includes('ERROR')) return '❌';
   if (t.includes('WARN')) return '⚠️';
   if (t.includes('PROVIDER')) return '🔀';
+  if (t.includes('WAVE') || t.includes('PARALLEL')) return '≋';
+  if (t.includes('GOAL') || t.includes('DECISION')) return '🧭';
   if (t.includes('CONTEXT')) return '🧭';
   if (t.includes('RECOVERY')) return '♻️';
   if (t.includes('STATUS')) return '●';

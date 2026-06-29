@@ -9,6 +9,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 import java.lang.reflect.Method;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.PlannedTask;
@@ -16,12 +17,16 @@ import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.project.rag.RetrievalService;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Pins the tier-config tuning that keeps iteration limits as a safety net, not the primary quality
@@ -50,6 +55,10 @@ class SequentialExecutorTierConfigTest {
     lenient()
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
+    return newExecutor(modelResolver);
+  }
+
+  private SequentialExecutor newExecutor(ModelResolver modelResolver) {
     return new SequentialExecutor(
         mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(BuildProjectTool.class),
@@ -64,7 +73,27 @@ class SequentialExecutorTierConfigTest {
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
         mock(ContextStore.class),
         mock(RunCostTracker.class),
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        mock(com.navneet.executespec.router.AvailableProviderResolver.class),
+        null);
+  }
+
+  private SequentialExecutor newExecutorWithTierResolvingModel() {
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    lenient()
+        .when(modelResolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenAnswer(
+            invocation -> {
+              LlmProvider provider = invocation.getArgument(1);
+              AgentTier tier = invocation.getArgument(2);
+              return ResolvedModel.builder()
+                  .requestedProvider(provider)
+                  .actualProvider(provider)
+                  .agentTier(tier)
+                  .model(tier.name().toLowerCase())
+                  .build();
+            });
+    return newExecutor(modelResolver);
   }
 
   /** Reflectively invoke {@code tierConfigFor} and return field-by-field for assertion. */
@@ -84,15 +113,27 @@ class SequentialExecutorTierConfigTest {
       String model,
       boolean projectRun)
       throws Exception {
+    return invoke(exec, complexity, provider, model, projectRun, null);
+  }
+
+  private Cfg invoke(
+      SequentialExecutor exec,
+      PlannedTask.Complexity complexity,
+      String provider,
+      String model,
+      boolean projectRun,
+      String lowComplexityWorkerStartTierOverride)
+      throws Exception {
     Method m =
         SequentialExecutor.class.getDeclaredMethod(
             "tierConfigFor",
             PlannedTask.Complexity.class,
             String.class,
             String.class,
-            boolean.class);
+            boolean.class,
+            String.class);
     m.setAccessible(true);
-    Object cfg = m.invoke(exec, complexity, provider, model, projectRun);
+    Object cfg = m.invoke(exec, complexity, provider, model, projectRun, lowComplexityWorkerStartTierOverride);
     assertNotNull(cfg);
     return new Cfg(
         (String) recordField(cfg, "provider"),
@@ -108,6 +149,14 @@ class SequentialExecutorTierConfigTest {
     Method accessor = record.getClass().getDeclaredMethod(name);
     accessor.setAccessible(true);
     return accessor.invoke(record);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> continuationPolicyData(SequentialExecutor exec)
+      throws Exception {
+    Method m = SequentialExecutor.class.getDeclaredMethod("continuationPolicyData");
+    m.setAccessible(true);
+    return (Map<String, Object>) m.invoke(exec);
   }
 
   @Test
@@ -126,6 +175,68 @@ class SequentialExecutorTierConfigTest {
   void low_project_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "claude-foo", true);
     assertEquals(120, c.maxIter, "LOW iter cap 60; project ×2 = 120");
+  }
+
+  @Test
+  void low_worker_start_tier_defaults_to_workhorse() throws Exception {
+    Cfg c =
+        invoke(
+            newExecutorWithTierResolvingModel(),
+            PlannedTask.Complexity.LOW,
+            "deepseek",
+            "fallback",
+            false);
+
+    assertEquals("workhorse", c.model);
+  }
+
+  @Test
+  void low_worker_start_tier_can_optInto_lightweight() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");
+
+    Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
+
+    assertEquals("lightweight", c.model);
+  }
+
+  @Test
+  void low_worker_start_tier_can_use_perRun_lightweight_override() throws Exception {
+    Cfg c =
+        invoke(
+            newExecutorWithTierResolvingModel(),
+            PlannedTask.Complexity.LOW,
+            "deepseek",
+            "fallback",
+            false,
+            "LIGHTWEIGHT");
+
+    assertEquals("lightweight", c.model);
+  }
+
+  @Test
+  void continuation_policy_exposes_low_worker_start_tier() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");
+
+    Map<String, Object> policy = continuationPolicyData(exec);
+
+    assertEquals("LIGHTWEIGHT", policy.get("lowComplexityWorkerStartTierConfigured"));
+    assertEquals("LIGHTWEIGHT", policy.get("lowComplexityWorkerStartTierEffective"));
+  }
+
+  @Test
+  void invalid_low_worker_start_tier_fallsBackTo_workhorse() throws Exception {
+    SequentialExecutor exec = newExecutorWithTierResolvingModel();
+    ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "CHEAPEST");
+
+    Cfg c = invoke(exec, PlannedTask.Complexity.LOW, "deepseek", "fallback", false);
+
+    assertEquals("workhorse", c.model);
+
+    Map<String, Object> policy = continuationPolicyData(exec);
+    assertEquals("CHEAPEST", policy.get("lowComplexityWorkerStartTierConfigured"));
+    assertEquals("WORKHORSE", policy.get("lowComplexityWorkerStartTierEffective"));
   }
 
   @Test
