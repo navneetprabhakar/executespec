@@ -16,7 +16,6 @@ import java.util.Optional;
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.entity.ManagedAiUsageEvent;
 import com.navneet.executespec.billing.entity.ManagedAiUsagePeriod;
@@ -36,7 +35,7 @@ class ManagedAiUsageServiceTest {
   private ManagedAiUsageEventRepository eventRepo;
   private ManagedAiModelClassifier modelClassifier;
   private ManagedAiNotificationService notificationService;
-  private TierEnforcementService tierService;
+  private ManagedAiTierResolver tierResolver;
   private ManagedAiUsageService service;
 
   @BeforeEach
@@ -45,9 +44,9 @@ class ManagedAiUsageServiceTest {
     eventRepo = mock(ManagedAiUsageEventRepository.class);
     modelClassifier = mock(ManagedAiModelClassifier.class);
     notificationService = mock(ManagedAiNotificationService.class);
-    tierService = mock(TierEnforcementService.class);
+    tierResolver = mock(ManagedAiTierResolver.class);
     PipelineRunRepository pipelineRunRepository = mock(PipelineRunRepository.class);
-    when(tierService.resolveUserTier("u1")).thenReturn("PRO");
+    when(tierResolver.resolveUserTier("u1")).thenReturn("PRO");
 
     ManagedAiProperties properties = new ManagedAiProperties();
     ManagedAiProperties.TierPolicy policy = new ManagedAiProperties.TierPolicy();
@@ -71,8 +70,8 @@ class ManagedAiUsageServiceTest {
             new ManagedAiRoutingPolicy(),
             new ManagedAiUsageMapper(),
             new ManagedAiUsagePeriodService(
-                periodRepo, tierService, pipelineRunRepository, notificationService),
-            tierService);
+                periodRepo, tierResolver, pipelineRunRepository, notificationService),
+            tierResolver);
   }
 
   @Test
@@ -359,7 +358,7 @@ class ManagedAiUsageServiceTest {
 
   @Test
   void assertCanStartRunAllowsUngatedTier() {
-    when(tierService.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
+    when(tierResolver.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
     service.assertCanStartRun(userDetails(), false); // ungated -> no throw
     verify(periodRepo, never()).findCurrent(anyString(), any());
   }
