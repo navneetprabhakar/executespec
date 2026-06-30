@@ -8,7 +8,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.agent.RunKeyContext;
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.entity.ManagedAiUsagePeriod;
 import com.navneet.executespec.billing.repository.ManagedAiUsagePeriodRepository;
@@ -24,7 +23,7 @@ import lombok.RequiredArgsConstructor;
 class ManagedAiUsagePeriodService {
 
   private final ManagedAiUsagePeriodRepository periodRepository;
-  private final TierEnforcementService tierEnforcementService;
+  private final ManagedAiTierResolver tierResolver;
   private final PipelineRunRepository pipelineRunRepository;
   private final ManagedAiNotificationService notificationService;
 
@@ -92,9 +91,7 @@ class ManagedAiUsagePeriodService {
   ManagedAiUserContext resolveUser(String runId, RunKeyContext keys) {
     if (keys != null && keys.userId() != null && !keys.userId().isBlank()) {
       return new ManagedAiUserContext(
-          keys.userId(),
-          blankToNull(keys.orgId()),
-          tierEnforcementService.resolveUserTier(keys.userId()));
+          keys.userId(), blankToNull(keys.orgId()), tierResolver.resolveUserTier(keys.userId()));
     }
     PipelineRun run = runId == null ? null : pipelineRunRepository.findById(runId).orElse(null);
     if (run == null || run.getCreatedByUserId() == null || run.getCreatedByUserId().isBlank()) {
@@ -102,7 +99,7 @@ class ManagedAiUsagePeriodService {
     }
     String tier =
         run.getUserTier() == null || run.getUserTier().isBlank()
-            ? tierEnforcementService.resolveUserTier(run.getCreatedByUserId())
+            ? tierResolver.resolveUserTier(run.getCreatedByUserId())
             : run.getUserTier().trim().toUpperCase(Locale.ROOT);
     return new ManagedAiUserContext(run.getCreatedByUserId(), blankToNull(run.getOrgId()), tier);
   }

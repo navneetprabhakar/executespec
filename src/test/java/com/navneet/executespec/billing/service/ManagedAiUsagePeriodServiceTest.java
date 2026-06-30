@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.RunKeyContext;
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.entity.ManagedAiUsagePeriod;
 import com.navneet.executespec.billing.repository.ManagedAiUsagePeriodRepository;
@@ -25,7 +24,7 @@ import org.junit.jupiter.api.Test;
 class ManagedAiUsagePeriodServiceTest {
 
   private ManagedAiUsagePeriodRepository periodRepository;
-  private TierEnforcementService tierEnforcementService;
+  private ManagedAiTierResolver tierResolver;
   private PipelineRunRepository pipelineRunRepository;
   private ManagedAiNotificationService notificationService;
   private ManagedAiUsagePeriodService service;
@@ -33,13 +32,13 @@ class ManagedAiUsagePeriodServiceTest {
   @BeforeEach
   void setUp() {
     periodRepository = mock(ManagedAiUsagePeriodRepository.class);
-    tierEnforcementService = mock(TierEnforcementService.class);
+    tierResolver = mock(ManagedAiTierResolver.class);
     pipelineRunRepository = mock(PipelineRunRepository.class);
     notificationService = mock(ManagedAiNotificationService.class);
     when(periodRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     service =
         new ManagedAiUsagePeriodService(
-            periodRepository, tierEnforcementService, pipelineRunRepository, notificationService);
+            periodRepository, tierResolver, pipelineRunRepository, notificationService);
   }
 
   @Test
@@ -75,7 +74,7 @@ class ManagedAiUsagePeriodServiceTest {
 
   @Test
   void resolvesUserFromRunKeyContextBeforePipelineRunFallback() {
-    when(tierEnforcementService.resolveUserTier("u1")).thenReturn("PRO");
+    when(tierResolver.resolveUserTier("u1")).thenReturn("PRO");
 
     ManagedAiUserContext user = service.resolveUser("run-1", keys("u1", " "));
 
@@ -97,7 +96,7 @@ class ManagedAiUsagePeriodServiceTest {
     ManagedAiUserContext user = service.resolveUser("run-1", null);
 
     assertThat(user).isEqualTo(new ManagedAiUserContext("u2", "o2", "PRO"));
-    verify(tierEnforcementService, never()).resolveUserTier(anyString());
+    verify(tierResolver, never()).resolveUserTier(anyString());
   }
 
   @Test
@@ -105,7 +104,7 @@ class ManagedAiUsagePeriodServiceTest {
     PipelineRun run =
         PipelineRun.builder().runId("run-1").createdByUserId("u2").orgId("o2").build();
     when(pipelineRunRepository.findById("run-1")).thenReturn(Optional.of(run));
-    when(tierEnforcementService.resolveUserTier("u2")).thenReturn("TEAM");
+    when(tierResolver.resolveUserTier("u2")).thenReturn("TEAM");
 
     ManagedAiUserContext user = service.resolveUser("run-1", null);
 
