@@ -36,6 +36,12 @@ public class StripePaymentGateway implements PaymentGateway {
   @Value("${billing.stripe.pro-price-id:}")
   private String proPriceId;
 
+  @Value("${billing.stripe.pro-plus-price-id:}")
+  private String proPlusPriceId;
+
+  @Value("${billing.stripe.byok-price-id:}")
+  private String byokPriceId;
+
   @Value("${billing.stripe.enterprise-price-id:}")
   private String enterprisePriceId;
 
@@ -296,6 +302,63 @@ public class StripePaymentGateway implements PaymentGateway {
     }
   }
 
+  /** Create a one-time Stripe Checkout session for an arbitrary AI-credit top-up amount. */
+  @Override
+  public CheckoutResult createTopupCheckoutSession(
+      BillingEntity entity,
+      long amountUsdCents,
+      long aiCredits,
+      String topupId,
+      String successUrl,
+      String cancelUrl) {
+    if (amountUsdCents < 100) {
+      throw new IllegalArgumentException("amountUsdCents must be at least 100");
+    }
+    try {
+      SessionCreateParams.Builder builder =
+          SessionCreateParams.builder()
+              .setMode(SessionCreateParams.Mode.PAYMENT)
+              .setSuccessUrl(successUrl)
+              .setCancelUrl(cancelUrl)
+              .addLineItem(
+                  SessionCreateParams.LineItem.builder()
+                      .setQuantity(1L)
+                      .setPriceData(
+                          SessionCreateParams.LineItem.PriceData.builder()
+                              .setCurrency("usd")
+                              .setUnitAmount(amountUsdCents)
+                              .setProductData(
+                                  SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                                      .setName(aiCredits + " ExecuteSpec AI credits")
+                                      .build())
+                              .build())
+                      .build())
+              .putMetadata("billing_entity_id", entity.getId())
+              .putMetadata("billing_entity_type", entity.getEntityType())
+              .putMetadata("type", "ai_credit_topup")
+              .putMetadata("topup_id", topupId)
+              .putMetadata("ai_credits", String.valueOf(aiCredits))
+              .putMetadata("amount_usd_cents", String.valueOf(amountUsdCents));
+
+      if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {
+        builder.setCustomer(entity.getStripeCustomerId());
+      } else {
+        builder.setCustomerCreation(SessionCreateParams.CustomerCreation.ALWAYS);
+      }
+
+      Session session = Session.create(builder.build());
+      log.info(
+          "Stripe AI-credit topup checkout session created: sessionId={}, entityId={}, credits={}",
+          session.getId(),
+          entity.getId(),
+          aiCredits);
+      return new CheckoutResult(session.getUrl(), session.getId());
+    } catch (StripeException e) {
+      log.error("Failed to create Stripe AI-credit topup checkout: {}", e.getMessage(), e);
+      throw new RuntimeException("Stripe AI-credit topup checkout failed: " + e.getMessage(), e);
+    }
+  }
+
   /** Generate a Stripe Billing Portal URL for subscription self-management. */
   public String getCustomerPortalUrl(String stripeCustomerId, String returnUrl) {
     try {
@@ -358,6 +421,10 @@ public class StripePaymentGateway implements PaymentGateway {
     // Legacy string-pattern match on the planId string.
     String lower = planId.toLowerCase();
     if (lower.contains("enterprise")) return enterprisePriceId;
+    if (lower.contains("byok")) return byokPriceId;
+    if (lower.contains("pro_plus") || lower.contains("pro-plus")) {
+      return proPlusPriceId != null && !proPlusPriceId.isBlank() ? proPlusPriceId : proPriceId;
+    }
     if (lower.contains("team")) {
       return (lower.contains("inr") && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
           ? teamPriceIdInr
@@ -370,6 +437,10 @@ public class StripePaymentGateway implements PaymentGateway {
     switch (tier) {
       case "ENTERPRISE":
         return enterprisePriceId;
+      case "BYOK":
+        return byokPriceId;
+      case "PRO_PLUS":
+        return proPlusPriceId != null && !proPlusPriceId.isBlank() ? proPlusPriceId : proPriceId;
       case "TEAM":
         return (isInr && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
             ? teamPriceIdInr

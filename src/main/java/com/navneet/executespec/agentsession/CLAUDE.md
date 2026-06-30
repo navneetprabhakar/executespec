@@ -11,12 +11,17 @@ turns separately from runs.
   (`docs/plans/terminal-audit-register-2026-06-20.md`) and carry the relevant
   `TERM-AUDIT-SERVER-*` tag in docs/PRs.
 - `agent_session` / `agent_turn` are **not** `pipeline_run`. Open-ended conversation can inspect,
-  interpret, or propose work without becoming a billable execution run.
+  interpret, or propose work without becoming a billable execution run. Session list responses may
+  include a read-only latest linked-run summary (`latestLinkedRun*`) derived from the most recent
+  `agent_turn.linked_run_id`; this is operator UI recovery metadata, not a second run authority.
 - Cost-bearing or destructive actions are returned as typed confirmation-required proposals. This
   package must not approve a plan gate or create/approve a run implicitly from ambiguous chat text.
 - Streaming turns first emit and persist an orchestrator route decision. Non-run routes receive a
   read-only tool surface only; implementation/lifecycle/local/destructive decisions stop at a typed
-  proposal or rejection until the client performs an explicit confirmed action.
+  proposal or rejection until the client performs an explicit confirmed action. When WEB streaming
+  calls `SpecChatService` with the read-only allow-list, its system prompt must not advertise legacy
+  direct run-control tools; web run creation stays on the structured `create_cloud_run` proposal and
+  confirmation path.
 - `POST /api/orchestrator/turn` is the non-stream primary decision endpoint. It uses the same
   deterministic route/policy contract, persists `ORCHESTRATOR_DECISION`, and uses client `turnId`
   as the idempotency key.
@@ -57,7 +62,7 @@ turns separately from runs.
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionService.java`                 | Session access checks, high-level orchestration, and API-facing service delegation.                                                                                                                                 |
-| `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, and stored trace hydration.                                                                       |
+| `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, stored trace hydration, and latest linked-run summary hydration for reloadable operator UIs.       |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |
 | `AgentOrchestratorTurnService.java`        | Creates structured orchestrator turns: idempotent replay, request policy downgrade, project read check, turn persistence, trace event append, and session title/timestamp update.                                   |
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
@@ -94,7 +99,7 @@ turns separately from runs.
 | `OrchestratorRoutingEvalController.java`   | SUPER_ADMIN operator endpoint for credentialed prompt-eval runs.                                                                                                                                                    |
 | `AgentActionCatalog.java`                  | Static action catalog exposed to clients and future LLM intent prompts. One private action-definition source emits both descriptors and capability tools so surface/tier/billing metadata cannot drift.             |
 | `entity/*`                                 | `AgentSession`, `AgentTurn`, `AgentActionEvent`, `AgentUsageLedger`.                                                                                                                                                |
-| `dto/AgentSessionDtos.java`                | Shared DTO records for CLI/VS Code.                                                                                                                                                                                 |
+| `dto/AgentSessionDtos.java`                | Shared DTO records for web/CLI/VS Code, including additive `AgentSessionResponse.latestLinkedRun*` fields for sandbox operator recovery.                                                                            |
 
 ## Migration Trail
 
@@ -128,8 +133,9 @@ turns separately from runs.
 - `AgentGuardIntentsTest` pins pre-routing guard behavior: empty messages clarify, unsafe requests
   reject, and explicit no-edit/chat-only instructions cannot call the run API.
 - `AgentRunLifecycleIntentsTest` pins lifecycle command routing directly: approve/reject/cancel
-  require run ids and confirmation actions, list-runs/list-gates stays read-only, and unrelated
-  prompts are not claimed by lifecycle routing.
+  require imperative command wording plus run ids and confirmation actions, list-runs/list-gates
+  stays read-only, and approval-boundary wording inside code-run requests (for example "do not
+  code until I approve") is not claimed by lifecycle routing.
 - `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency and propagation of
   `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
@@ -168,9 +174,9 @@ turns separately from runs.
   required-arg rejection.
 - `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
   routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
-- `AgentSessionReadServiceTest` pins active-session pagination, owned-session loading,
-  missing/forbidden session rejection, event listing, bounded turn pagination, and stored trace
-  hydration.
+- `AgentSessionReadServiceTest` pins active-session pagination, latest linked-run summary
+  hydration for session rows, owned-session loading, missing/forbidden session rejection, event
+  listing, bounded turn pagination, and stored trace hydration.
 - `AgentSessionCreationServiceTest` pins requested-id idempotency, ownership rejection, run-scoped
   project resolution, provider preference update, model gate calls, and run/project mismatch
   rejection.

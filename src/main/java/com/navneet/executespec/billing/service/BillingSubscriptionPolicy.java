@@ -17,7 +17,14 @@ import lombok.extern.slf4j.Slf4j;
 class BillingSubscriptionPolicy {
 
   private static final Map<String, Integer> TIER_RANK =
-      Map.of("FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "ENTERPRISE", 4);
+      Map.of(
+          "FREE", 0,
+          "STARTER", 1,
+          "PRO", 2,
+          "PRO_PLUS", 3,
+          "BYOK", 4,
+          "TEAM", 4,
+          "ENTERPRISE", 5);
 
   private final TierConfigRepository tierConfigRepository;
 
@@ -31,9 +38,9 @@ class BillingSubscriptionPolicy {
 
   int effectiveSeats(BillingPlan plan, int requestedSeats) {
     if ("TEAM".equals(plan.getTier())) {
-      if (requestedSeats < 1 || requestedSeats > 20) {
+      if (requestedSeats < 2 || requestedSeats > 20) {
         throw new BillingException(
-            "TEAM tier requires 1-20 seats (got "
+            "TEAM tier requires 2-20 seats (got "
                 + requestedSeats
                 + "). Contact sales for larger orgs.");
       }
@@ -49,7 +56,15 @@ class BillingSubscriptionPolicy {
     if (!plan.isActive()) {
       throw new BillingException("This plan is no longer available.");
     }
-    if (!"LISTED".equals(plan.getLifecycleState()) || !tierIsListed(plan.getTier())) {
+    boolean hiddenProPlus =
+        "PRO_PLUS".equals(plan.getTier())
+            && "HIDDEN".equals(plan.getLifecycleState())
+            && !tierIsListed(plan.getTier());
+    if ("SUNSETTING".equals(plan.getLifecycleState())
+        || (!"LISTED".equals(plan.getLifecycleState()) && !hiddenProPlus)) {
+      throw new BillingException("This plan is not available for new subscriptions.");
+    }
+    if (!tierIsListed(plan.getTier()) && !hiddenProPlus) {
       throw new BillingException("This plan is not available for new subscriptions.");
     }
     if ("FREE".equals(plan.getTier())) {

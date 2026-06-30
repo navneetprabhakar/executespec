@@ -200,8 +200,7 @@ class RunOrchestratorReviewerRouteTest {
 
     RunOrchestrator.StatusAndReason terminal =
         RunOrchestrator.resolveTerminalStatus(
-            ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build(),
-            review);
+            ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build(), review);
 
     assertThat(review.overall()).isEqualTo(ReviewerResult.Overall.REVIEW_FAILED);
     assertThat(terminal.status()).isEqualTo("PARTIAL");

@@ -42,8 +42,7 @@ class ModelProviderRankingPolicyTest {
   void ranksByCostWhenQualityIsInsideTieBand() {
     ModelProviderScore expensiveNearQuality =
         score("anthropic", "sonnet", 90.8, 80, 5.00, 200, "BUG_FIX");
-    ModelProviderScore cheapNearQuality =
-        score("deepseek", "v4", 90.0, 80, 0.30, 1_500, "BUG_FIX");
+    ModelProviderScore cheapNearQuality = score("deepseek", "v4", 90.0, 80, 0.30, 1_500, "BUG_FIX");
 
     ModelProviderRankingDecision decision =
         new ModelProviderRankingPolicy(1.0).rank(List.of(expensiveNearQuality, cheapNearQuality));
@@ -61,7 +60,8 @@ class ModelProviderRankingPolicyTest {
         score("deepseek", "v4", 90.0, 80, 0.30, 1_500, "BUG_FIX");
 
     ModelProviderRankingDecision decision =
-        new ModelProviderRankingPolicy(1.0).rank(List.of(expensiveClearlyBetter, cheapLowerQuality));
+        new ModelProviderRankingPolicy(1.0)
+            .rank(List.of(expensiveClearlyBetter, cheapLowerQuality));
 
     assertThat(decision.selected()).contains(expensiveClearlyBetter);
     assertThat(decision.eligible()).containsExactly(expensiveClearlyBetter, cheapLowerQuality);
@@ -69,8 +69,7 @@ class ModelProviderRankingPolicyTest {
 
   @Test
   void nearQualityBandsAreAnchoredFromBestRemainingQuality() {
-    ModelProviderScore bestExpensive =
-        score("anthropic", "sonnet", 91.5, 80, 5.00, 200, "BUG_FIX");
+    ModelProviderScore bestExpensive = score("anthropic", "sonnet", 91.5, 80, 5.00, 200, "BUG_FIX");
     ModelProviderScore middleCheap = score("deepseek", "v4", 90.8, 80, 0.30, 1_500, "BUG_FIX");
     ModelProviderScore lowerCheap = score("openai", "mini", 90.0, 80, 0.20, 400, "BUG_FIX");
 

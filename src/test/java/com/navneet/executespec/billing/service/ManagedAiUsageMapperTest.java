@@ -70,6 +70,7 @@ class ManagedAiUsageMapperTest {
         mapper.toBalanceResponse(period, policy(), true, ManagedAiRoutingPolicy.VALUE_MODE);
 
     assertThat(response.aiCreditsRemaining()).isEqualTo(1550);
+    assertThat(response.purchasedAiCredits()).isZero();
     assertThat(response.rawCogsRemainingUsd()).isEqualTo(8.5);
     assertThat(response.frontierRawRemainingUsd()).isEqualTo(2.75);
     assertThat(response.routingState()).isEqualTo(ManagedAiRoutingPolicy.VALUE_MODE);

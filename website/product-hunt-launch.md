@@ -1,7 +1,7 @@
 # Product Hunt Launch Kit — ExecuteSpec
 
 > **Refreshed 2026-06-10** (RL-2026-06-019 truth pass). All pricing/claims in this kit now match the
-> billing DB (Free / Pro $29 / Team $39/seat / Enterprise) and the honest-claims policy
+> billing DB (Free / Pro $29 / Team $50/seat / Enterprise) and the honest-claims policy
 > (`docs/enterprise-one-pager.md`: no SOC 2, no SAML-end-to-end, no benchmark numbers until the
 > rebuilt eval lands). Source of truth for live copy: `website/index.html` + the app's
 > `PublicPricingPage`.
@@ -19,7 +19,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 | **Alt tagline** | 60 | `Spec in. Verified, test-backed pull request out.` (49) |
 | **Description** | 260 | See §2 |
 | **Topics** | 3 | `Developer Tools` · `Artificial Intelligence` · `Productivity` |
-| **Pricing tag** | — | `Freemium` (Free → $29 Pro → $39/seat Team BYOK → Enterprise) |
+| **Pricing tag** | — | `Freemium` (Free → $20 Pro → $50 BYOK → $50/seat Team → Enterprise) |
 | **Platforms** | — | `Web` |
 | **Website** | — | `https://executespec.ai` |
 | **Demo video** | — | TODO — 60-90s: spec → plan gate (with price) → live execution → verified score → real PR |
@@ -44,9 +44,13 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 >
 > **How pricing works (because this is what trips everyone up):**
 > - **1 credit ≈ $5 of model spend.** A run costs 1–N credits based on its estimate, shown before you approve.
-> - **Free**: 15 runs/month, no card. Small specs, $3/run cap.
-> - **Pro ($29/mo or $289/yr)**: 30 runs/month on managed keys — we pay the LLM. $5/run cap; bring your own key to lift it.
-> - **Team ($39/seat/mo, from 1 seat)**: BYOK — unlimited runs on your own Anthropic/OpenAI/Gemini keys, zero per-run markup. Org spend caps + approval thresholds.
+> - **Free**: 200 AI credits/month, no card. Native DeepSeek low-price route only.
+> - **Pro ($20/mo)**: 2,000 AI credits/month on managed keys with all default models.
+> - **Pro+ ($100/mo)**: hidden managed-credit upsell for high-usage Pro users, 125,000 AI credits/month.
+> - **BYOK ($50/mo)**: single-person org, mandatory provider keys, model matrix, no provider markup.
+> - **Team ($50/seat/mo)**: 2-seat minimum, BYOK, shared org controls, customer provider quota.
+> - **BYOK ($50/mo)**: single-person org, mandatory provider keys, model matrix, zero provider markup.
+> - **Team ($50/seat/mo, from 2 seats)**: BYOK — unlimited runs on your own Anthropic/OpenAI/Gemini keys, zero per-run markup. Org spend caps + approval thresholds.
 > - **Enterprise**: custom contract + signed DPA, per-org model matrix control, per-run model pins.
 >
 > **The hard truths:**
@@ -61,7 +65,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 A: Those are copilots — they help you write code inline, and you validate the result. ExecuteSpec is a delivery pipeline: spec goes in, a verified PR comes out. If you live in your IDE, Cursor is great. If you want to hand off a spec and come back to a PR with a deterministic verified score, that's us. Many devs use both.
 
 **Q: Can I use my own API keys?**
-A: Yes. Team ($39/seat/mo) is BYOK — you pay Anthropic/OpenAI/Google directly, zero per-run markup; the seat fee covers the platform. Pro can optionally add a key to lift its $5/run cap. Free + Pro otherwise run on our managed keys.
+A: Yes. BYOK ($50/mo) and Team ($50/seat/mo) use your Anthropic/OpenAI/Google keys directly with zero provider markup. Free + Pro run on managed keys.
 
 **Q: Why should I trust the verified score?**
 A: Because it's deterministic and additive over real signals: code delivered (30) + build passing (25) + your own test suite's pass rate (20) + reviewer verdict (20) + unfixed criticals (5), averaged over the slots that actually fired. No LLM self-rating. The formula is public.
@@ -122,7 +126,7 @@ https://executespec.ai`
 >
 > And before any of that runs, you approve the plan — with a cost estimate — at a gate. Credits charge on approval, refund on failure.
 >
-> Free: 15 runs/mo. Pro $29/mo. Team $39/seat BYOK (your keys, zero markup). Live on Product Hunt today: [link]
+> Free: 200 AI credits/mo. Pro $20/mo. BYOK $50/mo. Team $50/seat BYOK (your keys, zero markup). Live on Product Hunt today: [link]
 
 ## 8 · Advertising kickoff (US-targeted)
 
@@ -134,7 +138,7 @@ Ad group 1 — alternatives steal:
 > **H1:** ExecuteSpec — Ship, Don't Just Write
 > **H2:** 0-100 Verified Score on Every Run
 > **H3:** Delegate Specs, Merge Verified PRs
-> **Description:** Plan gate with price up front. Deterministic verified score. Multi-repo, BYOK. Free 15 runs/mo; Pro $29/mo; Team $39/seat.
+> **Description:** Plan gate with price up front. Deterministic verified score. Multi-repo, BYOK. Free 200 AI credits/mo; Pro $20/mo; BYOK $50/mo; Team $50/seat.
 > **CTA:** Start free → no card
 
 Ad group 2 — problem-aware:

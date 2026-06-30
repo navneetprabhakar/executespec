@@ -44,8 +44,10 @@ public class RunDetail {
 
   String planJson;
   String reviewJson;
+
   /** Durable final run-level goal proof derived from the validation-report ledger. */
   JsonNode runGoalDoneness;
+
   List<TaskSummary> tasks;
   IntegrationSource integrationSource; // null for manual runs
 

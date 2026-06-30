@@ -94,11 +94,11 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isEqualTo(0.10);
-    assertThat(period.getAiCreditsUsed()).isEqualTo(13);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(16);
     ArgumentCaptor<ManagedAiUsageEvent> event = ArgumentCaptor.forClass(ManagedAiUsageEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getSourceType()).isEqualTo("PLATFORM");
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
   }
 
   @Test
@@ -225,7 +225,7 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isCloseTo(4.05, offset(0.000001));
-    assertThat(period.getAiCreditsUsed()).isEqualTo(500);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(503);
     assertThat(period.getRoutingState()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
     verify(notificationService)
         .notifyTransition(period, ManagedAiUsageService.FULL, ManagedAiUsageService.VALUE_MODE);
@@ -233,7 +233,7 @@ class ManagedAiUsageServiceTest {
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getRoutingStateBefore()).isEqualTo(ManagedAiUsageService.FULL);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(
@@ -310,7 +310,7 @@ class ManagedAiUsageServiceTest {
     assertThat(event.getValue().getRoutingStateBefore())
         .isEqualTo(ManagedAiUsageService.VALUE_MODE);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.CHEAP_ONLY);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(

@@ -9,7 +9,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Project           | `1.0.0-M1`          | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V250`              | `src/main/resources/db/migration/V250_*.sql`                           |
+| Flyway head       | `V253`              | `src/main/resources/db/migration/V253_*.sql`                           |
 | Frontend          | `1.0.0-M1`          | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -22,12 +22,12 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V250                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V253                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
-| GCS / Cloud Run     | google-cloud-{storage, run, build, artifact-registry, resourcemanager, secretmanager} | [`pom.xml`](pom.xml) deps 23–29                                                |
-| Code intelligence   | JGit 6.9.0, JavaParser 3.28.1 (no symbol-solver), Tika 3.3.0                        | [`pom.xml`](pom.xml) deps 9–11, 59                                              |
+| GCS / Cloud Run     | google-cloud-{storage, run, build, artifact-registry, resourcemanager, secretmanager}; xDS and Conscrypt transitive clients are excluded from the fat JAR | [`pom.xml`](pom.xml) deps 23–29                                                |
+| Code intelligence   | JGit 6.9.0, JavaParser 3.28.1 (no symbol-solver), Tika 3.3.0 with document/code/text/PDF/Microsoft parsers retained and unsupported Apple/audio/CAD/crypto/font/image/mail/news/OCR/package/webarchive/XMP parsers excluded | [`pom.xml`](pom.xml) deps 9–11, 59                                              |
 | Observability       | Micrometer + OTel bridge + Prometheus registry; structured JSON via logstash encoder; local Grafana / Prometheus / Tempo stack | [`pom.xml`](pom.xml) deps 40–48, [`observability/docker-compose.yml`](observability/docker-compose.yml) |
 | Build               | Maven; Spotless 3.4.0 (google-java-format 1.22.0), JaCoCo 0.8.14, Surefire (excludes `e2e,integration,chaos`) | [`pom.xml`](pom.xml) `<build><plugins>` |
 | Frontend            | React 18.3, React Router 6.22, Zustand 4.5, TypeScript 5.3, Tailwind CSS 4.3, Vite 5.1 | [`frontend/package.json`](frontend/package.json), [`frontend/vite.config.ts`](frontend/vite.config.ts), [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts) |
@@ -155,7 +155,7 @@ npm run lint                    # eslint (--max-warnings 9999; severity gated vi
 npm run lint:fix                # eslint --fix
 ```
 
-`npm run build` writes the production bundle into `src/main/resources/static` with `emptyOutDir: true`, so it wipes and rebuilds the Spring Boot static folder. Run `mvn package` afterward to embed the bundle in the JAR.
+`npm run build` writes the production bundle into `src/main/resources/static` with `emptyOutDir: true`, so it wipes and rebuilds the Spring Boot static folder. Run `mvn package` afterward to embed the bundle in the JAR. The fat JAR intentionally prunes unused heavyweight transitive dependencies from Spring AI Anthropic, Tika, and Google client libraries; keep `DocumentExtractorTest` green when changing parser exclusions.
 
 ## Where to go next
 

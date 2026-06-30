@@ -283,15 +283,15 @@ public class OrgController {
             userDetails.getUser().getId()));
   }
 
-  // Org-level model-matrix overrides (F3, ENTERPRISE)
+  // Org-level model-matrix overrides (F3, BYOK/TEAM/ENTERPRISE)
 
   record ModelOverridesRequest(Map<String, String> overrides) {}
 
   /**
    * The matrix defaults + this org's per-(provider, tier) overrides + the picker options. Readable
-   * by any org admin (so the grid renders for everyone); only ENTERPRISE orgs may save — the PUT
-   * 403s otherwise. {@code editable} lets the UI render the grid read-only with an upgrade note for
-   * non-Enterprise tiers.
+   * by any org admin (so the grid renders for everyone); only BYOK/TEAM/ENTERPRISE orgs may save —
+   * the PUT 403s otherwise. {@code editable} lets the UI render the grid read-only with an upgrade
+   * note for lower tiers.
    */
   record ModelMatrixView(
       String tier,
@@ -325,7 +325,7 @@ public class OrgController {
   private ModelMatrixView buildMatrixView(String orgId) {
     Org org = orgRepo.findById(orgId).orElse(null);
     String tier = org != null ? org.getTier() : null;
-    boolean editable = "ENTERPRISE".equalsIgnoreCase(tier);
+    boolean editable = orgModelOverrideService.canEditMatrix(tier);
 
     List<String> providers = new ArrayList<>();
     for (LlmProvider p : LlmProvider.values()) providers.add(p.name().toLowerCase());

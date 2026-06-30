@@ -54,7 +54,7 @@ describe('ExtraPages', () => {
     expect(host.textContent).toContain('TEAM');
     expect(host.textContent).toContain('$39');
     expect(host.textContent).toContain('ENTERPRISE');
-    expect(host.textContent).toContain('$1 = 100 credits');
+    expect(host.textContent).toContain('$1 = 125 credits');
   });
 
   it('accepts project invite links through the project invite endpoint', async () => {

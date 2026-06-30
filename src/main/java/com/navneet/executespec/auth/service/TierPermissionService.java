@@ -284,7 +284,8 @@ public class TierPermissionService {
     int maxApply = resolveMaxApplySuggestions(tier);
     int maxPreviews = resolveMaxPreviewStarts(tier);
     // V165 — MAX deprecated, BYOK now lives on TEAM + ENTERPRISE.
-    boolean isTeamOrEnterprise = "TEAM".equals(tier) || "ENTERPRISE".equals(tier);
+    boolean isTeamOrEnterprise =
+        "TEAM".equals(tier) || "BYOK".equals(tier) || "ENTERPRISE".equals(tier);
     boolean isFree = "FREE".equals(tier);
 
     // R8 (2026-05-01 follow-up Task 9 + R8) — solo TEAM/ENT users

@@ -1727,7 +1727,9 @@ public class WorkerAgent {
     }
     List<String> results =
         calls.stream()
-            .map(c -> safeId(c.id()) + ":" + c.name() + "=" + envelopeStatus(out.get(safeId(c.id()))))
+            .map(
+                c ->
+                    safeId(c.id()) + ":" + c.name() + "=" + envelopeStatus(out.get(safeId(c.id()))))
             .toList();
     log.info(
         "WorkerAgent parallelReadDispatch DONE run={} task={} results={}",

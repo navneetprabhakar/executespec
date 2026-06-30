@@ -14,14 +14,23 @@ final class AgentRunLifecycleIntents {
   private AgentRunLifecycleIntents() {}
 
   static Optional<OrchestratorDecision> decide(String message, String lower) {
-    if (AgentIntentPatterns.containsAny(lower, "approve", "approved")) {
+    if (looksLikeApproveCommand(lower)) {
       return Optional.of(approveDecision(message));
     }
-    if (AgentIntentPatterns.containsAny(lower, "reject", "cancel", "decline")) {
+    if (looksLikeRejectOrCancelCommand(lower)) {
       return Optional.of(rejectOrCancelDecision(message, lower));
     }
     if (AgentIntentPatterns.containsAny(
-            lower, "pending approval", "awaiting approval", "approval", "gates")
+            lower,
+            "pending approval",
+            "awaiting approval",
+            "approval gate",
+            "approval gates",
+            "waiting approvals",
+            "waiting approval",
+            "list approvals",
+            "show approvals",
+            "gates")
         || AgentIntentPatterns.containsAny(
             lower, "list runs", "show runs", "recent runs", "run status")) {
       return Optional.of(
@@ -33,6 +42,22 @@ final class AgentRunLifecycleIntents {
               "I will list runs or gates without creating a new run."));
     }
     return Optional.empty();
+  }
+
+  private static boolean looksLikeApproveCommand(String lower) {
+    String text = lower.trim();
+    return text.matches("^(please\\s+)?approve(\\s+.*)?$")
+        || text.matches("^(please\\s+)?approved(\\s+.*)?$")
+        || text.matches(".*\\bapprove\\s+run\\b.*")
+        || text.matches(".*\\bapprove\\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b.*");
+  }
+
+  private static boolean looksLikeRejectOrCancelCommand(String lower) {
+    String text = lower.trim();
+    return text.matches("^(please\\s+)?(reject|cancel|decline)(\\s+.*)?$")
+        || text.matches(".*\\b(reject|cancel|decline)\\s+run\\b.*")
+        || text.matches(
+            ".*\\b(reject|cancel|decline)\\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b.*");
   }
 
   private static OrchestratorDecision approveDecision(String message) {

@@ -88,7 +88,8 @@ class BillingServiceStripeTest {
           new BillingTierBridgeService(
               userRepo, mock(OrgRepository.class), planRepo, subRepo, notificationService),
           new BillingSubscriptionWriter(subRepo),
-          new BillingWebhookEventRecorder(webhookRepo));
+          new BillingWebhookEventRecorder(webhookRepo),
+          mock(RunTopupService.class));
 
   @Test
   void stripeCheckoutCompletedRewritesCheckoutSessionIdToSubscriptionId() {
@@ -196,10 +197,10 @@ class BillingServiceStripeTest {
     when(gatewayRouter.resolveByName("stripe")).thenReturn(stripeGateway);
     when(stripeGateway.gatewayType()).thenReturn("STRIPE");
     when(stripeGateway.createCheckoutSession(
-            billingEntity, newPlanId.toString(), 1, "/ok", "/cancel"))
+            billingEntity, newPlanId.toString(), 2, "/ok", "/cancel"))
         .thenReturn(new CheckoutResult("https://checkout.example/session", "cs_upgrade"));
 
-    service.subscribe("user-1", newPlanId, "stripe", "/ok", "/cancel", 1);
+    service.subscribe("user-1", newPlanId, "stripe", "/ok", "/cancel", 2);
 
     verify(stripeGateway, never()).cancelSubscription("sub_old");
     verify(razorpayGateway, never()).cancelImmediately("sub_old");

@@ -35,6 +35,12 @@ public final class AgentSessionDtos {
       String defaultModel,
       String defaultExecutionMode,
       String approvalPolicy,
+      String latestLinkedRunId,
+      String latestLinkedRunStatus,
+      String latestLinkedRunTitle,
+      Instant latestLinkedRunStartedAt,
+      Instant latestLinkedRunCompletedAt,
+      String latestLinkedRunPrUrl,
       Instant createdAt,
       Instant updatedAt) {}
 

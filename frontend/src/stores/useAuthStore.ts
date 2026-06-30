@@ -146,11 +146,15 @@ export const selectIsOrgMember = (s: AuthStore) =>
  * Falls back to FREE when nothing is set so consumers don't have to handle
  * undefined.
  */
-export const selectNormalizedTier = (s: AuthStore): 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE' => {
+export const selectNormalizedTier = (
+  s: AuthStore,
+): 'FREE' | 'PRO' | 'PRO_PLUS' | 'BYOK' | 'TEAM' | 'ENTERPRISE' => {
   const raw = (s.user?.tier ?? '').toString().toUpperCase();
   // Legacy MAX rows still in flight from grandfathered users — coerce.
   if (raw === 'MAX') return 'TEAM';
   if (raw === 'PRO') return 'PRO';
+  if (raw === 'PRO_PLUS') return 'PRO_PLUS';
+  if (raw === 'BYOK') return 'BYOK';
   if (raw === 'TEAM') return 'TEAM';
   if (raw === 'ENTERPRISE') return 'ENTERPRISE';
   // Anything else (blank, FREE, unknown new tier) → FREE.

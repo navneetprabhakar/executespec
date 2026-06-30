@@ -223,7 +223,7 @@ export function IdeBilling() {
           </div>
 
           {/* Managed-AI usage is separate from run credits: run credits reserve work at
-              approval, while ES AI credits debit per successful model call. */}
+              approval, while AI credits debit per successful model call. */}
           <SectionTitle>Managed AI</SectionTitle>
           <div className='ide-card'>
             {managedAi ? (
@@ -246,10 +246,10 @@ export function IdeBilling() {
                         color: 'var(--ide-fg-bright)',
                       }}
                     >
-                      ES AI credits
+                      AI credits
                     </div>
                     <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                      $1 = 100 ES AI credits. Frontier calls step down automatically near policy
+                      $1 = 125 AI credits. Frontier calls step down automatically near policy
                       thresholds.
                     </div>
                   </div>
@@ -271,18 +271,28 @@ export function IdeBilling() {
                     borderTop: '1px solid var(--ide-border)',
                   }}
                 >
-                  <Stat
-                    label='Credits used'
-                    value={
-                      managedAi.managed === false
-                        ? 'Not applicable'
-                        : `${managedAi.aiCreditsUsed} / ${managedAi.includedAiCredits}`
-                    }
-                  />
-                  <Stat
-                    label={managedAi.managed === false ? 'Credit mode' : 'Credits left'}
-                    value={managedAi.managed === false ? 'Own keys' : managedAi.aiCreditsRemaining}
-                  />
+                  {(() => {
+                    const totalCredits =
+                      managedAi.includedAiCredits + (managedAi.purchasedAiCredits ?? 0);
+                    return (
+                      <>
+                        <Stat
+                          label='Credits used'
+                          value={
+                            managedAi.managed === false
+                              ? 'Not applicable'
+                              : `${managedAi.aiCreditsUsed} / ${totalCredits}`
+                          }
+                        />
+                        <Stat
+                          label={managedAi.managed === false ? 'Credit mode' : 'Credits left'}
+                          value={
+                            managedAi.managed === false ? 'Own keys' : managedAi.aiCreditsRemaining
+                          }
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
                 {managedAiEvents.length > 0 && (
                   <div style={{marginTop: 14, borderTop: '1px solid var(--ide-border)'}}>

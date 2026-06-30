@@ -115,8 +115,7 @@ public class ValidationReportGoalProofEvaluator {
           incompleteWith(
               incomplete, "reviewer found unresolved or failed implementation quality evidence"),
           evidence,
-          risksWith(
-              risks, "reviewer low-quality evidence may require model/provider escalation"),
+          risksWith(risks, "reviewer low-quality evidence may require model/provider escalation"),
           false,
           true);
     }

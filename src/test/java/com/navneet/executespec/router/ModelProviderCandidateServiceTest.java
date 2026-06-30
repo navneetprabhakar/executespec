@@ -28,7 +28,8 @@ class ModelProviderCandidateServiceTest {
     service =
         new ModelProviderCandidateService(
             modelRegistry, performanceTracker, benchmarkRunRepository);
-    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE")).thenReturn(List.of());
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(List.of());
     Map<String, ModelMatrixProperties.ModelConfig> models = new LinkedHashMap<>();
     models.put("claude-sonnet-4-6", model("anthropic", "HIGH", "CAPABLE", 3.0, 15.0, 200_000));
     models.put("gpt-5.4-mini", model("openai", "STANDARD", "UTILITY", 0.2, 0.6, 256_000));

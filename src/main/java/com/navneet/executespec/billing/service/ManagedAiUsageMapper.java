@@ -65,7 +65,8 @@ class ManagedAiUsageMapper {
       ManagedAiProperties.TierPolicy policy,
       boolean managed,
       String state) {
-    long remaining = Math.max(0, period.getIncludedAiCredits() - period.getAiCreditsUsed());
+    long totalCredits = period.getIncludedAiCredits() + period.getPurchasedAiCredits();
+    long remaining = Math.max(0, totalCredits - period.getAiCreditsUsed());
     double hard = policy.effectiveHardStopUsd();
     return new ManagedAiBalanceResponse(
         period.getUserId(),
@@ -75,6 +76,7 @@ class ManagedAiUsageMapper {
         period.getPeriodStart(),
         period.getPeriodEnd(),
         period.getIncludedAiCredits(),
+        period.getPurchasedAiCredits(),
         period.getAiCreditsUsed(),
         remaining,
         period.getRawCogsCapUsd(),

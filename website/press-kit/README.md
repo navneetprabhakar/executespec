@@ -29,7 +29,7 @@ _For Product Hunt launch, advertising, and press contacts. Last refreshed 2026-0
 >
 > Built for the merge step rather than the typing step: where Cursor, GitHub Copilot, and Continue suggest code at the cursor and leave validation to you, ExecuteSpec runs the validation itself and only opens a PR when it's ready (or labels it Needs review / Failed when it isn't).
 >
-> Multi-repo project workspaces with architecture docs, tech-debt panels, project memory, and RAG-powered project chat. Four tiers: **Free** (5 lifetime runs + 5 per friend you invite, cap 25), **Pro** ($20/mo, unlimited managed runs solo), **Team** ($39/seat/month, minimum 2 seats, BYOK + per-seat collab + audit log + SSO), **Enterprise** (SOC 2 + signed DPA + dedicated infra + custom MSA). Anonymous trial — no signup for the first preview. Built for US + global engineering teams.
+> Multi-repo project workspaces with architecture docs, tech-debt panels, project memory, and RAG-powered project chat. Current self-serve tiers: **Free** (200 AI credits/month, native DeepSeek only), **Pro** ($20/mo, 2,000 AI credits), **BYOK** ($50/mo single-person org, own provider keys), **Team** ($50/seat/month, minimum 2 seats, BYOK + collaboration + audit log), **Enterprise** (custom contract + DPA path). Built for US + global engineering teams.
 
 ## Founding story (1 paragraph)
 
@@ -98,7 +98,7 @@ Use `current/` for investor, website, Product Hunt, and deck work. These capture
 
 ## Boilerplate (for use in articles, partner listings, etc.)
 
-> ExecuteSpec is a spec-driven AI coding platform that turns a plain-English requirement into a reviewable pull request. The workflow is plan, approve cost, build, test, review, and open a PR with a deterministic verified score and evidence ledger. Multi-repo project workspaces, plan approval, project memory, PR/code review, and BYOK are built in. Pricing: Free (15 runs/month), Pro ($29/month for 30 managed runs), Team ($39/seat/month from 1 seat, BYOK), Enterprise (custom contract + DPA path). Try free at https://executespec.ai.
+> ExecuteSpec is a spec-driven AI coding platform that turns a plain-English requirement into a reviewable pull request. The workflow is plan, approve cost, build, test, review, and open a PR with a deterministic verified score and evidence ledger. Multi-repo project workspaces, plan approval, project memory, PR/code review, and BYOK are built in. Pricing: Free (200 AI credits/month), Pro ($20/month for 2,000 AI credits), BYOK ($50/month single-person org), Team ($50/seat/month from 2 seats), Enterprise (custom contract + DPA path). Try free at https://executespec.ai.
 
 ## Press availability
 

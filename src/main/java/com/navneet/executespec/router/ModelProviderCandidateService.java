@@ -93,7 +93,8 @@ public class ModelProviderCandidateService {
     int parallelism = Math.min(entries.size(), maxParallelTasks());
     List<String> labels = entries.stream().map(this::candidateLabel).toList();
     log.info(
-        "ModelProviderCandidateService parallelProviderEvaluation START count={} parallelism={} labels={}",
+        "ModelProviderCandidateService parallelProviderEvaluation START count={} parallelism={}"
+            + " labels={}",
         entries.size(),
         parallelism,
         labels);
@@ -119,11 +120,13 @@ public class ModelProviderCandidateService {
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       log.warn(
-          "ModelProviderCandidateService parallelProviderEvaluation interrupted; falling back to sequential");
+          "ModelProviderCandidateService parallelProviderEvaluation interrupted; falling back to"
+              + " sequential");
       return buildSignalsSequential(entries, request, false);
     } catch (ExecutionException | RuntimeException ex) {
       log.warn(
-          "ModelProviderCandidateService parallelProviderEvaluation failed: {}; falling back to sequential",
+          "ModelProviderCandidateService parallelProviderEvaluation failed: {}; falling back to"
+              + " sequential",
           ex.getMessage());
       return buildSignalsSequential(entries, request, false);
     }
@@ -246,7 +249,8 @@ public class ModelProviderCandidateService {
       return List.of();
     }
     try {
-      List<BenchmarkRun> runs = benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE");
+      List<BenchmarkRun> runs =
+          benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE");
       if (runs == null || runs.isEmpty()) {
         return List.of();
       }
@@ -264,7 +268,8 @@ public class ModelProviderCandidateService {
       BenchmarkRun run, String taskCategory, int minSampleTasks) {
     double resolvedRate = (run.getResolvedTasks() * 100.0) / run.getTotalTasks();
     boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
-    boolean compatibleTaskCategory = benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
+    boolean compatibleTaskCategory =
+        benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
     return ModelProviderCapabilitySignal.builder()
         .provider(run.getProvider())
         .model(run.getModel())
@@ -338,10 +343,7 @@ public class ModelProviderCandidateService {
   private static String normalizeBenchmarkLabel(String value) {
     return value == null
         ? ""
-        : value.trim()
-            .toLowerCase(Locale.ROOT)
-            .replace('-', '_')
-            .replace(' ', '_');
+        : value.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
   }
 
   private static String safeLabel(String value) {

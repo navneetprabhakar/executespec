@@ -64,8 +64,7 @@ public class GoalContinuationPolicy {
             escalation.get().decision(),
             "BENCHMARK_PRIOR_REQUIRED");
       }
-      if (request.expensiveContinuationRequiresConfirmation()
-          && !userConfirmedForEscalation) {
+      if (request.expensiveContinuationRequiresConfirmation() && !userConfirmedForEscalation) {
         return blockedEscalationDecision(
             RunContinuationDecision.STOP_BLOCKED,
             escalation.get().selectedCandidate(),
@@ -130,8 +129,7 @@ public class GoalContinuationPolicy {
   private Optional<GoalContinuationPolicyDecision> escalationDecision(
       GoalContinuationRequest request) {
     if (requiresBenchmarkPriorForAutomaticAction(request)) {
-      Optional<GoalContinuationPolicyDecision> benchmarkBacked =
-          escalationDecision(request, true);
+      Optional<GoalContinuationPolicyDecision> benchmarkBacked = escalationDecision(request, true);
       if (benchmarkBacked.isPresent()) {
         return benchmarkBacked;
       }
@@ -184,8 +182,7 @@ public class GoalContinuationPolicy {
   }
 
   private static boolean requiresBenchmarkPriorForAutomaticAction(GoalContinuationRequest request) {
-    return request != null
-        && request.benchmarkQualityPriorRequiredForAutomaticContinuation();
+    return request != null && request.benchmarkQualityPriorRequiredForAutomaticContinuation();
   }
 
   private static boolean escalationMightHelp(GoalContinuationRequest request) {
@@ -332,10 +329,7 @@ public class GoalContinuationPolicy {
                 "blockedAutomaticContinuationReason",
                 blockedReason == null ? "UNKNOWN" : blockedReason);
     return new GoalContinuationPolicyDecision(
-        decision,
-        selectedCandidate,
-        reason == null ? List.of() : List.of(reason),
-        policy);
+        decision, selectedCandidate, reason == null ? List.of() : List.of(reason), policy);
   }
 
   private static String proposedCandidateSuffix(GoalContinuationPolicyDecision decision) {
