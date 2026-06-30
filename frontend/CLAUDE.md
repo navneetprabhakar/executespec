@@ -76,7 +76,7 @@ All surfaces share `useAuthStore`, `useUiStore` (theme), and `useRunStore`. The 
 
 ## Tokens + theming
 
-Single source of truth: [`docs/design/ui-tokens.md`](../docs/design/ui-tokens.md). Palette is **Graphite + Signal**:
+Single source of truth: [`executespec-docs/backend/design/ui-tokens.md`](../../executespec-docs/backend/design/ui-tokens.md). Palette is **Graphite + Signal**:
 
 - Graphite base (`--c-graphite-*`) for surfaces + chrome.
 - Signal Blue (`#5B8DEF`) for primary actions + brand accents.
@@ -91,7 +91,7 @@ JetBrainsMono variable font is the single typeface for the entire app (PR #108, 
 
 `frontend/src/lib/api/` is the primary API client. `core.ts` owns `BASE`, auth headers, `ApiError`, error parsing, and the shared `req<T>` / `reqText` helpers; domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, etc.) export endpoint helpers through `index.ts`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
 
-For the full audit of which endpoint is consumed by which frontend file, see [`docs/frontend-api-usage.md`](../docs/frontend-api-usage.md).
+For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md).
 
 ## Build + lint gates
 
@@ -107,7 +107,7 @@ npm run lint:fix            # eslint --fix
 
 CI runs `format:check` + `lint` on every PR (`.github/workflows/lint.yml`).
 
-Documented deviations from Google TypeScript style in [`docs/design/code-style.md`](../docs/design/code-style.md): default exports OK for `*.tsx` (D-T1), `any` is warn-mode (D-T2), interface vs type both accepted (D-T3), JSDoc on internal types skipped (D-T4).
+Documented deviations from Google TypeScript style in [`executespec-docs/backend/design/code-style.md`](../../executespec-docs/backend/design/code-style.md): default exports OK for `*.tsx` (D-T1), `any` is warn-mode (D-T2), interface vs type both accepted (D-T3), JSDoc on internal types skipped (D-T4).
 
 ## Notable components
 
