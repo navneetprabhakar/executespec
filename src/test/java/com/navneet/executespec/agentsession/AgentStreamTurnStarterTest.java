@@ -101,6 +101,54 @@ class AgentStreamTurnStarterTest {
   }
 
   @Test
+  void projectScopedStreamCodeRequestEmitsConfirmationGatedCloudRunProposal() {
+    AgentSession session = session();
+    session.setRunId(null);
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(aiProviderPreferenceService.preferredProvider(any(AppUserDetails.class))).thenReturn(null);
+
+    var ctx =
+        starter.begin(
+            session,
+            "s1",
+            new StreamTurnRequest(
+                "Submit a coding run to add README launch notes. Stop at the plan gate and do not"
+                    + " code until I approve.",
+                List.of(),
+                null,
+                new ClientCapabilities(false, true, true, true),
+                null),
+            user());
+
+    assertThat(ctx.projectId()).isEqualTo("p1");
+    assertThat(ctx.runId()).isNull();
+    assertThat(ctx.decision().route()).isEqualTo("CODE_RUN_REQUIRED");
+    assertThat(ctx.decision().requiresUserConfirmation()).isTrue();
+    assertThat(ctx.decision().policy().runApiAllowed()).isTrue();
+    assertThat(ctx.decision().proposedAction()).isNotNull();
+    assertThat(ctx.decision().proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(ctx.decision().proposedAction().arguments())
+        .containsEntry("projectId", "p1")
+        .containsEntry(
+            "spec",
+            "Submit a coding run to add README launch notes. Stop at the plan gate and do not"
+                + " code until I approve.");
+
+    var turn = ArgumentCaptor.forClass(AgentTurn.class);
+    verify(turnRepo).save(turn.capture());
+    assertThat(turn.getValue().getStatus()).isEqualTo("STREAMING");
+    assertThat(turn.getValue().getIntentType()).isEqualTo("CODE_RUN_REQUIRED");
+    assertThat(turn.getValue().getActionType()).isEqualTo("create_cloud_run");
+
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getPayloadJson()).contains("CODE_RUN_REQUIRED");
+    assertThat(event.getValue().getPayloadJson()).contains("create_cloud_run");
+    assertThat(event.getValue().getPayloadJson()).contains("runApiAllowed");
+    assertThat(event.getValue().getPayloadJson()).contains("true");
+  }
+
+  @Test
   void fallsBackToSessionDefaultProviderWhenPreferenceIsMissing() {
     AgentSession session = session();
     session.setTitle("Existing title");

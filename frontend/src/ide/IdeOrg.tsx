@@ -1375,7 +1375,7 @@ export function IdeOrgSettings() {
             </div>
             <div className='ide-kv'>
               <span>Included credits</span>
-              <span>{managedAiPolicy.includedCredits} ES AI credits</span>
+              <span>{managedAiPolicy.includedCredits} AI credits</span>
             </div>
             <div className='ide-kv'>
               <span>Step-down</span>

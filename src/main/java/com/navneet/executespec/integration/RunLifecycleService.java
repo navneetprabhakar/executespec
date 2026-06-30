@@ -720,7 +720,8 @@ public class RunLifecycleService {
                                 override == null ? null : override.proposedAction())
                             .userConfirmedContinuationProvider(
                                 override == null ? null : override.provider())
-                            .userConfirmedContinuationModel(override == null ? null : override.model())
+                            .userConfirmedContinuationModel(
+                                override == null ? null : override.model())
                             .requireBenchmarkPriorForAutomaticContinuation(
                                 override == null ? null : override.benchmarkPriorRequired())
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())

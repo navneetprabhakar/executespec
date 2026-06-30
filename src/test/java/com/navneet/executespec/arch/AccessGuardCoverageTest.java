@@ -220,7 +220,8 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.readymade.controller.ReadymadeController#resolve",
               "com.navneet.executespec.migration.controller.MigrationController#dryRun",
               // Fork intentionally reads the source run and creates a separate run owned by the
-              // caller; it does not mutate the source run's lifecycle, workspace, gate, or PR state.
+              // caller; it does not mutate the source run's lifecycle, workspace, gate, or PR
+              // state.
               "com.navneet.executespec.api.controller.RunController#forkRun"));
 
   @Test

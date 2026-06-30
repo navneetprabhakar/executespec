@@ -943,8 +943,14 @@
   .con-newrun .con-newrun-label {
     display: none;
   }
+  .con-root.agent-active .con-newrun .con-newrun-label {
+    display: inline;
+  }
   .con-newrun {
     padding: 8px 10px;
+  }
+  .con-root.agent-active .con-newrun {
+    padding: 8px 9px;
   }
   .con-cockpit-metrics {
     grid-template-columns: 1fr;

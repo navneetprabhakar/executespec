@@ -35,6 +35,24 @@ class AgentRunLifecycleIntentsTest {
   }
 
   @Test
+  void futureApprovalBoundaryIsNotMisreadAsApproveCommand() {
+    assertThat(
+            AgentRunLifecycleIntents.decide(
+                "Submit a coding run and do not code until I approve",
+                "submit a coding run and do not code until i approve"))
+        .isEmpty();
+  }
+
+  @Test
+  void approvalBeforeSpendLanguageIsNotMisreadAsGateListing() {
+    assertThat(
+            AgentRunLifecycleIntents.decide(
+                "Create a remote sandbox with approval before credits",
+                "create a remote sandbox with approval before credits"))
+        .isEmpty();
+  }
+
+  @Test
   void rejectAndCancelUseDistinctActionTypes() {
     assertThat(decide("reject run " + RUN_ID).proposedAction().type()).isEqualTo("reject_run");
     assertThat(decide("cancel run " + RUN_ID).proposedAction().type()).isEqualTo("cancel_run");

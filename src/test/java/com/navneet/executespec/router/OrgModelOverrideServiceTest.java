@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * F3 — validation + persistence semantics for {@link OrgModelOverrideService}: ENTERPRISE-only
+ * F3 — validation + persistence semantics for {@link OrgModelOverrideService}: BYOK/TEAM/ENTERPRISE
  * writes, strict per-cell validation against the registered matrix, OpenRouter validated via the
  * allow-list, and lenient run-time reads that drop cells which no longer validate.
  */
@@ -64,13 +64,26 @@ class OrgModelOverrideServiceTest {
   }
 
   @Test
-  void nonEnterprise_rejectedWith403() {
-    seed("TEAM", null);
+  void lowerTier_rejectedWith403() {
+    seed("PRO", null);
     assertThatThrownBy(
             () ->
                 svc.updateOverrides("org-1", Map.of("anthropic:planning", "claude-opus-4-6"), "a"))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Enterprise");
+        .hasMessageContaining("BYOK");
+  }
+
+  @Test
+  void byok_validCell_persistsCanonicalModel() {
+    Org org = seed("BYOK", null);
+    when(registry.isKnownModel("claude-opus-4-6")).thenReturn(true);
+    when(registry.providerFor("claude-opus-4-6")).thenReturn("anthropic");
+
+    svc.updateOverrides("org-1", Map.of("anthropic:planning", "claude-opus-4-6"), "actor");
+
+    assertThat(org.getModelOverridesJson())
+        .contains("anthropic:planning")
+        .contains("claude-opus-4-6");
   }
 
   @Test

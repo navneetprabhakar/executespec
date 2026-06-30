@@ -15,6 +15,7 @@ public final class ManagedAiDtos {
       Instant periodStart,
       Instant periodEnd,
       long includedAiCredits,
+      long purchasedAiCredits,
       long aiCreditsUsed,
       long aiCreditsRemaining,
       double rawCogsCapUsd,

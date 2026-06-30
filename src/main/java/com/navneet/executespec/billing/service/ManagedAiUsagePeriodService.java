@@ -138,6 +138,7 @@ class ManagedAiUsagePeriodService {
         .periodStart(start)
         .periodEnd(end)
         .includedAiCredits(policy.getIncludedCredits())
+        .purchasedAiCredits(0)
         .aiCreditsUsed(0)
         .rawCogsCapUsd(policy.getRawCogsCapUsd())
         .rawCogsUsedUsd(0.0)
@@ -154,5 +155,16 @@ class ManagedAiUsagePeriodService {
 
   private static String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value;
+  }
+
+  ManagedAiUsagePeriod grantPurchasedCredits(
+      ManagedAiUserContext user, ManagedAiProperties.TierPolicy policy, long credits, Instant now) {
+    if (credits <= 0) {
+      throw new IllegalArgumentException("credits must be positive");
+    }
+    ManagedAiUsagePeriod period = currentOrCreate(user, policy, now, true);
+    period.setPurchasedAiCredits(period.getPurchasedAiCredits() + credits);
+    period.setUpdatedAt(now);
+    return periodRepository.save(period);
   }
 }

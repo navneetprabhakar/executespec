@@ -230,8 +230,9 @@ class ProjectChatActionToolsTest {
         .thenReturn(submitted);
 
     JsonNode out =
-        env(tool("submit_run")
-            .call("{\"spec\":\"create a codemap\",\"startLowTasksOnCheapTier\":true}"));
+        env(
+            tool("submit_run")
+                .call("{\"spec\":\"create a codemap\",\"startLowTasksOnCheapTier\":true}"));
 
     assertThat(out.get("ok").asBoolean()).isTrue();
     verify(runOrchestrator)

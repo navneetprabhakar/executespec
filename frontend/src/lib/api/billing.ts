@@ -45,6 +45,7 @@ export type ManagedAiBalance = {
   periodStart: string;
   periodEnd: string;
   includedAiCredits: number;
+  purchasedAiCredits: number;
   aiCreditsUsed: number;
   aiCreditsRemaining: number;
   rawCogsCapUsd: number;

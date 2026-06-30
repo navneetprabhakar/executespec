@@ -124,7 +124,10 @@ public class ManagedAiUsageService {
     String before = routingPolicy.recomputeState(period);
     boolean platform = isPlatform(source);
     long credits =
-        platform ? creditCalculator.creditsFor(usage.costUsd(), policy.getRetailMultiplier()) : 0;
+        platform
+            ? creditCalculator.creditsFor(
+                usage.costUsd(), policy.getRetailMultiplier(), properties.getCreditsPerUsd())
+            : 0;
     if (platform) {
       period.setRawCogsUsedUsd(period.getRawCogsUsedUsd() + usage.costUsd());
       period.setAiCreditsUsed(period.getAiCreditsUsed() + credits);
@@ -220,13 +223,14 @@ public class ManagedAiUsageService {
               // the
               // current grant immediately.
               long included = policy.getIncludedCredits();
+              long purchased = p.getPurchasedAiCredits();
               long used = p.getAiCreditsUsed();
               return new CreditSummary(
                   true,
                   routingPolicy.recomputeState(p),
-                  included,
+                  included + purchased,
                   used,
-                  Math.max(0, included - used));
+                  Math.max(0, included + purchased - used));
             })
         .orElseGet(
             () ->
@@ -273,8 +277,23 @@ public class ManagedAiUsageService {
         policy.isConcurrencyEnforced(),
         policy.isRateLimitsEnabled(),
         policy.getNotificationThresholdsPct(),
-        "$1 = 100 ES AI credits; successful platform-key LLM calls debit ceil(raw_cost_usd *"
-            + " multiplier * 100).");
+        "$1 = "
+            + properties.getCreditsPerUsd()
+            + " AI credits; successful platform-key LLM calls debit ceil(raw_cost_usd *"
+            + " multiplier * "
+            + properties.getCreditsPerUsd()
+            + ").");
+  }
+
+  @Transactional
+  public void grantPurchasedCredits(String userId, String orgId, long credits) {
+    if (credits <= 0) {
+      throw new IllegalArgumentException("credits must be positive");
+    }
+    String tier = tierEnforcementService.resolveUserTier(userId);
+    ManagedAiUserContext user = new ManagedAiUserContext(userId, orgId, tier);
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(tier);
+    periodService.grantPurchasedCredits(user, policy, credits, Instant.now());
   }
 
   private static boolean isManaged(ManagedAiProperties.TierPolicy policy) {

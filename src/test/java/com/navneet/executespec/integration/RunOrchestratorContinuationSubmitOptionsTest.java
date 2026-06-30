@@ -1,10 +1,10 @@
 package com.navneet.executespec.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.run.RunContinuationConfirmationFlag;
@@ -39,7 +39,8 @@ class RunOrchestratorContinuationSubmitOptionsTest {
 
   @Test
   void normalizeLowComplexityWorkerStartTier_allowsOnlySupportedRunValues() {
-    assertEquals("LIGHTWEIGHT", RunOrchestrator.normalizeLowComplexityWorkerStartTier("lightweight"));
+    assertEquals(
+        "LIGHTWEIGHT", RunOrchestrator.normalizeLowComplexityWorkerStartTier("lightweight"));
     assertEquals("WORKHORSE", RunOrchestrator.normalizeLowComplexityWorkerStartTier(" WORKHORSE "));
     assertNull(RunOrchestrator.normalizeLowComplexityWorkerStartTier(null));
     assertNull(RunOrchestrator.normalizeLowComplexityWorkerStartTier("cheapest"));

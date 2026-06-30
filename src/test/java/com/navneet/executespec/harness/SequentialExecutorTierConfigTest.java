@@ -133,7 +133,9 @@ class SequentialExecutorTierConfigTest {
             boolean.class,
             String.class);
     m.setAccessible(true);
-    Object cfg = m.invoke(exec, complexity, provider, model, projectRun, lowComplexityWorkerStartTierOverride);
+    Object cfg =
+        m.invoke(
+            exec, complexity, provider, model, projectRun, lowComplexityWorkerStartTierOverride);
     assertNotNull(cfg);
     return new Cfg(
         (String) recordField(cfg, "provider"),

@@ -9,10 +9,10 @@ import org.junit.jupiter.api.Test;
 class OrgServiceSeatPolicyTest {
 
   @Test
-  void teamSeatAdjustmentAllowsSingleSeatOrg() throws Exception {
+  void teamSeatAdjustmentRequiresTwoSeatOrg() throws Exception {
     Field minSeats = OrgService.class.getDeclaredField("TEAM_MIN_SEATS");
     minSeats.setAccessible(true);
 
-    assertThat(minSeats.getInt(null)).isEqualTo(1);
+    assertThat(minSeats.getInt(null)).isEqualTo(2);
   }
 }

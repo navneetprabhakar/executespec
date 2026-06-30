@@ -77,7 +77,7 @@ function quotaSubtitle(
   tier: string,
   _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
 ): string {
-  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed ES AI
+  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed AI
   // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
   // The subtitle stays at the tier so it never shows a stale run cap.
   return tier;
@@ -597,7 +597,7 @@ export function IdeCompose() {
             : managedAi?.routingState === 'VALUE_MODE'
               ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
               : managedAi
-                ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
+                ? `${managedAi.aiCreditsRemaining} AI credits left this cycle.`
                 : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {

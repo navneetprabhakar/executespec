@@ -119,10 +119,9 @@ export function PublicPricingPage() {
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
         <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
-          Managed AI is metered in <b>ES AI credits</b> — $1 = 100 credits, charged from real model
-          cost as your run works. Frontier models step down automatically near your monthly cap;
-          bring your own keys (Team) to remove it. Pro bills monthly or yearly; Team is monthly, per
-          seat.
+          Managed AI is metered in <b>AI credits</b> — $1 = 125 credits, charged from real model
+          cost as your run works. Frontier models step down automatically near your monthly cap; use
+          BYOK to remove it. Pro bills monthly; Team is monthly, per seat.
         </Card>
 
         <div className='signal-grid cols-2 cols-4-xl'>
@@ -132,7 +131,7 @@ export function PublicPricingPage() {
               price: '$0',
               sub: 'No card required',
               features: [
-                '200 ES AI credits / month',
+                '200 AI credits / month',
                 'Small specs only',
                 'Managed-AI cap',
                 '1 project · 1 repo',
@@ -141,31 +140,45 @@ export function PublicPricingPage() {
             },
             {
               tier: 'PRO',
-              price: '$29',
+              price: '$20',
               unit: '/mo',
-              sub: 'For individuals · $289/yr (save 17%)',
+              sub: 'For individuals · monthly',
               features: [
-                '2,000 ES AI credits / month',
+                '2,000 AI credits / month',
                 'Managed keys — Anthropic · OpenAI · Gemini',
                 'PR review + code review (4 scans/mo)',
                 '2 projects · 2 repos each',
-                'Managed-AI cap — add your own key to lift it',
+                'Managed-AI cap — Pro+ upsell when needed',
               ],
             },
             {
+              tier: 'BYOK',
+              price: '$50',
+              unit: '/mo',
+              sub: 'Solo org · bring your own API keys',
+              features: [
+                'No managed-AI cap',
+                'Mandatory provider keys',
+                'Model matrix available',
+                'Single-person organization',
+                'No provider markup',
+                'Upgrade to Team for members',
+              ],
+              best: true,
+            },
+            {
               tier: 'TEAM',
-              price: '$39',
+              price: '$50',
               unit: '/seat/mo',
-              sub: 'From 1 seat · bring your own API keys',
+              sub: 'Minimum 2 seats · bring your own API keys',
               features: [
                 'Unlimited on your own keys (BYOK)',
                 'No managed-AI cap',
                 'Org spend caps + approval thresholds',
-                '5 projects · cross-repo runs',
+                '10 projects · cross-repo runs',
                 'Unlimited code reviews + sharing',
                 'Autofix: PR review · tech debt · code scans',
               ],
-              best: true,
             },
             {
               tier: 'ENTERPRISE',

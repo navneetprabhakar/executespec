@@ -41,6 +41,9 @@ public class ManagedAiUsagePeriod {
   @Column(name = "included_ai_credits", nullable = false)
   private long includedAiCredits;
 
+  @Column(name = "purchased_ai_credits", nullable = false)
+  private long purchasedAiCredits;
+
   @Column(name = "ai_credits_used", nullable = false)
   private long aiCreditsUsed;
 

@@ -28,6 +28,12 @@ const session: api.AgentSessionResponse = {
   defaultModel: 'deepseek-v4-pro-native',
   defaultExecutionMode: 'PRODUCTION',
   approvalPolicy: 'CONFIRM_MUTATIONS',
+  latestLinkedRunId: null,
+  latestLinkedRunStatus: null,
+  latestLinkedRunTitle: null,
+  latestLinkedRunStartedAt: null,
+  latestLinkedRunCompletedAt: null,
+  latestLinkedRunPrUrl: null,
   createdAt: '2026-06-20T00:00:00Z',
   updatedAt: '2026-06-20T00:00:00Z',
 };

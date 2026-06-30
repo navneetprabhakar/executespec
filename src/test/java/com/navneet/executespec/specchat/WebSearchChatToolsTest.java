@@ -5,12 +5,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.security.ContextSanitizer;
-
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.concurrent.atomic.AtomicReference;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.security.ContextSanitizer;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;

@@ -38,10 +38,10 @@ class ManagedAiRoutingPolicyTest {
 
   @Test
   void creditGrantTopUpRaisesTheGate() {
-    // The whole point of gating on credits: a top-up raises includedAiCredits and lifts the gate,
-    // even though the raw-$ cap ($16) is unchanged.
+    // The whole point of gating on credits: a top-up raises the total credit pool and lifts the
+    // gate, even though the raw-$ cap ($16) is unchanged.
     ManagedAiUsagePeriod period = period();
-    period.setIncludedAiCredits(4000); // topped up from 2000
+    period.setPurchasedAiCredits(2000); // topped up from 2000 to 4000 total credits
     period.setAiCreditsUsed(2500); // past the original 2000 grant …
     assertThat(policy.recomputeState(period)).isNotEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
     period.setAiCreditsUsed(4000); // … exhausted only at the topped-up grant

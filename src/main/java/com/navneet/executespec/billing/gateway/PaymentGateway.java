@@ -78,4 +78,14 @@ public interface PaymentGateway {
             + gatewaySubscriptionId
             + ". Use the manual seat-adjust workflow in docs/payment-history.md.");
   }
+
+  default CheckoutResult createTopupCheckoutSession(
+      BillingEntity entity,
+      long amountUsdCents,
+      long aiCredits,
+      String topupId,
+      String successUrl,
+      String cancelUrl) {
+    throw new UnsupportedOperationException("Top-up checkout not supported by " + gatewayType());
+  }
 }

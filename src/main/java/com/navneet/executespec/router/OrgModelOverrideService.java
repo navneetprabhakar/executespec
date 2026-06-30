@@ -22,11 +22,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * F3 — per-org overrides of the {@code application.yml model-matrix}. An ENTERPRISE org admin can
- * pin a specific model for any {@code (provider, tier)} cell (e.g. {@code anthropic:planning →
- * claude-opus-4-6}); unset cells fall back to the YAML default. Overrides are stored sparsely as a
- * JSON map on {@link Org#getModelOverridesJson()} and bound to the run thread via {@link
- * RunModelOverrides} at pipeline start.
+ * F3 — per-org overrides of the {@code application.yml model-matrix}. A BYOK/TEAM/ENTERPRISE org
+ * admin can pin a specific model for any {@code (provider, tier)} cell (e.g. {@code
+ * anthropic:planning → claude-opus-4-6}); unset cells fall back to the YAML default. Overrides are
+ * stored sparsely as a JSON map on {@link Org#getModelOverridesJson()} and bound to the run thread
+ * via {@link RunModelOverrides} at pipeline start.
  *
  * <p>Validation is strict on write (reject the whole request if any cell is malformed) and lenient
  * on read (skip a now-invalid cell rather than break a run — e.g. if a model was retired from the
@@ -93,17 +93,17 @@ public class OrgModelOverrideService {
 
   /**
    * Replaces the org's full override set (sparse — only the cells the admin wants overridden). An
-   * empty map clears all overrides. ENTERPRISE-only; every cell is validated against the registered
-   * model matrix.
+   * empty map clears all overrides. BYOK/TEAM/ENTERPRISE-only; every cell is validated against the
+   * registered model matrix.
    */
   public void updateOverrides(String orgId, Map<String, String> overrides, String actorId) {
     Org org =
         orgRepo
             .findById(orgId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
-    if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+    if (!canEditMatrix(org.getTier())) {
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Per-org model overrides are an Enterprise-tier feature");
+          HttpStatus.FORBIDDEN, "Per-org model overrides require BYOK, Team, or Enterprise");
     }
     Map<String, String> clean = new LinkedHashMap<>();
     if (overrides != null) {
@@ -203,5 +203,11 @@ public class OrgModelOverrideService {
           ex.getMessage());
       return Map.of();
     }
+  }
+
+  public boolean canEditMatrix(String tier) {
+    if (tier == null) return false;
+    String t = tier.trim().toUpperCase();
+    return "BYOK".equals(t) || "TEAM".equals(t) || "ENTERPRISE".equals(t);
   }
 }

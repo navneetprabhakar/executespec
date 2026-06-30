@@ -16,6 +16,8 @@ public class ManagedAiProperties {
 
   private boolean enabled = true;
 
+  private long creditsPerUsd = 125;
+
   private Map<String, TierPolicy> tiers = new HashMap<>();
 
   public TierPolicy policyFor(String tier) {

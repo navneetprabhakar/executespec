@@ -55,6 +55,12 @@
     <dependency>
       <groupId>org.springframework.ai</groupId>
       <artifactId>spring-ai-starter-model-anthropic</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>io.rest-assured</groupId>
+          <artifactId>json-path</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.springframework.ai</groupId>
@@ -107,6 +113,57 @@
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-parsers-standard-package</artifactId>
       <version>3.3.0</version>
+      <exclusions>
+        <!-- Keep document/code/text/PDF/Microsoft parsers; drop unsupported upload formats. -->
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-apple-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-audiovideo-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-cad-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-crypto-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-font-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-image-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-mail-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-news-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-ocr-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-pkg-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-webarchive-module</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.tika</groupId>
+          <artifactId>tika-parser-xmp-commons</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Jackson -->
@@ -183,6 +240,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-storage</artifactId>
       <version>2.68.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Google Cloud Run Admin v2 — deploy engine: deploy to user's Cloud Run. -->
@@ -190,6 +257,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-run</artifactId>
       <version>0.92.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Google Cloud Build — deploy engine: build images in user's GCP project. -->
@@ -197,6 +274,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-build</artifactId>
       <version>3.94.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Apache Commons Compress — tar.gz for Cloud Build source upload.
@@ -214,6 +301,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-artifact-registry</artifactId>
       <version>1.91.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Google Cloud Resource Manager — deploy engine: IAM permission validation -->
@@ -221,6 +318,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-resourcemanager</artifactId>
       <version>1.94.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Google Cloud Secret Manager — externalized secrets (API keys, credentials) -->
@@ -228,6 +335,16 @@
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-secretmanager</artifactId>
       <version>2.92.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Redis (Lettuce client) — gate signaling across instances + ShedLock provider -->
@@ -327,12 +444,32 @@
       <groupId>com.google.cloud.opentelemetry</groupId>
       <artifactId>exporter-trace</artifactId>
       <version>0.36.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <!-- GCP Cloud Monitoring exporter -->
     <dependency>
       <groupId>com.google.cloud.opentelemetry</groupId>
       <artifactId>exporter-metrics</artifactId>
       <version>0.36.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>io.grpc</groupId>
+          <artifactId>grpc-xds</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.conscrypt</groupId>
+          <artifactId>conscrypt-openjdk-uber</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <!-- Structured JSON logging with trace/span IDs -->
     <dependency>

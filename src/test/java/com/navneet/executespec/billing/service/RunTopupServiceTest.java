@@ -19,7 +19,9 @@ import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.billing.dto.TopupOrderInitResult;
 import com.navneet.executespec.billing.entity.RunTopup;
 import com.navneet.executespec.billing.entity.TopupPackage;
+import com.navneet.executespec.billing.gateway.BillingEntityResolver;
 import com.navneet.executespec.billing.gateway.BillingGateway;
+import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.repository.RunTopupRepository;
 import com.navneet.executespec.billing.repository.TopupPackageRepository;
@@ -35,6 +37,7 @@ class RunTopupServiceTest {
       mock(BillingSubscriptionRepository.class);
   private final BillingGateway razorpayGateway = mock(BillingGateway.class);
   private final InvoiceService invoiceService = mock(InvoiceService.class);
+  private final ManagedAiUsageService managedAiUsageService = mock(ManagedAiUsageService.class);
   private final RunTopupService service =
       new RunTopupService(
           topupRepo,
@@ -44,7 +47,10 @@ class RunTopupServiceTest {
           mock(AppUserRepository.class),
           mock(ActivityAuditService.class),
           mock(BillingNotificationService.class),
-          invoiceService);
+          invoiceService,
+          managedAiUsageService,
+          mock(BillingEntityResolver.class),
+          mock(PaymentGatewayRouter.class));
 
   @Test
   void initiatePurchaseStoresPackageReferenceForInvoiceResolution() {
@@ -89,7 +95,7 @@ class RunTopupServiceTest {
         .hasMessageContaining("does not belong");
 
     verify(topupRepo, never()).save(topup);
-    verify(topupRepo, never()).activatePendingPurchase(any(), any(), any());
+    verify(topupRepo, never()).markPendingPurchaseCredited(any(), any(), any());
   }
 
   @Test
@@ -108,8 +114,8 @@ class RunTopupServiceTest {
             .id(pending.getId())
             .userId("user-1")
             .quantity(10)
-            .remaining(10)
-            .status("ACTIVE")
+            .remaining(0)
+            .status("CREDITED")
             .gatewayOrderId("order_1")
             .gatewayPaymentId("pay_1")
             .build();
@@ -118,7 +124,7 @@ class RunTopupServiceTest {
     when(topupRepo.findByGatewayOrderId("order_1"))
         .thenReturn(Optional.of(pending))
         .thenReturn(Optional.of(active));
-    when(topupRepo.activatePendingPurchase(
+    when(topupRepo.markPendingPurchaseCredited(
             org.mockito.ArgumentMatchers.eq("order_1"),
             org.mockito.ArgumentMatchers.eq("pay_1"),
             any(Instant.class)))
@@ -126,13 +132,14 @@ class RunTopupServiceTest {
 
     RunTopup credited = service.verifyAndCredit("user-1", "order_1", "pay_1", "sig_1");
 
-    assertThat(credited.getStatus()).isEqualTo("ACTIVE");
-    assertThat(credited.getRemaining()).isEqualTo(10);
+    assertThat(credited.getStatus()).isEqualTo("CREDITED");
+    assertThat(credited.getRemaining()).isZero();
     verify(topupRepo)
-        .activatePendingPurchase(
+        .markPendingPurchaseCredited(
             org.mockito.ArgumentMatchers.eq("order_1"),
             org.mockito.ArgumentMatchers.eq("pay_1"),
             any(Instant.class));
+    verify(managedAiUsageService).grantPurchasedCredits("user-1", null, 10);
     verify(invoiceService).generateTopupInvoice(active, null, "pay_1");
     verify(topupRepo, never()).save(pending);
   }
@@ -153,8 +160,8 @@ class RunTopupServiceTest {
             .id(pending.getId())
             .userId("user-1")
             .quantity(10)
-            .remaining(10)
-            .status("ACTIVE")
+            .remaining(0)
+            .status("CREDITED")
             .gatewayOrderId("order_1")
             .gatewayPaymentId("pay_1")
             .build();
@@ -163,7 +170,7 @@ class RunTopupServiceTest {
     when(topupRepo.findByGatewayOrderId("order_1"))
         .thenReturn(Optional.of(pending))
         .thenReturn(Optional.of(active));
-    when(topupRepo.activatePendingPurchase(
+    when(topupRepo.markPendingPurchaseCredited(
             org.mockito.ArgumentMatchers.eq("order_1"),
             org.mockito.ArgumentMatchers.eq("pay_1"),
             any(Instant.class)))
@@ -171,8 +178,10 @@ class RunTopupServiceTest {
 
     RunTopup credited = service.verifyAndCredit("user-1", "order_1", "pay_1", "sig_1");
 
-    assertThat(credited.getStatus()).isEqualTo("ACTIVE");
+    assertThat(credited.getStatus()).isEqualTo("CREDITED");
     verify(invoiceService, never()).generateTopupInvoice(any(), any(), any());
+    verify(managedAiUsageService, never())
+        .grantPurchasedCredits(any(), any(), org.mockito.ArgumentMatchers.anyLong());
     verify(topupRepo, never()).save(pending);
   }
 }

@@ -33,6 +33,7 @@ class ManagedAiControllerTest {
             Instant.EPOCH,
             Instant.EPOCH.plusSeconds(3600),
             2000,
+            0,
             10,
             1990,
             16,
