@@ -4336,6 +4336,12 @@ components:
         actualCostUsd:
           type: number
           nullable: true
+          description: Actual provider cost in USD. Customer-facing web surfaces show this only to SUPER_ADMIN users.
+        aiCreditsCharged:
+          type: integer
+          format: int64
+          nullable: true
+          description: Managed AI credits debited by successful platform-key model calls for this run.
         githubPrUrl:
           type: string
           nullable: true
@@ -4467,12 +4473,21 @@ components:
         includedAiCredits:
           type: integer
           format: int64
+          description: Included monthly AI-credit grant; `-1` means unlimited/ungated.
+        purchasedAiCredits:
+          type: integer
+          format: int64
+          description: Purchased top-up credits attached to the current period.
         aiCreditsUsed:
           type: integer
           format: int64
         aiCreditsRemaining:
           type: integer
           format: int64
+          description: Remaining managed AI credits; `-1` means unlimited/ungated.
+        unlimitedAiCredits:
+          type: boolean
+          description: True when the user's tier is not blocked by managed-AI credit limits.
         rawCogsCapUsd:
           type: number
         rawCogsUsedUsd:
@@ -4567,6 +4582,10 @@ components:
         includedCredits:
           type: integer
           format: int64
+          description: Policy grant configured for the tier; zero-cap ungated tiers expose `unlimitedAiCredits=true`.
+        unlimitedAiCredits:
+          type: boolean
+          description: True when the effective policy has no managed-AI credit limit.
         rawCogsCapUsd:
           type: number
         frontierRawCapUsd:

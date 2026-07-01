@@ -328,8 +328,9 @@ class SpecChatServiceTest {
             .orElse("");
 
     assertThat(system)
-        .contains("This turn is read-only")
-        .contains("structured `create_cloud_run` proposal flow")
+        .contains("Do not mention remote sandbox, plan gates, proposal flows")
+        .contains("Never tell the user \"I'm read-only in this loop\"")
+        .doesNotContain("remote sandbox proposal/plan gate surfaced by the UI")
         .doesNotContain("submit_run(spec")
         .doesNotContain("approve_plan(runId)")
         .doesNotContain("cancel_run(runId)");

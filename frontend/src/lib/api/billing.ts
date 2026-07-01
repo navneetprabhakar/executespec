@@ -48,6 +48,7 @@ export type ManagedAiBalance = {
   purchasedAiCredits: number;
   aiCreditsUsed: number;
   aiCreditsRemaining: number;
+  unlimitedAiCredits?: boolean;
   rawCogsCapUsd: number;
   rawCogsUsedUsd: number;
   rawCogsRemainingUsd: number;
@@ -89,6 +90,7 @@ export type ManagedAiPolicy = {
   enabled: boolean;
   tier: string;
   includedCredits: number;
+  unlimitedAiCredits?: boolean;
   rawCogsCapUsd: number;
   frontierRawCapUsd: number;
   valueModeAfterRawUsd: number;

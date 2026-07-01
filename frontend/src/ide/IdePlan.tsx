@@ -7,17 +7,21 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {
   formatManagedAiPlanMessage,
   formatPlanUsd,
+  hasUnlimitedAiCredits,
   isPlanExecutingStatus,
   isPlanTerminalStatus,
   managedAiBadgeKind,
+  managedAiStatusLabel,
   planStatusPhrase,
 } from '@/ide/planUtils';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 // Plan-approval gate. Polls the work item; auto-routes to Live (executing) or Result
 // (terminal). When AWAITING_APPROVAL, shows the plan + credits/cap + Approve.
 export default function IdePlan() {
   const {runId = ''} = useParams();
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   useDocumentTitle('Plan approval');
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [busy, setBusy] = useState('');
@@ -139,18 +143,22 @@ export default function IdePlan() {
               <span>Credits on approval</span>
               <span>{run.creditsCharged ?? '—'}</span>
             </div>
-            <div className='ide-kv'>
-              <span>Estimate</span>
-              <span>
-                {run.costEstimateLow != null
-                  ? `${formatPlanUsd(run.costEstimateLow)} – ${formatPlanUsd(run.costEstimateHigh)}`
-                  : '—'}
-              </span>
-            </div>
-            <div className='ide-kv'>
-              <span>Spend cap</span>
-              <span>{formatPlanUsd(run.hardCapUsd)}</span>
-            </div>
+            {isSuperAdmin && (
+              <>
+                <div className='ide-kv'>
+                  <span>Estimate</span>
+                  <span>
+                    {run.costEstimateLow != null
+                      ? `${formatPlanUsd(run.costEstimateLow)} – ${formatPlanUsd(run.costEstimateHigh)}`
+                      : '—'}
+                  </span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Spend cap</span>
+                  <span>{formatPlanUsd(run.hardCapUsd)}</span>
+                </div>
+              </>
+            )}
             <div
               style={{
                 marginTop: 10,
@@ -161,10 +169,12 @@ export default function IdePlan() {
                 lineHeight: 1.5,
               }}
             >
-              1 credit ≈ $5 of model spend. Charged when you approve.{' '}
-              <strong style={{color: 'var(--ide-fg)'}}>Fully refunded if the work fails</strong>{' '}
-              (build broken or execution errored). Cancelling before completion refunds unspent
-              credit. Spend never exceeds the hard cap.
+              Run credits reserve the approved work. Managed AI credits debit per successful
+              platform-key model call while work executes.{' '}
+              <strong style={{color: 'var(--ide-fg)'}}>
+                Run credits are refunded if the work fails
+              </strong>
+              .
             </div>
           </div>
 
@@ -182,10 +192,12 @@ export default function IdePlan() {
               {managedAi && (
                 <IdeBadge
                   kind={
-                    managedAi.managed === false ? 'ok' : managedAiBadgeKind(managedAi.routingState)
+                    hasUnlimitedAiCredits(managedAi)
+                      ? 'ok'
+                      : managedAiBadgeKind(managedAi.routingState)
                   }
                 >
-                  {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
+                  {managedAiStatusLabel(managedAi)}
                 </IdeBadge>
               )}
             </div>

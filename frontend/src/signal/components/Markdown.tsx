@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {Components} from 'react-markdown';
+import {isValidElement, type ReactNode} from 'react';
 
 /**
  * Markdown renderer for chat / assistant surfaces (SpecChat, ProjectChatPage,
@@ -15,6 +16,55 @@ import type {Components} from 'react-markdown';
  *
  * Usage: <Markdown>{content}</Markdown>
  */
+function nodeText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join('');
+  if (isValidElement<{children?: ReactNode}>(node)) return nodeText(node.props.children);
+  return '';
+}
+
+function codeLanguage(node: ReactNode): string {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = codeLanguage(item);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (!isValidElement<{className?: string; children?: ReactNode}>(node)) return '';
+  const match = /language-([A-Za-z0-9_+.-]+)/.exec(node.props.className || '');
+  return match?.[1] || codeLanguage(node.props.children);
+}
+
+function lineCount(text: string): number {
+  if (!text.trim()) return 0;
+  return text.replace(/\n$/, '').split('\n').length;
+}
+
+function collapsedComponents(): Components {
+  return {
+    ...components,
+    pre: ({children}) => {
+      const text = nodeText(children);
+      const language = codeLanguage(children);
+      const lines = lineCount(text);
+      const label = [
+        language ? language.toUpperCase() : 'Code block',
+        lines ? `${lines} line${lines === 1 ? '' : 's'}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      return (
+        <details className='signal-md-codefold'>
+          <summary>{label || 'Code block'}</summary>
+          <pre className='signal-md-codeblock'>{children}</pre>
+        </details>
+      );
+    },
+  };
+}
+
 const components: Components = {
   h1: ({children}) => <h1 className='signal-md-h signal-md-h1'>{children}</h1>,
   h2: ({children}) => <h2 className='signal-md-h signal-md-h2'>{children}</h2>,
@@ -48,10 +98,19 @@ const components: Components = {
   ),
 };
 
-export function Markdown({children}: {children: string}) {
+export function Markdown({
+  children,
+  collapseCodeBlocks = false,
+}: {
+  children: string;
+  collapseCodeBlocks?: boolean;
+}) {
   return (
     <div className='signal-md'>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={collapseCodeBlocks ? collapsedComponents() : components}
+      >
         {children || ''}
       </ReactMarkdown>
     </div>

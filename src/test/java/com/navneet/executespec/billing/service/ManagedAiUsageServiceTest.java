@@ -93,11 +93,11 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isEqualTo(0.10);
-    assertThat(period.getAiCreditsUsed()).isEqualTo(16);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(10);
     ArgumentCaptor<ManagedAiUsageEvent> event = ArgumentCaptor.forClass(ManagedAiUsageEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getSourceType()).isEqualTo("PLATFORM");
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
   }
 
   @Test
@@ -203,7 +203,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionToValueModeNotifiesAndNextCriticalPlannerStepsUpMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(3.95);
-    period.setAiCreditsUsed(487); // +1 call (13 cr) crosses VALUE_MODE at 500
+    period.setAiCreditsUsed(490); // +1 call (10 cr) crosses VALUE_MODE at 500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
@@ -224,7 +224,7 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isCloseTo(4.05, offset(0.000001));
-    assertThat(period.getAiCreditsUsed()).isEqualTo(503);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(500);
     assertThat(period.getRoutingState()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
     verify(notificationService)
         .notifyTransition(period, ManagedAiUsageService.FULL, ManagedAiUsageService.VALUE_MODE);
@@ -232,7 +232,7 @@ class ManagedAiUsageServiceTest {
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getRoutingStateBefore()).isEqualTo(ManagedAiUsageService.FULL);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(
@@ -277,7 +277,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);
-    period.setAiCreditsUsed(1487); // +1 call (13 cr) crosses CHEAP_ONLY at 1500
+    period.setAiCreditsUsed(1490); // +1 call (10 cr) crosses CHEAP_ONLY at 1500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
@@ -309,7 +309,7 @@ class ManagedAiUsageServiceTest {
     assertThat(event.getValue().getRoutingStateBefore())
         .isEqualTo(ManagedAiUsageService.VALUE_MODE);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.CHEAP_ONLY);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(16);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(

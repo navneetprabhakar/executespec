@@ -70,6 +70,9 @@ public class RunDetail {
   /** Run credits charged (proportional to estimated cost). */
   Integer creditsCharged;
 
+  /** Managed AI credits actually debited by successful platform-key model calls for this run. */
+  Long aiCreditsCharged;
+
   /** Hard cap in USD (safety ceiling). */
   Double hardCapUsd;
 
