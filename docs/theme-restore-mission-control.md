@@ -3,6 +3,8 @@
 > **Era:** March 2026 — the original brand identity  
 > **Visual identity:** Pure black `#0A0A0F` surfaces, violet `#8B5CF6` accent, emerald `#10B981` success/streaming  
 > **Scope:** CSS + font changes only. No backend, no routing, no React component logic.
+>
+> **Not to be confused with:** the era immediately after this one (Apr 1–21, 2026) swapped violet for Vercel's exact blue `#0070F3` and dropped to true black `#000000` with zero glassmorphism — the codebase's own commit history calls that one "the Vercel/Geist clone aesthetic." See [`theme-restore-geist-clone.md`](theme-restore-geist-clone.md) for that one instead. This document's "Geist Sans/Mono" fonts overlap with that later era, but the *color palette* here is violet, not blue.
 
 ---
 
