@@ -16,7 +16,6 @@ import java.util.Optional;
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.entity.ManagedAiUsageEvent;
 import com.navneet.executespec.billing.entity.ManagedAiUsagePeriod;
@@ -36,7 +35,7 @@ class ManagedAiUsageServiceTest {
   private ManagedAiUsageEventRepository eventRepo;
   private ManagedAiModelClassifier modelClassifier;
   private ManagedAiNotificationService notificationService;
-  private TierEnforcementService tierService;
+  private ManagedAiTierResolver tierResolver;
   private ManagedAiUsageService service;
 
   @BeforeEach
@@ -45,9 +44,9 @@ class ManagedAiUsageServiceTest {
     eventRepo = mock(ManagedAiUsageEventRepository.class);
     modelClassifier = mock(ManagedAiModelClassifier.class);
     notificationService = mock(ManagedAiNotificationService.class);
-    tierService = mock(TierEnforcementService.class);
+    tierResolver = mock(ManagedAiTierResolver.class);
     PipelineRunRepository pipelineRunRepository = mock(PipelineRunRepository.class);
-    when(tierService.resolveUserTier("u1")).thenReturn("PRO");
+    when(tierResolver.resolveUserTier("u1")).thenReturn("PRO");
 
     ManagedAiProperties properties = new ManagedAiProperties();
     ManagedAiProperties.TierPolicy policy = new ManagedAiProperties.TierPolicy();
@@ -71,8 +70,8 @@ class ManagedAiUsageServiceTest {
             new ManagedAiRoutingPolicy(),
             new ManagedAiUsageMapper(),
             new ManagedAiUsagePeriodService(
-                periodRepo, tierService, pipelineRunRepository, notificationService),
-            tierService);
+                periodRepo, tierResolver, pipelineRunRepository, notificationService),
+            tierResolver);
   }
 
   @Test
@@ -94,11 +93,11 @@ class ManagedAiUsageServiceTest {
         RunKeyContext.Source.PLATFORM);
 
     assertThat(period.getRawCogsUsedUsd()).isEqualTo(0.10);
-    assertThat(period.getAiCreditsUsed()).isEqualTo(13);
+    assertThat(period.getAiCreditsUsed()).isEqualTo(10);
     ArgumentCaptor<ManagedAiUsageEvent> event = ArgumentCaptor.forClass(ManagedAiUsageEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getSourceType()).isEqualTo("PLATFORM");
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
   }
 
   @Test
@@ -204,7 +203,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionToValueModeNotifiesAndNextCriticalPlannerStepsUpMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(3.95);
-    period.setAiCreditsUsed(487); // +1 call (13 cr) crosses VALUE_MODE at 500
+    period.setAiCreditsUsed(490); // +1 call (10 cr) crosses VALUE_MODE at 500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
@@ -233,7 +232,7 @@ class ManagedAiUsageServiceTest {
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getRoutingStateBefore()).isEqualTo(ManagedAiUsageService.FULL);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.VALUE_MODE);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(
@@ -278,7 +277,7 @@ class ManagedAiUsageServiceTest {
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);
-    period.setAiCreditsUsed(1487); // +1 call (13 cr) crosses CHEAP_ONLY at 1500
+    period.setAiCreditsUsed(1490); // +1 call (10 cr) crosses CHEAP_ONLY at 1500
     when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
     when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
@@ -310,7 +309,7 @@ class ManagedAiUsageServiceTest {
     assertThat(event.getValue().getRoutingStateBefore())
         .isEqualTo(ManagedAiUsageService.VALUE_MODE);
     assertThat(event.getValue().getRoutingStateAfter()).isEqualTo(ManagedAiUsageService.CHEAP_ONLY);
-    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(13);
+    assertThat(event.getValue().getAiCreditsCharged()).isEqualTo(10);
 
     ManagedAiUsageService.CallAuthorization auth =
         service.authorizeCall(
@@ -359,7 +358,7 @@ class ManagedAiUsageServiceTest {
 
   @Test
   void assertCanStartRunAllowsUngatedTier() {
-    when(tierService.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
+    when(tierResolver.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
     service.assertCanStartRun(userDetails(), false); // ungated -> no throw
     verify(periodRepo, never()).findCurrent(anyString(), any());
   }

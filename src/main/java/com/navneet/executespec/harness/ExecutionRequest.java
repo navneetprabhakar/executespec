@@ -40,8 +40,8 @@ import lombok.Builder;
  * @param initialProviderSwitchesUsed initial run-level provider-switch count to seed before
  *     continuation advice. Used by approved blocked continuation retries so the approved action
  *     counts against the same ceiling as automatic reruns.
- * @param initialModelStepUpsUsed initial target-task model-step-up count to seed before continuation
- *     advice.
+ * @param initialModelStepUpsUsed initial target-task model-step-up count to seed before
+ *     continuation advice.
  * @param initialModelStepDownsUsed initial target-task model-step-down count to seed before
  *     continuation advice.
  */

@@ -9,9 +9,9 @@ class ManagedAiCreditCalculatorTest {
   private final ManagedAiCreditCalculator calculator = new ManagedAiCreditCalculator();
 
   @Test
-  void convertsRawUsdToEsAiCreditsAtConfiguredMultiplier() {
-    assertThat(calculator.creditsFor(0.10, 1.25)).isEqualTo(13);
-    assertThat(calculator.creditsFor(1.00, 1.00)).isEqualTo(100);
-    assertThat(calculator.creditsFor(0.0, 1.25)).isZero();
+  void convertsRawUsdToAiCreditsAtConfiguredMultiplier() {
+    assertThat(calculator.creditsFor(0.10, 1.25, 80)).isEqualTo(10);
+    assertThat(calculator.creditsFor(1.00, 1.00, 80)).isEqualTo(80);
+    assertThat(calculator.creditsFor(0.0, 1.25, 80)).isZero();
   }
 }

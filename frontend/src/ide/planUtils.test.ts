@@ -2,9 +2,11 @@ import {describe, expect, it} from 'vitest';
 import {
   formatManagedAiPlanMessage,
   formatPlanUsd,
+  hasUnlimitedAiCredits,
   isPlanExecutingStatus,
   isPlanTerminalStatus,
   managedAiBadgeKind,
+  managedAiStatusLabel,
   planStatusPhrase,
 } from './planUtils';
 
@@ -45,7 +47,7 @@ describe('planUtils', () => {
         cheapOnlyAfterRawUsd: 12,
       }),
     ).toBe(
-      '1200 ES AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.',
+      '1200 AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.',
     );
   });
 
@@ -53,10 +55,21 @@ describe('planUtils', () => {
     expect(
       formatManagedAiPlanMessage({
         managed: false,
+        unlimitedAiCredits: true,
+        includedAiCredits: -1,
         aiCreditsRemaining: 0,
       }),
     ).toBe(
-      'Using your own provider keys. Managed ES AI credits are not applicable to this work; run credits and your provider account still apply.',
+      'Unlimited AI credits for this tier. Managed-AI credit limits do not block this work; run approval and provider-key policy still apply.',
+    );
+  });
+
+  it('recognizes unlimited managed-AI sentinels', () => {
+    expect(hasUnlimitedAiCredits({managed: false, includedAiCredits: 0})).toBe(true);
+    expect(hasUnlimitedAiCredits({managed: true, includedAiCredits: -1})).toBe(true);
+    expect(hasUnlimitedAiCredits({managed: true, aiCreditsRemaining: -1})).toBe(true);
+    expect(managedAiStatusLabel({unlimitedAiCredits: true, routingState: 'FULL'})).toBe(
+      'Unlimited',
     );
   });
 });

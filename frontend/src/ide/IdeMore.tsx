@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
@@ -40,6 +40,7 @@ function fmtWhen(iso?: string | null): string {
 // Work list. Internally this still reads runs; the Console IA presents them as
 // user-requested work, not an implementation primitive.
 export function IdeRuns() {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
   const [q, setQ] = useState('');
@@ -196,7 +197,7 @@ export function IdeRuns() {
                           ? 'live'
                           : '—'}
                     </span>
-                    {cost != null && (
+                    {isSuperAdmin && cost != null && (
                       <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
                     )}
                   </span>

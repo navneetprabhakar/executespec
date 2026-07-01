@@ -1,7 +1,12 @@
 package com.navneet.executespec.agentsession;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
@@ -12,6 +17,8 @@ import com.navneet.executespec.agentsession.repository.AgentActionEventRepositor
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -28,14 +35,16 @@ class AgentSessionReadService {
   private final AgentTurnRepository turnRepo;
   private final AgentActionEventRepository eventRepo;
   private final AgentTurnReadModel turnReadModel;
+  private final PipelineRunRepository pipelineRunRepo;
 
   List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
     int capped = Math.max(1, Math.min(100, limit));
-    return sessionRepo
-        .findByUserIdAndStatusOrderByUpdatedAtDesc(
-            user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped))
-        .stream()
-        .map(this::toResponse)
+    List<AgentSession> sessions =
+        sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
+            user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped));
+    Map<String, PipelineRun> latestRuns = latestLinkedRunsBySessionId(sessions);
+    return sessions.stream()
+        .map(session -> toResponse(session, latestRuns.get(session.getId())))
         .toList();
   }
 
@@ -83,6 +92,14 @@ class AgentSessionReadService {
   }
 
   AgentSessionResponse toResponse(AgentSession s) {
+    return toResponse(s, null);
+  }
+
+  private AgentSessionResponse toResponse(AgentSession s, PipelineRun latestRun) {
+    String prUrl =
+        latestRun == null
+            ? null
+            : AgentText.firstNonBlank(latestRun.getScmPrUrl(), latestRun.getGithubPrUrl());
     return new AgentSessionResponse(
         s.getId(),
         s.getProjectId(),
@@ -95,7 +112,41 @@ class AgentSessionReadService {
         s.getDefaultModel(),
         s.getDefaultExecutionMode(),
         s.getApprovalPolicy(),
+        latestRun == null ? null : latestRun.getRunId(),
+        latestRun == null ? null : latestRun.getStatus(),
+        latestRun == null ? null : AgentText.firstNonBlank(latestRun.getRunTitle(), s.getTitle()),
+        latestRun == null ? null : latestRun.getStartedAt(),
+        latestRun == null ? null : latestRun.getCompletedAt(),
+        prUrl,
         s.getCreatedAt(),
         s.getUpdatedAt());
+  }
+
+  private Map<String, PipelineRun> latestLinkedRunsBySessionId(List<AgentSession> sessions) {
+    if (sessions == null || sessions.isEmpty()) {
+      return Map.of();
+    }
+    List<String> sessionIds = sessions.stream().map(AgentSession::getId).toList();
+    List<AgentTurn> linkedTurns = turnRepo.findLatestLinkedRunTurnsBySessionIds(sessionIds);
+    if (linkedTurns.isEmpty()) {
+      return Map.of();
+    }
+    List<String> runIds =
+        linkedTurns.stream()
+            .map(AgentTurn::getLinkedRunId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+    Map<String, PipelineRun> runsById =
+        pipelineRunRepo.findAllById(runIds).stream()
+            .collect(Collectors.toMap(PipelineRun::getRunId, Function.identity()));
+    Map<String, PipelineRun> bySession = new HashMap<>();
+    for (AgentTurn turn : linkedTurns) {
+      PipelineRun run = runsById.get(turn.getLinkedRunId());
+      if (run != null) {
+        bySession.put(turn.getSessionId(), run);
+      }
+    }
+    return bySession;
   }
 }

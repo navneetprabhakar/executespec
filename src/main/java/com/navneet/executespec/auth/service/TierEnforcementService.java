@@ -83,9 +83,11 @@ public class TierEnforcementService {
       Map.of(
           "FREE", 0,
           "PRO", 1,
-          "TEAM", 2,
-          "MAX", 2,
-          "ENTERPRISE", 3);
+          "PRO_PLUS", 2,
+          "TEAM", 3,
+          "BYOK", 3,
+          "MAX", 3,
+          "ENTERPRISE", 4);
 
   /**
    * Atomically checks quota AND increments the run count in a single transaction with pessimistic
@@ -438,7 +440,9 @@ public class TierEnforcementService {
     // TEAM, PRO and ENTERPRISE are paid capabilities. BYOK still controls cost-cap behavior, not
     // whether an Enterprise project collaborator can run the work they were invited to.
     if ("ENTERPRISE".equals(effectiveTier)) return;
+    if ("BYOK".equals(effectiveTier)) return;
     if ("TEAM".equals(effectiveTier)) return; // v2.6.0 — TEAM unlocks high-complexity
+    if ("PRO_PLUS".equals(effectiveTier)) return;
     if ("PRO".equals(effectiveTier)) return;
 
     // FREE tier — block high-complexity plans
@@ -654,6 +658,8 @@ public class TierEnforcementService {
                 switch (tier.toUpperCase()) {
                   case "ENTERPRISE" -> FALLBACK_ENT;
                   case "TEAM" -> FALLBACK_TEAM;
+                  case "BYOK" -> FALLBACK_TEAM;
+                  case "PRO_PLUS" -> -1;
                   case "PRO" -> FALLBACK_PRO;
                   default -> FALLBACK_FREE;
                 });
@@ -837,6 +843,8 @@ public class TierEnforcementService {
     String t = tier.toUpperCase();
     if ("ENTERPRISE".equals(t)) return false;
     if ("TEAM".equals(t)) return false;
+    if ("BYOK".equals(t)) return false;
+    if ("PRO_PLUS".equals(t)) return false;
     if ("PRO".equals(t)) return !hasByok;
     if ("FREE".equals(t)) return true;
     return false;
@@ -851,7 +859,9 @@ public class TierEnforcementService {
 
     // TEAM, ENTERPRISE, and PRO+BYOK users have no per-run cost limit
     if ("TEAM".equals(effectiveTier)) return -1;
+    if ("BYOK".equals(effectiveTier)) return -1;
     if ("ENTERPRISE".equals(effectiveTier)) return -1;
+    if ("PRO_PLUS".equals(effectiveTier)) return -1;
     if ("PRO".equals(effectiveTier) && hasByok) return -1;
 
     // Look up from tier_config table, fall back to constants

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import com.navneet.executespec.agent.LlmRequest;
@@ -293,6 +294,46 @@ class SpecChatServiceTest {
         .contains("Use that snapshot as real local evidence")
         .contains("Do NOT answer \"I don't have access\"")
         .contains("does not grant write/shell authority");
+  }
+
+  @Test
+  void readOnlyToolFilterUsesWebPromptWithoutRunControlToolNames() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("Use the remote sandbox proposal."));
+    SpecChatService svc = newService(router, List.of(fakeTool("submit_run", "{\"ok\":true}")));
+    AppUserDetails user = mock(AppUserDetails.class);
+    var appUser = mock(com.navneet.executespec.auth.entity.AppUser.class);
+    when(appUser.getId()).thenReturn("u1");
+    when(user.getUser()).thenReturn(appUser);
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        user,
+        "sess-read-only",
+        "project-1",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "submit a run to add audit logging")),
+        null,
+        Set.of("list_recent_runs", "search_code"));
+
+    ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(captor.capture());
+    String system =
+        captor.getValue().messages().stream()
+            .filter(SystemMessage.class::isInstance)
+            .map(m -> m.getText())
+            .findFirst()
+            .orElse("");
+
+    assertThat(system)
+        .contains("Do not mention remote sandbox, plan gates, proposal flows")
+        .contains("Never tell the user \"I'm read-only in this loop\"")
+        .doesNotContain("remote sandbox proposal/plan gate surfaced by the UI")
+        .doesNotContain("submit_run(spec")
+        .doesNotContain("approve_plan(runId)")
+        .doesNotContain("cancel_run(runId)");
   }
 
   @Test

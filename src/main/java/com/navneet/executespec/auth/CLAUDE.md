@@ -27,6 +27,7 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 ## Team Access
 
 - Org membership invites (`POST /api/org/invite`) are work-domain invites. Enterprise orgs always block consumer domains and enforce configured org domains.
+- V253 pricing tiers: `PRO_PLUS` and `BYOK` are first-class tier values. BYOK ranks with Team for own-key/model-matrix capability as a single-person org. Team self-serve subscriptions require 2-20 seats.
 - Project-only external collaborators use the separate V175 project invite surface (`POST /api/projects/{id}/invites`) and are controlled by `org.external_sharing_enabled`.
 - Accepted external project collaborators inherit the highest active host-project org tier through `TierEnforcementService.resolveUserTier` / `EntitlementResolver.resolveTier`. This is an effective entitlement only: do not mutate the collaborator's personal billing tier. Removing the `ProjectMember` row naturally falls back to the user's own org/user tier.
 - Project-scoped read surfaces must honor `ProjectMember` even when the caller's home `orgId` differs from the host project org. This includes project-filtered run lists, single-run reads for runs with `PipelineRun.projectId`, linked repo reads, and project chat. Write access remains stricter: use `ProjectAccessGuard.assertCanWrite` / `RunAccessGuard.requireRunWriteAccess` so `PROJECT_VIEWER` cannot mutate project or run state.
@@ -38,3 +39,4 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - `V215__personal_access_token.sql` creates hashed PATs for programmatic auth.
 - `V237__provider_key_lanes.sql` adds DeepSeek and Fireworks BYOK lanes on `org` and `app_user`.
 - `V242__user_preferred_ai_provider.sql` adds `app_user.preferred_ai_provider`.
+- `V253__ai_credit_pricing_ladder.sql` refreshes Free/Pro/Pro+/BYOK/Team seed rows and restores Team's 2-seat minimum.

@@ -129,12 +129,21 @@ export default function ConsoleShell() {
   useEffect(() => setAccountOpen(false), [location.pathname]);
 
   const path = location.pathname;
+  const workFocusedPath =
+    path.startsWith('/agent') ||
+    path.startsWith('/plan') ||
+    path.startsWith('/live') ||
+    path.startsWith('/result');
+  const primaryCta = path.startsWith('/agent')
+    ? {label: 'Sandbox', title: 'Start a remote sandbox', path: '/agent'}
+    : {label: 'Start', title: 'Start work', path: '/compose'};
   const shellClasses = [
     'ide-root',
     'con-root',
     drawerOpen ? 'drawer-active' : '',
     navCollapsed ? 'nav-collapsed' : '',
     path.startsWith('/compose') ? 'compose-active' : '',
+    path.startsWith('/agent') ? 'agent-active' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -175,6 +184,24 @@ export default function ConsoleShell() {
     {id: 'start', label: 'Go: Start', hint: 'Start', run: () => navigate('/compose')},
     {id: 'compose', label: 'Start work', hint: '＋', run: () => navigate('/compose')},
     {id: 'agent', label: 'Open agent', hint: 'chat', run: () => navigate('/agent')},
+    {
+      id: 'agent-new-sandbox',
+      label: 'Agent: New remote sandbox',
+      hint: 'sandbox',
+      run: () => navigate('/agent'),
+    },
+    {
+      id: 'agent-approvals',
+      label: 'Agent: Waiting approvals',
+      hint: 'gate',
+      run: () => navigate('/decisions'),
+    },
+    {
+      id: 'agent-latest-sandbox',
+      label: 'Agent: Open latest sandbox',
+      hint: runs[0] ? runLabel(runs[0]) : 'none',
+      run: () => navigate(runs[0] ? `/result/${runs[0].runId}` : '/agent'),
+    },
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
@@ -207,7 +234,7 @@ export default function ConsoleShell() {
 
   return (
     <div className={shellClasses}>
-      <AnnouncementBanner />
+      {!workFocusedPath && <AnnouncementBanner />}
       <header className='con-topbar'>
         <button
           className='con-icon con-only-mobile'
@@ -223,9 +250,13 @@ export default function ConsoleShell() {
         </NavLink>
         <span className='con-topbar-spacer' />
         <PlanGateIndicator dir='down' />
-        <button className='con-newrun' onClick={() => navigate('/compose')} title='Start work'>
+        <button
+          className='con-newrun'
+          onClick={() => navigate(primaryCta.path)}
+          title={primaryCta.title}
+        >
           <PlusIcon size={15} />
-          <span className='con-newrun-label'>Start</span>
+          <span className='con-newrun-label'>{primaryCta.label}</span>
         </button>
         <button
           className='con-icon'

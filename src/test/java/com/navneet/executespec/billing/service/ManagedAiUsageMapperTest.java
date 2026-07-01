@@ -70,11 +70,30 @@ class ManagedAiUsageMapperTest {
         mapper.toBalanceResponse(period, policy(), true, ManagedAiRoutingPolicy.VALUE_MODE);
 
     assertThat(response.aiCreditsRemaining()).isEqualTo(1550);
+    assertThat(response.unlimitedAiCredits()).isFalse();
+    assertThat(response.purchasedAiCredits()).isZero();
     assertThat(response.rawCogsRemainingUsd()).isEqualTo(8.5);
     assertThat(response.frontierRawRemainingUsd()).isEqualTo(2.75);
     assertThat(response.routingState()).isEqualTo(ManagedAiRoutingPolicy.VALUE_MODE);
     assertThat(response.managed()).isTrue();
     assertThat(response.retailMultiplier()).isEqualTo(1.25);
+  }
+
+  @Test
+  void mapsUngatedBalanceWithUnlimitedSentinel() {
+    ManagedAiUsagePeriod period = period();
+    period.setTier("ENTERPRISE");
+    period.setIncludedAiCredits(0);
+    period.setAiCreditsUsed(450);
+
+    ManagedAiBalanceResponse response =
+        mapper.toBalanceResponse(
+            period, new ManagedAiProperties.TierPolicy(), false, ManagedAiRoutingPolicy.FULL);
+
+    assertThat(response.includedAiCredits()).isEqualTo(-1);
+    assertThat(response.aiCreditsRemaining()).isEqualTo(-1);
+    assertThat(response.unlimitedAiCredits()).isTrue();
+    assertThat(response.managed()).isFalse();
   }
 
   @Test

@@ -12,6 +12,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {
   domainListFromEmail,
@@ -1375,7 +1376,14 @@ export function IdeOrgSettings() {
             </div>
             <div className='ide-kv'>
               <span>Included credits</span>
-              <span>{managedAiPolicy.includedCredits} ES AI credits</span>
+              <span>
+                {hasUnlimitedAiCredits({
+                  unlimitedAiCredits: managedAiPolicy.unlimitedAiCredits,
+                  includedAiCredits: managedAiPolicy.includedCredits,
+                })
+                  ? 'Unlimited'
+                  : `${managedAiPolicy.includedCredits} AI credits`}
+              </span>
             </div>
             <div className='ide-kv'>
               <span>Step-down</span>

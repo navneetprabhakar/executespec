@@ -13,6 +13,7 @@ import com.navneet.executespec.api.dto.TaskSummary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
@@ -36,6 +37,7 @@ public class RunMapper {
   private final TestPlanRepository testPlanRepository;
   private final RunCodeMapRepository runCodeMapRepository;
   private final ValidationReportRepository validationReportRepository;
+  private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -249,6 +251,7 @@ public class RunMapper {
         .costEstimateLow(r.getCostEstimateLow())
         .costEstimateHigh(r.getCostEstimateHigh())
         .creditsCharged(r.getCreditsCharged())
+        .aiCreditsCharged(managedAiUsageEventRepository.sumAiCreditsChargedByRunId(r.getRunId()))
         .hardCapUsd(r.getHardCapUsd())
         // v2.6.2-track — hierarchical-planner phase breakdown.
         .planStrategy(r.getPlanStrategy())

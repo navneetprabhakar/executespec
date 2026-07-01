@@ -40,10 +40,7 @@ public class BillingController {
       @RequestParam(required = false) String keyMode,
       @RequestParam(required = false, defaultValue = "false") boolean includeHidden,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    boolean effectiveIncludeHidden =
-        includeHidden
-            && userDetails != null
-            && "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
+    boolean effectiveIncludeHidden = includeHidden && userDetails != null;
     return ResponseEntity.ok(billingService.listPlans(keyMode, effectiveIncludeHidden));
   }
 
@@ -148,7 +145,7 @@ public class BillingController {
       @RequestBody TopupPurchaseRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     TopupOrderInitResult result =
-        runTopupService.initiatePurchase(userDetails.getUser().getId(), request.packageId());
+        runTopupService.initiatePurchase(userDetails.getUser().getId(), request);
     return ResponseEntity.ok(result);
   }
 

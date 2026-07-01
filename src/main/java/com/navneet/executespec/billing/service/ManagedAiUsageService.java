@@ -5,7 +5,6 @@ import java.util.List;
 
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.dto.ManagedAiDtos.ManagedAiBalanceResponse;
 import com.navneet.executespec.billing.dto.ManagedAiDtos.ManagedAiPolicyResponse;
@@ -39,7 +38,7 @@ public class ManagedAiUsageService {
   private final ManagedAiRoutingPolicy routingPolicy;
   private final ManagedAiUsageMapper usageMapper;
   private final ManagedAiUsagePeriodService periodService;
-  private final TierEnforcementService tierEnforcementService;
+  private final ManagedAiTierResolver tierResolver;
 
   @Transactional
   public CallAuthorization authorizeCall(
@@ -124,7 +123,10 @@ public class ManagedAiUsageService {
     String before = routingPolicy.recomputeState(period);
     boolean platform = isPlatform(source);
     long credits =
-        platform ? creditCalculator.creditsFor(usage.costUsd(), policy.getRetailMultiplier()) : 0;
+        platform
+            ? creditCalculator.creditsFor(
+                usage.costUsd(), policy.getRetailMultiplier(), properties.getCreditsPerUsd())
+            : 0;
     if (platform) {
       period.setRawCogsUsedUsd(period.getRawCogsUsedUsd() + usage.costUsd());
       period.setAiCreditsUsed(period.getAiCreditsUsed() + credits);
@@ -160,7 +162,7 @@ public class ManagedAiUsageService {
         new ManagedAiUserContext(
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            tierEnforcementService.resolveUserTier(userDetails.getUser().getId()));
+            tierResolver.resolveUserTier(userDetails.getUser().getId()));
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
     boolean managed = properties.isEnabled() && isManaged(policy);
     ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
@@ -184,9 +186,7 @@ public class ManagedAiUsageService {
     String userId = userDetails.getUser().getId();
     ManagedAiUserContext user =
         new ManagedAiUserContext(
-            userId,
-            userDetails.getUser().getOrgId(),
-            tierEnforcementService.resolveUserTier(userId));
+            userId, userDetails.getUser().getOrgId(), tierResolver.resolveUserTier(userId));
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
     if (!isManaged(policy)) return;
     ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
@@ -220,13 +220,14 @@ public class ManagedAiUsageService {
               // the
               // current grant immediately.
               long included = policy.getIncludedCredits();
+              long purchased = p.getPurchasedAiCredits();
               long used = p.getAiCreditsUsed();
               return new CreditSummary(
                   true,
                   routingPolicy.recomputeState(p),
-                  included,
+                  included + purchased,
                   used,
-                  Math.max(0, included - used));
+                  Math.max(0, included + purchased - used));
             })
         .orElseGet(
             () ->
@@ -258,12 +259,13 @@ public class ManagedAiUsageService {
   }
 
   public ManagedAiPolicyResponse policy(AppUserDetails userDetails) {
-    String tier = tierEnforcementService.resolveUserTier(userDetails.getUser().getId());
+    String tier = tierResolver.resolveUserTier(userDetails.getUser().getId());
     ManagedAiProperties.TierPolicy policy = properties.policyFor(tier);
     return new ManagedAiPolicyResponse(
         properties.isEnabled(),
         tier,
         policy.getIncludedCredits(),
+        properties.isEnabled() && !isManaged(policy),
         policy.getRawCogsCapUsd(),
         policy.getFrontierRawCapUsd(),
         policy.getValueModeAfterRawUsd(),
@@ -273,8 +275,22 @@ public class ManagedAiUsageService {
         policy.isConcurrencyEnforced(),
         policy.isRateLimitsEnabled(),
         policy.getNotificationThresholdsPct(),
-        "$1 = 100 ES AI credits; successful platform-key LLM calls debit ceil(raw_cost_usd *"
-            + " multiplier * 100).");
+        properties.creditDefinition()
+            + "; successful platform-key LLM calls debit ceil(raw_cost_usd *"
+            + " multiplier * "
+            + properties.getCreditsPerUsd()
+            + ").");
+  }
+
+  @Transactional
+  public void grantPurchasedCredits(String userId, String orgId, long credits) {
+    if (credits <= 0) {
+      throw new IllegalArgumentException("credits must be positive");
+    }
+    String tier = tierResolver.resolveUserTier(userId);
+    ManagedAiUserContext user = new ManagedAiUserContext(userId, orgId, tier);
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(tier);
+    periodService.grantPurchasedCredits(user, policy, credits, Instant.now());
   }
 
   private static boolean isManaged(ManagedAiProperties.TierPolicy policy) {

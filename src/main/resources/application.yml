@@ -135,9 +135,11 @@ execution:
 
 managed-ai:
   enabled: true
+  credit-pack-usd: 1.25
+  credit-pack-credits: 100
   tiers:
-    # Run-count retirement (2026-06-22): FREE is gated by a small managed ES-credit
-    # grant instead of a monthly run cap. 200 credits == $2.00 raw COGS at 1.00x.
+    # Run-count retirement (2026-06-22): FREE is gated by a small managed AI-credit
+    # grant instead of a monthly run cap.
     FREE:
       included-credits: 200
       raw-cogs-cap-usd: 2.00
@@ -160,6 +162,27 @@ managed-ai:
       concurrency-enforced: false
       rate-limits-enabled: false
       notification-thresholds-pct: [50, 75, 90, 100]
+    PRO_PLUS:
+      included-credits: 125000
+      raw-cogs-cap-usd: 1000.00
+      frontier-raw-cap-usd: 250.00
+      value-mode-after-raw-usd: 250.00
+      cheap-only-after-raw-usd: 750.00
+      hard-stop-after-raw-usd: 1000.00
+      retail-multiplier: 1.00
+      concurrency-enforced: false
+      rate-limits-enabled: false
+      notification-thresholds-pct: [50, 75, 90, 100]
+    BYOK:
+      included-credits: 0
+      raw-cogs-cap-usd: 0.00
+      frontier-raw-cap-usd: 0.00
+      value-mode-after-raw-usd: 0.00
+      cheap-only-after-raw-usd: 0.00
+      hard-stop-after-raw-usd: 0.00
+      retail-multiplier: 1.00
+      concurrency-enforced: false
+      rate-limits-enabled: false
     TEAM:
       included-credits: 0
       raw-cogs-cap-usd: 0.00
@@ -796,11 +819,10 @@ model-matrix:
   free-tier:
     provider: deepseek
     model: deepseek-v4-flash-native
-    # Model-level allow-list for the FREE tier (supersedes `provider`): DeepSeek V4 flash + pro.
+    # Model-level allow-list for the FREE tier (supersedes `provider`): low-price native DeepSeek only.
     # Edit this list to tune exactly which models free users may run.
     models:
       - deepseek-v4-flash-native
-      - deepseek-v4-pro-fw
 
   agent-tier-map:
     OutlinePlannerAgent: PLANNING

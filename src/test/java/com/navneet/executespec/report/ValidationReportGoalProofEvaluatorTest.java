@@ -38,8 +38,7 @@ class ValidationReportGoalProofEvaluatorTest {
             passingLedger());
 
     assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
-    assertThat(decision.goalSummary())
-        .isEqualTo("run goal: add billing export with CSV download");
+    assertThat(decision.goalSummary()).isEqualTo("run goal: add billing export with CSV download");
   }
 
   @Test
@@ -83,6 +82,40 @@ class ValidationReportGoalProofEvaluatorTest {
     assertThat(decision.reason()).contains("failed completion evidence");
     assertThat(decision.recommendedNextStep()).contains("alternate model/provider");
     assertThat(decision.anotherModelProviderMightHelp()).isTrue();
+  }
+
+  @Test
+  void softReportConcernsDoNotTurnPassedHardEvidenceIntoStopFailed() {
+    var decision =
+        evaluator.evaluate(
+            "run-soft-report-gaps",
+            PipelineResult.PASSED,
+            List.of(
+                row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
+                row("build", "Build", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("reviewer", "Reviewer", "PASS", "LLM_REVIEWER"),
+                row("report-issues", "Report issues", "FAIL", "HYBRID"),
+                row("spec-adherence", "Spec adherence", "FAIL", "LLM_ASSESSMENT"),
+                row(
+                    "test-coverage-judgment",
+                    "Test coverage judgment",
+                    "UNKNOWN",
+                    "LLM_ASSESSMENT"),
+                row("trust-cap", "Trust cap", "UNKNOWN", "INTERNAL_FORMULA"),
+                row("score-summary", "Internal score", "PASS", "INTERNAL_FORMULA")));
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.recommendedDecision())
+        .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+    assertThat(decision.reason()).contains("does not prove run completion");
+    assertThat(decision.incompleteItems())
+        .contains(
+            "Report issues is fail",
+            "Spec adherence is fail",
+            "Test coverage judgment is unknown",
+            "Trust cap is unknown");
+    assertThat(decision.anotherModelProviderMightHelp()).isFalse();
   }
 
   @Test

@@ -27,7 +27,7 @@ class ManagedAiRoutingPolicy {
    * expensive models), independent of the customer credit limit.
    */
   String recomputeState(ManagedAiUsagePeriod period) {
-    long included = period.getIncludedAiCredits();
+    long included = period.getIncludedAiCredits() + period.getPurchasedAiCredits();
     long usedCredits = period.getAiCreditsUsed();
     if (included > 0 && usedCredits >= included) return EXHAUSTED;
     double hardRaw =

@@ -3,8 +3,8 @@ package com.navneet.executespec.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -23,9 +23,9 @@ import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -237,8 +237,7 @@ class WorkerAgentToolDispatchTest {
         result.toolCallLog().stream().anyMatch(s -> s.contains("searchFiles")),
         "the parallel-dispatched searchFiles must still be recorded in the tool log in order");
     assertTrue(
-        result.toolCallLog().stream()
-            .anyMatch(s -> s.contains("readFile") && s.contains("-> OK")),
+        result.toolCallLog().stream().anyMatch(s -> s.contains("readFile") && s.contains("-> OK")),
         "the parallel-dispatched readFile must be recorded as an OK tool-call log entry");
     assertTrue(
         result.toolCallLog().stream()

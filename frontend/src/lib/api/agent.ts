@@ -43,6 +43,12 @@ export interface AgentSessionResponse {
   defaultModel: string | null;
   defaultExecutionMode: string | null;
   approvalPolicy: string | null;
+  latestLinkedRunId: string | null;
+  latestLinkedRunStatus: string | null;
+  latestLinkedRunTitle: string | null;
+  latestLinkedRunStartedAt: string | null;
+  latestLinkedRunCompletedAt: string | null;
+  latestLinkedRunPrUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }

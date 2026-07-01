@@ -51,6 +51,25 @@ class AgentIntentServiceTest {
   }
 
   @Test
+  void codeRunRequestWithFutureApprovalLanguageStillCreatesCloudRunProposal() {
+    var decision =
+        service.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "Submit a coding run to add README launch notes. Stop at the plan gate and do not"
+                    + " code until I approve.",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("CODE_RUN_REQUIRED");
+    assertThat(decision.reasonCode()).isEqualTo("explicit_code_mutation_request");
+    assertThat(decision.requiresUserConfirmation()).isTrue();
+    assertThat(decision.proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(decision.policy().runApiAllowed()).isTrue();
+  }
+
+  @Test
   void codeChangeWithLocalToolsProposesLocalTaskButStillRequiresConfirmation() {
     var decision =
         service.interpret(
