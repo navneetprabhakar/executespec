@@ -14,6 +14,7 @@ public interface ManagedAiUsageEventRepository extends JpaRepository<ManagedAiUs
   List<ManagedAiUsageEvent> findByPeriodIdOrderByCreatedAtDesc(String periodId, Pageable pageable);
 
   @Query(
-      "SELECT COALESCE(SUM(e.aiCreditsCharged), 0) FROM ManagedAiUsageEvent e WHERE e.runId = :runId")
+      "SELECT COALESCE(SUM(e.aiCreditsCharged), 0) FROM ManagedAiUsageEvent e WHERE e.runId ="
+          + " :runId")
   long sumAiCreditsChargedByRunId(@Param("runId") String runId);
 }

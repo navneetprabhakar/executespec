@@ -121,6 +121,12 @@ describe('agentState', () => {
         role: 'assistant',
         content: 'Create a cloud run?',
         status: 'NEEDS_CONFIRMATION',
+        usage: {
+          inputTokens: 20,
+          outputTokens: 10,
+          reasoningTokens: 0,
+          costUsd: 0.001,
+        },
       },
     ]);
 

@@ -29,11 +29,7 @@ public class ManagedAiProperties {
   }
 
   public String creditDefinition() {
-    return "$"
-        + formatAmount(creditPackUsd)
-        + " = "
-        + creditPackCredits
-        + " AI credits";
+    return "$" + formatAmount(creditPackUsd) + " = " + creditPackCredits + " AI credits";
   }
 
   public TierPolicy policyFor(String tier) {
