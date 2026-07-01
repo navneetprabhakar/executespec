@@ -1,8 +1,24 @@
-# Restoring the Geist-clone Theme
+# Restoring the Geist-clone (Vercel-clone) Theme
 
-> **Era:** Oldest recoverable era — root commit `1b0ffc66`
-> **Visual identity:** Pure black `#0A0A0F`, violet brand `#8B5CF6`, emerald streaming log `#10B981`, glassmorphism cards, Geist Sans/Mono fonts
+> **Era:** `d3422ac2` (Apr 1, 2026) → `8c6a5dcc` (Apr 21, 2026) — the era the codebase's own commit history calls "the Vercel/Geist clone aesthetic" (see the `tokens.css` header comment added when this era was retired: *"Design goal: decouple ExecuteSpec from the Vercel/Geist clone aesthetic"*).
+> **Visual identity:** True black `#000000` background, Vercel's exact CTA blue `#0070F3`, flat neutral gray scale (no violet, no glassmorphism, no blur), sharp/flat cards, Geist Sans/Mono fonts.
 > **Scope:** CSS/font changes only. No backend, no routing, no React component logic changes required.
+>
+> **Correction note:** an earlier version of this document mislabeled the Mar 1 root-commit era (violet `#8B5CF6` + `backdrop-filter` glassmorphism) as "Geist-clone." That era is a different, earlier aesthetic — see [`theme-restore-mission-control.md`](theme-restore-mission-control.md) (Variant A) for it instead. This document now covers the genuinely distinct black+Vercel-blue era that followed it.
+
+---
+
+## Why this is a separate era from "Mission Control"
+
+| | Mission Control (Mar 1–28) | **Geist-clone (this doc, Apr 1–21)** | Graphite+Signal (current, Apr 21→) |
+|---|---|---|---|
+| Page background | `#0A0A0F` (near-black) | **`#000000` (true black)** | `#10131a` (warmed graphite) |
+| Brand accent | Violet `#8B5CF6` | **Vercel blue `#0070F3`** | Signal Blue `#3b6fcc` (`#5b8def` on dark) |
+| Card treatment | Glassmorphism (blur) or flat (variant B) | **Flat, sharp border, no blur** | Flat, subtle border |
+| Status colors | success=emerald, uses violet for "thinking" | **success=blue `#0070F3`, no violet/emerald at all** | success=green, distinct hue per status group |
+| Font | Geist Sans/Mono (CDN) or DM Sans+JetBrains Mono | **Geist Sans/Mono (local `@font-face`, not CDN)** | JetBrains Mono (sole face, Google Fonts) |
+
+The Geist-clone era is the only one of the three with **zero violet and zero emerald** anywhere in the palette — everything is grayscale + one blue. If you're trying to reproduce "black background, Vercel-blue buttons, no purple anywhere," this is the doc you want. If you want "black background with a violet/purple accent," use the Mission Control doc instead.
 
 ---
 
@@ -10,158 +26,229 @@
 
 | File | Change type | Summary |
 |------|-------------|---------|
-| `frontend/src/design-system/primitives.css` | Edit | 9 token changes: pure-black surface ladder + violet brand |
-| `frontend/src/tokens.css` | Edit | 3 semantic accent changes |
-| `frontend/src/index.css` | Edit | Add Geist CDN font imports + glassmorphism utility classes |
-| `frontend/src/ide/ide.css` | Edit | 6 IDE token overrides + font family |
-| `frontend/src/console/console.css` | Edit | 4 console token overrides + font family |
-| `frontend/index.html` | Edit | Swap Google Fonts link for Geist CDN |
+| `frontend/src/design-system/primitives.css` | Edit | Surface ladder → true black; brand family → Vercel blue (no violet) |
+| `frontend/src/tokens.css` | Edit | Gray scale + accent + status literals → Geist-clone values |
+| `frontend/src/index.css` | Edit | Add local Geist `@font-face` + flat (non-blurred) card utility |
+| `frontend/src/ide/ide.css` | Edit | 6 IDE token overrides + font family (flat, no blur) |
+| `frontend/src/console/console.css` | Edit | Dark-mode token overrides + font family |
+| `frontend/index.html` | Edit | Remove Google Fonts links (fonts load via local `@font-face`, not CDN) |
 
 ---
 
 ## Step 1 — `frontend/src/design-system/primitives.css`
 
-These are the raw color primitives. The surface ladder needs to shift from warmed graphite back to pure black, and the brand color family needs to change from Signal Blue to violet.
+This file didn't exist yet during the Apr 2026 era (it was introduced Apr 28 as an abstraction layer during the token-aliasing refactor). To reproduce the look on the *current* architecture, retarget the primitives to the Geist-clone hexes — no violet anywhere.
 
-### Surface ladder (graphite → pure black)
+### Surface ladder (graphite → true black + flat gray scale)
 
 ```diff
 - --c-graphite-0: #10131a;  /* page bg */
-+ --c-graphite-0: #0a0a0f;  /* page bg */
++ --c-graphite-0: #000000;  /* page bg — true black, not near-black */
 
 - --c-graphite-1: #161a23;  /* lowest surface */
-+ --c-graphite-1: #111118;
++ --c-graphite-1: #0a0a0a;
 
 - --c-graphite-2: #1a1f29;  /* card */
-+ --c-graphite-2: #1a1a24;
++ --c-graphite-2: #111111;
 
 - --c-graphite-3: #232936;  /* card-elevated */
-+ --c-graphite-3: #242432;
++ --c-graphite-3: #1a1a1a;
 
 - --c-graphite-4: #2d3441;  /* surface border (subtle) */
-+ --c-graphite-4: #2e2e3e;
++ --c-graphite-4: #252525;
+
+- --c-graphite-5: #3d4553;  /* surface divider */
++ --c-graphite-5: #333333;
+
+- --c-graphite-6: #545c6a;  /* disabled fg */
++ --c-graphite-6: #555555;
+
+- --c-graphite-7: #6a737e;  /* border-default */
++ --c-graphite-7: #666666;
+
+- --c-graphite-8: #7b8593;  /* border-hover */
++ --c-graphite-8: #888888;
 ```
 
-> `--c-graphite-5` through `--c-graphite-8` (borders, disabled fg) — leave unchanged.
-
-### Brand color family (Signal Blue → Violet)
+### Brand color family (Signal Blue → Vercel blue; NO violet)
 
 ```diff
 - --c-signal-blue: #3b6fcc;
-+ --c-signal-blue: #8b5cf6;        /* violet brand */
++ --c-signal-blue: #0070f3;         /* exact Vercel CTA blue */
 
 - --c-signal-blue-hover: #2b5bb3;
-+ --c-signal-blue-hover: #7c3aed;  /* violet hover */
++ --c-signal-blue-hover: #0060d0;   /* darker on hover, matches the era's convention */
 
 - --c-signal-blue-on-dark: #7aa5f5;
-+ --c-signal-blue-on-dark: #a78bfa; /* light violet — for text/links on dark bg */
++ --c-signal-blue-on-dark: #3291ff; /* lighter blue for text/links on black */
 
 - --c-signal-teal: #7ad1c8;
-+ --c-signal-teal: #10b981;         /* emerald — used as the gradient pair end */
++ --c-signal-teal: #0070f3;         /* era had no teal — brand gradient collapses to solid blue */
 ```
 
-> `--c-success`, `--c-warning`, `--c-error`, `--c-info`, `--c-pop-orange`, `--c-accent-purple`, `--c-accent-pink` — **leave unchanged**.
+> `--c-accent-purple` / `--c-accent-pink` — **do not use these** for any brand or status role in this era. The era's "thinking" and "blocked" states are grayscale (see status table below), not purple/pink.
+
+### Text ink scale (warm ink → true grayscale)
+
+```diff
+- --c-ink-100: #eceef2;  /* primary */
++ --c-ink-100: #ededed;
+
+- --c-ink-200: #c9d1db;  /* secondary */
++ --c-ink-200: #a1a1a1;
+
+- --c-ink-300: #8a94a6;  /* muted */
++ --c-ink-300: #666666;
+
+- --c-ink-400: #5e6771;  /* subtle */
++ --c-ink-400: #555555;
+```
+
+> `--c-success`, `--c-warning`, `--c-error`, `--c-info` — see the status-token table below; several of these need to change too, since this era's status semantics were genuinely different (success used blue, not green).
 
 ---
 
 ## Step 2 — `frontend/src/tokens.css`
 
-The semantic token layer aliases `primitives.css`. Because primitives changed, most tokens auto-resolve correctly. Only the three explicit hex literals in `:root` need updating.
-
 ### In `:root { }` (dark default)
 
 ```diff
 - --accent-blue: #5b8def;
-+ --accent-blue: #8b5cf6;           /* resolves via --c-signal-blue override above, but this literal override must also change */
++ --accent-blue: #0070f3;
 
 - --accent-blue-hover: #7aa5f5;
-+ --accent-blue-hover: #7c3aed;
++ --accent-blue-hover: #0060d0;
 
-  --accent-blue-text: var(--c-signal-blue-on-dark);  /* no change — resolves to #a78bfa now */
+  --accent-blue-text: var(--c-signal-blue-on-dark);  /* resolves to #3291ff now */
 ```
 
-> `--brand-grad` already reads `linear-gradient(135deg, var(--accent-blue) 0%, var(--c-signal-teal) 100%)` — it will automatically resolve to violet→emerald. No change needed.
+### Status tokens — this era's semantics genuinely differ, not just a recolor
 
-### In `[data-theme='light'] { }` (light mode override)
+The Apr 1 commit used **success = blue** (matching the brand color, Vercel-style — a "deploy succeeded" blue banner), not green:
 
-Leave the light-mode block unchanged. The Geist-clone era was dark-only; the light overrides are a safety net that won't be visible in normal use after Step 5.
+```diff
+- --status-success: #10b981;      /* green */
++ --status-success: #0070f3;      /* blue — matches brand in this era */
+
+- --status-building / --status-executing: (varies)
++ --status-building: #f5a623;     /* amber — unchanged role */
+
+- --status-error: #ef4444;
++ --status-error: #e5484d;        /* slightly more muted red than current */
+
+- --status-queued: #666666;       /* unchanged — already gray in both eras */
+```
+
+> A week later (`ab49db4d`, Apr 7) this same era refined status colors to a distinct-hue-per-group scheme closer to today's (blue=executing, purple=thinking, amber=waiting, orange=partial, red=error, pink=blocked, gray=queued) — but even that later refinement kept the *background* black and the *brand* blue. If you want the exact Apr 7–21 look rather than the Apr 1–7 look, keep `--status-success: #10b981` (green) and use the distinct-hue set instead of blue-for-everything. Either sub-variant is a legitimate "Geist-clone" snapshot; the true-black-background + Vercel-blue-brand pairing is the constant across both.
+
+### Radius
+
+```diff
+- (graphite era uses --radius-* aliasing --mc-radius: 2px or component defaults)
++ --radius-sm: 2px;
++ --radius-md: 4px;
++ --radius-lg: 6px;
+```
 
 ---
 
 ## Step 3 — `frontend/src/index.css`
 
-### 3a. Add Geist font imports at the very top (before the existing `@import` lines)
+### 3a. Add Geist font faces (local, not CDN)
+
+This era loaded fonts from a local `node_modules/geist` package via `@font-face`, not jsdelivr CDN (that CDN approach belongs to the earlier Mission Control glassmorphism era — see the other doc). Add near the top of `tokens.css` or `index.css`:
 
 ```css
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/style.css');
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-mono/style.css');
-```
-
-The file currently starts with:
-```css
-/* R-300 (Wave 6) — primitives must load BEFORE tokens.css ... */
-@import './design-system/primitives.css';
-@import './tokens.css';
-```
-
-After the edit the top should be:
-```css
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/style.css');
-@import url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-mono/style.css');
-
-/* R-300 (Wave 6) ... */
-@import './design-system/primitives.css';
-@import './tokens.css';
-```
-
-### 3b. Add glassmorphism and gradient-mesh utility classes at the bottom of the file
-
-```css
-/* ── Geist-clone era utilities ────────────────────────────────── */
-.glass-panel {
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
-.gradient-mesh {
-  background:
-    radial-gradient(ellipse at 20% 50%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, rgba(6, 182, 212, 0.03) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 80%, rgba(16, 185, 129, 0.02) 0%, transparent 50%),
-    #0a0a0f;
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 ```
 
-> To apply the gradient mesh to the page background, add `class="gradient-mesh"` to the `<body>` element in `frontend/index.html`, or add `body { background: var(--geist-bg); }` and override `--geist-bg` with the mesh. The simpler path is using the `gradient-mesh` class directly on the body/root.
+> Requires the `geist` npm package installed under `frontend/node_modules/geist`. If you'd rather not add a build dependency, substitute the jsdelivr CDN links from the Mission Control doc's Step 3a — the font family names are the same, only the delivery mechanism differs. The important visual distinction from Mission Control isn't the font-loading method, it's the color palette (no violet, no blur, true black).
+
+### 3b. Flat card + terminal utilities (NOT glassmorphism)
+
+```diff
+  .glass-panel {
+-   backdrop-filter: blur(12px);
+-   -webkit-backdrop-filter: blur(12px);
+-   background: rgba(255, 255, 255, 0.03);
+-   border-color: rgba(255, 255, 255, 0.06);
+-   box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
++   @apply border rounded-md;
++   background: #111111;         /* var(--gray-100) equivalent */
++   border-color: #252525;       /* var(--border-default) equivalent */
+  }
+
+  .terminal-log {
+    @apply font-mono text-sm leading-relaxed;
+-   background: #0d0d14;
++   background: #000000;         /* var(--geist-bg) */
+  }
+
+  .gradient-mesh {
+-   background: radial-gradient(...), ..., #0a0a0f;
++   background: #000000;         /* flat black — no gradient mesh in this era */
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+-     rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.03) 100%
++     #1a1a1a 0%, #252525 50%, #1a1a1a 100%
+    );
+  }
+```
+
+> No `.glass-panel` blur, no gradient mesh — this is the one era of the three with genuinely flat, sharp UI chrome. If your build still shows blur/gradient after this step, you're looking at leftover Mission Control CSS.
+
+### 3c. Body font + background
+
+```diff
+  body {
+-   background: var(--background);
+-   color: var(--foreground);
++   background: var(--geist-bg);      /* resolves to #000000 */
++   color: var(--text-primary);       /* resolves to #ededed */
+    font-family: 'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+```
 
 ---
 
 ## Step 4 — `frontend/src/ide/ide.css`
 
-Update the token block inside `.ide-root { }`. Only the changed values are listed.
-
 ```diff
   .ide-root {
 -   --ide-bg-editor: #0b0d10;
-+   --ide-bg-editor: #0a0a0f;      /* pure black */
++   --ide-bg-editor: #000000;
 
 -   --ide-bg-sidebar: #11151b;
-+   --ide-bg-sidebar: #111118;
++   --ide-bg-sidebar: #0a0a0a;
 
 -   --ide-bg-activitybar: #171b22;
-+   --ide-bg-activitybar: #0a0a0f; /* collapsed into page bg */
++   --ide-bg-activitybar: #000000;   /* collapses into page bg, no separate tint */
 
 -   --ide-accent: #5b8def;
-+   --ide-accent: #8b5cf6;         /* violet */
++   --ide-accent: #0070f3;           /* Vercel blue */
 
 -   --ide-green: #7ad1c8;
-+   --ide-green: #10b981;          /* emerald */
++   --ide-green: #0070f3;            /* success reuses brand blue in this era, not green/teal */
 
 -   --ide-blue: #7aa5f5;
-+   --ide-blue: #a78bfa;           /* light violet */
++   --ide-blue: #3291ff;             /* lighter blue for on-dark text/links */
 
     /* Change the font family */
 -   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -169,23 +256,21 @@ Update the token block inside `.ide-root { }`. Only the changed values are liste
   }
 ```
 
-Also add a mono font override for code/terminal elements within `.ide-root`:
-
 ```css
 .ide-root code,
 .ide-root pre,
 .ide-root .font-mono {
-  font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  font-family: 'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
 }
 ```
 
-The `[data-theme='light'] .ide-root` block — leave unchanged (light mode will still fall back to Merge Rail light values, which is fine since Geist-clone was dark-only).
+> If you'd rather keep green as a distinct success color (the Apr 7–21 refined-status sub-variant), leave `--ide-green` at a green/teal value and only change `--ide-accent` + `--ide-bg-*`. Both are legitimate Geist-clone snapshots — see the status-token note in Step 2.
+
+The `[data-theme='light'] .ide-root` block — leave unchanged (this era was dark-only in practice; the light block is a safety net).
 
 ---
 
 ## Step 5 — `frontend/src/console/console.css`
-
-The console shell (`con-root`) currently defaults to light cream. To restore Geist-clone, update the **dark-mode override** block and change the font:
 
 ### In `.con-root { }` — add font change
 
@@ -196,20 +281,27 @@ The console shell (`con-root`) currently defaults to light cream. To restore Gei
   }
 ```
 
-### In `[data-theme='dark'] .con-root { }` — update accent and backgrounds
+### In `[data-theme='dark'] .con-root { }` — update backgrounds and accent
 
 ```diff
   [data-theme='dark'] .con-root {
 -   --ide-bg-editor: #0b0d10;
-+   --ide-bg-editor: #0a0a0f;
++   --ide-bg-editor: #000000;
 
 -   --ide-bg-sidebar: #11151b;
-+   --ide-bg-sidebar: #111118;
++   --ide-bg-sidebar: #0a0a0a;
 
--   --ide-accent: (current dark value);
-+   --ide-accent: #8b5cf6;         /* violet */
+-   --ide-bg-activitybar: #11151b;
++   --ide-bg-activitybar: #000000;
 
-+   --ide-green: #10b981;          /* emerald */
+-   --ide-accent: #4f7fe7;
++   --ide-accent: #0070f3;
+
+-   --ide-green: #7ad1c8;
++   --ide-green: #0070f3;
+
+-   --ide-blue: #9dbbff;
++   --ide-blue: #3291ff;
   }
 ```
 
@@ -217,56 +309,40 @@ The console shell (`con-root`) currently defaults to light cream. To restore Gei
 
 ## Step 6 — `frontend/index.html`
 
-Swap the JetBrains Mono Google Fonts link for Geist CDN preconnect + stylesheet links.
+This era loaded no Google Fonts at all — Geist fonts came from the local `@font-face` declarations in Step 3a. Remove any Google Fonts `<link>` tags entirely:
 
-Find the existing Google Fonts `<link>` tags (they will look like):
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:..." rel="stylesheet">
+```diff
+- <link rel="preconnect" href="https://fonts.googleapis.com" />
+- <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+- <link href="https://fonts.googleapis.com/css2?family=..." rel="stylesheet" />
+  <title>ExecuteSpec</title>
 ```
 
-Replace with:
-```html
-<link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/style.css">
-<link rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-mono/style.css">
-```
-
-> The CDN imports in Step 3 and these `<link>` tags are redundant — either approach works. The `<link>` tags give faster first-paint (browser discovers fonts before parsing CSS); the `@import` in index.css works without touching HTML. Use both for belt-and-suspenders or just one.
+> No CDN preconnect either — this is the one era with zero external font network requests.
 
 ---
 
 ## Step 7 — Set dark as the default theme
 
-The Geist-clone era was dark-only. Currently the console defaults to light. Force dark for first-time visitors:
+Same as the other restoration docs — this era was dark-only in practice.
 
 ### Option A — `frontend/index.html` (fastest, prevents FOUC)
 
-Add this script block in `<head>` before any stylesheets:
 ```html
 <script>
   (function() {
     var saved = localStorage.getItem('ui-theme');
-    if (!saved) {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    } else {
-      document.documentElement.setAttribute('data-theme', saved);
-    }
+    document.documentElement.setAttribute('data-theme', saved || 'dark');
   })();
 </script>
 ```
 
 ### Option B — `frontend/src/stores/useUiStore.ts`
 
-Find the Zustand store's initial state and change the default theme:
 ```diff
 - theme: 'light',
 + theme: 'dark',
 ```
-(The exact field name may vary — search for `theme:` in the store file.)
 
 ---
 
@@ -275,22 +351,19 @@ Find the Zustand store's initial state and change the default theme:
 - **Backend** — zero Java/Spring changes
 - **Routing / App.tsx** — no changes
 - **React components (.tsx files)** — no changes
-- **Tailwind config** — the config already aliases to CSS vars (`var(--accent-blue)` etc.), so it picks up token changes automatically
-- **Score band colors** — green/amber/red bands are semantic status tokens, unchanged
-- **`--c-success`, `--c-error`, `--c-warning`, `--c-info`** — unchanged
-- **Light-mode token block** — left as-is (safety net)
+- **Tailwind config** — aliases to CSS vars automatically
 - **All API client code** — unchanged
 
 ---
 
 ## Apply order
 
-1. `primitives.css` — foundation; everything aliases from here
-2. `tokens.css` — semantic layer
-3. `index.css` — fonts + utility classes
+1. `primitives.css` — foundation
+2. `tokens.css` — semantic layer + status tokens
+3. `index.css` — fonts (local `@font-face`) + flat utility classes (no blur)
 4. `ide.css` — IDE shell tokens
 5. `console.css` — console shell tokens
-6. `index.html` — font links + dark-default script
+6. `index.html` — remove Google Fonts links + add dark-default script
 7. Run `npm --prefix frontend run build` and verify in browser
 
 ---
@@ -298,10 +371,10 @@ Find the Zustand store's initial state and change the default theme:
 ## Quick visual verification checklist
 
 After applying:
-- [ ] Page background is pure black `#0A0A0F` (not warm graphite)
-- [ ] Primary buttons show violet `#8B5CF6` (not blue)
-- [ ] Running run log / streaming output shows emerald `#10B981`
-- [ ] Font renders as Geist Sans (clean geometric, not monospace-default)
-- [ ] Cards have a subtle blur/translucency effect (glassmorphism)
-- [ ] Brand gradient goes violet → emerald (not blue → teal)
-- [ ] Score ring / active tabs use violet accent
+- [ ] Page background is **true black** `#000000` (not near-black `#0A0A0F`, not warm graphite)
+- [ ] Primary buttons show **Vercel blue** `#0070F3` (not violet, not Signal Blue)
+- [ ] **No violet or emerald appears anywhere** in the UI — this is the tell that distinguishes this era from Mission Control
+- [ ] Cards are **flat with a sharp border** — no blur, no translucency
+- [ ] No gradient mesh on the page background — flat black
+- [ ] Font renders as Geist Sans (loaded without a network request to Google Fonts or jsdelivr, if using the local `@font-face` route)
+- [ ] Brand "gradient" is really just solid blue (teal collapsed into blue in this era)
