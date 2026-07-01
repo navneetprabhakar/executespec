@@ -79,7 +79,8 @@ class AgentSessionServiceActionLifecycleTest {
         new AgentSessionService(
             intentService,
             new AgentActionCatalog(),
-            new AgentSessionReadService(sessionRepo, turnRepo, eventRepo, turnReadModel),
+            new AgentSessionReadService(
+                sessionRepo, turnRepo, eventRepo, turnReadModel, pipelineRunRepo),
             new AgentSessionCreationService(
                 sessionRepo,
                 projectAccessGuard,
@@ -423,7 +424,8 @@ class AgentSessionServiceActionLifecycleTest {
             "orch_trace_existing");
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("client-turn-5"))
         .thenReturn(List.of(orchestratorDecisionEvent("client-turn-5", decision)));
-    when(runSubmissionGate.submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
+    when(runSubmissionGate.submitConfirmed(
+            any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
         .thenReturn(new AgentRunSubmissionGate.Submission("run-123", true, "SUBMITTED"));
 
     var response =
@@ -436,7 +438,8 @@ class AgentSessionServiceActionLifecycleTest {
     assertThat(response.calledRunApi()).isTrue();
     assertThat(existing.getLinkedRunId()).isEqualTo("run-123");
     assertThat(existing.getStatus()).isEqualTo("RUN_SUBMITTED");
-    verify(runSubmissionGate).submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
+    verify(runSubmissionGate)
+        .submitConfirmed(any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.eq(false));
     verify(turnRepo).save(existing);
 
     var events = ArgumentCaptor.forClass(AgentActionEvent.class);

@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -16,6 +17,7 @@ const debtTotal = (r: api.TechDebtReport): number =>
 
 export default function IdeProjects() {
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
   const [stats, setStats] = useState<Record<string, Dash>>({});
   // Tech-debt count keyed by project id, fetched lazily alongside the dashboard.
@@ -76,7 +78,7 @@ export default function IdeProjects() {
         .filter(Boolean),
     ).size;
     const avg = numOf(s, 'recencyAvgScore') ?? numOf(s, 'avgScore');
-    const spent = numOf(s, 'totalCostUsd');
+    const spent = isSuperAdmin ? numOf(s, 'totalCostUsd') : undefined;
     const techDebt = debt[p.id];
     const status = p.archivedAt
       ? {l: 'Archived', k: 'warn' as const}
@@ -109,7 +111,9 @@ export default function IdeProjects() {
         >
           {[
             ['Avg score', avg != null ? `${Math.round(avg)}%` : '—'],
-            ['Spent', spent != null ? `$${spent.toFixed(2)}` : '—'],
+            ...(isSuperAdmin
+              ? ([['Model spend', spent != null ? `$${spent.toFixed(2)}` : '—']] as const)
+              : []),
             ['Tech debt', techDebt != null ? String(techDebt) : '—'],
           ].map(([k, v]) => (
             <div key={k}>

@@ -269,7 +269,10 @@ class GoalContinuationPolicyTest {
 
     GoalContinuationPolicyDecision decision =
         policy.decide(
-            request(progressing(true), current(), ranked(higherUnbenchmarked, benchmarkBacked, current()))
+            request(
+                    progressing(true),
+                    current(),
+                    ranked(higherUnbenchmarked, benchmarkBacked, current()))
                 .qualityInsufficient(true)
                 .maxModelStepUps(1)
                 .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
@@ -290,7 +293,10 @@ class GoalContinuationPolicyTest {
 
     GoalContinuationPolicyDecision decision =
         policy.decide(
-            request(progressing(true), current, ranked(higherUnbenchmarked, benchmarkBacked, current))
+            request(
+                    progressing(true),
+                    current,
+                    ranked(higherUnbenchmarked, benchmarkBacked, current))
                 .providerBehaviorPoor(true)
                 .maxProviderSwitches(1)
                 .benchmarkQualityPriorRequiredForAutomaticContinuation(true)
@@ -301,7 +307,8 @@ class GoalContinuationPolicyTest {
   }
 
   @Test
-  void benchmarkPriorRequiredBlocksProviderChangeWithUnbenchmarkedProposalWhenNoBackedProviderFits() {
+  void
+      benchmarkPriorRequiredBlocksProviderChangeWithUnbenchmarkedProposalWhenNoBackedProviderFits() {
     ModelProviderScore current =
         score("deepseek", "deepseek-v4-pro", 76, 0.4, 1_600, 70, true, "current broke down");
     ModelProviderScore higherUnbenchmarked =

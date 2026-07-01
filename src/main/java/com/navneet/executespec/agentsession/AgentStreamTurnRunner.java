@@ -128,10 +128,7 @@ public class AgentStreamTurnRunner {
       payload.put("requires_confirmation", action.requiresConfirmation());
       payload.put("summary", action.confirmationPrompt());
       payload.put("spec", AgentActionArguments.stringArg(action.arguments(), "spec"));
-      send(
-          emitter,
-          "proposal",
-          payload);
+      send(emitter, "proposal", payload);
     }
     if (!summary.isBlank()) {
       send(emitter, "token", Map.of("delta", summary));

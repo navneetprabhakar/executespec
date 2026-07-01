@@ -110,7 +110,8 @@ public class ModelProviderRankingPolicy {
           Comparator.comparingDouble(ModelProviderScore::costPerMillionTokens)
               .thenComparingLong(ModelProviderScore::latencyP50Ms)
               .thenComparingLong(ModelProviderScore::latencyP95Ms)
-              .thenComparing(Comparator.comparingDouble(ModelProviderScore::qualityScore).reversed())
+              .thenComparing(
+                  Comparator.comparingDouble(ModelProviderScore::qualityScore).reversed())
               .thenComparing(ModelProviderScore::provider)
               .thenComparing(ModelProviderScore::model));
       ordered.addAll(band);

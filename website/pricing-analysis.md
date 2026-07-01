@@ -1,10 +1,11 @@
 # ExecuteSpec — Eval Matrix + Pricing Analysis (v3 — full 3-provider live)
 
 > **HISTORICAL REFERENCE (superseded by `docs/business/billing-plan-assessment.md`,
-> refreshed 2026-06-19).** Tier names + per-tier pricing in this doc are pre-V141
+> refreshed 2026-06-30).** Tier names + per-tier pricing in this doc are pre-V141
 > and should not be used for current pricing decisions. Current ladder: Free
-> 15 runs/month, Pro $29 for 30 managed runs/month, Team $39/seat/month from
-> 1 seat with BYOK, Enterprise custom. Current public copy lives in
+> 200 AI credits on native DeepSeek, Pro $20/month with 2,000 AI credits,
+> hidden Pro+ $100/month with 125,000 AI credits, BYOK $50/month, Team
+> $50/seat/month from 2 seats with BYOK, Enterprise custom. Current public copy lives in
 > `website/index.html` + `website/llms.txt`.
 >
 > Original analysis kept below for historical eval-matrix data and old margin

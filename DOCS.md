@@ -15,5 +15,11 @@ The long-form ExecuteSpec **backend** documentation has moved to the central doc
 | [`backend/business`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/business) · [`competitive-analysis`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/competitive-analysis) · [`reference`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/reference) | Business, competitive analysis, catalog formats |
 
 **Stays in this repo:** `README.md`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, and the API
-specification at `docs/openapi.yaml`. The marketing `website/` tree also remains here (it is a site,
-not docs — a candidate for its own repo).
+specification at `docs/openapi.yaml`. Frontend restoration guides that are tied to this repo's live
+theme files also stay here:
+
+- `docs/theme-restore-geist-clone.md`
+- `docs/theme-restore-graphite-signal.md`
+
+The marketing `website/` tree also remains here (it is a site, not docs — a candidate for its own
+repo).

@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
 import {StatusDot} from '@/ide/IdeIcons';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'];
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
@@ -32,6 +33,7 @@ function decisionFor(
 
 function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}) {
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const decision = decisionFor(r, prPending);
   return (
     <button className='con-runrow con-decision-row' onClick={() => navigate(decision.to)}>
@@ -40,7 +42,7 @@ function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
         <span className='con-runrow-meta'>
           {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
-          {r.actualCostUsd != null && r.actualCostUsd > 0
+          {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
             ? ` · $${r.actualCostUsd.toFixed(2)}`
             : ''}
         </span>

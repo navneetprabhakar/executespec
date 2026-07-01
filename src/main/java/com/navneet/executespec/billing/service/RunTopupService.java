@@ -10,10 +10,13 @@ import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.billing.dto.TopupOrderInitResult;
+import com.navneet.executespec.billing.dto.TopupPurchaseRequest;
 import com.navneet.executespec.billing.entity.RunTopup;
 import com.navneet.executespec.billing.entity.TopupPackage;
 import com.navneet.executespec.billing.exception.BillingException;
+import com.navneet.executespec.billing.gateway.BillingEntityResolver;
 import com.navneet.executespec.billing.gateway.BillingGateway;
+import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.repository.RunTopupRepository;
 import com.navneet.executespec.billing.repository.TopupPackageRepository;
@@ -30,6 +33,9 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class RunTopupService {
 
+  private static final long AI_TOPUP_CREDITS_PER_USD = 100;
+  private static final long FALLBACK_USD_CENT_TO_INR_PAISE = 85;
+
   private final RunTopupRepository topupRepo;
   private final TopupPackageRepository packageRepo;
   private final BillingGateway razorpayGateway;
@@ -38,6 +44,9 @@ public class RunTopupService {
   private final ActivityAuditService auditService;
   private final BillingNotificationService notificationService;
   private final InvoiceService invoiceService;
+  private final ManagedAiUsageService managedAiUsageService;
+  private final BillingEntityResolver billingEntityResolver;
+  private final PaymentGatewayRouter gatewayRouter;
 
   @Transactional(readOnly = true)
   public List<TopupPackage> getPackages() {
@@ -135,6 +144,46 @@ public class RunTopupService {
 
   /** Initiate a top-up purchase: create PENDING record + Razorpay order. */
   public TopupOrderInitResult initiatePurchase(String userId, UUID packageId) {
+    return initiatePurchase(userId, new TopupPurchaseRequest(packageId, null, null, null, null));
+  }
+
+  /** Initiate an AI-credit top-up purchase. Package rows and custom USD amounts share this path. */
+  public TopupOrderInitResult initiatePurchase(String userId, TopupPurchaseRequest request) {
+    TopupIntent intent = resolveIntent(request);
+    if ("STRIPE".equalsIgnoreCase(intent.gateway())) {
+      return initiateStripePurchase(userId, intent, request);
+    }
+    return initiateRazorpayPurchase(userId, intent);
+  }
+
+  private TopupIntent resolveIntent(TopupPurchaseRequest request) {
+    if (request == null) {
+      throw new BillingException("Top-up request is required");
+    }
+    if (request.packageId() != null) {
+      return packageIntent(request.packageId(), request.gateway());
+    }
+    Long amountUsdCents = request.amountUsdCents();
+    if (amountUsdCents == null || amountUsdCents < 100) {
+      throw new BillingException("Custom top-up amount must be at least $1");
+    }
+    long wholeDollars = amountUsdCents / 100;
+    if (wholeDollars * 100 != amountUsdCents) {
+      throw new BillingException("Custom top-up amount must be a whole-dollar amount");
+    }
+    long credits = wholeDollars * AI_TOPUP_CREDITS_PER_USD;
+    long amountInr = amountUsdCents * FALLBACK_USD_CENT_TO_INR_PAISE;
+    String gateway = normalizeGateway(request.gateway(), "RAZORPAY");
+    return new TopupIntent(
+        "Custom " + credits + " AI credits",
+        Math.toIntExact(credits),
+        amountInr,
+        amountUsdCents,
+        gateway,
+        "custom:" + amountUsdCents);
+  }
+
+  private TopupIntent packageIntent(UUID packageId, String requestedGateway) {
     TopupPackage pkg =
         packageRepo
             .findById(packageId)
@@ -142,7 +191,22 @@ public class RunTopupService {
     if (!pkg.isActive()) {
       throw new BillingException("This top-up package is no longer available");
     }
+    String defaultGateway =
+        pkg.getAmountUsd() > 0 && pkg.getAmountInr() <= 0 ? "STRIPE" : "RAZORPAY";
+    String gateway = normalizeGateway(requestedGateway, defaultGateway);
+    return new TopupIntent(
+        pkg.getName(),
+        pkg.getRunCount(),
+        pkg.getAmountInr(),
+        pkg.getAmountUsd(),
+        gateway,
+        "pkg:" + packageId);
+  }
 
+  private TopupOrderInitResult initiateRazorpayPurchase(String userId, TopupIntent intent) {
+    if (intent.amountInrPaise() <= 0) {
+      throw new BillingException("This top-up is not configured for Razorpay checkout");
+    }
     String receiptId = "topup_" + UUID.randomUUID().toString().substring(0, 8);
 
     // Get customer ID if exists
@@ -151,38 +215,89 @@ public class RunTopupService {
     Map<String, String> notes =
         Map.of(
             "user_id", userId,
-            "package_id", packageId.toString(),
-            "package_name", pkg.getName(),
-            "run_count", String.valueOf(pkg.getRunCount()));
+            "grant_reason", intent.grantReason(),
+            "package_name", intent.name(),
+            "ai_credits", String.valueOf(intent.aiCredits()));
     if (customerId != null) {
       notes = new java.util.HashMap<>(notes);
       notes.put("customer_id", customerId);
     }
 
     TopupOrderInitResult orderResult =
-        razorpayGateway.createOrder(pkg.getAmountInr(), "INR", receiptId, notes);
+        razorpayGateway.createOrder(intent.amountInrPaise(), "INR", receiptId, notes);
 
     // Create PENDING top-up record
     RunTopup topup =
         RunTopup.builder()
             .userId(userId)
-            .quantity(pkg.getRunCount())
-            .remaining(0) // set to quantity after payment verification
-            .source("PURCHASE")
+            .quantity(intent.aiCredits())
+            .remaining(0)
+            .source("AI_CREDIT_PURCHASE")
             .gatewayOrderId(orderResult.orderId())
-            .amountPaidInr(pkg.getAmountInr())
-            .grantReason("pkg:" + packageId)
+            .amountPaidInr(intent.amountInrPaise())
+            .grantReason(intent.grantReason())
             .status("PENDING")
             .build();
     topupRepo.save(topup);
 
     log.info(
-        "Top-up purchase initiated: userId={}, package={}, orderId={}",
+        "AI-credit top-up purchase initiated: userId={}, package={}, orderId={}, credits={}",
         userId,
-        pkg.getName(),
-        orderResult.orderId());
+        intent.name(),
+        orderResult.orderId(),
+        intent.aiCredits());
 
-    return orderResult;
+    return new TopupOrderInitResult(
+        orderResult.orderId(),
+        orderResult.customerId(),
+        orderResult.razorpayKeyId(),
+        orderResult.amountPaise(),
+        "RAZORPAY",
+        null,
+        null,
+        intent.aiCredits());
+  }
+
+  private TopupOrderInitResult initiateStripePurchase(
+      String userId, TopupIntent intent, TopupPurchaseRequest request) {
+    if (intent.amountUsdCents() <= 0) {
+      throw new BillingException("This top-up is not configured for Stripe checkout");
+    }
+    var user = userRepo.findById(userId).orElseThrow(() -> new BillingException("User not found"));
+    RunTopup topup =
+        RunTopup.builder()
+            .userId(userId)
+            .orgId(user.getOrgId())
+            .quantity(intent.aiCredits())
+            .remaining(0)
+            .source("AI_CREDIT_PURCHASE")
+            .amountPaidInr(0)
+            .grantReason(intent.grantReason())
+            .status("PENDING")
+            .build();
+    topupRepo.save(topup);
+    var entity = billingEntityResolver.resolve(user);
+    var checkout =
+        gatewayRouter
+            .resolveByName("stripe")
+            .createTopupCheckoutSession(
+                entity,
+                intent.amountUsdCents(),
+                intent.aiCredits(),
+                topup.getId().toString(),
+                request.successUrl() != null ? request.successUrl() : "/billing?topup=success",
+                request.cancelUrl() != null ? request.cancelUrl() : "/billing?topup=cancelled");
+    topup.setGatewayOrderId(checkout.sessionId());
+    topupRepo.save(topup);
+    return new TopupOrderInitResult(
+        checkout.sessionId(),
+        null,
+        null,
+        0,
+        "STRIPE",
+        checkout.url(),
+        checkout.sessionId(),
+        intent.aiCredits());
   }
 
   /** Verify payment and credit runs after Razorpay checkout. */
@@ -206,7 +321,7 @@ public class RunTopupService {
       return topup;
     }
 
-    int activated = topupRepo.activatePendingPurchase(orderId, paymentId, Instant.now());
+    int activated = topupRepo.markPendingPurchaseCredited(orderId, paymentId, Instant.now());
     if (activated == 0) {
       log.warn("Top-up activation lost race: orderId={}", orderId);
       return topupRepo.findByGatewayOrderId(orderId).orElse(topup);
@@ -234,6 +349,7 @@ public class RunTopupService {
             .build());
 
     // Send notification email
+    managedAiUsageService.grantPurchasedCredits(userId, topup.getOrgId(), topup.getQuantity());
     var user = userRepo.findById(userId).orElse(null);
     if (user != null) {
       notificationService.sendTopupCredited(user.getEmail(), topup.getQuantity());
@@ -262,6 +378,56 @@ public class RunTopupService {
         orderId);
     return topup;
   }
+
+  public RunTopup creditStripeTopup(String topupId, String sessionId, String paymentId) {
+    RunTopup topup =
+        topupRepo
+            .findById(UUID.fromString(topupId))
+            .orElseThrow(() -> new BillingException("Top-up record not found: " + topupId));
+    if (!"PENDING".equals(topup.getStatus())) {
+      log.warn(
+          "Stripe top-up already processed: topupId={}, status={}", topupId, topup.getStatus());
+      return topup;
+    }
+    topup.setGatewayOrderId(sessionId);
+    topup.setGatewayPaymentId(paymentId);
+    topup.setRemaining(0);
+    topup.setStatus("CREDITED");
+    topupRepo.save(topup);
+    managedAiUsageService.grantPurchasedCredits(
+        topup.getUserId(), topup.getOrgId(), topup.getQuantity());
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("TOPUP_PURCHASED")
+            .entityType("BILLING")
+            .entityId(topup.getId().toString())
+            .actorId(topup.getUserId())
+            .newValue(
+                "{\"quantity\":"
+                    + topup.getQuantity()
+                    + ",\"sessionId\":\""
+                    + sessionId
+                    + "\",\"gateway\":\"STRIPE\"}")
+            .build());
+    return topup;
+  }
+
+  private static String normalizeGateway(String requested, String fallback) {
+    if (requested == null || requested.isBlank()) return fallback;
+    String normalized = requested.trim().toUpperCase();
+    if (!"STRIPE".equals(normalized) && !"RAZORPAY".equals(normalized)) {
+      throw new BillingException("Unsupported top-up gateway: " + requested);
+    }
+    return normalized;
+  }
+
+  private record TopupIntent(
+      String name,
+      int aiCredits,
+      long amountInrPaise,
+      long amountUsdCents,
+      String gateway,
+      String grantReason) {}
 
   /** Admin grants bonus runs to a user or org. */
   public RunTopup grantBonusRuns(

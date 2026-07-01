@@ -4,7 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {PlusIcon, StatusDot} from '@/ide/IdeIcons';
-import {useAuthStore} from '@/stores/useAuthStore';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 /**
  * ConsoleHome — product cockpit. It avoids implementation nouns on the first
@@ -23,6 +23,7 @@ function scoreKind(s: number): 'ok' | 'warn' | 'bad' {
 
 function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string}) {
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   return (
     <button className='con-runrow' onClick={() => navigate(to)} title={runTitleFor(r)}>
       <StatusDot kind={statusKind(r.status)} size={9} />
@@ -30,7 +31,7 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
         <span className='con-runrow-meta'>
           {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
-          {r.actualCostUsd != null && r.actualCostUsd > 0
+          {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
             ? ` · $${r.actualCostUsd.toFixed(2)}`
             : ''}
         </span>

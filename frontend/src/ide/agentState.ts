@@ -18,6 +18,14 @@ export type LocalMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
   status?: string;
+  usage?: AgentUsageSummary;
+};
+
+export type AgentUsageSummary = {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  costUsd: number;
 };
 
 export type StreamTimelineItem = {
@@ -311,6 +319,12 @@ export function toMessages(turns: api.AgentTurnResponse[]): LocalMessage[] {
         role: 'assistant',
         content: reply,
         status: turn.status,
+        usage: {
+          inputTokens: turn.inputTokens,
+          outputTokens: turn.outputTokens,
+          reasoningTokens: turn.reasoningTokens,
+          costUsd: turn.costUsd,
+        },
       });
     }
     return items;

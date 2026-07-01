@@ -21,6 +21,8 @@ import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,7 @@ class AgentSessionReadServiceTest {
   @Mock AgentSessionRepository sessionRepo;
   @Mock AgentTurnRepository turnRepo;
   @Mock AgentActionEventRepository eventRepo;
+  @Mock PipelineRunRepository pipelineRunRepo;
 
   private AgentSessionReadService service;
 
@@ -47,7 +50,8 @@ class AgentSessionReadServiceTest {
             sessionRepo,
             turnRepo,
             eventRepo,
-            new AgentTurnReadModel(eventRepo, new ObjectMapper()));
+            new AgentTurnReadModel(eventRepo, new ObjectMapper()),
+            pipelineRunRepo);
   }
 
   @Test
@@ -55,6 +59,7 @@ class AgentSessionReadServiceTest {
     when(sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
             eq("u1"), eq("ACTIVE"), any(Pageable.class)))
         .thenReturn(List.of(session("s1", "u1")));
+    when(turnRepo.findLatestLinkedRunTurnsBySessionIds(List.of("s1"))).thenReturn(List.of());
 
     var sessions = service.listSessions(user(), 500);
 
@@ -64,6 +69,34 @@ class AgentSessionReadServiceTest {
     verify(sessionRepo)
         .findByUserIdAndStatusOrderByUpdatedAtDesc(eq("u1"), eq("ACTIVE"), pageable.capture());
     assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
+  }
+
+  @Test
+  void listsLatestLinkedRunSummaryForSessionRows() {
+    when(sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
+            eq("u1"), eq("ACTIVE"), any(Pageable.class)))
+        .thenReturn(List.of(session("s1", "u1")));
+    when(turnRepo.findLatestLinkedRunTurnsBySessionIds(List.of("s1")))
+        .thenReturn(List.of(linkedTurn("t2", 2, "submitted", "run-2")));
+    when(pipelineRunRepo.findAllById(List.of("run-2")))
+        .thenReturn(
+            List.of(
+                PipelineRun.builder()
+                    .runId("run-2")
+                    .runTitle("Add audit logs")
+                    .status("AWAITING_APPROVAL")
+                    .startedAt(java.time.Instant.parse("2026-06-20T00:00:00Z"))
+                    .scmPrUrl("https://github.com/acme/repo/pull/2")
+                    .build()));
+
+    var sessions = service.listSessions(user(), 25);
+
+    assertThat(sessions).hasSize(1);
+    assertThat(sessions.get(0).latestLinkedRunId()).isEqualTo("run-2");
+    assertThat(sessions.get(0).latestLinkedRunStatus()).isEqualTo("AWAITING_APPROVAL");
+    assertThat(sessions.get(0).latestLinkedRunTitle()).isEqualTo("Add audit logs");
+    assertThat(sessions.get(0).latestLinkedRunPrUrl())
+        .isEqualTo("https://github.com/acme/repo/pull/2");
   }
 
   @Test
@@ -136,6 +169,12 @@ class AgentSessionReadServiceTest {
         .intentConfidence(0.9)
         .status("OK")
         .build();
+  }
+
+  private static AgentTurn linkedTurn(String id, int sequence, String message, String runId) {
+    AgentTurn turn = turn(id, sequence, message);
+    turn.setLinkedRunId(runId);
+    return turn;
   }
 
   private static AgentActionEvent orchestratorDecisionEvent(String turnId, String route)

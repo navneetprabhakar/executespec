@@ -20,6 +20,12 @@ function session(id: string, projectId: string | null, runId: string | null): Ag
     defaultModel: null,
     defaultExecutionMode: 'PRODUCTION',
     approvalPolicy: 'CONFIRM_MUTATIONS',
+    latestLinkedRunId: null,
+    latestLinkedRunStatus: null,
+    latestLinkedRunTitle: null,
+    latestLinkedRunStartedAt: null,
+    latestLinkedRunCompletedAt: null,
+    latestLinkedRunPrUrl: null,
     createdAt: '2026-06-20T00:00:00Z',
     updatedAt: '2026-06-20T00:00:00Z',
   };

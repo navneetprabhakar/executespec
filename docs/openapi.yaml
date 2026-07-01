@@ -14,9 +14,11 @@ info:
     persistence (V120). YAML keys under `model-matrix` / `failover-order` use
     `gemini`.
 
-    Tier ladder (live): FREE (5 runs/month) / PRO ($29, 30 managed runs) /
-    TEAM ($39/seat, from 1 seat, BYOK) / ENTERPRISE. The Solo / MAX tiers do
-    not exist on dev/main today (V185 retired Solo naming; V165 dropped MAX).
+    Tier ladder (live): FREE (200 AI credits, native DeepSeek only) / PRO
+    ($20, 2,000 AI credits) / PRO_PLUS ($100, 125,000 AI credits, hidden
+    upsell) / BYOK ($50 single-person org) / TEAM ($50/seat, 2-seat minimum,
+    BYOK) / ENTERPRISE. The Solo / MAX tiers do not exist on dev/main today
+    (V185 retired Solo naming; V165 dropped MAX).
 
     Run modes: BUILD (default — full V2 pipeline) and PATCH (single thin-agent
     loop against a failing-test spec; powers the 4 autofix surfaces + SWE-bench
@@ -2289,7 +2291,7 @@ paths:
   /billing/topup/packages:
     get:
       tags: [Billing]
-      summary: List run top-up packages
+      summary: List AI-credit top-up packages
       responses:
         "200":
           content:
@@ -2302,15 +2304,25 @@ paths:
   /billing/topup/purchase:
     post:
       tags: [Billing]
-      summary: Purchase run top-up
+      summary: Purchase AI-credit top-up
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              required: [packageId]
               properties:
                 packageId:
+                  type: string
+                  description: Static package id. Omit when using a custom whole-dollar amount.
+                amountUsdCents:
+                  type: integer
+                  description: Custom whole-dollar USD amount in cents; credits = dollars * 100.
+                gateway:
+                  type: string
+                  enum: [razorpay, stripe]
+                successUrl:
+                  type: string
+                cancelUrl:
                   type: string
       responses:
         "200":
@@ -2325,11 +2337,19 @@ paths:
                     type: string
                   amountPaise:
                     type: integer
+                  gateway:
+                    type: string
+                  checkoutUrl:
+                    type: string
+                  stripeSessionId:
+                    type: string
+                  aiCredits:
+                    type: integer
 
   /billing/topup/verify:
     post:
       tags: [Billing]
-      summary: Verify top-up payment
+      summary: Verify Razorpay top-up payment
       requestBody:
         content:
           application/json:
@@ -4316,6 +4336,12 @@ components:
         actualCostUsd:
           type: number
           nullable: true
+          description: Actual provider cost in USD. Customer-facing web surfaces show this only to SUPER_ADMIN users.
+        aiCreditsCharged:
+          type: integer
+          format: int64
+          nullable: true
+          description: Managed AI credits debited by successful platform-key model calls for this run.
         githubPrUrl:
           type: string
           nullable: true
@@ -4447,12 +4473,21 @@ components:
         includedAiCredits:
           type: integer
           format: int64
+          description: Included monthly AI-credit grant; `-1` means unlimited/ungated.
+        purchasedAiCredits:
+          type: integer
+          format: int64
+          description: Purchased top-up credits attached to the current period.
         aiCreditsUsed:
           type: integer
           format: int64
         aiCreditsRemaining:
           type: integer
           format: int64
+          description: Remaining managed AI credits; `-1` means unlimited/ungated.
+        unlimitedAiCredits:
+          type: boolean
+          description: True when the user's tier is not blocked by managed-AI credit limits.
         rawCogsCapUsd:
           type: number
         rawCogsUsedUsd:
@@ -4547,6 +4582,10 @@ components:
         includedCredits:
           type: integer
           format: int64
+          description: Policy grant configured for the tier; zero-cap ungated tiers expose `unlimitedAiCredits=true`.
+        unlimitedAiCredits:
+          type: boolean
+          description: True when the effective policy has no managed-AI credit limit.
         rawCogsCapUsd:
           type: number
         frontierRawCapUsd:
@@ -4764,6 +4803,27 @@ components:
           type: string
         approvalPolicy:
           type: string
+        latestLinkedRunId:
+          type: string
+          nullable: true
+          description: Most recent pipeline run linked from a durable agent turn in this session.
+        latestLinkedRunStatus:
+          type: string
+          nullable: true
+        latestLinkedRunTitle:
+          type: string
+          nullable: true
+        latestLinkedRunStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        latestLinkedRunCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        latestLinkedRunPrUrl:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time

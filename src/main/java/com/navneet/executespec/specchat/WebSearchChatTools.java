@@ -6,13 +6,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,9 +55,9 @@ import lombok.extern.slf4j.Slf4j;
  * redirects (so a public URL cannot bounce to an internal address). The connection is opened
  * against the validated {@link InetAddress} rather than resolving the host a second time, response
  * headers and body bytes are bounded before decoding, non-text responses are rejected, returned
- * content is capped, HTML-stripped, run through {@link ContextSanitizer} to strip embedded injection
- * phrases / system tags, and explicitly marked {@code untrusted} in the envelope — the system
- * prompt instructs the model never to treat fetched/uploaded content as instructions.
+ * content is capped, HTML-stripped, run through {@link ContextSanitizer} to strip embedded
+ * injection phrases / system tags, and explicitly marked {@code untrusted} in the envelope — the
+ * system prompt instructs the model never to treat fetched/uploaded content as instructions.
  */
 @Component
 @Slf4j
@@ -112,8 +112,7 @@ public class WebSearchChatTools {
     this(json, contextSanitizer, new PinnedHttpFetcher());
   }
 
-  WebSearchChatTools(
-      ObjectMapper json, ContextSanitizer contextSanitizer, GuardedFetcher fetcher) {
+  WebSearchChatTools(ObjectMapper json, ContextSanitizer contextSanitizer, GuardedFetcher fetcher) {
     this.json = json;
     this.contextSanitizer = contextSanitizer;
     this.fetcher = fetcher;
@@ -216,7 +215,8 @@ public class WebSearchChatTools {
     if (uri.getRawQuery() != null && uri.getRawQuery().length() > MAX_URL_QUERY) {
       return FetchOutcome.err("URL query string is too long");
     }
-    if (!isAllowedFetchPort(uri)) return FetchOutcome.err("only default http/https ports are allowed");
+    if (!isAllowedFetchPort(uri))
+      return FetchOutcome.err("only default http/https ports are allowed");
     if (looksUnsafeForEgress(rawUrl)) {
       return FetchOutcome.err("URL looks like it may contain credentials or copied secrets");
     }
@@ -490,8 +490,7 @@ public class WebSearchChatTools {
       if (uri.getRawQuery() != null && !uri.getRawQuery().isBlank()) {
         target += "?" + uri.getRawQuery();
       }
-      String hostHeader =
-          (port == 80 || port == 443) ? host : host + ":" + port;
+      String hostHeader = (port == 80 || port == 443) ? host : host + ":" + port;
       String request =
           "GET "
               + target
@@ -500,7 +499,8 @@ public class WebSearchChatTools {
               + hostHeader
               + "\r\n"
               + "User-Agent: ExecuteSpec-Agent/1.0\r\n"
-              + "Accept: text/*, application/json, application/*+json, application/xml, application/*+xml\r\n"
+              + "Accept: text/*, application/json, application/*+json, application/xml,"
+              + " application/*+xml\r\n"
               + "Accept-Encoding: identity\r\n"
               + "Connection: close\r\n\r\n";
       out.write(request.getBytes(StandardCharsets.US_ASCII));

@@ -13,6 +13,7 @@ import {
   sessionTitle,
   type AgentAction,
   type AgentAttachmentLite,
+  type AgentUsageSummary,
   type AgentUiState,
   type BarTone,
   type LocalMessage,
@@ -20,6 +21,8 @@ import {
   type RoutingState,
   type StreamTimelineItem,
 } from '@/ide/agentState';
+import {hasUnlimitedAiCredits} from '@/ide/planUtils';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 const Paperclip = () => (
   <svg
@@ -76,11 +79,47 @@ const FolderIcon = () => (
 );
 
 const SUGGESTIONS = [
-  'What plans are waiting?',
-  'Explain this project',
-  'Search the web for the latest pgvector release',
-  'Create a run to add audit logging',
+  'Create a remote sandbox to add audit logging',
+  'Fix a failing test in a remote sandbox',
+  'Review waiting sandbox approvals',
+  'Explain this project before I start work',
 ];
+
+const SANDBOX_PHASES = [
+  {key: 'queued', label: 'Queued'},
+  {key: 'planning', label: 'Plan'},
+  {key: 'approval', label: 'Approval'},
+  {key: 'coding', label: 'Code'},
+  {key: 'building', label: 'Build'},
+  {key: 'reviewing', label: 'Review'},
+  {key: 'evidence', label: 'Evidence'},
+  {key: 'done', label: 'Done'},
+] as const;
+
+function tokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return `${Math.round(value)}`;
+}
+
+function totalTokens(usage?: AgentUsageSummary | null): number {
+  if (!usage) return 0;
+  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+}
+
+function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
+  if (!usage || totalTokens(usage) <= 0) return 'No token usage yet';
+  const parts = [
+    `${tokenCount(totalTokens(usage))} tokens`,
+    `${tokenCount(usage.inputTokens)} in`,
+    `${tokenCount(usage.outputTokens)} out`,
+  ];
+  if (usage.reasoningTokens > 0) parts.push(`${tokenCount(usage.reasoningTokens)} reasoning`);
+  parts.push('AI credits pending');
+  if (isSuperAdmin && usage.costUsd > 0) parts.push(`$${usage.costUsd.toFixed(4)}`);
+  return parts.join(' · ');
+}
 
 /** Top bar: Chats · scope chip · title · honest status · New chat · settings popover. */
 export function AgentTopBar({
@@ -90,9 +129,12 @@ export function AgentTopBar({
   busy,
   settingsOpen,
   managedAi,
+  sessionUsage,
   routingState,
   capabilities,
+  pendingGateCount,
   onNewChat,
+  onOpenApprovals,
   onToggleChats,
   onToggleSettings,
 }: {
@@ -102,9 +144,12 @@ export function AgentTopBar({
   busy: boolean;
   settingsOpen: boolean;
   managedAi: api.ManagedAiBalance | null;
+  sessionUsage: AgentUsageSummary;
   routingState: RoutingState;
   capabilities: api.AgentCapabilityTool[];
+  pendingGateCount: number;
   onNewChat: () => void;
+  onOpenApprovals: () => void;
   onToggleChats: () => void;
   onToggleSettings: () => void;
 }) {
@@ -120,15 +165,25 @@ export function AgentTopBar({
           {scopeLabel}
         </span>
       )}
-      <div className='agent-bar-title'>{selected ? sessionTitle(selected) : 'New chat'}</div>
+      <div className='agent-bar-title'>
+        {selected ? sessionTitle(selected) : 'Remote sandbox operator'}
+      </div>
       <span className='agent-bar-spacer' />
       <span className={`agent-bar-status ${barStatus.tone}`}>
         <span className='agent-bar-dot' aria-hidden='true' />
         {barStatus.label}
       </span>
+      <span className='agent-usage-pill' title='Current chat session token usage'>
+        {usageLabel(sessionUsage)}
+      </span>
+      {pendingGateCount > 0 && (
+        <button className='agent-approval-pill' onClick={onOpenApprovals}>
+          {pendingGateCount} approval{pendingGateCount === 1 ? '' : 's'}
+        </button>
+      )}
       <button className='agent-bar-btn' onClick={onNewChat} disabled={busy}>
         <PlusIcon size={14} />
-        <span>New chat</span>
+        <span>New sandbox</span>
       </button>
       <div className='agent-bar-settings'>
         <button
@@ -170,53 +225,86 @@ function SettingsPopover({
     <>
       <div className='agent-pop-backdrop' onClick={onClose} />
       <div className='agent-pop' role='dialog' aria-label='Agent settings and usage'>
+        <div className='agent-pop-title'>Sandbox policy</div>
         <div className='agent-pop-row'>
-          <span>Provider</span>
-          <code>{selected?.defaultProvider || 'account default'}</code>
+          <span>Execution target</span>
+          <code>remote only</code>
         </div>
-        {managedAi ? (
-          <>
-            <div className='agent-pop-row'>
-              <span>ES AI credits</span>
-              <code>
-                {managedAi.aiCreditsUsed} / {managedAi.includedAiCredits}
-              </code>
-            </div>
-            <div className='agent-meter'>
-              <span
-                style={{width: `${pct(managedAi.aiCreditsUsed, managedAi.includedAiCredits)}%`}}
-              />
-            </div>
-          </>
-        ) : (
+        <div className='agent-pop-row'>
+          <span>Plan gate</span>
+          <code>{routingState?.runApiAllowed ? 'after confirm' : 'confirmation gated'}</code>
+        </div>
+        <div className='agent-pop-row'>
+          <span>Local files</span>
+          <code>not touched</code>
+        </div>
+        <div className='agent-pop-row'>
+          <span>Run credits</span>
+          <code>charged after approval</code>
+        </div>
+        {managedAi && <ManagedAiBalance balance={managedAi} />}
+        <details className='agent-pop-diagnostics'>
+          <summary>Operator diagnostics</summary>
           <div className='agent-pop-row'>
-            <span>ES AI credits</span>
-            <code>n/a</code>
+            <span>Provider</span>
+            <code>{selected?.defaultProvider || 'account default'}</code>
           </div>
-        )}
-        {routingState && (
-          <>
+          {routingState && (
             <div className='agent-pop-row'>
-              <span>Confidence</span>
+              <span>Route confidence</span>
               <code>{Math.round(routingState.confidence * 100)}%</code>
             </div>
-            <div className='agent-pop-row'>
-              <span>Run API</span>
-              <code>{routingState.runApiAllowed ? 'after confirm' : 'blocked'}</code>
-            </div>
-          </>
-        )}
-        <div className='agent-pop-caps-label'>What it can do ({capabilities.length})</div>
-        <div className='agent-pop-caps'>
-          {capabilities.slice(0, 16).map((c) => (
-            <span key={c.name}>
-              <StatusDot kind={c.confirmationRequired ? 'warn' : 'ok'} size={6} />
-              {c.name.replace(/_/g, ' ')}
-            </span>
-          ))}
-        </div>
+          )}
+          <div className='agent-pop-caps-label'>Action contracts ({capabilities.length})</div>
+          <div className='agent-pop-caps'>
+            {capabilities.slice(0, 16).map((c) => (
+              <span key={c.name}>
+                <StatusDot kind={c.confirmationRequired ? 'warn' : 'ok'} size={6} />
+                {c.name.replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+        </details>
       </div>
     </>
+  );
+}
+
+function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const unlimited = hasUnlimitedAiCredits(balance);
+  const totalCredits = balance.includedAiCredits + (balance.purchasedAiCredits ?? 0);
+  const configured = unlimited || totalCredits > 0 || balance.rawCogsCapUsd > 0;
+  return (
+    <div className='agent-pop-balance'>
+      <span>Managed AI balance</span>
+      {unlimited ? (
+        <>
+          <strong>Unlimited AI credits</strong>
+          <small>This tier is not blocked by managed-AI credit limits.</small>
+        </>
+      ) : configured ? (
+        <>
+          <strong>
+            {balance.aiCreditsRemaining} of {totalCredits} credits left
+          </strong>
+          <div className='agent-meter'>
+            <span style={{width: `${pct(balance.aiCreditsUsed, totalCredits)}%`}} />
+          </div>
+          {isSuperAdmin && (
+            <small>
+              Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
+              monthly cap.
+            </small>
+          )}
+        </>
+      ) : (
+        <>
+          <strong>Managed credits not configured</strong>
+          <small>Runs use the configured provider keys and still require plan approval.</small>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -224,18 +312,26 @@ function SettingsPopover({
 export function AgentChatsDrawer({
   open,
   sessions,
+  gates,
   selectedId,
   status,
   onSelect,
   onNewChat,
+  onApproveGate,
+  onRejectGate,
+  onOpenGate,
   onClose,
 }: {
   open: boolean;
   sessions: api.AgentSessionResponse[];
+  gates: api.AgentGateDecisionCard[];
   selectedId: string | null;
   status: AgentUiState;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+  onApproveGate: (gate: api.AgentGateDecisionCard) => void;
+  onRejectGate: (gate: api.AgentGateDecisionCard) => void;
+  onOpenGate: (runId: string) => void;
   onClose: () => void;
 }) {
   if (!open) return null;
@@ -244,31 +340,73 @@ export function AgentChatsDrawer({
       <div className='agent-drawer-backdrop' onClick={onClose} />
       <aside className='agent-drawer' role='dialog' aria-label='Chats'>
         <div className='agent-drawer-head'>
-          <strong>Chats</strong>
+          <strong>Remote sandboxes</strong>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
-            New
+            New sandbox
           </button>
         </div>
+        <div className='agent-drawer-summary'>
+          <span>{gates.length} waiting approval</span>
+          <span>{sessions.length} conversations</span>
+        </div>
+        {gates.length > 0 && (
+          <div className='agent-drawer-section'>
+            <div className='agent-drawer-label'>Approval inbox</div>
+            <div className='agent-drawer-list'>
+              {gates.map((gate) => (
+                <div key={gate.runId} className='agent-drawer-gate'>
+                  <span className='agent-drawer-title'>
+                    {gate.title || gate.summary || gate.runId}
+                  </span>
+                  <span className='agent-drawer-meta'>{gateQueueMeta(gate)}</span>
+                  <span className='agent-drawer-riskline'>
+                    <b>{(gate.risk || 'LOW').toLowerCase()} risk</b>
+                    <span>{gate.tasks.length || 'n/a'} tasks</span>
+                    <span>{gateCostLabel(gate)}</span>
+                  </span>
+                  <span className='agent-drawer-actions'>
+                    <button
+                      className='ide-btn agent-btn-primary'
+                      onClick={() => onApproveGate(gate)}
+                    >
+                      Approve &amp; run
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => onRejectGate(gate)}>
+                      Reject
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => onOpenGate(gate.runId)}>
+                      Full plan
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {status === 'loadingSession' ? (
           <div className='agent-muted'>Loading…</div>
         ) : sessions.length === 0 ? (
-          <div className='agent-muted'>No chats yet.</div>
+          <div className='agent-muted'>No sandbox conversations yet.</div>
         ) : (
-          <div className='agent-drawer-list'>
-            {sessions.map((s) => (
-              <button
-                key={s.id}
-                className={s.id === selectedId ? 'active' : ''}
-                onClick={() => onSelect(s.id)}
-              >
-                <span className='agent-drawer-title'>{sessionTitle(s)}</span>
-                <span className='agent-drawer-meta'>
-                  {scopeBadge(s)}
-                  {relTime(s.updatedAt)}
-                </span>
-              </button>
-            ))}
+          <div className='agent-drawer-section'>
+            <div className='agent-drawer-label'>Conversations</div>
+            <div className='agent-drawer-list'>
+              {sessions.map((s) => (
+                <button
+                  key={s.id}
+                  className={s.id === selectedId ? 'active' : ''}
+                  onClick={() => onSelect(s.id)}
+                >
+                  <span className='agent-drawer-title'>{sessionTitle(s)}</span>
+                  <span className='agent-drawer-meta'>
+                    {sessionDrawerMeta(s)}
+                    {' · '}
+                    {relTime(s.updatedAt)}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </aside>
@@ -280,6 +418,38 @@ function scopeBadge(s: api.AgentSessionResponse): string {
   if (s.runId) return 'Run · ';
   if (s.projectId) return 'Project · ';
   return '';
+}
+
+function sessionMode(s: api.AgentSessionResponse): string {
+  if (s.runId) return 'run-scoped';
+  if (s.projectId) return 'project-scoped';
+  return 'sandbox operator';
+}
+
+function sessionDrawerMeta(s: api.AgentSessionResponse): string {
+  if (s.latestLinkedRunId) {
+    const title = s.latestLinkedRunTitle || `Run ${s.latestLinkedRunId.slice(0, 8)}`;
+    const status = s.latestLinkedRunStatus ? ` · ${runPhaseLabel(s.latestLinkedRunStatus)}` : '';
+    return `Latest sandbox: ${title}${status}`;
+  }
+  return `${scopeBadge(s)}${sessionMode(s)}`;
+}
+
+function gateAge(gate: api.AgentGateDecisionCard): string {
+  return relTime(gate.submittedAt);
+}
+
+function gateCostLabel(gate: api.AgentGateDecisionCard): string {
+  const parts = [];
+  if (gate.creditsRequired != null) parts.push(`${gate.creditsRequired} credits`);
+  return parts.length ? parts.join(' / ') : 'cost pending';
+}
+
+function gateQueueMeta(gate: api.AgentGateDecisionCard): string {
+  const project = gate.projectName || 'Standalone sandbox';
+  const route = gate.provider || gate.model || 'default route';
+  const age = gateAge(gate);
+  return `${project} · ${route}${age ? ` · ${age}` : ''}`;
 }
 
 function relTime(iso?: string | null): string {
@@ -296,6 +466,7 @@ function relTime(iso?: string | null): string {
 }
 
 function MessageBubble({message}: {message: LocalMessage}) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   if (message.role === 'user') {
     return (
       <div className='agent-msg user'>
@@ -305,9 +476,14 @@ function MessageBubble({message}: {message: LocalMessage}) {
   }
   return (
     <div className={`agent-msg ${message.role}`}>
-      <div className='agent-msg-label'>{message.role === 'system' ? 'System' : 'Agent'}</div>
+      <div className='agent-msg-label'>
+        <span>{message.role === 'system' ? 'System' : 'Agent'}</span>
+        {message.role === 'assistant' && message.usage && totalTokens(message.usage) > 0 && (
+          <span className='agent-msg-usage'>{usageLabel(message.usage, isSuperAdmin)}</span>
+        )}
+      </div>
       <div className='agent-msg-body'>
-        <Markdown>{message.content}</Markdown>
+        <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
       </div>
     </div>
   );
@@ -340,7 +516,7 @@ function Typing() {
 }
 
 /** Live (or just-finished) run, pinned in the chat that spawned it. */
-function RunCard({
+function SandboxRunCard({
   run,
   liveCostUsd,
   busy,
@@ -354,6 +530,7 @@ function RunCard({
   onStop: () => void;
 }) {
   const prog = runProgress(run.tasks);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const terminal = isTerminalRunStatus(run.status);
   const failed = (run.status || '').toUpperCase() === 'FAILED';
   const cancelled = (run.status || '').toUpperCase() === 'CANCELLED';
@@ -361,19 +538,47 @@ function RunCard({
   const est = run.costEstimateHigh ?? 0;
   const variant = !terminal ? '' : failed ? ' failed' : cancelled ? ' cancelled' : ' done';
   const pillKind = !terminal ? 'live' : failed ? 'bad' : cancelled ? 'muted' : 'ok';
+  const activePhase = sandboxPhaseKey(run.status);
+  const score = run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100`;
+  const provider = run.aiProvider || run.workerModel || 'default route';
+  const prUrl = run.scmPrUrl || run.githubPrUrl;
+  const terminalLabel = failed
+    ? 'Open failure evidence'
+    : cancelled
+      ? 'Open cancelled run'
+      : 'Review evidence';
   return (
     <div className={`agent-runcard${variant}`}>
       <div className='agent-runcard-head'>
         <RunsIcon size={16} />
-        <span className='agent-runcard-title'>{run.runTitle || 'Cloud run'}</span>
+        <span className='agent-runcard-title'>{run.runTitle || 'Remote sandbox run'}</span>
         <span className={`agent-runcard-pill ${pillKind}`}>
           {!terminal && <span className='agent-runcard-dot' aria-hidden='true' />}
           {runPhaseLabel(run.status)}
         </span>
         <span className='agent-runcard-cost'>
-          ${cost.toFixed(2)}
-          {est ? ` / ~$${est.toFixed(2)}` : ''}
+          {run.aiCreditsCharged != null
+            ? `${run.aiCreditsCharged} AI credits`
+            : 'AI credits pending'}
+          {isSuperAdmin && (
+            <>
+              {' · $'}
+              {cost.toFixed(2)}
+              {est ? ` / ~$${est.toFixed(2)}` : ''}
+            </>
+          )}
         </span>
+      </div>
+      <div className='agent-runcard-mode'>Remote sandbox · plan-gated · PR-oriented</div>
+      <div className='agent-runcard-phases' aria-label='Sandbox phase'>
+        {SANDBOX_PHASES.map((phase) => (
+          <span
+            key={phase.key}
+            className={phaseState(phase.key, activePhase, terminal, failed, cancelled)}
+          >
+            {phase.label}
+          </span>
+        ))}
       </div>
       {!terminal && prog.current && (
         <div className='agent-runcard-step'>
@@ -381,17 +586,43 @@ function RunCard({
           {prog.current}
         </div>
       )}
+      <div className='agent-runcard-kpis'>
+        <span>
+          <b>{prog.total || 'n/a'}</b>
+          tasks
+        </span>
+        <span>
+          <b>{score}</b>
+          evidence
+        </span>
+        <span>
+          <b>{provider}</b>
+          route
+        </span>
+      </div>
       {prog.total > 0 && (
         <div className='agent-runcard-bar'>
           <span style={{width: `${terminal && !failed && !cancelled ? 100 : prog.pct}%`}} />
         </div>
       )}
       <div className='agent-runcard-actions'>
-        <button className='ide-btn' onClick={() => onOpen(runOpenPath(run.runId, run.status))}>
-          {terminal ? 'Open result' : 'Open run'}
+        <button
+          className='ide-btn agent-btn-primary'
+          onClick={() => onOpen(runOpenPath(run.runId, run.status))}
+        >
+          {terminal
+            ? terminalLabel
+            : run.status === 'AWAITING_APPROVAL'
+              ? 'Review plan'
+              : 'Open live run'}
         </button>
-        {run.githubPrUrl && (
-          <a className='ide-btn ghost' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
+        {terminal && (
+          <button className='ide-btn ghost' onClick={() => onOpen(`/result/${run.runId}`)}>
+            Changed files
+          </button>
+        )}
+        {prUrl && (
+          <a className='ide-btn ghost' href={prUrl} target='_blank' rel='noreferrer'>
             View PR
           </a>
         )}
@@ -420,23 +651,29 @@ function ActionCard({
   const isCloudRun = pending.action.type === 'create_cloud_run';
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
+  if (isCloudRun) {
+    return (
+      <SandboxProposalCard
+        pending={pending}
+        busy={busy}
+        onConfirm={onConfirm}
+        onDismiss={onDismiss}
+      />
+    );
+  }
+  if (isLocal) return <LocalHandoffCard pending={pending} onDismiss={onDismiss} />;
   const args = Object.entries(pending.action.arguments || {});
   return (
-    <div className={`agent-card${isCloudRun ? ' waiting' : ''}`}>
+    <div className='agent-card'>
       <div className='agent-card-head'>
         <RunsIcon size={16} />
-        <strong>{isLocal ? 'Continue on your machine' : 'Start a cloud run'}</strong>
+        <strong>{pending.action.type.replace(/_/g, ' ')}</strong>
         {pending.action.billingImpact && pending.action.billingImpact !== 'none' && (
           <span className='agent-card-meta'>{pending.action.billingImpact.replace(/_/g, ' ')}</span>
         )}
       </div>
       {pending.action.confirmationPrompt && (
         <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
-      )}
-      {isCloudRun && (
-        <div className='agent-card-consequence'>
-          You approve the plan and cost on the next screen — nothing bills until then.
-        </div>
       )}
       {args.length > 0 && (
         <div className='agent-card-args'>
@@ -449,31 +686,104 @@ function ActionCard({
         </div>
       )}
       <div className='agent-card-actions'>
-        {isLocal ? (
-          <>
-            <button className='ide-btn' onClick={() => (window.location.href = '/cli-login')}>
-              Continue in CLI
-            </button>
-            <button className='ide-btn ghost' onClick={onDismiss}>
-              Keep as advice
-            </button>
-          </>
-        ) : (
-          <>
-            {isCloudRun && (
-              <button
-                className='ide-btn agent-btn-primary'
-                onClick={() => onConfirm(pending)}
-                disabled={busy}
-              >
-                Review plan &amp; cost
-              </button>
-            )}
-            <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
-              Dismiss
-            </button>
-          </>
-        )}
+        <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SandboxProposalCard({
+  pending,
+  onConfirm,
+  onDismiss,
+  busy,
+}: {
+  pending: PendingAction;
+  onConfirm: (pending: PendingAction) => void;
+  onDismiss: () => void;
+  busy: boolean;
+}) {
+  const args = pending.action.arguments || {};
+  const spec = asText(args.spec || args.request || pending.action.confirmationPrompt || '');
+  const project = asText(args.projectId || args.project || 'Current project or selected repo');
+  const provider = asText(args.aiProvider || args.provider || 'Account default');
+  return (
+    <div className='agent-card agent-sandbox-proposal waiting'>
+      <div className='agent-card-head'>
+        <RunsIcon size={16} />
+        <strong>Create remote sandbox run</strong>
+        <span className='agent-card-meta'>plan gate before spend</span>
+      </div>
+      <div className='agent-card-sub'>
+        ExecuteSpec will create an isolated remote workspace, draft a plan, then stop for your
+        approval before coding or charging run credits.
+      </div>
+      {pending.action.confirmationPrompt && (
+        <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
+      )}
+      <div className='agent-card-args'>
+        <div className='agent-kv-row'>
+          <span>Request</span>
+          <code>{spec || 'Implementation request from this turn'}</code>
+        </div>
+        <div className='agent-kv-row'>
+          <span>Context</span>
+          <code>{project}</code>
+        </div>
+        <div className='agent-kv-row'>
+          <span>Execution target</span>
+          <code>Remote sandbox</code>
+        </div>
+        <div className='agent-kv-row'>
+          <span>Provider route</span>
+          <code>{provider}</code>
+        </div>
+      </div>
+      <SandboxContractPanel />
+      <TrustBoundaryPanel compact />
+      <div className='agent-card-consequence-row'>
+        <span>plan first</span>
+        <span>no local files touched</span>
+        <span>approval before credits</span>
+        <span>PR-oriented result</span>
+      </div>
+      <div className='agent-card-actions'>
+        <button
+          className='ide-btn agent-btn-primary'
+          onClick={() => onConfirm(pending)}
+          disabled={busy}
+        >
+          Create sandbox plan
+        </button>
+        <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
+          Edit request
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LocalHandoffCard({pending, onDismiss}: {pending: PendingAction; onDismiss: () => void}) {
+  return (
+    <div className='agent-card agent-local-handoff'>
+      <div className='agent-card-head'>
+        <RunsIcon size={16} />
+        <strong>Continue in local tools</strong>
+        <span className='agent-card-meta'>{pending.action.type.replace(/_/g, ' ')}</span>
+      </div>
+      <div className='agent-card-sub'>
+        This request needs local file or shell authority. The web agent stays remote-sandbox only;
+        use the CLI or VS Code client when your machine must execute commands.
+      </div>
+      <div className='agent-card-actions'>
+        <button className='ide-btn' onClick={() => (window.location.href = '/cli-login')}>
+          Continue in CLI
+        </button>
+        <button className='ide-btn ghost' onClick={onDismiss}>
+          Keep as advice
+        </button>
       </div>
     </div>
   );
@@ -493,15 +803,24 @@ function GateCard({
   busy: boolean;
 }) {
   return (
-    <div className='agent-card waiting'>
+    <div className='agent-card agent-gate-card waiting'>
+      <div className='agent-card-head'>
+        <RunsIcon size={16} />
+        <strong>Sandbox plan awaiting approval</strong>
+        {gate.risk && <span className='agent-card-meta'>risk {gate.risk.toLowerCase()}</span>}
+      </div>
       <button className='agent-card-title' onClick={() => onOpen(gate.runId)}>
         {gate.title || gate.summary || gate.runId}
       </button>
       <div className='agent-card-consequence-row'>
+        <span>{gate.projectName || 'standalone sandbox'}</span>
         {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
         {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
+        {gate.provider && <span>{gate.provider}</span>}
+        {gateAge(gate) && <span>{gateAge(gate)}</span>}
         <span>opens a PR</span>
       </div>
+      {gate.summary && <div className='agent-card-sub'>{gate.summary}</div>}
       {gate.tasks.length > 0 && (
         <ul className='agent-card-tasks'>
           {gate.tasks.slice(0, 4).map((task) => (
@@ -509,6 +828,7 @@ function GateCard({
           ))}
         </ul>
       )}
+      <TrustBoundaryPanel compact />
       <div className='agent-card-actions'>
         <button
           className='ide-btn agent-btn-primary'
@@ -520,7 +840,101 @@ function GateCard({
         <button className='ide-btn ghost' onClick={() => onReject(gate)} disabled={busy}>
           Reject
         </button>
+        <button className='ide-btn ghost' onClick={() => onOpen(gate.runId)} disabled={busy}>
+          Open full plan
+        </button>
       </div>
+    </div>
+  );
+}
+
+function SandboxContractPanel() {
+  return (
+    <div className='agent-contract-panel' aria-label='Sandbox contract'>
+      <div className='agent-contract-title'>What will happen before spend</div>
+      <div className='agent-contract-grid'>
+        <span>
+          <b>Workspace</b>
+          isolated remote clone
+        </span>
+        <span>
+          <b>Branch</b>
+          shown in plan
+        </span>
+        <span>
+          <b>Tests</b>
+          detected command
+        </span>
+        <span>
+          <b>PR</b>
+          target confirmed
+        </span>
+        <span>
+          <b>Cost</b>
+          cap before run
+        </span>
+        <span>
+          <b>Local files</b>
+          never touched
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
+  return (
+    <div className={compact ? 'agent-trust-panel compact' : 'agent-trust-panel'}>
+      <span>Repo token scoped to selected project</span>
+      <span>Secrets are not displayed in chat</span>
+      <span>Run events stay in audit trail</span>
+      <span>Approval required before code execution</span>
+      <span>Retention follows workspace cleanup policy</span>
+      <span>Outbound network follows sandbox policy</span>
+    </div>
+  );
+}
+
+function OperatorIntro({
+  hasHistory,
+  onPick,
+}: {
+  hasHistory: boolean;
+  onPick: (text: string) => void;
+}) {
+  return (
+    <div className='agent-operator-intro'>
+      <div className='agent-operator-kicker'>Remote sandbox operator</div>
+      <div className='agent-operator-grid'>
+        <div>
+          <h1>Run work in a remote sandbox.</h1>
+          <p>
+            Plan, code, test, review, and open a PR without touching your local machine. You approve
+            the plan and cost before the sandbox starts coding.
+          </p>
+        </div>
+        <div className='agent-operator-steps' aria-label='Remote sandbox workflow'>
+          <span>Request</span>
+          <span>Plan gate</span>
+          <span>Sandbox work</span>
+          <span>Evidence</span>
+          <span>PR / deploy</span>
+        </div>
+      </div>
+      <SandboxContractPanel />
+      <TrustBoundaryPanel />
+      <div className='agent-empty-chips'>
+        {SUGGESTIONS.map((s) => (
+          <button key={s} onClick={() => onPick(s)}>
+            {s}
+          </button>
+        ))}
+      </div>
+      {hasHistory && (
+        <div className='agent-history-note'>
+          Recent transcript is below. Start a new sandbox from here or open Chats for older work.
+        </div>
+      )}
     </div>
   );
 }
@@ -531,10 +945,10 @@ function EmptyState({onPick}: {onPick: (text: string) => void}) {
       <div className='agent-empty-icon'>
         <CommandIcon size={26} />
       </div>
-      <strong>Ask the agent</strong>
+      <strong>Remote sandbox ready</strong>
       <p>
-        Search the web, ask about your projects and runs, attach a file, or kick off a gated cloud
-        run — the human approves before anything bills.
+        Describe the change, review the generated plan, then let ExecuteSpec work in an isolated
+        sandbox. Browser sessions never get local shell authority.
       </p>
       <div className='agent-empty-chips'>
         {SUGGESTIONS.map((s) => (
@@ -701,13 +1115,23 @@ export function AgentConversation({
   onStopRun: () => void;
 }) {
   const empty = messages.length === 0 && !isBusy && !visibleAction && !runCard;
+  const showOperatorIntro = !visibleAction && !runCard && gates.length === 0 && !isBusy;
+  const showOperatorInScroll = showOperatorIntro && messages.length === 0;
+  const showComposerContract =
+    messages.length === 0 && !visibleAction && gates.length === 0 && !runCard;
   return (
     <section className='agent-chat'>
       <div className='agent-chat-scroll' onScroll={onScroll}>
         <div className='agent-chat-col'>
+          {showOperatorInScroll && (
+            <OperatorIntro
+              hasHistory={messages.length > 0}
+              onPick={(s) => dispatch({type: 'input:set', input: s})}
+            />
+          )}
           {gates.length > 0 && (
             <div className='agent-gates-inline'>
-              <div className='agent-gates-label'>Waiting for your approval</div>
+              <div className='agent-gates-label'>Remote sandboxes waiting for your approval</div>
               {gates.map((g) => (
                 <GateCard
                   key={g.runId}
@@ -720,15 +1144,15 @@ export function AgentConversation({
               ))}
             </div>
           )}
-          {empty ? (
-            <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
-          ) : (
-            messages.map((message) => <MessageBubble key={message.id} message={message} />)
-          )}
+          {empty
+            ? !showOperatorInScroll && (
+                <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
+              )
+            : messages.map((message) => <MessageBubble key={message.id} message={message} />)}
           <Activity items={streamEvents} />
           {isBusy && !streamText && <Typing />}
           {runCard && (
-            <RunCard
+            <SandboxRunCard
               run={runCard}
               liveCostUsd={runCost}
               busy={isBusy}
@@ -749,6 +1173,14 @@ export function AgentConversation({
       </div>
       <div className='agent-composer-wrap'>
         <div className='agent-chat-col'>
+          {showComposerContract && (
+            <div className='agent-composer-contract'>
+              <span>Remote sandbox only</span>
+              <span>Plan and cost first</span>
+              <span>Branch, tests, PR, and cap shown before run</span>
+              <span>No local files touched</span>
+            </div>
+          )}
           <Composer
             input={input}
             attachments={attachments}
@@ -764,4 +1196,43 @@ export function AgentConversation({
       </div>
     </section>
   );
+}
+
+function sandboxPhaseKey(status?: string | null): (typeof SANDBOX_PHASES)[number]['key'] {
+  const s = (status || '').toUpperCase();
+  if (['QUEUED', 'PENDING', 'SUBMITTED', 'QUEUED_BATCH'].includes(s)) return 'queued';
+  if (['CLASSIFYING', 'PLANNING'].includes(s)) return 'planning';
+  if (s === 'AWAITING_APPROVAL') return 'approval';
+  if (['WORKING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH', 'CODING', 'RUNNING'].includes(s))
+    return 'coding';
+  if (['COMPILING', 'BUILDING', 'TESTING'].includes(s)) return 'building';
+  if (s === 'REVIEWING') return 'reviewing';
+  if (['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'ERROR', 'PARTIAL'].includes(s))
+    return 'done';
+  return 'queued';
+}
+
+function phaseState(
+  phase: (typeof SANDBOX_PHASES)[number]['key'],
+  active: (typeof SANDBOX_PHASES)[number]['key'],
+  terminal: boolean,
+  failed: boolean,
+  cancelled: boolean,
+): string {
+  const order = SANDBOX_PHASES.map((p) => p.key);
+  const phaseIndex = order.indexOf(phase);
+  const activeIndex = order.indexOf(active);
+  const state =
+    terminal && phase === 'done'
+      ? failed
+        ? 'bad'
+        : cancelled
+          ? 'muted'
+          : 'done'
+      : phaseIndex < activeIndex
+        ? 'done'
+        : phaseIndex === activeIndex
+          ? 'active'
+          : 'pending';
+  return `agent-runcard-phase ${state}`;
 }

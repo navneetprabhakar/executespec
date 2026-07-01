@@ -80,6 +80,7 @@ public class BillingService {
   private final BillingTierBridgeService tierBridgeService;
   private final BillingSubscriptionWriter subscriptionWriter;
   private final BillingWebhookEventRecorder webhookEventRecorder;
+  private final RunTopupService runTopupService;
 
   @Value("${billing.founder-pricing.max-slots:100}")
   private int founderMaxSlots;
@@ -757,6 +758,17 @@ public class BillingService {
     String billingEntityId = session.path("metadata").path("billing_entity_id").asText("");
     String billingEntityType = session.path("metadata").path("billing_entity_type").asText("");
     String planId = session.path("metadata").path("plan_id").asText("");
+    String type = session.path("metadata").path("type").asText("");
+
+    if ("ai_credit_topup".equals(type)) {
+      String topupId = session.path("metadata").path("topup_id").asText("");
+      if (topupId.isBlank()) {
+        log.warn("Stripe AI-credit top-up checkout without topup_id metadata");
+        return;
+      }
+      runTopupService.creditStripeTopup(topupId, stripeCheckoutSessionId, stripeCheckoutSessionId);
+      return;
+    }
 
     if (stripeSubscriptionId.isBlank()) {
       log.warn("Stripe checkout.session.completed without subscription ID");

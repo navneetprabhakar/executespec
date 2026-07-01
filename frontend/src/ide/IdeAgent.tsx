@@ -8,10 +8,46 @@ import {
   initialAgentState,
   isTerminalRunStatus,
   toMessages,
+  type AgentUsageSummary,
   type PendingAction,
 } from '@/ide/agentState';
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
-import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
+import {
+  agentSessionMatchesScope,
+  selectScopedAgentSession,
+  webAgentSessionRequest,
+} from '@/ide/agentSession';
+
+const MAX_CONTEXT_TURNS = 8;
+
+function conversationForStream(
+  turns: api.AgentTurnResponse[],
+  latestMessage: string,
+): api.AgentConversationMessage[] {
+  const conversation: api.AgentConversationMessage[] = [];
+  for (const turn of turns.slice(-MAX_CONTEXT_TURNS)) {
+    if (turn.userMessage?.trim()) {
+      conversation.push({role: 'user', content: turn.userMessage.trim()});
+    }
+    if (turn.assistantSummary?.trim()) {
+      conversation.push({role: 'assistant', content: turn.assistantSummary.trim()});
+    }
+  }
+  conversation.push({role: 'user', content: latestMessage});
+  return conversation;
+}
+
+function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
+  return turns.reduce(
+    (acc, turn) => ({
+      inputTokens: acc.inputTokens + (turn.inputTokens || 0),
+      outputTokens: acc.outputTokens + (turn.outputTokens || 0),
+      reasoningTokens: acc.reasoningTokens + (turn.reasoningTokens || 0),
+      costUsd: acc.costUsd + (turn.costUsd || 0),
+    }),
+    {inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0},
+  );
+}
 
 export default function IdeAgent() {
   const navigate = useNavigate();
@@ -26,16 +62,25 @@ export default function IdeAgent() {
   const [runCost, setRunCost] = useState<number | null>(null);
   const stickToBottom = useRef(true);
 
-  const selected = useMemo(
-    () => state.sessions.find((session) => session.id === state.selectedId) ?? null,
-    [state.sessions, state.selectedId],
-  );
+  const scope = useMemo(() => ({projectId, runId}), [projectId, runId]);
+  const selected = useMemo(() => {
+    const candidate = state.sessions.find((session) => session.id === state.selectedId) ?? null;
+    if (!candidate) return null;
+    return agentSessionMatchesScope(candidate, scope) ? candidate : null;
+  }, [scope, state.sessions, state.selectedId]);
 
   const historicalActions = useMemo(
     () => state.turns.map(actionFromTurn).filter(Boolean) as PendingAction[],
     [state.turns],
   );
   const visibleAction = state.pendingAction ?? historicalActions[0] ?? null;
+  const latestLinkedRunId = useMemo(() => {
+    for (let i = state.turns.length - 1; i >= 0; i -= 1) {
+      const run = state.turns[i]?.linkedRunId;
+      if (run) return run;
+    }
+    return null;
+  }, [state.turns]);
 
   const messages = [
     ...toMessages(state.turns),
@@ -46,6 +91,7 @@ export default function IdeAgent() {
       ? [{id: 'pending:assistant', role: 'assistant' as const, content: state.streamText}]
       : []),
   ];
+  const sessionUsage = useMemo(() => usageFromTurns(state.turns), [state.turns]);
 
   const loadTurns = useCallback(async (sessionId: string) => {
     const rows = await api.listAgentTurns(sessionId, {limit: 50});
@@ -78,8 +124,10 @@ export default function IdeAgent() {
         api.listAgentCapabilities('WEB'),
         api.getManagedAiBalance().catch(() => null),
       ]);
-      const scoped = selectScopedAgentSession(sessionRows, {projectId, runId});
-      const selectedId = state.selectedId ?? scoped?.id ?? sessionRows[0]?.id ?? null;
+      const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
+      const scoped = selectScopedAgentSession(sessionRows, scope);
+      const selectedId =
+        current && agentSessionMatchesScope(current, scope) ? current.id : (scoped?.id ?? null);
       dispatch({
         type: 'load:success',
         sessions: sessionRows,
@@ -95,7 +143,7 @@ export default function IdeAgent() {
         error: e instanceof Error ? e.message : 'Failed to load agent state.',
       });
     }
-  }, [loadTurns, projectId, runId, state.selectedId]);
+  }, [loadTurns, scope, state.selectedId]);
 
   useEffect(() => {
     void load();
@@ -117,6 +165,15 @@ export default function IdeAgent() {
   useEffect(() => {
     if (stickToBottom.current) endRef.current?.scrollIntoView({block: 'end'});
   }, [state.turns, state.pendingUser, state.streamText, state.streamEvents, runDetail]);
+
+  // A confirmed web-agent turn persists the run id on the durable turn. Hydrate
+  // it after reload so the agent still behaves like an operator cockpit, not a
+  // transcript with a lost run card.
+  useEffect(() => {
+    if (latestLinkedRunId && latestLinkedRunId !== state.activeRun) {
+      dispatch({type: 'run:submitted', runId: latestLinkedRunId});
+    }
+  }, [latestLinkedRunId, state.activeRun]);
 
   // Poll the agent-submitted run so the pinned run card stays live until terminal.
   useEffect(() => {
@@ -162,7 +219,7 @@ export default function IdeAgent() {
   }, []);
 
   async function createSession() {
-    const session = await api.createAgentSession(webAgentSessionRequest({projectId, runId}));
+    const session = await api.createAgentSession(webAgentSessionRequest(scope));
     const next = [session, ...state.sessions.filter((s) => s.id !== session.id)];
     dispatch({type: 'sessions:set', sessions: next});
     dispatch({type: 'session:select', sessionId: session.id});
@@ -208,7 +265,12 @@ export default function IdeAgent() {
       loadManagedAi(),
     ]);
     dispatch({type: 'gates:set', gates});
-    const active = sessionId ?? state.selectedId ?? sessions[0]?.id;
+    const current = sessions.find((session) => session.id === state.selectedId) ?? null;
+    const active =
+      sessionId ??
+      (current && agentSessionMatchesScope(current, scope) ? current.id : null) ??
+      selectScopedAgentSession(sessions, scope)?.id ??
+      null;
     if (active) await loadTurns(active);
   }
 
@@ -225,6 +287,7 @@ export default function IdeAgent() {
         session.id,
         {
           message,
+          conversation: conversationForStream(state.turns, message),
           attachmentIds,
           clientCapabilities: {
             localTools: false,
@@ -387,12 +450,15 @@ export default function IdeAgent() {
         busy={isBusy}
         settingsOpen={settingsOpen}
         managedAi={state.managedAi}
+        sessionUsage={sessionUsage}
         routingState={state.routingState}
         capabilities={state.capabilities}
+        pendingGateCount={state.gates.length}
         onNewChat={() => {
           setChatsOpen(false);
           void createSession();
         }}
+        onOpenApprovals={() => setChatsOpen(true)}
         onToggleChats={() => setChatsOpen((o) => !o)}
         onToggleSettings={() => setSettingsOpen((o) => !o)}
       />
@@ -416,6 +482,7 @@ export default function IdeAgent() {
       <AgentChatsDrawer
         open={chatsOpen}
         sessions={state.sessions}
+        gates={state.gates}
         selectedId={state.selectedId}
         status={state.status}
         onSelect={(id) => {
@@ -425,6 +492,18 @@ export default function IdeAgent() {
         onNewChat={() => {
           setChatsOpen(false);
           void createSession();
+        }}
+        onApproveGate={(gate) => {
+          setChatsOpen(false);
+          void approveGate(gate);
+        }}
+        onRejectGate={(gate) => {
+          setChatsOpen(false);
+          void rejectGate(gate);
+        }}
+        onOpenGate={(id) => {
+          setChatsOpen(false);
+          navigate(`/plan/${id}`);
         }}
         onClose={() => setChatsOpen(false)}
       />

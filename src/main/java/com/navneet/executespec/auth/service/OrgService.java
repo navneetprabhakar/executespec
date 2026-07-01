@@ -45,7 +45,7 @@ public class OrgService {
   private final StripePaymentGateway stripeGateway;
 
   /** TEAM tier self-serve seat range. Orgs above this go to ENTERPRISE. */
-  private static final int TEAM_MIN_SEATS = 1;
+  private static final int TEAM_MIN_SEATS = 2;
 
   private static final int TEAM_MAX_SEATS = 20;
   private final ObjectMapper mapper = new ObjectMapper();

@@ -7,11 +7,15 @@ import {CostProgressBar} from '@/signal/components/CostProgressBar';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {repoDisplayName, repoIdFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {useIsMobile} from '@/hooks/useIsMobile';
-import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
-import {formatManagedAiPlanMessage} from '@/ide/planUtils';
+import {
+  formatManagedAiPlanMessage,
+  hasUnlimitedAiCredits,
+  managedAiStatusLabel,
+} from '@/ide/planUtils';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -77,7 +81,7 @@ function quotaSubtitle(
   tier: string,
   _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
 ): string {
-  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed ES AI
+  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed AI
   // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
   // The subtitle stays at the tier so it never shows a stale run cap.
   return tier;
@@ -102,6 +106,7 @@ export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const tier = useAuthStore(selectNormalizedTier);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
@@ -212,8 +217,12 @@ export function IdeWelcome() {
             <span>{liveTasks.length ? `${liveDone}/${liveTasks.length} tasks` : 'warming up'}</span>
             <span>·</span>
             <span>{formatElapsed(runElapsedMs(liveRun))}</span>
-            <span>·</span>
-            <span>${liveSpent.toFixed(2)}</span>
+            {isSuperAdmin && (
+              <>
+                <span>·</span>
+                <span>${liveSpent.toFixed(2)}</span>
+              </>
+            )}
           </div>
           <div style={{display: 'flex', gap: 8}}>
             <Link className='ide-btn ghost' to={`/plan/${liveRun.runId}`}>
@@ -291,7 +300,7 @@ export function IdeWelcome() {
                     {r.verifiedScore}
                   </IdeBadge>
                 )}
-                {typeof r.actualCostUsd === 'number' && (
+                {isSuperAdmin && typeof r.actualCostUsd === 'number' && (
                   <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
                     ${r.actualCostUsd.toFixed(2)}
                   </span>
@@ -586,7 +595,7 @@ export function IdeCompose() {
 
   const providerModels = modelsByProvider[provider.toLowerCase()] || [];
   const managedAiMessage =
-    managedAi?.managed === false
+    managedAi && hasUnlimitedAiCredits(managedAi)
       ? formatManagedAiPlanMessage(managedAi)
       : managedAi?.routingState === 'EXHAUSTED'
         ? 'Managed-AI cap is exhausted. New managed-key model calls will be blocked.'
@@ -597,7 +606,7 @@ export function IdeCompose() {
             : managedAi?.routingState === 'VALUE_MODE'
               ? 'Value mode is active. New work will prefer lower-cost models when quality is comparable.'
               : managedAi
-                ? `${managedAi.aiCreditsRemaining} ES AI credits left this cycle.`
+                ? `${managedAi.aiCreditsRemaining} AI credits left this cycle.`
                 : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {
@@ -967,10 +976,12 @@ export function IdeCompose() {
                   {managedAi && (
                     <IdeBadge
                       kind={
-                        managedAi.managed === false ? 'ok' : managedKind(managedAi.routingState)
+                        hasUnlimitedAiCredits(managedAi)
+                          ? 'ok'
+                          : managedKind(managedAi.routingState)
                       }
                     >
-                      {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
+                      {managedAiStatusLabel(managedAi)}
                     </IdeBadge>
                   )}
                 </div>
@@ -1236,6 +1247,7 @@ function logTypeLabel(type?: string): string {
 export function IdeLive() {
   const params = useParams();
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const runId = params.runId || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [err, setErr] = useState('');
@@ -1362,7 +1374,8 @@ export function IdeLive() {
             {tasks.length
               ? `${completed}/${tasks.length} steps`
               : (run?.status || '').toLowerCase() || 'running'}{' '}
-            · {elapsed} · ${spent.toFixed(2)}
+            · {elapsed}
+            {isSuperAdmin && ` · $${spent.toFixed(2)}`}
             {tokIn + tokOut > 0 && ` · ${(tokIn + tokOut).toLocaleString()} tok`}
           </div>
         </div>
@@ -1408,12 +1421,12 @@ export function IdeLive() {
                 {run.runSummary || run.userRequest}
               </div>
             )}
-            {estHigh > 0 && (
+            {isSuperAdmin && estHigh > 0 && (
               <div style={{margin: '10px 0'}}>
                 <CostProgressBar spent={spent} cap={estHigh} label='Spend vs estimate' />
               </div>
             )}
-            {hardCap > 0 && (
+            {isSuperAdmin && hardCap > 0 && (
               <div style={{margin: '10px 0'}}>
                 <CostProgressBar spent={spent} cap={hardCap} label='Spend vs hard cap' />
               </div>

@@ -44,8 +44,10 @@ public class RunDetail {
 
   String planJson;
   String reviewJson;
+
   /** Durable final run-level goal proof derived from the validation-report ledger. */
   JsonNode runGoalDoneness;
+
   List<TaskSummary> tasks;
   IntegrationSource integrationSource; // null for manual runs
 
@@ -67,6 +69,9 @@ public class RunDetail {
 
   /** Run credits charged (proportional to estimated cost). */
   Integer creditsCharged;
+
+  /** Managed AI credits actually debited by successful platform-key model calls for this run. */
+  Long aiCreditsCharged;
 
   /** Hard cap in USD (safety ceiling). */
   Double hardCapUsd;

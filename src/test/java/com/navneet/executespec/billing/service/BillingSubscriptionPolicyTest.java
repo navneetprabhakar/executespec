@@ -25,14 +25,14 @@ class BillingSubscriptionPolicyTest {
   void teamSeatsMustStayInSelfServeRange() {
     BillingPlan team = plan("TEAM");
 
-    assertThat(policy.effectiveSeats(team, 1)).isEqualTo(1);
+    assertThat(policy.effectiveSeats(team, 2)).isEqualTo(2);
     assertThat(policy.effectiveSeats(team, 20)).isEqualTo(20);
-    assertThatThrownBy(() -> policy.effectiveSeats(team, 0))
+    assertThatThrownBy(() -> policy.effectiveSeats(team, 1))
         .isInstanceOf(BillingException.class)
-        .hasMessageContaining("TEAM tier requires 1-20 seats");
+        .hasMessageContaining("TEAM tier requires 2-20 seats");
     assertThatThrownBy(() -> policy.effectiveSeats(team, 21))
         .isInstanceOf(BillingException.class)
-        .hasMessageContaining("TEAM tier requires 1-20 seats");
+        .hasMessageContaining("TEAM tier requires 2-20 seats");
   }
 
   @Test
@@ -92,6 +92,8 @@ class BillingSubscriptionPolicyTest {
     assertThat(policy.isStrictUpgrade("PRO", "TEAM")).isFalse();
     assertThat(policy.isStrictUpgrade("TEAM", "TEAM")).isFalse();
     assertThat(policy.isStrictUpgrade("TEAM", "PRO")).isTrue();
+    assertThat(policy.isStrictUpgrade("PRO_PLUS", "PRO")).isTrue();
+    assertThat(policy.isStrictUpgrade("BYOK", "PRO_PLUS")).isTrue();
     policy.requireUpgrade("TEAM", "PRO");
   }
 

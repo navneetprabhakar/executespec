@@ -32,7 +32,8 @@ class RunDetailSseServiceTest {
   @Test
   void continuationDecisionTriggersRunDetailRefresh() {
     PipelineRun run = PipelineRun.builder().runId("run-1").status("PARTIAL").build();
-    RunDetail detail = RunDetail.builder().runId("run-1").status("PARTIAL").tasks(List.of()).build();
+    RunDetail detail =
+        RunDetail.builder().runId("run-1").status("PARTIAL").tasks(List.of()).build();
     when(stateStore.findRun("run-1")).thenReturn(Optional.of(run));
     when(stateStore.getAllTasks("run-1")).thenReturn(List.of());
     when(runMapper.toDetail(run, List.of())).thenReturn(detail);

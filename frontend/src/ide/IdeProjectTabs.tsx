@@ -7,6 +7,7 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -243,6 +244,7 @@ function Notice({msg, kind}: {msg: string; kind: 'info' | 'bad'}) {
 }
 
 export function IdeProjectPulse() {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const {projectId = ''} = useParams();
   const [dash, setDash] = useState<Dash | null>(null);
   const [health, setHealth] = useState<Array<Record<string, unknown>>>([]);
@@ -338,7 +340,12 @@ export function IdeProjectPulse() {
           <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8}}>
             <Metric label='Avg score' value={avgScore != null ? `${Math.round(avgScore)}%` : '—'} />
             <Metric label='Avg work time' value={runTime} />
-            <Metric label='Spent · 30d' value={spent != null ? `$${spent.toFixed(2)}` : '—'} />
+            {isSuperAdmin && (
+              <Metric
+                label='Model spend · 30d'
+                value={spent != null ? `$${spent.toFixed(2)}` : '—'}
+              />
+            )}
             <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
           </div>
 
@@ -453,7 +460,7 @@ export function IdeProjectPulse() {
             <div className='ide-card' style={{padding: 0}}>
               {recent.slice(0, 5).map((r, i) => {
                 const sc = scoreOf(r);
-                const cost = costOf(r);
+                const cost = isSuperAdmin ? costOf(r) : undefined;
                 const live = isLive(r.status);
                 return (
                   <Link
@@ -522,6 +529,7 @@ function RunDetailPanel({
   run: api.RunDetail;
   report: api.ValidationReportData | null;
 }) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState('');
   const score =
@@ -583,10 +591,12 @@ function RunDetailPanel({
         <span>Reviewer</span>
         <span>{report?.reviewerVerdict || '—'}</span>
       </div>
-      <div className='ide-kv'>
-        <span>Spent</span>
-        <span>${cost.toFixed(2)}</span>
-      </div>
+      {isSuperAdmin && (
+        <div className='ide-kv'>
+          <span>Model spend</span>
+          <span>${cost.toFixed(2)}</span>
+        </div>
+      )}
       <div className='ide-kv'>
         <span>Files</span>
         <span>{filesGenerated ?? '—'}</span>
@@ -683,6 +693,7 @@ function RunDetailPanel({
 }
 
 export function IdeProjectRuns() {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<Sub>('runs');
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
@@ -889,7 +900,7 @@ export function IdeProjectRuns() {
               <div className='ide-card' style={{padding: 0, alignSelf: 'start'}}>
                 {filtered.map((r, i) => {
                   const sc = scoreOf(r);
-                  const cost = costOf(r);
+                  const cost = isSuperAdmin ? costOf(r) : undefined;
                   const live = isLive(r.status);
                   const selected = selectedRunId === r.runId;
                   return (

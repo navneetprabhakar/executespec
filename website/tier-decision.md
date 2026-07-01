@@ -1,9 +1,10 @@
 # Tier Re-assessment — Project View & Platform Features
 
-> **HISTORICAL REFERENCE (superseded by the 2026-06-19 business packet).** The
-> current ladder is **FREE / PRO / TEAM / ENTERPRISE**: Free 15 runs/month, Pro
-> $29 for 30 managed runs/month, Team $39/seat/month from 1 seat with BYOK, and
-> Enterprise custom. Do not use the MAX tier, 2-seat minimum, or old score claims
+> **HISTORICAL REFERENCE (superseded by the 2026-06-30 business packet).** The
+> current ladder is **FREE / PRO / PRO+ / BYOK / TEAM / ENTERPRISE**: Free has
+> 200 AI credits on native DeepSeek, Pro is $20/month with 2,000 AI credits,
+> hidden Pro+ is $100/month with 125,000 AI credits, BYOK is $50/month, Team is
+> $50/seat/month from 2 seats with BYOK, and Enterprise is custom. Do not use the MAX tier, old score claims
 > below for current pricing or investor copy. See `website/llms.txt`,
 > `website/index.html`, and `docs/business/billing-plan-assessment.md`.
 >

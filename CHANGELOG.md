@@ -13,6 +13,62 @@ Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-trac
 
 A second multi-track push has since landed (V203 → V243, ~2026-05-20 → 2026-06-16): the agent-session protocol behind the CLI/VS Code clients, the W0 LLM-usage attribution contract, cross-surface provider preference, local-hands run gates, the Console-only web shell, Enterprise per-org model overrides, the OpenRouter/DeepSeek/Fireworks aggregator + BYOK lanes, anti-gaming scoring guards + trust caps, and a tranche of flag-gated worker-quality levers. Highlights below, newest first.
 
+### Changed — Graphite+Signal theme restoration
+
+- Restored the protected Console shell to the Graphite+Signal visual baseline: dark graphite
+  defaults (`#10131a` / `#161a23`), Signal Blue actions (`#5b8def`), JetBrains Mono chrome, and
+  dark-first bootstrapping through both `data-theme` and `data-signal-theme`. The legacy light theme
+  remains available through `[data-theme='light']`.
+- Aligned the IDE shell's dark background surfaces with the same graphite ladder so route-level IDE
+  surfaces no longer sit on the colder Merge Rail black while the Console uses Graphite+Signal.
+
+### Fixed — run activity log readability
+
+- The run-detail Activity log now renders retained SSE events as useful operator summaries instead
+  of repeating generic labels like `run status`, `gate opened`, `task wave plan`, and `token usage`.
+  Common event types now show status/gate details, task-wave mode, token/provider/cost evidence,
+  tool-call context, and compact task/cost/cache metadata chips.
+- The run-detail Steps tab no longer shows continuation model rankings for tasks whose goal and
+  continuation decision already stopped as `STOP_DONE`; ranking evidence is reserved for actionable
+  continuation or failure states.
+
+### Fixed — final run proof severity
+
+- Final validation proof now reserves `FAILED / STOP_FAILED` for hard completion failures such as
+  failed pipeline result, missing/failed code/build/tests/reviewer evidence, or reviewer
+  low-quality rows. Soft report concerns (`report-issues`) and optional assessment rows such as
+  spec adherence, trust cap, and test-coverage judgment now keep the proof `UNCERTAIN` with visible
+  risks instead of mislabeling a deterministically passing run as failed.
+
+### Fixed — web agent chat visibility
+
+- The `/agent` surface no longer collapses completed chat answers behind the remote-sandbox launcher.
+  Once a transcript exists, user and assistant messages render as the primary surface; the sandbox
+  launcher remains an empty-state/onboarding affordance only.
+- The web agent read-only prompt no longer tells normal chat answers to repeat remote-sandbox,
+  plan-gate, or read-only-loop boilerplate.
+- Web agent streaming turns now send the recent durable transcript as model context, so follow-up
+  prompts like "as I said" can see prior user/assistant turns instead of relying only on the latest
+  message.
+- The `/agent` transcript now surfaces session/turn token usage without showing raw USD to normal
+  users, and assistant code blocks render collapsed by default so generated single-file or
+  multi-file answers do not take over the whole chat.
+- The `/agent` transcript and composer now use a wider desktop measure, hide the remote-sandbox
+  contract strip once a conversation starts, and avoid stacking the onboarding launcher with a
+  second empty-state panel.
+
+### Changed — managed AI credit billing visibility
+
+- Managed AI credit conversion now comes from `managed-ai.credit-pack-usd` +
+  `managed-ai.credit-pack-credits` and defaults to `$1.25 = 100 AI credits`.
+- Run detail responses now include `aiCreditsCharged`, summed from the managed-AI usage ledger, so
+  result pages can show actual AI credits used instead of the older run-credit reservation.
+- Managed-AI balance/policy responses now expose unlimited zero-cap tiers explicitly via
+  `unlimitedAiCredits`; BYOK/Team/Enterprise balance responses use `-1` credit sentinels instead of
+  making unlimited plans look like `0 / 0` credits.
+- Customer-facing result, plan, live-work, recent-run, and agent gate surfaces hide raw USD
+  cost/cap/estimate diagnostics unless the viewer is `SUPER_ADMIN`.
+
 ### Fixed — agent control plane web-search boot
 
 - **`WebSearchChatTools` failed to start the context.** The class declared two constructors (a 2-arg

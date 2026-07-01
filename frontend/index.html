@@ -4,9 +4,28 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('es:theme') || localStorage.getItem('signal:theme');
+          var theme = saved === 'light' || saved === 'system' ? saved : 'dark';
+          if (theme === 'system') {
+            theme =
+              window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.setAttribute('data-signal-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          document.documentElement.setAttribute('data-signal-theme', 'dark');
+        }
+      })();
+    </script>
     <!-- R-171 — PWA manifest + iOS home-screen support. -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0B0D10" />
+    <meta name="theme-color" content="#10131A" />
     <!-- Fix K (2026-05-03): apple-mobile-web-app-capable is deprecated as of
          iOS 16. The standard meta name is mobile-web-app-capable; we keep the
          apple-* one for back-compat with older iOS PWA installers. Both must
