@@ -477,6 +477,8 @@ export interface RunDetail extends RunSummary {
   actualCostUsd?: number | null;
   /** Number of credits charged for this run. */
   creditsCharged?: number | null;
+  /** Managed AI credits debited by successful platform-key model calls for this run. */
+  aiCreditsCharged?: number | null;
   /** Hard cap in USD (safety net ceiling). */
   hardCapUsd?: number | null;
   /** v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent. */

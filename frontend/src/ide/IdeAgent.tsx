@@ -8,6 +8,7 @@ import {
   initialAgentState,
   isTerminalRunStatus,
   toMessages,
+  type AgentUsageSummary,
   type PendingAction,
 } from '@/ide/agentState';
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
@@ -16,6 +17,37 @@ import {
   selectScopedAgentSession,
   webAgentSessionRequest,
 } from '@/ide/agentSession';
+
+const MAX_CONTEXT_TURNS = 8;
+
+function conversationForStream(
+  turns: api.AgentTurnResponse[],
+  latestMessage: string,
+): api.AgentConversationMessage[] {
+  const conversation: api.AgentConversationMessage[] = [];
+  for (const turn of turns.slice(-MAX_CONTEXT_TURNS)) {
+    if (turn.userMessage?.trim()) {
+      conversation.push({role: 'user', content: turn.userMessage.trim()});
+    }
+    if (turn.assistantSummary?.trim()) {
+      conversation.push({role: 'assistant', content: turn.assistantSummary.trim()});
+    }
+  }
+  conversation.push({role: 'user', content: latestMessage});
+  return conversation;
+}
+
+function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
+  return turns.reduce(
+    (acc, turn) => ({
+      inputTokens: acc.inputTokens + (turn.inputTokens || 0),
+      outputTokens: acc.outputTokens + (turn.outputTokens || 0),
+      reasoningTokens: acc.reasoningTokens + (turn.reasoningTokens || 0),
+      costUsd: acc.costUsd + (turn.costUsd || 0),
+    }),
+    {inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0},
+  );
+}
 
 export default function IdeAgent() {
   const navigate = useNavigate();
@@ -59,6 +91,7 @@ export default function IdeAgent() {
       ? [{id: 'pending:assistant', role: 'assistant' as const, content: state.streamText}]
       : []),
   ];
+  const sessionUsage = useMemo(() => usageFromTurns(state.turns), [state.turns]);
 
   const loadTurns = useCallback(async (sessionId: string) => {
     const rows = await api.listAgentTurns(sessionId, {limit: 50});
@@ -254,6 +287,7 @@ export default function IdeAgent() {
         session.id,
         {
           message,
+          conversation: conversationForStream(state.turns, message),
           attachmentIds,
           clientCapabilities: {
             localTools: false,
@@ -416,6 +450,7 @@ export default function IdeAgent() {
         busy={isBusy}
         settingsOpen={settingsOpen}
         managedAi={state.managedAi}
+        sessionUsage={sessionUsage}
         routingState={state.routingState}
         capabilities={state.capabilities}
         pendingGateCount={state.gates.length}

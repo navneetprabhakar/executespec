@@ -29,6 +29,17 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => api);
 
+vi.mock('@/stores/useAuthStore', () => {
+  const authState = {
+    user: {globalRole: 'DEVELOPER', orgRole: 'DEVELOPER'},
+  };
+  return {
+    useAuthStore: (selector?: (state: typeof authState) => unknown) =>
+      typeof selector === 'function' ? selector(authState) : authState,
+    selectIsSuperAdmin: (state: typeof authState) => state.user?.globalRole === 'SUPER_ADMIN',
+  };
+});
+
 const session = {
   id: 's1',
   projectId: null,
@@ -62,6 +73,7 @@ const managedAi = {
   purchasedAiCredits: 0,
   aiCreditsUsed: 410,
   aiCreditsRemaining: 1590,
+  unlimitedAiCredits: false,
   rawCogsCapUsd: 16,
   rawCogsUsedUsd: 4.1,
   rawCogsRemainingUsd: 11.9,
@@ -230,6 +242,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Chats');
     expect(host.textContent).toContain('New sandbox');
     expect(host.textContent).toContain('Web agent');
+    expect(host.textContent).toContain('140 tokens');
+    expect(host.textContent).toContain('AI credits pending');
     // Pending gate surfaces inline as an action card
     expect(host.textContent).toContain('Remote sandboxes waiting for your approval');
     expect(host.textContent).toContain('Add audit logs');
@@ -259,9 +273,12 @@ describe('IdeAgent', () => {
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
     api.getManagedAiBalance.mockResolvedValue({
       ...managedAi,
+      managed: false,
+      tier: 'ENTERPRISE',
       includedAiCredits: 0,
       aiCreditsUsed: 0,
-      aiCreditsRemaining: 0,
+      aiCreditsRemaining: -1,
+      unlimitedAiCredits: true,
       rawCogsCapUsd: 0,
       rawCogsUsedUsd: 0,
       rawCogsRemainingUsd: 0,
@@ -278,8 +295,8 @@ describe('IdeAgent', () => {
     });
 
     expect(host.textContent).toContain('Managed AI balance');
-    expect(host.textContent).toContain('Managed credits not configured');
-    expect(host.textContent).toContain('Runs use the configured provider keys');
+    expect(host.textContent).toContain('Unlimited AI credits');
+    expect(host.textContent).toContain('This tier is not blocked by managed-AI credit limits.');
     expect(host.textContent).not.toContain('0 of 0 credits left');
   });
 
@@ -298,8 +315,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('1 waiting approval');
     expect(host.textContent).toContain('Approval inbox');
     expect(host.textContent).toContain('2 credits');
-    expect(host.textContent).toContain('~$0.25');
-    expect(host.textContent).toContain('cap $5.00');
+    expect(host.textContent).not.toContain('~$0.25');
+    expect(host.textContent).not.toContain('cap $5.00');
     expect(host.textContent).toContain('low risk');
     expect(host.textContent).toContain('Approve & run');
     expect(host.textContent).toContain('Reject');
@@ -368,10 +385,12 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('isolated remote clone');
     expect(host.textContent).toContain('Run events stay in audit trail');
-    expect(host.textContent).toContain('Remote sandbox ready');
+    expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
+    expect(host.querySelectorAll('.agent-empty').length).toBe(0);
+    expect(host.querySelectorAll('.agent-composer-contract').length).toBe(1);
   });
 
-  it('collapses historical transcript behind the operator launcher', async () => {
+  it('shows historical transcript as the primary agent response', async () => {
     api.listAgentGates.mockResolvedValue([]);
     api.listAgentTurns.mockResolvedValue([
       {
@@ -399,10 +418,14 @@ describe('IdeAgent', () => {
 
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('Run work in a remote sandbox.');
-    expect(host.textContent).toContain('Recent answer');
-    expect(host.textContent).toContain('Last agent response');
-    expect(host.querySelectorAll('.agent-msg').length).toBe(0);
+    expect(host.textContent).toContain('Explain the CLI repo');
+    expect(host.textContent).toContain(
+      'This is a long old transcript that should not dominate the remote sandbox launcher.',
+    );
+    expect(host.querySelectorAll('.agent-msg').length).toBe(2);
+    expect(host.querySelectorAll('.agent-composer-contract').length).toBe(0);
+    expect(host.textContent).not.toContain('Recent answer');
+    expect(host.textContent).not.toContain('Run work in a remote sandbox.');
   });
 
   it('does not collapse a newly submitted user prompt behind the launcher', async () => {
@@ -514,6 +537,63 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('Recent answer');
   });
 
+  it('collapses generated code blocks by default and shows assistant turn usage', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          messages={[
+            {
+              id: 'turn:assistant',
+              role: 'assistant',
+              content: 'Here is the file:\n\n```html\n<div>One</div>\n<div>Two</div>\n```',
+              usage: {
+                inputTokens: 1200,
+                outputTokens: 400,
+                reasoningTokens: 50,
+                costUsd: 0.01,
+              },
+            },
+          ]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={false}
+          visibleAction={null}
+          gates={[]}
+          runCard={null}
+          runCost={null}
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+
+    const codeFold = host.querySelector('details.signal-md-codefold');
+    expect(codeFold).not.toBeNull();
+    expect(codeFold?.hasAttribute('open')).toBe(false);
+    expect(codeFold?.querySelector('summary')?.textContent).toContain('HTML');
+    expect(host.textContent).toContain('1.6k tokens');
+    expect(host.textContent).toContain('AI credits pending');
+  });
+
   it('renders streamed route decisions and cloud-run proposal cards before execution', async () => {
     api.streamAgentTurn.mockImplementation(async (_sessionId, _body, handlers) => {
       handlers.onAck?.({session_id: 's1', turn_id: 't2', sequence: 2});
@@ -568,6 +648,19 @@ describe('IdeAgent', () => {
     });
     await flush();
 
+    expect(api.streamAgentTurn).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({
+        message: 'Start a run to add billing audit logs',
+        conversation: [
+          {role: 'user', content: 'What plans are waiting?'},
+          {role: 'assistant', content: 'One plan is waiting for approval.'},
+          {role: 'user', content: 'Start a run to add billing audit logs'},
+        ],
+      }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
     // Proposal renders as a clean inline action card (no routing jargon in the main view)
     expect(host.textContent).toContain('Create remote sandbox run');
     expect(host.textContent).toContain('Create a remote sandbox?');

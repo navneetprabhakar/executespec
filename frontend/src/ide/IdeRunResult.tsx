@@ -12,6 +12,7 @@ import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
   IdeCodeViewer,
@@ -28,9 +29,11 @@ import {
   isNoisyLogEvent,
   lineDiff,
   logIcon,
+  logMeta,
   logMessage,
   num,
   SEV,
+  shouldShowModelRanking,
   TABS,
   TAB_LABEL,
   type Tab,
@@ -257,6 +260,7 @@ function candidateMetrics(c: RankingCandidate): string {
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const runId = params.runId || params.runShort || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
@@ -949,8 +953,9 @@ export default function IdeRunResult() {
                     </span>
                   }
                 />
-                <Kv k='Cost' v={usd(run?.actualCostUsd)} />
-                <Kv k='Credits' v={run?.creditsCharged ?? '—'} />
+                <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
+                <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
+                {isSuperAdmin && <Kv k='Cost' v={usd(run?.actualCostUsd)} />}
               </div>
             </div>
 
@@ -1498,6 +1503,7 @@ export default function IdeRunResult() {
                   const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
+                  const showModelRanking = shouldShowModelRanking(t);
                   const rankingDetails = policy ? rankingPolicyDetails(policy) : [];
                   const rejectedRankingCount =
                     policy?.rejectedBelowQualityThresholdCount ??
@@ -1596,7 +1602,7 @@ export default function IdeRunResult() {
                           Next: {t.goalDoneness.recommendedNextStep}
                         </div>
                       )}
-                      {policy?.rankingPolicy && rankingCandidates.length > 0 && (
+                      {showModelRanking && policy && (
                         <div
                           style={{
                             border: '1px solid var(--ide-border)',
@@ -1778,6 +1784,7 @@ export default function IdeRunResult() {
                   >
                     {visibleLog.map((ev, i) => {
                       const t = (ev.type || 'log').toLowerCase();
+                      const meta = logMeta(ev);
                       const color = t.includes('tool')
                         ? 'var(--ide-accent)'
                         : t.includes('llm') || t.includes('completion')
@@ -1791,13 +1798,15 @@ export default function IdeRunResult() {
                         <div
                           key={i}
                           style={{
-                            display: 'flex',
+                            display: 'grid',
+                            gridTemplateColumns: '18px 104px 76px minmax(0, 1fr)',
                             gap: 8,
-                            padding: '6px 8px',
+                            padding: '8px 10px',
                             borderBottom:
                               i < visibleLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
                             fontSize: 12,
-                            lineHeight: 1.5,
+                            lineHeight: 1.45,
+                            alignItems: 'start',
                           }}
                         >
                           <span style={{flexShrink: 0}} aria-hidden='true'>
@@ -1807,23 +1816,58 @@ export default function IdeRunResult() {
                             className='ide-mono'
                             style={{
                               color,
-                              flexShrink: 0,
                               textTransform: 'uppercase',
                               fontSize: 10,
-                              minWidth: 92,
+                              paddingTop: 2,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
+                            title={ev.type || 'log'}
                           >
                             {ev.type || 'log'}
                           </span>
-                          {ev.timestamp != null && (
-                            <span
-                              className='ide-mono'
-                              style={{color: 'var(--ide-fg-muted)', flexShrink: 0, fontSize: 10}}
-                            >
-                              {new Date(ev.timestamp as string | number).toLocaleTimeString()}
+                          <span
+                            className='ide-mono'
+                            style={{color: 'var(--ide-fg-muted)', fontSize: 10, paddingTop: 2}}
+                          >
+                            {ev.timestamp != null
+                              ? new Date(ev.timestamp as string | number).toLocaleTimeString()
+                              : '—'}
+                          </span>
+                          <span style={{minWidth: 0}}>
+                            <span style={{display: 'block', wordBreak: 'break-word'}}>
+                              {logMessage(ev)}
                             </span>
-                          )}
-                          <span style={{wordBreak: 'break-word'}}>{logMessage(ev)}</span>
+                            {meta.length > 0 && (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: 6,
+                                  marginTop: 5,
+                                }}
+                              >
+                                {meta.map((m) => (
+                                  <span
+                                    key={m}
+                                    className='ide-mono'
+                                    style={{
+                                      border: '1px solid var(--ide-border)',
+                                      borderRadius: 999,
+                                      padding: '1px 6px',
+                                      color: 'var(--ide-fg-muted)',
+                                      fontSize: 10,
+                                      background:
+                                        'color-mix(in srgb, var(--ide-bg-widget) 78%, transparent)',
+                                    }}
+                                  >
+                                    {m}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </span>
                         </div>
                       );
                     })}
@@ -2126,26 +2170,35 @@ export default function IdeRunResult() {
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <div className='ide-h1'>Cost</div>
             <div className='ide-card'>
-              <Kv k='Actual cost' v={usd(run?.actualCostUsd)} />
-              <Kv k='Hard cap' v={usd(run?.hardCapUsd)} />
-              <Kv k='Credits charged' v={run?.creditsCharged ?? '—'} />
-              <Kv
-                k='Estimate range'
-                v={
-                  run?.costEstimateLow != null
-                    ? `${usd(run.costEstimateLow)} – ${usd(run.costEstimateHigh)}`
-                    : '—'
-                }
-              />
+              <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
+              <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
               <Kv k='Input tokens' v={num(run?.totalInputTokens)} />
               <Kv k='Output tokens' v={num(run?.totalOutputTokens)} />
+              {isSuperAdmin && (
+                <>
+                  <Kv k='Actual cost' v={usd(run?.actualCostUsd)} />
+                  <Kv k='Hard cap' v={usd(run?.hardCapUsd)} />
+                  <Kv
+                    k='Estimate range'
+                    v={
+                      run?.costEstimateLow != null
+                        ? `${usd(run.costEstimateLow)} – ${usd(run.costEstimateHigh)}`
+                        : '—'
+                    }
+                  />
+                </>
+              )}
             </div>
-            <div className='ide-h2'>Per phase</div>
-            <div className='ide-card'>
-              <Kv k='Classifier' v={usd(run?.classifierCostUsd)} />
-              <Kv k='Outline' v={usd(run?.outlineCostUsd)} />
-              <Kv k='Expansion' v={usd(run?.expansionCostUsd)} />
-            </div>
+            {isSuperAdmin && (
+              <>
+                <div className='ide-h2'>Per phase</div>
+                <div className='ide-card'>
+                  <Kv k='Classifier' v={usd(run?.classifierCostUsd)} />
+                  <Kv k='Outline' v={usd(run?.outlineCostUsd)} />
+                  <Kv k='Expansion' v={usd(run?.expansionCostUsd)} />
+                </div>
+              </>
+            )}
           </div>
         )}
 

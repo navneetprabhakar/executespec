@@ -135,7 +135,8 @@ execution:
 
 managed-ai:
   enabled: true
-  credits-per-usd: 125
+  credit-pack-usd: 1.25
+  credit-pack-credits: 100
   tiers:
     # Run-count retirement (2026-06-22): FREE is gated by a small managed AI-credit
     # grant instead of a monthly run cap.

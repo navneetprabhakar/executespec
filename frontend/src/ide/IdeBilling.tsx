@@ -17,7 +17,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {fetchPlans, type BillingPlan} from '@/lib/billing-api';
-import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {
@@ -32,7 +32,11 @@ import {
   type PaymentRowLite,
   type PlanCard,
 } from '@/ide/billingUtils';
-import {formatManagedAiPlanMessage} from '@/ide/planUtils';
+import {
+  formatManagedAiPlanMessage,
+  hasUnlimitedAiCredits,
+  managedAiStatusLabel,
+} from '@/ide/planUtils';
 
 function SectionTitle({children}: {children: React.ReactNode}) {
   return <div className='ide-h2'>{children}</div>;
@@ -72,6 +76,7 @@ export function IdeBilling() {
   useDocumentTitle('Billing');
   const user = useAuthStore((s) => s.user);
   const tier = useAuthStore(selectNormalizedTier);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useAuthStore((s) => s.permissions);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
@@ -217,7 +222,7 @@ export function IdeBilling() {
               }}
             >
               <Stat label='Work runs' value={<>{periodRuns}</>} />
-              <Stat label='Spent' value={`$${totalSpend.toFixed(2)}`} />
+              {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(2)}`} />}
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
           </div>
@@ -249,14 +254,16 @@ export function IdeBilling() {
                       AI credits
                     </div>
                     <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                      $1 = 125 AI credits. Frontier calls step down automatically near policy
+                      $1.25 = 100 AI credits. Frontier calls step down automatically near policy
                       thresholds.
                     </div>
                   </div>
                   <IdeBadge
-                    kind={managedAi.managed === false ? 'ok' : managedKind(managedAi.routingState)}
+                    kind={
+                      hasUnlimitedAiCredits(managedAi) ? 'ok' : managedKind(managedAi.routingState)
+                    }
                   >
-                    {managedAi.managed === false ? 'BYOK' : managedAi.routingState}
+                    {managedAiStatusLabel(managedAi)}
                   </IdeBadge>
                 </div>
                 <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
@@ -272,6 +279,7 @@ export function IdeBilling() {
                   }}
                 >
                   {(() => {
+                    const unlimited = hasUnlimitedAiCredits(managedAi);
                     const totalCredits =
                       managedAi.includedAiCredits + (managedAi.purchasedAiCredits ?? 0);
                     return (
@@ -279,16 +287,12 @@ export function IdeBilling() {
                         <Stat
                           label='Credits used'
                           value={
-                            managedAi.managed === false
-                              ? 'Not applicable'
-                              : `${managedAi.aiCreditsUsed} / ${totalCredits}`
+                            unlimited ? 'No limit' : `${managedAi.aiCreditsUsed} / ${totalCredits}`
                           }
                         />
                         <Stat
-                          label={managedAi.managed === false ? 'Credit mode' : 'Credits left'}
-                          value={
-                            managedAi.managed === false ? 'Own keys' : managedAi.aiCreditsRemaining
-                          }
+                          label={unlimited ? 'Credit limit' : 'Credits left'}
+                          value={unlimited ? 'Unlimited' : managedAi.aiCreditsRemaining}
                         />
                       </>
                     );
@@ -401,8 +405,8 @@ export function IdeBilling() {
               <span>{tier}</span>
             </div>
             <div className='ide-kv'>
-              <span>Spend (cycle)</span>
-              <span>${totalSpend.toFixed(2)}</span>
+              <span>{isSuperAdmin ? 'Model spend (cycle)' : 'Billing meter'}</span>
+              <span>{isSuperAdmin ? `$${totalSpend.toFixed(2)}` : 'AI credits'}</span>
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
               <span>Successful work (30d)</span>

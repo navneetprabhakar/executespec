@@ -16,15 +16,38 @@ public class ManagedAiProperties {
 
   private boolean enabled = true;
 
-  private long creditsPerUsd = 125;
+  /** Retail definition for managed AI credits. Default: $1.25 buys 100 AI credits. */
+  private double creditPackUsd = 1.25;
+
+  private long creditPackCredits = 100;
 
   private Map<String, TierPolicy> tiers = new HashMap<>();
+
+  public double getCreditsPerUsd() {
+    if (creditPackUsd <= 0 || creditPackCredits <= 0) return 80.0;
+    return creditPackCredits / creditPackUsd;
+  }
+
+  public String creditDefinition() {
+    return "$"
+        + formatAmount(creditPackUsd)
+        + " = "
+        + creditPackCredits
+        + " AI credits";
+  }
 
   public TierPolicy policyFor(String tier) {
     String key = tier == null || tier.isBlank() ? "FREE" : tier.trim().toUpperCase();
     TierPolicy policy = tiers.get(key);
     if (policy != null) return policy;
     return tiers.getOrDefault("FREE", TierPolicy.freeDefaults());
+  }
+
+  private static String formatAmount(double amount) {
+    if (Math.rint(amount) == amount) {
+      return String.valueOf((long) amount);
+    }
+    return java.math.BigDecimal.valueOf(amount).stripTrailingZeros().toPlainString();
   }
 
   @Data

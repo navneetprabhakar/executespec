@@ -119,7 +119,7 @@ export function PublicPricingPage() {
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
         <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
-          Managed AI is metered in <b>AI credits</b> — $1 = 125 credits, charged from real model
+          Managed AI is metered in <b>AI credits</b> — $1.25 = 100 credits, charged from real model
           cost as your run works. Frontier models step down automatically near your monthly cap; use
           BYOK to remove it. Pro bills monthly; Team is monthly, per seat.
         </Card>

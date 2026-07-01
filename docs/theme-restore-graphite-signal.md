@@ -4,6 +4,11 @@
 > **Visual identity:** Warmed graphite `#10131a` page bg, Signal Blue `#5b8def` accent, flat elevated cards (no glassmorphism), JetBrains Mono, dark-first
 > **Scope:** CSS changes only + one store/HTML default change. No backend, no routing, no React component logic changes required.
 
+> **Implementation status:** Applied on branch `codex/web-agent-remote-sandbox-ux-plan` on 2026-07-01.
+> The implementation uses `frontend/index.html` plus `frontend/src/main.tsx` for dark-first
+> bootstrapping, keeps `[data-theme='light']` as the opt-in light override, and applies the optional
+> IDE graphite alignment.
+
 ---
 
 ## Overview of changes

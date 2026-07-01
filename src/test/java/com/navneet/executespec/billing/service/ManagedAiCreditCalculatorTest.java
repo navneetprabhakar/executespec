@@ -10,8 +10,8 @@ class ManagedAiCreditCalculatorTest {
 
   @Test
   void convertsRawUsdToAiCreditsAtConfiguredMultiplier() {
-    assertThat(calculator.creditsFor(0.10, 1.25, 125)).isEqualTo(16);
-    assertThat(calculator.creditsFor(1.00, 1.00, 125)).isEqualTo(125);
-    assertThat(calculator.creditsFor(0.0, 1.25, 125)).isZero();
+    assertThat(calculator.creditsFor(0.10, 1.25, 80)).isEqualTo(10);
+    assertThat(calculator.creditsFor(1.00, 1.00, 80)).isEqualTo(80);
+    assertThat(calculator.creditsFor(0.0, 1.25, 80)).isZero();
   }
 }

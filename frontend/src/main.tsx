@@ -35,12 +35,16 @@ if (
 if (typeof document !== 'undefined') {
   document.documentElement.classList.add('signal-app');
   try {
-    const saved = localStorage.getItem('signal:theme');
-    const sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute(
-      'data-signal-theme',
-      saved || (sysDark ? 'dark' : 'light'),
-    );
+    const saved = localStorage.getItem('es:theme') || localStorage.getItem('signal:theme');
+    const theme = saved === 'light' || saved === 'system' ? saved : 'dark';
+    const resolved =
+      theme === 'system'
+        ? window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+        : theme;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-signal-theme', resolved);
   } catch {
     /* ignore */
   }

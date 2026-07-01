@@ -13,6 +13,7 @@ import {
   sessionTitle,
   type AgentAction,
   type AgentAttachmentLite,
+  type AgentUsageSummary,
   type AgentUiState,
   type BarTone,
   type LocalMessage,
@@ -20,6 +21,8 @@ import {
   type RoutingState,
   type StreamTimelineItem,
 } from '@/ide/agentState';
+import {hasUnlimitedAiCredits} from '@/ide/planUtils';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 const Paperclip = () => (
   <svg
@@ -93,6 +96,31 @@ const SANDBOX_PHASES = [
   {key: 'done', label: 'Done'},
 ] as const;
 
+function tokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return `${Math.round(value)}`;
+}
+
+function totalTokens(usage?: AgentUsageSummary | null): number {
+  if (!usage) return 0;
+  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+}
+
+function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
+  if (!usage || totalTokens(usage) <= 0) return 'No token usage yet';
+  const parts = [
+    `${tokenCount(totalTokens(usage))} tokens`,
+    `${tokenCount(usage.inputTokens)} in`,
+    `${tokenCount(usage.outputTokens)} out`,
+  ];
+  if (usage.reasoningTokens > 0) parts.push(`${tokenCount(usage.reasoningTokens)} reasoning`);
+  parts.push('AI credits pending');
+  if (isSuperAdmin && usage.costUsd > 0) parts.push(`$${usage.costUsd.toFixed(4)}`);
+  return parts.join(' · ');
+}
+
 /** Top bar: Chats · scope chip · title · honest status · New chat · settings popover. */
 export function AgentTopBar({
   selected,
@@ -101,6 +129,7 @@ export function AgentTopBar({
   busy,
   settingsOpen,
   managedAi,
+  sessionUsage,
   routingState,
   capabilities,
   pendingGateCount,
@@ -115,6 +144,7 @@ export function AgentTopBar({
   busy: boolean;
   settingsOpen: boolean;
   managedAi: api.ManagedAiBalance | null;
+  sessionUsage: AgentUsageSummary;
   routingState: RoutingState;
   capabilities: api.AgentCapabilityTool[];
   pendingGateCount: number;
@@ -142,6 +172,9 @@ export function AgentTopBar({
       <span className={`agent-bar-status ${barStatus.tone}`}>
         <span className='agent-bar-dot' aria-hidden='true' />
         {barStatus.label}
+      </span>
+      <span className='agent-usage-pill' title='Current chat session token usage'>
+        {usageLabel(sessionUsage)}
       </span>
       {pendingGateCount > 0 && (
         <button className='agent-approval-pill' onClick={onOpenApprovals}>
@@ -238,12 +271,19 @@ function SettingsPopover({
 }
 
 function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const unlimited = hasUnlimitedAiCredits(balance);
   const totalCredits = balance.includedAiCredits + (balance.purchasedAiCredits ?? 0);
-  const configured = totalCredits > 0 || balance.rawCogsCapUsd > 0;
+  const configured = unlimited || totalCredits > 0 || balance.rawCogsCapUsd > 0;
   return (
     <div className='agent-pop-balance'>
       <span>Managed AI balance</span>
-      {configured ? (
+      {unlimited ? (
+        <>
+          <strong>Unlimited AI credits</strong>
+          <small>This tier is not blocked by managed-AI credit limits.</small>
+        </>
+      ) : configured ? (
         <>
           <strong>
             {balance.aiCreditsRemaining} of {totalCredits} credits left
@@ -251,10 +291,12 @@ function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
           <div className='agent-meter'>
             <span style={{width: `${pct(balance.aiCreditsUsed, totalCredits)}%`}} />
           </div>
-          <small>
-            Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
-            monthly cap.
-          </small>
+          {isSuperAdmin && (
+            <small>
+              Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
+              monthly cap.
+            </small>
+          )}
         </>
       ) : (
         <>
@@ -400,8 +442,6 @@ function gateAge(gate: api.AgentGateDecisionCard): string {
 function gateCostLabel(gate: api.AgentGateDecisionCard): string {
   const parts = [];
   if (gate.creditsRequired != null) parts.push(`${gate.creditsRequired} credits`);
-  if (gate.estimatedCostUsd != null) parts.push(`~$${gate.estimatedCostUsd.toFixed(2)}`);
-  if (gate.hardCapUsd != null) parts.push(`cap $${gate.hardCapUsd.toFixed(2)}`);
   return parts.length ? parts.join(' / ') : 'cost pending';
 }
 
@@ -426,6 +466,7 @@ function relTime(iso?: string | null): string {
 }
 
 function MessageBubble({message}: {message: LocalMessage}) {
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   if (message.role === 'user') {
     return (
       <div className='agent-msg user'>
@@ -435,9 +476,14 @@ function MessageBubble({message}: {message: LocalMessage}) {
   }
   return (
     <div className={`agent-msg ${message.role}`}>
-      <div className='agent-msg-label'>{message.role === 'system' ? 'System' : 'Agent'}</div>
+      <div className='agent-msg-label'>
+        <span>{message.role === 'system' ? 'System' : 'Agent'}</span>
+        {message.role === 'assistant' && message.usage && totalTokens(message.usage) > 0 && (
+          <span className='agent-msg-usage'>{usageLabel(message.usage, isSuperAdmin)}</span>
+        )}
+      </div>
       <div className='agent-msg-body'>
-        <Markdown>{message.content}</Markdown>
+        <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
       </div>
     </div>
   );
@@ -484,6 +530,7 @@ function SandboxRunCard({
   onStop: () => void;
 }) {
   const prog = runProgress(run.tasks);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const terminal = isTerminalRunStatus(run.status);
   const failed = (run.status || '').toUpperCase() === 'FAILED';
   const cancelled = (run.status || '').toUpperCase() === 'CANCELLED';
@@ -510,8 +557,16 @@ function SandboxRunCard({
           {runPhaseLabel(run.status)}
         </span>
         <span className='agent-runcard-cost'>
-          ${cost.toFixed(2)}
-          {est ? ` / ~$${est.toFixed(2)}` : ''}
+          {run.aiCreditsCharged != null
+            ? `${run.aiCreditsCharged} AI credits`
+            : 'AI credits pending'}
+          {isSuperAdmin && (
+            <>
+              {' · $'}
+              {cost.toFixed(2)}
+              {est ? ` / ~$${est.toFixed(2)}` : ''}
+            </>
+          )}
         </span>
       </div>
       <div className='agent-runcard-mode'>Remote sandbox · plan-gated · PR-oriented</div>
@@ -761,8 +816,6 @@ function GateCard({
         <span>{gate.projectName || 'standalone sandbox'}</span>
         {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
         {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
-        {gate.estimatedCostUsd != null && <span>~${gate.estimatedCostUsd.toFixed(2)}</span>}
-        {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
         {gate.provider && <span>{gate.provider}</span>}
         {gateAge(gate) && <span>{gateAge(gate)}</span>}
         <span>opens a PR</span>
@@ -905,28 +958,6 @@ function EmptyState({onPick}: {onPick: (text: string) => void}) {
         ))}
       </div>
     </div>
-  );
-}
-
-function RecentTranscriptPreview({messages}: {messages: LocalMessage[]}) {
-  const latestAgent = [...messages]
-    .reverse()
-    .find((m) => m.role === 'assistant' && m.content.trim().length > 0);
-  const latestUser = [...messages]
-    .reverse()
-    .find((m) => m.role === 'user' && m.content.trim().length > 0);
-  const latest = latestAgent || latestUser || messages[messages.length - 1];
-  if (!latest) return null;
-  return (
-    <details className='agent-recent-transcript'>
-      <summary>
-        <span>Recent answer</span>
-        <b>{latest.role === 'user' ? 'Last request' : 'Last agent response'}</b>
-      </summary>
-      <div className='agent-recent-body'>
-        {latest.role === 'assistant' ? <Markdown>{latest.content}</Markdown> : latest.content}
-      </div>
-    </details>
   );
 }
 
@@ -1085,27 +1116,11 @@ export function AgentConversation({
 }) {
   const empty = messages.length === 0 && !isBusy && !visibleAction && !runCard;
   const showOperatorIntro = !visibleAction && !runCard && gates.length === 0 && !isBusy;
-  const lastMessage = messages[messages.length - 1];
-  const canCollapseHistory =
-    lastMessage?.role === 'assistant' &&
-    lastMessage.content.trim().length > 0 &&
-    lastMessage.status !== 'STREAMING' &&
-    !lastMessage.id.startsWith('pending:');
-  const showOperatorDock = showOperatorIntro && messages.length > 0 && canCollapseHistory;
   const showOperatorInScroll = showOperatorIntro && messages.length === 0;
-  const visibleMessages = showOperatorDock ? [] : messages;
+  const showComposerContract =
+    messages.length === 0 && !visibleAction && gates.length === 0 && !runCard;
   return (
     <section className='agent-chat'>
-      {showOperatorDock && (
-        <div className='agent-operator-dock'>
-          <div className='agent-chat-col'>
-            <OperatorIntro
-              hasHistory={messages.length > 0}
-              onPick={(s) => dispatch({type: 'input:set', input: s})}
-            />
-          </div>
-        </div>
-      )}
       <div className='agent-chat-scroll' onScroll={onScroll}>
         <div className='agent-chat-col'>
           {showOperatorInScroll && (
@@ -1114,7 +1129,6 @@ export function AgentConversation({
               onPick={(s) => dispatch({type: 'input:set', input: s})}
             />
           )}
-          {showOperatorDock && <RecentTranscriptPreview messages={messages} />}
           {gates.length > 0 && (
             <div className='agent-gates-inline'>
               <div className='agent-gates-label'>Remote sandboxes waiting for your approval</div>
@@ -1130,11 +1144,11 @@ export function AgentConversation({
               ))}
             </div>
           )}
-          {empty ? (
-            <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
-          ) : (
-            visibleMessages.map((message) => <MessageBubble key={message.id} message={message} />)
-          )}
+          {empty
+            ? !showOperatorInScroll && (
+                <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
+              )
+            : messages.map((message) => <MessageBubble key={message.id} message={message} />)}
           <Activity items={streamEvents} />
           {isBusy && !streamText && <Typing />}
           {runCard && (
@@ -1159,12 +1173,14 @@ export function AgentConversation({
       </div>
       <div className='agent-composer-wrap'>
         <div className='agent-chat-col'>
-          <div className='agent-composer-contract'>
-            <span>Remote sandbox only</span>
-            <span>Plan and cost first</span>
-            <span>Branch, tests, PR, and cap shown before run</span>
-            <span>No local files touched</span>
-          </div>
+          {showComposerContract && (
+            <div className='agent-composer-contract'>
+              <span>Remote sandbox only</span>
+              <span>Plan and cost first</span>
+              <span>Branch, tests, PR, and cap shown before run</span>
+              <span>No local files touched</span>
+            </div>
+          )}
           <Composer
             input={input}
             attachments={attachments}

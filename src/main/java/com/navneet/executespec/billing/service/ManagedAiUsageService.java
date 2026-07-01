@@ -265,6 +265,7 @@ public class ManagedAiUsageService {
         properties.isEnabled(),
         tier,
         policy.getIncludedCredits(),
+        properties.isEnabled() && !isManaged(policy),
         policy.getRawCogsCapUsd(),
         policy.getFrontierRawCapUsd(),
         policy.getValueModeAfterRawUsd(),
@@ -274,9 +275,8 @@ public class ManagedAiUsageService {
         policy.isConcurrencyEnforced(),
         policy.isRateLimitsEnabled(),
         policy.getNotificationThresholdsPct(),
-        "$1 = "
-            + properties.getCreditsPerUsd()
-            + " AI credits; successful platform-key LLM calls debit ceil(raw_cost_usd *"
+        properties.creditDefinition()
+            + "; successful platform-key LLM calls debit ceil(raw_cost_usd *"
             + " multiplier * "
             + properties.getCreditsPerUsd()
             + ").");

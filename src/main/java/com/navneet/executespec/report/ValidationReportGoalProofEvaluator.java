@@ -22,8 +22,10 @@ import com.navneet.executespec.report.model.VerificationEvidenceDTO;
  */
 public class ValidationReportGoalProofEvaluator {
 
-  private static final Set<String> REQUIRED_PASS_IDS =
-      Set.of("code-delivered", "build", "tests", "reviewer", "report-issues");
+  private static final Set<String> REQUIRED_HARD_PASS_IDS =
+      Set.of("code-delivered", "build", "tests", "reviewer");
+
+  private static final String REPORT_ISSUES_ID = "report-issues";
 
   private static final Set<String> OPTIONAL_PROOF_IDS =
       Set.of("spec-adherence", "endpoint-coverage", "test-coverage-judgment", "trust-cap");
@@ -89,7 +91,7 @@ public class ValidationReportGoalProofEvaluator {
       incomplete.add("pipeline result unavailable");
     }
 
-    for (String id : REQUIRED_PASS_IDS) {
+    for (String id : REQUIRED_HARD_PASS_IDS) {
       VerificationEvidenceDTO row = byId.get(id);
       String status = status(row);
       if ("PASS".equals(status)) {
@@ -101,6 +103,16 @@ public class ValidationReportGoalProofEvaluator {
         hasUnproven = true;
       }
       String item = label(row, id) + " is " + status.toLowerCase();
+      incomplete.add(item);
+      risks.add(item);
+    }
+
+    VerificationEvidenceDTO reportIssues = byId.get(REPORT_ISSUES_ID);
+    String reportIssuesStatus = status(reportIssues);
+    if (!"PASS".equals(reportIssuesStatus)) {
+      hasUnproven = true;
+      String item =
+          label(reportIssues, REPORT_ISSUES_ID) + " is " + reportIssuesStatus.toLowerCase();
       incomplete.add(item);
       risks.add(item);
     }
@@ -134,11 +146,7 @@ public class ValidationReportGoalProofEvaluator {
       if ("PASS".equals(status)) {
         continue;
       }
-      if ("FAIL".equals(status)) {
-        hasFailure = true;
-      } else {
-        hasUnproven = true;
-      }
+      hasUnproven = true;
       String item = label(row) + " is " + status.toLowerCase();
       incomplete.add(item);
       risks.add(item);
@@ -185,7 +193,7 @@ public class ValidationReportGoalProofEvaluator {
         evidence,
         risks,
         false,
-        true);
+        false);
   }
 
   private static boolean reviewerQualityFailed(VerificationEvidenceDTO reviewer) {

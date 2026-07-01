@@ -54,12 +54,38 @@ export function planStatusPhrase(status: string): string {
 
 export function formatManagedAiPlanMessage(input: {
   managed?: boolean | null;
+  unlimitedAiCredits?: boolean | null;
   aiCreditsRemaining: number;
+  includedAiCredits?: number | null;
   frontierRawCapUsd?: number | null;
   cheapOnlyAfterRawUsd?: number | null;
 }): string {
-  if (input.managed === false) {
-    return 'Using your own provider keys. Managed AI credits are not applicable to this work; run credits and your provider account still apply.';
+  if (hasUnlimitedAiCredits(input)) {
+    return 'Unlimited AI credits for this tier. Managed-AI credit limits do not block this work; run approval and provider-key policy still apply.';
   }
   return `${input.aiCreditsRemaining} AI credits left this cycle. Approval charges run credits now; managed-AI credits debit per successful model call while work executes. Frontier calls step down automatically as you approach the managed-AI cap.`;
+}
+
+export function hasUnlimitedAiCredits(input: {
+  managed?: boolean | null;
+  unlimitedAiCredits?: boolean | null;
+  includedAiCredits?: number | null;
+  aiCreditsRemaining?: number | null;
+}): boolean {
+  return (
+    input.unlimitedAiCredits === true ||
+    input.includedAiCredits === -1 ||
+    input.aiCreditsRemaining === -1 ||
+    (input.managed === false && (input.includedAiCredits ?? 0) <= 0)
+  );
+}
+
+export function managedAiStatusLabel(input: {
+  managed?: boolean | null;
+  unlimitedAiCredits?: boolean | null;
+  includedAiCredits?: number | null;
+  aiCreditsRemaining?: number | null;
+  routingState?: string | null;
+}): string {
+  return hasUnlimitedAiCredits(input) ? 'Unlimited' : input.routingState || 'FULL';
 }
