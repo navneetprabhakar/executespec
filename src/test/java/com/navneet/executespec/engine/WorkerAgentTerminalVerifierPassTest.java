@@ -24,6 +24,10 @@ class WorkerAgentTerminalVerifierPassTest {
   @Test
   void terminalVerifierCommandRejectsExplorationAndTrivialSmokeCommands() {
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /app")).isFalse();
+    assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /tests/")).isFalse();
+    assertThat(WorkerAgent.terminalVerifierCommand("shell", "find /tests -maxdepth 2 -type f"))
+        .isFalse();
+    assertThat(WorkerAgent.terminalVerifierCommand("shell", "cat /tests/test.sh")).isFalse();
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "python -c 'import solution'"))
         .isFalse();
     assertThat(WorkerAgent.terminalVerifierCommand("readFile", "/tests/test.sh")).isFalse();
@@ -33,8 +37,13 @@ class WorkerAgentTerminalVerifierPassTest {
   void terminalVisibleTestCommandRequiresTheVisibleTestsPath() {
     assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "bash /tests/test.sh")).isTrue();
     assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "cd /tests && pytest -q")).isTrue();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "cd /tests && ./test.sh")).isTrue();
     assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -m pytest /tests -q"))
         .isTrue();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "ls -la /tests/")).isFalse();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "find /tests -maxdepth 2 -type f"))
+        .isFalse();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "cat /tests/test.sh")).isFalse();
     assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -c 'custom smoke'"))
         .isFalse();
     assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -m pytest /app -q"))

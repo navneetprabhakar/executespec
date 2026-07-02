@@ -2598,8 +2598,8 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     }
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
     String c = command.toLowerCase(java.util.Locale.ROOT);
-    return c.contains("/tests/test.sh")
-        || c.contains("/tests/")
+    return executesVisibleTestScript(c)
+        || runsVisibleTestPath(c)
         || c.contains("pytest")
         || c.contains("python -m unittest")
         || c.contains("npm test")
@@ -2623,7 +2623,40 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     if (RUN_TESTS_TOOL_NAME.equals(toolName)) return true;
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
     String c = command.toLowerCase(java.util.Locale.ROOT);
-    return c.contains("/tests") || c.contains("cd /tests");
+    return executesVisibleTestScript(c)
+        || runsVisibleTestPath(c)
+        || (targetsVisibleTests(c) && terminalTestRunnerCommand(c));
+  }
+
+  private static boolean targetsVisibleTests(String command) {
+    return command.contains("/tests") || command.contains("cd /tests");
+  }
+
+  private static boolean terminalTestRunnerCommand(String command) {
+    return command.contains("pytest")
+        || command.contains("python -m unittest")
+        || command.contains("npm test")
+        || command.contains("pnpm test")
+        || command.contains("yarn test")
+        || command.contains("go test")
+        || command.contains("cargo test")
+        || command.contains("mvn test")
+        || command.contains("gradle test")
+        || command.contains("bats ")
+        || command.contains("bats-")
+        || command.contains("prove ")
+        || command.contains("./test")
+        || command.contains("./verify");
+  }
+
+  private static boolean runsVisibleTestPath(String command) {
+    return command.matches(
+            ".*\\b(?:bash|sh|python|python3|node|ruby|perl|bats|prove)\\s+[^;&|\\n]*/tests/.*")
+        || command.matches(".*cd\\s+/tests\\b.*(?:&&|;)\\s*\\./[^;&|\\n]+.*");
+  }
+
+  private static boolean executesVisibleTestScript(String command) {
+    return command.matches(".*(?:^|[;&|]\\s*)(?:sudo\\s+)?/tests/test\\.sh(?:\\s|$).*");
   }
 
   private static boolean terminalVerifierTool(String toolName) {
