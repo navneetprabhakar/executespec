@@ -53,6 +53,14 @@ public class BenchmarkTaskResult {
   @Column(name = "es_run_id", length = 64)
   private String esRunId;
 
+  /** Harness outcome label, independent of reward math (e.g. PASSED, FAILED, TIMEOUT). */
+  @Column(name = "outcome", length = 40)
+  private String outcome;
+
+  /** Human-readable harness/verifier/infra reason when available. */
+  @Column(name = "outcome_reason", length = 500)
+  private String reason;
+
   @Column(name = "cost_usd", nullable = false, precision = 12, scale = 6)
   @Builder.Default
   private BigDecimal costUsd = BigDecimal.ZERO;

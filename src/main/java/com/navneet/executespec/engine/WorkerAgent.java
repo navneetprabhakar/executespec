@@ -423,6 +423,8 @@ public class WorkerAgent {
     // RL-2026-06 — terminal-mode critic pass (#1). One-shot fresh-context acceptance review before
     // the first completeTask. criticNudged ⇒ can never loop.
     boolean criticNudged = false;
+    boolean terminalVerifiedPass = false;
+    String terminalVerifiedPassEvidence = null;
 
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
@@ -700,6 +702,33 @@ public class WorkerAgent {
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
         history.add(new AssistantMessage(assistantText));
+        if (terminalVerifiedPass) {
+          String summary =
+              "terminal verifier-shaped check passed; preserving verified candidate"
+                  + (terminalVerifiedPassEvidence == null
+                      ? ""
+                      : " (" + terminalVerifiedPassEvidence + ")");
+          toolLog.add("TERMINAL_VERIFIED_PASS → FORCE_COMPLETED");
+          log.info(
+              "WorkerAgent terminal verified-pass force-complete run={} task={} iter={}"
+                  + " evidence={}",
+              runId,
+              req.context().taskId(),
+              iter,
+              terminalVerifiedPassEvidence);
+          contextStore.delete(req.context());
+          recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
+          return WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.COMPLETED)
+              .iterations(iter)
+              .toolCallsDispatched(toolsDispatched)
+              .completionSummary(summary)
+              .finalAssistantText(lastText)
+              .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
+              .toolCallLog(toolLog)
+              .totalLatencyMs(System.currentTimeMillis() - start)
+              .build();
+        }
         if (!progressNudged) {
           progressNudged = true;
           log.info(
@@ -928,7 +957,7 @@ public class WorkerAgent {
           // fail-open (a PASS verdict OR any critic error permits completion) so it can neither
           // loop
           // nor false-block. When on it subsumes the lighter verify nudge below.
-          if (criticOn && !criticNudged) {
+          if (criticOn && !criticNudged && !terminalVerifiedPass) {
             criticNudged = true;
             String gaps = runCriticPass(req, requiredDeliverables);
             if (gaps != null) {
@@ -961,6 +990,7 @@ public class WorkerAgent {
               && !verifyNudged
               && !criticOn
               && !vbcOn
+              && !terminalVerifiedPass
               && totalWriteCalls > 0
               && (lastEditIter > lastVerifyIter || terminalVerifyGateOn)) {
             verifyNudged = true;
@@ -1025,6 +1055,22 @@ public class WorkerAgent {
         }
         metrics.recordToolCall(tc.name());
         // C1 — use the pre-computed concurrent result for a read-only batch; else dispatch now.
+        if (terminalVerifiedPass && terminalRiskyAfterVerifiedPass(tc.name())) {
+          String refused = errEnvelope("TERMINAL_VERIFIED_PASS", terminalVerifiedPassMessage());
+          toolResponses.add(
+              new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+          toolLog.add(tc.name() + " → REFUSED (terminal verified pass)");
+          log.info(
+              "WorkerAgent terminal verified-pass guard refused tool run={} task={} iter={} tool={}"
+                  + " evidence={}",
+              req.context().runId(),
+              req.context().taskId(),
+              iter,
+              tc.name(),
+              terminalVerifiedPassEvidence);
+          continue;
+        }
+        // C1 — use the pre-computed concurrent result for a read-only batch; else dispatch now.
         String envelope =
             parallelReads.containsKey(safeId(tc.id()))
                 ? parallelReads.get(safeId(tc.id()))
@@ -1059,10 +1105,26 @@ public class WorkerAgent {
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
         if (isWriteTool(tc.name())) {
           lastEditIter = iter;
-        } else if (isShellTool(tc.name())
-            || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
-            || RUN_TESTS_TOOL_NAME.equals(tc.name())) {
+        } else if ((isShellTool(tc.name())
+                || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
+                || RUN_TESTS_TOOL_NAME.equals(tc.name()))
+            && isOkEnvelope(envelope)) {
           lastVerifyIter = iter;
+        }
+        if (terminalTaskMode
+            && !terminalVerifiedPass
+            && terminalVerifierPass(
+                tc.name(), tc.arguments(), envelope, requiredDeliverables, req.context())) {
+          terminalVerifiedPass = true;
+          terminalVerifiedPassEvidence = terminalVerifierEvidence(tc.name(), tc.arguments());
+          snapshotTerminalVerifiedCandidate(req.context(), requiredDeliverables);
+          toolLog.add("TERMINAL_VERIFIED_PASS → " + terminalVerifiedPassEvidence);
+          log.info(
+              "WorkerAgent terminal verified-pass detected run={} task={} iter={} evidence={}",
+              req.context().runId(),
+              req.context().taskId(),
+              iter,
+              terminalVerifiedPassEvidence);
         }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
@@ -1561,6 +1623,15 @@ public class WorkerAgent {
     for (AssistantMessage.ToolCall tc : calls) {
       dispatched++;
       if (CompleteTaskTool.NAME.equals(tc.name())) {
+        if (!terminalFinalizerCompletionAllowed(req)) {
+          toolLog.add("TERMINAL_FINALIZER completeTask -> BLOCKED");
+          log.info(
+              "WorkerAgent TERMINAL_FINALIZER completeTask blocked by completion gates run={}"
+                  + " task={}",
+              req.context().runId(),
+              req.context().taskId());
+          return null;
+        }
         String summary = "terminal finalizer: " + extractSummary(tc.arguments());
         toolLog.add("TERMINAL_FINALIZER completeTask -> COMPLETED");
         log.info("WorkerAgent TERMINAL_FINALIZER got completeTask: {}", summary);
@@ -1578,7 +1649,7 @@ public class WorkerAgent {
       }
       if (isWriteTool(tc.name()) || isShellTool(tc.name())) {
         String env = dispatchOne(tc, req, false);
-        boolean ok = env != null && env.startsWith("{\"ok\":true");
+        boolean ok = isOkEnvelope(env);
         toolLog.add("TERMINAL_FINALIZER " + tc.name() + " -> " + (ok ? "OK" : "ERR"));
         if (ok) {
           productive = true;
@@ -1590,6 +1661,15 @@ public class WorkerAgent {
     }
 
     if (productive) {
+      if (!terminalFinalizerCompletionAllowed(req)) {
+        toolLog.add("TERMINAL_FINALIZER productive tools -> BLOCKED");
+        log.info(
+            "WorkerAgent TERMINAL_FINALIZER productive tools blocked by completion gates run={}"
+                + " task={}",
+            req.context().runId(),
+            req.context().taskId());
+        return null;
+      }
       log.info(
           "WorkerAgent TERMINAL_FINALIZER produced productive tools run={} task={} tools={}",
           req.context().runId(),
@@ -1610,10 +1690,39 @@ public class WorkerAgent {
     return null;
   }
 
+  private boolean terminalFinalizerCompletionAllowed(WorkerTaskRequest req) {
+    List<String> requiredDeliverables =
+        req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
+    if (!requiredDeliverables.isEmpty()) {
+      List<String> missing = missingDeliverables(req.context(), requiredDeliverables);
+      if (!missing.isEmpty()) {
+        log.info(
+            "WorkerAgent TERMINAL_FINALIZER deliverable gate blocked run={} task={} missing={}",
+            req.context().runId(),
+            req.context().taskId(),
+            missing);
+        return false;
+      }
+    }
+    if (Boolean.TRUE.equals(req.criticPass())) {
+      String gaps = runCriticPass(req, requiredDeliverables);
+      if (gaps != null) {
+        log.info(
+            "WorkerAgent TERMINAL_FINALIZER critic blocked run={} task={} gaps={}",
+            req.context().runId(),
+            req.context().taskId(),
+            previewThought(gaps));
+        return false;
+      }
+    }
+    return true;
+  }
+
   private List<ToolCallback> terminalFinalizerTools(WorkerTaskRequest req, boolean restrict) {
     List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
     if (!restrict) return all;
-    java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
+    java.util.Set<String> allow =
+        java.util.Set.of("writeFile", "editFile", "shell", CompleteTaskTool.NAME);
     List<ToolCallback> filtered =
         all.stream().filter(t -> allow.contains(t.getToolDefinition().name())).toList();
     return filtered.isEmpty() ? all : filtered;
@@ -1744,7 +1853,11 @@ public class WorkerAgent {
     if (envelope == null || envelope.isBlank()) {
       return "missing";
     }
-    return envelope.contains("\"ok\":true") ? "ok" : "err";
+    return isOkEnvelope(envelope) ? "ok" : "err";
+  }
+
+  private static boolean isOkEnvelope(String envelope) {
+    return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
   private String dispatchOne(
@@ -2337,6 +2450,20 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     if (remote) {
       cmd.append(
           "echo '=== /app files ==='; find /app -maxdepth 3 -type f 2>/dev/null | head -40; ");
+      cmd.append(
+          "echo '=== /tests files ==='; find /tests -maxdepth 3 -type f 2>/dev/null | head -40; ");
+      cmd.append(
+          "if [ -f /tests/test.sh ]; then echo '=== /tests/test.sh ==='; head -c 4000"
+              + " /tests/test.sh; echo; fi; ");
+      if (safe.isEmpty()) {
+        cmd.append(
+            "echo '=== likely /app candidate contents ==='; "
+                + "find /app -maxdepth 3 -type f \\( -perm -111 -o -name '*.py' -o -name '*.sh'"
+                + " -o -name '*.js' -o -name '*.ts' -o -name '*.json' -o -name '*.txt'"
+                + " -o -name '*.csv' -o -name '*.out' -o -name '*.result' \\) 2>/dev/null"
+                + " | head -8 | while IFS= read -r f; do echo \"=== $f ===\"; head -c 2000"
+                + " \"$f\"; echo; done; ");
+      }
     } else {
       // Local product run: the deliverable is the worker's change set.
       cmd.append("echo '=== git diff (stat) ==='; git diff --stat 2>/dev/null | head -40; ");
@@ -2373,6 +2500,134 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
         + "\n\nFix each REAL gap (re-run the task's own example/criteria to confirm), then call"
         + " completeTask. If a point is mistaken and your deliverable already satisfies it, you may"
         + " call completeTask now — this review will not run again.";
+  }
+
+  private boolean terminalVerifierPass(
+      String toolName,
+      String argsJson,
+      String envelope,
+      List<String> requiredDeliverables,
+      ExecutionContext ctx) {
+    if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
+    String command = commandFromArgs(argsJson);
+    if (!terminalVerifierCommand(toolName, command)) return false;
+    return requiredDeliverables == null
+        || requiredDeliverables.isEmpty()
+        || missingDeliverables(ctx, requiredDeliverables).isEmpty();
+  }
+
+  private String terminalVerifierEvidence(String toolName, String argsJson) {
+    String command = commandFromArgs(argsJson);
+    if (command.isBlank()) return toolName;
+    return toolName + ": " + truncate(command, 220);
+  }
+
+  private String commandFromArgs(String argsJson) {
+    if (argsJson == null || argsJson.isBlank()) return "";
+    try {
+      JsonNode args = objectMapper.readTree(argsJson);
+      return args.path("command").asText("");
+    } catch (Exception e) {
+      return "";
+    }
+  }
+
+  static boolean terminalVerifierCommand(String toolName, String command) {
+    if (RUN_TESTS_TOOL_NAME.equals(toolName) || BUILD_PROJECT_TOOL_NAME.equals(toolName)) {
+      return true;
+    }
+    if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
+    String c = command.toLowerCase(java.util.Locale.ROOT);
+    return c.contains("/tests/test.sh")
+        || c.contains("/tests/")
+        || c.contains("pytest")
+        || c.contains("python -m unittest")
+        || c.contains("npm test")
+        || c.contains("pnpm test")
+        || c.contains("yarn test")
+        || c.contains("go test")
+        || c.contains("cargo test")
+        || c.contains("mvn test")
+        || c.contains("gradle test")
+        || c.contains("bats ")
+        || c.contains("bats-")
+        || c.contains("prove ")
+        || c.contains(" verify")
+        || c.contains("./verify")
+        || c.contains(" benchmark")
+        || c.contains("./benchmark")
+        || c.contains(" hyperfine ");
+  }
+
+  private static boolean terminalVerifierTool(String toolName) {
+    return isShellTool(toolName)
+        || RUN_TESTS_TOOL_NAME.equals(toolName)
+        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  }
+
+  private static boolean terminalRiskyAfterVerifiedPass(String toolName) {
+    return isWriteTool(toolName)
+        || isShellTool(toolName)
+        || RUN_TESTS_TOOL_NAME.equals(toolName)
+        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  }
+
+  private static String terminalVerifiedPassMessage() {
+    return "A verifier-shaped command has already passed with the required deliverable present."
+        + " Preserve that candidate and call completeTask now. Do not keep editing, rerunning broad"
+        + " commands, or making speculative optimizations after a passing verifier-shaped check.";
+  }
+
+  private void snapshotTerminalVerifiedCandidate(
+      ExecutionContext ctx, List<String> requiredDeliverables) {
+    if (requiredDeliverables == null || requiredDeliverables.isEmpty()) return;
+    List<String> safe =
+        requiredDeliverables.stream()
+            .filter(p -> p != null && p.matches("/[A-Za-z0-9._/-]+"))
+            .distinct()
+            .limit(8)
+            .toList();
+    if (safe.isEmpty()) return;
+    String snapshotDir = "/tmp/es-passing-candidate-" + safeShellToken(ctx.runId());
+    StringBuilder cmd = new StringBuilder();
+    cmd.append("rm -rf '")
+        .append(snapshotDir)
+        .append("'; mkdir -p '")
+        .append(snapshotDir)
+        .append("'; ");
+    for (String p : safe) {
+      cmd.append("if [ -e '")
+          .append(p)
+          .append("' ]; then mkdir -p '")
+          .append(snapshotDir)
+          .append("'\"$(dirname '")
+          .append(p)
+          .append("')\"; cp -a '")
+          .append(p)
+          .append("' '")
+          .append(snapshotDir)
+          .append(p)
+          .append("'; fi; ");
+    }
+    cmd.append("printf 'ES_SNAPSHOT_OK\\n'");
+    try {
+      ObjectNode args = objectMapper.createObjectNode();
+      args.put("command", cmd.toString());
+      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      if (envelope == null || !isOkEnvelope(envelope)) {
+        log.debug("terminal verified-pass snapshot did not complete for run={}", ctx.runId());
+      }
+    } catch (Exception e) {
+      log.debug(
+          "terminal verified-pass snapshot failed (non-fatal) run={}: {}",
+          ctx.runId(),
+          e.getMessage());
+    }
+  }
+
+  private static String safeShellToken(String s) {
+    if (s == null || s.isBlank()) return "run";
+    return s.replaceAll("[^A-Za-z0-9._-]", "-");
   }
 
   private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {

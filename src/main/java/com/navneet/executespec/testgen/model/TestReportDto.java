@@ -50,6 +50,7 @@ public class TestReportDto {
     private String testClass;
     private String testMethod;
     private String failureMessage;
+    private String classification;
     private String suggestion;
   }
 }

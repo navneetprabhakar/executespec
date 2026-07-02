@@ -47,8 +47,7 @@ class BenchmarkControllerSmokeTest {
 
     SwebenchInstanceLoader loader = new SwebenchInstanceLoader(props);
     BenchmarkController controller =
-        new BenchmarkController(
-            mock(BenchmarkRunService.class), mock(BenchmarkGenerationService.class), loader, props);
+        new BenchmarkController(mock(BenchmarkGenerationService.class), loader, props);
 
     Map<String, Object> list = controller.listInstances().getBody();
     Map<String, Object> preview = controller.preview("instance_NodeBB__NodeBB-049989").getBody();

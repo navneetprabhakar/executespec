@@ -25,4 +25,9 @@ RULES:
 == PROJECT MEMORY ==
 {{PROJECT_MEMORY}}
 
-Output the plan via the `submitExecutionPlan` tool call. Nothing else.
+Output a JSON object only, with this shape:
+{"solutions":[...], "dependencyEdges":[{"from":1,"to":2}]}
+
+For every Solution `dependsOn` entry, also emit the matching dependency edge:
+if solution 2 has dependsOn [1], include {"from":1,"to":2}.
+No prose, no markdown fences.

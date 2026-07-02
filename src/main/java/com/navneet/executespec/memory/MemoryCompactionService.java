@@ -35,6 +35,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class MemoryCompactionService {
 
+  static final int SNAPSHOT_CHAR_CAP = 12_000;
+
   private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
@@ -86,6 +88,15 @@ public class MemoryCompactionService {
       String compacted = callLightweightLlm(filled, projectId);
       if (compacted == null || compacted.isBlank()) {
         log.warn("MemoryCompactionService: empty LLM response for project {}", projectId);
+        return 0;
+      }
+      if (compacted.length() > SNAPSHOT_CHAR_CAP) {
+        log.warn(
+            "MemoryCompactionService: compacted snapshot too large for project {} ({} > {} chars)"
+                + " — keeping previous snapshot",
+            projectId,
+            compacted.length(),
+            SNAPSHOT_CHAR_CAP);
         return 0;
       }
 

@@ -35,12 +35,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Lean, synchronous benchmark code-generation API.
  *
- * <p><b>Why this exists.</b> {@link BenchmarkRunService} runs each instance through {@code
- * RunOrchestrator.submitRun} — the full product entry point, which drags in the entire run
- * lifecycle (a DB run record managed across phases, credit charging, an async pipeline thread, SSE,
- * the completion-email listener, preview kickoff, validation-report + test-gen background work,
- * auto-push). For a benchmark, all of that is noise — and it was the source of most of the
- * operational friction (submit blocks until terminal, harvesting races, completion emails, etc.).
+ * <p><b>Why this exists.</b> Benchmarks need the same codegen worker seam as product PATCH-mode,
+ * but not the post-codegen product lifecycle (credits, preview, validation report, email listeners,
+ * auto-push). This wrapper owns benchmark-only setup/capture while keeping generation in {@link
+ * CodeGenEngine}.
  *
  * <p>This service does <b>only code generation</b>: it calls {@code CodeGenEngineImpl}, which wires
  * the same {@code WorkerAgent} → tools → {@code LlmRouter} loop inside the cleanroom container
@@ -54,8 +52,8 @@ import lombok.extern.slf4j.Slf4j;
  * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
  * lifecycle.
  *
- * <p>Blind, like {@link BenchmarkRunService}: the agent sees only the issue {@code
- * problem_statement}; the hidden tests are applied externally at scoring.
+ * <p>Blind: the agent sees only the issue {@code problem_statement}; the hidden tests are applied
+ * externally at scoring.
  */
 @Service
 @RequiredArgsConstructor
@@ -217,8 +215,8 @@ public class BenchmarkGenerationService {
    * Pull (skip if present) → cp {@code /testbed/.} into the host workspace → run a live container
    * bind-mounting it at {@code /testbed} with {@code --network none} → register the container so
    * the worker's shell/build tools dispatch via {@code docker exec}. Mirrors {@link
-   * BenchmarkRunService#onRunStarted} but called directly (no event), so setup is complete before
-   * {@code CodeGenEngine.solve} invokes the worker.
+   * the old async benchmark setup but called directly (no event), so setup is complete before {@code
+   * CodeGenEngine.solve} invokes the worker.
    */
   private void setupCleanroom(
       String image,
@@ -364,12 +362,12 @@ public class BenchmarkGenerationService {
    * the service stays dependency-light.
    */
   private static String defaultPlanningModel(String provider) {
-    if (provider == null) return "claude-sonnet-4-6";
+    if (provider == null) return "claude-sonnet-5";
     return switch (provider.toLowerCase()) {
       case "openai" -> "gpt-5.4";
       case "gemini", "google" -> "gemini-3.5-flash";
       case "deepseek" -> "deepseek-v4-flash-native";
-      default -> "claude-sonnet-4-6";
+      default -> "claude-sonnet-5";
     };
   }
 

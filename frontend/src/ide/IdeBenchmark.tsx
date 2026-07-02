@@ -245,6 +245,8 @@ interface TaskGroup {
   inTok: number;
   outTok: number;
   runId: string | null; // the passing attempt's run, else the latest
+  outcome: string | null;
+  reason: string | null;
 }
 
 function groupTasks(tasks: api.BenchmarkTaskResult[]): TaskGroup[] {
@@ -258,6 +260,7 @@ function groupTasks(tasks: api.BenchmarkTaskResult[]): TaskGroup[] {
   byName.forEach((atts, taskName) => {
     const sorted = [...atts].sort((a, b) => a.attempt - b.attempt);
     const passing = sorted.find((a) => a.reward > 0);
+    const displayAttempt = passing ?? sorted[sorted.length - 1];
     groups.push({
       taskName,
       attempts: sorted,
@@ -266,7 +269,9 @@ function groupTasks(tasks: api.BenchmarkTaskResult[]): TaskGroup[] {
       cost: sorted.reduce((s, a) => s + Number(a.costUsd ?? 0), 0),
       inTok: sorted.reduce((s, a) => s + Number(a.inputTokens ?? 0), 0),
       outTok: sorted.reduce((s, a) => s + Number(a.outputTokens ?? 0), 0),
-      runId: (passing ?? sorted[sorted.length - 1])?.esRunId ?? null,
+      runId: displayAttempt?.esRunId ?? null,
+      outcome: displayAttempt?.outcome ?? null,
+      reason: displayAttempt?.reason ?? null,
     });
   });
   return groups.sort((a, b) => a.taskName.localeCompare(b.taskName));
@@ -287,11 +292,12 @@ function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: num
             </span>
           );
         const pass = a.reward > 0;
+        const extra = [a.outcome, a.reason].filter(Boolean).join(' · ');
         return (
           <span
             key={i}
             style={{color: pass ? 'var(--ide-green)' : 'var(--ide-red)'}}
-            title={`attempt ${i + 1}: ${pass ? 'pass' : 'fail'}`}
+            title={`attempt ${i + 1}: ${pass ? 'pass' : 'fail'}${extra ? ` · ${extra}` : ''}`}
           >
             {pass ? '✓' : '✗'}
           </span>
@@ -328,6 +334,11 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                   <span style={{color: MUTED}}>
                     … {g.done}/{k}
                   </span>
+                )}
+                {!g.passed && (g.outcome || g.reason) && (
+                  <div style={{marginTop: 3, color: MUTED, fontSize: 11}}>
+                    {[g.outcome, g.reason].filter(Boolean).join(' · ')}
+                  </div>
                 )}
               </td>
               <td style={TD}>

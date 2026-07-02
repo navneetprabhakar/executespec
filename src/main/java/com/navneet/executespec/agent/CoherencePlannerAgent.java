@@ -214,10 +214,9 @@ public class CoherencePlannerAgent {
           case "FIX_HARD_CONSTRAINT_CONFLICT" -> {
             String newConstraint = patch.path("newConstraint").asText("").trim();
             if (newConstraint.isEmpty()) break;
-            // Simplest semantics: append the corrected constraint. The worker's
-            // system prompt sees both the old + new; the prompt's TDD wording
-            // tells it the newest entry wins on conflict. Heavy-handed; we
-            // can refine in slice 5.
+            // Append the corrected constraint. The worker hard-constraints block explicitly says
+            // later bullets win on conflict, so this patch has deterministic semantics without
+            // guessing which older free-form constraint text to delete.
             task.hardConstraints.add(newConstraint);
             applied++;
             summaries.add(

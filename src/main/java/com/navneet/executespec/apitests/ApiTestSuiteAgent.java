@@ -156,8 +156,7 @@ public class ApiTestSuiteAgent {
 
     String yaml = llmResponse.getResult().getOutput().getText();
 
-    // Strip markdown fences if LLM added them
-    yaml = yaml.trim().replaceAll("(?s)^```ya?ml\\s*", "").replaceAll("(?s)```$", "").trim();
+    yaml = stripMarkdownFences(yaml);
 
     if (yaml.isBlank() || !yaml.startsWith("openapi")) {
       log.warn("ApiTestSuiteAgent: unexpected LLM response for run {} — not saved", runId);
@@ -176,6 +175,19 @@ public class ApiTestSuiteAgent {
     stateStore.markApiSpecReady(runId);
     broadcaster.emit(runId, RunEvent.apiSpecReady(runId));
     log.info("ApiTestSuiteAgent: OpenAPI spec written and committed for run {}", runId);
+  }
+
+  static String stripMarkdownFences(String yaml) {
+    if (yaml == null) return "";
+    String stripped = yaml.trim();
+    if (stripped.startsWith("```")) {
+      int firstNewline = stripped.indexOf('\n');
+      int lastFence = stripped.lastIndexOf("```");
+      if (firstNewline >= 0 && lastFence > firstNewline) {
+        stripped = stripped.substring(firstNewline + 1, lastFence).trim();
+      }
+    }
+    return stripped;
   }
 
   boolean hasFrontendFiles(Path ws) {

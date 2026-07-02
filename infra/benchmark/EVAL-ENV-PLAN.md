@@ -91,7 +91,7 @@ CAMPAIGN=full300-ds SET_FILE=full300.txt ARMS="DEEPSEEK:deepseek-v4-flash-native
   STOP_ON_DONE=true nohup bash scripts/eval-campaign.sh > ~/campaign.out 2>&1 &
 ```
 
-Model pins (baseline-matched): GPT `gpt-5.4` · Sonnet `claude-sonnet-4-6` · Gemini `gemini-3.5-flash` · DeepSeek `deepseek-v4-flash-native`.
+Model pins (current defaults): Sonnet `claude-sonnet-5` for Anthropic PLANNING/WORKHORSE through 2026-08-31; DeepSeek native defaults to `deepseek-v4-pro-native` for planning/workhorse and `deepseek-v4-flash-native` for lightweight. The internal TB 2.1 pass deliberately excludes GPT, Gemini, and Sarvam.
 
 ## Morning
 
@@ -129,25 +129,26 @@ Same VM module; TB layer added alongside the SWE-bench scripts.
 | File | Role |
 |---|---|
 | `scripts/setup-tb.sh` | one-time: uv + **harbor 0.13.1** venv in `~/tbench` + the `es_harbor_agent` **and `tb-bench-bridge.py`** from `tb/` |
-| `scripts/run-tb.sh` | the k=N driver — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), Harbor run (default dataset `terminal-bench/terminal-bench-2-1`), live HTML tracker **+ the in-app `/benchmark` bridge** (resolved%+cost+tokens), GCS results sync |
+| `scripts/run-tb.sh` | one-pass internal driver by default — **persistent `jobs_dir` (`~/es-tb-jobs`, NOT /tmp)**, backend+compaction-flags (via API), Harbor run (default dataset `terminal-bench/terminal-bench-2-1`), live HTML tracker **+ the in-app `/benchmark` bridge** (resolved%+cost+tokens), GCS results sync; refuses `K != 1` unless explicitly overridden for a separate approved campaign |
+| `scripts/run-tb-internal-once-matrix.sh` | approved TB 2.1 internal matrix: DeepSeek V4 Pro native, DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, GLM 5.2 via OpenRouter; k=1, bridge on, submission off |
 | `scripts/tb-tracker.py` | live **visual dashboard** (per-task grid + metrics, auto-refresh) → HTML to GCS + Telegram pings |
 | `scripts/submit-tb.sh` | submit ONE finished job: ATIF preflight for passing trials → `harbor upload --public` → `harbor leaderboard submit -l terminal-bench-2-1` + post `SUBMITTED{url}` to `/benchmark` (run manually per model after validation; needs `harbor auth login` + metadata yaml) |
 | `tb/es_harbor_agent.py` | the remote-brain Harbor adapter (version-controlled copy of `~/tbench/es_harbor_agent.py`); declares `SUPPORTS_ATIF=true` and writes `agent/trajectory.json` during each Harbor trial |
 | `tb/tb-bench-bridge.py` | the in-app `/benchmark` bridge — one `TASK_SCORED` per trial (reward + esRunId + cost + **input/output tokens** from each `result.json`) → the V236/V238 tracking dashboard |
 
-**Full-89 leaderboard sweep (4 models, k=5):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
-locked model table (Flash → Pro → **gate** → Sonnet → MiMo), per-model commands, harbor auth, and submission.
+**Full-89 internal sweep (5 models, k=1):** see [`TB-FULL89-RUNBOOK.md`](TB-FULL89-RUNBOOK.md) for the
+locked model table and `/benchmark` tracking expectations. This is not a leaderboard submission.
 
 **Why persistent jobs_dir:** the laptop runs wrote to `/tmp/es-tb-jobs` and a **reboot wiped them** (2026-06-09). `run-tb.sh` writes to `~/es-tb-jobs` + syncs to GCS so results survive reboot/stop-start/teardown.
 
-**Run (k=5, pro, compaction ON, with tracker+GCS):**
+**Run the internal one-pass matrix (k=1, compaction ON, with tracker+GCS):**
 ```bash
 # on the VM, after setup-tb.sh:
 GCS_BUCKET=$(cd ~/executespec/infra/benchmark && terraform output -raw results_bucket) \
-ES_MODEL=deepseek-v4-pro-native HARBOR_MODEL=deepseek/deepseek-v4-pro K=5 CONCURRENCY=12 \
-  nohup bash ~/executespec/infra/benchmark/scripts/run-tb.sh > ~/tb.out 2>&1 &
+CONCURRENCY=12 \
+  nohup bash ~/executespec/infra/benchmark/scripts/run-tb-internal-once-matrix.sh > ~/tb.out 2>&1 &
 # watch: open  gs://<bucket>/tb-tracker.html  (auto-refresh) + Telegram pings every 5 min.
-# submit: JOB_NAME=<job> METADATA_FILE=~/es-tb-jobs/metadata-<model>-tb21.yaml bash scripts/submit-tb.sh
+# no submit for this internal pass.
 ```
 
 **⚠️ Pre-flight:** the box gets code via `git pull` → it needs the **TB-extraction commit pushed** (currently held). Push the branch or scp `TerminalBenchRunService.java` first.

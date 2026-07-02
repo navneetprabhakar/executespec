@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.RequirementSpec.RequirementKind;
 
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Test;
  * collaborators needed.
  */
 class PlannerOutputUtilsValidationTest {
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   @Test
   void cleanPlanProducesNoViolations() {
@@ -151,6 +154,24 @@ class PlannerOutputUtilsValidationTest {
     assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
   }
 
+  @Test
+  void parsePlanUsesLegacyClassificationCapWhenNoPlanStrategyIsSupplied() {
+    Plan plan =
+        PlannerOutputUtils.parsePlanFromArgs(
+            planJsonWithTasks(8), Classification.MEDIUM, OBJECT_MAPPER);
+
+    assertThat(plan.tasks()).hasSize(4);
+  }
+
+  @Test
+  void parsePlanUsesPlanStrategyCapWhenStrategyIsSupplied() {
+    Plan plan =
+        PlannerOutputUtils.parsePlanFromArgs(
+            planJsonWithTasks(8), Classification.MEDIUM, PlanStrategy.MEDIUM, OBJECT_MAPPER);
+
+    assertThat(plan.tasks()).hasSize(8);
+  }
+
   private static PlannedTask task(String id, String title, List<String> meetsRequirements) {
     return PlannedTask.builder()
         .id(id)
@@ -175,5 +196,25 @@ class PlannerOutputUtilsValidationTest {
         .tasks(tasks)
         .requirements(reqs)
         .build();
+  }
+
+  private static String planJsonWithTasks(int taskCount) {
+    StringBuilder tasks = new StringBuilder("[");
+    for (int i = 1; i <= taskCount; i++) {
+      if (i > 1) tasks.append(',');
+      tasks
+          .append("{\"id\":\"T")
+          .append(i)
+          .append("\",\"title\":\"Task ")
+          .append(i)
+          .append("\",\"description\":\"Task ")
+          .append(i)
+          .append("\",\"complexity\":\"LOW\",\"type\":\"LEAF\"}");
+    }
+    tasks.append(']');
+    return "{\"planTitle\":\"t\",\"planSummary\":\"s\",\"projectType\":\"unknown\","
+        + "\"runtimeSurface\":\"HTTP\",\"smokeTestStrategy\":\"BUILD\",\"tasks\":"
+        + tasks
+        + ",\"requirements\":[]}";
   }
 }

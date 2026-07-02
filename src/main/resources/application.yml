@@ -214,8 +214,10 @@ model-matrix:
     # SpecChatService is bumped to WORKHORSE in agent-tier-map so the user-facing spec-build chat
     # stays on the flagship.
     anthropic:
-      planning: claude-sonnet-4-6
-      workhorse: claude-sonnet-4-6
+      # 2026-07-02: Sonnet 5 is the default PLANNING + WORKHORSE route through
+      # 2026-08-31 while Anthropic's introductory Sonnet 5 pricing is active.
+      planning: claude-sonnet-5
+      workhorse: claude-sonnet-5
       lightweight: claude-haiku-4-5-20251001
     gemini:
       planning: gemini-3.5-flash
@@ -280,7 +282,22 @@ model-matrix:
         input-per-1m: 3.00
         cached-input-per-1m: 0.30
         output-per-1m: 15.00
-      notes: "PLANNING + WORKHORSE tiers for Anthropic."
+      notes: "Selectable stable fallback for Anthropic. Replaced by claude-sonnet-5 as PLANNING + WORKHORSE default on 2026-07-02."
+    claude-sonnet-5:
+      provider: anthropic
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 35
+      context-limit: 1048576
+      max-output-tokens: 128000
+      display-label: "Claude Sonnet 5"
+      pricing:
+        input-per-1m: 2.00
+        cached-input-per-1m: 0.20
+        output-per-1m: 10.00
+      notes: "Anthropic default PLANNING + WORKHORSE model from 2026-07-02 through 2026-08-31 while introductory Sonnet 5 pricing applies. Revisit before 2026-09-01."
     claude-haiku-4-5-20251001:
       provider: anthropic
       chain-tier: UTILITY
@@ -468,11 +485,11 @@ model-matrix:
       max-output-tokens: 32000
       display-label: "DeepSeek V4 Pro (Native)"
       pricing:
-        input-per-1m: 0.27
-        cached-input-per-1m: 0.027
-        output-per-1m: 1.10
+        input-per-1m: 0.435
+        cached-input-per-1m: 0.003625
+        output-per-1m: 0.87
       notes: |
-        DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing 2026-05-28: $0.27 in / $0.027 cached / $1.10 out per 1M.
+        DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing refreshed 2026-07-02 from DeepSeek docs: $0.435 cache-miss input / $0.003625 cache-hit input / $0.87 output per 1M.
         TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
     deepseek-v4-flash-native:
       provider: deepseek
@@ -485,10 +502,10 @@ model-matrix:
       max-output-tokens: 16384
       display-label: "DeepSeek V4 Flash (Native)"
       pricing:
-        input-per-1m: 0.10
-        cached-input-per-1m: 0.02
-        output-per-1m: 0.20
-      notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
+        input-per-1m: 0.14
+        cached-input-per-1m: 0.0028
+        output-per-1m: 0.28
+      notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from DeepSeek docs: $0.14 cache-miss input / $0.0028 cache-hit input / $0.28 output per 1M. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
     sarvam-105b:
       provider: sarvam
       chain-tier: CAPABLE
@@ -717,10 +734,10 @@ model-matrix:
       max-output-tokens: 32000
       display-label: "GLM 5.2 (OpenRouter)"
       pricing:
-        input-per-1m: 1.40
-        cached-input-per-1m: 1.40
-        output-per-1m: 4.40
-      notes: "OpenRouter z-ai/glm-5.2 — coding-first GLM-5 flagship, 1M ctx; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+        input-per-1m: 0.93
+        cached-input-per-1m: 0.93
+        output-per-1m: 3.00
+      notes: "OpenRouter z-ai/glm-5.2 — coding-first GLM-5 flagship, 1M ctx; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from OpenRouter model page: $0.93 input / $3 output per 1M; cached=input because OpenRouter cache accounting is provider-dependent."
     "[kimi-k2.7-code]":
       provider: openrouter
       chain-tier: CAPABLE
@@ -797,6 +814,7 @@ model-matrix:
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
     claude-sonnet-4-5: claude-sonnet-4-6
+    claude-sonnet-5-latest: claude-sonnet-5
     claude-haiku-4-5: claude-haiku-4-5-20251001
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
@@ -808,7 +826,7 @@ model-matrix:
       - { provider: openai, model: gpt-5.4 }
       - { provider: gemini, model: gemini-3.5-flash }
     CAPABLE:
-      - { provider: anthropic, model: claude-sonnet-4-6 }
+      - { provider: anthropic, model: claude-sonnet-5 }
       - { provider: openai, model: gpt-5.4 }
       - { provider: gemini, model: gemini-3.5-flash }
     UTILITY:
