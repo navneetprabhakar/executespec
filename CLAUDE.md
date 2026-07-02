@@ -31,7 +31,7 @@ Run modes (`pipeline_run.run_mode`): **`BUILD`** (default — the diagram above)
 
 Tools (`tool/`): `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, `runTests` (patch-mode only), plus `completeTask` for native termination. `ToolRegistry.bindForWorker(ctx)` filters `gitCommit` from worker authority (auto-push happens at run-end via `ScmPushService.pushMultiRepo`).
 
-LLM router (`agent/LlmRouter.java`): native tool calling end-to-end across direct providers (Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient`; Gemini via `GeminiNativeToolClient`; DeepSeek via the OpenAI-wire client) and aggregator transports (OpenRouter and Fireworks via the OpenAI-wire client). Sarvam remains as disabled/dark metadata only: provider/model selection fails closed and the catalogs hide it until quality evals pass. OpenRouter requests include a provider-routing hint `provider.sort=latency` after the 2026-06-10 MiMo probe showed lower local request latency than default price routing or throughput routing. Every call flows through `RunCostTracker` (cache-aware pricing from `application.yml model-matrix.model-pricing`; OpenRouter literal rows win before legacy owner-provider fallback). Legacy `FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) survives for non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`).
+LLM router (`agent/LlmRouter.java`): native tool calling end-to-end across direct providers (Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient`; Gemini via `GeminiNativeToolClient`; DeepSeek via the OpenAI-wire client) and aggregator transports (OpenRouter and Fireworks via the OpenAI-wire client). Gemini remains in the enum/YAML/router layer for operator regression work, but it is temporarily disabled for buyer-facing provider/model selection after the 2026-07-02 provider matrix failed bounded codegen and app-chat behavior; `ModelAccessService.DISABLED_PROVIDERS` includes both `gemini` and its `google` alias. Sarvam remains as disabled/dark metadata only: provider/model selection fails closed and the catalogs hide it until quality evals pass. OpenRouter requests include a provider-routing hint `provider.sort=latency` after the 2026-06-10 MiMo probe showed lower local request latency than default price routing or throughput routing. Every call flows through `RunCostTracker` (cache-aware pricing from `application.yml model-matrix.model-pricing`; OpenRouter literal rows win before legacy owner-provider fallback). Legacy `FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) survives for non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`).
 
 Workspaces: `<agent.workspace>/<runId>/` (local disk on the VM). Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/`. Worker writes flow through tool dispatchers; cleanroom container mounts (SWE-bench, ProgramBench) bind the workspace dir at `/workspace` so host-side tools and container-side tools see the same files.
 
@@ -108,7 +108,7 @@ Agent tier mapping (`application.yml`):
 | WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                                 |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, SpecChatService, ConversationAgent, TestReportGenerator |
 
-Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
+Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). Buyer-facing selection currently exposes the enabled providers only; Gemini is hidden/rejected until its quality gate is reopened. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on provider calls.
 
 Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. **2026-05-21 (RL-2026-05-010):** Gemini PLANNING also moved Pro → `gemini-3.5-flash` (the eval-best Gemini — ties Sonnet at verifiedScore 94 on the HIGH band, cheaper than Pro). All Gemini tiers now run Flash-class models; `gemini-3-pro-preview` is no longer tier-routed (it survives only as the `GeminiNativeToolClient` default-model constant).
 
@@ -230,7 +230,7 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 
 # Optional — LLM
-GOOGLE_API_KEY=                  # Gemini API key
+GOOGLE_API_KEY=                  # Gemini API key; retained for operator regression, buyer-facing Gemini is temporarily darked
 OPENROUTER_API_KEY=              # Enterprise gateway — DeepSeek / Qwen / Kimi / MiMo / GLM via openrouter.ai. Empty = provider registered but every call short-circuits with "OpenRouter api-key not configured."
 DEEPSEEK_API_KEY=                # Native DeepSeek (api.deepseek.com). Empty = provider disabled.
 FIREWORKS_API_KEY=               # Fireworks AI OpenAI-wire route for Chinese open models. Empty = provider disabled; live slug/latency smoke requires a real key.
@@ -238,11 +238,13 @@ FIREWORKS_API_KEY=               # Fireworks AI OpenAI-wire route for Chinese op
 # Optional — Integrations
 # (GITHUB_PAT removed 2026-05-23 — there is no system GitHub PAT; every GitHub op uses the caller's own PAT)
 SLACK_CLIENT_ID= / SLACK_CLIENT_SECRET= / SLACK_SIGNING_SECRET=
-DASHBOARD_URL=
+DASHBOARD_URL=                   # notification / integration link base
+APP_SURFACE_RETURN_URL=          # browser OAuth callback, e.g. http://localhost:5173/auth/callback
 
 # Optional — OAuth2 login
 GOOGLE_OAUTH_CLIENT_ID= / GOOGLE_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_CLIENT_ID= / GITHUB_OAUTH_CLIENT_SECRET=
+CORS_ALLOWED_ORIGINS=            # comma-separated browser origins; local default includes localhost/127.0.0.1 ports 5173 and 5174 for concurrent Vite worktrees
 
 # Optional — Billing
 RAZORPAY_KEY_ID= / RAZORPAY_KEY_SECRET=
@@ -353,8 +355,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST            | `/api/auth/register` / `/login` / `/refresh` / `/logout`                    | JWT auth.                                                                                                                                |
 | POST            | `/api/auth/forgot-password` / `/reset-password` / GET `/verify-email`       | Account recovery.                                                                                                                        |
 | GET             | `/api/auth/oauth2/init?surface=<x>` / `/authorize` / `/callback/{provider}` | OAuth2 (Google + GitHub).                                                                                                                |
-| GET             | `/api/auth/me/permissions`                                                  | Tier-based permissions.                                                                                                                  |
-| GET             | `/api/auth/me/data-export`                                                  | GDPR ZIP (manifest + payload + README).                                                                                                  |
+| GET             | `/api/auth/me/permissions`                                                  | Tier-based permissions, including the legacy `monthlyRunLimit` plus explicit quota metadata (`quotaModel`, `includedAiCredits`, `unlimitedAiCredits`, `quotaDescription`) so managed-AI tiers do not look like unlimited-run plans. |
+| GET             | `/api/auth/me/data-export`                                                  | GDPR ZIP (manifest + payload + README). Send `Accept: application/zip`; JSON clients receive a clear 406 hint.                                                                                                  |
 | POST/GET/DELETE | `/api/auth/me/tokens` (+ `/{tokenId}`)                                      | Personal Access Tokens for CLI / VS Code / CI (V215). Create returns the `es_pat_…` plaintext once; list is secret-free; delete revokes. |
 | POST            | `/api/org` / `/api/org/invite`                                              | Org creation/conversion + invitations.                                                                                                   |
 

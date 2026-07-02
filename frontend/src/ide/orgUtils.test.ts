@@ -3,6 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {
   domainListFromEmail,
   formatUsd,
+  isTeamWorkspaceSetupPending,
   isSamlConfigOnly,
   matrixModelLabel,
   matrixProviderRows,
@@ -13,6 +14,7 @@ import {
   orgMemberId,
   orgMemberInitials,
   orgSeatCount,
+  orgSeatDisplayCount,
   orgSeatValue,
   parseDomainList,
 } from './orgUtils';
@@ -35,8 +37,14 @@ describe('orgUtils', () => {
     expect(orgDisplayName(enterpriseOrg)).toBe('Personal org');
     expect(normalizedOrgTier(teamOrg)).toBe('TEAM');
     expect(orgSeatCount({tier: 'TEAM', seats: 3} as api.OrgDto & {seats: number})).toBe(3);
+    expect(orgSeatDisplayCount(org({tier: 'TEAM', seatCount: 1}), '')).toBe(2);
     expect(orgSeatValue(teamOrg, '', 2)).toBe('2 / 4');
     expect(orgSeatValue(enterpriseOrg, '', 7)).toBe('7 active · contract-managed');
+    expect(orgSeatValue(org({tier: 'TEAM', seatCount: 1, isPersonal: true}), '', 1)).toBe(
+      '1 active · team setup pending',
+    );
+    expect(isTeamWorkspaceSetupPending(org({tier: 'ENTERPRISE', isPersonal: true}), '')).toBe(true);
+    expect(isTeamWorkspaceSetupPending(org({tier: 'PRO', isPersonal: true}), '')).toBe(false);
   });
 
   it('normalizes member labels, ids, and initials', () => {
@@ -52,7 +60,7 @@ describe('orgUtils', () => {
 
   it('builds org provider key rows by tier', () => {
     const teamRows = orgKeyRows({tier: 'TEAM', hasOpenAiKey: true} as api.OrgDto);
-    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai', 'gemini']);
+    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai']);
     expect(teamRows.find((row) => row.provider === 'openai')?.connected).toBe(true);
 
     const enterpriseRows = orgKeyRows({
@@ -64,7 +72,6 @@ describe('orgUtils', () => {
     expect(enterpriseRows.map((row) => row.provider)).toEqual([
       'anthropic',
       'openai',
-      'gemini',
       'openrouter',
       'deepseek',
       'fireworks',

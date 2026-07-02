@@ -16,6 +16,11 @@ import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {Bell, Settings, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
+import {
+  adminWriteConfirmation,
+  type AdminWriteChange,
+  type AdminWriteConfirmation,
+} from './adminSafety';
 
 // Admin (super-admin)
 // Canonical activation-funnel stage keys (uppercase + `.windowed`), aligned
@@ -244,6 +249,10 @@ const ADMIN_ORG_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
 const ADMIN_ORG_STATUSES = ['ACTIVE', 'SUSPENDED'];
 
 type SectionProps = {ok: (s: string) => void; bad: (e: unknown) => void};
+type PendingAdminWrite = {
+  copy: AdminWriteConfirmation;
+  run: () => Promise<void>;
+};
 
 // Compact inline-edit select reused across the Users + Orgs tables.
 function AdminMiniSelect({
@@ -280,7 +289,7 @@ function AdminMiniSelect({
 
 function AdminUsersSection({ok, bad}: SectionProps) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
-  const [confirm, setConfirm] = useState<{u: api.AuthUser; status: string} | null>(null);
+  const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
   useEffect(() => {
@@ -318,10 +327,8 @@ function AdminUsersSection({ok, bad}: SectionProps) {
       })
       .catch(bad);
 
-  const onStatus = (u: api.AuthUser, status: string) => {
-    if (status === 'SUSPENDED') setConfirm({u, status});
-    else void applyStatus(u, status);
-  };
+  const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
+    setConfirm({copy: adminWriteConfirmation(change), run});
 
   if (!users) return <LoadingState label='Loading users…' />;
   return (
@@ -338,17 +345,29 @@ function AdminUsersSection({ok, bad}: SectionProps) {
               <AdminMiniSelect
                 value={u.tier}
                 options={ADMIN_USER_TIERS}
-                onChange={(v) => void setTier(u, v)}
+                onChange={(v) =>
+                  confirmWrite({kind: 'user-tier', email: u.email, from: u.tier, to: v}, () =>
+                    setTier(u, v),
+                  )
+                }
               />
               <AdminMiniSelect
                 value={u.globalRole}
                 options={ADMIN_USER_ROLES}
-                onChange={(v) => void setRole(u, v)}
+                onChange={(v) =>
+                  confirmWrite({kind: 'user-role', email: u.email, from: u.globalRole, to: v}, () =>
+                    setRole(u, v),
+                  )
+                }
               />
               <AdminMiniSelect
                 value={ADMIN_USER_STATUSES.includes(u.status) ? u.status : 'ACTIVE'}
                 options={ADMIN_USER_STATUSES}
-                onChange={(v) => onStatus(u, v)}
+                onChange={(v) =>
+                  confirmWrite({kind: 'user-status', email: u.email, from: u.status, to: v}, () =>
+                    applyStatus(u, v),
+                  )
+                }
               />
               <Button kind='ghost' sm onClick={() => setGrantFor(u)}>
                 + Runs
@@ -360,12 +379,12 @@ function AdminUsersSection({ok, bad}: SectionProps) {
 
       <ConfirmModal
         open={!!confirm}
-        title='Suspend user'
-        body={`Suspend ${confirm?.u.email}? They will lose access until reactivated.`}
-        confirmLabel='Suspend'
-        danger
+        title={confirm?.copy.title ?? 'Confirm admin change'}
+        body={confirm?.copy.body ?? ''}
+        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
+        danger={confirm?.copy.danger}
         onConfirm={async () => {
-          if (confirm) await applyStatus(confirm.u, confirm.status);
+          if (confirm) await confirm.run();
         }}
         onClose={() => setConfirm(null)}
       />
@@ -397,7 +416,7 @@ function AdminUsersSection({ok, bad}: SectionProps) {
 
 function AdminOrgsSection({ok, bad}: SectionProps) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
-  const [confirm, setConfirm] = useState<{o: api.OrgDto; status: string} | null>(null);
+  const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
 
@@ -428,10 +447,8 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
       })
       .catch(bad);
 
-  const onStatus = (o: api.OrgDto, status: string) => {
-    if (status === 'SUSPENDED') setConfirm({o, status});
-    else void applyStatus(o, status);
-  };
+  const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
+    setConfirm({copy: adminWriteConfirmation(change), run});
 
   if (!orgs) return <LoadingState label='Loading orgs…' />;
   return (
@@ -453,12 +470,20 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
               <AdminMiniSelect
                 value={o.tier}
                 options={ADMIN_ORG_TIERS}
-                onChange={(v) => void setTier(o, v)}
+                onChange={(v) =>
+                  confirmWrite({kind: 'org-tier', name: o.name, from: o.tier, to: v}, () =>
+                    setTier(o, v),
+                  )
+                }
               />
               <AdminMiniSelect
                 value={ADMIN_ORG_STATUSES.includes(o.status) ? o.status : 'ACTIVE'}
                 options={ADMIN_ORG_STATUSES}
-                onChange={(v) => onStatus(o, v)}
+                onChange={(v) =>
+                  confirmWrite({kind: 'org-status', name: o.name, from: o.status, to: v}, () =>
+                    applyStatus(o, v),
+                  )
+                }
               />
               <Button kind='ghost' sm onClick={() => setLimitFor(o)}>
                 Limit
@@ -473,12 +498,12 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
 
       <ConfirmModal
         open={!!confirm}
-        title='Suspend org'
-        body={`Suspend ${confirm?.o.name}? All members lose access until reactivated.`}
-        confirmLabel='Suspend'
-        danger
+        title={confirm?.copy.title ?? 'Confirm admin change'}
+        body={confirm?.copy.body ?? ''}
+        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
+        danger={confirm?.copy.danger}
         onConfirm={async () => {
-          if (confirm) await applyStatus(confirm.o, confirm.status);
+          if (confirm) await confirm.run();
         }}
         onClose={() => setConfirm(null)}
       />

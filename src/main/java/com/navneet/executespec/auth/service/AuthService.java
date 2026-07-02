@@ -358,12 +358,26 @@ public class AuthService {
             .findById(userId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+    assertActiveForSession(user);
     OrgMember orgMember = null;
     if (user.getOrgId() != null) {
       orgMember = orgMemberRepo.findByOrgIdAndUserId(user.getOrgId(), user.getId()).orElse(null);
     }
     String accessToken = jwtUtil.generateAccessToken(user, orgMember);
     return new LoginResponse(accessToken, userDto(user, orgMember));
+  }
+
+  private static void assertActiveForSession(AppUser user) {
+    if ("ACTIVE".equals(user.getStatus())) {
+      return;
+    }
+    if ("PENDING_VERIFICATION".equals(user.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Email not verified — check your inbox for the activation link, or use Forgot password to"
+              + " resend.");
+    }
+    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account suspended");
   }
 
   private UserDto userDto(AppUser user, OrgMember orgMember) {
@@ -547,6 +561,7 @@ public class AuthService {
     var existing = userRepo.findByOauthProviderAndOauthId(provider, oauthId);
     if (existing.isPresent()) {
       AppUser user = existing.get();
+      assertOAuthLoginAllowed(user);
       user.setLastLoginAt(Instant.now());
       user.setUpdatedAt(Instant.now());
       if (avatarUrl != null) user.setAvatarUrl(avatarUrl);
@@ -557,11 +572,11 @@ public class AuthService {
     var byEmail = userRepo.findByEmail(email.toLowerCase());
     if (byEmail.isPresent()) {
       AppUser user = byEmail.get();
+      assertOAuthLoginAllowed(user);
       user.setOauthProvider(provider);
       user.setOauthId(oauthId);
       if (avatarUrl != null) user.setAvatarUrl(avatarUrl);
       user.setEmailVerified(true);
-      user.setStatus("ACTIVE");
       user.setLastLoginAt(Instant.now());
       user.setUpdatedAt(Instant.now());
       userRepo.save(user);
@@ -646,6 +661,13 @@ public class AuthService {
     mailService.sendWelcomeEmail(user.getEmail(), user.getFirstName(), user.getTier());
 
     return user;
+  }
+
+  static void assertOAuthLoginAllowed(AppUser user) {
+    String status = user.getStatus();
+    if (!"ACTIVE".equals(status) && !"PENDING_VERIFICATION".equals(status)) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account is not active");
+    }
   }
 
   private String createEmailToken(String userId, String type, int expiryHours) {

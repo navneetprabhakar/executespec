@@ -78,6 +78,8 @@ export function IdeBilling() {
   const tier = useAuthStore(selectNormalizedTier);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useAuthStore((s) => s.permissions);
+  const canManageBilling =
+    isSuperAdmin || user?.orgRole === 'ORG_ADMIN' || user?.orgRole === 'BILLING_ADMIN';
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
@@ -143,7 +145,7 @@ export function IdeBilling() {
   if (!user?.orgId) {
     return (
       <div className='ide-pane' style={{maxWidth: 760}}>
-        <div className='ide-h1'>Billing</div>
+        <h1 className='ide-h1'>Billing</h1>
         <div className='ide-empty'>No organization on this account.</div>
       </div>
     );
@@ -151,7 +153,7 @@ export function IdeBilling() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Billing</div>
+      <h1 className='ide-h1'>Billing</h1>
       <div className='ide-sub'>
         {tier}
         {billing?.gateway ? ` · billed via ${billing.gateway}` : ''}
@@ -206,9 +208,15 @@ export function IdeBilling() {
                       : 'Managed plan'}
                 </div>
               </div>
-              <Link className='ide-btn' to='/plans' style={{flexShrink: 0, textDecoration: 'none'}}>
-                Change plan
-              </Link>
+              {canManageBilling && (
+                <Link
+                  className='ide-btn'
+                  to='/plans'
+                  style={{flexShrink: 0, textDecoration: 'none'}}
+                >
+                  Change plan
+                </Link>
+              )}
             </div>
             {/* C9 — auto-fit grid so the stats wrap cleanly at 375px instead of
                 squeezing three fixed columns. */}
@@ -354,8 +362,8 @@ export function IdeBilling() {
                     Bring your own provider keys, bypass the managed-AI cap.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
-                    Upgrade to TEAM and use your own Anthropic / OpenAI / Gemini / DeepSeek /
-                    Fireworks keys — you pay the LLM bill directly, no platform cap.
+                    Upgrade to TEAM and use your own Anthropic / OpenAI / DeepSeek / Fireworks keys
+                    — you pay the LLM bill directly, no platform cap.
                   </span>
                 </div>
                 <Link
@@ -489,8 +497,10 @@ export function IdeBilling() {
           <SectionTitle>Payment method</SectionTitle>
           <InfoCard>
             Cards are managed securely by your payment gateway
-            {billing?.gateway ? ` (${billing.gateway})` : ''}. Use “Change plan” to start or update
-            a subscription — checkout opens on the gateway’s hosted page.
+            {billing?.gateway ? ` (${billing.gateway})` : ''}.{' '}
+            {canManageBilling
+              ? 'Use “Change plan” to start or update a subscription — checkout opens on the gateway’s hosted page.'
+              : 'Ask an org admin or billing admin to start or update a subscription.'}
           </InfoCard>
         </>
       )}
@@ -507,7 +517,11 @@ export function IdeBilling() {
 
 export function IdePlans() {
   useDocumentTitle('Plans');
+  const user = useAuthStore((s) => s.user);
   const tier = useAuthStore(selectNormalizedTier);
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const canManageBilling =
+    isSuperAdmin || user?.orgRole === 'ORG_ADMIN' || user?.orgRole === 'BILLING_ADMIN';
   // TIER-2 deep link (/plans?highlight=TEAM) — the named card gets the accent
   // treatment so the upsell lands on a visibly emphasized tier.
   const [searchParams] = useSearchParams();
@@ -550,6 +564,7 @@ export function IdePlans() {
   // URL. The button always buys the headline (monthly) cadence now that the
   // global cycle toggle is gone.
   async function subscribe(t: string) {
+    if (!canManageBilling) return;
     if (t === 'ENTERPRISE') {
       window.location.href = 'mailto:sales@executespec.ai?subject=Enterprise%20plan';
       return;
@@ -579,7 +594,7 @@ export function IdePlans() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 920}}>
-      <div className='ide-h1'>Plans</div>
+      <h1 className='ide-h1'>Plans</h1>
       <div className='ide-sub'>Currently on {tier}</div>
 
       {err && (
@@ -750,17 +765,19 @@ export function IdePlans() {
                   className='ide-btn'
                   style={{width: '100%', marginTop: 14}}
                   onClick={() => subscribe(p.tier)}
-                  disabled={isCurrent || busyTier === p.tier}
+                  disabled={!canManageBilling || isCurrent || busyTier === p.tier}
                 >
-                  {busyTier === p.tier
-                    ? 'Redirecting…'
-                    : isCurrent
-                      ? 'Current plan'
-                      : p.tier === 'ENTERPRISE'
-                        ? 'Talk to sales'
-                        : p.tier === 'FREE'
-                          ? 'Start free'
-                          : 'Upgrade'}
+                  {!canManageBilling
+                    ? 'Admin only'
+                    : busyTier === p.tier
+                      ? 'Redirecting…'
+                      : isCurrent
+                        ? 'Current plan'
+                        : p.tier === 'ENTERPRISE'
+                          ? 'Talk to sales'
+                          : p.tier === 'FREE'
+                            ? 'Start free'
+                            : 'Upgrade'}
                 </button>
               </div>
             );

@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnRequest;
@@ -98,7 +99,8 @@ public class AgentStreamTurnRunner {
         emitter.complete();
         return;
       }
-      sessionService.failStreamTurn(ctx, e.getMessage());
+      String message = userFacingStreamError(e, ctx.provider());
+      sessionService.failStreamTurn(ctx, message);
       try {
         send(
             emitter,
@@ -106,11 +108,13 @@ public class AgentStreamTurnRunner {
             Map.of(
                 "session_id", ctx.sessionId(),
                 "turn_id", ctx.turnId(),
-                "message", e.getMessage() == null ? "agent stream failed" : e.getMessage()));
+                "message", message));
       } catch (Exception ignored) {
         // emitter is already broken
       }
-      emitter.completeWithError(e);
+      // The response is already committed as text/event-stream. Completing with an exception
+      // re-enters Spring's JSON exception handlers and produces a second broken response.
+      emitter.complete();
     }
   }
 
@@ -165,6 +169,31 @@ public class AgentStreamTurnRunner {
     } catch (IOException io) {
       throw new UncheckedIOException(io);
     }
+  }
+
+  private static String userFacingStreamError(Throwable error, String provider) {
+    String raw = error == null ? "" : error.getMessage();
+    if (raw == null || raw.isBlank()) {
+      return "Agent stream failed.";
+    }
+    if (!looksLikeProviderCredentialFailure(raw)) {
+      return raw;
+    }
+    String providerLabel =
+        provider == null || provider.isBlank() ? "Selected provider" : provider.trim();
+    return providerLabel
+        + " authentication failed. Check the provider key in Settings > Provider keys, switch to a"
+        + " configured provider, or use managed AI credits before retrying.";
+  }
+
+  private static boolean looksLikeProviderCredentialFailure(String raw) {
+    String normalized = raw.toLowerCase(Locale.ROOT);
+    return normalized.contains("invalid x-api-key")
+        || normalized.contains("invalid api key")
+        || normalized.contains("api key")
+        || normalized.contains("unauthorized")
+        || normalized.contains("authentication")
+        || normalized.contains("401");
   }
 
   private static final class AccumulatingSink implements SpecChatService.Sink {

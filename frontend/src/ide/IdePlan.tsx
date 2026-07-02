@@ -104,7 +104,7 @@ export default function IdePlan() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>Review plan</div>
+      <h1 className='ide-h1'>Review plan</h1>
       <div className='ide-sub ide-mono'>Work {runId}</div>
 
       {!run ? (

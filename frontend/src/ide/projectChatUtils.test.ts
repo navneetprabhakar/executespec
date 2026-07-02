@@ -49,7 +49,7 @@ describe('projectChatUtils', () => {
     });
     expect(resolveProjectChatSlashAction('/provider unknown', context)).toEqual({
       kind: 'provider-usage',
-      content: 'Usage: /provider anthropic|openai|gemini|deepseek',
+      content: 'Usage: /provider anthropic|openai|deepseek',
     });
   });
 

@@ -1114,7 +1114,7 @@ app:
     access-token-expiry-minutes: 360
     refresh-token-expiry-days: 7
   cors:
-    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
     app-return-url: ${APP_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
     build-return-url: ${BUILD_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
   tiers:
@@ -1127,6 +1127,12 @@ app:
     enterprise:
       monthly-run-limit: -1
       concurrent-run-limit: 10
+
+auth:
+  oauth:
+    # Browser OAuth must return to the web app origin, not the backend/mail URL. This keeps local
+    # Vite OAuth on :5173/:5174 while CLI device login carries its /cli-login redirect separately.
+    app-return-url: ${APP_SURFACE_RETURN_URL:${app.cors.app-return-url:http://localhost:5173/auth/callback}}
 
 executespec:
   designs:

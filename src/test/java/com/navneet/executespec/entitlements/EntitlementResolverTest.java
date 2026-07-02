@@ -301,6 +301,8 @@ class EntitlementResolverTest {
     assertEquals("FREE", EntitlementResolver.normalize(null));
     assertEquals("FREE", EntitlementResolver.normalize(""));
     assertEquals("PRO", EntitlementResolver.normalize("pro"));
+    assertEquals("PRO_PLUS", EntitlementResolver.normalize("pro_plus"));
+    assertEquals("BYOK", EntitlementResolver.normalize("byok"));
     assertEquals("TEAM", EntitlementResolver.normalize("max"));
   }
 }

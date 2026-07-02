@@ -8,6 +8,7 @@ import ProtectedRoute from '@/signal/components/auth/ProtectedRoute';
 import ConsoleShell from '@/console/ConsoleShell';
 import ConsoleHome from '@/console/ConsoleHome';
 import ConsoleDecisions from '@/console/ConsoleDecisions';
+import SuperAdminOnly from '@/console/SuperAdminOnly';
 import {IdeCompose, IdeLive} from '@/ide/IdeSurfaces';
 import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
@@ -117,7 +118,7 @@ function LegacyRedirect() {
   )
     path = '/admin';
   if (path === '/claim') path = '/welcome';
-  if (path === '/landing' || path === '') path = '/compose';
+  if (path === '/landing' || path === '') path = '/home';
   return <Navigate to={path + location.search + location.hash} replace />;
 }
 
@@ -130,7 +131,7 @@ function protectedChildren() {
   return (
     <>
       {/* Default + run loop */}
-      <Route path='/' element={<Navigate to='/compose' replace />} />
+      <Route path='/' element={<Navigate to='/home' replace />} />
       <Route path='/home' element={<ConsoleHome />} />
       <Route path='/decisions' element={<ConsoleDecisions />} />
       <Route path='/runs' element={<IdeRuns />} />
@@ -191,10 +192,31 @@ function protectedChildren() {
       <Route path='/search' element={<IdeSearch />} />
       <Route path='/setup' element={<IdeMoreMenu />} />
       <Route path='/more' element={<Navigate to='/setup' replace />} />
-      <Route path='/admin' element={<IdeAdmin />} />
-      <Route path='/admin/*' element={<AdminPage />} />
+      <Route
+        path='/admin'
+        element={
+          <SuperAdminOnly>
+            <IdeAdmin />
+          </SuperAdminOnly>
+        }
+      />
+      <Route
+        path='/admin/*'
+        element={
+          <SuperAdminOnly>
+            <AdminPage />
+          </SuperAdminOnly>
+        }
+      />
       {/* Operator-only benchmark tracking (SUPER_ADMIN) — RL-2026-06. */}
-      <Route path='/benchmark' element={<IdeBenchmark />} />
+      <Route
+        path='/benchmark'
+        element={
+          <SuperAdminOnly>
+            <IdeBenchmark />
+          </SuperAdminOnly>
+        }
+      />
       <Route path='/benchmarks' element={<Navigate to='/benchmark' replace />} />
     </>
   );
@@ -276,7 +298,7 @@ export default function App() {
         <Route path='/landing' element={<LegacyRedirect />} />
 
         {/* Catch-all */}
-        <Route path='*' element={<Navigate to='/compose' replace />} />
+        <Route path='*' element={<Navigate to='/home' replace />} />
       </Routes>
     </Suspense>
   );

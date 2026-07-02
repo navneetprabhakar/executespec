@@ -175,7 +175,7 @@ Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below 
 | ---------------------- | ------------------------------------ |
 | `ANTHROPIC_API_KEY`    | Anthropic provider (Claude)          |
 | `OPENAI_API_KEY`       | OpenAI provider (GPT)                |
-| `GOOGLE_API_KEY`       | Google GenAI provider (Gemini)       |
+| `GOOGLE_API_KEY`       | Google GenAI provider (Gemini; retained for operator regression while buyer-facing Gemini is temporarily darked) |
 | `GITHUB_OWNER`         | Default GitHub owner / org           |
 | `RAZORPAY_KEY_ID`      | Razorpay test or live key            |
 | `RAZORPAY_KEY_SECRET`  | Razorpay key secret                  |
@@ -194,6 +194,7 @@ The application boots without LLM keys (provider auto-configs are excluded; manu
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                                    | Enables Google OAuth2 login                                           |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
-| `DASHBOARD_URL`                                                                            | Dashboard URL used in OAuth + Slack callbacks (e.g. `http://localhost:5173`) |
+| `APP_SURFACE_RETURN_URL`                                                                   | Browser OAuth callback URL (e.g. `http://localhost:5173/auth/callback`) |
+| `DASHBOARD_URL`                                                                            | Dashboard URL used in Slack and notification links                    |
 
 Additional environment variables consumed at runtime (cookies, CORS, mail, preview engine, OTel) are set per-environment by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) (`env-patch.sh`) rather than committed to the template.

@@ -97,7 +97,7 @@ export function IdeInsights() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>Insights</div>
+      <h1 className='ide-h1'>Insights</h1>
       <div className='ide-sub'>Last {days} days · all projects</div>
 
       <div className='ide-rtabs' style={{marginBottom: 12}}>

@@ -25,17 +25,32 @@ import {
 import {
   confidenceColor,
   evidenceKind,
+  emptyCodeTabMessage,
+  fileCountSummary,
   fmtDur,
+  goalDecisionHelp,
+  goalDecisionLabel,
+  goalStateLabel,
+  hasRunCostEvidence,
   isNoisyLogEvent,
+  isFailedTerminalStatus,
   lineDiff,
   logIcon,
+  logLabel,
   logMeta,
   logMessage,
+  modelRankingCandidateLabel,
+  modelRankingCandidateMetrics,
+  modelRankingDetails,
+  modelRankingLabel,
   num,
+  runPhaseDiagnosis,
   SEV,
+  shouldUseRunEvidenceChat,
   shouldShowModelRanking,
   TABS,
   TAB_LABEL,
+  testRerunState,
   type Tab,
   toLines,
   usd,
@@ -58,12 +73,12 @@ function taskGoalLine(t: api.TaskSummary): string | null {
   const source = continuationSourceLabel(continuation?.source || continuation?.policy?.source);
   const goalPart =
     goal?.state && goal?.recommendedDecision
-      ? `Goal ${goal.state} -> ${goal.recommendedDecision}`
+      ? `Goal ${goalStateLabel(goal.state)} -> ${goalDecisionLabel(goal.recommendedDecision)}`
       : goal?.state
-        ? `Goal ${goal.state}`
+        ? `Goal ${goalStateLabel(goal.state)}`
         : null;
   const nextPart = continuation?.decision
-    ? `${source ? `${source} · ` : ''}Next ${continuation.decision}`
+    ? `${source ? `${source} · ` : ''}Next ${goalDecisionLabel(continuation.decision)}`
     : null;
   const reason = continuation?.reasons?.[0] || goal?.reason || null;
   return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
@@ -201,62 +216,6 @@ function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
   return facts;
 }
 
-type ContinuationPolicy = NonNullable<
-  NonNullable<api.TaskSummary['continuationDecision']>['policy']
->;
-type RankingCandidate = NonNullable<ContinuationPolicy['topEligibleCandidates']>[number];
-
-function rankingLabel(policy?: string | null): string {
-  return policy === 'quality_desc_then_cost_asc_then_latency_asc'
-    ? 'Quality > cost > latency'
-    : policy || 'Model ranking';
-}
-
-function rankingPolicyDetails(policy: ContinuationPolicy): string[] {
-  const details: string[] = [];
-  const source = continuationSourceLabel(policy.source);
-  if (source) {
-    details.push(source);
-  }
-  if (
-    typeof policy.rankingQualityTieBand === 'number' &&
-    Number.isFinite(policy.rankingQualityTieBand)
-  ) {
-    details.push(`near-quality band ${policy.rankingQualityTieBand.toFixed(1)} pts`);
-  }
-  if (policy.requireBenchmarkPriorForAutomaticContinuation === true) {
-    details.push('unbenchmarked upgrades need approval');
-  } else if (policy.requireBenchmarkPriorForAutomaticContinuation === false) {
-    details.push('unbenchmarked upgrades can auto-run');
-  }
-  if (policy.routePinned) {
-    details.push('route pinned');
-  }
-  if (policy.lowComplexityWorkerStartTierEffective) {
-    const effective = policy.lowComplexityWorkerStartTierEffective.toLowerCase();
-    const configured = policy.lowComplexityWorkerStartTierConfigured?.toLowerCase();
-    details.push(
-      configured && configured !== effective
-        ? `LOW starts on ${effective} (${configured} ignored)`
-        : `LOW starts on ${effective}`,
-    );
-  }
-  return details;
-}
-
-function candidateLabel(c: RankingCandidate): string {
-  const provider = providerLabel(c.provider) || c.provider || 'Provider';
-  return `${provider}/${c.model || 'model'}`;
-}
-
-function candidateMetrics(c: RankingCandidate): string {
-  const q = c.qualityScore == null ? 'Q —' : `Q ${Math.round(c.qualityScore)}`;
-  const cost = c.costPerMillionTokens == null ? '$—/M' : `$${c.costPerMillionTokens.toFixed(2)}/M`;
-  const latency = c.latencyP50Ms == null ? 'p50 —' : `p50 ${fmtDur(c.latencyP50Ms)}`;
-  const benchmark = c.benchmarkQualityPriorAvailable ? 'bench' : 'no bench';
-  return `${q} · ${cost} · ${latency} · ${benchmark}`;
-}
-
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -379,6 +338,16 @@ export default function IdeRunResult() {
     if (tab === 'Chat' && !chat) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  useEffect(() => {
+    if (!runId || eventLog) return;
+    const s = (run?.status || '').toUpperCase();
+    if (!['REVIEWING', 'VALIDATING', 'GENERATING_REPORT', 'REPORTING'].includes(s)) return;
+    api
+      .getRunEventLog(runId)
+      .then(setEventLog)
+      .catch(() => setEventLog([]));
+  }, [eventLog, run?.status, runId]);
 
   // Keep the chat thread pinned to the newest message — but only when the user
   // is already near the bottom (RES-8: don't yank the view while they're
@@ -561,6 +530,17 @@ export default function IdeRunResult() {
     try {
       if (await handleRunSlash(text)) return;
       setChat((prev) => [...(prev || []), {role: 'user', content: text}]);
+      if (shouldUseRunEvidenceChat(text)) {
+        const reply = await api.sendRunChatMessage(runId, text);
+        setChat((prev) => [
+          ...(prev || []),
+          {
+            role: 'assistant',
+            content: reply.reply,
+          },
+        ]);
+        return;
+      }
       const session = await ensureRunAgentSession();
       const reply = await streamWebAgentChatReply(session.id, text, {
         label: 'run agent',
@@ -637,7 +617,7 @@ export default function IdeRunResult() {
     if (cmd === '/provider') {
       const provider = normalizeUiProvider(arg);
       if (!provider) {
-        appendRunChatNote('Usage: /provider anthropic|openai|gemini|deepseek');
+        appendRunChatNote('Usage: /provider anthropic|openai|deepseek');
         return true;
       }
       const saved = await api.updateProviderPreference(provider);
@@ -677,7 +657,7 @@ export default function IdeRunResult() {
   const terminal = ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(
     statusUpper,
   );
-  const failedTerminal = ['FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(statusUpper);
+  const failedTerminal = isFailedTerminalStatus(statusUpper);
   const failedTasks =
     run?.tasks?.filter((t) =>
       ['FAILED', 'PARTIAL', 'BLOCKED'].includes((t.status || '').toUpperCase()),
@@ -700,6 +680,22 @@ export default function IdeRunResult() {
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
+  const reportedFiles = report?.filesGenerated ?? null;
+  const workspaceFiles = files.length;
+  const fileCounts = fileCountSummary({reportedFiles, workspaceFiles});
+  const hasCostEvidence = hasRunCostEvidence(run);
+  const {canRerunTests, emptyMessage: noCodeTestMessage} = testRerunState({
+    status: run?.status,
+    hasTestPlan: Boolean(testPlan),
+    hasTests: Boolean(tests),
+  });
+  const phaseDiagnosis = runPhaseDiagnosis({
+    status: run?.status,
+    tasks: run?.tasks,
+    report,
+    tests,
+    eventLog,
+  });
   const failureText =
     run?.failureReason ||
     (run?.statusReason ? humanStatusReason(run.statusReason) : '') ||
@@ -871,6 +867,34 @@ export default function IdeRunResult() {
               </div>
             )}
 
+            {!failedTerminal && phaseDiagnosis && (
+              <div className='ide-recovery-card'>
+                <div className='ide-recovery-main'>
+                  <div className='ide-recovery-kicker'>Current diagnosis</div>
+                  <div className='ide-recovery-title'>{phaseDiagnosis.title}</div>
+                  <div className='ide-recovery-copy'>{phaseDiagnosis.body}</div>
+                  {phaseDiagnosis.facts.length > 0 && (
+                    <div className='ide-recovery-meta'>
+                      {phaseDiagnosis.facts.map((fact) => (
+                        <span key={fact}>{fact}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className='ide-recovery-actions' aria-label='Diagnosis actions'>
+                  <button className='ide-btn' onClick={() => setTab(phaseDiagnosis.primaryTab)}>
+                    {phaseDiagnosis.primaryTab === 'Tasks' ? 'Open steps' : 'Open logs'}
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
+                    Evidence
+                  </button>
+                  <button className='ide-btn ghost' onClick={() => setTab('Chat')}>
+                    Ask about it
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
               {/* RES-3 — when nothing was measured (patch/bench runs), one honest
                   line beats a wall of em-dashes that reads as "broken". */}
@@ -918,8 +942,33 @@ export default function IdeRunResult() {
                     }
                   />
                   <Kv k='Issues' v={issues.length} />
-                  <Kv k='Files' v={report?.filesGenerated ?? files.length} />
+                  <Kv
+                    k='Files'
+                    v={
+                      reportedFiles != null ? (
+                        <span title={fileCounts.title}>{fileCounts.label}</span>
+                      ) : (
+                        workspaceFiles
+                      )
+                    }
+                  />
                   <Kv k='Pipeline' v={report?.pipelineResult ?? '—'} />
+                  {fileCounts.explanation && (
+                    <div
+                      className='ide-card'
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
+                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
+                        color: 'var(--ide-fg-muted)',
+                        fontSize: 12.5,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {fileCounts.explanation}
+                    </div>
+                  )}
                   {scoredWithoutMeasuredTests && (
                     <div
                       className='ide-card'
@@ -1112,7 +1161,7 @@ export default function IdeRunResult() {
               >
                 ⌁ Share
               </button>
-              {['anthropic', 'openai', 'gemini']
+              {['anthropic', 'openai']
                 .filter((p) => p !== (run?.aiProvider || '').toLowerCase())
                 .map((p) => (
                   <button
@@ -1456,7 +1505,7 @@ export default function IdeRunResult() {
                 />
               ) : (
                 <div className='ide-empty'>
-                  {files.length ? 'Select a file' : 'No generated files'}
+                  {emptyCodeTabMessage({hasFiles: files.length > 0, status: run?.status})}
                 </div>
               )}
             </div>
@@ -1466,19 +1515,24 @@ export default function IdeRunResult() {
         {/* ── Tasks ── */}
         {tab === 'Tasks' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>Steps</div>
+            <h1 className='ide-h1'>Steps</h1>
             {run?.runGoalDoneness && (
               <div className='ide-card' style={{marginBottom: 12}}>
                 <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                   <IdeBadge kind={goalStateKind(run.runGoalDoneness.state)}>
-                    {run.runGoalDoneness.state || 'UNKNOWN'}
+                    {goalStateLabel(run.runGoalDoneness.state)}
                   </IdeBadge>
                   {run.runGoalDoneness.recommendedDecision && (
                     <span className='ide-mono' style={{fontSize: 12}}>
-                      {run.runGoalDoneness.recommendedDecision}
+                      {goalDecisionLabel(run.runGoalDoneness.recommendedDecision)}
                     </span>
                   )}
                 </div>
+                {goalDecisionHelp(run.runGoalDoneness.recommendedDecision) && (
+                  <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                    {goalDecisionHelp(run.runGoalDoneness.recommendedDecision)}
+                  </div>
+                )}
                 {run.runGoalDoneness.reason && (
                   <div style={{fontSize: 13, marginTop: 8}}>{run.runGoalDoneness.reason}</div>
                 )}
@@ -1504,7 +1558,7 @@ export default function IdeRunResult() {
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
                   const showModelRanking = shouldShowModelRanking(t);
-                  const rankingDetails = policy ? rankingPolicyDetails(policy) : [];
+                  const rankingDetails = policy ? modelRankingDetails(policy) : [];
                   const rejectedRankingCount =
                     policy?.rejectedBelowQualityThresholdCount ??
                     policy?.topRejectedCandidates?.length ??
@@ -1622,8 +1676,10 @@ export default function IdeRunResult() {
                               marginBottom: 5,
                             }}
                           >
-                            <span style={{color: 'var(--ide-fg-bright)'}}>Model ranking</span>
-                            <span className='ide-mono'>{rankingLabel(policy.rankingPolicy)}</span>
+                            <span style={{color: 'var(--ide-fg-bright)'}}>Model route choice</span>
+                            <span className='ide-mono'>
+                              {modelRankingLabel(policy.rankingPolicy)}
+                            </span>
                             {rankingDetails.map((detail) => (
                               <span key={detail}>{detail}</span>
                             ))}
@@ -1643,9 +1699,9 @@ export default function IdeRunResult() {
                                 }}
                               >
                                 <span className='ide-mono' style={{overflowWrap: 'anywhere'}}>
-                                  {idx + 1}. {candidateLabel(candidate)}
+                                  {idx + 1}. {modelRankingCandidateLabel(candidate)}
                                 </span>
-                                <span>{candidateMetrics(candidate)}</span>
+                                <span>{modelRankingCandidateMetrics(candidate)}</span>
                               </div>
                             ))}
                           </div>
@@ -1743,7 +1799,7 @@ export default function IdeRunResult() {
             const visibleLog = eventLog?.filter((ev) => !isNoisyLogEvent(ev)) ?? null;
             return (
               <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-                <div className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <h1 className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 8}}>
                   Activity log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
                   <span
                     className='ide-mono'
@@ -1765,7 +1821,7 @@ export default function IdeRunResult() {
                   >
                     ↻ Refresh
                   </button>
-                </div>
+                </h1>
                 {visibleLog == null ? (
                   <IdeLoader label='Loading event log…' />
                 ) : visibleLog.length === 0 ? (
@@ -1783,6 +1839,7 @@ export default function IdeRunResult() {
                     }}
                   >
                     {visibleLog.map((ev, i) => {
+                      const label = logLabel(ev.type);
                       const t = (ev.type || 'log').toLowerCase();
                       const meta = logMeta(ev);
                       const color = t.includes('tool')
@@ -1825,7 +1882,7 @@ export default function IdeRunResult() {
                             }}
                             title={ev.type || 'log'}
                           >
-                            {ev.type || 'log'}
+                            {label}
                           </span>
                           <span
                             className='ide-mono'
@@ -1880,7 +1937,7 @@ export default function IdeRunResult() {
         {/* ── Timeline ── */}
         {tab === 'Timeline' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>Timeline</div>
+            <h1 className='ide-h1'>Timeline</h1>
             {timeline && (timeline.tasks || []).length > 0 && (
               <div className='ide-card' style={{marginBottom: 12}}>
                 <RunTimeline tasks={timeline.tasks} />
@@ -1976,7 +2033,7 @@ export default function IdeRunResult() {
         {/* ── Validation ── */}
         {tab === 'Validation' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 10}}>
+            <h1 className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 10}}>
               Evidence
               {report && (
                 <button
@@ -1993,7 +2050,7 @@ export default function IdeRunResult() {
                   ⬇ PDF
                 </button>
               )}
-            </div>
+            </h1>
             {!report ? (
               <div className='ide-empty'>No evidence report.</div>
             ) : (
@@ -2011,14 +2068,19 @@ export default function IdeRunResult() {
                     <div className='ide-card'>
                       <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                         <IdeBadge kind={goalStateKind(report.runGoalDecision.state)}>
-                          {report.runGoalDecision.state || 'UNKNOWN'}
+                          {goalStateLabel(report.runGoalDecision.state)}
                         </IdeBadge>
                         {report.runGoalDecision.recommendedDecision && (
                           <span className='ide-mono' style={{fontSize: 12}}>
-                            {report.runGoalDecision.recommendedDecision}
+                            {goalDecisionLabel(report.runGoalDecision.recommendedDecision)}
                           </span>
                         )}
                       </div>
+                      {goalDecisionHelp(report.runGoalDecision.recommendedDecision) && (
+                        <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                          {goalDecisionHelp(report.runGoalDecision.recommendedDecision)}
+                        </div>
+                      )}
                       {report.runGoalDecision.reason && (
                         <div style={{fontSize: 13, marginTop: 8}}>
                           {report.runGoalDecision.reason}
@@ -2168,7 +2230,7 @@ export default function IdeRunResult() {
         {/* ── Cost ── */}
         {tab === 'Cost' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>Cost</div>
+            <h1 className='ide-h1'>Cost</h1>
             <div className='ide-card'>
               <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
               <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
@@ -2189,6 +2251,23 @@ export default function IdeRunResult() {
                 </>
               )}
             </div>
+            {!hasCostEvidence && failedTerminal && (
+              <div
+                className='ide-card'
+                style={{
+                  marginTop: 12,
+                  borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
+                  background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
+                  color: 'var(--ide-fg-muted)',
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                }}
+              >
+                No token or AI-credit usage was recorded for this failed run. That usually means the
+                run stopped before a billable provider response, for example provider authentication
+                failure or tool setup failure.
+              </div>
+            )}
             {isSuperAdmin && (
               <>
                 <div className='ide-h2'>Per phase</div>
@@ -2205,7 +2284,7 @@ export default function IdeRunResult() {
         {/* ── PR ── */}
         {tab === 'PR' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1'>Pull request</div>
+            <h1 className='ide-h1'>Pull request</h1>
             {msg && (
               <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
                 {msg}
@@ -2253,12 +2332,17 @@ export default function IdeRunResult() {
         {/* ── Tests ── */}
         {tab === 'Tests' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-            <div className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 10}}>
+            <h1 className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 10}}>
               Tests
               <button
                 className='ide-btn ghost'
                 style={{marginLeft: 'auto', padding: '4px 10px'}}
-                disabled={busy === 'runtests'}
+                disabled={busy === 'runtests' || !canRerunTests}
+                title={
+                  canRerunTests
+                    ? 'Queue a test run for this workspace'
+                    : 'No generated code or test plan is available to re-run'
+                }
                 onClick={() =>
                   action(
                     'runtests',
@@ -2269,9 +2353,9 @@ export default function IdeRunResult() {
               >
                 ↻ Re-run tests
               </button>
-            </div>
+            </h1>
             {!tests ? (
-              <div className='ide-empty'>No test report yet.</div>
+              <div className='ide-empty'>{noCodeTestMessage}</div>
             ) : (
               <>
                 <div className='ide-card' style={{display: 'flex', gap: 18}}>
@@ -2516,7 +2600,7 @@ export default function IdeRunResult() {
             className='ide-pane'
             style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}
           >
-            <div className='ide-h1'>Ask about this work</div>
+            <h1 className='ide-h1'>Ask about this work</h1>
             <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
               Ask the agent about its decisions, or describe a change and start a fresh iteration
               from this work&apos;s codebase.

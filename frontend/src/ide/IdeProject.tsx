@@ -185,7 +185,7 @@ export default function IdeProject() {
               return (
                 <button
                   key={id}
-                  className='ide-badge'
+                  className='ide-badge interactive'
                   style={{
                     cursor: 'pointer',
                     borderColor: on ? 'var(--ide-accent)' : undefined,
@@ -209,12 +209,12 @@ export default function IdeProject() {
           </div>
           <select
             className='ide-select'
+            aria-label='Project run provider'
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
           >
             <option value='ANTHROPIC'>Anthropic</option>
             <option value='OPENAI'>OpenAI</option>
-            <option value='GEMINI'>Gemini</option>
             <option value='DEEPSEEK'>DeepSeek</option>
           </select>
         </div>
@@ -224,6 +224,7 @@ export default function IdeProject() {
           </div>
           <select
             className='ide-select'
+            aria-label='Project run approval mode'
             value={mode}
             onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
           >

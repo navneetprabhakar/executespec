@@ -7,6 +7,7 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {
   availableOrgMembers,
+  canManageProjectSharing,
   isExternalProjectMember,
   memberDisplayName,
 } from '@/ide/projectMoreUtils';
@@ -67,7 +68,13 @@ export function IdeProjectMembers() {
   }, [projectId]);
 
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
-  const canManage = isSuperAdmin || user?.orgRole === 'ORG_ADMIN';
+  const currentMember = members?.find((m) => m.userId === user?.id);
+  const canManage = canManageProjectSharing({
+    globalRole: user?.globalRole,
+    orgRole: user?.orgRole,
+    projectRole: currentMember?.projectRole,
+    hasProjectMembership: !!currentMember,
+  });
   const canInviteExternals = isSuperAdmin || externalSharingEnabled === true;
 
   async function invite() {
@@ -170,7 +177,7 @@ export function IdeProjectMembers() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Members &amp; sharing</div>
+      <h1 className='ide-h1'>Members &amp; sharing</h1>
       <Banner err={err} msg={msg} />
 
       <div className='ide-h2'>Project access · {members?.length ?? 0}</div>
@@ -245,6 +252,7 @@ export function IdeProjectMembers() {
             </div>
             <select
               className='ide-select'
+              aria-label='Organization member to add'
               value={orgMemberUserId}
               onChange={(e) => setOrgMemberUserId(e.target.value)}
               style={{marginBottom: 8}}
@@ -263,7 +271,8 @@ export function IdeProjectMembers() {
                   type='button'
                   className='ide-btn ghost'
                   style={{
-                    padding: '4px 10px',
+                    minHeight: 32,
+                    padding: '5px 10px',
                     borderColor: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
                     color: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
                   }}
@@ -296,6 +305,7 @@ export function IdeProjectMembers() {
               <input
                 className='ide-input'
                 type='email'
+                aria-label='External collaborator email'
                 placeholder='teammate@company.com'
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
@@ -308,7 +318,8 @@ export function IdeProjectMembers() {
                     type='button'
                     className='ide-btn ghost'
                     style={{
-                      padding: '4px 10px',
+                      minHeight: 32,
+                      padding: '5px 10px',
                       borderColor: r === inviteRole ? 'var(--ide-accent)' : undefined,
                       color: r === inviteRole ? 'var(--ide-accent)' : undefined,
                     }}
@@ -371,7 +382,7 @@ export function IdeProjectMembers() {
           </div>
           <div style={{fontSize: 13, lineHeight: 1.55}}>
             Ask an org admin to invite project collaborators or change your role. You can still view
-            current members and use share links if your role permits them.
+            current members. Share links are managed by project writers and org admins.
           </div>
         </div>
       )}
@@ -414,7 +425,7 @@ export function IdeProjectMembers() {
                   </div>
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '3px 8px'}}
+                    style={{minHeight: 32, padding: '5px 8px'}}
                     disabled={busy === `invite-${iv.id}`}
                     onClick={() => void resendInvite(iv)}
                   >
@@ -422,7 +433,7 @@ export function IdeProjectMembers() {
                   </button>
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '3px 8px', color: 'var(--ide-red)'}}
+                    style={{minHeight: 32, padding: '5px 8px', color: 'var(--ide-red)'}}
                     onClick={() => setRevokeInviteFor(iv.id)}
                   >
                     Revoke
@@ -438,13 +449,11 @@ export function IdeProjectMembers() {
       {shareLinks === null ? (
         <IdeLoader label='Loading share links…' />
       ) : shareLinks.length === 0 ? (
-        <div className='ide-empty'>
-          No share links yet. Create one to give read-only access without an account.
-        </div>
+        <div className='ide-empty'>No share links yet.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {shareLinks.map((s, i) => {
-            const url = s.token ? `${window.location.origin}/shared/${s.token}` : '';
+            const url = canManage && s.token ? `${window.location.origin}/shared/${s.token}` : '';
             return (
               <div
                 key={s.id}
@@ -468,39 +477,45 @@ export function IdeProjectMembers() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {url}
+                    {canManage ? url : 'Share link details are managed by project writers.'}
                     {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
                   </div>
                 </div>
-                <button
-                  className='ide-btn ghost'
-                  style={{padding: '3px 8px'}}
-                  onClick={() =>
-                    void navigator.clipboard.writeText(url).then(() => setMsg('Link copied.'))
-                  }
-                >
-                  Copy
-                </button>
-                <button
-                  className='ide-btn ghost'
-                  style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                  onClick={() => setRevokeFor(s.id)}
-                >
-                  Revoke
-                </button>
+                {canManage && (
+                  <>
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '3px 8px'}}
+                      onClick={() =>
+                        void navigator.clipboard.writeText(url).then(() => setMsg('Link copied.'))
+                      }
+                    >
+                      Copy
+                    </button>
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '3px 8px', color: 'var(--ide-red)'}}
+                      onClick={() => setRevokeFor(s.id)}
+                    >
+                      Revoke
+                    </button>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
       )}
-      <button
-        className='ide-btn ghost'
-        style={{marginTop: 10}}
-        onClick={makeShareLink}
-        disabled={busy === 'share'}
-      >
-        {busy === 'share' ? 'Creating…' : 'Create project snapshot link'}
-      </button>
+      {canManage && (
+        <button
+          className='ide-btn ghost'
+          style={{marginTop: 10}}
+          onClick={makeShareLink}
+          disabled={busy === 'share'}
+        >
+          {busy === 'share' ? 'Creating…' : 'Create project snapshot link'}
+        </button>
+      )}
 
       <ConfirmModal
         open={!!revokeFor}

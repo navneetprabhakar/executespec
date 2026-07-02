@@ -97,7 +97,7 @@ export function IdeRuns() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>Work</div>
+      <h1 className='ide-h1'>Work</h1>
       <div className='ide-sub'>
         {runs === null
           ? 'Every request ExecuteSpec has worked on, newest first.'
@@ -416,7 +416,7 @@ export function IdeAccount() {
   }) {
     return (
       <button
-        className='ide-badge'
+        className='ide-badge interactive'
         style={{
           cursor: 'pointer',
           borderColor: on ? 'var(--ide-accent)' : undefined,
@@ -473,7 +473,8 @@ export function IdeAccount() {
           width: '100%',
           background: 'none',
           border: 'none',
-          padding: 0,
+          minHeight: 32,
+          padding: '6px 0',
           cursor: 'pointer',
           textAlign: 'left',
         }}
@@ -575,7 +576,8 @@ export function IdeAccount() {
           width: '100%',
           background: 'none',
           border: 'none',
-          padding: 0,
+          minHeight: 32,
+          padding: '6px 0',
           cursor: 'pointer',
           textAlign: 'left',
         }}
@@ -795,7 +797,7 @@ export function IdeDeployments() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>Deployments</div>
+      <h1 className='ide-h1'>Deployments</h1>
       <div className='ide-sub'>
         Permanent Cloud Run services promoted from completed work. Deploy from a result page.
       </div>

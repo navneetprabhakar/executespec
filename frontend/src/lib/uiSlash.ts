@@ -14,7 +14,7 @@ export const UI_SLASH_COMMANDS: readonly UiSlashCommand[] = [
   {command: '/projects', description: 'List projects'},
   {command: '/runs', description: 'List recent work'},
   {command: '/status', description: 'Show current context'},
-  {command: '/provider', args: '<anthropic|openai|gemini|deepseek>', description: 'Set provider'},
+  {command: '/provider', args: '<anthropic|openai|deepseek>', description: 'Set provider'},
   {command: '/clear', description: 'Clear this chat'},
   {command: '/compile', description: 'Create work from project chat', surfaces: ['project']},
   {command: '/compact', description: 'Compact project chat history', surfaces: ['project']},
@@ -50,6 +50,6 @@ export function normalizeUiProvider(input?: string): string | null {
   const p = (input || '').trim().toUpperCase();
   if (!p) return null;
   if (p === 'CLAUDE') return 'ANTHROPIC';
-  if (['ANTHROPIC', 'OPENAI', 'GEMINI', 'DEEPSEEK'].includes(p)) return p;
+  if (['ANTHROPIC', 'OPENAI', 'DEEPSEEK'].includes(p)) return p;
   return null;
 }

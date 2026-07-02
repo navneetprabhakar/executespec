@@ -28,7 +28,7 @@ export function useDocumentTitle(title: string | null | undefined) {
  *  App.tsx's protected routes; detail surfaces override via useDocumentTitle. */
 export function routeTitle(pathname: string): string {
   const exact: Record<string, string> = {
-    '/home': 'Start',
+    '/home': 'Home',
     '/runs': 'Work',
     '/compose': 'Start',
     '/projects': 'Projects',

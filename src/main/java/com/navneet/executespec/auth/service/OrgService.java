@@ -21,6 +21,7 @@ import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.gateway.StripePaymentGateway;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.router.ModelAccessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -647,7 +648,7 @@ public class OrgService {
       java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
 
   private static final java.util.Set<String> VALID_PROVIDERS =
-      java.util.Set.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
+      java.util.Set.of("anthropic", "openai", "openrouter", "deepseek", "fireworks");
 
   @Transactional
   public OrgDto updateKeySourceSettings(
@@ -669,12 +670,14 @@ public class OrgService {
     if (enabledProviders != null) {
       // Validate and normalize
       for (String p : enabledProviders) {
-        if (!VALID_PROVIDERS.contains(p.toLowerCase())) {
+        String normalized = p.toLowerCase();
+        if (!VALID_PROVIDERS.contains(normalized)
+            || ModelAccessService.isDisabledProvider(normalized)) {
           throw new ResponseStatusException(
               HttpStatus.BAD_REQUEST,
               "Invalid provider: "
                   + p
-                  + ". Must be anthropic, openai, gemini, openrouter, deepseek, or fireworks.");
+                  + ". Must be anthropic, openai, openrouter, deepseek, or fireworks.");
         }
       }
       if (enabledProviders.isEmpty()) {

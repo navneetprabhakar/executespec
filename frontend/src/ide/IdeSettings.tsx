@@ -3,11 +3,16 @@ import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
+import {
+  adminWriteConfirmation,
+  type AdminWriteChange,
+  type AdminWriteConfirmation,
+} from '@/signal/pages/adminSafety';
 
 // Per-user credential providers that store a token via /auth/settings/{provider}.
 // (GitHub also has the org-level App-install flow, surfaced as a second action.)
 type ConnectKind = 'github' | 'jira' | 'confluence' | 'bitbucket';
-const INT_BTN: React.CSSProperties = {padding: '4px 10px', flexShrink: 0};
+const INT_BTN: React.CSSProperties = {minHeight: 32, padding: '5px 10px', flexShrink: 0};
 
 export function IdeIntegrations() {
   const user = useAuthStore((s) => s.user);
@@ -265,7 +270,7 @@ export function IdeIntegrations() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Integrations</div>
+      <h1 className='ide-h1'>Integrations</h1>
       <div className='ide-sub'>Connect GitHub, Slack, and your issue trackers.</div>
 
       {(err || msg) && (
@@ -400,6 +405,11 @@ const USER_STATUSES = ['ACTIVE', 'SUSPENDED'];
 const ORG_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
 const ORG_STATUSES = ['ACTIVE', 'SUSPENDED'];
 
+type PendingAdminWrite = {
+  copy: AdminWriteConfirmation;
+  run: () => Promise<void>;
+};
+
 type AdminSection = 'overview' | 'users' | 'orgs' | 'analytics' | 'ops' | 'topups';
 
 export function IdeAdmin() {
@@ -423,7 +433,7 @@ export function IdeAdmin() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>Admin</div>
+      <h1 className='ide-h1'>Admin</h1>
       <div className='ide-sub'>SUPER_ADMIN · every action here is logged.</div>
 
       <div className='ide-rtabs' style={{marginBottom: 16}}>
@@ -527,7 +537,7 @@ function AdminOverview() {
 
 function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
-  const [suspendFor, setSuspendFor] = useState<api.AuthUser | null>(null);
+  const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
   const load = () =>
@@ -544,7 +554,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
     setUsers((prev) => (prev ? prev.map((x) => (x.id === u.id ? u : x)) : prev));
 
   function setTier(u: api.AuthUser, tier: string) {
-    api
+    return api
       .adminUpdateUserTier(u.id, tier)
       .then((r) => {
         patch(r);
@@ -553,7 +563,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       .catch(bad);
   }
   function setRole(u: api.AuthUser, role: string) {
-    api
+    return api
       .adminUpdateUserRole(u.id, role)
       .then((r) => {
         patch(r);
@@ -570,10 +580,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       })
       .catch(bad);
   }
-  function setStatus(u: api.AuthUser, status: string) {
-    if (status === 'SUSPENDED') setSuspendFor(u);
-    else void applyStatus(u, status);
-  }
+  const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
+    setConfirm({copy: adminWriteConfirmation(change), run});
 
   if (!users) return <IdeLoader label='Loading users…' />;
   return (
@@ -590,12 +598,32 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
                 {u.email}
               </div>
             </div>
-            <MiniSelect value={u.tier} options={USER_TIERS} onChange={(v) => setTier(u, v)} />
-            <MiniSelect value={u.globalRole} options={USER_ROLES} onChange={(v) => setRole(u, v)} />
+            <MiniSelect
+              value={u.tier}
+              options={USER_TIERS}
+              onChange={(v) =>
+                confirmWrite({kind: 'user-tier', email: u.email, from: u.tier, to: v}, () =>
+                  setTier(u, v),
+                )
+              }
+            />
+            <MiniSelect
+              value={u.globalRole}
+              options={USER_ROLES}
+              onChange={(v) =>
+                confirmWrite({kind: 'user-role', email: u.email, from: u.globalRole, to: v}, () =>
+                  setRole(u, v),
+                )
+              }
+            />
             <MiniSelect
               value={USER_STATUSES.includes(u.status) ? u.status : 'ACTIVE'}
               options={USER_STATUSES}
-              onChange={(v) => setStatus(u, v)}
+              onChange={(v) =>
+                confirmWrite({kind: 'user-status', email: u.email, from: u.status, to: v}, () =>
+                  applyStatus(u, v),
+                )
+              }
             />
             <button
               className='ide-btn ghost'
@@ -609,15 +637,15 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
       </AdminList>
 
       <ConfirmModal
-        open={!!suspendFor}
-        title='Suspend user'
-        body={suspendFor ? `Suspend ${suspendFor.email}?` : ''}
-        confirmLabel='Suspend'
-        danger
+        open={!!confirm}
+        title={confirm?.copy.title ?? 'Confirm admin change'}
+        body={confirm?.copy.body ?? ''}
+        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
+        danger={confirm?.copy.danger}
         onConfirm={async () => {
-          if (suspendFor) await applyStatus(suspendFor, 'SUSPENDED');
+          if (confirm) await confirm.run();
         }}
-        onClose={() => setSuspendFor(null)}
+        onClose={() => setConfirm(null)}
       />
       <PromptModal
         open={!!grantFor}
@@ -645,7 +673,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
 
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
-  const [suspendFor, setSuspendFor] = useState<api.OrgDto | null>(null);
+  const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
 
@@ -662,7 +690,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
     setOrgs((prev) => (prev ? prev.map((x) => (x.id === o.id ? o : x)) : prev));
 
   function setTier(o: api.OrgDto, tier: string) {
-    api
+    return api
       .adminUpdateOrgTier(o.id, tier)
       .then((r) => {
         patch(r);
@@ -679,10 +707,8 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       })
       .catch(bad);
   }
-  function setStatus(o: api.OrgDto, status: string) {
-    if (status === 'SUSPENDED') setSuspendFor(o);
-    else void applyStatus(o, status);
-  }
+  const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
+    setConfirm({copy: adminWriteConfirmation(change), run});
 
   if (!orgs) return <IdeLoader label='Loading orgs…' />;
   return (
@@ -700,11 +726,23 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
                   : 'tier cap'}
               </div>
             </div>
-            <MiniSelect value={o.tier} options={ORG_TIERS} onChange={(v) => setTier(o, v)} />
+            <MiniSelect
+              value={o.tier}
+              options={ORG_TIERS}
+              onChange={(v) =>
+                confirmWrite({kind: 'org-tier', name: o.name, from: o.tier, to: v}, () =>
+                  setTier(o, v),
+                )
+              }
+            />
             <MiniSelect
               value={ORG_STATUSES.includes(o.status) ? o.status : 'ACTIVE'}
               options={ORG_STATUSES}
-              onChange={(v) => setStatus(o, v)}
+              onChange={(v) =>
+                confirmWrite({kind: 'org-status', name: o.name, from: o.status, to: v}, () =>
+                  applyStatus(o, v),
+                )
+              }
             />
             <button
               className='ide-btn ghost'
@@ -725,15 +763,15 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
       </AdminList>
 
       <ConfirmModal
-        open={!!suspendFor}
-        title='Suspend org'
-        body={suspendFor ? `Suspend org ${suspendFor.name}?` : ''}
-        confirmLabel='Suspend'
-        danger
+        open={!!confirm}
+        title={confirm?.copy.title ?? 'Confirm admin change'}
+        body={confirm?.copy.body ?? ''}
+        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
+        danger={confirm?.copy.danger}
         onConfirm={async () => {
-          if (suspendFor) await applyStatus(suspendFor, 'SUSPENDED');
+          if (confirm) await confirm.run();
         }}
-        onClose={() => setSuspendFor(null)}
+        onClose={() => setConfirm(null)}
       />
       <PromptModal
         open={!!limitFor}

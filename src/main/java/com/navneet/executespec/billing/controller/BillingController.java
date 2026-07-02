@@ -10,9 +10,12 @@ import com.navneet.executespec.billing.service.BillingService;
 import com.navneet.executespec.billing.service.FounderPricingService;
 import com.navneet.executespec.billing.service.RunTopupService;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +43,10 @@ public class BillingController {
       @RequestParam(required = false) String keyMode,
       @RequestParam(required = false, defaultValue = "false") boolean includeHidden,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    boolean effectiveIncludeHidden = includeHidden && userDetails != null;
+    boolean effectiveIncludeHidden =
+        includeHidden
+            && userDetails != null
+            && "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
     return ResponseEntity.ok(billingService.listPlans(keyMode, effectiveIncludeHidden));
   }
 
@@ -83,6 +89,7 @@ public class BillingController {
 
   /** POST /api/billing/subscribe Initiate a subscription. Returns Razorpay checkout data. */
   @PostMapping("/subscribe")
+  @PreAuthorize("hasAnyRole('ORG_ADMIN','BILLING_ADMIN','SUPER_ADMIN')")
   public ResponseEntity<SubscriptionInitResult> subscribe(
       @RequestBody CreateSubscriptionRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -103,6 +110,7 @@ public class BillingController {
    * subscription and upgrades tier on success.
    */
   @PostMapping("/verify")
+  @PreAuthorize("hasAnyRole('ORG_ADMIN','BILLING_ADMIN','SUPER_ADMIN')")
   public ResponseEntity<BillingStatusResponse> verify(
       @RequestBody VerifyPaymentRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -113,6 +121,7 @@ public class BillingController {
 
   /** POST /api/billing/cancel Cancel subscription at end of current billing period. */
   @PostMapping("/cancel")
+  @PreAuthorize("hasAnyRole('ORG_ADMIN','BILLING_ADMIN','SUPER_ADMIN')")
   public ResponseEntity<Void> cancel(@AuthenticationPrincipal AppUserDetails userDetails) {
     billingService.cancel(userDetails.getUser().getId());
     return ResponseEntity.ok().build();
@@ -122,6 +131,7 @@ public class BillingController {
    * POST /api/billing/seats Update seat count (Pro tier only). Takes effect at next billing cycle.
    */
   @PostMapping("/seats")
+  @PreAuthorize("hasAnyRole('ORG_ADMIN','BILLING_ADMIN','SUPER_ADMIN')")
   public ResponseEntity<BillingStatusResponse> updateSeats(
       @RequestBody UpdateSeatsRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -144,6 +154,7 @@ public class BillingController {
   public ResponseEntity<TopupOrderInitResult> purchaseTopup(
       @RequestBody TopupPurchaseRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertCanManageTopups(userDetails);
     TopupOrderInitResult result =
         runTopupService.initiatePurchase(userDetails.getUser().getId(), request);
     return ResponseEntity.ok(result);
@@ -156,6 +167,7 @@ public class BillingController {
   public ResponseEntity<BillingStatusResponse> verifyTopup(
       @RequestBody TopupVerifyRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertCanManageTopups(userDetails);
     String userId = userDetails.getUser().getId();
     runTopupService.verifyAndCredit(
         userId,
@@ -163,5 +175,24 @@ public class BillingController {
         request.razorpayPaymentId(),
         request.razorpaySignature());
     return ResponseEntity.ok(billingService.getStatus(userId));
+  }
+
+  private void assertCanManageTopups(AppUserDetails userDetails) {
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
+    }
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return;
+    }
+    if (userDetails.getUser().getOrgId() == null) {
+      return;
+    }
+    String orgRole =
+        userDetails.getOrgMember() == null ? null : userDetails.getOrgMember().getOrgRole();
+    if ("ORG_ADMIN".equals(orgRole) || "BILLING_ADMIN".equals(orgRole)) {
+      return;
+    }
+    throw new ResponseStatusException(
+        HttpStatus.FORBIDDEN, "Only org admins and billing admins can buy org top-ups");
   }
 }

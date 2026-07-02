@@ -28,6 +28,7 @@ import com.navneet.executespec.auth.service.UserDataExportService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -228,6 +229,17 @@ public class AuthController {
             "Content-Disposition", "attachment; filename=\"" + bundle.suggestedFilename() + "\"")
         .header("Content-Type", "application/zip")
         .body(bundle.zipBytes());
+  }
+
+  @GetMapping(value = "/me/data-export", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Map<String, String>> exportMyDataJsonHint() {
+    return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE)
+        .body(
+            Map.of(
+                "error",
+                "data_export_requires_zip_accept",
+                "message",
+                "This endpoint returns a ZIP bundle. Retry with Accept: application/zip."));
   }
 
   // Personal Access Tokens (programmatic auth for CLI / VS Code / CI)

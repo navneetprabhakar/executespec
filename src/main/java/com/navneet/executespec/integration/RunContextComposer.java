@@ -22,6 +22,7 @@ import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.reviewer.ReviewerResult;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.stereotype.Component;
@@ -305,8 +306,7 @@ class RunContextComposer {
     boolean strict =
         "true".equalsIgnoreCase(System.getProperty("executespec.strict-provider", "false"));
     if (aiProvider != null && !aiProvider.isBlank()) {
-      String lower = aiProvider.toLowerCase();
-      String resolved = "google".equals(lower) ? "gemini" : lower;
+      String resolved = enabledProviderOrThrow(aiProvider);
       log.info(
           "normalizeProvider[strict={}] runId={} -> provider={} (explicit)",
           strict,
@@ -325,12 +325,12 @@ class RunContextComposer {
               .map(p -> p.getAiProvider() == null ? null : p.getAiProvider().name())
               .orElse(null);
       if (projectProvider != null && !projectProvider.isBlank()) {
+        String resolved = enabledProviderOrThrow(projectProvider);
         log.warn(
             "normalizeProvider: null aiProvider on runId={} — falling back to project default {}",
             runId,
             projectProvider);
-        String lower = projectProvider.toLowerCase();
-        return "google".equals(lower) ? "gemini" : lower;
+        return resolved;
       }
     }
     log.warn(
@@ -339,6 +339,13 @@ class RunContextComposer {
         projectId,
         DEFAULT_PROVIDER);
     return DEFAULT_PROVIDER;
+  }
+
+  private String enabledProviderOrThrow(String provider) {
+    String lower = provider.toLowerCase();
+    String resolved = "google".equals(lower) ? "gemini" : lower;
+    ModelAccessService.assertProviderEnabled(resolved);
+    return resolved;
   }
 
   /**
