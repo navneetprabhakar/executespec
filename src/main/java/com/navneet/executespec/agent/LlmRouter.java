@@ -555,7 +555,9 @@ public class LlmRouter {
             .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
             .messageTypeMinContentLength(MessageType.TOOL, 512)
             .build();
-    boolean dropTemperature = ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model());
+    boolean dropTemperature =
+        ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
+            || AnthropicModelOptions.shouldOmitTemperature(r.model());
     var b =
         AnthropicChatOptions.builder()
             .model(r.model())
@@ -567,7 +569,7 @@ public class LlmRouter {
     try {
       return model.call(new Prompt(r.messages(), b.build()));
     } catch (RuntimeException ex) {
-      if (!isTemperatureDeprecatedError(ex)) throw ex;
+      if (!AnthropicModelOptions.isTemperatureDeprecatedError(ex)) throw ex;
       ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
       log.warn(
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
@@ -595,10 +597,7 @@ public class LlmRouter {
         hash,
         h -> {
           AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-          return AnthropicChatModel.builder()
-              .anthropicApi(api)
-              .defaultOptions(AnthropicChatOptions.builder().temperature(0.0).build())
-              .build();
+          return AnthropicChatModel.builder().anthropicApi(api).build();
         });
   }
 
@@ -628,18 +627,7 @@ public class LlmRouter {
     // RL-2026-06-051.
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-7");
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-8");
-  }
-
-  /**
-   * Returns true when the exception chain mentions Anthropic's "temperature is deprecated for this
-   * model" 400.
-   */
-  private static boolean isTemperatureDeprecatedError(Throwable ex) {
-    for (Throwable t = ex; t != null; t = t.getCause()) {
-      String msg = t.getMessage();
-      if (msg != null && msg.contains("temperature is deprecated")) return true;
-    }
-    return false;
+    ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-sonnet-5");
   }
 
   private ChatResponse callGemini(LlmRequest r, List<ToolCallback> tools, String apiKey) {

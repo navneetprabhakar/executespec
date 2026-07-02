@@ -38,6 +38,7 @@ Run one at a time through `scripts/run-tb-internal-once-matrix.sh`.
 4. Provider keys exist for DeepSeek native, Anthropic, and OpenRouter.
 5. `/benchmark` is reachable as SUPER_ADMIN.
 6. `~/tbench` has Harbor and the version-controlled `es_harbor_agent.py`.
+7. Redis is `>=6.2`; the app uses `GETDEL`, so Ubuntu 22.04's stock Redis 6.0 fails normal run startup.
 
 ## Run the approved matrix
 

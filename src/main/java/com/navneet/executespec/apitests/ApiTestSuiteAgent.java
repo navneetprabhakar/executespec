@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -118,12 +119,12 @@ public class ApiTestSuiteAgent {
     ResolvedModel resolved = modelResolver.resolve("ApiTestSuiteAgent", run.getAiProviderEnum());
     AnthropicCacheOptions cacheOpts =
         AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    AnthropicChatOptions opts =
-        AnthropicChatOptions.builder()
-            .temperature(0.0)
-            .model(resolved.getModel())
-            .cacheOptions(cacheOpts)
-            .build();
+    var optsBuilder =
+        AnthropicChatOptions.builder().model(resolved.getModel()).cacheOptions(cacheOpts);
+    if (!AnthropicModelOptions.shouldOmitTemperature(resolved.getModel())) {
+      optsBuilder.temperature(0.0);
+    }
+    AnthropicChatOptions opts = optsBuilder.build();
     Prompt prompt =
         new Prompt(
             List.of(
