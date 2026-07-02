@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.OpenAiNativeToolClient;
 import com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest;
 
@@ -103,11 +104,11 @@ public class NativeToolsTestController {
     if (anthropicModel == null) throw new IllegalStateException("Anthropic model not configured");
     var b =
         AnthropicChatOptions.builder()
-            .temperature(0.0)
             .maxTokens(512)
             .toolCallbacks(callbacks)
             .internalToolExecutionEnabled(false);
     if (modelOverride != null && !modelOverride.isBlank()) b.model(modelOverride);
+    if (!AnthropicModelOptions.shouldOmitTemperature(modelOverride)) b.temperature(0.0);
     return anthropicModel.call(new Prompt(List.of(new UserMessage(userPrompt)), b.build()));
   }
 
