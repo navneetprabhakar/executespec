@@ -8,6 +8,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.billing.config.ManagedAiProperties;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class TierPermissionService {
   private final OrgMemberRepository orgMemberRepo;
   private final TierConfigRepository tierConfigRepo;
   private final TierEnforcementService tierEnforcementService;
+  private final ManagedAiProperties managedAiProperties;
 
   public record TierPermissions(
       boolean canManageAiKeys,
@@ -61,7 +63,17 @@ public class TierPermissionService {
       int maxPreviewStarts,
       // Deploy engine
       boolean canDeploy,
-      int maxDeployments) {}
+      int maxDeployments,
+      String quotaModel,
+      long includedAiCredits,
+      boolean unlimitedAiCredits,
+      String quotaDescription) {}
+
+  private record QuotaInfo(
+      String quotaModel,
+      long includedAiCredits,
+      boolean unlimitedAiCredits,
+      String quotaDescription) {}
 
   public TierPermissions getPermissions(String userId) {
     AppUser user =
@@ -114,7 +126,12 @@ public class TierPermissionService {
   private TierPermissions superAdminPermissions(AppUser user) {
     // SUPER_ADMIN always unlimited — never show quota constraints
     // regardless of which org they belong to
-    return new TierPermissions(
+    return withQuota(
+        new QuotaInfo(
+            "SUPER_ADMIN_UNLIMITED",
+            -1,
+            true,
+            "SUPER_ADMIN is not capped by monthly runs or managed AI credits."),
         true, // canManageAiKeys
         true, // canViewPricing
         true, // canManageIntegrations
@@ -145,7 +162,9 @@ public class TierPermissionService {
   }
 
   private TierPermissions financePermissions(AppUser user) {
-    return new TierPermissions(
+    return withQuota(
+        new QuotaInfo(
+            "NONE", 0, false, "FINANCE users have read-only billing access and no run quota."),
         false, // canManageAiKeys
         false, // canViewPricing
         false, // canManageIntegrations
@@ -197,10 +216,12 @@ public class TierPermissionService {
     int maxPreviews = resolveMaxPreviewStarts(org.getTier());
     boolean canDeploy = resolveCanDeploy(org.getTier());
     int maxDeploys = resolveMaxDeployments(org.getTier());
+    QuotaInfo quota = quotaInfo(org.getTier(), limit);
 
     if (isOrgAdmin) {
       // ORG_ADMIN (PRO or ENTERPRISE) — full access except cost breakdown (super admin only)
-      return new TierPermissions(
+      return withQuota(
+          quota,
           true, // canManageAiKeys
           true, // canViewPricing
           true, // canManageIntegrations
@@ -230,7 +251,8 @@ public class TierPermissionService {
     }
 
     // DEVELOPER in org — run detail tabs unlocked for all tiers
-    return new TierPermissions(
+    return withQuota(
+        quota,
         false, // canManageAiKeys
         false, // canViewPricing
         false, // canManageIntegrations
@@ -283,6 +305,7 @@ public class TierPermissionService {
     int used = user.getPersonalRunCount();
     int maxApply = resolveMaxApplySuggestions(tier);
     int maxPreviews = resolveMaxPreviewStarts(tier);
+    QuotaInfo quota = quotaInfo(tier, limit);
     // V165 — MAX deprecated, BYOK now lives on TEAM + ENTERPRISE.
     boolean isTeamOrEnterprise =
         "TEAM".equals(tier) || "BYOK".equals(tier) || "ENTERPRISE".equals(tier);
@@ -299,7 +322,8 @@ public class TierPermissionService {
     // (FREE has no billing; PRO is single-developer grandfathered).
     boolean canManageOrgAsTeamOrEnt = isTeamOrEnterprise;
 
-    return new TierPermissions(
+    return withQuota(
+        quota,
         isTeamOrEnterprise, // canManageAiKeys — TEAM/ENTERPRISE can configure BYOK
         canManageOrgAsTeamOrEnt, // [R8] canViewPricing — TEAM/ENT need to see plans they're paying
         // for
@@ -332,6 +356,94 @@ public class TierPermissionService {
         resolveCanDeploy(tier), // [F-03] from tier_config (was: true hardcoded)
         resolveMaxDeployments(tier) // [F-03] from tier_config (was: 3 hardcoded)
         );
+  }
+
+  private TierPermissions withQuota(
+      QuotaInfo quota,
+      boolean canManageAiKeys,
+      boolean canViewPricing,
+      boolean canManageIntegrations,
+      boolean canViewMetrics,
+      boolean canViewCostBreakdown,
+      boolean canViewTokenUsage,
+      boolean canUseChat,
+      boolean canCreateOrg,
+      boolean canInviteMembers,
+      boolean canViewOrgMembers,
+      boolean canViewAudit,
+      boolean canViewLiveLog,
+      boolean canViewInvoices,
+      boolean canViewAccounting,
+      boolean canManageCreditNotes,
+      boolean canExportGstr,
+      boolean canManageSellerConfig,
+      boolean canManageBillingProfile,
+      int monthlyRunLimit,
+      int currentRunCount,
+      int maxOrgMembers,
+      int currentOrgMembers,
+      int maxApplySuggestions,
+      int maxPreviewStarts,
+      boolean canDeploy,
+      int maxDeployments) {
+    return new TierPermissions(
+        canManageAiKeys,
+        canViewPricing,
+        canManageIntegrations,
+        canViewMetrics,
+        canViewCostBreakdown,
+        canViewTokenUsage,
+        canUseChat,
+        canCreateOrg,
+        canInviteMembers,
+        canViewOrgMembers,
+        canViewAudit,
+        canViewLiveLog,
+        canViewInvoices,
+        canViewAccounting,
+        canManageCreditNotes,
+        canExportGstr,
+        canManageSellerConfig,
+        canManageBillingProfile,
+        monthlyRunLimit,
+        currentRunCount,
+        maxOrgMembers,
+        currentOrgMembers,
+        maxApplySuggestions,
+        maxPreviewStarts,
+        canDeploy,
+        maxDeployments,
+        quota.quotaModel(),
+        quota.includedAiCredits(),
+        quota.unlimitedAiCredits(),
+        quota.quotaDescription());
+  }
+
+  private QuotaInfo quotaInfo(String tier, int monthlyRunLimit) {
+    String normalized = tier == null || tier.isBlank() ? "FREE" : tier.trim().toUpperCase();
+    if (!managedAiProperties.isEnabled()) {
+      return new QuotaInfo(
+          "RUN_LIMIT",
+          0,
+          monthlyRunLimit == -1,
+          "Monthly run limits are the active quota boundary for this account.");
+    }
+    ManagedAiProperties.TierPolicy policy = managedAiProperties.policyFor(normalized);
+    long includedCredits = policy == null ? 0 : policy.getIncludedCredits();
+    if (includedCredits > 0) {
+      return new QuotaInfo(
+          "MANAGED_AI_CREDITS",
+          includedCredits,
+          false,
+          "Managed AI credits are the active quota boundary; monthlyRunLimit is retained for"
+              + " backwards compatibility.");
+    }
+    return new QuotaInfo(
+        "OWN_KEYS_UNLIMITED",
+        0,
+        true,
+        "This tier is not capped by managed AI credits; provider-key and org policy controls"
+            + " apply.");
   }
 
   /** Resolve max org members: per-org override → tier_config default. */

@@ -32,8 +32,17 @@ export interface TierPermissions {
   canExportGstr: boolean;
   canManageSellerConfig: boolean;
   canManageBillingProfile: boolean;
+  /** Legacy run-count field. For managed-AI tiers this can be -1 while credits are the quota. */
   monthlyRunLimit: number;
   currentRunCount: number;
+  /** Active quota model exposed by the backend, e.g. MANAGED_AI_CREDITS or OWN_KEYS_UNLIMITED. */
+  quotaModel?: string;
+  /** Included monthly managed AI credits when quotaModel is MANAGED_AI_CREDITS. */
+  includedAiCredits?: number;
+  /** Whether the account is unlimited for managed-AI credit accounting. */
+  unlimitedAiCredits?: boolean;
+  /** Backend explanation for how to interpret monthlyRunLimit with the active quota model. */
+  quotaDescription?: string;
   maxOrgMembers: number;
   currentOrgMembers: number;
   /** Max apply-to-run actions per run. -1 = unlimited. */

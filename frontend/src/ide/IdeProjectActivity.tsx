@@ -24,7 +24,7 @@ export function IdeProjectActivity() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Activity</div>
+      <h1 className='ide-h1'>Activity</h1>
       {feed === null ? (
         <IdeLoader label='Loading activity…' />
       ) : feed.length === 0 ? (

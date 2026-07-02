@@ -17,6 +17,24 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Missing provider input should resolve through `AiProviderPreferenceService` before falling back to project or YAML defaults.
 - Legacy `GOOGLE` input is accepted as `GEMINI`; persistence should use canonical enum names.
 
+## Data Export
+
+- `GET /api/auth/me/data-export` is a ZIP-only personal-data export. Browser/download clients should send `Accept: application/zip`; JSON-default clients receive a clear `406` body with `error=data_export_requires_zip_accept` instead of a misleading route miss.
+
+## Local CORS
+
+- `SecurityConfig.corsConfigurationSource()` trims comma-separated `app.cors.allowed-origins` entries before registering them. The local default includes `http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:5174`, and `http://127.0.0.1:5174` so concurrent Vite worktrees can authenticate through the browser without `Invalid CORS request`.
+
+## OAuth Return URLs
+
+- Browser OAuth success uses `auth.oauth.app-return-url` (`APP_SURFACE_RETURN_URL`, defaulting to `app.cors.app-return-url`) as the exact `/auth/callback` target. Do not use `app.mail.base-url` for OAuth; local backend-served mail links and Vite app OAuth callbacks can intentionally be different origins.
+- CLI / VS Code device login remains separate: `OAuthRedirectCookieFilter` only stores safe `/cli-login...` paths in `es_oauth_redirect`, and `OAuthSuccessHandler` appends that path as the callback `redirect=` param after token generation.
+- `OAuthSuccessHandlerTest` pins app-origin callback selection plus safe `/cli-login` handoff and unsafe redirect rejection.
+
+## Tier Permissions
+
+- `GET /api/auth/me/permissions` keeps the legacy `monthlyRunLimit` integer for backward compatibility, but clients must read `quotaModel`, `includedAiCredits`, `unlimitedAiCredits`, and `quotaDescription` to understand the active customer-facing quota boundary. Managed-key tiers such as FREE/PRO/PRO_PLUS report `quotaModel=MANAGED_AI_CREDITS`; BYOK/TEAM/ENTERPRISE report `OWN_KEYS_UNLIMITED`.
+
 ## Org Lifecycle
 
 - Registration bootstraps solo users into a personal org (`org.is_personal=true`) so project/run ownership always has an org boundary.

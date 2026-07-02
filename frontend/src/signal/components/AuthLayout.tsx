@@ -30,8 +30,8 @@ export default function AuthLayout({children}: {children: ReactNode}) {
               Start with the change, keep control at the gate.
             </h2>
             <p className='auth-brand-lede'>
-              The app opens on Start. From there you pick context, review the plan, then let the
-              worker produce a verified pull request.
+              The app opens on Home. From there you can understand the product, start work, review
+              the plan, then inspect the verified pull request.
             </p>
           </div>
 
@@ -42,10 +42,10 @@ export default function AuthLayout({children}: {children: ReactNode}) {
               <span className='auth-console-state'>1 awaiting approval</span>
             </div>
             <div className='auth-console-tabs'>
+              <span>Home</span>
               <span>Start</span>
               <span>Work</span>
               <span>Projects</span>
-              <span>Setup</span>
             </div>
             <div className='auth-console-lines'>
               {[

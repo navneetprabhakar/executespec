@@ -132,9 +132,10 @@ describe('systemUtils', () => {
       {to: '/notifications', label: 'Notifications', sub: '-'},
     ]);
     expect(setupAccountRows('forge@example.com')[0].sub).toBe('forge@example.com');
-    expect(setupOperationRows('FREE', false).some((row) => row.to === '/audit')).toBe(false);
-    expect(setupOperationRows('TEAM', false).some((row) => row.to === '/audit')).toBe(true);
-    expect(setupOperationRows('FREE', true).some((row) => row.to === '/audit')).toBe(true);
+    expect(setupOperationRows('FREE', false, false).some((row) => row.to === '/audit')).toBe(false);
+    expect(setupOperationRows('TEAM', false, false).some((row) => row.to === '/audit')).toBe(false);
+    expect(setupOperationRows('FREE', false, true).some((row) => row.to === '/audit')).toBe(true);
+    expect(setupOperationRows('FREE', true, false).some((row) => row.to === '/audit')).toBe(true);
   });
 });
 

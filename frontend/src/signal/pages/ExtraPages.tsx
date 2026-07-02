@@ -145,7 +145,7 @@ export function PublicPricingPage() {
               sub: 'For individuals · monthly',
               features: [
                 '2,000 AI credits / month',
-                'Managed keys — Anthropic · OpenAI · Gemini',
+                'Managed keys — Anthropic · OpenAI · DeepSeek',
                 'PR review + code review (4 scans/mo)',
                 '2 projects · 2 repos each',
                 'Managed-AI cap — Pro+ upsell when needed',

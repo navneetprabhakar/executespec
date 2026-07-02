@@ -25,7 +25,8 @@ public class AiProviderPreferenceService {
 
   public String preferredProvider(AppUserDetails userDetails) {
     AppUser user = requireUser(userDetails);
-    return blankToNull(user.getPreferredAiProvider());
+    String stored = blankToNull(user.getPreferredAiProvider());
+    return stored == null ? null : normalizeProvider(stored);
   }
 
   public String resolveProvider(AppUserDetails userDetails, String explicitProvider) {

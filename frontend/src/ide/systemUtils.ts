@@ -279,11 +279,15 @@ export function setupAccountRows(email?: string | null): MoreRow[] {
   ];
 }
 
-export function setupOperationRows(tier: string, isSuperAdmin: boolean): MoreRow[] {
+export function setupOperationRows(
+  tier: string,
+  isSuperAdmin: boolean,
+  isOrgAdmin: boolean,
+): MoreRow[] {
   return [
     {to: '/search', label: 'Search', sub: 'Work, projects, files'},
     {to: '/insights', label: 'Insights', sub: 'Usage and outcomes'},
-    ...(tier === 'TEAM' || tier === 'ENTERPRISE' || isSuperAdmin
+    ...(isOrgAdmin || isSuperAdmin
       ? [{to: '/audit', label: 'Audit log', sub: 'Compliance trail'}]
       : []),
     {to: '/deployments', label: 'Deployments', sub: 'Cloud Run / Docker'},

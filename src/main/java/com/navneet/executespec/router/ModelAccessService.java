@@ -23,10 +23,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ModelAccessService {
 
-  // Sarvam is intentionally dark-launched only. Live quality was not production-ready, so keep the
-  // enum/YAML breadcrumbs for later eval work but make every customer-facing selection path
-  // fail-closed until it is explicitly re-enabled.
-  private static final Set<String> DISABLED_PROVIDERS = Set.of("sarvam");
+  // Sarvam is intentionally dark-launched only. Gemini is temporarily dark for buyer-facing run
+  // selection after the 2026-07-02 provider matrix: it was reachable but returned PARTIAL/37 and
+  // produced only README.md on the bounded smoke task while the other enabled providers passed.
+  // Keep enum/YAML breadcrumbs for operator evals; customer-facing selection paths fail closed.
+  private static final Set<String> DISABLED_PROVIDERS = Set.of("gemini", "google", "sarvam");
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -72,14 +73,22 @@ public class ModelAccessService {
         && DISABLED_PROVIDERS.contains(provider.trim().toLowerCase(Locale.ROOT));
   }
 
+  public static boolean isDisabledProviderModelSlug(String modelId) {
+    if (modelId == null || modelId.isBlank()) {
+      return false;
+    }
+    String normalized = modelId.trim().toLowerCase(Locale.ROOT);
+    return DISABLED_PROVIDERS.stream()
+        .anyMatch(provider -> normalized.equals(provider) || normalized.contains(provider + "-"));
+  }
+
   public static void assertProviderEnabled(String provider) {
     if (isDisabledProvider(provider)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,
           "Provider '"
               + provider
-              + "' is disabled; choose Anthropic, OpenAI, Gemini, DeepSeek,"
-              + " OpenRouter, or Fireworks.");
+              + "' is disabled; choose Anthropic, OpenAI, DeepSeek, OpenRouter, or Fireworks.");
     }
   }
 

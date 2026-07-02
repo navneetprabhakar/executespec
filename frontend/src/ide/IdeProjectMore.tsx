@@ -273,9 +273,9 @@ export function IdeProjectChat() {
       <ProjectTabs projectId={projectId} />
       <div className='ide-project-chat-head'>
         <div className='ide-project-chat-title'>
-          <div className='ide-h1' style={{margin: 0}}>
+          <h1 className='ide-h1' style={{margin: 0}}>
             Ask about project
-          </div>
+          </h1>
           <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             context: {memRuns} completed work item{memRuns === 1 ? '' : 's'}
           </span>
@@ -446,6 +446,7 @@ export function IdeProjectChat() {
               aria-expanded={memOpen}
               title={memOpen ? 'Hide memory digest' : 'Show memory digest'}
               className='ide-project-chat-rail-head'
+              style={{minHeight: 32}}
             >
               Project context · {memRuns} item{memRuns === 1 ? '' : 's'}
               <span>{memOpen ? 'hide' : 'show'}</span>
@@ -716,9 +717,9 @@ export function IdeProjectCode() {
           style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
         >
           <div>
-            <div className='ide-h1' style={{margin: 0}}>
+            <h1 className='ide-h1' style={{margin: 0}}>
               Codebase
-            </div>
+            </h1>
             <div className='ide-sub' style={{margin: 0}}>
               Browse linked repo files, review code issues, and regenerate project docs.
             </div>
@@ -1304,9 +1305,9 @@ export function IdeProjectArchitecture() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-        <div className='ide-h1' style={{margin: 0}}>
+        <h1 className='ide-h1' style={{margin: 0}}>
           System map
-        </div>
+        </h1>
         {arch?.version != null && (
           <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>v{arch.version}</span>
         )}

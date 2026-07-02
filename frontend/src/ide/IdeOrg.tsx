@@ -17,6 +17,7 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {
   domainListFromEmail,
   isSamlConfigOnly,
+  isTeamWorkspaceSetupPending,
   KEY_PLACEHOLDER,
   matrixModelLabel,
   matrixProviderRows,
@@ -26,7 +27,7 @@ import {
   orgMemberDisplayName,
   orgMemberId,
   orgMemberInitials,
-  orgSeatCount,
+  orgSeatDisplayCount,
   orgSeatValue,
   parseDomainList,
   type OrgKeyProvider,
@@ -98,11 +99,8 @@ export function IdeApiKeys() {
   useDocumentTitle('Provider keys');
   const tier = useAuthStore(selectNormalizedTier);
   const user = useAuthStore((s) => s.user);
-  // Gate strictly by tier (FREE only is blocked). Some running JVMs return
-  // `canManageAiKeys=false` on PRO/TEAM (RJ-01 quirk) which would show the wrong
-  // CTA to paying users. Tier is the contractual surface, so we ignore the
-  // advisory `permissions.canManageAiKeys` hint here — same as the Signal page.
-  const canManage = tier !== 'FREE';
+  const permissions = useAuthStore((s) => s.permissions);
+  const canManage = permissions?.canManageAiKeys ?? ['BYOK', 'TEAM', 'ENTERPRISE'].includes(tier);
 
   // Per-provider "key already saved" flags (raw keys are never returned) —
   // drives the "Leave blank to keep your current key" hint under each row.
@@ -116,7 +114,6 @@ export function IdeApiKeys() {
 
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
-  const [geminiKey, setGeminiKey] = useState('');
   const [deepSeekKey, setDeepSeekKey] = useState('');
   const [fireworksKey, setFireworksKey] = useState('');
   const [msg, setMsg] = useState('');
@@ -144,7 +141,6 @@ export function IdeApiKeys() {
       setMsg(`${provider} key saved. Work using ${provider} now bypasses the platform cap.`);
       if (provider === 'OPENAI') setOpenaiKey('');
       if (provider === 'ANTHROPIC') setAnthropicKey('');
-      if (provider === 'GEMINI') setGeminiKey('');
       if (provider === 'DEEPSEEK') setDeepSeekKey('');
       if (provider === 'FIREWORKS') setFireworksKey('');
     } catch (e: unknown) {
@@ -175,12 +171,13 @@ export function IdeApiKeys() {
         >
           {label}
         </div>
-        {/* TIER-3 — when the tier gate is closed (FREE) the whole row renders
+        {/* TIER-3 — when the tier gate is closed the whole row renders
             disabled; the upgrade banner above is the single CTA. */}
         <div style={{display: 'flex', gap: 8}}>
           <input
             className='ide-input ide-mono'
             type='password'
+            aria-label={`${label} personal provider key`}
             autoComplete='off'
             placeholder={`Paste your ${provider.toLowerCase()} key (${KEY_PLACEHOLDER[provider]})`}
             value={value}
@@ -208,14 +205,14 @@ export function IdeApiKeys() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Provider keys</div>
+      <h1 className='ide-h1'>Provider keys</h1>
       <div className='ide-sub'>Bring your own model keys · bypass platform cost cap</div>
 
       <InfoCard>
         When you connect a provider key, work using that provider{' '}
         <strong>bypass our cost cap</strong> entirely. Keys are stored server-side under this
-        deployment's configured crypto policy and are never shown again. Available on
-        PRO/TEAM/ENTERPRISE tiers.
+        deployment's configured crypto policy and are never shown again. Available on BYOK, TEAM,
+        and ENTERPRISE tiers.
       </InfoCard>
 
       {!canManage && (
@@ -228,7 +225,7 @@ export function IdeApiKeys() {
             borderColor: 'var(--ide-red)',
           }}
         >
-          Provider keys are a PRO+ feature.{' '}
+          Provider keys require a BYOK, TEAM, or ENTERPRISE workspace.{' '}
           <Link to='/plans' style={{color: 'var(--ide-red)', fontWeight: 600}}>
             Upgrade →
           </Link>
@@ -241,7 +238,6 @@ export function IdeApiKeys() {
       <div className='ide-card' style={{padding: 0}}>
         {ProviderRow('Anthropic', 'ANTHROPIC', anthropicKey, setAnthropicKey, false)}
         {ProviderRow('OpenAI', 'OPENAI', openaiKey, setOpenaiKey, false)}
-        {ProviderRow('Gemini (Google AI)', 'GEMINI', geminiKey, setGeminiKey, false)}
         {ProviderRow('DeepSeek', 'DEEPSEEK', deepSeekKey, setDeepSeekKey, false)}
         {ProviderRow('Fireworks', 'FIREWORKS', fireworksKey, setFireworksKey, true)}
       </div>
@@ -287,6 +283,10 @@ export function IdeOrgMembers() {
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
   const canInvite = user?.orgRole === 'ORG_ADMIN' || isSuperAdmin;
   const orgTier = normalizedOrgTier(org, tier);
+  const workspaceSetupPending = isTeamWorkspaceSetupPending(
+    org as api.OrgDto & {seats?: number},
+    tier,
+  );
   const seatValue = orgSeatValue(org as api.OrgDto & {seats?: number}, tier, members.length);
 
   async function invite() {
@@ -364,7 +364,7 @@ export function IdeOrgMembers() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>Team access</div>
+      <h1 className='ide-h1'>Team access</h1>
       <div className='ide-sub'>
         Manage organization members, roles, and work-domain invites for {orgDisplayName(org)} ·{' '}
         {members.length} member
@@ -402,10 +402,19 @@ export function IdeOrgMembers() {
             </div>
             {orgTier === 'ENTERPRISE' && (
               <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                Enterprise membership is governed by contract and allowed domains.
+                {workspaceSetupPending
+                  ? 'Finish workspace setup before treating this as a provisioned Enterprise org.'
+                  : 'Enterprise membership is governed by contract and allowed domains.'}
               </div>
             )}
-            {orgTier !== 'ENTERPRISE' && (
+            {orgTier === 'TEAM' && (
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                {workspaceSetupPending
+                  ? 'TEAM has a 2-seat minimum; invite flow is available while setup is completed.'
+                  : 'Org members consume seats. External project collaborators do not.'}
+              </div>
+            )}
+            {orgTier !== 'ENTERPRISE' && orgTier !== 'TEAM' && (
               <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                 Org members consume seats. External project collaborators do not.
               </div>
@@ -431,12 +440,14 @@ export function IdeOrgMembers() {
               <input
                 className='ide-input'
                 type='email'
+                aria-label='Organization invite email'
                 placeholder='teammate@company.com'
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
               />
               <select
                 className='ide-select'
+                aria-label='Organization invite role'
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
               >
@@ -542,6 +553,7 @@ export function IdeOrgMembers() {
                     <>
                       <select
                         className='ide-select'
+                        aria-label={`Organization role for ${mAny.email || displayName}`}
                         value={mAny.orgRole || 'DEVELOPER'}
                         disabled={roleBusy || removeBusy}
                         onChange={(e) => changeRole(uid, e.target.value)}
@@ -690,6 +702,7 @@ function CreateOrgPanel({
   const [err, setErr] = useState('');
   const canCreate = tier !== 'FREE' && (!org || org.isPersonal === true);
   const showCreateAction = canCreate || !org;
+  const workspaceSetupPending = isTeamWorkspaceSetupPending(org, tier);
 
   async function submit() {
     const parsedDomains = parseDomainList(domains);
@@ -729,14 +742,16 @@ function CreateOrgPanel({
       <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap'}}>
         <div style={{minWidth: 0, flex: 1}}>
           <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-            Organization workspace
+            {workspaceSetupPending ? 'Team workspace setup' : 'Organization workspace'}
           </div>
           <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
-            {org?.isPersonal
-              ? 'Convert your personal workspace into a team organization before inviting teammates.'
-              : org
-                ? 'You are already in an organization. Multi-org switching is not available yet.'
-                : 'Create an organization before inviting teammates.'}
+            {workspaceSetupPending
+              ? 'Your paid workspace has team controls enabled. Add organization name and domains so buyers do not see a personal workspace shell.'
+              : org?.isPersonal
+                ? 'Convert your personal workspace into a team organization before inviting teammates.'
+                : org
+                  ? 'You are already in an organization. Multi-org switching is not available yet.'
+                  : 'Create an organization before inviting teammates.'}
           </div>
         </div>
         {showCreateAction ? (
@@ -748,7 +763,13 @@ function CreateOrgPanel({
               tier === 'FREE' ? 'Organization creation is available after upgrading.' : undefined
             }
           >
-            {open ? 'Cancel' : org?.isPersonal ? 'Convert to org' : 'Create org'}
+            {open
+              ? 'Cancel'
+              : workspaceSetupPending
+                ? 'Finish setup'
+                : org?.isPersonal
+                  ? 'Convert to org'
+                  : 'Create org'}
           </button>
         ) : (
           <IdeBadge kind='ok'>Active org</IdeBadge>
@@ -796,7 +817,13 @@ function CreateOrgPanel({
             <div style={{fontSize: 12.5, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
           )}
           <button className='ide-btn' disabled={busy} onClick={submit}>
-            {busy ? 'Creating…' : org?.isPersonal ? 'Convert workspace' : 'Create organization'}
+            {busy
+              ? 'Creating…'
+              : workspaceSetupPending
+                ? 'Save team workspace'
+                : org?.isPersonal
+                  ? 'Convert workspace'
+                  : 'Create organization'}
           </button>
         </div>
       )}
@@ -960,11 +987,12 @@ export function IdeOrgSettings() {
   }
 
   async function saveSeats() {
+    const requestedSeats = Math.max(2, seats);
     setSeatBusy(true);
     setErr('');
     setMsg('');
     try {
-      const res = await api.adjustOrgSeats(seats);
+      const res = await api.adjustOrgSeats(requestedSeats);
       setMsg(res.message || `Seats updated to ${res.newSeats}.`);
       setSeats(res.newSeats);
       // Reflect the new count in the local org snapshot + subtitle.
@@ -1038,7 +1066,7 @@ export function IdeOrgSettings() {
   if (!org) {
     return (
       <div className='ide-pane' style={{maxWidth: 820}}>
-        <div className='ide-h1'>Org settings</div>
+        <h1 className='ide-h1'>Org settings</h1>
         <div className='ide-sub'>Create an organization to invite teammates</div>
         <Banner err={err} msg={msg} />
         <CreateOrgPanel
@@ -1057,14 +1085,20 @@ export function IdeOrgSettings() {
   const orgKeyRows = buildOrgKeyRows(org);
   const orgTier = normalizedOrgTier(org);
   const isTeamTier = orgTier === 'TEAM';
-  const seatCount = orgSeatCount(org as api.OrgDto & {seats?: number});
+  const workspaceSetupPending = isTeamWorkspaceSetupPending(
+    org as api.OrgDto & {seats?: number},
+    orgTier,
+  );
+  const seatDisplayCount = orgSeatDisplayCount(org as api.OrgDto & {seats?: number}, orgTier);
+  const teamSeatInputValue = Math.max(2, seats);
   const ssoProviderConfigOnly = isSamlConfigOnly(ssoProvider);
 
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
-      <div className='ide-h1'>Org settings</div>
+      <h1 className='ide-h1'>Org settings</h1>
       <div className='ide-sub'>
-        {org.name || 'Personal org'} · {seatCount} seats
+        {workspaceSetupPending ? 'Workspace setup pending' : org.name || 'Personal org'} ·{' '}
+        {seatDisplayCount} seats
       </div>
 
       <Banner err={err} msg={msg} />
@@ -1084,6 +1118,7 @@ export function IdeOrgSettings() {
         <Field label='Org name'>
           <input
             className='ide-input'
+            aria-label='Organization name'
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={!canEdit}
@@ -1092,6 +1127,7 @@ export function IdeOrgSettings() {
         <Field label='Authorised email domains (comma-separated)'>
           <input
             className='ide-input'
+            aria-label='Organization authorized email domains'
             value={domains}
             onChange={(e) => setDomains(e.target.value)}
             disabled={!canEdit}
@@ -1117,18 +1153,20 @@ export function IdeOrgSettings() {
               marginBottom: 12,
             }}
           >
-            TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your
-            billing gateway. You can&apos;t reduce below the current active member count.
+            {workspaceSetupPending
+              ? 'TEAM has a 2-seat minimum. Complete workspace setup before buyer demos; the stored personal-org seat value can still be 1 until billing sync finishes.'
+              : "TEAM-tier orgs share a seat pool. Changing the count syncs the prorated quantity to your billing gateway. You can't reduce below the current active member count."}
           </div>
           <Field label='Seats'>
             <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
               <input
                 className='ide-input'
                 type='number'
-                min={1}
+                aria-label='Team seat count'
+                min={2}
                 max={20}
-                value={seats}
-                onChange={(e) => setSeats(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                value={teamSeatInputValue}
+                onChange={(e) => setSeats(Math.max(2, Math.min(20, Number(e.target.value) || 2)))}
                 disabled={!canEdit}
                 style={{width: 120}}
               />
@@ -1136,7 +1174,7 @@ export function IdeOrgSettings() {
                 <button
                   className='ide-btn'
                   style={{flexShrink: 0}}
-                  disabled={seatBusy || seats === (org.seatCount ?? 1)}
+                  disabled={seatBusy || teamSeatInputValue === (org.seatCount ?? 1)}
                   onClick={saveSeats}
                 >
                   {seatBusy ? 'Updating…' : 'Update seats'}
@@ -1155,10 +1193,11 @@ export function IdeOrgSettings() {
           <div
             style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}
           >
-            This org currently reports {seatCount} seat{seatCount === 1 ? '' : 's'}. Self-serve seat
-            adjustment only applies to TEAM-tier billing. To give someone access to a project, open
-            the project&apos;s <Link to='/projects'>Members</Link> tab; to invite them into the
-            organization first, use <Link to='/org-members'>Team access</Link>.
+            This org currently reports {seatDisplayCount} seat
+            {seatDisplayCount === 1 ? '' : 's'}. Self-serve seat adjustment only applies to
+            TEAM-tier billing. To give someone access to a project, open the project&apos;s{' '}
+            <Link to='/projects'>Members</Link> tab; to invite them into the organization first, use{' '}
+            <Link to='/org-members'>Team access</Link>.
           </div>
         </div>
       )}
@@ -1169,8 +1208,9 @@ export function IdeOrgSettings() {
           only, per docs/sso-saml-wiring.md), so the copy + the SAML chips say
           so instead of promising enforcement. */}
       <InfoCard>
-        Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Once SAML enforcement is
-        enabled for your org (contact us), members signing in with another method will be blocked.
+        {orgTier === 'FREE' || orgTier === 'PRO' || orgTier === 'PRO_PLUS'
+          ? 'Single sign-on is an Enterprise setup item. This page shows current status only for your tier.'
+          : 'Pin login to your IdP — Google OIDC, Okta SAML, or Azure AD SAML. Once SAML enforcement is enabled for your org (contact us), members signing in with another method will be blocked.'}
       </InfoCard>
       <div className='ide-card'>
         <Field label='Provider'>
@@ -1182,14 +1222,14 @@ export function IdeOrgSettings() {
                   key={p}
                   type='button'
                   onClick={
-                    canEdit
+                    canEdit && orgTier === 'ENTERPRISE'
                       ? () => {
                           setSsoProvider(p);
                           if (isSamlConfigOnly(p)) setSsoEnforced(false);
                         }
                       : undefined
                   }
-                  disabled={!canEdit}
+                  disabled={!canEdit || orgTier !== 'ENTERPRISE'}
                   className='ide-badge'
                   title={
                     samlConfigOnly
@@ -1198,7 +1238,7 @@ export function IdeOrgSettings() {
                   }
                   style={{
                     padding: '5px 11px',
-                    cursor: canEdit ? 'pointer' : 'default',
+                    cursor: canEdit && orgTier === 'ENTERPRISE' ? 'pointer' : 'default',
                     borderColor: ssoProvider === p ? 'var(--ide-accent)' : undefined,
                     color: ssoProvider === p ? 'var(--ide-accent)' : undefined,
                   }}
@@ -1213,18 +1253,20 @@ export function IdeOrgSettings() {
         <Field label='Metadata URL'>
           <input
             className='ide-input'
+            aria-label='SSO metadata URL'
             value={ssoMetadataUrl}
             onChange={(e) => setSsoMetadataUrl(e.target.value)}
-            disabled={!canEdit}
+            disabled={!canEdit || orgTier !== 'ENTERPRISE'}
             placeholder='https://accounts.google.com/.well-known/openid-configuration'
           />
         </Field>
         <Field label='Login domain'>
           <input
             className='ide-input'
+            aria-label='SSO login domain'
             value={ssoDomain}
             onChange={(e) => setSsoDomain(e.target.value)}
-            disabled={!canEdit}
+            disabled={!canEdit || orgTier !== 'ENTERPRISE'}
             placeholder='acme.com'
           />
         </Field>
@@ -1240,8 +1282,9 @@ export function IdeOrgSettings() {
           >
             <input
               type='checkbox'
+              aria-label='Enforce SSO for organization'
               checked={ssoEnforced}
-              disabled={!canEdit || ssoProviderConfigOnly}
+              disabled={!canEdit || orgTier !== 'ENTERPRISE' || ssoProviderConfigOnly}
               onChange={(e) => setSsoEnforced(e.target.checked)}
             />
             {ssoProviderConfigOnly
@@ -1249,7 +1292,7 @@ export function IdeOrgSettings() {
               : 'Require SSO for all members on the login domain.'}
           </label>
         </Field>
-        {canEdit && (
+        {canEdit && orgTier === 'ENTERPRISE' && (
           <div style={{display: 'flex', gap: 8}}>
             <button className='ide-btn' style={{flex: 1}} disabled={busy} onClick={saveSso}>
               {busy ? 'Saving…' : 'Save SSO'}
@@ -1270,10 +1313,9 @@ export function IdeOrgSettings() {
       {/* ── AI provider keys ── */}
       <div className='ide-h2'>AI provider keys</div>
       <InfoCard>
-        Org-wide provider keys shared by every member. Work using a provider you supply a key for
-        bypasses the platform cost cap. Keys are stored server-side under this deployment's
-        configured crypto policy and are never shown again — paste a new value to replace one, or
-        leave a field blank to keep the current key.
+        {orgTier === 'FREE' || orgTier === 'PRO' || orgTier === 'PRO_PLUS'
+          ? 'Org-wide provider keys are available on BYOK, TEAM, and ENTERPRISE workspaces. This page shows current status only for your tier.'
+          : "Org-wide provider keys shared by every member. Work using a provider you supply a key for bypasses the platform cost cap. Keys are stored server-side under this deployment's configured crypto policy and are never shown again — paste a new value to replace one, or leave a field blank to keep the current key."}
       </InfoCard>
       <div className='ide-card' style={{padding: 0}}>
         {orgKeyRows.map((row, i) => (
@@ -1303,19 +1345,24 @@ export function IdeOrgSettings() {
               <input
                 className='ide-input ide-mono'
                 type='password'
+                aria-label={`${row.label} organization provider key`}
                 autoComplete='off'
                 placeholder={
                   row.connected ? 'Paste a new key to replace' : `Paste your ${row.label} key`
                 }
                 value={keyInputs[row.provider]}
                 onChange={(e) => setKeyInputs((k) => ({...k, [row.provider]: e.target.value}))}
-                disabled={!canEdit}
+                disabled={!canEdit || ['FREE', 'PRO', 'PRO_PLUS'].includes(orgTier)}
                 style={{flex: 1}}
               />
               <button
                 className='ide-btn'
                 style={{flexShrink: 0}}
-                disabled={!canEdit || keyBusy === row.provider}
+                disabled={
+                  !canEdit ||
+                  ['FREE', 'PRO', 'PRO_PLUS'].includes(orgTier) ||
+                  keyBusy === row.provider
+                }
                 onClick={() => saveOrgKey(row.provider)}
               >
                 {keyBusy === row.provider ? 'Saving…' : 'Save'}
@@ -1333,8 +1380,8 @@ export function IdeOrgSettings() {
       <InfoCard>
         Tiers: <strong>Planning</strong> (complex reasoning) · <strong>Workhorse</strong> (default)
         · <strong>Lightweight</strong> (cheap/fast). &lsquo;Default · &lt;model&gt;&rsquo; follows
-        the platform matrix; pick a model to override it for this org&apos;s work. Editable on
-        ENTERPRISE.
+        the platform matrix; pick a model to override it for this org&apos;s work. Editable on BYOK,
+        TEAM, and ENTERPRISE.
         {matrix && !matrix.editable && (
           <>
             {' '}
@@ -1435,6 +1482,7 @@ export function IdeOrgSettings() {
                 </div>
                 <select
                   className='ide-select'
+                  aria-label={`${t} ${row.provider} model override`}
                   value={row.selectedOverride}
                   disabled={!canEdit || !matrix.editable}
                   onChange={(e) => {
@@ -1506,6 +1554,7 @@ export function IdeOrgSettings() {
           <button
             type='button'
             role='switch'
+            aria-label='Allow external project collaborators'
             aria-checked={!!org.externalSharingEnabled}
             disabled={!canEdit || extBusy}
             // eslint-disable-next-line no-restricted-syntax -- explicit pending state via `extBusy` already disables this toggle while in flight.
@@ -1530,7 +1579,7 @@ export function IdeOrgSettings() {
             style={{
               position: 'relative',
               width: 44,
-              height: 24,
+              height: 32,
               flexShrink: 0,
               background: org.externalSharingEnabled
                 ? 'var(--ide-accent)'
@@ -1546,9 +1595,9 @@ export function IdeOrgSettings() {
               style={{
                 position: 'absolute',
                 top: 1,
-                left: org.externalSharingEnabled ? 21 : 1,
-                width: 20,
-                height: 20,
+                left: org.externalSharingEnabled ? 13 : 1,
+                width: 28,
+                height: 28,
                 background: '#fff',
                 borderRadius: '50%',
                 transition: 'left 0.2s',

@@ -23,6 +23,8 @@ export type MatrixProviderRow = {
   models: string[];
 };
 
+export const TEAM_MIN_SEATS = 2;
+
 export const KEY_PLACEHOLDER: Record<UserKeyProvider, string> = {
   ANTHROPIC: 'sk-ant-…',
   OPENAI: 'sk-…',
@@ -62,15 +64,37 @@ export function orgSeatCount(org: (api.OrgDto & {seats?: number}) | null | undef
   return org?.seatCount ?? org?.seats ?? 1;
 }
 
+export function isTeamWorkspaceSetupPending(
+  org: (api.OrgDto & {seats?: number}) | null | undefined,
+  fallbackTier: string,
+): boolean {
+  const tier = normalizedOrgTier(org, fallbackTier);
+  return !!org?.isPersonal && (tier === 'BYOK' || tier === 'TEAM' || tier === 'ENTERPRISE');
+}
+
+export function orgSeatDisplayCount(
+  org: (api.OrgDto & {seats?: number}) | null | undefined,
+  fallbackTier: string,
+): number {
+  const tier = normalizedOrgTier(org, fallbackTier);
+  const count = orgSeatCount(org);
+  return tier === 'TEAM' ? Math.max(count, TEAM_MIN_SEATS) : count;
+}
+
 export function orgSeatValue(
   org: (api.OrgDto & {seats?: number}) | null | undefined,
   fallbackTier: string,
   activeMembers: number,
 ): string {
   const tier = normalizedOrgTier(org, fallbackTier);
+  if (isTeamWorkspaceSetupPending(org, fallbackTier)) {
+    if (tier === 'ENTERPRISE') return `${activeMembers} active · contract setup pending`;
+    if (tier === 'TEAM') return `${activeMembers} active · team setup pending`;
+    if (tier === 'BYOK') return `${activeMembers} active · BYOK workspace`;
+  }
   return tier === 'ENTERPRISE'
     ? `${activeMembers} active · contract-managed`
-    : `${activeMembers} / ${orgSeatCount(org)}`;
+    : `${activeMembers} / ${orgSeatDisplayCount(org, fallbackTier)}`;
 }
 
 export function orgMemberDisplayName(member: {
@@ -102,7 +126,6 @@ export function orgKeyRows(org: api.OrgDto): OrgKeyRow[] {
   return [
     {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
     {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
-    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
     ...(isEnterprise
       ? [
           {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},

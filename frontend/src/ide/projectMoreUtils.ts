@@ -71,6 +71,20 @@ export function isExternalProjectMember(
   return member.external === true;
 }
 
+export function canManageProjectSharing(input: {
+  globalRole?: string | null;
+  orgRole?: string | null;
+  projectRole?: string | null;
+  hasProjectMembership?: boolean;
+}): boolean {
+  if (input.globalRole === 'SUPER_ADMIN') return true;
+  if (input.projectRole === 'PROJECT_ADMIN' || input.projectRole === 'PROJECT_DEVELOPER') {
+    return true;
+  }
+  if (input.hasProjectMembership) return false;
+  return input.orgRole === 'ORG_ADMIN';
+}
+
 export function availableOrgMembers(
   orgMembers: api.OrgMemberDto[] | null | undefined,
   projectMembers: api.ProjectMemberDto[] | null | undefined,

@@ -131,7 +131,7 @@ export function SpecChat({
     if (cmd === '/provider') {
       const provider = normalizeUiProvider(arg);
       if (!provider) {
-        note('Usage: /provider anthropic|openai|gemini|deepseek');
+        note('Usage: /provider anthropic|openai|deepseek');
         return true;
       }
       const saved = await api.updateProviderPreference(provider);

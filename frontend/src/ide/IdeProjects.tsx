@@ -133,9 +133,9 @@ export default function IdeProjects() {
   return (
     <div className='ide-pane'>
       <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4}}>
-        <div className='ide-h1' style={{margin: 0}}>
+        <h1 className='ide-h1' style={{margin: 0}}>
           Projects
-        </div>
+        </h1>
         <span style={{flex: 1}} />
         {!creating ? (
           <button className='ide-btn' onClick={() => setCreating(true)}>
@@ -167,7 +167,7 @@ export default function IdeProjects() {
         {(['mine', 'archived'] as const).map((f) => (
           <button
             key={f}
-            className='ide-badge'
+            className='ide-badge interactive'
             style={{
               cursor: 'pointer',
               textTransform: 'capitalize',

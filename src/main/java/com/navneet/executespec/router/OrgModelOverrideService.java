@@ -164,6 +164,11 @@ public class OrgModelOverrideService {
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown provider: " + parts[0]);
     }
+    if (ModelAccessService.isDisabledProvider(provider.name())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Provider " + provider.name().toLowerCase() + " is disabled for org model overrides");
+    }
     try {
       tier = AgentTier.valueOf(parts[1].trim().toUpperCase());
     } catch (IllegalArgumentException ex) {

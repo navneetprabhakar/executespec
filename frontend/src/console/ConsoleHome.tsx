@@ -3,7 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
-import {PlusIcon, StatusDot} from '@/ide/IdeIcons';
+import {CommandIcon, PlusIcon, ProjectsIcon, RunsIcon, StatusDot} from '@/ide/IdeIcons';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 /**
@@ -25,7 +25,12 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   return (
-    <button className='con-runrow' onClick={() => navigate(to)} title={runTitleFor(r)}>
+    <button
+      type='button'
+      className='con-runrow'
+      onClick={() => navigate(to)}
+      title={runTitleFor(r)}
+    >
       <StatusDot kind={statusKind(r.status)} size={9} />
       <span className='con-runrow-main'>
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
@@ -215,37 +220,71 @@ export default function ConsoleHome() {
       <div className='con-cockpit'>
         <div className='con-hero'>
           <div>
-            <div className='con-hero-kicker'>Start</div>
-            <h1 className='con-hero-title'>What needs the next decision?</h1>
+            <div className='con-hero-kicker'>ExecuteSpec</div>
+            <h1 className='con-hero-title'>Spec-driven coding, verified before it ships.</h1>
             <div className='con-hero-sub'>
-              Review approvals, watch live work, and start the next code change from one console.
+              Turn a product or engineering spec into planned code changes, review the plan gate,
+              track execution, and inspect the verified result from one control plane.
             </div>
           </div>
-          <button className='con-newrun lg' onClick={() => navigate('/compose')}>
+          <button type='button' className='con-newrun lg' onClick={() => navigate('/compose')}>
             <PlusIcon size={16} />
             Start work
           </button>
         </div>
         <div className='con-cockpit-metrics'>
-          <button className='con-metric-card' onClick={() => navigate('/decisions')}>
+          <button type='button' className='con-metric-card' onClick={() => navigate('/decisions')}>
             <span className='con-metric-label'>Awaiting decisions</span>
             <strong>{gate.length}</strong>
           </button>
-          <button className='con-metric-card' onClick={() => navigate('/runs')}>
+          <button type='button' className='con-metric-card' onClick={() => navigate('/runs')}>
             <span className='con-metric-label'>Live work</span>
             <strong>{active.length}</strong>
           </button>
-          <button className='con-metric-card' onClick={() => navigate('/projects')}>
+          <button type='button' className='con-metric-card' onClick={() => navigate('/projects')}>
             <span className='con-metric-label'>Project contexts</span>
             <strong>{projects.length}</strong>
           </button>
         </div>
       </div>
 
+      <section className='con-product-strip' aria-label='Product overview'>
+        <button type='button' className='con-product-card' onClick={() => navigate('/compose')}>
+          <PlusIcon size={16} />
+          <span>
+            <strong>Submit a spec</strong>
+            <small>Describe the change, choose project context, and confirm the run budget.</small>
+          </span>
+        </button>
+        <button type='button' className='con-product-card' onClick={() => navigate('/decisions')}>
+          <CommandIcon size={16} />
+          <span>
+            <strong>Approve the plan</strong>
+            <small>Human review stays at the plan gate before automated execution starts.</small>
+          </span>
+        </button>
+        <button type='button' className='con-product-card' onClick={() => navigate('/runs')}>
+          <RunsIcon size={16} />
+          <span>
+            <strong>Verify the result</strong>
+            <small>
+              Follow live work, review evidence, and open the PR when the score is ready.
+            </small>
+          </span>
+        </button>
+        <button type='button' className='con-product-card' onClick={() => navigate('/projects')}>
+          <ProjectsIcon size={16} />
+          <span>
+            <strong>Ground it in projects</strong>
+            <small>Connect repos, docs, architecture, memory, and team access.</small>
+          </span>
+        </button>
+      </section>
+
       <section className='con-section con-section-priority'>
         <div className='con-section-title attn'>
           Attention queue
-          <button className='con-section-link' onClick={() => navigate('/decisions')}>
+          <button type='button' className='con-section-link' onClick={() => navigate('/decisions')}>
             View decisions
           </button>
         </div>
@@ -287,7 +326,12 @@ export default function ConsoleHome() {
           </div>
           <div className='con-setup-list'>
             {setupItems.map((item) => (
-              <button key={item.key} className='con-setup-item' onClick={() => navigate(item.to)}>
+              <button
+                key={item.key}
+                type='button'
+                className='con-setup-item'
+                onClick={() => navigate(item.to)}
+              >
                 <span className={item.done ? 'con-setup-state done' : 'con-setup-state'} />
                 <span className='con-setup-copy'>
                   <span className='con-setup-label'>{item.label}</span>
@@ -302,14 +346,22 @@ export default function ConsoleHome() {
         <section className='con-section'>
           <div className='con-section-title'>
             Project health
-            <button className='con-section-link' onClick={() => navigate('/projects')}>
+            <button
+              type='button'
+              className='con-section-link'
+              onClick={() => navigate('/projects')}
+            >
               View all
             </button>
           </div>
           {projects.length === 0 ? (
             <div className='con-empty'>
               No project contexts yet —{' '}
-              <button className='con-inline-link' onClick={() => navigate('/projects')}>
+              <button
+                type='button'
+                className='con-inline-link'
+                onClick={() => navigate('/projects')}
+              >
                 create one
               </button>{' '}
               to connect repos, architecture, memory, and chat.
@@ -319,6 +371,7 @@ export default function ConsoleHome() {
               {projects.slice(0, 6).map((p) => (
                 <button
                   key={p.id}
+                  type='button'
                   className='con-proj-card'
                   onClick={() => navigate(`/projects/${p.id}`)}
                 >
