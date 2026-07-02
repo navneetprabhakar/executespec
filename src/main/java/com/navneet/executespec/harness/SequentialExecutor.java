@@ -225,6 +225,7 @@ or edit BEFORE moving on:
   - Python (.py)         → `black <file>` (or `ruff format <file>` if pyproject.toml uses ruff)
   - JS/TS (.js .ts .tsx) → `npx prettier --write <file>`
   - Go (.go)             → `gofmt -w <file>`
+  - Rust (.rs)           → `cargo fmt -- <file>`
   - Java (.java)         → skip; mvn spotless handles it on smoke
 If the formatter binary isn't on PATH (`black: command not found`), continue —
 do NOT pip install / npm install just to format. The build's lint gate will
@@ -4072,6 +4073,12 @@ to boot — skip it for those.""";
     if (workspaceSummary != null && workspaceSummary.contains("MULTI-REPO")) {
       sb.append("\n\n").append(workspaceSummary);
     }
+    String projectFragmentBlock = loadProjectTypeFragments(projectType);
+    if (!projectFragmentBlock.isBlank()) {
+      sb.append("\n\n--- PROJECT-TYPE WORKER RULES ---\n")
+          .append(projectFragmentBlock)
+          .append("\n--- END PROJECT-TYPE WORKER RULES ---\n");
+    }
     // v2.5.13 — RN/Expo scaffold adherence directive. When the planner declared
     // react-native-expo, inject the scaffold template verbatim so the worker
     // stops drifting to Expo SDK 51 (stable-ish but doesn't match our smoke
@@ -4089,6 +4096,7 @@ to boot — skip it for those.""";
     }
     if (!task.hardConstraints().isEmpty()) {
       sb.append("\n\nHARD CONSTRAINTS for this task (MUST follow):\n");
+      sb.append("If two constraints conflict, the later bullet is the corrected one and wins.\n");
       for (String c : task.hardConstraints()) {
         sb.append("- ").append(c).append('\n');
       }
@@ -4264,6 +4272,32 @@ to boot — skip it for those.""";
     }
   }
 
+  String loadProjectTypeFragments(String projectType) {
+    List<String> keys = fragmentKeysForProjectType(projectType);
+    if (keys.isEmpty()) return "";
+    StringBuilder sb = new StringBuilder();
+    for (String key : keys) {
+      String fragment = loadPromptFragment(key);
+      if (fragment.isBlank()) continue;
+      if (!sb.isEmpty()) sb.append("\n\n");
+      sb.append(fragment);
+    }
+    return sb.toString();
+  }
+
+  private String loadPromptFragment(String key) {
+    if (key == null || key.isBlank()) return "";
+    try {
+      org.springframework.core.io.Resource r =
+          new org.springframework.core.io.ClassPathResource("prompts/fragments/" + key + ".md");
+      if (!r.exists()) return "";
+      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadPromptFragment({}) failed: {}", key, e.getMessage());
+      return "";
+    }
+  }
+
   /**
    * Load the scaffold template file matching the given projectType, or "" if none applies. Mirrors
    * the loose kebab-case convention used by {@link
@@ -4292,6 +4326,26 @@ to boot — skip it for those.""";
     return switch (key) {
       case "java-spring-boot", "springboot" -> "spring-boot";
       default -> key;
+    };
+  }
+
+  static List<String> fragmentKeysForProjectType(String projectType) {
+    String key = scaffoldKeyForProjectType(projectType);
+    return switch (key) {
+      case "fullstack", "node-fullstack" ->
+          List.of(
+              "api-url-rules",
+              "module-system",
+              "router-isolation",
+              "backend-robustness",
+              "preview-defaults",
+              "fullstack-directory");
+      case "node-backend" ->
+          List.of("module-system", "router-isolation", "backend-robustness", "preview-defaults");
+      case "node-frontend" -> List.of("api-url-rules", "module-system");
+      case "spring-boot", "python", "go", "rust" ->
+          List.of("backend-robustness", "preview-defaults");
+      default -> List.of();
     };
   }
 

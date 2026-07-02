@@ -46,6 +46,15 @@ def _trunc(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n] + f"\n…[truncated {len(s) - n} chars]"
 
 
+def _trunc_head_tail(s: str, n: int) -> str:
+    if len(s) <= n:
+        return s
+    head = max(1, n // 2)
+    tail = max(1, n - head)
+    omitted = len(s) - head - tail
+    return s[:head] + f"\n…[truncated middle {omitted} chars]\n" + s[-tail:]
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -176,8 +185,13 @@ class ExecuteSpecAgent(BaseAgent):
                     return _err("INVALID_ARGS", f"{name}: no command")
                 r = await env.exec(cmd, timeout_sec=self.tool_timeout)
                 out = (r.stdout or "") + (r.stderr or "")
-                body = _trunc(out, SHELL_LIMIT)
-                return _ok(body + (f"\n[exit code {r.return_code}]" if r.return_code else ""))
+                body = _trunc_head_tail(out, SHELL_LIMIT)
+                if r.return_code != 0:
+                    return _err(
+                        "COMMAND_FAILED",
+                        f"{name} exited {r.return_code}\n{body}".strip(),
+                    )
+                return _ok(body)
             if name == "readFile":
                 path = args["path"]
                 r = await env.exec(f"cat -- {shlex.quote(path)}", timeout_sec=30)

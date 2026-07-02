@@ -57,7 +57,12 @@ public class TestReportGenerator {
       String runId, Long testPlanId, TestExecutionSummary summary, String previewUrl) {
     List<TestResult> results = testResultRepository.findByTestPlanId(testPlanId);
     List<TestResult> failures =
-        results.stream().filter(r -> r.getStatus() == TestResultStatus.FAILED).toList();
+        results.stream()
+            .filter(
+                r ->
+                    r.getStatus() == TestResultStatus.FAILED
+                        || r.getStatus() == TestResultStatus.ERROR)
+            .toList();
 
     // Build task ID → name map
     Map<Long, String> taskIdToName =
@@ -145,12 +150,18 @@ public class TestReportGenerator {
               .map(
                   f ->
                       Map.of(
-                          "testClass", taskIdToName.getOrDefault(f.getTestTaskId(), "Unknown"),
-                          "testMethod", f.getTestMethod(),
+                          "testClass",
+                          taskIdToName.getOrDefault(f.getTestTaskId(), "Unknown"),
+                          "testMethod",
+                          f.getTestMethod(),
+                          "status",
+                          f.getStatus().name(),
                           "failureMessage",
-                              f.getFailureMessage() != null ? f.getFailureMessage() : "",
-                          "expected", f.getExpectedValue() != null ? f.getExpectedValue() : "",
-                          "actual", f.getActualValue() != null ? f.getActualValue() : ""))
+                          f.getFailureMessage() != null ? f.getFailureMessage() : "",
+                          "expected",
+                          f.getExpectedValue() != null ? f.getExpectedValue() : "",
+                          "actual",
+                          f.getActualValue() != null ? f.getActualValue() : ""))
               .toList();
       String failuresJson = objectMapper.writeValueAsString(failuresData);
 
@@ -189,16 +200,35 @@ public class TestReportGenerator {
       }
 
       List<FixSuggestionPlan> plans = objectMapper.readValue(response, new TypeReference<>() {});
+      Map<String, TestResult> failuresByClassAndMethod =
+          failures.stream()
+              .collect(
+                  Collectors.toMap(
+                      f ->
+                          failureKey(
+                              taskIdToName.getOrDefault(f.getTestTaskId(), "Unknown"),
+                              f.getTestMethod()),
+                      f -> f,
+                      (a, b) -> a));
 
       return plans.stream()
           .map(
-              p ->
-                  TestReportDto.FailureSuggestion.builder()
-                      .testClass("") // matched by testMethod
-                      .testMethod(p.getTestMethod())
-                      .failureMessage("")
-                      .suggestion(p.getSuggestion())
-                      .build())
+              p -> {
+                String testClass = p.getTestClass() != null ? p.getTestClass() : "";
+                TestResult matched =
+                    failuresByClassAndMethod.get(failureKey(testClass, p.getTestMethod()));
+                String resolvedClass =
+                    matched != null
+                        ? taskIdToName.getOrDefault(matched.getTestTaskId(), testClass)
+                        : testClass;
+                return TestReportDto.FailureSuggestion.builder()
+                    .testClass(resolvedClass)
+                    .testMethod(p.getTestMethod())
+                    .failureMessage(matched != null ? matched.getFailureMessage() : "")
+                    .classification(p.getClassification())
+                    .suggestion(p.getSuggestion())
+                    .build();
+              })
           .toList();
 
     } catch (Exception e) {
@@ -235,9 +265,15 @@ public class TestReportGenerator {
     }
   }
 
+  static String failureKey(String testClass, String testMethod) {
+    return (testClass == null ? "" : testClass) + "#" + (testMethod == null ? "" : testMethod);
+  }
+
   @Data
   private static class FixSuggestionPlan {
+    private String testClass;
     private String testMethod;
+    private String classification;
     private String suggestion;
   }
 }

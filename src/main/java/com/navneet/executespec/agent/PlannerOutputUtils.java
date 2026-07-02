@@ -39,6 +39,14 @@ public final class PlannerOutputUtils {
    */
   public static Plan parsePlanFromArgs(
       String argsJson, Classification classification, ObjectMapper objectMapper) {
+    return parsePlanFromArgs(argsJson, classification, null, objectMapper);
+  }
+
+  public static Plan parsePlanFromArgs(
+      String argsJson,
+      Classification classification,
+      PlanStrategy planStrategy,
+      ObjectMapper objectMapper) {
     JsonNode root;
     try {
       root = objectMapper.readTree(argsJson);
@@ -53,6 +61,9 @@ public final class PlannerOutputUtils {
 
     List<PlannedTask> tasks = new ArrayList<>();
     JsonNode tasksNode = root.path("tasks");
+    int maxTasks = planStrategy == null ? classification.maxTasks() : planStrategy.maxTasks();
+    String capLabel =
+        planStrategy == null ? "classification=" + classification : "planStrategy=" + planStrategy;
 
     // Salvage path: Anthropic occasionally emits its internal
     // <parameter name="..."> XML inline instead of a clean tool-call payload,
@@ -73,11 +84,11 @@ public final class PlannerOutputUtils {
     if (tasksNode.isArray()) {
       int idx = 0;
       for (JsonNode t : tasksNode) {
-        if (idx >= classification.maxTasks()) {
+        if (idx >= maxTasks) {
           log.warn(
-              "PlannerOutputUtils: planner exceeded maxTasks={} for classification={}, truncating",
-              classification.maxTasks(),
-              classification);
+              "PlannerOutputUtils: planner exceeded maxTasks={} for {}, truncating",
+              maxTasks,
+              capLabel);
           break;
         }
         tasks.add(buildTask(t, idx + 1));

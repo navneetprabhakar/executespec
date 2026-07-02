@@ -1,9 +1,11 @@
 #!/bin/bash
-# run-tb.sh — Terminal-Bench k=N driver (the TB analogue of eval-campaign.sh).
+# run-tb.sh — Terminal-Bench internal driver (one-pass by default).
 # Works locally OR on the benchmark VM. Key fixes vs the ad-hoc runners:
 #   • PERSISTENT jobs_dir (NOT /tmp — /tmp is wiped on reboot, which lost our data once)
 #   • live visual tracker (HTML → GCS + Telegram pings) via tb-tracker.py
 #   • GCS results sync at the end (survives VM teardown)
+#   • in-app /benchmark bridge enabled by default
+#   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
 #                               K CONCURRENCY COMPACTION JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
 set -uo pipefail
@@ -16,7 +18,8 @@ MODEL="${ES_MODEL:-deepseek-v4-pro-native}"            # ExecuteSpec model id
 HARBOR_MODEL="${HARBOR_MODEL:-deepseek/deepseek-v4-pro}"
 TB_DATASET="${TB_DATASET:-terminal-bench/terminal-bench-2-1}"
 BENCHMARK_DATASET="${BENCHMARK_DATASET:-${TB_DATASET##*/}}"
-K="${K:-5}"                                            # attempts per task (5 = leaderboard)
+K="${K:-1}"                                            # internal benchmark: exactly one attempt/task
+TOTAL_TASKS="${TOTAL_TASKS:-89}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
 JOB_NAME="${JOB_NAME:-es-tb-${PROVIDER}-k${K}}"
@@ -27,6 +30,15 @@ ADMIN_ENV="${ADMIN_ENV:-$HOME/swebench-bench/.espec-admin.env}"
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
 mkdir -p "$JOBS_DIR"
 LOG(){ echo "$(date '+%H:%M:%S') [run-tb] $*"; }
+
+if [ "$K" != "1" ] && [ "${ALLOW_TB_MULTI_PASS:-}" != "true" ]; then
+  echo "Refusing K=$K. This runner is locked to one-pass internal TB runs. Set ALLOW_TB_MULTI_PASS=true only for a separately approved campaign." >&2
+  exit 2
+fi
+if [ "${SUBMIT_TB:-off}" != "off" ]; then
+  echo "Refusing SUBMIT_TB=${SUBMIT_TB}. This runner never submits; run submit-tb.sh manually only after explicit approval." >&2
+  exit 2
+fi
 
 # ── 1. harbor config on the fly (persistent jobs_dir) ───────────────────────
 CFG="$TB_DIR/es-tb-runtb-${JOB_NAME}.yaml"
@@ -41,7 +53,7 @@ agents:
 datasets:
   - name: $TB_DATASET
 EOF
-LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY)"
+LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, internal-only=true)"
 
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
@@ -54,16 +66,24 @@ curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || 
 TK=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
+set_flag(){
+  local flag="$1" value="$2"
+  curl -fsS -X PUT "localhost:8080/api/admin/feature-flags/$flag" -H "Authorization: Bearer $TK" \
+    -H 'Content-Type: application/json' -d "{\"value\":\"$value\"}" >/dev/null
+}
 FV=$([ "$COMPACTION" = on ] && echo true || echo false)
-for f in worker.tool-compactor.enabled worker.history-compaction.enabled; do
-  curl -s -X PUT "localhost:8080/api/admin/feature-flags/$f" -H "Authorization: Bearer $TK" \
-    -H 'Content-Type: application/json' -d "{\"value\":\"$FV\"}" >/dev/null; done
-LOG "backend UP · compaction=$COMPACTION (flags via API)"
+set_flag worker.tool-compactor.enabled "$FV"
+set_flag worker.history-compaction.enabled "$FV"
+for f in worker.provider-prompt-tuning.enabled worker.critic-pass.enabled \
+         worker.verify-before-complete.enabled worker.salvage-force-tool-choice.enabled; do
+  set_flag "$f" true
+done
+LOG "backend UP · compaction=$COMPACTION · benchmark quality flags asserted"
 
 # ── 3. launch the LIVE tracker (loop + telegram + gcs) ──────────────────────
 DONE="$JOBS_DIR/${JOB_NAME}.done"; rm -f "$DONE"
 GCSARG=(); [ -n "$GCS_BUCKET" ] && GCSARG=(--gcs "$GCS_BUCKET/tb-tracker.html")
-nohup python3 "$TRACKER" "$JOBS_DIR/$JOB_NAME" --name "$MODEL · TB k=$K" --total 89 \
+nohup python3 "$TRACKER" "$JOBS_DIR/$JOB_NAME" --name "$MODEL · TB k=$K" --total "$TOTAL_TASKS" \
   --loop 300 --telegram --tg-script "$TG" --done-marker "$DONE" \
   --out "$JOBS_DIR/${JOB_NAME}-dashboard.html" "${GCSARG[@]}" > "$JOBS_DIR/tracker.log" 2>&1 &
 LOG "tracker live → $JOBS_DIR/${JOB_NAME}-dashboard.html ${GCS_BUCKET:+(+ $GCS_BUCKET/tb-tracker.html)}"
@@ -77,7 +97,7 @@ if [ "${BRIDGE:-on}" = on ]; then
   export BR_ES_BASE="http://localhost:8080" \
          BR_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-}" BR_ADMIN_PW="${ESPEC_ADMIN_PW:-}"
   nohup python3 "$BRIDGE_PY" --job-dir "$JOBS_DIR/$JOB_NAME" \
-    --provider "$PROVIDER" --model "$MODEL" --k "$K" --total 89 \
+    --provider "$PROVIDER" --model "$MODEL" --k "$K" --total "$TOTAL_TASKS" \
     --dataset "$BENCHMARK_DATASET" --idle-min 30 --max-min "${BRIDGE_MAX_MIN:-1440}" \
     > "$JOBS_DIR/${JOB_NAME}-bridge.log" 2>&1 &
   LOG "in-app bridge live → http://localhost:8080/benchmark (run id in ${JOB_NAME}-bridge.log)"

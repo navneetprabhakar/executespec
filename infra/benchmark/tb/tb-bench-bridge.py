@@ -5,8 +5,8 @@ Runs ALONGSIDE a `harbor run`: POSTs a benchmark_run `start`, polls the job dir 
 trial's `result.json` (written when a trial finishes), POSTs one `TASK_SCORED` per *trial*
 (= per attempt — so k>1 aggregates correctly), and `RUN_DONE` when all trials are in or no new
 trial appears for --idle-min (Harbor done/stuck). Each TASK_SCORED carries the trial's
-reward + esRunId + cost + input/output tokens (from `agent_result` in result.json), so the
-dashboard shows resolved% + cost + aggregate tokens live.
+reward + esRunId + cost + input/output tokens (from `agent_result` in result.json), plus a
+best-effort outcome/reason so the dashboard distinguishes verifier failures from infra failures.
 
 Auth: BR_TOKEN, or BR_ADMIN_EMAIL + BR_ADMIN_PW. Base: BR_ES_BASE.
 """
@@ -36,6 +36,52 @@ def _login(base, email, pw):
     return d.get("accessToken") or d.get("token")
 
 
+def _first_text(*vals):
+    for v in vals:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _classify_trial(result, reward):
+    """Return (outcome, reason) independent of reward math."""
+    if reward > 0:
+        return "PASSED", None
+    ar = result.get("agent_result") or {}
+    vr = result.get("verifier_result") or {}
+    status = _first_text(
+        result.get("status"),
+        result.get("outcome"),
+        ar.get("status"),
+        ar.get("outcome"),
+        vr.get("status"),
+        vr.get("outcome"),
+    )
+    reason = _first_text(
+        result.get("error"),
+        result.get("exception"),
+        result.get("failure_reason"),
+        ar.get("error"),
+        ar.get("exception"),
+        ar.get("failure_reason"),
+        ar.get("message"),
+        vr.get("error"),
+        vr.get("exception"),
+        vr.get("failure_reason"),
+        vr.get("message"),
+    )
+    hay = " ".join(x for x in (status, reason) if x).lower()
+    if "timeout" in hay or "timed out" in hay:
+        return "TIMEOUT", reason or status
+    if any(w in hay for w in ("container", "docker", "harbor", "bridge", "tool")):
+        return "INFRA_FAILED", reason or status
+    if any(w in hay for w in ("verifier", "verify", "reward")):
+        return "VERIFIER_FAILED", reason or status
+    if any(w in hay for w in ("agent", "worker", "llm", "model")):
+        return "AGENT_FAILED", reason or status
+    return "FAILED", reason or status
+
+
 def _scan(job_dir):
     """{trial_dir: {task, reward, esRunId, cost, in_tok, out_tok}} from every
     <task>__<hash>/result.json. One entry per trial (= per attempt), so k>1 is preserved."""
@@ -55,6 +101,7 @@ def _scan(job_dir):
         except Exception:  # noqa: BLE001
             rew = 0
         meta = ar.get("metadata") or {}
+        outcome, reason = _classify_trial(d, rew)
         out[trial] = {
             "task": task,
             "reward": rew,
@@ -62,6 +109,8 @@ def _scan(job_dir):
             "cost": ar.get("cost_usd"),
             "in_tok": ar.get("n_input_tokens"),
             "out_tok": ar.get("n_output_tokens"),
+            "outcome": outcome,
+            "reason": reason,
         }
     return out
 
@@ -133,6 +182,10 @@ def main():
                 body["inputTokens"] = int(info["in_tok"])
             if info["out_tok"] is not None:
                 body["outputTokens"] = int(info["out_tok"])
+            if info.get("outcome"):
+                body["outcome"] = info["outcome"]
+            if info.get("reason"):
+                body["reason"] = info["reason"]
             try:
                 _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", body)
                 posted.add(trial)

@@ -45,8 +45,9 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>{@code isImmediatelyPriorToolCall} is true — preserve the most recent tool output verbatim
  *       (the worker may need it for the next decision; loss of fidelity here costs more than the
  *       context savings).
- *   <li>Tool is in {@link #SKIP_TOOLS} — write/git/complete outputs are already short and
- *       actionable; summarising them would lose precision (line numbers, diff hunks, commit shas).
+ *   <li>Tool is in {@link #SKIP_TOOLS} — exact file reads and write/git/complete outputs are
+ *       already load-bearing; summarising them would lose precision (line numbers, diff hunks,
+ *       commit shas, exact edit-match text).
  *   <li>Raw output is null or smaller than {@link #COMPACT_THRESHOLD_BYTES} (3 KB).
  * </ul>
  *
@@ -82,6 +83,8 @@ public class ToolOutputCompactor {
    * compact these:
    *
    * <ul>
+   *   <li>{@code readFile} — exact source text may be needed for subsequent {@code editFile}
+   *       old-string matching; never paraphrase it.
    *   <li>{@code writeFile} / {@code editFile} — small ack envelopes; line-number anchors matter.
    *   <li>{@code gitCommit} — short commit-sha echo; denied to worker anyway (defensive).
    *   <li>{@code completeTask} — the termination signal; bypassing compaction defensively.
@@ -90,7 +93,25 @@ public class ToolOutputCompactor {
    * </ul>
    */
   static final Set<String> SKIP_TOOLS =
-      Set.of("writeFile", "editFile", "gitCommit", "completeTask", "gitDiff", "gitStatus");
+      Set.of(
+          "readFile",
+          "read_file",
+          "writeFile",
+          "write_file",
+          "editFile",
+          "edit_file",
+          "multiEdit",
+          "multi_edit",
+          "applyPatch",
+          "apply_patch",
+          "gitCommit",
+          "git_commit",
+          "completeTask",
+          "complete_task",
+          "gitDiff",
+          "git_diff",
+          "gitStatus",
+          "git_status");
 
   private static final String SYSTEM_PROMPT =
       "You are a tool-output compactor. You summarise verbose tool output for a coding agent,"
@@ -174,9 +195,14 @@ public class ToolOutputCompactor {
           promptAssembler.assemble(
               "tool-output-compactor.md",
               Map.of(
-                  "TOOL_NAME", toolName,
-                  "WORKER_GOAL", truncate(workerGoal, GOAL_TRUNCATE_CHARS),
-                  "RAW_OUTPUT", rawOutput));
+                  "TOOL_NAME",
+                  toolName,
+                  "RAW_BYTES",
+                  String.valueOf(rawOutput.length()),
+                  "WORKER_GOAL",
+                  truncate(workerGoal, GOAL_TRUNCATE_CHARS),
+                  "RAW_OUTPUT",
+                  rawOutput));
     } catch (Exception e) {
       log.warn(
           "ToolOutputCompactor prompt assemble failed (tool={}): {} — using raw output",
@@ -210,13 +236,22 @@ public class ToolOutputCompactor {
             workerCtx.runId());
         return Optional.empty();
       }
-      if (summary.length() >= rawOutput.length()) {
+      if (isLengthTruncated(resp)) {
+        log.warn(
+            "ToolOutputCompactor hit max-token finish (tool={}, runId={}) — using raw output",
+            toolName,
+            workerCtx.runId());
+        return Optional.empty();
+      }
+      String compactedText =
+          "[compacted from " + rawOutput.length() + " bytes]\n" + summary.strip();
+      if (compactedText.length() >= rawOutput.length()) {
         // Compactor produced something larger than the input — fall back to raw (no benefit).
         log.warn(
             "ToolOutputCompactor produced no shrink (tool={} raw={}B summary={}B) — using raw",
             toolName,
             rawOutput.length(),
-            summary.length());
+            compactedText.length());
         return Optional.empty();
       }
 
@@ -235,8 +270,8 @@ public class ToolOutputCompactor {
               + " cost=${} model={} run={}",
           toolName,
           rawOutput.length(),
-          summary.length(),
-          (rawOutput.length() == 0 ? 0 : 100 - (summary.length() * 100 / rawOutput.length())),
+          compactedText.length(),
+          (rawOutput.length() == 0 ? 0 : 100 - (compactedText.length() * 100 / rawOutput.length())),
           inTok,
           outTok,
           String.format(Locale.ROOT, "%.6f", cost),
@@ -244,7 +279,8 @@ public class ToolOutputCompactor {
           workerCtx.runId());
 
       return Optional.of(
-          new Compacted(summary, rawOutput.length(), summary.length(), inTok, outTok, cost));
+          new Compacted(
+              compactedText, rawOutput.length(), compactedText.length(), inTok, outTok, cost));
     } catch (Exception e) {
       // Fail-safe: any LLM error → keep raw output. The worker NEVER loses tool output to a
       // compactor failure. LlmRouter already handles its own transient retry (RL-2026-05-029).
@@ -279,6 +315,14 @@ public class ToolOutputCompactor {
           workerProvider);
       return LlmProvider.ANTHROPIC;
     }
+  }
+
+  private static boolean isLengthTruncated(ChatResponse resp) {
+    if (resp == null || resp.getResult() == null || resp.getResult().getMetadata() == null) {
+      return false;
+    }
+    Object finish = resp.getResult().getMetadata().getFinishReason();
+    return finish != null && "length".equalsIgnoreCase(String.valueOf(finish));
   }
 
   private static String truncate(String s, int max) {

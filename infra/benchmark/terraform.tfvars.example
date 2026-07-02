@@ -8,5 +8,5 @@
 # disk_type    = "pd-ssd"           # "pd-balanced" to shave a few $
 # use_spot     = false              # true = cheaper but preemptible
 
-# Add your own IP for direct (non-IAP) SSH — keep the IAP range too:
-# ssh_source_ranges = ["35.235.240.0/20", "YOUR.IP.ADDR.0/32"]
+# SSH is intended to use IAP. Direct public-IP SSH is not supported in projects
+# that enforce compute.vmExternalIpAccess.

@@ -35,8 +35,8 @@ import lombok.extern.slf4j.Slf4j;
  * {@code @Profile({"local","dev","benchmark"})}.
  *
  * <p>Distinct from the {@code benchmark/} SWE-bench <b>execution</b> harness ({@link
- * BenchmarkRunService} at {@code /api/admin/benchmark}), which actually runs instances through the
- * production pipeline. This layer only receives + shows what a verifier publishes.
+ * BenchmarkController} at {@code /api/admin/benchmark}), which actually runs instances through the
+ * shared codegen engine. This layer only receives + shows what a verifier publishes.
  */
 @Service
 @RequiredArgsConstructor
@@ -110,6 +110,36 @@ public class BenchmarkTrackingService {
       Long outputTokens,
       String message,
       String payloadJson) {
+    return ingest(
+        runId,
+        type,
+        taskName,
+        attempt,
+        reward,
+        esRunId,
+        cost,
+        inputTokens,
+        outputTokens,
+        message,
+        payloadJson,
+        null,
+        null);
+  }
+
+  public BenchmarkRun ingest(
+      String runId,
+      String type,
+      String taskName,
+      Integer attempt,
+      Integer reward,
+      String esRunId,
+      BigDecimal cost,
+      Long inputTokens,
+      Long outputTokens,
+      String message,
+      String payloadJson,
+      String outcome,
+      String reason) {
     BenchmarkRun run =
         runs.findById(runId)
             .orElseThrow(() -> new IllegalArgumentException("benchmark run not found: " + runId));
@@ -118,7 +148,16 @@ public class BenchmarkTrackingService {
       case "TASK_SCORED" -> {
         if (taskName != null && !taskName.isBlank()) {
           upsertTaskResult(
-              runId, taskName, attempt, reward, esRunId, cost, inputTokens, outputTokens);
+              runId,
+              taskName,
+              attempt,
+              reward,
+              esRunId,
+              cost,
+              inputTokens,
+              outputTokens,
+              firstNonBlank(outcome, extractField(payloadJson, "outcome")),
+              firstNonBlank(reason, extractField(payloadJson, "reason")));
           recompute(run);
         }
       }
@@ -162,7 +201,9 @@ public class BenchmarkTrackingService {
       String esRunId,
       BigDecimal cost,
       Long inputTokens,
-      Long outputTokens) {
+      Long outputTokens,
+      String outcome,
+      String reason) {
     int att = attempt == null ? 1 : attempt;
     boolean exists =
         taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(runId).stream()
@@ -178,6 +219,8 @@ public class BenchmarkTrackingService {
             .attempt(att)
             .reward(reward == null ? 0 : Math.max(0, reward))
             .esRunId(esRunId)
+            .outcome(truncate(outcome, 40))
+            .reason(truncate(reason, 500))
             .costUsd(cost == null ? BigDecimal.ZERO : cost)
             .inputTokens(inputTokens == null ? 0L : Math.max(0L, inputTokens))
             .outputTokens(outputTokens == null ? 0L : Math.max(0L, outputTokens))
@@ -276,6 +319,19 @@ public class BenchmarkTrackingService {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  private String firstNonBlank(String first, String second) {
+    if (first != null && !first.isBlank()) return first;
+    if (second != null && !second.isBlank()) return second;
+    return null;
+  }
+
+  private String truncate(String value, int max) {
+    if (value == null) return null;
+    String trimmed = value.trim();
+    if (trimmed.isEmpty()) return null;
+    return trimmed.length() <= max ? trimmed : trimmed.substring(0, max);
   }
 
   // ── Reads ───────────────────────────────────────────────────────────────

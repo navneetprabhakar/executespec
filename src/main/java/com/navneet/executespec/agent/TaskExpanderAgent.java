@@ -232,8 +232,7 @@ public class TaskExpanderAgent {
     "description": {"type": "string"},
     "touchesFiles": {"type": "array", "items": {"type": "string"}},
     "hardConstraints": {"type": "array", "items": {"type": "string"}},
-    "meetsRequirements": {"type": "array", "items": {"type": "string"}},
-    "smokeTestStrategy": {"type": "string", "description": "Optional override: BUILD | PREVIEW_HEALTH | TEST_SUITE"}
+    "meetsRequirements": {"type": "array", "items": {"type": "string"}}
   },
   "required": ["taskId", "description"]
 }
