@@ -61,7 +61,8 @@ terraform destroy
 ```
 
 ## Notes
-- The bootstrap installs Docker, Java 21 + Maven, Python + the `swebench` harness, Postgres (db `executespec`, `postgres/postgres`) and Redis. The app deploy + keys + image pulls are manual (they need secrets / the repo).
+- The bootstrap installs the dev-VM-aligned runtime/toolchain set: Docker `29.3.1`, Compose `5.1.1`, Java `21.0.11`, Maven `3.6.3`, Node.js `24.14.1`, Python validator tools + the `swebench` harness, Postgres 14 (db `executespec`, `postgres/postgres`), pgvector `v0.8.0`, and Redis. The GitHub Actions deploy path then ships the JAR and patches the app env.
+- Benchmark GitHub environment secrets must include the deploy WIF values plus model keys used by the internal run: `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, and `OPENROUTER_API_KEY`. Use `BENCHMARK_GITHUB_PAT` for the app's GitHub token; GitHub rejects environment secret names beginning with `GITHUB_`.
 - Disk holds ~500 images comfortably, so **no batch-rotation needed** for the full 300 — unlike the laptop.
 - To eval multiple providers in one VM session, run separate `run-core-codegen.sh` arms (the `MODEL`/`PROVIDERS` env vars are per-invocation).
 - Spot caveat: a preemption mid-run loses in-flight work; only use `use_spot=true` if you batch + resume.
