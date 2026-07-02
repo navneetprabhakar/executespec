@@ -29,6 +29,7 @@ import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.FireworksModelMapper;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
@@ -328,7 +329,9 @@ public class OrgController {
     boolean editable = orgModelOverrideService.canEditMatrix(tier);
 
     List<String> providers = new ArrayList<>();
-    for (LlmProvider p : LlmProvider.values()) providers.add(p.name().toLowerCase());
+    for (LlmProvider p : LlmProvider.values()) {
+      if (!ModelAccessService.isDisabledProvider(p.name())) providers.add(p.name().toLowerCase());
+    }
     List<String> tiers = new ArrayList<>();
     for (AgentTier t : AgentTier.values()) tiers.add(t.name().toLowerCase());
 
@@ -368,14 +371,24 @@ public class OrgController {
    * Models a given provider can run — its registered matrix models (OpenRouter = the allow-list).
    */
   private List<String> selectableModelsFor(String provider) {
+    if (ModelAccessService.isDisabledProvider(provider)) {
+      return List.of();
+    }
     if ("openrouter".equalsIgnoreCase(provider)) {
-      return OpenRouterModelMapper.allowList().keySet().stream().sorted().toList();
+      return OpenRouterModelMapper.allowList().keySet().stream()
+          .filter(model -> !ModelAccessService.isDisabledProviderModelSlug(model))
+          .sorted()
+          .toList();
     }
     if ("fireworks".equalsIgnoreCase(provider)) {
-      return FireworksModelMapper.allowList().keySet().stream().sorted().toList();
+      return FireworksModelMapper.allowList().keySet().stream()
+          .filter(model -> !ModelAccessService.isDisabledProviderModelSlug(model))
+          .sorted()
+          .toList();
     }
     return modelRegistry.allModels().keySet().stream()
         .filter(id -> provider.equalsIgnoreCase(modelRegistry.providerFor(id)))
+        .filter(model -> !ModelAccessService.isDisabledProviderModelSlug(model))
         .sorted()
         .toList();
   }

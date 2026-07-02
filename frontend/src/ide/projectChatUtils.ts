@@ -50,7 +50,7 @@ export function resolveProjectChatSlashAction(
       const provider = normalizeUiProvider(arg);
       return provider
         ? {kind: 'provider', provider}
-        : {kind: 'provider-usage', content: 'Usage: /provider anthropic|openai|gemini|deepseek'};
+        : {kind: 'provider-usage', content: 'Usage: /provider anthropic|openai|deepseek'};
     }
     default:
       return {kind: 'none'};

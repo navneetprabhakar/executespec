@@ -60,7 +60,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private void authenticateWithPat(String token, HttpServletRequest request) {
     String userId = personalAccessTokenService.resolveUserId(token);
     if (userId != null) {
-      setAuthentication(userDetailsService.loadUserById(userId), request, AUTH_SOURCE_PAT);
+      UserDetails userDetails = userDetailsService.loadUserById(userId);
+      if (isActive(userDetails)) {
+        setAuthentication(userDetails, request, AUTH_SOURCE_PAT);
+      }
     }
   }
 
@@ -76,8 +79,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     if (jwtUtil.isTokenValid(token, userInvalidatedAt)) {
-      setAuthentication(userDetails, request, AUTH_SOURCE_JWT);
+      if (isActive(userDetails)) {
+        setAuthentication(userDetails, request, AUTH_SOURCE_JWT);
+      }
     }
+  }
+
+  private boolean isActive(UserDetails userDetails) {
+    return userDetails.isEnabled() && userDetails.isAccountNonLocked();
   }
 
   private void setAuthentication(

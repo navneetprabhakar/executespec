@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   availableOrgMembers,
+  canManageProjectSharing,
   contractDetectorSummary,
   docStamp,
   filterProjectFiles,
@@ -94,6 +95,33 @@ describe('projectMoreUtils', () => {
         external: boolean;
       }),
     ).toBe(true);
+  });
+
+  it('lets explicit project role override personal org-admin status for share management', () => {
+    expect(
+      canManageProjectSharing({
+        globalRole: 'USER',
+        orgRole: 'ORG_ADMIN',
+        projectRole: 'PROJECT_VIEWER',
+        hasProjectMembership: true,
+      }),
+    ).toBe(false);
+    expect(
+      canManageProjectSharing({
+        globalRole: 'USER',
+        orgRole: 'DEVELOPER',
+        projectRole: 'PROJECT_DEVELOPER',
+        hasProjectMembership: true,
+      }),
+    ).toBe(true);
+    expect(
+      canManageProjectSharing({
+        globalRole: 'USER',
+        orgRole: 'ORG_ADMIN',
+        hasProjectMembership: false,
+      }),
+    ).toBe(true);
+    expect(canManageProjectSharing({globalRole: 'SUPER_ADMIN'})).toBe(true);
   });
 
   it('splits architecture markdown into preamble and top-level sections', () => {

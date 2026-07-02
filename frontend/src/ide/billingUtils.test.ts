@@ -49,9 +49,35 @@ describe('billingUtils', () => {
 
     expect(billingUsageSummary(null, {currentRunCount: 1, monthlyRunLimit: -1}, 'FREE')).toEqual({
       periodRuns: 1,
-      runCap: '∞',
+      runCap: 'AI credits',
       totalSpend: 0,
       planStatus: 'No subscription',
+    });
+
+    expect(billingUsageSummary(null, {currentRunCount: 4, monthlyRunLimit: -1}, 'TEAM')).toEqual({
+      periodRuns: 4,
+      runCap: '∞',
+      totalSpend: 0,
+      planStatus: 'Subscription active',
+    });
+
+    expect(
+      billingUsageSummary(
+        null,
+        {
+          currentRunCount: 2,
+          monthlyRunLimit: -1,
+          quotaModel: 'MANAGED_AI_CREDITS',
+          includedAiCredits: 2000,
+          unlimitedAiCredits: false,
+        },
+        'PRO',
+      ),
+    ).toEqual({
+      periodRuns: 2,
+      runCap: 'AI credits',
+      totalSpend: 0,
+      planStatus: 'Subscription active',
     });
   });
 

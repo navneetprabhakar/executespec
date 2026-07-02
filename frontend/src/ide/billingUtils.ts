@@ -27,7 +27,7 @@ export interface PlanCard {
 
 export interface BillingUsageSummary {
   periodRuns: number;
-  runCap: number | '∞';
+  runCap: number | '∞' | 'AI credits';
   totalSpend: number;
   planStatus: string;
 }
@@ -49,7 +49,7 @@ export const PLAN_FEATURES: Record<string, string[]> = {
   ],
   PRO: [
     '✓ 30 work items / month on managed keys',
-    '✓ Anthropic · OpenAI · Gemini',
+    '✓ Anthropic · OpenAI · DeepSeek',
     '✓ PR review + code review (4 scans/mo)',
     '✓ 2 projects · 2 repos each',
     '○ $5 per-work cap — provider keys lift it',
@@ -124,18 +124,40 @@ export function managedKind(state?: string | null): BadgeKind {
 export function billingUsageSummary(
   usage: api.UsageMetrics | null | undefined,
   permissions:
-    | {currentRunCount?: number | null; monthlyRunLimit?: number | null}
+    | {
+        currentRunCount?: number | null;
+        monthlyRunLimit?: number | null;
+        quotaModel?: string | null;
+        includedAiCredits?: number | null;
+        unlimitedAiCredits?: boolean | null;
+      }
     | null
     | undefined,
   tier: string,
 ): BillingUsageSummary {
   const periodRuns = usage?.totalRuns ?? permissions?.currentRunCount ?? 0;
   const rawCap = permissions?.monthlyRunLimit ?? -1;
+  const normalizedTier = tier.toUpperCase();
+  const quotaModel = (permissions?.quotaModel || '').toUpperCase();
+  const managedCreditTier =
+    quotaModel === 'MANAGED_AI_CREDITS' ||
+    (!quotaModel && (normalizedTier === 'FREE' || normalizedTier === 'PRO'));
+  const unlimitedAiTier =
+    permissions?.unlimitedAiCredits === true ||
+    quotaModel === 'OWN_KEYS_UNLIMITED' ||
+    quotaModel === 'SUPER_ADMIN_UNLIMITED';
   return {
     periodRuns,
-    runCap: rawCap && rawCap !== -1 ? rawCap : '∞',
+    runCap:
+      rawCap && rawCap !== -1
+        ? rawCap
+        : managedCreditTier
+          ? 'AI credits'
+          : unlimitedAiTier
+            ? '∞'
+            : '∞',
     totalSpend: usage?.totalCost ?? 0,
-    planStatus: tier === 'FREE' ? 'No subscription' : 'Subscription active',
+    planStatus: normalizedTier === 'FREE' ? 'No subscription' : 'Subscription active',
   };
 }
 

@@ -1,7 +1,8 @@
-import type {Dispatch, RefObject, UIEvent} from 'react';
+import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {Markdown} from '@/signal/components/Markdown';
 import {CommandIcon, PlusIcon, RunsIcon, SearchIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
+import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
 import {
   asText,
   friendlyTool,
@@ -116,7 +117,7 @@ function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): str
     `${tokenCount(usage.outputTokens)} out`,
   ];
   if (usage.reasoningTokens > 0) parts.push(`${tokenCount(usage.reasoningTokens)} reasoning`);
-  parts.push('AI credits pending');
+  parts.push('chat included');
   if (isSuperAdmin && usage.costUsd > 0) parts.push(`$${usage.costUsd.toFixed(4)}`);
   return parts.join(' · ');
 }
@@ -465,7 +466,13 @@ function relTime(iso?: string | null): string {
   return `${days}d ago`;
 }
 
-function MessageBubble({message}: {message: LocalMessage}) {
+function MessageBubble({
+  message,
+  dispatch,
+}: {
+  message: LocalMessage;
+  dispatch: Dispatch<AgentAction>;
+}) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   if (message.role === 'user') {
     return (
@@ -485,8 +492,117 @@ function MessageBubble({message}: {message: LocalMessage}) {
       <div className='agent-msg-body'>
         <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
       </div>
+      {message.role === 'assistant' && (
+        <ArtifactRail artifacts={extractAgentArtifacts(message.content)} dispatch={dispatch} />
+      )}
     </div>
   );
+}
+
+function ArtifactRail({
+  artifacts,
+  dispatch,
+}: {
+  artifacts: AgentArtifact[];
+  dispatch: Dispatch<AgentAction>;
+}) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  if (!artifacts.length) return null;
+
+  async function copyArtifact(artifact: AgentArtifact) {
+    await navigator.clipboard?.writeText(artifact.content);
+    setCopiedId(artifact.id);
+    window.setTimeout(
+      () => setCopiedId((current) => (current === artifact.id ? null : current)),
+      1600,
+    );
+  }
+
+  function downloadArtifact(artifact: AgentArtifact) {
+    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = artifact.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function previewArtifact(artifact: AgentArtifact) {
+    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+
+  function requestSandbox(artifact: AgentArtifact) {
+    dispatch({
+      type: 'input:set',
+      input: `Create a remote sandbox from the generated artifact ${artifact.filename}. Preserve the artifact content from the previous assistant message and return evidence, changed files, and the handoff path.`,
+    });
+  }
+
+  return (
+    <div className='agent-artifact-rail' aria-label='Generated artifacts'>
+      <div className='agent-artifact-head'>
+        <span>Generated artifacts</span>
+        <span>
+          {artifacts.length} file{artifacts.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className='agent-artifact-list'>
+        {artifacts.map((artifact) => (
+          <div className='agent-artifact-item' key={artifact.id}>
+            <div className='agent-artifact-main'>
+              <code>{artifact.filename}</code>
+              <span>
+                {artifact.language.toUpperCase()} · {artifact.lineCount} line
+                {artifact.lineCount === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className='agent-artifact-actions'>
+              <button className='ide-btn ghost' onClick={() => void copyArtifact(artifact)}>
+                {copiedId === artifact.id ? 'Copied' : 'Copy'}
+              </button>
+              <button className='ide-btn ghost' onClick={() => downloadArtifact(artifact)}>
+                Download
+              </button>
+              <button
+                className='ide-btn ghost'
+                onClick={() => previewArtifact(artifact)}
+                disabled={!artifact.previewable}
+                title={
+                  artifact.previewable
+                    ? 'Open a browser preview'
+                    : 'Preview is unavailable for this file type'
+                }
+              >
+                Preview
+              </button>
+              <button className='ide-btn ghost' onClick={() => requestSandbox(artifact)}>
+                Use in sandbox
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className='agent-artifact-handoff'>
+        <span>Remote sandbox keeps local files untouched.</span>
+        <a href='/cli-login'>Open local handoff</a>
+      </div>
+    </div>
+  );
+}
+
+function mimeForArtifact(artifact: AgentArtifact): string {
+  const ext = artifact.filename.split('.').pop()?.toLowerCase();
+  if (ext === 'html' || ext === 'htm') return 'text/html';
+  if (ext === 'svg') return 'image/svg+xml';
+  if (ext === 'json') return 'application/json';
+  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
+  if (ext === 'css') return 'text/css';
+  if (ext === 'js' || ext === 'ts' || ext === 'tsx' || ext === 'jsx') return 'text/javascript';
+  return 'text/plain';
 }
 
 /** Friendly activity chips for tool/run events — no raw JSON. */
@@ -1030,6 +1146,7 @@ function Composer({
           className='agent-input'
           rows={1}
           value={input}
+          aria-label='Message the agent'
           placeholder='Message the agent…'
           onChange={(e) => dispatch({type: 'input:set', input: e.target.value})}
           onKeyDown={(e) => {
@@ -1121,6 +1238,7 @@ export function AgentConversation({
     messages.length === 0 && !visibleAction && gates.length === 0 && !runCard;
   return (
     <section className='agent-chat'>
+      <h1 className='ide-sr-only'>Agent</h1>
       <div className='agent-chat-scroll' onScroll={onScroll}>
         <div className='agent-chat-col'>
           {showOperatorInScroll && (
@@ -1148,7 +1266,9 @@ export function AgentConversation({
             ? !showOperatorInScroll && (
                 <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
               )
-            : messages.map((message) => <MessageBubble key={message.id} message={message} />)}
+            : messages.map((message) => (
+                <MessageBubble key={message.id} message={message} dispatch={dispatch} />
+              ))}
           <Activity items={streamEvents} />
           {isBusy && !streamText && <Typing />}
           {runCard && (

@@ -65,9 +65,11 @@ public class EntitlementResolver {
       Map.of(
           "FREE", 0,
           "PRO", 1,
-          "TEAM", 2,
-          "MAX", 2,
-          "ENTERPRISE", 3);
+          "PRO_PLUS", 2,
+          "TEAM", 3,
+          "BYOK", 3,
+          "MAX", 3,
+          "ENTERPRISE", 4);
 
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
@@ -185,6 +187,8 @@ public class EntitlementResolver {
     return switch (tierKey) {
       case "FREE" -> "Free";
       case "PRO" -> "Pro";
+      case "PRO_PLUS" -> "Pro+";
+      case "BYOK" -> "BYOK";
       case "TEAM", "MAX" -> "Team";
       case "ENTERPRISE" -> "Enterprise";
       default -> tierKey;

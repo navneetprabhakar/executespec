@@ -91,6 +91,17 @@ describe('moreUtils', () => {
     expect(usageLabel(null)).toBe('- / -');
     expect(usageLabel(permissions({currentRunCount: 4, monthlyRunLimit: -1}))).toBe('4 / ∞');
     expect(
+      usageLabel(
+        permissions({
+          currentRunCount: 4,
+          monthlyRunLimit: -1,
+          quotaModel: 'MANAGED_AI_CREDITS',
+          includedAiCredits: 2000,
+          unlimitedAiCredits: false,
+        }),
+      ),
+    ).toBe('4 / AI credits');
+    expect(
       limitRows(permissions({maxOrgMembers: -1, canDeploy: true, maxDeployments: -1})),
     ).toEqual(
       expect.arrayContaining([
@@ -99,6 +110,16 @@ describe('moreUtils', () => {
         {k: 'Deploy engine', v: 'Up to ∞'},
       ]),
     );
+    expect(
+      limitRows(
+        permissions({
+          monthlyRunLimit: -1,
+          quotaModel: 'MANAGED_AI_CREDITS',
+          includedAiCredits: 2000,
+          unlimitedAiCredits: false,
+        }),
+      ),
+    ).toEqual(expect.arrayContaining([{k: 'Monthly work cap', v: 'AI credits'}]));
   });
 
   it('builds account management rows from tier and role', () => {

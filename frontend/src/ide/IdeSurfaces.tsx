@@ -61,7 +61,6 @@ const NON_TERMINAL = new Set([
 const FALLBACK_PROVIDER_OPTIONS: api.ProviderEntry[] = [
   {id: 'ANTHROPIC', label: 'Anthropic', models: []},
   {id: 'OPENAI', label: 'OpenAI', models: []},
-  {id: 'GEMINI', label: 'Gemini', models: []},
   {id: 'DEEPSEEK', label: 'DeepSeek', models: []},
 ];
 const ENTERPRISE_PROVIDER_IDS = new Set(['OPENROUTER', 'FIREWORKS']);
@@ -187,7 +186,7 @@ export function IdeWelcome() {
 
   return (
     <div className='ide-pane'>
-      <div className='ide-h1'>Workspace</div>
+      <h1 className='ide-h1'>Workspace</h1>
       <div className='ide-sub'>
         {/* ⌘K hint suppressed on touch layouts (review/11 #9). */}
         Spec-driven runs across your repos. {runCap}.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
@@ -694,6 +693,7 @@ export function IdeCompose() {
               </div>
               <textarea
                 className='ide-textarea ide-compose-textarea'
+                aria-label='Work request'
                 rows={8}
                 placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
                 value={spec}
@@ -879,6 +879,7 @@ export function IdeCompose() {
                   </div>
                   <select
                     className='ide-select'
+                    aria-labelledby='compose-provider-label'
                     value={provider}
                     onChange={(e) => chooseProvider(e.target.value)}
                   >
@@ -899,6 +900,7 @@ export function IdeCompose() {
                     </div>
                     <select
                       className='ide-select'
+                      aria-labelledby='compose-model-label'
                       value={modelName}
                       onChange={(e) => setModelName(e.target.value)}
                     >
@@ -920,6 +922,7 @@ export function IdeCompose() {
                   </div>
                   <select
                     className='ide-select'
+                    aria-labelledby='compose-mode-label'
                     value={mode}
                     onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
                   >
@@ -939,6 +942,7 @@ export function IdeCompose() {
                       min='0.5'
                       max={tierMaxCap}
                       value={costCap}
+                      aria-label='Run cost cap in USD'
                       aria-labelledby='compose-cap-label'
                       onChange={(e) =>
                         setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
@@ -1367,9 +1371,9 @@ export function IdeLive() {
         }}
       >
         <div>
-          <div className='ide-h1' style={{marginBottom: 2}}>
+          <h1 className='ide-h1' style={{marginBottom: 2}}>
             Work in progress · {shortRunId(runId)}
-          </div>
+          </h1>
           <div className='ide-sub ide-mono' style={{marginTop: 0}}>
             {tasks.length
               ? `${completed}/${tasks.length} steps`

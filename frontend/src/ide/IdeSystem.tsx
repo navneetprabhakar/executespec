@@ -289,7 +289,7 @@ export function IdeSearch() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Search</div>
+      <h1 className='ide-h1'>Search</h1>
       <div className='ide-sub'>Work, projects, files.</div>
 
       <div
@@ -316,6 +316,7 @@ export function IdeSearch() {
         </svg>
         <input
           type='search'
+          aria-label='Search work, projects, and files'
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder='Search work, projects, files…'
@@ -329,6 +330,7 @@ export function IdeSearch() {
             border: 0,
             outline: 0,
             fontSize: 14,
+            minHeight: 32,
             color: 'var(--ide-fg-bright)',
           }}
         />
@@ -503,7 +505,7 @@ export function IdeAudit() {
   if (!isOrgAdmin) {
     return (
       <div className='ide-pane' style={{maxWidth: 760}}>
-        <div className='ide-h1'>Audit log</div>
+        <h1 className='ide-h1'>Audit log</h1>
         <div className='ide-sub'>Compliance trail.</div>
         <div className='ide-empty'>Audit log is available to organization admins only.</div>
       </div>
@@ -512,7 +514,7 @@ export function IdeAudit() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Audit log</div>
+      <h1 className='ide-h1'>Audit log</h1>
       <div className='ide-sub'>{logs === null ? 'Compliance trail.' : `${logs.length} events`}</div>
 
       <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
@@ -592,7 +594,7 @@ export function IdeAudit() {
 export function IdeEmptyProject() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Get started</div>
+      <h1 className='ide-h1'>Get started</h1>
       <div className='ide-sub'>Let’s get your first PR shipped.</div>
 
       <div className='ide-card' style={{borderColor: 'var(--ide-green)'}}>
@@ -667,6 +669,7 @@ export function IdeMoreMenu() {
   useDocumentTitle('Setup');
   const user = useAuthStore((s) => s.user);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
   const tier = useAuthStore(selectNormalizedTier);
   const [unread, setUnread] = useState<number | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
@@ -695,7 +698,7 @@ export function IdeMoreMenu() {
 
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
-      <div className='ide-h1'>Setup</div>
+      <h1 className='ide-h1'>Setup</h1>
       <div className='ide-sub'>
         Connect the things needed for work to run: teammates, repositories, provider defaults, and
         billing.
@@ -717,7 +720,10 @@ export function IdeMoreMenu() {
         {advancedOpen && (
           <>
             <MoreSection title='Account' rows={setupAccountRows(user?.email)} />
-            <MoreSection title='Operations' rows={setupOperationRows(tier, isSuperAdmin)} />
+            <MoreSection
+              title='Operations'
+              rows={setupOperationRows(tier, isSuperAdmin, isOrgAdmin)}
+            />
           </>
         )}
       </div>

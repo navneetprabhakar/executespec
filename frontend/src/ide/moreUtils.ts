@@ -121,20 +121,14 @@ export function accountEmail(user: api.AuthUser | null | undefined): string {
 
 export function usageLabel(permissions: TierPermissions | null): string {
   if (!permissions) return '- / -';
-  return `${permissions.currentRunCount} / ${
-    permissions.monthlyRunLimit === -1 ? '∞' : permissions.monthlyRunLimit
-  }`;
+  return `${permissions.currentRunCount} / ${workCapLabel(permissions)}`;
 }
 
 export function limitRows(permissions: TierPermissions | null): LabelRow[] {
   return [
     {
       k: 'Monthly work cap',
-      v: permissions
-        ? permissions.monthlyRunLimit === -1
-          ? 'Unlimited'
-          : String(permissions.monthlyRunLimit)
-        : '-',
+      v: permissions ? workCapLabel(permissions) : '-',
     },
     {k: 'Work used', v: permissions ? String(permissions.currentRunCount) : '-'},
     {
@@ -155,6 +149,19 @@ export function limitRows(permissions: TierPermissions | null): LabelRow[] {
         : 'PRO+',
     },
   ];
+}
+
+function workCapLabel(permissions: TierPermissions): string {
+  const quotaModel = (permissions.quotaModel || '').toUpperCase();
+  if (quotaModel === 'MANAGED_AI_CREDITS') return 'AI credits';
+  if (
+    permissions.unlimitedAiCredits === true ||
+    quotaModel === 'OWN_KEYS_UNLIMITED' ||
+    quotaModel === 'SUPER_ADMIN_UNLIMITED'
+  ) {
+    return 'Unlimited';
+  }
+  return permissions.monthlyRunLimit === -1 ? '∞' : String(permissions.monthlyRunLimit);
 }
 
 export function billingRows(tier: string): LinkRow[] {
