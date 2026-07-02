@@ -303,8 +303,10 @@ jobs:
 
       - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
         run: |
+          REMOTE_ENV_PATCH="/tmp/env-patch-${{ github.run_id }}-${{ github.run_attempt }}.sh"
+
           # Upload env-patch script to the VM
-          gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:/tmp/env-patch.sh \
+          gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_ENV_PATCH} \
             --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE }} \
             --tunnel-through-iap \
@@ -317,10 +319,11 @@ jobs:
             --strict-host-key-checking=no \
             --command="
               set -e
+              REMOTE_ENV_PATCH='${REMOTE_ENV_PATCH}'
+              trap 'sudo rm -f \"\$REMOTE_ENV_PATCH\"' EXIT
               sudo mkdir -p /opt/app/releases
               sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/releases/
-              sudo bash /tmp/env-patch.sh '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy'
-              rm -f /tmp/env-patch.sh
+              sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy'
               sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
               echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA
               sudo systemctl restart executespec
