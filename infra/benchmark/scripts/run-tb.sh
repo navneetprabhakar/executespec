@@ -7,7 +7,7 @@
 #   • in-app /benchmark bridge enabled by default
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
-#                               K CONCURRENCY COMPACTION JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
+#                               K CONCURRENCY COMPACTION TASK_LIMIT JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -19,7 +19,8 @@ HARBOR_MODEL="${HARBOR_MODEL:-deepseek/deepseek-v4-pro}"
 TB_DATASET="${TB_DATASET:-terminal-bench/terminal-bench-2-1}"
 BENCHMARK_DATASET="${BENCHMARK_DATASET:-${TB_DATASET##*/}}"
 K="${K:-1}"                                            # internal benchmark: exactly one attempt/task
-TOTAL_TASKS="${TOTAL_TASKS:-89}"
+TASK_LIMIT="${TASK_LIMIT:-}"                           # optional sanity subset; full TB leaves empty
+TOTAL_TASKS="${TOTAL_TASKS:-${TASK_LIMIT:-89}}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
 JOB_NAME="${JOB_NAME:-es-tb-${PROVIDER}-k${K}}"
@@ -53,6 +54,11 @@ agents:
 datasets:
   - name: $TB_DATASET
 EOF
+if [ -n "$TASK_LIMIT" ]; then
+  cat >> "$CFG" <<EOF
+    n_tasks: $TASK_LIMIT
+EOF
+fi
 LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, internal-only=true)"
 
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
@@ -63,6 +69,8 @@ start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
       localhost:8080/actuator/health >/dev/null 2>&1; }
 curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend…"; start_backend; }
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
+export ES_ADMIN_EMAIL="${ES_ADMIN_EMAIL:-${ESPEC_ADMIN_EMAIL:-}}"
+export ES_ADMIN_PW="${ES_ADMIN_PW:-${ESPEC_ADMIN_PW:-}}"
 TK=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
@@ -109,7 +117,9 @@ fi
 cd "$TB_DIR" || exit 1
 export ES_PROVIDER="$PROVIDER" ES_MODEL="$MODEL" ES_MAX_ITERS="${ES_MAX_ITERS:-120}"
 LOG "harbor run starting (provider=$PROVIDER model=$MODEL)…"
-caffeinate -dimsu ./.venv/bin/harbor run -c "$CFG" -y 2>&1 | tee "$JOBS_DIR/${JOB_NAME}-run.log"
+RUN_PREFIX=()
+command -v caffeinate >/dev/null 2>&1 && RUN_PREFIX=(caffeinate -dimsu)
+"${RUN_PREFIX[@]}" ./.venv/bin/harbor run -c "$CFG" -y 2>&1 | tee "$JOBS_DIR/${JOB_NAME}-run.log"
 
 # ── 5. done: marker, final tracker tick, GCS results sync, ping ─────────────
 touch "$DONE"; sleep 6   # let the tracker write its final cycle

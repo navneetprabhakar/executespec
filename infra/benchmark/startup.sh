@@ -36,6 +36,12 @@ echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.n
 # ── Node.js LTS (matches the dev VM validator-toolchain path) ───────────────
 curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
 
+# ── Redis 7+ (Spring Data uses GETDEL; Ubuntu 22.04's Redis 6.0 lacks it) ──
+curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /etc/apt/keyrings/redis-archive-keyring.gpg
+chmod a+r /etc/apt/keyrings/redis-archive-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb ${VERSION_CODENAME} main" \
+  > /etc/apt/sources.list.d/redis.list
+
 apt-get update
 apt-get install -y --allow-downgrades \
   docker-ce=${DOCKER_VERSION} docker-ce-cli=${DOCKER_VERSION} containerd.io=${CONTAINERD_VERSION} docker-buildx-plugin docker-compose-plugin=${DOCKER_COMPOSE_VERSION} \
