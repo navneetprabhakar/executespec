@@ -237,6 +237,9 @@ jobs:
           upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,https://benchmark.executespec.ai,http://localhost:5173"
           upsert "DASHBOARD_URL=$1"
           upsert "APP_BASE_URL=$1"
+          upsert "APP_MAIL_BASE_URL=$1"
+          upsert "APP_SURFACE_RETURN_URL=$1/auth/callback"
+          upsert "BUILD_SURFACE_RETURN_URL=$1/auth/callback"
           upsert "MAIL_TRANSPORT=smtp"
           upsert "MAIL_FROM=admin@executespec.ai"
 
