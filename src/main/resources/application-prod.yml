@@ -164,6 +164,8 @@ app:
     # doesn't need a config push — just a DNS + deploy. Ops can still
     # override via the env var to lock down to one origin.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai,https://www.executespec.ai,https://app.executespec.ai,https://build.executespec.ai}
+    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.executespec.ai/auth/callback}
+    build-return-url: ${BUILD_SURFACE_RETURN_URL:https://app.executespec.ai/auth/callback}
   # V143 product-routing config retired (V179, single-surface
   # retirement 2026-05-06).
 
@@ -171,6 +173,8 @@ app:
 # Refresh-token cookie carries Secure (HTTPS-only) in prod — served over HTTPS
 # behind Cloudflare. Local dev (HTTP) keeps this false via the base profile. C1.
 auth:
+  oauth:
+    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.executespec.ai/auth/callback}
   refresh-cookie:
     secure: true
 

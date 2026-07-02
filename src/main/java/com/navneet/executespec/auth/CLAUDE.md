@@ -28,6 +28,7 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 ## OAuth Return URLs
 
 - Browser OAuth success uses `auth.oauth.app-return-url` (`APP_SURFACE_RETURN_URL`, defaulting to `app.cors.app-return-url`) as the exact `/auth/callback` target. Do not use `app.mail.base-url` for OAuth; local backend-served mail links and Vite app OAuth callbacks can intentionally be different origins.
+- Deployed profiles (`dev`, `benchmark`, `prod`) must pin non-local `auth.oauth.app-return-url` / `app.cors.*-return-url` defaults, and the deploy workflow must upsert `APP_SURFACE_RETURN_URL`, `BUILD_SURFACE_RETURN_URL`, and `APP_MAIL_BASE_URL` from the resolved public URL. Otherwise OAuth and email links can silently fall back to localhost.
 - CLI / VS Code device login remains separate: `OAuthRedirectCookieFilter` only stores safe `/cli-login...` paths in `es_oauth_redirect`, and `OAuthSuccessHandler` appends that path as the callback `redirect=` param after token generation.
 - `OAuthSuccessHandlerTest` pins app-origin callback selection plus safe `/cli-login` handoff and unsafe redirect rejection.
 
