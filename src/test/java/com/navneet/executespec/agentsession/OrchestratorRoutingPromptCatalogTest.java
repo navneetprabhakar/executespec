@@ -22,7 +22,10 @@ class OrchestratorRoutingPromptCatalogTest {
           .contains("CODE_RUN_REQUIRED")
           .contains("SECURITY_REJECT")
           .contains("Find the bug")
-          .contains("Fix the bug");
+          .contains("Fix the bug")
+          .contains("negativeEvidence")
+          .contains("requiresUserConfirmation")
+          .contains("always include an array");
       for (String route : OrchestratorRoutingPromptCatalog.ROUTES) {
         assertThat(prompt).as(provider + " prompt contains " + route).contains(route);
       }

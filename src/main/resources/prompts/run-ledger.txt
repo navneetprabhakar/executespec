@@ -7,6 +7,7 @@ RULES:
 - Use abbreviations, arrows (->), plus (+= for additions), minus (-= for removals)
 - Max 150 words total
 - Be specific: exact endpoint paths, component names, model field names
+- If FILE CHANGES says diff stat unavailable, infer changed modules only from task outputs and say `unknown` for files you cannot verify.
 - Preserve technical decisions and WHY (not just what)
 - Note any debt or limitations left behind
 

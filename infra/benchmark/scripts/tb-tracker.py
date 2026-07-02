@@ -4,7 +4,7 @@ TB eval tracker — renders a self-contained, auto-refreshing visual dashboard f
 optionally loops, syncs the HTML to GCS, and pushes a Telegram ping each cycle.
 
 Usage:
-  python3 tb-tracker.py <job_dir> [--name "v4-pro · TB k=5"] [--total 89] [--out dash.html]
+  python3 tb-tracker.py <job_dir> [--name "v4-pro · TB k=1"] [--total 89] [--out dash.html]
                         [--loop 1800] [--telegram] [--gcs gs://bucket/path] [--tg-script /path/tg-send.py]
 
 Data sources (Harbor): <job_dir>/**/reward.txt (1=pass,0=fail) + <job_dir>/result.json (stats).

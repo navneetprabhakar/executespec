@@ -8,6 +8,14 @@ The agent's current goal:
 The tool that produced the output:
 {{TOOL_NAME}}
 
+Raw byte count supplied by the caller:
+{{RAW_BYTES}}
+
+Budget: your answer is capped at roughly 1500 output tokens. Preserve in this order: (1) exact
+errors/failing assertions/exit codes, (2) file paths and line/column anchors, (3) changed symbols and
+commands tried, (4) compact success rollups. If this budget cannot preserve a detail safely, keep the
+more diagnostic detail and drop low-value success noise.
+
 ## What to PRESERVE VERBATIM
 
 Copy these tokens exactly as they appear — do NOT paraphrase, abbreviate, or "clean up":
@@ -38,7 +46,7 @@ Everything else. Specifically, collapse:
 - If the raw output is mostly errors / failures, the compacted text will be barely shorter than the original (that's fine — preservation wins).
 - If the raw output is mostly success noise around one signal (e.g. one failing test inside a long log), the compacted text can be 10× shorter.
 - Do not invent claims the raw output doesn't support. If you are uncertain whether something is signal or noise, keep it.
-- Wrap your output with a single leading marker line `[compacted from N bytes]` where N is the raw byte count — this tells the agent the output was processed (so it doesn't expect verbatim).
+- Do not add the `[compacted from ... bytes]` marker yourself. The caller adds that marker using the real raw byte count after your response.
 
 ## Raw tool output to compact
 

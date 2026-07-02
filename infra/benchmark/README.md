@@ -12,7 +12,10 @@ up → run → **`terraform destroy`**.
 GCS backend in `../`, so a `destroy` here can never touch production infra.
 
 Defaults: `e2-standard-16` (16 vCPU / 64 GB), 1 TB `pd-ssd`, Ubuntu 22.04, project
-`executespecv1`, zone `us-east4-a`. Inbound SSH is locked to the GCP IAP range.
+`executespecv1`, zone `us-east4-a`. The VM has no external IP; SSH is over IAP
+and package/Docker/LLM egress goes through Cloud NAT. `terraform apply` also
+creates a global HTTP(S) load balancer and outputs the static IP to use for the
+Cloudflare `benchmark.executespec.ai` A record.
 
 ## Cost (destroy to stop it)
 - Compute `e2-standard-16` ≈ **$0.55–0.60/hr** on-demand (set `use_spot=true` for ~60–90% off, preemptible).
@@ -31,6 +34,11 @@ gcloud config set project executespecv1
 cd infra/benchmark
 terraform init
 terraform apply            # ~1 min to create; bootstrap runs ~3-5 min after boot
+terraform output -raw load_balancer_ip   # Cloudflare A-record target
+
+# Optional app deploy path after GitHub secrets are configured:
+#   push to branch `benchmark`, or run Build & Deploy with target_env=benchmark.
+# The workflow deploys the built JAR directly to benchmark-instance over IAP/SCP.
 
 # 2. SSH in (IAP tunnel — no public SSH). `terraform output ssh_command` prints this:
 gcloud compute ssh benchmark-instance --zone us-east4-a --project executespecv1 --tunnel-through-iap

@@ -690,7 +690,7 @@ exit=0 — the harness will reject premature completions.
   }
 
   /**
-   * True iff {@code result} dispatched at least one writeFile / editFile tool call. Inspects {@link
+   * True iff {@code result} dispatched at least one write-class tool call. Inspects {@link
    * WorkerResult#toolCallLog()} which records {@code "<toolName>(<argsPreview>)"} per dispatch (see
    * {@code WorkerAgent.run}).
    */
@@ -698,12 +698,34 @@ exit=0 — the harness will reject premature completions.
     if (result == null || result.toolCallLog() == null) return false;
     for (String entry : result.toolCallLog()) {
       if (entry == null) continue;
-      // Entries are formatted as "writeFile(path=...)" / "editFile(...)" / refused-prefixed
-      // variants. startsWith() on the bare tool name covers the success path; refusals can
-      // be ignored because they don't represent a real write either way.
-      if (entry.startsWith("writeFile") || entry.startsWith("editFile")) return true;
+      // Entries are formatted as "writeFile(path=...)" / "edit_file(...)" / refused-prefixed
+      // variants. Extracting only a leading tool name keeps refused/error prefixes from counting as
+      // writes while covering the same write aliases advertised in the reviewer prompts.
+      String toolName = leadingToolName(entry);
+      if (isWriteToolName(toolName)) return true;
     }
     return false;
+  }
+
+  private static String leadingToolName(String entry) {
+    int end = 0;
+    while (end < entry.length()) {
+      char c = entry.charAt(end);
+      if (!(Character.isLetterOrDigit(c) || c == '_')) break;
+      end++;
+    }
+    return end == 0 ? "" : entry.substring(0, end);
+  }
+
+  private static boolean isWriteToolName(String toolName) {
+    return "writeFile".equals(toolName)
+        || "write_file".equals(toolName)
+        || "editFile".equals(toolName)
+        || "edit_file".equals(toolName)
+        || "multiEdit".equals(toolName)
+        || "multi_edit".equals(toolName)
+        || "applyPatch".equals(toolName)
+        || "apply_patch".equals(toolName);
   }
 
   /**

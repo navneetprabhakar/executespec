@@ -61,7 +61,7 @@ If there are violations: emit `patchPlan` with one or more patches, each describ
 - `ADD_MEETS_REQUIREMENT` — { taskId, requirementId, reason }
 - `ADD_DEPENDS_ON` — { taskId, dependsOnTaskId, reason }
 - `REMOVE_DEPENDS_ON` — { taskId, dependsOnTaskId, reason }
-- `FIX_HARD_CONSTRAINT_CONFLICT` — { taskId, newConstraint, reason } (replaces the incompatible constraint with the corrected one)
+- `FIX_HARD_CONSTRAINT_CONFLICT` — { taskId, newConstraint, reason } (appends the corrected constraint; the worker treats later conflicting constraints as higher precedence)
 - `MOVE_FILE_TO_REPO_SUBDIR` — { taskId, from, to, reason }
 
 Each patch MUST have a `reason` — the reviewer reads these to understand why a task is being changed.
