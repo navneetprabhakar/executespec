@@ -225,6 +225,13 @@ public class WorkerAgent {
   public static final int VBC_GATE_MAX_REFUSALS = 3;
 
   /**
+   * Terminal visible-test gate — how many times {@code completeTask} may be refused when a remote
+   * terminal sandbox exposes visible verifier files under {@code /tests} but the worker has not yet
+   * run a passing command against those tests. Bounded + fail-open like the other completion gates.
+   */
+  public static final int TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS = 3;
+
+  /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
    * shell don't reset the counter — only file mutations and explicit build attempts.
    *
@@ -425,6 +432,7 @@ public class WorkerAgent {
     boolean criticNudged = false;
     boolean terminalVerifiedPass = false;
     String terminalVerifiedPassEvidence = null;
+    int terminalVisibleTestRefusals = 0;
 
     // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
     // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
@@ -945,6 +953,30 @@ public class WorkerAgent {
                   vbcFailure);
               continue;
             }
+          }
+          // Terminal visible-test gate. The prompt asks workers to inspect/run /tests, but that is
+          // advisory. With critic-pass enabled a worker could self-test against its own wrong
+          // contract, the critic could miss the mismatch, and completeTask would be accepted
+          // without ever executing the visible verifier. If /tests exists, require a passing
+          // verifier-shaped command that actually targets /tests before completion.
+          if (terminalTaskMode
+              && terminalVerifyGateOn
+              && !terminalVerifiedPass
+              && terminalVisibleTestRefusals < TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS
+              && visibleTestsExist(req.context())) {
+            terminalVisibleTestRefusals++;
+            String refused =
+                errEnvelope("TERMINAL_VISIBLE_TESTS_REQUIRED", terminalVisibleTestsMessage());
+            toolResponses.add(
+                new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+            toolLog.add(tc.name() + " → REFUSED (visible terminal tests not run)");
+            log.info(
+                "WorkerAgent completeTask VISIBLE-TEST-GATED run={} task={} iter={} refusals={}",
+                req.context().runId(),
+                req.context().taskId(),
+                iter,
+                terminalVisibleTestRefusals);
+            continue;
           }
           // #1 critic/reviewer pass (RL-2026-06) — COMMON to all consumers, not a TB fork. One
           // fresh-context acceptance review before the FIRST completeTask: a no-tool LlmRouter call
@@ -2345,6 +2377,25 @@ public class WorkerAgent {
     }
   }
 
+  /** Terminal visible-test gate — detect whether the remote sandbox exposes verifier files. */
+  private boolean visibleTestsExist(ExecutionContext ctx) {
+    try {
+      ObjectNode args = objectMapper.createObjectNode();
+      args.put(
+          "command",
+          "[ -d /tests ] && find /tests -maxdepth 2 -type f | head -1 | grep -q . && echo"
+              + " TESTS_PRESENT || true");
+      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      if (envelope == null) return false;
+      JsonNode env = objectMapper.readTree(envelope);
+      return env.path("ok").asBoolean(false)
+          && env.path("content").asText("").contains("TESTS_PRESENT");
+    } catch (Exception e) {
+      log.debug("visible-test check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return false;
+    }
+  }
+
   /** VBC verify-before-complete — the refusal message naming what failed and what to do. */
   static String verifyBeforeCompleteMessage(String detail) {
     return "completeTask refused — the project's own tests do not pass ("
@@ -2353,6 +2404,14 @@ public class WorkerAgent {
         + " they exercise — then call completeTask again. A run that completes with failing tests"
         + " ships a broken deliverable. If a failure is genuinely pre-existing and unrelated to"
         + " your change, note that in completionNotes; the gate yields after a few attempts.";
+  }
+
+  static String terminalVisibleTestsMessage() {
+    return "completeTask refused — this terminal task exposes visible verifier files under /tests,"
+        + " but you have not run a passing verifier command against /tests. Run /tests/test.sh or"
+        + " the relevant pytest/bats/unittest command under /tests, inspect any failure, fix the"
+        + " exact contract mismatch, then call completeTask. Do not rely only on a self-authored"
+        + " smoke test; visible tests are the executable scoring contract.";
   }
 
   /** RL-2026-06 — the deliverable-gate refusal message naming the missing required path(s). */
@@ -2511,6 +2570,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
     String command = commandFromArgs(argsJson);
     if (!terminalVerifierCommand(toolName, command)) return false;
+    if (visibleTestsExist(ctx) && !terminalVisibleTestCommand(toolName, command)) return false;
     return requiredDeliverables == null
         || requiredDeliverables.isEmpty()
         || missingDeliverables(ctx, requiredDeliverables).isEmpty();
@@ -2557,6 +2617,13 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
         || c.contains(" benchmark")
         || c.contains("./benchmark")
         || c.contains(" hyperfine ");
+  }
+
+  static boolean terminalVisibleTestCommand(String toolName, String command) {
+    if (RUN_TESTS_TOOL_NAME.equals(toolName)) return true;
+    if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
+    String c = command.toLowerCase(java.util.Locale.ROOT);
+    return c.contains("/tests") || c.contains("cd /tests");
   }
 
   private static boolean terminalVerifierTool(String toolName) {

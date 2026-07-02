@@ -28,4 +28,16 @@ class WorkerAgentTerminalVerifierPassTest {
         .isFalse();
     assertThat(WorkerAgent.terminalVerifierCommand("readFile", "/tests/test.sh")).isFalse();
   }
+
+  @Test
+  void terminalVisibleTestCommandRequiresTheVisibleTestsPath() {
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "bash /tests/test.sh")).isTrue();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "cd /tests && pytest -q")).isTrue();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -m pytest /tests -q"))
+        .isTrue();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -c 'custom smoke'"))
+        .isFalse();
+    assertThat(WorkerAgent.terminalVisibleTestCommand("shell", "python -m pytest /app -q"))
+        .isFalse();
+  }
 }
