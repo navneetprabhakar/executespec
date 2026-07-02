@@ -5,6 +5,11 @@ You are compacting the EARLIER turns of a coding agent's work session into a tig
 The agent's task:
 {{WORKER_GOAL}}
 
+Budget: your note is capped at roughly 1200 output tokens. Preserve in this order: (1) files edited
+and exact identifiers, (2) verification outcomes and current failures, (3) hard constraints and
+architecture/API decisions, (4) dead ends already tried. Drop narration and successful read/search
+noise before dropping any unresolved problem.
+
 ## What to PRESERVE (the agent will lose these turns — capture every load-bearing fact)
 
 - **Files created / edited so far** — path + a one-line description of what each now contains.

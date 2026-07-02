@@ -58,9 +58,9 @@ public class OutlinePlannerAgent {
 
   /**
    * v2.6.2 slice 3 — skeleton-mode prompt for LARGE/LEGACY classifications. Emits
-   * id/title/complexity/repos/dependsOn/type only — the expander fills the bodies in parallel.
-   * Smaller output budget needed because no descriptions / hardConstraints / meetsRequirements per
-   * task.
+   * id/title/complexity/touchesFiles/dependsOn/type only — the expander fills the bodies in
+   * parallel. Smaller output budget needed because no descriptions / hardConstraints /
+   * meetsRequirements per task.
    */
   private static final String PROMPT_PATH_SKELETON = "prompts/outline-planner-skeleton.md";
 
@@ -322,12 +322,12 @@ public class OutlinePlannerAgent {
     String systemPrompt =
         loadPrompt(promptPath)
             .replace("{{SPEC}}", req.spec() == null ? "" : req.spec())
-            .replace("{{CLASSIFICATION}}", req.classification().name())
+            .replace("{{CLASSIFICATION}}", req.promptClassification())
             .replace(
                 "{{MAX_TASKS}}",
-                req.classification().maxTasks() == Integer.MAX_VALUE
+                req.plannerMaxTasks() == Integer.MAX_VALUE
                     ? "unlimited"
-                    : String.valueOf(req.classification().maxTasks()))
+                    : String.valueOf(req.plannerMaxTasks()))
             .replace(
                 "{{WORKSPACE_SUMMARY}}",
                 req.workspaceSummary() == null ? "(no summary)" : req.workspaceSummary())
@@ -353,11 +353,14 @@ public class OutlinePlannerAgent {
     String plannerProviderName = resolved.providerName();
 
     log.info(
-        "OutlinePlanner [{}] -> {} {} (classification={}, maxTokens={}, wallTimeout={}s)",
+        "OutlinePlanner [{}] -> {} {} (classification={}, planStrategy={}, maxTasks={},"
+            + " maxTokens={}, wallTimeout={}s)",
         mode,
         plannerProviderName,
         plannerModel,
         req.classification(),
+        req.planStrategy(),
+        req.plannerMaxTasks() == Integer.MAX_VALUE ? "unlimited" : req.plannerMaxTasks(),
         maxTokens,
         PLANNER_LLM_WALL_TIMEOUT_SECONDS);
 
@@ -449,7 +452,8 @@ public class OutlinePlannerAgent {
                 + " text-form args",
             finishReason);
         Plan plan =
-            PlannerOutputUtils.parsePlanFromArgs(salvaged, req.classification(), objectMapper);
+            PlannerOutputUtils.parsePlanFromArgs(
+                salvaged, req.classification(), req.planStrategy(), objectMapper);
         PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
         return plan;
       }
@@ -461,7 +465,7 @@ public class OutlinePlannerAgent {
     }
     Plan plan =
         PlannerOutputUtils.parsePlanFromArgs(
-            planCall.arguments(), req.classification(), objectMapper);
+            planCall.arguments(), req.classification(), req.planStrategy(), objectMapper);
     PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
     return plan;
   }

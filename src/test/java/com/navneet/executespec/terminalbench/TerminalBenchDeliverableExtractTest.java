@@ -10,9 +10,9 @@ import org.junit.jupiter.api.Test;
 /**
  * RL-2026-06 — pins {@link TerminalBenchRunService#extractDeliverablePaths(String)}, the
  * required-deliverable extractor that feeds the worker's deterministic gate (#2). Conservative by
- * design: only {@code /app/} paths with a file extension, deduped in first-seen order. The gate
- * only refuses on a MISSING path, so over-matching an existing input file is harmless; these tests
- * pin the common shapes seen across the Terminal-Bench corpus.
+ * design: output-looking {@code /app/} paths, deduped in first-seen order. The gate only refuses on
+ * a MISSING path, so over-matching an existing input file is harmless; these tests pin the common
+ * shapes seen across the Terminal-Bench corpus.
  */
 class TerminalBenchDeliverableExtractTest {
 
@@ -46,6 +46,14 @@ class TerminalBenchDeliverableExtractTest {
             + " /usr/bin/python.";
     List<String> paths = TerminalBenchRunService.extractDeliverablePaths(instruction);
     assertEquals(List.of("/app/gates.txt"), paths);
+  }
+
+  @Test
+  void extracts_extensionless_absolute_output_after_verb() {
+    List<String> paths =
+        TerminalBenchRunService.extractDeliverablePaths(
+            "Build the executable at /app/solver and make it runnable.");
+    assertEquals(List.of("/app/solver"), paths);
   }
 
   @Test

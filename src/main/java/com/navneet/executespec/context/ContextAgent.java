@@ -174,11 +174,11 @@ public class ContextAgent {
 
   /**
    * Parses the LLM's JSON patch response and applies KEEP/UPDATE/ADD/REMOVE operations to the
-   * current CODEBASE_CONTEXT.md. Falls back to writing the raw LLM response if the response is not
-   * valid JSON patch format (graceful degradation).
+   * current CODEBASE_CONTEXT.md. If the response is not valid JSON patch format, preserves the
+   * current context doc and writes the rejected response to a sidecar for operator debugging.
    */
-  private void writeContextDoc(
-      Path projectPath, String currentDoc, String llmResponse, String runId) throws IOException {
+  void writeContextDoc(Path projectPath, String currentDoc, String llmResponse, String runId)
+      throws IOException {
     Path p = projectPath.resolve(".agent-context/CODEBASE_CONTEXT.md");
     Files.createDirectories(p.getParent());
 
@@ -202,17 +202,25 @@ public class ContextAgent {
         return;
       } catch (Exception e) {
         log.warn(
-            "Context Agent: JSON patch parse failed for run {} — falling back to raw write: {}",
+            "Context Agent: JSON patch parse failed for run {} — preserving current doc: {}",
             runId,
             e.getMessage());
       }
     }
 
-    // Fallback: raw write (e.g. model returned plain markdown instead of JSON)
+    // Fallback: preserve canonical doc; raw LLM text is diagnostic only. Overwriting
+    // CODEBASE_CONTEXT.md with malformed prose makes the next run's context worse than stale.
     log.warn(
-        "Context Agent: LLM response was not a JSON patch array for run {} — writing raw", runId);
+        "Context Agent: LLM response was not a valid JSON patch array for run {} — writing rejected"
+            + " sidecar only",
+        runId);
+    if (currentDoc != null && !Files.exists(p)) {
+      Files.writeString(p, currentDoc, StandardOpenOption.CREATE_NEW);
+    }
+    Path rejected =
+        projectPath.resolve(".agent-context/CODEBASE_CONTEXT.rejected." + runId + ".txt");
     Files.writeString(
-        p, llmResponse, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+        rejected, llmResponse, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
   }
 
   /**

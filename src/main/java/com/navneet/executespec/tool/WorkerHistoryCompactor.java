@@ -213,6 +213,12 @@ public class WorkerHistoryCompactor {
         log.warn("WorkerHistoryCompactor empty summary (run={}) — history unchanged", ctx.runId());
         return history;
       }
+      if (isLengthTruncated(resp)) {
+        log.warn(
+            "WorkerHistoryCompactor hit max-token finish (run={}) — history unchanged",
+            ctx.runId());
+        return history;
+      }
 
       // Rebuild: system(0) + ONE user message folding the task + the compacted progress note +
       // the recent block (which starts at `cut`, an AssistantMessage). The single combined user
@@ -308,6 +314,14 @@ public class WorkerHistoryCompactor {
           workerProvider);
       return LlmProvider.ANTHROPIC;
     }
+  }
+
+  private static boolean isLengthTruncated(ChatResponse resp) {
+    if (resp == null || resp.getResult() == null || resp.getResult().getMetadata() == null) {
+      return false;
+    }
+    Object finish = resp.getResult().getMetadata().getFinishReason();
+    return finish != null && "length".equalsIgnoreCase(String.valueOf(finish));
   }
 
   private static String truncate(String s, int max) {

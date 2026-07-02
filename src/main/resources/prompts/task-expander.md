@@ -10,8 +10,7 @@ A single `submitTaskDetail` tool call with this shape:
   "description": "<full task description; becomes the user prompt to the worker>",
   "touchesFiles": ["<file paths the task will read/write>"],
   "hardConstraints": ["<must-respect rules; injected into worker system prompt verbatim>"],
-  "meetsRequirements": ["R<n>", "R<m>"],
-  "smokeTestStrategy": "BUILD" | "PREVIEW_HEALTH" | "TEST_SUITE"   // optional; defaults to plan-level
+  "meetsRequirements": ["R<n>", "R<m>"]
 }
 ```
 

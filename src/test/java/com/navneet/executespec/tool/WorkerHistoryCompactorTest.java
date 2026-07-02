@@ -31,6 +31,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -96,6 +97,8 @@ class WorkerHistoryCompactorTest {
     AssistantMessage msg = Mockito.mock(AssistantMessage.class);
     Mockito.when(resp.getResult()).thenReturn(gen);
     Mockito.when(gen.getOutput()).thenReturn(msg);
+    Mockito.when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason("stop").build());
     Mockito.when(msg.getText()).thenReturn("Files: created Health.java. Open: none.");
     when(router.call(any(LlmRequest.class))).thenReturn(resp);
   }
@@ -220,6 +223,33 @@ class WorkerHistoryCompactorTest {
                 .build());
     when(promptAssembler.assemble(anyString(), any())).thenReturn("summariser prompt");
     when(router.call(any(LlmRequest.class))).thenThrow(new RuntimeException("boom"));
+
+    List<Message> h = longHistory();
+    List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
+    assertThat(out).isSameAs(h);
+  }
+
+  @Test
+  @DisplayName(
+      "finishReason=length → same list reference so partial summaries never replace history")
+  void failSafe_whenModelHitLengthLimit() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    when(modelResolver.resolve(anyString(), any(LlmProvider.class)))
+        .thenReturn(
+            ResolvedModel.builder()
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-haiku-4-5-20251001")
+                .build());
+    when(promptAssembler.assemble(anyString(), any())).thenReturn("summariser prompt");
+    ChatResponse resp = Mockito.mock(ChatResponse.class);
+    Generation gen = Mockito.mock(Generation.class);
+    AssistantMessage msg = Mockito.mock(AssistantMessage.class);
+    Mockito.when(resp.getResult()).thenReturn(gen);
+    Mockito.when(gen.getOutput()).thenReturn(msg);
+    Mockito.when(msg.getText()).thenReturn("partial summary");
+    Mockito.when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason("length").build());
+    when(router.call(any(LlmRequest.class))).thenReturn(resp);
 
     List<Message> h = longHistory();
     List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");

@@ -11,9 +11,10 @@ so an external client (the Terminal-Bench **Harbor adapter**, `~/tbench/es_harbo
 drive it: the ExecuteSpec server runs the worker loop (the *brain*); every worker tool call is
 emitted as a `TOOL_CALL` SSE event; the adapter executes it **inside the Harbor task container**
 (the *hands*) via `environment.exec` / file ops, and POSTs the result envelope back to
-`POST /api/runs/{id}/tool-results`. The worker is provider-agnostic, but the standing evaluation
-policy is **DeepSeek-first only** until the harness quality is materially better. Anthropic / OpenAI /
-Gemini runs are deferred until DeepSeek results stop exposing obvious prompt/tool/context gaps.
+`POST /api/runs/{id}/tool-results`. The worker is provider-agnostic. Normal tuning remains
+DeepSeek-first so harness debt is not hidden by stronger models; the 2026-07-02 internal comparison
+is the explicit exception and is locked to DeepSeek V4 Pro/Flash native, Sonnet 5, Sonnet 4.6, and
+GLM 5.2 via OpenRouter.
 
 A Terminal-Bench task is a single terminal goal, not a multi-task code spec, so this path runs the
 worker **directly** — NO classifier / planner / reviewer / scoring / PR push. It reuses the built
@@ -25,11 +26,11 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 | File | Purpose |
 |------|---------|
 | `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
-| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. **`extractDeliverablePaths` (RL-2026-06-016)** now runs TWO matchers: the absolute `/app/…\.ext` `DELIVERABLE_PATH` + a `RELATIVE_DELIVERABLE` that catches a bare `name.ext` introduced by an output verb (write/create/produce/…) in the same clause (`[^./]` gap can't cross a `/` into an absolute path nor a `.` into the next sentence; letter-led extension avoids `e.g.`/`i.e.`), prepended `/app/`. Fixes the write-compressor miss where "Write me **data.comp**" left the un-prefixed OUTPUT unextracted (the gate saw only the inputs → passed). Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
+| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. `extractDeliverablePaths` checks absolute `/app/…\.ext` paths, output-verb absolute paths including extensionless executables (for example `Build /app/solver`), and relatively named `name.ext` outputs introduced by an output verb, prepended `/app/`. Extensionless `/app/foo` inputs are still ignored unless the same clause says to write/create/build/save them. The shared worker's verified-pass guard snapshots extracted deliverables after a conservative passing verifier-shaped command, refuses later risky edits/reruns, and force-completes text-only follow-ups. Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
 
-The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) are **NOT** Terminal-Bench code — they live in the shared `engine/WorkerAgent` as flag/data-activated, workspace-agnostic capabilities (see `engine/CLAUDE.md`). TB is just one **consumer** (it sets the flags via `ES_TB_CRITIC` / `ES_TB_DELIVERABLE_GATE` / `ES_TB_VERIFY_GATE`); PATCH uses the same critic through `CodeGenEngineImpl` behind `worker.critic-pass.enabled` (V231, default OFF). So the "no reviewer" framing above is now "no *pipeline* reviewer (`ReviewerAgent`)" — TB gets the lightweight common critic instead, reading the `/app` files (remote) the way PATCH reads its `git diff` (local). Empirically the #2+#1 combo lifted a 13-task near-miss slice 4/13 → 8/13 (pass@2), 0 regressions.
+The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) + verified-pass guard (#4) are **NOT** Terminal-Bench code — they live in the shared `engine/WorkerAgent` as flag/data-activated, workspace-agnostic capabilities (see `engine/CLAUDE.md`). TB is just one **consumer** (it sets the flags via `ES_TB_CRITIC` / `ES_TB_DELIVERABLE_GATE` / `ES_TB_VERIFY_GATE`); PATCH uses the same critic through `CodeGenEngineImpl` behind `worker.critic-pass.enabled` (V231, default OFF). So the "no reviewer" framing above is now "no *pipeline* reviewer (`ReviewerAgent`)" — TB gets the lightweight common critic instead, reading the `/app` files (remote) the way PATCH reads its `git diff` (local). Empirically the #2+#1 combo lifted a 13-task near-miss slice 4/13 → 8/13 (pass@2), 0 regressions.
 
 ## The keystone mechanism (and the fix that made it work)
 
@@ -60,7 +61,14 @@ readFile, grep for searchFiles, base64-via-exec for write/edit). Config via env:
 `AgentContext` cost/tokens from `GET /api/runs/{id}/cost`. Since RL-2026-06-031 the adapter declares
 `SUPPORTS_ATIF=true` and writes `agent/trajectory.json` during each trial with the instruction,
 ExecuteSpec tool-call/result pairs, and terminal cost summary; `submit-tb.sh` refuses to upload when a
-passing trial is missing that trajectory because leaderboard validation rejects it.
+passing trial is missing that trajectory because leaderboard validation rejects it. For internal
+non-submission runs, `tb-bench-bridge.py` also publishes per-task `outcome` / `reason` to
+`/benchmark` so infra/verifier/model failures are visible without changing reward-based resolved%.
+
+Remote shell/build/test results must preserve command failure semantics: non-zero
+`environment.exec(...)` returns are sent back as `{ok:false, kind:"COMMAND_FAILED", message:"..."}`
+with bounded head+tail output, not as successful content with an exit code string. Otherwise the
+worker treats failed tests as successful verification and benchmark failure analysis becomes garbage.
 
 ## Verified
 
@@ -93,7 +101,9 @@ passing trial is missing that trajectory because leaderboard validation rejects 
   Terminal-Bench workers to inspect `/tests` early, treat tests as the scoring contract, sweep named
   error patterns recursively, implement detection-first no-op handling for clean transform inputs,
   benchmark against golden/reference thresholds, and stop changing a candidate once a
-  verifier-shaped check passes. **RL-2026-06-013** added two more (ported from `SYSTEM_PROMPT_BASE`):
+  verifier-shaped check passes. The shared worker now makes that last rule mechanical: a successful
+  verifier-shaped command with extracted deliverables present snapshots the candidate and blocks
+  later risky edits/reruns. **RL-2026-06-013** added two more (ported from `SYSTEM_PROMPT_BASE`):
   build the MINIMUM (no gold-plating a passing candidate — a correct deliverable + an unrequested
   bonus script/dep that errors scores zero; maps to the openssl-selfsigned-cert regression), and
   symptom-anchored fix-verification for FIX/REPAIR tasks (reproduce the exact symptom, confirm your
@@ -119,16 +129,15 @@ export ES_MAX_ITERS=120
 ./.venv/bin/harbor run -c es-tb-base20.yaml -y
 ```
 
-Keep first follow-up tests **DeepSeek-only** unless the founder explicitly requests the provider
-matrix again. Use the first-20 slice in `es-tb-base20.yaml` as the comparable baseline; provider
-YAMLs for Anthropic/OpenAI/Gemini exist in `~/tbench` but are intentionally out of scope for the
-current pass.
+Current internal TB 2.1 benchmark is a **one-pass, non-submission** matrix: DeepSeek V4 Pro native,
+DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, and GLM 5.2 via OpenRouter. Use
+`infra/benchmark/scripts/run-tb-internal-once-matrix.sh`; it enforces `K=1`, `BRIDGE=on`, and
+`SUBMIT_TB=off`. Gemini, GPT, and Sarvam are intentionally out of scope for this internal pass.
 
 ## Iteration policy
 
-- Test Terminal-Bench 2.0 / 2.1 with DeepSeek first. Other providers are comparison data only after
-  the ExecuteSpec harness has improved enough that DeepSeek is no longer failing on obvious harness
-  defects.
+- Test Terminal-Bench 2.1 internal comparisons with the locked five-model matrix only. Do not add
+  Gemini, GPT, Sarvam, or frontier routes without a fresh explicit benchmark scope.
 - Use small comparable slices first (`es-tb-base20.yaml` before wider sets). Keep job names unique or
   archive the prior `/tmp/es-tb-jobs/<job_name>` directory before rerunning.
 - After every run, inspect failures task-by-task and classify them as prompt, tool protocol,

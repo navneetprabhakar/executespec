@@ -25,4 +25,4 @@ RULES:
 6. REMOVE sections for features/packages that no longer exist.
 7. Do not duplicate anything already in decisions.md.
 8. Keep content concise — accuracy matters more than completeness.
-9. The orchestrator applies this patch atomically with optimistic locking (version check).
+9. The orchestrator applies this patch to the current workspace file. Return only a valid patch array; malformed output is rejected and will not update CODEBASE_CONTEXT.md.
