@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.entity.AppUser;
@@ -13,6 +14,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.billing.config.ManagedAiProperties;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,9 +47,35 @@ class TierPermissionServiceSoloUserTest {
     OrgMemberRepository orgMemberRepo = mock(OrgMemberRepository.class);
     tierConfigRepo = mock(TierConfigRepository.class);
     tierEnforcementService = mock(TierEnforcementService.class);
+    ManagedAiProperties managedAiProperties = managedAiProperties();
     svc =
         new TierPermissionService(
-            userRepo, orgRepo, orgMemberRepo, tierConfigRepo, tierEnforcementService);
+            userRepo,
+            orgRepo,
+            orgMemberRepo,
+            tierConfigRepo,
+            tierEnforcementService,
+            managedAiProperties);
+  }
+
+  private ManagedAiProperties managedAiProperties() {
+    ManagedAiProperties properties = new ManagedAiProperties();
+    properties.setEnabled(true);
+    properties.setTiers(
+        Map.of(
+            "FREE", tierPolicy(200),
+            "PRO", tierPolicy(2000),
+            "PRO_PLUS", tierPolicy(125000),
+            "TEAM", tierPolicy(0),
+            "ENTERPRISE", tierPolicy(0),
+            "BYOK", tierPolicy(0)));
+    return properties;
+  }
+
+  private ManagedAiProperties.TierPolicy tierPolicy(long includedCredits) {
+    ManagedAiProperties.TierPolicy policy = new ManagedAiProperties.TierPolicy();
+    policy.setIncludedCredits(includedCredits);
+    return policy;
   }
 
   private AppUser solo(String tier) {
@@ -174,6 +202,44 @@ class TierPermissionServiceSoloUserTest {
     seed("ENTERPRISE", -1, true, -1, -1, -1);
     TierPermissionService.TierPermissions p = svc.getPermissions("u-ENTERPRISE");
     assertThat(p.monthlyRunLimit()).isEqualTo(-1);
+  }
+
+  @Test
+  void freeSoloUser_withUnlimitedRunSentinel_reportsManagedCreditsQuotaModel() {
+    AppUser user = solo("FREE");
+    when(tierEnforcementService.effectiveUserLimit(user)).thenReturn(-1);
+    seed("FREE", -1, false, 0, 2, 2);
+    TierPermissionService.TierPermissions p = svc.getPermissions("u-FREE");
+
+    assertThat(p.monthlyRunLimit()).as("legacy field remains back-compatible").isEqualTo(-1);
+    assertThat(p.quotaModel()).isEqualTo("MANAGED_AI_CREDITS");
+    assertThat(p.includedAiCredits()).isEqualTo(200);
+    assertThat(p.unlimitedAiCredits()).isFalse();
+    assertThat(p.quotaDescription()).contains("active quota boundary");
+  }
+
+  @Test
+  void proSoloUser_withUnlimitedRunSentinel_reportsManagedCreditsQuotaModel() {
+    AppUser user = solo("PRO");
+    when(tierEnforcementService.effectiveUserLimit(user)).thenReturn(-1);
+    seed("PRO", -1, true, 3, 10, 5);
+    TierPermissionService.TierPermissions p = svc.getPermissions("u-PRO");
+
+    assertThat(p.monthlyRunLimit()).as("legacy field remains back-compatible").isEqualTo(-1);
+    assertThat(p.quotaModel()).isEqualTo("MANAGED_AI_CREDITS");
+    assertThat(p.includedAiCredits()).isEqualTo(2000);
+    assertThat(p.unlimitedAiCredits()).isFalse();
+  }
+
+  @Test
+  void teamSoloUser_reportsOwnKeysUnlimitedQuotaModel() {
+    solo("TEAM");
+    seed("TEAM", -1, true, -1, -1, -1);
+    TierPermissionService.TierPermissions p = svc.getPermissions("u-TEAM");
+
+    assertThat(p.quotaModel()).isEqualTo("OWN_KEYS_UNLIMITED");
+    assertThat(p.includedAiCredits()).isZero();
+    assertThat(p.unlimitedAiCredits()).isTrue();
   }
 
   // [J-01] (coverage Sprint 3 follow-up to F-03)

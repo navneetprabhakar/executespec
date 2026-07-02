@@ -1,5 +1,6 @@
 package com.navneet.executespec.auth.security;
 
+import java.util.Arrays;
 import java.util.List;
 
 import com.navneet.executespec.auth.oauth.CookieOAuth2AuthorizationRequestRepository;
@@ -44,11 +45,16 @@ public class SecurityConfig {
   private final boolean oauthEnabled;
   private final JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint;
 
-  @Value("${app.cors.allowed-origins:http://localhost:5173}")
+  @Value(
+      "${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
   private String allowedOrigins;
 
   @Value("${app.mail.base-url:http://localhost:5173}")
   private String dashboardUrl;
+
+  @Value(
+      "${auth.oauth.app-return-url:${app.cors.app-return-url:http://localhost:5173/auth/callback}}")
+  private String oauthAppReturnUrl;
 
   public SecurityConfig(
       JwtAuthenticationFilter jwtAuthenticationFilter,
@@ -283,7 +289,7 @@ public class SecurityConfig {
                   .failureHandler(
                       (req, res, ex) -> {
                         log.error("OAuth2 login failed: {}", ex.getMessage(), ex);
-                        res.sendRedirect(dashboardUrl + "/login?error=oauth_failed");
+                        res.sendRedirect(oauthLoginUrl() + "?error=oauth_failed");
                       }));
       // Preserve the CLI / VS Code /cli-login device-auth return URL across the OAuth round-trip:
       // stash ?redirect=/cli-login?... in a short-lived cookie that OAuthSuccessHandler reads back.
@@ -294,10 +300,27 @@ public class SecurityConfig {
     return http.build();
   }
 
+  private String oauthLoginUrl() {
+    String callback =
+        oauthAppReturnUrl == null || oauthAppReturnUrl.isBlank()
+            ? dashboardUrl + "/auth/callback"
+            : oauthAppReturnUrl.trim();
+    callback = callback.replaceAll("/+$", "");
+    if (callback.endsWith("/auth/callback")) {
+      return callback.substring(0, callback.length() - "/auth/callback".length()) + "/login";
+    }
+    int slash = callback.lastIndexOf('/');
+    return (slash > "https://".length() ? callback.substring(0, slash) : callback) + "/login";
+  }
+
   @Bean
   public CorsConfigurationSource corsConfigurationSource() {
     CorsConfiguration config = new CorsConfiguration();
-    config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
+    config.setAllowedOrigins(
+        Arrays.stream(allowedOrigins.split(","))
+            .map(String::trim)
+            .filter(origin -> !origin.isBlank())
+            .toList());
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
     config.setAllowedHeaders(List.of("*"));
     config.setAllowCredentials(true);

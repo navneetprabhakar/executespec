@@ -102,6 +102,7 @@ public class AvailableProviderResolver {
     if (keys.enabledProviders() != null && !keys.enabledProviders().isEmpty()) {
       available.removeIf(p -> !keys.isProviderAllowed(providerToString(p)));
     }
+    available.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
     // Fallback: if nothing available, include all system providers
     if (available.isEmpty()) {
@@ -125,6 +126,7 @@ public class AvailableProviderResolver {
     if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
     // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
+    providers.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
     if (providers.isEmpty()) {
       // Last resort: assume Anthropic is available (system default)

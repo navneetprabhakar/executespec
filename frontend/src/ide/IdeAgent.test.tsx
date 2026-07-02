@@ -243,7 +243,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('New sandbox');
     expect(host.textContent).toContain('Web agent');
     expect(host.textContent).toContain('140 tokens');
-    expect(host.textContent).toContain('AI credits pending');
+    expect(host.textContent).toContain('chat included');
     // Pending gate surfaces inline as an action card
     expect(host.textContent).toContain('Remote sandboxes waiting for your approval');
     expect(host.textContent).toContain('Add audit logs');
@@ -433,6 +433,7 @@ describe('IdeAgent', () => {
     document.body.appendChild(host);
     const localRoot = createRoot(host);
     root = localRoot;
+    const dispatch = vi.fn();
 
     await act(async () => {
       localRoot.render(
@@ -461,7 +462,7 @@ describe('IdeAgent', () => {
           attachments={[]}
           uploading={false}
           endRef={{current: null}}
-          dispatch={vi.fn()}
+          dispatch={dispatch}
           onScroll={vi.fn()}
           onSend={vi.fn()}
           onStop={vi.fn()}
@@ -487,6 +488,7 @@ describe('IdeAgent', () => {
     document.body.appendChild(host);
     const localRoot = createRoot(host);
     root = localRoot;
+    const dispatch = vi.fn();
 
     await act(async () => {
       localRoot.render(
@@ -516,7 +518,7 @@ describe('IdeAgent', () => {
           attachments={[]}
           uploading={false}
           endRef={{current: null}}
-          dispatch={vi.fn()}
+          dispatch={dispatch}
           onScroll={vi.fn()}
           onSend={vi.fn()}
           onStop={vi.fn()}
@@ -542,6 +544,7 @@ describe('IdeAgent', () => {
     document.body.appendChild(host);
     const localRoot = createRoot(host);
     root = localRoot;
+    const dispatch = vi.fn();
 
     await act(async () => {
       localRoot.render(
@@ -570,7 +573,7 @@ describe('IdeAgent', () => {
           attachments={[]}
           uploading={false}
           endRef={{current: null}}
-          dispatch={vi.fn()}
+          dispatch={dispatch}
           onScroll={vi.fn()}
           onSend={vi.fn()}
           onStop={vi.fn()}
@@ -590,8 +593,87 @@ describe('IdeAgent', () => {
     expect(codeFold).not.toBeNull();
     expect(codeFold?.hasAttribute('open')).toBe(false);
     expect(codeFold?.querySelector('summary')?.textContent).toContain('HTML');
+    expect(host.textContent).toContain('Generated artifacts');
+    expect(host.textContent).toContain('artifact-1.html');
+    expect(host.textContent).toContain('Copy');
+    expect(host.textContent).toContain('Download');
+    expect(host.textContent).toContain('Preview');
+    expect(host.textContent).toContain('Use in sandbox');
+    expect(host.textContent).toContain('Open local handoff');
     expect(host.textContent).toContain('1.6k tokens');
-    expect(host.textContent).toContain('AI credits pending');
+    expect(host.textContent).toContain('chat included');
+
+    const useInSandbox = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Use in sandbox',
+    );
+    if (!useInSandbox) throw new Error('Use in sandbox action was not rendered.');
+    await act(async () => {
+      useInSandbox.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'input:set',
+      input: expect.stringContaining('artifact-1.html'),
+    });
+  });
+
+  it('renders multi-file generated output as separate artifact actions', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+    const dispatch = vi.fn();
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          messages={[
+            {
+              id: 'turn:assistant',
+              role: 'assistant',
+              content:
+                'Here are the files:\n\n`src/App.tsx`:\n```tsx\nexport function App() { return <main />; }\n```\n\n```css filename=src/app.css\nmain { display: grid; }\n```',
+            },
+          ]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={false}
+          visibleAction={null}
+          gates={[]}
+          runCard={null}
+          runCost={null}
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={dispatch}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain('2 files');
+    expect(host.textContent).toContain('src/App.tsx');
+    expect(host.textContent).toContain('src/app.css');
+    expect([...host.querySelectorAll('.agent-artifact-item')]).toHaveLength(2);
+    expect(
+      [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Copy'),
+    ).toHaveLength(2);
+    expect(
+      [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Download'),
+    ).toHaveLength(2);
+    expect(
+      [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Use in sandbox'),
+    ).toHaveLength(2);
   });
 
   it('renders streamed route decisions and cloud-run proposal cards before execution', async () => {
@@ -653,6 +735,12 @@ describe('IdeAgent', () => {
       expect.objectContaining({
         message: 'Start a run to add billing audit logs',
         conversation: [
+          {
+            role: 'system',
+            content: expect.stringContaining(
+              'chat turns are included conversation usage and have not charged AI credits',
+            ),
+          },
           {role: 'user', content: 'What plans are waiting?'},
           {role: 'assistant', content: 'One plan is waiting for approval.'},
           {role: 'user', content: 'Start a run to add billing audit logs'},

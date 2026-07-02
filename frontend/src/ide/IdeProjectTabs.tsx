@@ -320,7 +320,7 @@ export function IdeProjectPulse() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Overview</div>
+      <h1 className='ide-h1'>Overview</h1>
       {/* §3.4 — the project landing redirects here once work exists; keep the
               composer one click away. {compose:true} skips the redirect. */}
       <div style={{margin: '4px 0 12px'}}>
@@ -848,7 +848,7 @@ export function IdeProjectRuns() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Work</div>
+      <h1 className='ide-h1'>Work</h1>
 
       <div className='ide-rtabs' style={{marginBottom: 12}}>
         <button
@@ -1227,9 +1227,9 @@ export function IdeProjectRepos() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-        <div className='ide-h1' style={{margin: 0}}>
+        <h1 className='ide-h1' style={{margin: 0}}>
           Repos
-        </div>
+        </h1>
         <span style={{flex: 1}} />
         <button className='ide-btn' onClick={openLinkPanel}>
           + Link repo

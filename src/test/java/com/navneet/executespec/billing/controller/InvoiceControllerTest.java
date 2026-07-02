@@ -123,13 +123,69 @@ class InvoiceControllerTest {
 
   private TierPermissionService.TierPermissions financePermissions() {
     return new TierPermissionService.TierPermissions(
-        false, true, false, false, false, false, false, false, false, false, false, false, true,
-        true, false, false, false, false, 0, 0, 0, 0, 0, 0, false, 0);
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        false,
+        0,
+        "NONE",
+        0,
+        false,
+        "Finance fixture has no run quota.");
   }
 
   private TierPermissionService.TierPermissions creditNotePermissions() {
     return new TierPermissionService.TierPermissions(
-        false, true, false, false, false, false, false, false, false, false, false, false, true,
-        true, true, false, false, false, 0, 0, 0, 0, 0, 0, false, 0);
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        false,
+        0,
+        "NONE",
+        0,
+        false,
+        "Finance fixture has no run quota.");
   }
 }

@@ -35,6 +35,7 @@ import {
 type NavItem = {path: string; Icon: (p: IconProps) => React.ReactElement; label: string};
 const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 const NAV: NavItem[] = [
+  {path: '/home', Icon: WorkspaceIcon, label: 'Home'},
   {path: '/compose', Icon: PlusIcon, label: 'Start'},
   {path: '/agent', Icon: CommandIcon, label: 'Agent'},
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
@@ -148,8 +149,8 @@ export default function ConsoleShell() {
     .filter(Boolean)
     .join(' ');
   const navActive = (p: string) => {
-    if (p === '/compose')
-      return path === '/' || path.startsWith('/home') || path.startsWith('/compose');
+    if (p === '/home') return path === '/' || path.startsWith('/home');
+    if (p === '/compose') return path.startsWith('/compose');
     if (p === '/runs')
       return (
         path.startsWith('/runs') ||
@@ -234,23 +235,36 @@ export default function ConsoleShell() {
 
   return (
     <div className={shellClasses}>
+      <a
+        href='#main-content'
+        className='con-skip-link'
+        onClick={(e) => {
+          e.preventDefault();
+          mainRef.current?.focus({preventScroll: false});
+        }}
+      >
+        Skip to main content
+      </a>
       {!workFocusedPath && <AnnouncementBanner />}
       <header className='con-topbar'>
         <button
+          type='button'
           className='con-icon con-only-mobile'
           onClick={() => setDrawerOpen(true)}
-          title='Menu'
-          aria-label='Open menu'
+          title='Open navigation menu'
+          aria-label='Open navigation menu'
+          aria-expanded={drawerOpen}
         >
           <MenuIcon size={20} />
         </button>
-        <NavLink to='/compose' className='con-brand'>
+        <NavLink to='/home' className='con-brand'>
           <img className='con-brand-mark' src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
           <span>ExecuteSpec</span>
         </NavLink>
         <span className='con-topbar-spacer' />
         <PlanGateIndicator dir='down' />
         <button
+          type='button'
           className='con-newrun'
           onClick={() => navigate(primaryCta.path)}
           title={primaryCta.title}
@@ -259,6 +273,7 @@ export default function ConsoleShell() {
           <span className='con-newrun-label'>{primaryCta.label}</span>
         </button>
         <button
+          type='button'
           className='con-icon'
           onClick={() => setPaletteOpen(true)}
           title='Command palette (⌘K)'
@@ -267,6 +282,7 @@ export default function ConsoleShell() {
           <CommandIcon size={18} />
         </button>
         <button
+          type='button'
           className='con-icon'
           onClick={toggleTheme}
           title={`Theme: ${theme} — click to switch`}
@@ -309,6 +325,7 @@ export default function ConsoleShell() {
         {/* Profile/account entry point. Deeper billing/org routes stay inside Account. */}
         <div className='con-account-menu-anchor' style={{position: 'relative'}}>
           <button
+            type='button'
             className='con-icon'
             title='Account & settings'
             aria-label='Account and settings'
@@ -337,6 +354,7 @@ export default function ConsoleShell() {
             <span>ExecuteSpec</span>
           </div>
           <button
+            type='button'
             className='con-side-collapse con-only-desktop'
             onClick={toggleNav}
             title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -408,7 +426,7 @@ export default function ConsoleShell() {
               <span className='con-side-count'>{projects.length}</span>
             </summary>
             {projects.length === 0 ? (
-              <button className='con-runitem' onClick={() => navigate('/projects')}>
+              <button type='button' className='con-runitem' onClick={() => navigate('/projects')}>
                 <PlusIcon size={13} />
                 <span className='con-runitem-label'>New project</span>
               </button>
@@ -426,6 +444,7 @@ export default function ConsoleShell() {
               ))
             )}
             <button
+              type='button'
               className='con-runitem con-runitem-action'
               onClick={() => navigate('/projects')}
             >
@@ -464,6 +483,7 @@ export default function ConsoleShell() {
         </nav>
 
         <main
+          id='main-content'
           className='con-content'
           ref={mainRef}
           tabIndex={-1}

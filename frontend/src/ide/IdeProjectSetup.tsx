@@ -34,7 +34,7 @@ export function IdeProjectSetup() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Project setup</div>
+      <h1 className='ide-h1'>Project setup</h1>
       <div className='ide-sub'>
         Configure access, repositories, and project context for this workspace.
       </div>

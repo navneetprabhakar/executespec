@@ -56,8 +56,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
     this.authorizedClientService = authorizedClientService;
   }
 
-  @Value("${app.mail.base-url:http://localhost:5173}")
-  private String dashboardUrl;
+  @Value(
+      "${auth.oauth.app-return-url:${app.cors.app-return-url:http://localhost:5173/auth/callback}}")
+  private String appReturnUrl;
 
   @Override
   public void onAuthenticationSuccess(
@@ -77,12 +78,8 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       OAuthProfile profile =
           oAuthUserMapper.toProfile(registrationId, oAuth2User, authorizedClient);
 
-      // Single-surface retirement (2026-05-06) — the per-surface
-      // OAuth return URL was groundwork for the consumer/B2B split
-      // that's no longer on the roadmap. Every login now lands on
-      // the single dashboardUrl, like it did before V143.
-      String baseRedirectUrl = dashboardUrl + "/auth/callback";
-      String baseLoginErrorUrl = dashboardUrl + "/login";
+      String baseRedirectUrl = callbackUrl();
+      String baseLoginErrorUrl = loginUrl();
 
       if (profile.email() == null || profile.email().isBlank()) {
         log.warn("OAuth login failed: no email returned from provider {}", registrationId);
@@ -131,16 +128,31 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
     } catch (OAuthEmailConflictException e) {
       log.warn("OAuth email conflict: {}", e.getMessage());
       response.sendRedirect(
-          dashboardUrl
-              + "/login?error="
+          loginUrl()
+              + "?error="
               + URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
     } catch (Exception e) {
       log.error("OAuth login error", e);
       response.sendRedirect(
-          dashboardUrl
-              + "/login?error="
-              + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
+          loginUrl() + "?error=" + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
     }
+  }
+
+  private String callbackUrl() {
+    String value =
+        appReturnUrl == null || appReturnUrl.isBlank()
+            ? "http://localhost:5173/auth/callback"
+            : appReturnUrl.trim();
+    return value.replaceAll("/+$", "");
+  }
+
+  private String loginUrl() {
+    String callback = callbackUrl();
+    if (callback.endsWith("/auth/callback")) {
+      return callback.substring(0, callback.length() - "/auth/callback".length()) + "/login";
+    }
+    int slash = callback.lastIndexOf('/');
+    return (slash > "https://".length() ? callback.substring(0, slash) : callback) + "/login";
   }
 
   /**

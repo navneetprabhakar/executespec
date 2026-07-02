@@ -168,7 +168,7 @@ export function IdeProjectSettings() {
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
       <ProjectTabs projectId={projectId} />
-      <div className='ide-h1'>Settings</div>
+      <h1 className='ide-h1'>Settings</h1>
       {!project ? (
         <IdeLoader label='Loading settings…' />
       ) : (
@@ -190,6 +190,7 @@ export function IdeProjectSettings() {
                 <Field label='Project name'>
                   <input
                     className='ide-input'
+                    aria-label='Project name'
                     value={name}
                     disabled={!canEdit}
                     onChange={(e) => setName(e.target.value)}
@@ -198,6 +199,7 @@ export function IdeProjectSettings() {
                 <Field label='Description'>
                   <textarea
                     className='ide-textarea'
+                    aria-label='Project description'
                     value={description}
                     disabled={!canEdit}
                     rows={3}
@@ -207,19 +209,20 @@ export function IdeProjectSettings() {
                 <Field label='Default AI provider'>
                   <select
                     className='ide-select'
+                    aria-label='Default AI provider'
                     value={provider}
                     disabled={!canEdit}
                     onChange={(e) => setProvider(e.target.value)}
                   >
                     <option value='ANTHROPIC'>Anthropic</option>
                     <option value='OPENAI'>OpenAI</option>
-                    <option value='GEMINI'>Gemini</option>
                     <option value='DEEPSEEK'>DeepSeek</option>
                   </select>
                 </Field>
                 <Field label='Target branch'>
                   <input
                     className='ide-input'
+                    aria-label='Target branch'
                     value={targetBranch}
                     disabled={!canEdit}
                     onChange={(e) => setTargetBranch(e.target.value)}
@@ -228,6 +231,7 @@ export function IdeProjectSettings() {
                 <Field label='Branch naming pattern'>
                   <input
                     className='ide-input'
+                    aria-label='Branch naming pattern'
                     value={branchNaming}
                     disabled={!canEdit}
                     onChange={(e) => setBranchNaming(e.target.value)}
@@ -242,6 +246,7 @@ export function IdeProjectSettings() {
                 <Field label='Default GitHub owner'>
                   <input
                     className='ide-input'
+                    aria-label='Default GitHub owner'
                     value={githubOwner}
                     disabled={!canEdit}
                     placeholder='e.g. acme-co'
