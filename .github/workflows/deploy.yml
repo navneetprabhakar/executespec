@@ -234,7 +234,10 @@ jobs:
           BENCHMARK_GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           BENCHMARK_DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           BENCHMARK_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          BENCHMARK_GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          # GitHub Actions reserves the GITHUB_* secret prefix, so the benchmark
+          # env stores this as BENCHMARK_GITHUB_PAT and writes GITHUB_PAT into
+          # the app env file at deploy time.
+          BENCHMARK_GITHUB_PAT: ${{ secrets.BENCHMARK_GITHUB_PAT }}
           BENCHMARK_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           BENCHMARK_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           BENCHMARK_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
