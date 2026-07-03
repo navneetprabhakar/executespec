@@ -7,7 +7,8 @@
 #   • in-app /benchmark bridge enabled by default
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
-#                               K CONCURRENCY COMPACTION TASK_LIMIT JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
+#                               K CONCURRENCY HARBOR_AGENT_TIMEOUT_SEC COMPACTION TASK_LIMIT
+#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -22,6 +23,7 @@ K="${K:-1}"                                            # internal benchmark: exa
 TASK_LIMIT="${TASK_LIMIT:-}"                           # optional sanity subset; full TB leaves empty
 TOTAL_TASKS="${TOTAL_TASKS:-${TASK_LIMIT:-89}}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
+HARBOR_AGENT_TIMEOUT_SEC="${HARBOR_AGENT_TIMEOUT_SEC:-1350}" # higher than ES TB wall-clock; avoids Harbor killing first
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
 JOB_NAME="${JOB_NAME:-es-tb-${PROVIDER}-k${K}}"
 GCS_BUCKET="${GCS_BUCKET:-}"                           # gs://bucket/path  (optional → tracker + results)
@@ -51,6 +53,8 @@ n_attempts: $K
 agents:
   - import_path: es_harbor_agent:ExecuteSpecAgent
     model_name: $HARBOR_MODEL
+    override_timeout_sec: $HARBOR_AGENT_TIMEOUT_SEC
+    max_timeout_sec: $HARBOR_AGENT_TIMEOUT_SEC
 datasets:
   - name: $TB_DATASET
 EOF
@@ -59,7 +63,7 @@ if [ -n "$TASK_LIMIT" ]; then
     n_tasks: $TASK_LIMIT
 EOF
 fi
-LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, internal-only=true)"
+LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, agent_timeout=${HARBOR_AGENT_TIMEOUT_SEC}s, internal-only=true)"
 
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3

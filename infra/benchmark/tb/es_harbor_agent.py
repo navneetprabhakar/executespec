@@ -22,6 +22,7 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
+    ES_CANCEL_ON_ABORT cancel the ExecuteSpec run if Harbor aborts the adapter (default true)
 """
 import asyncio
 import base64
@@ -90,6 +91,7 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
+        self.cancel_on_abort = os.environ.get("ES_CANCEL_ON_ABORT", "true").lower() != "false"
         self._trajectory_steps = []
         if not self.provider or not self.model:
             raise ValueError("ES_PROVIDER and ES_MODEL env vars are required")
@@ -171,8 +173,14 @@ class ExecuteSpecAgent(BaseAgent):
                 }
                 self._add_final_step(run_id, final, tools, context)
                 self._write_trajectory(run_id or str(uuid.uuid4()), context)
+            except asyncio.CancelledError as e:
+                self._add_error_step(run_id, e, tools)
+                await self._cancel_run_on_abort(client, token if "token" in locals() else None, run_id, final)
+                self._write_trajectory(run_id or str(uuid.uuid4()), context)
+                raise
             except Exception as e:
                 self._add_error_step(run_id, e, tools)
+                await self._cancel_run_on_abort(client, token if "token" in locals() else None, run_id, final)
                 self._write_trajectory(run_id or str(uuid.uuid4()), context)
                 raise
 
@@ -392,6 +400,23 @@ class ExecuteSpecAgent(BaseAgent):
         r = await client.get(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
         r.raise_for_status()
         return r.json() if r.content else {}
+
+    async def _delete(self, client, path, token) -> None:
+        r = await client.delete(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
+        if r.status_code not in (200, 202, 204, 404):
+            r.raise_for_status()
+
+    async def _cancel_run_on_abort(self, client, token, run_id, final) -> None:
+        if not self.cancel_on_abort or not token or not run_id or final is not None:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._delete(client, f"/api/runs/{run_id}", token)),
+                timeout=10,
+            )
+            self.logger.warning(f"[es] cancelled backend run after adapter abort: {run_id}")
+        except Exception as e:
+            self.logger.warning(f"[es] backend cancel after adapter abort failed for {run_id}: {e}")
 
     @staticmethod
     def _parse_frame(lines):
