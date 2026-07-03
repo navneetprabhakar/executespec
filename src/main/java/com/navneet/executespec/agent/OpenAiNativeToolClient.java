@@ -355,8 +355,31 @@ public class OpenAiNativeToolClient {
       // hits on a multi-iteration task is a flag that the prefix is mutating.
       int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+
+      Double providerCost = numberOrNull(usage.path("cost"));
+      if (providerCost != null) {
+        metaBuilder.keyValue("provider_reported_cost_usd", providerCost);
+      }
+      Double upstreamCost =
+          numberOrNull(usage.path("cost_details").path("upstream_inference_cost"));
+      if (upstreamCost != null) {
+        metaBuilder.keyValue("provider_upstream_cost_usd", upstreamCost);
+      }
     }
     return new ChatResponse(generations, metaBuilder.build());
+  }
+
+  private static Double numberOrNull(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) return null;
+    if (node.isNumber()) return node.asDouble();
+    if (node.isTextual()) {
+      try {
+        return Double.parseDouble(node.asText());
+      } catch (NumberFormatException ignored) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /** Request DTO for {@link #call(OpenAiToolCallRequest)}. */
