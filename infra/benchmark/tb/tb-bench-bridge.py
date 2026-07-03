@@ -157,6 +157,22 @@ def _scan(job_dir):
     return out
 
 
+def _existing_attempts(base, token, rid):
+    """Return task -> recorded attempt count for an existing benchmark_run."""
+    try:
+        detail = _req(base, f"/api/v2/test/benchmark/{rid}", token, "GET")
+    except Exception as e:  # noqa: BLE001
+        print(f"bridge: existing run lookup failed for {rid}: {e}", flush=True)
+        return {}
+    attempts = {}
+    for row in detail.get("tasks") or []:
+        task = row.get("taskName")
+        att = row.get("attempt") or 1
+        if task:
+            attempts[task] = max(attempts.get(task, 0), int(att))
+    return attempts
+
+
 def _fail_run(base, token, rid, message, fail_marker=None, payload=None):
     body = {"type": "RUN_FAILED", "message": message}
     if payload is not None:
@@ -174,6 +190,12 @@ def main():
     ap.add_argument("--dataset", default="terminal-bench-2")
     ap.add_argument("--provider", required=True)
     ap.add_argument("--model", required=True)
+    ap.add_argument("--run-id", help="Existing ExecuteSpec benchmark_run id to resume")
+    ap.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help="When --run-id is set, treat already-recorded attempts as posted",
+    )
     ap.add_argument("--k", type=int, default=1)
     ap.add_argument("--total", type=int, required=True)  # number of TASKS (not trials)
     ap.add_argument("--poll", type=int, default=15)
@@ -190,27 +212,44 @@ def main():
         print("bridge: login failed")
         return 1
 
-    run = _req(
-        base,
-        "/api/v2/test/benchmark/start",
-        token,
-        "POST",
-        {
-            "suite": a.suite,
-            "dataset": a.dataset,
-            "provider": a.provider,
-            "model": a.model,
-            "k": a.k,
-            "totalTasks": a.total,
-        },
-    )
-    rid = run["id"]
-    print("bridge: benchmark_run id =", rid, flush=True)
+    if a.run_id:
+        rid = a.run_id
+        print("bridge: resuming benchmark_run id =", rid, flush=True)
+    else:
+        run = _req(
+            base,
+            "/api/v2/test/benchmark/start",
+            token,
+            "POST",
+            {
+                "suite": a.suite,
+                "dataset": a.dataset,
+                "provider": a.provider,
+                "model": a.model,
+                "k": a.k,
+                "totalTasks": a.total,
+            },
+        )
+        rid = run["id"]
+        print("bridge: benchmark_run id =", rid, flush=True)
     print("bridge: dashboard =", base.rstrip("/") + "/benchmark", flush=True)
 
     expected_trials = max(a.total, a.total * a.k)
     posted = set()  # trial dirs already posted
     attempts = {}  # task -> attempt counter
+    if a.run_id and a.resume_existing:
+        attempts = _existing_attempts(base, token, rid)
+        existing_by_task = dict(attempts)
+        for trial, info in sorted(_scan(a.job_dir).items()):
+            seen = existing_by_task.get(info["task"], 0)
+            if seen <= 0:
+                continue
+            posted.add(trial)
+            existing_by_task[info["task"]] = seen - 1
+        print(
+            f"bridge: resume-existing marked {len(posted)} existing trials posted",
+            flush=True,
+        )
     deadline = time.time() + a.max_min * 60
     last_change = time.time()
     idle_limit = a.idle_min * 60
