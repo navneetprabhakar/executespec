@@ -119,7 +119,18 @@ Target:
 - `infra/benchmark/scripts/run-tb.sh` now emits Harbor `agents[].override_timeout_sec`
   and `agents[].max_timeout_sec`.
 - Default `HARBOR_AGENT_TIMEOUT_SEC=1350`.
-- Preserve a buffer for one slow in-flight LLM/tool turn plus the terminal finalizer.
+- ExecuteSpec TB worker wall-clock is configurable via
+  `terminal-bench.worker-wall-clock-seconds`; default is now `1260s`, leaving a
+  90s buffer under Harbor's `1350s` cap for one slow in-flight LLM/tool turn plus
+  the terminal finalizer.
+- Harbor has no true live pause for an in-flight trial. To preserve benchmark
+  progress when changing server values, stop the Harbor launcher/bridge, keep the
+  job directory, deploy the backend change, then resume the same job directory.
+  Completed trial directories with `result.json` are reused; active incomplete
+  trial directories are rerun.
+- If the in-app bridge must be restarted against the same dashboard row, use
+  `tb-bench-bridge.py --run-id <benchmark_run_id> --resume-existing` so already
+  recorded attempts are not reposted.
 
 ### 2. Adapter finally-cleanup
 

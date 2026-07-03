@@ -24,6 +24,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.context.ContextSnapshotFactory;
@@ -57,11 +58,12 @@ public class TerminalBenchRunService {
   private final FeatureFlagService featureFlagService;
 
   /**
-   * Per-task wall-clock safety net. Harbor's agent phase currently times out at 1350s. The worker
-   * only checks wall-clock at iteration boundaries and does not interrupt an in-flight LLM/tool
-   * call, so keep a conservative buffer for one slow turn plus the terminal finalizer.
+   * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
+   * runner sets the outer agent timeout to 1350s; keep this lower so ExecuteSpec can run its
+   * terminal finalizer and return a clean terminal state before Harbor kills the adapter.
    */
-  private static final int DEFAULT_WALL_CLOCK_SECONDS = 900;
+  @Value("${terminal-bench.worker-wall-clock-seconds:1260}")
+  private int workerWallClockSeconds;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
@@ -296,7 +298,7 @@ iterating needlessly.
                   .stagnationWarnAfter(TB_STAGNATION_WARN_AFTER)
                   .stagnationForceAfter(TB_STAGNATION_FORCE_AFTER)
                   .temperature(0.0)
-                  .wallClockSeconds(DEFAULT_WALL_CLOCK_SECONDS)
+                  .wallClockSeconds(workerWallClockSeconds)
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)

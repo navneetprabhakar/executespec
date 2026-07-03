@@ -133,6 +133,11 @@ execution:
       enabled: true
     max-reruns-per-task: 1
 
+terminal-bench:
+  # Internal TB 2.1 runs use Harbor agent timeout 1350s. Keep the ExecuteSpec worker
+  # below that outer cap while leaving enough room for long productive terminal tasks.
+  worker-wall-clock-seconds: 1260
+
 managed-ai:
   enabled: true
   credit-pack-usd: 1.25
