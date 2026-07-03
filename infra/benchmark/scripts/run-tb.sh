@@ -43,6 +43,13 @@ if [ "${SUBMIT_TB:-off}" != "off" ]; then
   exit 2
 fi
 
+# Keep the Harbor adapter in ~/tbench aligned with the versioned repo copy. setup-tb.sh performs
+# the initial install, but benchmark reruns must pick up adapter fixes without a separate manual
+# copy step.
+if [ -f "$REPO/infra/benchmark/tb/es_harbor_agent.py" ]; then
+  cp "$REPO/infra/benchmark/tb/es_harbor_agent.py" "$TB_DIR/es_harbor_agent.py"
+fi
+
 # ── 1. harbor config on the fly (persistent jobs_dir) ───────────────────────
 CFG="$TB_DIR/es-tb-runtb-${JOB_NAME}.yaml"
 cat > "$CFG" <<EOF
