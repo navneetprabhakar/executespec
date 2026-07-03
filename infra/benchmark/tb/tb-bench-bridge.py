@@ -47,6 +47,9 @@ def _classify_trial(result, reward):
     """Return (outcome, reason) independent of reward math."""
     if reward > 0:
         return "PASSED", None
+    setup_failure = _setup_failure_reason(result)
+    if setup_failure:
+        return "INFRA_SETUP_FAILED", setup_failure
     ar = result.get("agent_result") or {}
     vr = result.get("verifier_result") or {}
     status = _first_text(
@@ -82,6 +85,44 @@ def _classify_trial(result, reward):
     return "FAILED", reason or status
 
 
+def _setup_failure_reason(result):
+    """Detect Harbor failures before the ExecuteSpec agent/verifier ran."""
+    if result.get("agent_result") is not None or result.get("verifier_result") is not None:
+        return None
+    exc = result.get("exception_info") or result.get("exception") or result.get("error")
+    env = result.get("environment_setup") or {}
+    execution = result.get("agent_execution")
+    verifier = result.get("verifier")
+    if not exc and not env:
+        return None
+    text = json.dumps(
+        {
+            "exception_info": exc,
+            "environment_setup": env,
+            "agent_execution": execution,
+            "verifier": verifier,
+        },
+        default=str,
+    )
+    hay = text.lower()
+    if any(
+        marker in hay
+        for marker in (
+            "docker",
+            "compose",
+            "container",
+            "image",
+            "registry",
+            "environment",
+            "setup",
+            "harbor",
+        )
+    ):
+        compact = " ".join(text.split())
+        return compact[:1200]
+    return None
+
+
 def _scan(job_dir):
     """{trial_dir: {task, reward, esRunId, cost, in_tok, out_tok}} from every
     <task>__<hash>/result.json. One entry per trial (= per attempt), so k>1 is preserved."""
@@ -111,8 +152,19 @@ def _scan(job_dir):
             "out_tok": ar.get("n_output_tokens"),
             "outcome": outcome,
             "reason": reason,
+            "fatal": outcome == "INFRA_SETUP_FAILED",
         }
     return out
+
+
+def _fail_run(base, token, rid, message, fail_marker=None, payload=None):
+    body = {"type": "RUN_FAILED", "message": message}
+    if payload is not None:
+        body["payload"] = json.dumps(payload)
+    _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", body)
+    if fail_marker:
+        with open(fail_marker, "w", encoding="utf-8") as fh:
+            fh.write(message + "\n")
 
 
 def main():
@@ -127,6 +179,7 @@ def main():
     ap.add_argument("--poll", type=int, default=15)
     ap.add_argument("--max-min", type=int, default=600)
     ap.add_argument("--idle-min", type=int, default=25)  # finalize if no new trial for this long
+    ap.add_argument("--fail-marker")
     a = ap.parse_args()
 
     base = os.environ["BR_ES_BASE"]
@@ -163,6 +216,33 @@ def main():
     idle_limit = a.idle_min * 60
     while time.time() < deadline:
         trials = _scan(a.job_dir)
+        fatal_trial = next(
+            ((trial, info) for trial, info in sorted(trials.items()) if info.get("fatal")),
+            None,
+        )
+        if fatal_trial:
+            trial, info = fatal_trial
+            msg = (
+                "INVALID BENCHMARK RUN: Harbor failed during environment setup before "
+                f"ExecuteSpec agent execution for task={info['task']} trial={trial}; "
+                "do not use this score for model comparison."
+            )
+            try:
+                _fail_run(
+                    base,
+                    token,
+                    rid,
+                    msg,
+                    a.fail_marker,
+                    {"trial": trial, "task": info["task"], "reason": info.get("reason")},
+                )
+            except Exception as e:  # noqa: BLE001
+                print("bridge: RUN_FAILED post failed", e, flush=True)
+                if a.fail_marker:
+                    with open(a.fail_marker, "w", encoding="utf-8") as fh:
+                        fh.write(msg + "\n")
+            print(f"bridge: fatal setup failure — {msg}", flush=True)
+            return 2
         for trial, info in sorted(trials.items()):
             if trial in posted:
                 continue

@@ -8,7 +8,7 @@
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
 #                               K CONCURRENCY HARBOR_AGENT_TIMEOUT_SEC COMPACTION TASK_LIMIT
-#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR
+#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -25,6 +25,10 @@ TOTAL_TASKS="${TOTAL_TASKS:-${TASK_LIMIT:-89}}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
 HARBOR_AGENT_TIMEOUT_SEC="${HARBOR_AGENT_TIMEOUT_SEC:-1350}" # higher than ES TB wall-clock; avoids Harbor killing first
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
+TB_PREFLIGHT_IMAGES="${TB_PREFLIGHT_IMAGES:-on}"       # on|off; fail-fast on Docker Hub/cache issues
+TB_PREFLIGHT_JOBS="${TB_PREFLIGHT_JOBS:-4}"
+TB_PREFLIGHT_RETRIES="${TB_PREFLIGHT_RETRIES:-5}"
+TB_PREFLIGHT_RETRY_SLEEP="${TB_PREFLIGHT_RETRY_SLEEP:-20}"
 JOB_NAME="${JOB_NAME:-es-tb-${PROVIDER}-k${K}}"
 GCS_BUCKET="${GCS_BUCKET:-}"                           # gs://bucket/path  (optional → tracker + results)
 TRACKER="$REPO/infra/benchmark/scripts/tb-tracker.py"
@@ -72,6 +76,25 @@ EOF
 fi
 LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, agent_timeout=${HARBOR_AGENT_TIMEOUT_SEC}s, internal-only=true)"
 
+# ── 1b. materialize task metadata + pre-pull prebuilt images ────────────────
+# Harbor environment setup failures are not model failures. Pull every cached
+# TB task image before starting the timed run and stop here if Docker Hub/cache
+# is unhealthy.
+if [ "$TB_PREFLIGHT_IMAGES" = on ]; then
+  LOG "preflight: downloading Harbor task metadata for $TB_DATASET"
+  ( cd "$TB_DIR" && ./.venv/bin/harbor download "$TB_DATASET" --cache ) || exit 1
+  LOG "preflight: pulling Terminal-Bench task images"
+  python3 "$REPO/infra/benchmark/scripts/tb-preflight-images.py" \
+    --package terminal-bench \
+    --jobs "$TB_PREFLIGHT_JOBS" \
+    --retries "$TB_PREFLIGHT_RETRIES" \
+    --retry-sleep "$TB_PREFLIGHT_RETRY_SLEEP" \
+    --min-images "$TOTAL_TASKS" \
+    --image-list-out "$JOBS_DIR/${JOB_NAME}-images.txt" || exit 1
+else
+  LOG "preflight: image warmup disabled (TB_PREFLIGHT_IMAGES=off)"
+fi
+
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
   ( cd "$REPO" && JAVA_HOME=$JAVA_HOME mvn -q spring-boot:run -Dspring-boot.run.fork=false \
@@ -101,6 +124,7 @@ LOG "backend UP · compaction=$COMPACTION · benchmark quality flags asserted"
 
 # ── 3. launch the LIVE tracker (loop + telegram + gcs) ──────────────────────
 DONE="$JOBS_DIR/${JOB_NAME}.done"; rm -f "$DONE"
+BRIDGE_FAIL="$JOBS_DIR/${JOB_NAME}.bridge-failed"; rm -f "$BRIDGE_FAIL"
 GCSARG=(); [ -n "$GCS_BUCKET" ] && GCSARG=(--gcs "$GCS_BUCKET/tb-tracker.html")
 nohup python3 "$TRACKER" "$JOBS_DIR/$JOB_NAME" --name "$MODEL · TB k=$K" --total "$TOTAL_TASKS" \
   --loop 300 --telegram --tg-script "$TG" --done-marker "$DONE" \
@@ -118,6 +142,7 @@ if [ "${BRIDGE:-on}" = on ]; then
   nohup python3 "$BRIDGE_PY" --job-dir "$JOBS_DIR/$JOB_NAME" \
     --provider "$PROVIDER" --model "$MODEL" --k "$K" --total "$TOTAL_TASKS" \
     --dataset "$BENCHMARK_DATASET" --idle-min 30 --max-min "${BRIDGE_MAX_MIN:-1440}" \
+    --fail-marker "$BRIDGE_FAIL" \
     > "$JOBS_DIR/${JOB_NAME}-bridge.log" 2>&1 &
   LOG "in-app bridge live → http://localhost:8080/benchmark (run id in ${JOB_NAME}-bridge.log)"
 else
@@ -130,7 +155,32 @@ export ES_PROVIDER="$PROVIDER" ES_MODEL="$MODEL" ES_MAX_ITERS="${ES_MAX_ITERS:-1
 LOG "harbor run starting (provider=$PROVIDER model=$MODEL)…"
 RUN_PREFIX=()
 command -v caffeinate >/dev/null 2>&1 && RUN_PREFIX=(caffeinate -dimsu)
-"${RUN_PREFIX[@]}" ./.venv/bin/harbor run -c "$CFG" -y 2>&1 | tee "$JOBS_DIR/${JOB_NAME}-run.log"
+HARBOR_RC=0
+if command -v setsid >/dev/null 2>&1; then
+  setsid "${RUN_PREFIX[@]}" ./.venv/bin/harbor run -c "$CFG" -y > >(tee "$JOBS_DIR/${JOB_NAME}-run.log") 2>&1 &
+else
+  "${RUN_PREFIX[@]}" ./.venv/bin/harbor run -c "$CFG" -y > >(tee "$JOBS_DIR/${JOB_NAME}-run.log") 2>&1 &
+fi
+HARBOR_PID=$!
+while kill -0 "$HARBOR_PID" 2>/dev/null; do
+  if [ -f "$BRIDGE_FAIL" ]; then
+    LOG "bridge marked run failed; stopping Harbor"
+    PGID=$(ps -o pgid= -p "$HARBOR_PID" 2>/dev/null | tr -d ' ')
+    if [ -n "$PGID" ] && [ "$PGID" != "$(ps -o pgid= $$ | tr -d ' ')" ]; then
+      kill -TERM "-$PGID" 2>/dev/null || true
+      sleep 10
+      kill -KILL "-$PGID" 2>/dev/null || true
+    else
+      kill -TERM "$HARBOR_PID" 2>/dev/null || true
+      sleep 10
+      kill -KILL "$HARBOR_PID" 2>/dev/null || true
+    fi
+    HARBOR_RC=2
+    break
+  fi
+  sleep 10
+done
+wait "$HARBOR_PID" || HARBOR_RC=$?
 
 # ── 5. done: marker, final tracker tick, GCS results sync, ping ─────────────
 touch "$DONE"; sleep 6   # let the tracker write its final cycle
@@ -139,3 +189,4 @@ SC=$(find "$JOBS_DIR/$JOB_NAME" -name reward.txt 2>/dev/null | wc -l | tr -d ' '
 PA=$(find "$JOBS_DIR/$JOB_NAME" -name reward.txt -exec grep -l '^1' {} \; 2>/dev/null | wc -l | tr -d ' ')
 [ -f "$TG" ] && python3 "$TG" "🏁 TB k=$K DONE — $MODEL · ${PA}/${SC} trials passed. Results: $JOBS_DIR/$JOB_NAME ${GCS_BUCKET:+(+GCS)}." >/dev/null 2>&1
 LOG "DONE — ${PA}/${SC} trial-passes. Results in $JOBS_DIR/$JOB_NAME"
+exit "$HARBOR_RC"
