@@ -128,6 +128,9 @@ Target:
   job directory, deploy the backend change, then resume the same job directory.
   Completed trial directories with `result.json` are reused; active incomplete
   trial directories are rerun.
+- If the in-app bridge must be restarted against the same dashboard row, use
+  `tb-bench-bridge.py --run-id <benchmark_run_id> --resume-existing` so already
+  recorded attempts are not reposted.
 
 ### 2. Adapter finally-cleanup
 
