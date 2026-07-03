@@ -3,6 +3,8 @@
 > Operator runbook for the internal TB 2.1 full-89 benchmark on the amd64 benchmark VM.
 > This is **not a leaderboard submission**. It is k=1 only, tracked through the in-app
 > `/benchmark` dashboard.
+>
+> TB 2.1-specific change/RCA history lives in [`TB21-OPERATIONAL-NOTES.md`](TB21-OPERATIONAL-NOTES.md).
 
 **Why the amd64 VM, not the laptop:** the Mac is arm64, so it emulates the amd64 TB task images,
 which destabilizes runs and understates results. Run this on the benchmark VM.
