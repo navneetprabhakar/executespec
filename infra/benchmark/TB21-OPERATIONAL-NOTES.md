@@ -49,6 +49,19 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
 - `/benchmark` is the operator view for score, cost, tokens, and per-task pass/fail status.
 - Harbor trial `result.json` and `reward.txt` remain the authoritative raw scoring artifacts.
 
+### Docker image preflight and contaminated-run guard
+
+- `infra/benchmark/scripts/run-tb.sh` now defaults `TB_PREFLIGHT_IMAGES=on`.
+- Before Harbor starts, it runs `harbor download <dataset> --cache` and then
+  `infra/benchmark/scripts/tb-preflight-images.py`.
+- The preflight reads each cached task's `task.toml` `docker_image` value and pulls every prebuilt
+  image with retries. If the image cache or Docker Hub is unhealthy, the run fails before any model
+  tokens are spent.
+- The bridge now treats Harbor setup failures before ExecuteSpec agent execution as
+  `INFRA_SETUP_FAILED`, posts `RUN_FAILED`, writes a bridge fail marker, and the runner stops Harbor.
+- These rows must not be compared as model `reward=0` failures. A run with setup failures is
+  contaminated and must be rerun after the infra issue is cleared.
+
 ## Flash gatefix run observations
 
 Flash gatefix run:
@@ -149,6 +162,23 @@ After the timeout/orphan fix is deployed and Flash is rerun:
   - `/benchmark` rows remain cleanly attributable by run id and job dir.
 - Do not mix two models into a single Harbor job. Use separate job dirs, separate benchmark run ids,
   and separate Harbor configs.
+
+### 5. Docker registry/setup failure policy
+
+Problem:
+
+- Docker Hub returned registry `500 Internal Server Error` during Harbor environment setup for the
+  Pro-native run `tb21-20260703-0655-deepseek-v4-pro-native-timeoutfix-c4`.
+- Harbor wrote `result.json` rows with no `agent_result` / no `verifier_result`, so the old bridge
+  counted them as `TASK_SCORED reward=0` with `esRunId=null`.
+- That makes the in-app resolved rate look like a model score even though ExecuteSpec never ran.
+
+Target:
+
+- Pre-pull all TB task images before the timed run.
+- Fail the benchmark if Harbor reports setup failure before agent execution.
+- Do not start another model from a contaminated run; mark it invalid in `/benchmark`, stop Harbor,
+  and rerun that same model after preflight passes.
 
 ## RCA/reporting notes
 
