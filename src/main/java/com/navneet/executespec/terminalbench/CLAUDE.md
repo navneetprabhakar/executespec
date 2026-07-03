@@ -87,10 +87,11 @@ worker treats failed tests as successful verification and benchmark failure anal
   iteration 16, sends a deadline nudge near iteration 32, and runs a restricted terminal finalizer at
   the force threshold (currently iteration 64) even if shell calls keep resetting the progress
   counter. Wall-clock-exceeded terminal runs also get one restricted finalizer attempt before they
-  fail. The server-side TB worker wall clock is **900s**, intentionally below Harbor's 1350s agent
-  timeout with buffer for one slow in-flight tool/LLM turn plus the terminal finalizer, so long runs
-  fail cleanly through ExecuteSpec instead of surfacing as Harbor `AgentTimeoutError` + orphaned
-  backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
+  fail. The server-side TB worker wall clock is configurable through
+  `terminal-bench.worker-wall-clock-seconds` and defaults to **1260s**, intentionally below Harbor's
+  1350s agent timeout with buffer for one slow in-flight tool/LLM turn plus the terminal finalizer,
+  so long runs fail cleanly through ExecuteSpec instead of surfacing as Harbor `AgentTimeoutError` +
+  orphaned backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
   runs the forced terminal finalizer so the model must emit `completeTask` or write/edit the exact
   `/app` artifact instead of failing the ExecuteSpec run while the artifact may already be correct.
 - Latest comparable first-20 run (`/tmp/es-tb-jobs/es-deepseek-base20-iter100-finalizer-20260606-095500`):
