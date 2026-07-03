@@ -155,7 +155,11 @@ public class RunCostTracker {
     // outTok).
     int reasoningTok = thinkingTok > 0 ? thinkingTok : readMetaInt(response, "reasoning_tokens");
 
-    double callCost = priceCall(provider, model, inTok, outTok, cacheWrite, cacheRead);
+    Double providerReportedCost = readMetaDouble(response, "provider_reported_cost_usd");
+    double callCost =
+        shouldUseProviderReportedCost(provider, providerReportedCost)
+            ? providerReportedCost
+            : priceCall(provider, model, inTok, outTok, cacheWrite, cacheRead);
 
     Accumulator acc = byRun.computeIfAbsent(runId, k -> new Accumulator());
     acc.inputTokens.addAndGet(inTok);
@@ -796,6 +800,23 @@ public class RunCostTracker {
     } catch (Exception ignored) {
     }
     return 0;
+  }
+
+  private static Double readMetaDouble(ChatResponse response, String key) {
+    try {
+      Object v = response.getMetadata() == null ? null : response.getMetadata().get(key);
+      if (v instanceof Number n) return n.doubleValue();
+      if (v instanceof String s && !s.isBlank()) return Double.parseDouble(s);
+    } catch (Exception ignored) {
+    }
+    return null;
+  }
+
+  private static boolean shouldUseProviderReportedCost(String provider, Double cost) {
+    return "openrouter".equalsIgnoreCase(provider)
+        && cost != null
+        && Double.isFinite(cost)
+        && cost >= 0.0;
   }
 
   private static int safe(Integer v) {

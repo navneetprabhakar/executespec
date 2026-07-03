@@ -691,7 +691,10 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(openRouterBaseUrl)
-            .extraBody(Map.of("provider", Map.of("sort", "latency")))
+            .extraBody(
+                Map.of(
+                    "provider", Map.of("sort", "latency"),
+                    "usage", Map.of("include", true)))
             .build());
   }
 
