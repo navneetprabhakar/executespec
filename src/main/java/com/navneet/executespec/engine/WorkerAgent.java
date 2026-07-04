@@ -172,6 +172,34 @@ public class WorkerAgent {
   public static final int PATCH_NO_EDIT_WARN_AFTER_N = 6;
 
   /**
+   * progress-v2 (flag {@code worker.progress-v2.enabled}) — repetition trigger thresholds. A tool
+   * call SIGNATURE (name + normalized args) that fails this many times consecutively (successes
+   * clear the streak) fires the one-shot nudge / force-terminates. Repetition — not absence of
+   * writes — is the v2 definition of stagnation: re-running the same failing command without
+   * changing anything is the loop signature; reading NEW files never is.
+   */
+  public static final int PROGRESS_V2_REPEAT_FAILURE_NUDGE_AT = 3;
+
+  /** See {@link #PROGRESS_V2_REPEAT_FAILURE_NUDGE_AT}. */
+  public static final int PROGRESS_V2_REPEAT_FAILURE_FORCE_AT = 5;
+
+  /**
+   * progress-v2 — PATCH pre-first-edit exploration ceiling (total iterations, NOT non-write
+   * iterations). Replaces the v1 {@link #PATCH_NO_EDIT_WARN_AFTER_N} 6-non-write-iteration nudge:
+   * on large repos, competent localization legitimately takes dozens of novel reads/searches.
+   * Effective value is {@code max(this, 3 × progressWarnAfter)}.
+   */
+  public static final int PROGRESS_V2_EXPLORATION_NUDGE_AFTER = 24;
+
+  /**
+   * progress-v2 — how many text-only stops may be retried with {@code tool_choice="required"}
+   * before the run terminates with STOPPED_WITHOUT_COMPLETE. Reasoning-style models plan out loud;
+   * a plan turn is not a reason to kill a run. Bounded so a model that simply refuses tools still
+   * terminates.
+   */
+  public static final int PROGRESS_V2_TEXT_ONLY_FORCED_RETRIES = 2;
+
+  /**
    * V182 layer-3 — within how many iterations of {@code completeTask} must a successful {@code
    * runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()} is true,
    * the dispatch loop refuses {@code completeTask} unless the agent ran tests within this window. 5
@@ -377,6 +405,20 @@ public class WorkerAgent {
                 Math.max(terminalArtifactDeadlineAfter + 1, maxIter - 4))
             : Integer.MAX_VALUE;
     int itersSinceProgress = 0;
+    // progress-v2 (harness-resolution Phase 1, flag worker.progress-v2.enabled, default OFF).
+    // When ON: novelty-based progress + repetition-based force + bounded text-only retries.
+    // When OFF: every v2 branch below is dead code — the v1 loop is byte-identical.
+    final boolean progressV2 = Boolean.TRUE.equals(req.progressV2());
+    // v2: every (tool, normalized-args) signature seen this task. A call with a NEW signature is
+    // evidence-gathering progress; repeating an old one is not.
+    final java.util.Set<String> seenCallSignatures = new java.util.HashSet<>();
+    // v2: consecutive failures per signature (a success on the same signature clears its streak).
+    final java.util.Map<String, Integer> failedSignatureStreaks = new java.util.HashMap<>();
+    int textOnlyForcedRetries = 0;
+    boolean forceToolChoiceNextCall = false;
+    // v2: PATCH pre-first-edit exploration ceiling (total iterations; see constant javadoc).
+    final int explorationNudgeAfter =
+        Math.max(PROGRESS_V2_EXPLORATION_NUDGE_AFTER, progressWarnAfter * 3);
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
     // the next failure terminates (force threshold, or another text-only stop).
@@ -599,6 +641,12 @@ public class WorkerAgent {
                 history, req.provider(), req.context(), lastInputTokens, req.userPrompt());
       }
 
+      // progress-v2 — one-shot tool_choice=required after a repeated text-only stop. Consumed
+      // here; providers that reject "required" get one automatic retry without it (mirrors the
+      // salvage forced→auto fallback) so the forced attempt can never turn into a run-killing
+      // router error.
+      final boolean forcedThisCall = progressV2 && forceToolChoiceNextCall;
+      forceToolChoiceNextCall = false;
       ChatResponse resp;
       try {
         resp =
@@ -612,6 +660,7 @@ public class WorkerAgent {
                     .stepId("worker.iteration-" + iter)
                     .temperature(req.temperature())
                     .maxTokens(req.maxTokensPerCall())
+                    .toolChoice(forcedThisCall ? "required" : null)
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
                     .toolsOverride(toolRegistry.bindForWorker(req.context()))
@@ -626,6 +675,14 @@ public class WorkerAgent {
                     .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
                     .build());
       } catch (Exception e) {
+        if (forcedThisCall) {
+          log.warn(
+              "WorkerAgent forced tool_choice rejected at iter={} ({}); retrying auto",
+              iter,
+              e.getMessage());
+          iter--; // retry the same logical iteration without the forced choice
+          continue;
+        }
         log.error("WorkerAgent router failure at iter={}", iter, e);
         recordTerminal(WorkerResult.Outcome.ERROR, req, iter);
         return errorResult(
@@ -747,8 +804,36 @@ public class WorkerAgent {
               iter,
               totalWriteCalls,
               previewThought(assistantText));
-          history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
+          history.add(
+              new UserMessage(
+                  progressV2 && !terminalTaskMode
+                      ? progressNudgeMessageV2(totalWriteCalls)
+                      : progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
           continue; // Re-enter the loop; iter increments; model gets another shot.
+        }
+        // progress-v2 — a repeated text-only stop is retried with tool_choice=required (bounded),
+        // not treated as terminal. Reasoning-style models plan out loud; a plan turn is not a
+        // reason to kill the run. If the model STILL refuses tools after the bounded retries,
+        // fall through to the v1 termination below.
+        if (progressV2
+            && !terminalTaskMode
+            && textOnlyForcedRetries < PROGRESS_V2_TEXT_ONLY_FORCED_RETRIES) {
+          textOnlyForcedRetries++;
+          forceToolChoiceNextCall = true;
+          log.info(
+              "WorkerAgent TEXT_ONLY_FORCED_RETRY run={} task={} iter={} retry={}/{}",
+              runId,
+              req.context().taskId(),
+              iter,
+              textOnlyForcedRetries,
+              PROGRESS_V2_TEXT_ONLY_FORCED_RETRIES);
+          history.add(
+              new UserMessage(
+                  "Your last reply had no tool call. Respond with a TOOL CALL now: completeTask"
+                      + " (with your summary) if the task is done and verified, otherwise the"
+                      + " next concrete action (readFile / editFile / shell / buildProject)."
+                      + " A text-only reply ends the task as incomplete."));
+          continue;
         }
         if (terminalTaskMode) {
           WorkerResult finalized =
@@ -1161,6 +1246,17 @@ public class WorkerAgent {
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
         toolLog.add(toolCallLogEntry(tc, envelope));
+        // progress-v2 — repetition signal: consecutive failures of the SAME call signature
+        // (success clears the streak). Re-running an identical failing command without changing
+        // anything is the true stagnation-loop shape.
+        if (progressV2) {
+          String sig = callSignature(tc);
+          if (isFailureEnvelope(envelope)) {
+            failedSignatureStreaks.merge(sig, 1, Integer::sum);
+          } else {
+            failedSignatureStreaks.remove(sig);
+          }
+        }
         // 2026-05-04 — emit a per-mutation log line so the LiveLog shows real activity, not
         // just the token counter. Filtered to mutating + heavy tools (writes, edits, shell,
         // build) — read/list/search/git noise stays out of the user-facing log so the screen
@@ -1177,12 +1273,22 @@ public class WorkerAgent {
       // one nudge — this replaces the old Lever A + Lever C + stagnation-warn trio.
       boolean wroteThisIter =
           calls.stream().anyMatch(tc -> isProgressTool(tc.name(), terminalTaskMode));
-      if (patchNoEditNudgeOn && totalWriteCalls == 0) {
+      if (patchNoEditNudgeOn && totalWriteCalls == 0 && !progressV2) {
         // PATCH runs score the source diff. Before the first edit, build/test/read loops are useful
         // evidence but not progress toward a patch; only an actual write should reset the no-edit
         // watchdog. After the first edit, fall back to the normal progress definition so legitimate
         // edit/build/test cycles still get room to converge.
         wroteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
+      }
+      if (progressV2) {
+        // v2 — novelty IS progress: any call whose (tool, normalized-args) signature is new this
+        // task resets the counter. Reads/searches/shell against NEW targets are investigation;
+        // only repetition accumulates. Writes/builds keep counting via the v1 definition too.
+        boolean novelThisIter = false;
+        for (AssistantMessage.ToolCall tc : calls) {
+          if (seenCallSignatures.add(callSignature(tc))) novelThisIter = true;
+        }
+        wroteThisIter = wroteThisIter || novelThisIter;
       }
       if (wroteThisIter) {
         itersSinceProgress = 0;
@@ -1192,7 +1298,13 @@ public class WorkerAgent {
       } else {
         itersSinceProgress++;
       }
+      // v2 — worst current same-signature failure streak (0 when off/empty).
+      final int worstFailureStreak =
+          progressV2 && !failedSignatureStreaks.isEmpty()
+              ? java.util.Collections.max(failedSignatureStreaks.values())
+              : 0;
       if (patchNoEditNudgeOn
+          && !progressV2
           && !progressNudged
           && totalWriteCalls == 0
           && itersSinceProgress >= PATCH_NO_EDIT_WARN_AFTER_N) {
@@ -1205,6 +1317,33 @@ public class WorkerAgent {
             itersSinceProgress,
             PATCH_NO_EDIT_WARN_AFTER_N);
         history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, false)));
+        progressNudged = true;
+      }
+      if (progressV2
+          && patchNoEditNudgeOn
+          && !progressNudged
+          && totalWriteCalls == 0
+          && iter >= explorationNudgeAfter) {
+        // v2 replacement for the 6-non-write-iteration PATCH nudge: a TOTAL-iteration exploration
+        // ceiling. Localizing in a large repo legitimately takes dozens of novel reads; only past
+        // the ceiling do we ask the worker to commit to a hypothesis.
+        log.info(
+            "WorkerAgent EXPLORATION_CEILING_NUDGE run={} task={} iter={} threshold={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            explorationNudgeAfter);
+        history.add(new UserMessage(progressNudgeMessageV2(totalWriteCalls)));
+        progressNudged = true;
+      }
+      if (progressV2 && !progressNudged && worstFailureStreak >= PROGRESS_V2_REPEAT_FAILURE_NUDGE_AT) {
+        log.info(
+            "WorkerAgent REPEAT_FAILURE_NUDGE run={} task={} iter={} worstStreak={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            worstFailureStreak);
+        history.add(new UserMessage(progressNudgeMessageV2(totalWriteCalls)));
         progressNudged = true;
       }
       if (!progressNudged && itersSinceProgress >= progressWarnAfter) {
@@ -1221,7 +1360,11 @@ public class WorkerAgent {
         // systemInstruction, so a mid-run SystemMessage mutates the implicit-cache prefix and
         // kills caching for the rest of the task. A UserMessage stays in contents[] as a normal
         // turn — cache prefix preserved; Anthropic + OpenAI honour it equally.
-        history.add(new UserMessage(progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
+        history.add(
+            new UserMessage(
+                progressV2 && !terminalTaskMode
+                    ? progressNudgeMessageV2(totalWriteCalls)
+                    : progressNudgeMessage(totalWriteCalls, terminalTaskMode)));
         progressNudged = true;
       }
       if (terminalTaskMode && !progressNudged && iter >= progressWarnAfter) {
@@ -1272,16 +1415,23 @@ public class WorkerAgent {
                     + " writeFile/editFile, or call completeTask if the deliverable already exists."
                     + " Do not run another broad shell investigation."));
       }
-      if (itersSinceProgress >= progressForceAfter) {
+      // v2 repetition force: the same call signature failing PROGRESS_V2_REPEAT_FAILURE_FORCE_AT
+      // times consecutively is a genuine loop regardless of how many novel reads happen between
+      // failures. This is the v2 hard-stop; the v1 non-write counter still applies as the
+      // fallback (novelty resets protect legitimate exploration from it when v2 is on).
+      final boolean repetitionForce =
+          progressV2 && worstFailureStreak >= PROGRESS_V2_REPEAT_FAILURE_FORCE_AT;
+      if (itersSinceProgress >= progressForceAfter || repetitionForce) {
         log.warn(
             "WorkerAgent PROGRESS_FORCE run={} task={} iter={} itersSinceProgress={} threshold={}"
-                + " totalWrites={}",
+                + " totalWrites={} trigger={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
             itersSinceProgress,
             progressForceAfter,
-            totalWriteCalls);
+            totalWriteCalls,
+            repetitionForce ? "REPEATED_FAILURE_STREAK(" + worstFailureStreak + ")" : "NO_PROGRESS");
         // 2026-05-09 Lever B extension — salvage on STAGNATION_FORCE with zero writes.
         // RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): LOW BUILD task spent 12 iters
         // reading without writing, hit stagnation force, was marked FAILED with no recovery
@@ -2190,6 +2340,63 @@ public class WorkerAgent {
   static String progressNudgeMessage(int totalWriteCalls) {
     return progressNudgeMessage(totalWriteCalls, false);
   }
+
+  /**
+   * progress-v2 corrective nudge (non-terminal modes). Differences from v1, both deliberate:
+   * no "STOP reading" (novel investigation is legitimate progress under v2 — the trigger was
+   * repetition, not reading) and no "an imperfect edit beats zero" (benchmark-diff logic; on a
+   * customer run a forced bad edit is reviewer load and trust-cap damage, not a save).
+   */
+  public static String progressNudgeMessageV2(int totalWriteCalls) {
+    String lead =
+        totalWriteCalls > 0
+            ? "PROGRESS CHECK — you have written "
+                + totalWriteCalls
+                + " file(s) but your recent turns repeated earlier work without new evidence,"
+                + " edits, or a completeTask call.\n\n"
+            : "PROGRESS CHECK — your recent turns repeated earlier work (same files, same"
+                + " commands) without producing new evidence or an edit.\n\n";
+    return lead
+        + "Pick ONE:\n"
+        + "1. If the task is DONE and verified, call the `completeTask` tool now with your"
+        + " summary.\n"
+        + "2. If you have a working hypothesis, act on it now: make the edit, then verify it"
+        + " (buildProject, runTests, or a targeted shell command that exercises the change).\n"
+        + "3. If a command or edit keeps failing the same way, STOP repeating it — change"
+        + " something first (re-read the exact failing region, fix the underlying cause, or try"
+        + " a different approach). Re-running an identical failing command cannot produce a"
+        + " different result.\n"
+        + "4. If you are genuinely stuck, name the single most likely file+function and inspect"
+        + " exactly that — new evidence, not a re-read of what you already saw.";
+  }
+
+  /**
+   * progress-v2 — stable identity of a tool call for novelty + repetition tracking:
+   * name + whitespace-normalized raw arguments. Trailing/duplicate whitespace differences do
+   * not make a call "new"; any real argument change does.
+   */
+  public static String callSignature(AssistantMessage.ToolCall tc) {
+    String args = tc.arguments() == null ? "" : tc.arguments().replaceAll("\\s+", " ").trim();
+    return tc.name() + " " + args;
+  }
+
+  /**
+   * progress-v2 — did this tool envelope represent a FAILED attempt? Two shapes exist: error
+   * envelopes ({@code {"ok":false...}}) and ok-envelopes carrying a non-zero process exit
+   * (shell / buildProject / runTests embed {@code exit=N} or {@code "exit_code": N}). Only the
+   * envelope head is inspected — large outputs spill to disk and the verdict is always in the
+   * head.
+   */
+  public static boolean isFailureEnvelope(String envelope) {
+    if (envelope == null || envelope.isEmpty()) return false;
+    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
+    if (head.startsWith("{\"ok\":false")) return true;
+    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
+    return m.find() && !"0".equals(m.group(1));
+  }
+
+  private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
+      java.util.regex.Pattern.compile("\\bexit(?:_code)?[\"=:\\s\\\\]+(-?\\d+)");
 
   static String progressNudgeMessage(int totalWriteCalls, boolean terminalTaskMode) {
     if (terminalTaskMode) {

@@ -112,6 +112,11 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .wallClockSeconds(request.budget() == null ? null : request.budget().wallClockSeconds())
         .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
         .verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+        // progress-v2 (V255, default OFF): novelty-based progress + repetition force + bounded
+        // text-only retries. Especially relevant on this lane: v1 warn/force is disabled above
+        // (stagnationDisabled), so v2's repetition trigger is the ONLY loop protection a
+        // benchmark PATCH run gets.
+        .progressV2(featureFlagService.isEnabled("worker.progress-v2.enabled"))
         .build();
   }
 

@@ -1364,6 +1364,11 @@ to boot — skip it for those.""";
                 isFinalTask
                     && featureFlagService != null
                     && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+            // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
+            // bounded text-only retries; the v1 write-only engine is byte-identical when off.
+            .progressV2(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots

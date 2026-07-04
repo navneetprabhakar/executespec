@@ -126,6 +126,16 @@ import lombok.Builder;
  *     then YIELD); no resolvable runner / a remote run / any error ⇒ fail-open (never false-FAILs a
  *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
  *     {@link CodeGenEngineImpl} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
+ * @param progressV2 harness-resolution Phase 1 (flag {@code worker.progress-v2.enabled}, V255,
+ *     default OFF). Replaces the write-only progress definition with evidence-based progress:
+ *     (a) any tool call with a NOVEL (name, normalized-args) signature resets the stagnation
+ *     counter — investigation counts, repetition does not; (b) stagnation force adds a
+ *     repetition trigger (the same call signature failing repeatedly) so true loops still
+ *     terminate; (c) the PATCH pre-edit nudge moves from 6 non-write iters to a total-iteration
+ *     exploration ceiling; (d) a text-only stop is retried with {@code tool_choice=required}
+ *     (bounded) instead of terminating the run; (e) the corrective nudge drops the
+ *     "an imperfect edit beats zero" directive (benchmark-diff logic, wrong for customer PRs).
+ *     Null/false ⇒ the RL-2026-05-005 write-only engine runs byte-identically.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -148,7 +158,8 @@ public record WorkerTaskRequest(
     Boolean terminalVerifyGate,
     List<String> requiredDeliverablePaths,
     Boolean criticPass,
-    Boolean verifyBeforeComplete) {
+    Boolean verifyBeforeComplete,
+    Boolean progressV2) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
