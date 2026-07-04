@@ -44,7 +44,7 @@ classifier/planner/reviewer; product PATCH/autofix and benchmark generation shar
 
 | File | Purpose |
 |------|---------|
-| `BenchmarkGenerationService.java` | **The active benchmark code-gen API.** `generate()` sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the shared code-gen engine synchronously, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. Workspace under the non-Documents output base by design. |
+| `BenchmarkGenerationService.java` | **The active benchmark code-gen API.** `generate()` enforces the shared `swebench.max-concurrent-runs` semaphore before setup/codegen, sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the shared code-gen engine synchronously, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. Workspace under the non-Documents output base by design. |
 | `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` and `POST /generate` both call `BenchmarkGenerationService.generate(...)`; `GET /preview/{id}` resolves image/repo/baseCommit; `GET /instances` returns loaded id count. |
 
 Diff capture hardening (RL-2026-06-030): both benchmark paths drain shell output while the process
@@ -87,6 +87,10 @@ for `finding:*`. (RL-2026-05-028.)
 - **`generate()` blocks until the worker is terminal**, so a runner that scores off the HTTP response
   must set a generous client timeout (Live runs are minutes each; a frozen run blocks until the engine
   wall/cost/iteration limits fire). The response includes the patch artifact paths directly.
+- **`generate()` now owns the same concurrency guard operators configure for the benchmark VM.**
+  `swebench.max-concurrent-runs` caps concurrent cleanroom/codegen calls, and
+  `swebench.submit-queue-wait-seconds` controls how long a caller waits before receiving HTTP 429.
+  Driver shard/concurrency values should feed this limit, not replace it.
 
 ## Status
 

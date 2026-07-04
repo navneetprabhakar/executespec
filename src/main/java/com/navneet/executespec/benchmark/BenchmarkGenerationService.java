@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -70,6 +71,10 @@ public class BenchmarkGenerationService {
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
 
+  private final Object generationSlotsLock = new Object();
+  private Semaphore generationSlots;
+  private int generationSlotLimit;
+
   /** Synchronous result returned straight to the HTTP caller. */
   public record GenerateResult(
       String runId,
@@ -120,8 +125,9 @@ public class BenchmarkGenerationService {
           HttpStatus.INTERNAL_SERVER_ERROR, "failed to create dirs: " + ioe.getMessage());
     }
 
-    setupCleanroom(image, workspace, containerName, runId, instance);
+    acquireGenerationSlot(instanceId);
     try {
+      setupCleanroom(image, workspace, containerName, runId, instance);
       // Minimal run row — the only state the code-gen path reads back: hardCapUsd (worker budget
       // cap) + sourceType="benchmark" (engine gate OFF for blind runs). NOT the full submitRun
       // lifecycle.
@@ -208,6 +214,46 @@ public class BenchmarkGenerationService {
     } finally {
       run("docker rm -f " + containerName, 30);
       containerStore.remove(runId);
+      releaseGenerationSlot();
+    }
+  }
+
+  void acquireGenerationSlot(String instanceId) {
+    int limit = Math.max(1, props.getMaxConcurrentRuns());
+    Semaphore slots;
+    synchronized (generationSlotsLock) {
+      if (generationSlots == null || generationSlotLimit != limit) {
+        generationSlots = new Semaphore(limit, true);
+        generationSlotLimit = limit;
+      }
+      slots = generationSlots;
+    }
+    try {
+      boolean acquired =
+          slots.tryAcquire(Math.max(0, props.getSubmitQueueWaitSeconds()), TimeUnit.SECONDS);
+      if (!acquired) {
+        throw new ResponseStatusException(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "benchmark generation concurrency exhausted for "
+                + instanceId
+                + " (limit="
+                + limit
+                + ")");
+      }
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "interrupted waiting for benchmark generation slot");
+    }
+  }
+
+  void releaseGenerationSlot() {
+    Semaphore slots;
+    synchronized (generationSlotsLock) {
+      slots = generationSlots;
+    }
+    if (slots != null) {
+      slots.release();
     }
   }
 
