@@ -22,6 +22,7 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
+    ES_CANCEL_ON_ABORT cancel the ExecuteSpec run if Harbor aborts the adapter (default true)
 """
 import asyncio
 import base64
@@ -40,10 +41,20 @@ from harbor.models.agent.context import AgentContext
 
 READ_LIMIT, SHELL_LIMIT, DIFF_LIMIT = 8000, 6000, 5000
 TRAJECTORY_LIMIT = 12000
+TOOL_OUTPUT_DIR = "/tmp/es-tool-output"
 
 
 def _trunc(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n] + f"\n…[truncated {len(s) - n} chars]"
+
+
+def _trunc_head_tail(s: str, n: int) -> str:
+    if len(s) <= n:
+        return s
+    head = max(1, n // 2)
+    tail = max(1, n - head)
+    omitted = len(s) - head - tail
+    return s[:head] + f"\n…[truncated middle {omitted} chars]\n" + s[-tail:]
 
 
 def _utc_now() -> str:
@@ -81,6 +92,7 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
+        self.cancel_on_abort = os.environ.get("ES_CANCEL_ON_ABORT", "true").lower() != "false"
         self._trajectory_steps = []
         if not self.provider or not self.model:
             raise ValueError("ES_PROVIDER and ES_MODEL env vars are required")
@@ -162,28 +174,36 @@ class ExecuteSpecAgent(BaseAgent):
                 }
                 self._add_final_step(run_id, final, tools, context)
                 self._write_trajectory(run_id or str(uuid.uuid4()), context)
+            except asyncio.CancelledError as e:
+                self._add_error_step(run_id, e, tools)
+                await self._cancel_run_on_abort(client, token if "token" in locals() else None, run_id, final)
+                self._write_trajectory(run_id or str(uuid.uuid4()), context)
+                raise
             except Exception as e:
                 self._add_error_step(run_id, e, tools)
+                await self._cancel_run_on_abort(client, token if "token" in locals() else None, run_id, final)
                 self._write_trajectory(run_id or str(uuid.uuid4()), context)
                 raise
 
     # ---------------- tool execution in the TB container ----------------
     async def _exec_tool(self, name: str, args: dict, env: BaseEnvironment) -> dict:
         try:
+            name, args = self._normalize_tool_call(name, args)
             if name in ("shell", "buildProject", "runTests"):
                 cmd = args.get("command")
                 if not cmd:
                     return _err("INVALID_ARGS", f"{name}: no command")
                 r = await env.exec(cmd, timeout_sec=self.tool_timeout)
                 out = (r.stdout or "") + (r.stderr or "")
-                body = _trunc(out, SHELL_LIMIT)
-                return _ok(body + (f"\n[exit code {r.return_code}]" if r.return_code else ""))
-            if name == "readFile":
-                path = args["path"]
-                r = await env.exec(f"cat -- {shlex.quote(path)}", timeout_sec=30)
+                body = await self._bounded_shell_output(env, name, out)
                 if r.return_code != 0:
-                    return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
-                return _ok(_trunc(r.stdout or "", READ_LIMIT))
+                    return _err(
+                        "COMMAND_FAILED",
+                        f"{name} exited {r.return_code}\n{body}".strip(),
+                    )
+                return _ok(body)
+            if name == "readFile":
+                return await self._read(env, args)
             if name == "writeFile":
                 return await self._write(env, args["path"], args.get("content", ""))
             if name == "editFile":
@@ -225,6 +245,82 @@ class ExecuteSpecAgent(BaseAgent):
             return _err("INVALID_ARGS", f"unknown tool: {name}")
         except Exception as e:
             return _err("INTERNAL", f"{type(e).__name__}: {e}")
+
+    def _normalize_tool_call(self, name: str, args: dict) -> tuple[str, dict]:
+        """Accept common Claude-Code-style aliases advertised by server-side worker bindings."""
+        aliases = {
+            "bash": "shell",
+            "executeCommand": "shell",
+            "runCommand": "shell",
+            "terminalCommand": "shell",
+            "read_file": "readFile",
+            "grep": "searchFiles",
+            "glob": "listFiles",
+        }
+        normalized = aliases.get(name, name)
+        if normalized == "shell" and "command" not in args:
+            command = args.get("cmd") or args.get("script") or args.get("input")
+            if command:
+                args = {**args, "command": command}
+        if normalized == "readFile" and "path" not in args and args.get("file"):
+            args = {**args, "path": args["file"]}
+        if normalized == "searchFiles" and "query" not in args:
+            query = args.get("pattern") or args.get("regex")
+            if query:
+                args = {**args, "query": query}
+        return normalized, args
+
+    async def _bounded_shell_output(self, env: BaseEnvironment, tool_name: str, out: str) -> str:
+        if len(out) <= SHELL_LIMIT:
+            return out
+        spill = f"{TOOL_OUTPUT_DIR}/{tool_name}-{uuid.uuid4().hex}.txt"
+        written = await self._write(env, spill, out)
+        note = (
+            f"\n[full output saved at {spill}; use readFile with startLine/endLine to inspect it]"
+            if written.get("ok")
+            else "\n[full output spill failed]"
+        )
+        return _trunc_head_tail(out, SHELL_LIMIT) + note
+
+    async def _read(self, env: BaseEnvironment, args: dict) -> dict:
+        path = args["path"]
+        start = args.get("startLine")
+        end = args.get("endLine")
+        try:
+            start = int(start) if start is not None else None
+            end = int(end) if end is not None else None
+        except Exception:
+            return _err("INVALID_ARGS", "startLine/endLine must be integers")
+        if start is not None and start < 1:
+            return _err("INVALID_ARGS", "startLine must be >= 1")
+        if end is not None and end < 1:
+            return _err("INVALID_ARGS", "endLine must be >= 1")
+        if start is not None and end is not None and start > end:
+            return _err("INVALID_ARGS", f"startLine ({start}) > endLine ({end})")
+
+        quoted = shlex.quote(path)
+        if start is not None or end is not None:
+            lo = start or 1
+            hi = str(end) if end is not None else "$"
+            cmd = f"sed -n {shlex.quote(f'{lo},{hi}p')} {quoted}"
+            r = await env.exec(cmd, timeout_sec=30)
+            if r.return_code != 0:
+                return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
+            return _ok(r.stdout or "")
+
+        r = await env.exec(f"cat -- {quoted}", timeout_sec=30)
+        if r.return_code != 0:
+            return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
+        content = r.stdout or ""
+        if len(content) <= READ_LIMIT:
+            return _ok(content)
+        lc = await env.exec(f"wc -l < {quoted}", timeout_sec=30)
+        line_count = (lc.stdout or "").strip() if lc.return_code == 0 else "unknown"
+        return _ok(
+            _trunc(content, READ_LIMIT)
+            + f"\n[file truncated at {READ_LIMIT} chars; total lines: {line_count}; "
+            + "use startLine/endLine to read later ranges]"
+        )
 
     async def _write(self, env: BaseEnvironment, path: str, content: str) -> dict:
         """Write arbitrary content to a container path via base64 (newline/quote-safe)."""
@@ -378,6 +474,23 @@ class ExecuteSpecAgent(BaseAgent):
         r = await client.get(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
         r.raise_for_status()
         return r.json() if r.content else {}
+
+    async def _delete(self, client, path, token) -> None:
+        r = await client.delete(f"{self.base}{path}", headers={"Authorization": f"Bearer {token}"})
+        if r.status_code not in (200, 202, 204, 404):
+            r.raise_for_status()
+
+    async def _cancel_run_on_abort(self, client, token, run_id, final) -> None:
+        if not self.cancel_on_abort or not token or not run_id or final is not None:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._delete(client, f"/api/runs/{run_id}", token)),
+                timeout=10,
+            )
+            self.logger.warning(f"[es] cancelled backend run after adapter abort: {run_id}")
+        except Exception as e:
+            self.logger.warning(f"[es] backend cancel after adapter abort failed for {run_id}: {e}")
 
     @staticmethod
     def _parse_frame(lines):

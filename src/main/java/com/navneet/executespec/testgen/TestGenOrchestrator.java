@@ -168,7 +168,8 @@ public class TestGenOrchestrator {
                 conventionsDoc,
                 userRequest,
                 isCli,
-                isStaticHtml);
+                isStaticHtml,
+                apiProbeResults);
         if (!survived) {
           return;
         }
@@ -224,12 +225,14 @@ public class TestGenOrchestrator {
       String conventionsDoc,
       String userRequest,
       boolean isCli,
-      boolean isStaticHtml) {
+      boolean isStaticHtml,
+      String apiProbeResults) {
     // Mark failed tasks and try one retry per failed test
     testCompilationGate.markFailedTasks(
         testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
 
-    handleCompilationRetries(runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml);
+    handleCompilationRetries(
+        runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml, apiProbeResults);
 
     // Re-compile after retries
     TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
@@ -272,7 +275,8 @@ public class TestGenOrchestrator {
       String conventionsDoc,
       String userRequest,
       boolean isCli,
-      boolean isStaticHtml) {
+      boolean isStaticHtml,
+      String apiProbeResults) {
     List<TestTask> failedTasks =
         testTaskRepository.findByTestPlanIdAndStatus(testPlan.getId(), TestTaskStatus.FAILED);
 
@@ -286,7 +290,8 @@ public class TestGenOrchestrator {
             userRequest,
             task.getCompilationError(),
             isCli,
-            isStaticHtml);
+            isStaticHtml,
+            apiProbeResults);
         task.setStatus(TestTaskStatus.GENERATING);
         testTaskRepository.save(task);
       } catch (Exception e) {

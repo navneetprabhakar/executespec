@@ -36,6 +36,23 @@ resource "google_compute_firewall" "ssh" {
   target_tags   = [var.instance_name]
 }
 
+# ── Egress without a VM external IP ──────────────────────────────────────────
+# The project blocks compute.vmExternalIpAccess. Keep the VM private and route
+# Docker/LLM/package-manager egress through Cloud NAT.
+resource "google_compute_router" "benchmark" {
+  name    = "${var.instance_name}-router"
+  network = google_compute_network.benchmark.id
+  region  = var.region
+}
+
+resource "google_compute_router_nat" "benchmark" {
+  name                               = "${var.instance_name}-nat"
+  router                             = google_compute_router.benchmark.name
+  region                             = google_compute_router.benchmark.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+
 # ── The benchmark VM ─────────────────────────────────────────────────────────
 resource "google_compute_instance" "benchmark" {
   name         = var.instance_name
@@ -58,9 +75,6 @@ resource "google_compute_instance" "benchmark" {
 
   network_interface {
     network = google_compute_network.benchmark.id
-    # Ephemeral public IP — needed for EGRESS only (Docker Hub image pulls +
-    # LLM API calls). Inbound is locked to tcp/22 from the IAP range above.
-    access_config {}
   }
 
   metadata = {

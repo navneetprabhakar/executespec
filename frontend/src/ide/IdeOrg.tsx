@@ -12,6 +12,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {
@@ -92,6 +93,28 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
       {children}
     </div>
   );
+}
+
+function modelOverrideOptions(
+  matrix: api.ModelMatrixView,
+  provider: string,
+  defaultModel: string,
+  models: string[],
+): ModelPickerOption[] {
+  return [
+    {
+      value: '',
+      label: `Default · ${matrixModelLabel(matrix, defaultModel)}`,
+      provider,
+      helper: defaultModel,
+    },
+    ...models.map((model) => ({
+      value: model,
+      label: matrixModelLabel(matrix, model),
+      provider,
+      helper: model,
+    })),
+  ];
 }
 
 // API keys (BYOK) — /api-keys
@@ -1480,13 +1503,12 @@ export function IdeOrgSettings() {
                 >
                   {row.provider}
                 </div>
-                <select
-                  className='ide-select'
-                  aria-label={`${t} ${row.provider} model override`}
+                <ModelPicker
+                  ariaLabel={`${t} ${row.provider} model override`}
                   value={row.selectedOverride}
                   disabled={!canEdit || !matrix.editable}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  options={modelOverrideOptions(matrix, row.provider, row.defaultModel, row.models)}
+                  onChange={(v) => {
                     setMatrixOverrides((prev) => {
                       const nextO = {...prev};
                       if (!v) delete nextO[row.key];
@@ -1497,16 +1519,8 @@ export function IdeOrgSettings() {
                   style={{
                     flex: 1,
                     minWidth: 0,
-                    cursor: !canEdit || !matrix.editable ? 'not-allowed' : 'pointer',
                   }}
-                >
-                  <option value=''>Default · {row.defaultModel}</option>
-                  {row.models.map((mdl) => (
-                    <option key={mdl} value={mdl}>
-                      {matrixModelLabel(matrix, mdl)}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
             ))}
           </div>

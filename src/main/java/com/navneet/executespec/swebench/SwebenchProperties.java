@@ -90,12 +90,11 @@ public class SwebenchProperties {
   private int taskWallTimeoutMinutes = 60;
 
   /**
-   * RL-2026-05-059 — hard cap on concurrent benchmark runs (semaphore in {@link
-   * com.navneet.executespec.benchmark.BenchmarkRunService}). A flood of submissions OR orphaned
-   * runs from a killed runner can otherwise pile onto the shared orchestrator pool and OOM the box
-   * (the 2026-05-31 jetsam crash: 4 flagship runs + orphans exceeded 23GB → kernel killed the JVM).
-   * Each provider submits 1-at-a-time, so 4 = one in-flight per provider. Memory-bounded — raise
-   * only with RAM headroom.
+   * RL-2026-05-059 — hard cap on concurrent benchmark runs. A flood of submissions OR orphaned runs
+   * from a killed runner can otherwise pile onto the shared box and OOM the JVM (the 2026-05-31
+   * jetsam crash: 4 flagship runs + orphans exceeded 23GB → kernel killed the JVM). Each provider
+   * submits 1-at-a-time, so 4 = one in-flight per provider. Memory-bounded — raise only with RAM
+   * headroom.
    */
   private int maxConcurrentRuns = 4;
 

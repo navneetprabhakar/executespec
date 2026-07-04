@@ -68,6 +68,20 @@ class PromptConformanceTest {
   }
 
   @Test
+  void skeletonPromptCarriesEnterpriseContextAndNoPhantomReposField() throws IOException {
+    String skeleton = prompt("prompts/outline-planner-skeleton.md");
+
+    assertThat(skeleton)
+        .contains("{{CONTRACTS}}")
+        .contains("{{PROJECT_ADRS}}")
+        .contains("{{PR_REVIEW_COMMENTS}}")
+        .contains("touchesFiles");
+    assertThat(skeleton)
+        .doesNotContain("complexity, repos, dependsOn")
+        .doesNotContain("v3 coverage check runs after expansion");
+  }
+
+  @Test
   void reviewerGeneralTreatsMissingChangedCodeTestsAsInScope() throws IOException {
     String reviewer = prompt("prompts/reviewer-general.md");
 
@@ -86,6 +100,27 @@ class PromptConformanceTest {
         .contains("{{include:security-rules:worker}}");
     assertThat(prompt("prompts/worker-history-compactor.md"))
         .contains("{{include:security-rules:worker}}");
+  }
+
+  @Test
+  void plannerSecurityFragmentUsesPlannerToolContract() throws IOException {
+    String plannerSecurity = prompt("prompts/fragments/security-rules-planner.md");
+
+    assertThat(plannerSecurity)
+        .contains("Your only action is the `submitOutline` tool call")
+        .contains("Use the camelCase schema exactly")
+        .contains("planTitle=\"Invalid request\"")
+        .contains("projectType=\"unknown\"")
+        .doesNotContain("project_type")
+        .doesNotContain("plan_title")
+        .doesNotContain("Run approved commands");
+  }
+
+  @Test
+  void taskExpanderDoesNotAdvertiseIgnoredSmokeStrategy() throws IOException {
+    String prompt = prompt("prompts/task-expander.md");
+
+    assertThat(prompt).doesNotContain("smokeTestStrategy");
   }
 
   @Test
@@ -112,6 +147,29 @@ class PromptConformanceTest {
           .doesNotContain("scratch repro")
           .doesNotContain("SWE-bench");
     }
+  }
+
+  @Test
+  void validationReportPromptDoesNotOverclaimResolutionOrLint() throws IOException {
+    String prompt = prompt("prompts/validation-report.txt");
+
+    assertThat(prompt)
+        .contains("Only claim a check passed if it appears in \"Checks passed\"")
+        .contains("Only say an issue was resolved when its line includes an explicit")
+        .contains("Accuracy Assessment");
+    assertThat(prompt)
+        .doesNotContain("resolved by automated checks before merge")
+        .doesNotContain("lint checks on first pass");
+  }
+
+  @Test
+  void coherenceConstraintConflictPromptMatchesAppendSemantics() throws IOException {
+    String prompt = prompt("prompts/coherence-planner.md");
+
+    assertThat(prompt)
+        .contains("appends the corrected constraint")
+        .contains("later conflicting constraints as higher precedence");
+    assertThat(prompt).doesNotContain("replaces the incompatible constraint");
   }
 
   private static String prompt(String classpath) throws IOException {

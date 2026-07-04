@@ -123,7 +123,8 @@ class SequentialExecutorSoftCompletionTest {
         costTracker,
         org.mockito.Mockito.mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
         availableProviderResolver,
-        goalContinuationAdvisor);
+        goalContinuationAdvisor,
+        null);
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */

@@ -68,7 +68,8 @@ public class SwebenchInstanceLoader {
       String patch,
       String dockerhubTag,
       String repoLanguage,
-      String interfaceName) {
+      String interfaceName,
+      String requirements) {
     public boolean isSweBenchPro() {
       return dockerhubTag != null && !dockerhubTag.isBlank();
     }
@@ -153,7 +154,12 @@ public class SwebenchInstanceLoader {
         n.path("patch").asText(""),
         n.path("dockerhub_tag").asText(""),
         n.path("repo_language").asText(""),
-        n.path("interface").asText(""));
+        // SWE-bench Pro annotator-written task inputs. The official evaluation setting includes
+        // BOTH in the agent prompt ("the problem statement, requirements and interface
+        // specification are included in the agent prompt", arXiv:2509.16941 §evaluation) —
+        // they are task spec, NOT held-out-test leakage.
+        n.path("interface").asText(""),
+        n.path("requirements").asText(""));
   }
 
   private JsonNode firstPresent(JsonNode node, String... names) {

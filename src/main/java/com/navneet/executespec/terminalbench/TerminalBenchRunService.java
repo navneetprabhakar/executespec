@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
@@ -23,6 +24,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.context.ContextSnapshotFactory;
@@ -53,18 +55,21 @@ public class TerminalBenchRunService {
   private final RunCostTracker costTracker;
   private final SseBroadcaster broadcaster;
   private final JwtUtil jwtUtil;
+  private final FeatureFlagService featureFlagService;
 
   /**
-   * Per-task wall-clock safety net. Harbor's agent phase currently times out at 1350s. The worker
-   * only checks wall-clock at iteration boundaries and does not interrupt an in-flight LLM/tool
-   * call, so keep a conservative buffer for one slow turn plus the terminal finalizer.
+   * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
+   * runner sets the outer agent timeout to 1350s; keep this lower so ExecuteSpec can run its
+   * terminal finalizer and return a clean terminal state before Harbor kills the adapter.
    */
-  private static final int DEFAULT_WALL_CLOCK_SECONDS = 900;
+  @Value("${terminal-bench.worker-wall-clock-seconds:1260}")
+  private int workerWallClockSeconds;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
   private static final int TB_STAGNATION_FORCE_AFTER = 64;
   private static final int TB_ARTIFACT_DEADLINE_AFTER = 32;
+  private static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
 
   /**
    * RL-2026-06 — terminal-mode enforced-verify gate (see {@code
@@ -95,15 +100,15 @@ public class TerminalBenchRunService {
       !"false".equalsIgnoreCase(System.getenv("ES_TB_CRITIC"));
 
   /**
-   * Required-deliverable path extractor. Terminal-Bench deliverables live under {@code /app/} with
-   * a file extension (e.g. {@code /app/run.py}, {@code /app/ssl/server.key}, {@code
-   * /app/jump_analyzer.py}). Conservative by design: the gate only ever refuses on a MISSING path,
-   * so over-extraction is safe (an input file the task references already exists → never refused);
-   * under-extraction just means the gate doesn't help that task. Extension-less executables are not
-   * matched (rare; no harm).
+   * Extensionless executables are common enough to matter, but matching every {@code /app/foo}
+   * would over-gate inputs. Only accept extensionless absolute paths when they appear in the same
+   * clause as an output verb.
    */
-  private static final Pattern DELIVERABLE_PATH =
-      Pattern.compile("/app/[A-Za-z0-9_][A-Za-z0-9._/-]*\\.[A-Za-z0-9]+");
+  private static final Pattern ABSOLUTE_OUTPUT_DELIVERABLE =
+      Pattern.compile(
+          "(?i)\\b(?:write|create|produce|generate|save|output|emit|store|build|put|place|"
+              + "copy|combine)\\b[^.\\n]{0,100}?(/app/[A-Za-z0-9_][A-Za-z0-9._/-]*"
+              + "[A-Za-z0-9_-])\\b");
 
   /**
    * RL-2026-06 — also catch a deliverable named RELATIVELY right after an output verb (e.g. "Write
@@ -277,14 +282,14 @@ iterating needlessly.
               WorkerTaskRequest.builder()
                   .provider(provider)
                   .model(model)
-                  .systemPrompt(TB_SYSTEM_PROMPT)
+                  .systemPrompt(systemPromptForProvider(provider))
                   .userPrompt(instruction)
                   .context(ctx)
                   .maxIterations(effectiveMaxIterations)
                   .stagnationWarnAfter(TB_STAGNATION_WARN_AFTER)
                   .stagnationForceAfter(TB_STAGNATION_FORCE_AFTER)
                   .temperature(0.0)
-                  .wallClockSeconds(DEFAULT_WALL_CLOCK_SECONDS)
+                  .wallClockSeconds(workerWallClockSeconds)
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)
@@ -320,21 +325,45 @@ iterating needlessly.
     return Math.max(requested, TB_DEFAULT_MAX_ITERATIONS);
   }
 
+  String systemPromptForProvider(String provider) {
+    if (featureFlagService == null || !featureFlagService.isEnabled(FLAG_PROVIDER_TUNING)) {
+      return TB_SYSTEM_PROMPT;
+    }
+    String fragment = loadTerminalProviderFragment(provider);
+    if (fragment.isBlank()) return TB_SYSTEM_PROMPT;
+    return TB_SYSTEM_PROMPT + "\n\n" + fragment;
+  }
+
+  String loadTerminalProviderFragment(String provider) {
+    if (provider == null || provider.isBlank()) return "";
+    String key = provider.trim().toLowerCase();
+    try {
+      var resource =
+          new org.springframework.core.io.ClassPathResource(
+              "prompts/fragments/provider/" + key + "/terminal.md");
+      if (!resource.exists()) return "";
+      return resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadTerminalProviderFragment({}) failed: {}", provider, e.getMessage());
+      return "";
+    }
+  }
+
   /**
    * RL-2026-06 — extract the exact required deliverable path(s) the worker's deterministic gate
    * (#2) will check. Package-private + static for unit testing. Returns at most 8 distinct {@code
-   * /app/} paths with a file extension, in first-seen order; empty when the gate is disabled or no
-   * path is named (→ the gate is inert). Conservative on purpose — the gate only refuses on a
-   * MISSING path, so this can safely over-match (an existing input file is never refused).
+   * /app/} output paths in first-seen order; empty when the gate is disabled or no output-looking
+   * path is named (→ the gate is inert). The extractor intentionally does not gate every referenced
+   * {@code /app/*.ext} path: input files are evidence, not completion criteria.
    */
   static List<String> extractDeliverablePaths(String instruction) {
     if (instruction == null || instruction.isBlank() || !TB_DELIVERABLE_GATE_ENABLED) {
       return List.of();
     }
     LinkedHashSet<String> paths = new LinkedHashSet<>();
-    Matcher m = DELIVERABLE_PATH.matcher(instruction);
-    while (m.find() && paths.size() < 8) {
-      paths.add(m.group());
+    Matcher absoluteOutput = ABSOLUTE_OUTPUT_DELIVERABLE.matcher(instruction);
+    while (absoluteOutput.find() && paths.size() < 8) {
+      paths.add(absoluteOutput.group(1));
     }
     // RL-2026-06 — append relatively-named outputs introduced by an output verb ("Write me
     // data.comp"), prepended with /app/. Deduped against the absolute matches by the LinkedHashSet.
