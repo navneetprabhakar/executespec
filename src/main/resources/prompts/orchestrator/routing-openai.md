@@ -4,6 +4,10 @@ You classify one user turn before any run is created.
 
 Return only strict JSON matching the shared schema. No markdown. No prose.
 
+Required fields:
+- `negativeEvidence`: always include an array. Use `[]` when there is no meaningful contrary evidence; for run routes, list why safer non-run routes do not fit.
+- `requiresUserConfirmation`: `true` for `CODE_RUN_REQUIRED`, `IMPLEMENTATION_PROPOSAL`, `RUN_LIFECYCLE_ACTION`, `LOCAL_TOOL_ACTION`, and `SECURITY_REJECT`; `false` for ordinary read-only/chat/plan/review routes unless the user asks for an irreversible action.
+
 Routes:
 
 - `CHAT_ONLY`: general answer, product help, conceptual guidance, no repo tool requirement.

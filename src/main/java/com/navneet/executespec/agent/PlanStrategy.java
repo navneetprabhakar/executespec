@@ -15,11 +15,21 @@ package com.navneet.executespec.agent;
  * See {@code docs/hierarchical-planner-plan.md}.
  */
 public enum PlanStrategy {
-  SINGLE_SHOT,
-  SMALL,
-  MEDIUM,
-  LARGE,
-  LEGACY;
+  SINGLE_SHOT(1),
+  SMALL(6),
+  MEDIUM(10),
+  LARGE(25),
+  LEGACY(60);
+
+  private final int maxTasks;
+
+  PlanStrategy(int maxTasks) {
+    this.maxTasks = maxTasks;
+  }
+
+  public int maxTasks() {
+    return maxTasks;
+  }
 
   public static PlanStrategy fromStringSafe(String s) {
     if (s == null) return null;

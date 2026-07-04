@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -136,10 +137,24 @@ public class TestWorkerAgent {
       String compilationError,
       boolean isCli,
       boolean isStaticHtml) {
+    return retryWithError(
+        runId, task, conventionsDoc, userRequest, compilationError, isCli, isStaticHtml, "");
+  }
+
+  /** Retry generating a test class with compilation error and existing probe context. */
+  public String retryWithError(
+      String runId,
+      TestTask task,
+      String conventionsDoc,
+      String userRequest,
+      String compilationError,
+      boolean isCli,
+      boolean isStaticHtml,
+      String apiProbeResults) {
     log.info("[TestWorker] Retrying {} with compilation error context", task.getTaskName());
 
     String systemPrompt =
-        buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml)
+        buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml, apiProbeResults)
             + "\n\nYour previous attempt had COMPILATION ERRORS:\n"
             + compilationError
             + "\n\nFix ALL compilation errors. Output ONLY valid, compilable Java source code.";
@@ -165,7 +180,7 @@ public class TestWorkerAgent {
     return code;
   }
 
-  private String buildPrompt(
+  String buildPrompt(
       TestTask task,
       String conventionsDoc,
       String userRequest,
@@ -174,20 +189,14 @@ public class TestWorkerAgent {
     return buildPrompt(task, conventionsDoc, userRequest, isCli, isStaticHtml, "");
   }
 
-  private String buildPrompt(
+  String buildPrompt(
       TestTask task,
       String conventionsDoc,
       String userRequest,
       boolean isCli,
       boolean isStaticHtml,
       String apiProbeResults) {
-    String testMethodsJson;
-    try {
-      // plan_json may contain test methods info; use task description as fallback
-      testMethodsJson = task.getTaskDescription();
-    } catch (Exception e) {
-      testMethodsJson = task.getTaskDescription();
-    }
+    String testMethodsJson = plannedTestMethodsJson(task);
 
     String testingContext;
     String technicalReqs;
@@ -294,12 +303,12 @@ public class TestWorkerAgent {
       String runId, ResolvedModel model, String systemPrompt) {
     AnthropicCacheOptions cacheOpts =
         AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    AnthropicChatOptions opts =
-        AnthropicChatOptions.builder()
-            .temperature(0.0)
-            .model(model.getModel())
-            .cacheOptions(cacheOpts)
-            .build();
+    var optsBuilder =
+        AnthropicChatOptions.builder().model(model.getModel()).cacheOptions(cacheOpts);
+    if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
+      optsBuilder.temperature(0.0);
+    }
+    AnthropicChatOptions opts = optsBuilder.build();
     Prompt prompt =
         new Prompt(
             List.of(
@@ -355,11 +364,44 @@ public class TestWorkerAgent {
     return code.strip();
   }
 
+  String plannedTestMethodsJson(TestTask task) {
+    if (task == null || task.getTestPlanId() == null) return fallbackTestMethods(task);
+    try {
+      TestPlan testPlan = testPlanRepository.findById(task.getTestPlanId()).orElse(null);
+      if (testPlan == null || testPlan.getPlanJson() == null || testPlan.getPlanJson().isBlank()) {
+        return fallbackTestMethods(task);
+      }
+      var root = objectMapper.readTree(testPlan.getPlanJson());
+      if (!root.isArray()) return fallbackTestMethods(task);
+      for (var node : root) {
+        if (!task.getTaskName().equals(node.path("taskName").asText())) continue;
+        var methods = node.path("testMethods");
+        if (methods.isArray()) return objectMapper.writeValueAsString(methods);
+        return fallbackTestMethods(task);
+      }
+    } catch (Exception e) {
+      log.debug(
+          "[TestWorker] Failed to extract planned methods for task {}: {}",
+          task.getTaskName(),
+          e.getMessage());
+    }
+    return fallbackTestMethods(task);
+  }
+
+  private String fallbackTestMethods(TestTask task) {
+    String description = task == null ? "" : task.getTaskDescription();
+    return description == null ? "" : description;
+  }
+
   private String loadPrompt() {
     try {
       return promptResource.getContentAsString(StandardCharsets.UTF_8);
     } catch (Exception e) {
       throw new RuntimeException("Failed to load test-worker.txt prompt", e);
     }
+  }
+
+  void setPromptResourceForTest(Resource promptResource) {
+    this.promptResource = promptResource;
   }
 }

@@ -8,8 +8,23 @@ output "zone" {
 }
 
 output "external_ip" {
-  description = "Ephemeral public IP (egress; inbound is IAP-SSH only)"
-  value       = google_compute_instance.benchmark.network_interface[0].access_config[0].nat_ip
+  description = "Global load balancer IP for benchmark.executespec.ai"
+  value       = google_compute_global_address.lb.address
+}
+
+output "load_balancer_ip" {
+  description = "Cloudflare A-record target for benchmark.executespec.ai"
+  value       = google_compute_global_address.lb.address
+}
+
+output "ssl_certificate_name" {
+  description = "Managed SSL certificate name"
+  value       = google_compute_managed_ssl_certificate.app.name
+}
+
+output "ssl_certificate_domain" {
+  description = "Managed SSL certificate domain"
+  value       = local.benchmark_domain
 }
 
 output "ssh_command" {

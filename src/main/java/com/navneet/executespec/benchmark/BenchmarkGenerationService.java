@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,12 +36,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Lean, synchronous benchmark code-generation API.
  *
- * <p><b>Why this exists.</b> {@link BenchmarkRunService} runs each instance through {@code
- * RunOrchestrator.submitRun} — the full product entry point, which drags in the entire run
- * lifecycle (a DB run record managed across phases, credit charging, an async pipeline thread, SSE,
- * the completion-email listener, preview kickoff, validation-report + test-gen background work,
- * auto-push). For a benchmark, all of that is noise — and it was the source of most of the
- * operational friction (submit blocks until terminal, harvesting races, completion emails, etc.).
+ * <p><b>Why this exists.</b> Benchmarks need the same codegen worker seam as product PATCH-mode,
+ * but not the post-codegen product lifecycle (credits, preview, validation report, email listeners,
+ * auto-push). This wrapper owns benchmark-only setup/capture while keeping generation in {@link
+ * CodeGenEngine}.
  *
  * <p>This service does <b>only code generation</b>: it calls {@code CodeGenEngineImpl}, which wires
  * the same {@code WorkerAgent} → tools → {@code LlmRouter} loop inside the cleanroom container
@@ -54,8 +53,8 @@ import lombok.extern.slf4j.Slf4j;
  * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
  * lifecycle.
  *
- * <p>Blind, like {@link BenchmarkRunService}: the agent sees only the issue {@code
- * problem_statement}; the hidden tests are applied externally at scoring.
+ * <p>Blind: the agent sees only the issue {@code problem_statement}; the hidden tests are applied
+ * externally at scoring.
  */
 @Service
 @RequiredArgsConstructor
@@ -71,6 +70,10 @@ public class BenchmarkGenerationService {
   private final CodeGenEngine codeGenEngine;
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
+
+  private final Object generationSlotsLock = new Object();
+  private Semaphore generationSlots;
+  private int generationSlotLimit;
 
   /** Synchronous result returned straight to the HTTP caller. */
   public record GenerateResult(
@@ -122,8 +125,9 @@ public class BenchmarkGenerationService {
           HttpStatus.INTERNAL_SERVER_ERROR, "failed to create dirs: " + ioe.getMessage());
     }
 
-    setupCleanroom(image, workspace, containerName, runId, instance);
+    acquireGenerationSlot(instanceId);
     try {
+      setupCleanroom(image, workspace, containerName, runId, instance);
       // Minimal run row — the only state the code-gen path reads back: hardCapUsd (worker budget
       // cap) + sourceType="benchmark" (engine gate OFF for blind runs). NOT the full submitRun
       // lifecycle.
@@ -167,7 +171,12 @@ public class BenchmarkGenerationService {
                   .verifyMode(VerifyMode.NONE)
                   .build());
 
-      String patch = captureDiff(containerName, instance.baseCommit(), workdirFor(instance));
+      String patch =
+          captureDiff(
+              containerName,
+              instance.baseCommit(),
+              workdirFor(instance),
+              instance.isSweBenchPro() || props.isSweBenchPro());
       Path submission = outputDir.resolve("submission.patch");
       Files.writeString(submission, patch);
       Path preds = writePreds(outputDir, instanceId, model, patch);
@@ -210,6 +219,46 @@ public class BenchmarkGenerationService {
     } finally {
       run("docker rm -f " + containerName, 30);
       containerStore.remove(runId);
+      releaseGenerationSlot();
+    }
+  }
+
+  void acquireGenerationSlot(String instanceId) {
+    int limit = Math.max(1, props.getMaxConcurrentRuns());
+    Semaphore slots;
+    synchronized (generationSlotsLock) {
+      if (generationSlots == null || generationSlotLimit != limit) {
+        generationSlots = new Semaphore(limit, true);
+        generationSlotLimit = limit;
+      }
+      slots = generationSlots;
+    }
+    try {
+      boolean acquired =
+          slots.tryAcquire(Math.max(0, props.getSubmitQueueWaitSeconds()), TimeUnit.SECONDS);
+      if (!acquired) {
+        throw new ResponseStatusException(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "benchmark generation concurrency exhausted for "
+                + instanceId
+                + " (limit="
+                + limit
+                + ")");
+      }
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "interrupted waiting for benchmark generation slot");
+    }
+  }
+
+  void releaseGenerationSlot() {
+    Semaphore slots;
+    synchronized (generationSlotsLock) {
+      slots = generationSlots;
+    }
+    if (slots != null) {
+      slots.release();
     }
   }
 
@@ -217,8 +266,8 @@ public class BenchmarkGenerationService {
    * Pull (skip if present) → cp {@code /testbed/.} into the host workspace → run a live container
    * bind-mounting it at {@code /testbed} with {@code --network none} → register the container so
    * the worker's shell/build tools dispatch via {@code docker exec}. Mirrors {@link
-   * BenchmarkRunService#onRunStarted} but called directly (no event), so setup is complete before
-   * {@code CodeGenEngine.solve} invokes the worker.
+   * the old async benchmark setup but called directly (no event), so setup is complete before {@code
+   * CodeGenEngine.solve} invokes the worker.
    */
   private void setupCleanroom(
       String image,
@@ -278,22 +327,13 @@ public class BenchmarkGenerationService {
 
   /** Capture the agent's {@code git diff} against the base commit, excluding run-infra noise. */
   private String captureDiff(String containerName, String baseCommit, String workdir) {
+    return captureDiff(containerName, baseCommit, workdir, props.isSweBenchPro());
+  }
+
+  private String captureDiff(
+      String containerName, String baseCommit, String workdir, boolean proExcludes) {
     String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
-    String excludes =
-        " -- . \":(exclude).agent-context\" \":(exclude)Dockerfile\" \":(exclude).dockerignore\""
-            + " \":(exclude)README.md\" \":(exclude)__pycache__\" \":(exclude).pytest_cache\""
-            + " \":(exclude)*.egg-info\""
-            + " \":(exclude,glob)**/pyproject.toml\" \":(exclude,glob)**/setup.py\""
-            + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
-            + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
-            + " \":(exclude,glob)**/.github/**\""
-            + " \":(exclude,glob)appendonlydir/**\""
-            + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
-            + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
-            + " \":(exclude,glob)**/conftest.py\""
-            + " \":(exclude,glob)**/repro*\" \":(exclude,glob)**/*_repro*\""
-            + " \":(exclude,glob)tmp/**\" \":(exclude,glob)**/tmp_*\""
-            + " \":(exclude,glob)**/scratch*\"";
+    String excludes = diffExcludes(proExcludes);
     String cmd =
         "docker exec "
             + containerName
@@ -308,6 +348,41 @@ public class BenchmarkGenerationService {
             + "'";
     ShellResult diff = run(cmd, 120);
     return diff.exit() == 0 ? diff.output() : "";
+  }
+
+  /**
+   * Diff-exclusion pathspecs. Two variants (harness-resolution B.2 finding #4, 2026-07-04):
+   *
+   * <p><b>Classic</b> keeps the historical Lite-calibrated list. <b>Pro</b> keeps ONLY the rules
+   * that can never hit a gold fix — agent-noise dirs and test files (Scale strips test changes from
+   * gold {@code patch} into {@code test_patch}, so test excludes are provably safe) — after the
+   * 2026-07-04 audit of all 731 Pro gold patches found the broad list silently stripped gold hunks
+   * on 32 instances / 52 files (28× {@code **&#47;testing/**} — Go helper packages — plus
+   * README.md, Dockerfile, .github, packaging files). A dropped gold hunk scores as a model
+   * failure; ~4.4% of the full set was unwinnable as configured. Pinned by {@code
+   * BenchmarkDiffExcludesTest}.
+   */
+  static String diffExcludes(boolean pro) {
+    String common =
+        " -- . \":(exclude).agent-context\" \":(exclude)__pycache__\""
+            + " \":(exclude).pytest_cache\" \":(exclude)*.egg-info\""
+            + " \":(exclude,glob)appendonlydir/**\""
+            + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
+            + " \":(exclude,glob)**/tests/**\""
+            + " \":(exclude,glob)**/conftest.py\""
+            + " \":(exclude,glob)**/repro*\" \":(exclude,glob)**/*_repro*\""
+            + " \":(exclude,glob)tmp/**\" \":(exclude,glob)**/tmp_*\""
+            + " \":(exclude,glob)**/scratch*\"";
+    if (pro) {
+      return common;
+    }
+    return common
+        + " \":(exclude)Dockerfile\" \":(exclude).dockerignore\" \":(exclude)README.md\""
+        + " \":(exclude,glob)**/pyproject.toml\" \":(exclude,glob)**/setup.py\""
+        + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
+        + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
+        + " \":(exclude,glob)**/.github/**\""
+        + " \":(exclude,glob)**/testing/**\"";
   }
 
   private Path writePreds(Path outputDir, String instanceId, String model, String patch)
@@ -364,17 +439,47 @@ public class BenchmarkGenerationService {
    * the service stays dependency-light.
    */
   private static String defaultPlanningModel(String provider) {
-    if (provider == null) return "claude-sonnet-4-6";
+    if (provider == null) return "claude-sonnet-5";
     return switch (provider.toLowerCase()) {
       case "openai" -> "gpt-5.4";
       case "gemini", "google" -> "gemini-3.5-flash";
       case "deepseek" -> "deepseek-v4-flash-native";
-      default -> "claude-sonnet-4-6";
+      default -> "claude-sonnet-5";
     };
   }
 
-  /** Blind spec — issue + offline/existing-repo framing only. NO held-out tests. */
-  private String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
+  /**
+   * Pre-completeTask self-verification, provider-agnostic. Grounded in observed blind-run failures:
+   * a changed return/arg signature with an un-updated caller (Python "too many values to unpack",
+   * Go "undefined: X" / "build failed") and incomplete cross-call-site edits. This does not reveal
+   * the held-out tests — it only enforces internal consistency of the candidate patch.
+   */
+  private static final String BENCH_VERIFY_CHECKLIST =
+      "6. BEFORE completeTask, self-verify the patch is internally consistent:\n"
+          + "   - If you changed any function/method signature or return shape, searchFiles for"
+          + " EVERY caller and update them; a missed caller fails with unpack/arg-count/undefined"
+          + " errors.\n"
+          + "   - Confirm the files you edited still parse/compile (build or import the changed"
+          + " module); a patch that does not compile scores zero regardless of logic.\n"
+          + "   - Re-read the issue's stated expected behavior — and EVERY item in the"
+          + " Requirements section when one is present — and confirm your change produces"
+          + " exactly that, not merely a plausible-looking edit.\n";
+
+  /**
+   * Blind spec — issue + offline/existing-repo framing only. NO held-out tests.
+   *
+   * <p>For SWE-bench Pro instances this also injects the annotator-written {@code requirements} and
+   * {@code interface} dataset fields. This is the OFFICIAL evaluation setting — "models are
+   * evaluated in the setting without any ambiguity — the problem statement, requirements and
+   * interface specification are included in the agent prompt" (arXiv:2509.16941). Requirements pin
+   * the exact expected behavior; interface pins exact class/function signatures that dependent code
+   * (including the held-out tests) will reference. Omitting them (the pre-2026-07 behavior) made
+   * our runs strictly harder than every leaderboard entry. Blindness is unchanged: FAIL_TO_PASS /
+   * PASS_TO_PASS / test_patch / patch are still never injected.
+   */
+  String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
+    boolean hasInterface = i.interfaceName() != null && !i.interfaceName().isBlank();
+    boolean hasRequirements = i.requirements() != null && !i.requirements().isBlank();
     StringBuilder sb = new StringBuilder();
     String language = i.repoLanguage();
     if (language == null || language.isBlank()) language = "software";
@@ -391,44 +496,58 @@ public class BenchmarkGenerationService {
         "- The environment is offline (no network) and all dependencies are pre-installed. Do not"
             + " pip install / curl / git fetch.\n");
     sb.append(
-            "- Edit only non-test source files. Do NOT modify or add test files. Your submission is"
-                + " the git diff of ")
+            "- Edit only non-test source files. Do NOT modify or add test files (writing a"
+                + " throwaway reproduction script under /tmp to debug is fine — it is not part of"
+                + " your submission). Your submission is the git diff of ")
         .append(workdirFor(i))
         .append(" against its base commit.\n\n");
     sb.append("# Repository\n- Repo: ")
         .append(i.repo())
         .append("\n- Working directory: ")
         .append(workdirFor(i))
-        .append("\n");
-    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
-      sb.append("- Interface: ").append(i.interfaceName()).append("\n");
-    }
-    sb.append("\n");
+        .append("\n\n");
     sb.append("# Issue\n\n").append(i.problemStatement()).append("\n\n");
+    if (hasRequirements) {
+      sb.append("# Requirements\n\n");
+      sb.append(
+          "The fix must satisfy ALL of the following requirements. They specify the expected"
+              + " behavior precisely — treat them as the acceptance contract, senior to any"
+              + " interpretation of the issue text above.\n\n");
+      sb.append(i.requirements()).append("\n\n");
+    }
+    if (hasInterface) {
+      sb.append("# Interface\n\n");
+      sb.append(
+          "New or changed classes/functions the fix is expected to introduce or conform to. Use"
+              + " these EXACT names and signatures — other code depends on them by name. This is"
+              + " a contract, not a complete file list.\n\n");
+      sb.append(i.interfaceName()).append("\n\n");
+    }
     sb.append("# How to work\n");
     sb.append(
         "1. Investigate with listFiles / searchFiles / readFile to locate the relevant source.\n");
     sb.append(
-        "2. Pin down the EXACT expected behavior BEFORE editing, and check whether the fix belongs"
-            + " in a shared mechanism (callers, serialization/storage layers, sibling modules) vs."
-            + " a single call site — match the codebase's conventions.\n");
-    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
+        "2. Pin down the EXACT expected behavior BEFORE editing"
+            + (hasRequirements ? " (the Requirements section above is authoritative)" : "")
+            + ", and check whether the fix belongs in a shared mechanism (callers,"
+            + " serialization/storage layers, sibling modules) vs. a single call site — match the"
+            + " codebase's conventions.\n");
+    if (hasInterface) {
       sb.append(
-          "3. The Interface above is a contract, not a complete file list. Inspect every named"
-              + " path, then search for production callers/consumers of those methods/functions and"
-              + " patch all code required for the issue's visible behavior. Do not stop after only"
-              + " adding helper methods if controllers, sockets, templates, schemas, or messages"
-              + " must use them.\n");
+          "3. Implement every symbol in the Interface section with the exact given name and"
+              + " signature. Inspect every named path, then search for production"
+              + " callers/consumers of those methods/functions and patch all code required for"
+              + " the issue's visible behavior. Do not stop after only adding helper methods if"
+              + " controllers, sockets, templates, schemas, or messages must use them.\n");
       sb.append("4. Make a minimal, targeted fix across the required production files.\n");
-      sb.append(
-          "5. Run the repository's EXISTING tests for the module you changed to confirm no"
-              + " regression, then call completeTask.\n");
     } else {
       sb.append("3. Make a minimal, targeted fix.\n");
-      sb.append(
-          "4. Run the repository's EXISTING tests for the module you changed to confirm no"
-              + " regression, then call completeTask.\n");
+      sb.append("4. Re-check the fix against the issue's stated expected behavior.\n");
     }
+    sb.append(
+        "5. Run the repository's EXISTING tests for the module you changed to confirm no"
+            + " regression, then call completeTask.\n");
+    sb.append(BENCH_VERIFY_CHECKLIST);
     return sb.toString();
   }
 

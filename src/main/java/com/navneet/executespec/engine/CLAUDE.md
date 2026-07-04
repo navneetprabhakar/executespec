@@ -37,16 +37,22 @@ rollout, each phase shippable + green:
 
 ## Common harness stages on the worker (RL-2026-06)
 
-Three completeTask-time stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is **one-shot + fail-open** (can never loop or false-block) and reads the deliverable via `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.
+Common completion/protection stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is bounded/fail-open where it can block, and deliverable reads use `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.
 
 | Stage | Field | What it does | Consumers |
 |-------|-------|--------------|-----------|
-| **#1 Critic pass** | `criticPass` (Boolean) | Before the FIRST completeTask, ONE fresh-context, no-tool `LlmRouter` acceptance review over the task + the deliverable — **git diff** for a local product run, **/app** files for a remote TB run; concrete gaps fed back once (`runCriticPass`/`criticMessage`/`CRITIC_SYSTEM_PROMPT`). Subsumes the verify nudge when on. | TB (`ES_TB_CRITIC`), PATCH via `CodeGenEngineImpl` (`worker.critic-pass.enabled`, V231, default OFF). BUILD has `ReviewerAgent`. |
+| **#1 Critic pass** | `criticPass` (Boolean) | Before the FIRST completeTask, ONE fresh-context, no-tool `LlmRouter` acceptance review over the task + the deliverable — **git diff** for a local product run, **/app** files for a remote TB run. Remote TB context now includes `/tests` listing, `/tests/test.sh` when present, and candidate `/app` file contents when explicit deliverable extraction is empty, so the critic is not blind on extensionless/implicit-output tasks. Concrete gaps are fed back once (`runCriticPass`/`criticMessage`/`CRITIC_SYSTEM_PROMPT`). Subsumes the verify nudge when on. | TB (`ES_TB_CRITIC`), PATCH via `CodeGenEngineImpl` (`worker.critic-pass.enabled`, V231, default OFF). BUILD has `ReviewerAgent`. |
 | **#2 Deliverable gate** | `requiredDeliverablePaths` (List) | At completeTask, ONE deterministic `shell` existence check for the required paths; missing ⇒ refuse (bounded to `DELIVERABLE_GATE_MAX_REFUSALS=2` then YIELD). Activates on a non-empty list — only TB supplies one today (`TerminalBenchRunService.extractDeliverablePaths`). | TB (`ES_TB_DELIVERABLE_GATE`). |
 | **#3 Verify gate** | `terminalVerifyGate` (Boolean) | Terminal refinement of the generic `!gateOn` verify nudge: fires even after a shallow shell smoke (which defeats the generic `lastEditIter > lastVerifyIter` trigger). | TB (`ES_TB_VERIFY_GATE`). |
+| **#3b Visible-test completion gate** | terminal mode + `terminalVerifyGate` | If the remote sandbox exposes verifier files under `/tests`, `completeTask` is refused until a passing verifier-shaped command actually targets `/tests` (for example `bash /tests/test.sh` or `pytest /tests`). This blocks the regression where a worker self-smokes the wrong contract while critic-pass misses the visible verifier mismatch. Bounded to `TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS=3`, then yields. | TB terminal mode. |
+| **#4 Verified-pass guard** | terminal mode + verifier-shaped command | After a conservative verifier-shaped command succeeds (executing `/tests/test.sh`, running a real test runner against `/tests`, common project test runners, or explicit verify/benchmark commands) and extracted deliverables exist, the worker snapshots required deliverables under `/tmp/es-passing-candidate-<runId>`, suppresses critic/verify nudges, refuses later risky mutating/rerun tools, and force-completes on a text-only follow-up. Listing or reading `/tests` is not accepted as proof. This makes "do not regress a passing candidate" mechanical rather than prompt-only. | TB terminal mode. |
 | **#VBC verify-before-complete** | `verifyBeforeComplete` (Boolean) | At the FIRST completeTask, **SERVER-RUNS the project's own test suite** (`smoketest/WorkspaceTestRunner` called DIRECTLY — NOT the flag-gated `runWorkspaceTests` tool, so decoupled from V217) and refuses if red (`verifyBeforeCompleteFailure`/`verifyBeforeCompleteMessage`; bounded `VBC_GATE_MAX_REFUSALS=3` then YIELD; fail-open on unwired/remote/no-runner/zero-tests/any error). Unlike the model-dependent test/build SOFT gates above, it RUNS the tests itself — a worker that never verifies is still caught. A *server gate, not a model tool* (no schema change → immune to the RL-2026-05-061 stall). Suppresses the soft `!gateOn` verify nudge when on. | PATCH via `CodeGenEngineImpl` (`worker.verify-before-complete.enabled`, V235, default OFF — every run), BUILD (`SequentialExecutor`, **final task only**). Remote/TB fail-open. |
 
 Validated on Terminal-Bench (DeepSeek): #2+#1 took a 13-task near-miss slice **4/13 → 8/13 (pass@2)**, 0 regressions; the critic demonstrably refuses premature completions then permits the fixed candidate.
+
+Terminal finalizer note: the finalizer can force one last closing tool turn for terminal tasks, but it
+must still pass the same deterministic deliverable, visible-test, and critic gates before returning `COMPLETED`.
+Productive shell/write calls alone are not proof of completion.
 
 ## Dispatch-layer robustness + parallelism (vix-leverage harness borrows)
 
@@ -65,3 +71,12 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
   some coupling).
 - The engine has **no knowledge** of credits / PRs / scoring / governance / SSE / DB — those are the
   caller's (upstream/downstream) concern.
+
+
+## Harness-resolution (2026-07-04, feature/harness-resolution — all flag-gated OFF)
+
+- `WorkerAgent` progress-v2 (`worker.progress-v2.enabled`): novelty-based progress (seen-set of tool+args signatures), per-signature consecutive-failure force (nudge@3/force@5), PATCH exploration ceiling replaces the 6-non-write nudge, bounded `tool_choice=required` retries on text-only stops, `progressNudgeMessageV2` (no 'imperfect edit beats zero'). Pinned by `agent/WorkerAgentProgressV2Test`.
+- auto-verify (`worker.auto-verify.enabled`): server runs the resolved suite at edit-burst end and injects counts + failing tail (schema-free); VBC refusals carry failure detail via `WorkspaceTestRunner.runTestsDetailed`.
+- Context-overflow recovery: `isContextLengthError` + compactNow → `hardTrimHistory` → ERROR (was: instant ERROR). Pinned by `WorkerAgentOverflowRecoveryTest`.
+- `RepoOrientationService` (`worker.localization.enabled`): deterministic warm-start block (layout, identifier grep hits, resolver commands) injected in both BUILD and engine lanes.
+- `WorkerTaskRequest` gained `progressV2` + `autoVerify`. New `@RequiredArgsConstructor` deps go at the END of the field list (7 test ctor sites were churned by mid-list insertion).

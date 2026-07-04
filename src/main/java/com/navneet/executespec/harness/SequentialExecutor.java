@@ -225,6 +225,7 @@ or edit BEFORE moving on:
   - Python (.py)         → `black <file>` (or `ruff format <file>` if pyproject.toml uses ruff)
   - JS/TS (.js .ts .tsx) → `npx prettier --write <file>`
   - Go (.go)             → `gofmt -w <file>`
+  - Rust (.rs)           → `cargo fmt -- <file>`
   - Java (.java)         → skip; mvn spotless handles it on smoke
 If the formatter binary isn't on PATH (`black: command not found`), continue —
 do NOT pip install / npm install just to format. The build's lint gate will
@@ -332,6 +333,10 @@ to boot — skip it for those.""";
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
+
+  /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
+  private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
+
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
@@ -521,6 +526,12 @@ to boot — skip it for those.""";
       emitTaskWavePlan(runId, plan);
 
       int taskCount = plan.tasks().size();
+      // task 12 (execution.run-journal.enabled, default OFF) — rolling run journal: each task's
+      // outcome one-liner, injected into subsequent task prompts so task N+1 stops being amnesiac
+      // about task N (assessment Gap 5: cross-task coherence was deferred entirely to the
+      // reviewer wiring pass). Accumulated unconditionally (cheap strings); INJECTED only when
+      // the flag is on.
+      List<String> runJournal = new ArrayList<>();
       for (int i = 0; i < taskCount; i++) {
         // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
         // calls {@code future.cancel(true)} which interrupts THIS thread, but
@@ -571,13 +582,13 @@ to boot — skip it for those.""";
                   "Executor RESUME task={} from snapshot iter={}",
                   task.id(),
                   action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
+              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
             }
-            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
-            default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+            default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
           }
         } else {
-          outcome = executeOne(task, plan, req, isFinalTask, null);
+          outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
         }
 
         if (resume == null) {
@@ -585,6 +596,7 @@ to boot — skip it for those.""";
         }
 
         outcomes.add(outcome);
+        runJournal.add(journalEntry(task, outcome));
         metrics.recordTaskStatus(outcome.status().name());
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
@@ -1264,7 +1276,17 @@ to boot — skip it for those.""";
       ExecutionRequest req,
       boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null);
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      List<String> runJournal) {
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, runJournal);
   }
 
   private TaskOutcome executeOne(
@@ -1274,6 +1296,17 @@ to boot — skip it for those.""";
       boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom,
       ProviderModelOverride providerModelOverride) {
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, providerModelOverride, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      ProviderModelOverride providerModelOverride,
+      List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
@@ -1292,7 +1325,27 @@ to boot — skip it for those.""";
             req.workspaceSummary(),
             requestedProvider,
             req.localHandsMode());
-    String userPrompt = composeUserPrompt(task, null);
+    String orientation =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("worker.localization.enabled")
+                && repoOrientationService != null)
+            ? repoOrientationService.orient(
+                taskCtx.workspaceRoot(), task.title() + "\n" + task.description())
+            : "";
+    // task 12 — run-journal injection: plan outline + last few task outcomes, so this task is a
+    // MEMBER OF A RUN rather than an isolated job (naming/placement/interface choices stay
+    // globally coherent). Flag-gated; empty when off or first task.
+    String journalBlock =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("execution.run-journal.enabled")
+                && runJournal != null
+                && !runJournal.isEmpty())
+            ? journalBlock(plan, runJournal)
+            : "";
+    String contextBlocks =
+        (orientation.isBlank() ? "" : orientation)
+            + (journalBlock.isBlank() ? "" : (orientation.isBlank() ? "" : "\n\n") + journalBlock);
+    String userPrompt = composeUserPrompt(task, null, contextBlocks);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
     String runId = req.runContext().runId();
@@ -1363,6 +1416,16 @@ to boot — skip it for those.""";
                 isFinalTask
                     && featureFlagService != null
                     && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+            // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
+            // bounded text-only retries; the v1 write-only engine is byte-identical when off.
+            .progressV2(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+            // auto-verify (V255, default OFF): server-side edit-burst test runs with
+            // failure-output injection (schema-free; supersedes V209/V217 on graduation).
+            .autoVerify(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -4072,6 +4135,12 @@ to boot — skip it for those.""";
     if (workspaceSummary != null && workspaceSummary.contains("MULTI-REPO")) {
       sb.append("\n\n").append(workspaceSummary);
     }
+    String projectFragmentBlock = loadProjectTypeFragments(projectType);
+    if (!projectFragmentBlock.isBlank()) {
+      sb.append("\n\n--- PROJECT-TYPE WORKER RULES ---\n")
+          .append(projectFragmentBlock)
+          .append("\n--- END PROJECT-TYPE WORKER RULES ---\n");
+    }
     // v2.5.13 — RN/Expo scaffold adherence directive. When the planner declared
     // react-native-expo, inject the scaffold template verbatim so the worker
     // stops drifting to Expo SDK 51 (stable-ish but doesn't match our smoke
@@ -4089,6 +4158,7 @@ to boot — skip it for those.""";
     }
     if (!task.hardConstraints().isEmpty()) {
       sb.append("\n\nHARD CONSTRAINTS for this task (MUST follow):\n");
+      sb.append("If two constraints conflict, the later bullet is the corrected one and wins.\n");
       for (String c : task.hardConstraints()) {
         sb.append("- ").append(c).append('\n');
       }
@@ -4264,6 +4334,32 @@ to boot — skip it for those.""";
     }
   }
 
+  String loadProjectTypeFragments(String projectType) {
+    List<String> keys = fragmentKeysForProjectType(projectType);
+    if (keys.isEmpty()) return "";
+    StringBuilder sb = new StringBuilder();
+    for (String key : keys) {
+      String fragment = loadPromptFragment(key);
+      if (fragment.isBlank()) continue;
+      if (!sb.isEmpty()) sb.append("\n\n");
+      sb.append(fragment);
+    }
+    return sb.toString();
+  }
+
+  private String loadPromptFragment(String key) {
+    if (key == null || key.isBlank()) return "";
+    try {
+      org.springframework.core.io.Resource r =
+          new org.springframework.core.io.ClassPathResource("prompts/fragments/" + key + ".md");
+      if (!r.exists()) return "";
+      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.debug("loadPromptFragment({}) failed: {}", key, e.getMessage());
+      return "";
+    }
+  }
+
   /**
    * Load the scaffold template file matching the given projectType, or "" if none applies. Mirrors
    * the loose kebab-case convention used by {@link
@@ -4295,6 +4391,26 @@ to boot — skip it for those.""";
     };
   }
 
+  static List<String> fragmentKeysForProjectType(String projectType) {
+    String key = scaffoldKeyForProjectType(projectType);
+    return switch (key) {
+      case "fullstack", "node-fullstack" ->
+          List.of(
+              "api-url-rules",
+              "module-system",
+              "router-isolation",
+              "backend-robustness",
+              "preview-defaults",
+              "fullstack-directory");
+      case "node-backend" ->
+          List.of("module-system", "router-isolation", "backend-robustness", "preview-defaults");
+      case "node-frontend" -> List.of("api-url-rules", "module-system");
+      case "spring-boot", "python", "go", "rust" ->
+          List.of("backend-robustness", "preview-defaults");
+      default -> List.of();
+    };
+  }
+
   /**
    * Task-scoped RAG retrieval. Uses the task description as the query; empty string on any failure
    * (retrieval errors never fail the run). Returns the raw markdown from {@code RetrievalService}
@@ -4321,9 +4437,53 @@ to boot — skip it for those.""";
   }
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError) {
+    return composeUserPrompt(task, previousBuildError, null);
+  }
+
+  /** task 12 — one journal line per finished task; accumulated every run, injected when flagged. */
+  static String journalEntry(PlannedTask task, TaskOutcome outcome) {
+    String summary = null;
+    if (outcome.workerOutcome() != null && outcome.workerOutcome().completionSummary() != null) {
+      summary = outcome.workerOutcome().completionSummary();
+    }
+    if (summary != null && summary.length() > 220) summary = summary.substring(0, 220) + "…";
+    return task.id()
+        + " ("
+        + task.title()
+        + ") → "
+        + outcome.status()
+        + (summary == null || summary.isBlank() ? "" : " — " + summary);
+  }
+
+  /** task 12 — plan outline + the last few journal entries (~1-2k tokens max). */
+  static String journalBlock(Plan plan, List<String> runJournal) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("# RUN JOURNAL (context from earlier tasks in this run)\n\n");
+    sb.append("Plan outline: ");
+    List<String> titles = new ArrayList<>();
+    for (PlannedTask t : plan.tasks()) titles.add(t.id() + " " + t.title());
+    sb.append(String.join(" · ", titles.subList(0, Math.min(titles.size(), 12))));
+    sb.append("\n\nCompleted so far:\n");
+    int from = Math.max(0, runJournal.size() - 5);
+    for (int i = from; i < runJournal.size(); i++) {
+      sb.append("- ").append(runJournal.get(i)).append("\n");
+    }
+    sb.append(
+        "\nStay consistent with the files, names, and interfaces established above — later tasks"
+            + " (and the reviewer) assume they hold.");
+    return sb.toString();
+  }
+
+  private String composeUserPrompt(
+      PlannedTask task, String previousBuildError, String orientation) {
     StringBuilder sb = new StringBuilder();
     sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
     sb.append(task.description());
+    if (orientation != null && !orientation.isBlank()) {
+      // task 11 (worker.localization.enabled): advisory warm-start block — layout, identifier
+      // hits, detected build/test commands — so localization isn't re-derived from a cold prompt.
+      sb.append("\n\n").append(orientation);
+    }
     if (previousBuildError != null && !previousBuildError.isBlank()) {
       // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
       // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the

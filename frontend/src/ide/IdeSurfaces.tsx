@@ -16,6 +16,7 @@ import {
   hasUnlimitedAiCredits,
   managedAiStatusLabel,
 } from '@/ide/planUtils';
+import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -593,6 +594,23 @@ export function IdeCompose() {
   }, [modelLabels, providerOptions]);
 
   const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+  const modelPickerOptions = useMemo<ModelPickerOption[]>(
+    () => [
+      {
+        value: '',
+        label: 'Recommended',
+        provider,
+        helper: 'Org / system default',
+      },
+      ...providerModels.map((m) => ({
+        value: m,
+        label: modelLabelById[m] || m,
+        provider,
+        helper: m,
+      })),
+    ],
+    [modelLabelById, provider, providerModels],
+  );
   const managedAiMessage =
     managedAi && hasUnlimitedAiCredits(managedAi)
       ? formatManagedAiPlanMessage(managedAi)
@@ -818,6 +836,15 @@ export function IdeCompose() {
               </details>
             )}
 
+            {err && (
+              <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
+            )}
+            <div className='ide-run-action ide-compose-submit-action'>
+              <button className='ide-btn' onClick={submit} disabled={busy}>
+                {busy ? 'Submitting...' : 'Create plan'}
+              </button>
+            </div>
+
             {projectId && projectRepos.length > 0 && (
               <div className='ide-card'>
                 <div className='ide-h2' style={{marginTop: 0}}>
@@ -898,19 +925,12 @@ export function IdeCompose() {
                     <div className='ide-field-label' id='compose-model-label'>
                       Model · Beta
                     </div>
-                    <select
-                      className='ide-select'
-                      aria-labelledby='compose-model-label'
+                    <ModelPicker
+                      ariaLabel='Compose model'
                       value={modelName}
-                      onChange={(e) => setModelName(e.target.value)}
-                    >
-                      <option value=''>Recommended</option>
-                      {providerModels.map((m) => (
-                        <option key={m} value={m}>
-                          {modelLabelById[m] || m}
-                        </option>
-                      ))}
-                    </select>
+                      options={modelPickerOptions}
+                      onChange={setModelName}
+                    />
                     <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                       Overrides this run only
                     </div>
@@ -1173,14 +1193,6 @@ export function IdeCompose() {
                 <span>Cap</span>
                 <span>${costCap.toFixed(2)}</span>
               </div>
-            </div>
-            {err && (
-              <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
-            )}
-            <div className='ide-run-action'>
-              <button className='ide-btn' onClick={submit} disabled={busy}>
-                {busy ? 'Submitting...' : 'Create plan'}
-              </button>
             </div>
           </section>
         </aside>

@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -210,12 +211,12 @@ public class TestPlannerAgent {
       String runId, ResolvedModel model, String prompt, int attempt) {
     AnthropicCacheOptions cacheOpts =
         AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    AnthropicChatOptions opts =
-        AnthropicChatOptions.builder()
-            .temperature(0.0)
-            .model(model.getModel())
-            .cacheOptions(cacheOpts)
-            .build();
+    var optsBuilder =
+        AnthropicChatOptions.builder().model(model.getModel()).cacheOptions(cacheOpts);
+    if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
+      optsBuilder.temperature(0.0);
+    }
+    AnthropicChatOptions opts = optsBuilder.build();
     Prompt chatPrompt =
         new Prompt(
             List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")),

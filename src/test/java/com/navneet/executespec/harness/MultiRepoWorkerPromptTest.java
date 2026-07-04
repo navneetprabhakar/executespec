@@ -56,6 +56,7 @@ class MultiRepoWorkerPromptTest {
         mock(com.navneet.executespec.cost.RunCostTracker.class),
         mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
         mock(com.navneet.executespec.router.AvailableProviderResolver.class),
+        null,
         null);
   }
 
@@ -179,6 +180,10 @@ class MultiRepoWorkerPromptTest {
 
     assertTrue(prompt.contains("MULTI-REPO PROJECT WORKSPACE"));
     assertTrue(
+        prompt.contains("later bullet is the corrected one and wins"),
+        "Coherence conflict patches append corrected constraints, so worker precedence must be"
+            + " explicit.");
+    assertTrue(
         prompt.contains("Do NOT use the deprecated payment_intents.create flow."),
         "Hard constraints must still appear in the prompt.");
     assertTrue(
@@ -204,5 +209,45 @@ class MultiRepoWorkerPromptTest {
         "spring-boot".equals(SequentialExecutor.scaffoldKeyForProjectType("java-spring-boot")),
         "java-spring-boot is the planner-facing projectType; spring-boot is the scaffold file"
             + " key.");
+  }
+
+  @Test
+  void node_fullstack_project_receives_web_stack_worker_fragments() {
+    String prompt = newExecutor().composeSystemPrompt(task(), null, null, "fullstack", null);
+
+    assertTrue(prompt.contains("API URL RULE"), "Full-stack workers need relative API URL rules.");
+    assertTrue(
+        prompt.contains("ROUTER NAMESPACE ISOLATION"),
+        "Full-stack workers need router mount path guidance.");
+    assertTrue(
+        prompt.contains("MODULE SYSTEM (ESM vs CJS)"),
+        "Full-stack workers need ESM/CJS guidance before writing JS imports.");
+    assertTrue(
+        prompt.contains("FULL-STACK DIRECTORY STRUCTURE"),
+        "Compiled-backend + frontend workers need the directory split rule.");
+  }
+
+  @Test
+  void unrelated_project_type_does_not_receive_web_stack_worker_fragments() {
+    String prompt = newExecutor().composeSystemPrompt(task(), null, null, "rust", null);
+
+    assertFalse(
+        prompt.contains("API URL RULE"), "Rust backend tasks should not get frontend URL rules.");
+    assertFalse(
+        prompt.contains("ROUTER NAMESPACE ISOLATION"),
+        "Rust backend tasks should not get Express router guidance.");
+    assertFalse(
+        prompt.contains("MODULE SYSTEM (ESM vs CJS)"),
+        "Rust backend tasks should not get JS module-system guidance.");
+  }
+
+  @Test
+  void project_type_fragment_router_is_explicit_and_excludes_cors_until_policy_is_resolved() {
+    assertTrue(
+        SequentialExecutor.fragmentKeysForProjectType("node-backend").contains("router-isolation"));
+    assertFalse(
+        SequentialExecutor.fragmentKeysForProjectType("node-backend").contains("cors-config"),
+        "cors-config still permits a wildcard fallback; keep it out of automatic worker"
+            + " injection.");
   }
 }

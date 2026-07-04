@@ -1,9 +1,8 @@
 name: Build & Deploy
 
-# v2.5.12 — dev-only trigger. Restored after 2152308b removed the file to
-# silence prod-env deploy failures on main pushes. Keep 'main' out of the
-# branches list until GCP prod credentials are provisioned. workflow_dispatch
-# retains a `dev` option only for the same reason.
+# v2.5.12 — dev trigger restored after 2152308b removed the file to silence
+# prod-env deploy failures on main pushes. Benchmark is an explicit ephemeral
+# target backed by the standalone infra/benchmark Terraform module.
 on:
   push:
     branches: [ dev, benchmark ]
@@ -16,6 +15,7 @@ on:
         type: choice
         options:
           - dev
+          - benchmark
       target_sha:
         description: 'Commit SHA to deploy (leave blank for latest)'
         required: false
@@ -35,18 +35,19 @@ env:
 
 jobs:
   build-and-deploy:
-    name: Build → Deploy (${{ inputs.target_env || (github.ref_name == 'main' && 'prod' || 'dev') }})
+    name: Build → Deploy (${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }})
     runs-on: ubuntu-latest
 
     # ── Environment ───────────────────
-    environment: ${{ (inputs.target_env || github.ref_name) == 'main' && 'production' || 'development' }}
+    environment: ${{ (inputs.target_env || github.ref_name) == 'main' && 'production' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'development' }}
 
     env:
-      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (github.ref_name == 'benchmark' && 'benchmark' || 'dev') }}
+      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }}
       TARGET_SHA:    ${{ inputs.target_sha || github.sha }}
       GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
       GCP_REGION:    ${{ secrets.GCP_REGION }}
       GCE_ZONE:      ${{ secrets.GCE_ZONE }}
+      GCE_ZONE_RESOLVED: ${{ (inputs.target_env || github.ref_name) == 'benchmark' && 'us-east4-a' || secrets.GCE_ZONE }}
 
     # Required for Workload Identity Federation
     permissions:
@@ -116,31 +117,42 @@ jobs:
         run: |
           echo "GCP_PROJECT=${{ env.GCP_PROJECT }}"
           echo "GCE_ZONE=${{ env.GCE_ZONE }}"
+          echo "GCE_ZONE_RESOLVED=${{ env.GCE_ZONE_RESOLVED }}"
           echo "GCP_REGION=${{ env.GCP_REGION }}"
           echo "DEPLOY_ENV=${{ env.DEPLOY_ENV }}"
           gcloud config get-value project
-          gcloud compute instances list --project=${{ env.GCP_PROJECT }} --filter="name~executespec" --format="table(name,zone,status)" || echo 'instances list failed'
+          gcloud compute instances list --project=${{ env.GCP_PROJECT }} --format="table(name,zone,status)" || echo 'instances list failed'
 
       # ── Determine deploy bucket ───────────────────────────────────────────
       - name: Set deploy bucket
         run: |
-          DEPLOY_BUCKET="gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy"
-          echo "DEPLOY_BUCKET=$DEPLOY_BUCKET" >> $GITHUB_ENV
-          echo "Deploy bucket: $DEPLOY_BUCKET"
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            echo "DEPLOY_BUCKET=" >> $GITHUB_ENV
+            echo "Benchmark deploy uploads JAR directly over IAP/SCP; no deploy bucket is required."
+          else
+            DEPLOY_BUCKET="gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy"
+            echo "DEPLOY_BUCKET=$DEPLOY_BUCKET" >> $GITHUB_ENV
+            echo "Deploy bucket: $DEPLOY_BUCKET"
+          fi
 
       # ── Upload JAR keyed by commit SHA ────────────────────────────────────
       # JAR is stored permanently by SHA — never overwritten — full rollback history.
       - name: Upload JAR to GCS
+        if: env.DEPLOY_ENV != 'benchmark'
         run: |
           JAR=$(ls target/*.jar | head -1)
-          gsutil cp "$JAR" ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar
-          echo "${{ env.TARGET_SHA }}" | gsutil cp - ${{ env.DEPLOY_BUCKET }}/CURRENT_SHA
-          echo "Uploaded: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar"
+          gsutil cp "$JAR" "$DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
+          echo "${{ env.TARGET_SHA }}" | gsutil cp - "$DEPLOY_BUCKET/CURRENT_SHA"
+          echo "Uploaded: $DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
 
       # ── Set static instance name (standalone VM — no MIG) ──────────────
       - name: Set instance name
         run: |
-          INSTANCE="executespec-${{ env.DEPLOY_ENV }}-vm"
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            INSTANCE="benchmark-instance"
+          else
+            INSTANCE="executespec-${{ env.DEPLOY_ENV }}-vm"
+          fi
           echo "GCE_INSTANCE_RESOLVED=$INSTANCE" >> $GITHUB_ENV
           echo "Target instance: $INSTANCE"
 
@@ -151,7 +163,7 @@ jobs:
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="
@@ -193,11 +205,12 @@ jobs:
 
       # ── Sync design system files from GCS ──────────────────────────────────
       - name: Sync design system files
+        if: env.DEPLOY_ENV != 'benchmark'
         continue-on-error: true
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="
@@ -215,6 +228,20 @@ jobs:
 
       # ── Deploy JAR and restart service ──────────────────────────────────────
       - name: Write env patch script
+        env:
+          BENCHMARK_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BENCHMARK_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BENCHMARK_GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          BENCHMARK_DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          BENCHMARK_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # GitHub Actions reserves the GITHUB_* secret prefix, so the benchmark
+          # env stores this as BENCHMARK_GITHUB_PAT and writes GITHUB_PAT into
+          # the app env file at deploy time.
+          BENCHMARK_GITHUB_PAT: ${{ secrets.BENCHMARK_GITHUB_PAT }}
+          BENCHMARK_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          BENCHMARK_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          BENCHMARK_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
+          BENCHMARK_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
         run: |
           cat > /tmp/env-patch.sh << 'SCRIPT'
           #!/bin/bash
@@ -234,6 +261,7 @@ jobs:
           }
 
           # ── App settings ──────────────────────────────────────────────
+          DEPLOY_ENV="${3:-}"
           upsert "CORS_ALLOWED_ORIGINS=https://app.executespec.ai,https://dev.executespec.ai,https://benchmark.executespec.ai,http://localhost:5173"
           upsert "DASHBOARD_URL=$1"
           upsert "APP_BASE_URL=$1"
@@ -272,6 +300,31 @@ jobs:
           upsert "PREVIEW_ENGINE_ROUTE_VIA=true"
           upsert "PREVIEW_MODE=docker"
 
+          if [ "$DEPLOY_ENV" = "benchmark" ]; then
+            upsert "SPRING_PROFILES_ACTIVE=benchmark"
+            upsert "POSTGRES_HOST=localhost"
+            upsert "POSTGRES_PORT=5432"
+            upsert "POSTGRES_DB=executespec"
+            upsert "POSTGRES_USER=postgres"
+            upsert "POSTGRES_PASSWORD=postgres"
+            upsert "REDIS_HOST=localhost"
+            upsert "REDIS_PORT=6379"
+            upsert "GCP_PROJECT=executespecv1"
+            upsert "GCP_REGION=us-east4"
+            upsert "SWEBENCH_ENABLED=true"
+            upsert "SWEBENCH_BOOTSTRAP=true"
+            upsert "SWEBENCH_SUITE=swe-bench-pro"
+            upsert "SWEBENCH_INSTANCES_FILE=/var/swebench/swebench_pro_full.json"
+            upsert "SWEBENCH_OUTPUT_BASE=/var/swebench/runs"
+            upsert "SWEBENCH_MAX_CONCURRENT_RUNS=8"
+            upsert "APP_MAIL_BASE_URL=https://benchmark.executespec.ai"
+            upsert "APP_SURFACE_RETURN_URL=https://benchmark.executespec.ai/auth/callback"
+            upsert "BUILD_SURFACE_RETURN_URL=https://benchmark.executespec.ai/auth/callback"
+            upsert "PREVIEW_PROXY_ENABLED=false"
+            upsert "PREVIEW_ENGINE_ROUTE_VIA=false"
+            upsert "JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64"
+          fi
+
           # ── API keys from GCS (never committed to repo) ──────────────
           DEPLOY_BUCKET="$2"
           if [ -n "$DEPLOY_BUCKET" ]; then
@@ -302,33 +355,100 @@ jobs:
             fi
           fi
           SCRIPT
+          append_secret() {
+            local key="$1"
+            local value="$2"
+            [ -z "$value" ] && return 0
+            printf 'upsert %q\n' "${key}=${value}" >> /tmp/env-patch.sh
+          }
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            append_secret ANTHROPIC_API_KEY "$BENCHMARK_ANTHROPIC_API_KEY"
+            append_secret OPENAI_API_KEY "$BENCHMARK_OPENAI_API_KEY"
+            append_secret GOOGLE_API_KEY "$BENCHMARK_GOOGLE_API_KEY"
+            append_secret DEEPSEEK_API_KEY "$BENCHMARK_DEEPSEEK_API_KEY"
+            append_secret OPENROUTER_API_KEY "$BENCHMARK_OPENROUTER_API_KEY"
+            append_secret GITHUB_PAT "$BENCHMARK_GITHUB_PAT"
+            append_secret GOOGLE_OAUTH_CLIENT_ID "$BENCHMARK_GOOGLE_OAUTH_CLIENT_ID"
+            append_secret GOOGLE_OAUTH_CLIENT_SECRET "$BENCHMARK_GOOGLE_OAUTH_CLIENT_SECRET"
+            append_secret GITHUB_OAUTH_CLIENT_ID "$BENCHMARK_GITHUB_OAUTH_CLIENT_ID"
+            append_secret GITHUB_OAUTH_CLIENT_SECRET "$BENCHMARK_GITHUB_OAUTH_CLIENT_SECRET"
+          fi
           chmod +x /tmp/env-patch.sh
+          cat > /tmp/executespec-benchmark.service << 'SERVICE'
+          [Unit]
+          Description=ExecuteSpec Benchmark Application
+          After=network-online.target docker.service postgresql.service redis-server.service
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/app
+          EnvironmentFile=/opt/app/executespec.env
+          ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/app/app.jar
+          Restart=always
+          RestartSec=20
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=executespec
+          LimitNOFILE=65535
+          LimitNPROC=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
 
       - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
         run: |
           REMOTE_ENV_PATCH="/tmp/env-patch-${{ github.run_id }}-${{ github.run_attempt }}.sh"
+          REMOTE_JAR="/tmp/app-${{ env.TARGET_SHA }}.jar"
+          REMOTE_SERVICE="/tmp/executespec-benchmark-${{ github.run_id }}-${{ github.run_attempt }}.service"
 
           # Upload env-patch script to the VM
           gcloud compute scp /tmp/env-patch.sh ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_ENV_PATCH} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            JAR=$(ls target/*.jar | head -1)
+            gcloud compute scp "$JAR" ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_JAR} \
+              --project ${{ env.GCP_PROJECT }} \
+              --zone ${{ env.GCE_ZONE_RESOLVED }} \
+              --tunnel-through-iap \
+              --strict-host-key-checking=no
+            gcloud compute scp /tmp/executespec-benchmark.service ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_SERVICE} \
+              --project ${{ env.GCP_PROJECT }} \
+              --zone ${{ env.GCE_ZONE_RESOLVED }} \
+              --tunnel-through-iap \
+              --strict-host-key-checking=no
+          fi
 
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="
               set -e
               REMOTE_ENV_PATCH='${REMOTE_ENV_PATCH}'
-              trap 'sudo rm -f \"\$REMOTE_ENV_PATCH\"' EXIT
+              REMOTE_JAR='${REMOTE_JAR}'
+              REMOTE_SERVICE='${REMOTE_SERVICE}'
+              trap 'sudo rm -f \"\$REMOTE_ENV_PATCH\" \"\$REMOTE_SERVICE\"' EXIT
               sudo mkdir -p /opt/app/releases
-              sudo gsutil cp ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/releases/
-              sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy'
+              if [ '${{ env.DEPLOY_ENV }}' = 'benchmark' ]; then
+                sudo mv \"\$REMOTE_JAR\" /opt/app/releases/app-${{ env.TARGET_SHA }}.jar
+              else
+                sudo gsutil cp $DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/releases/
+              fi
+              sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy' '${{ env.DEPLOY_ENV }}'
               sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
               echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA
+              if [ '${{ env.DEPLOY_ENV }}' = 'benchmark' ]; then
+                sudo mv \"\$REMOTE_SERVICE\" /etc/systemd/system/executespec.service
+                sudo systemctl daemon-reload
+                sudo systemctl enable executespec
+              fi
               sudo systemctl restart executespec
               echo 'Deploy done — service restarting'
             "
@@ -360,7 +480,7 @@ jobs:
             echo "Health check attempt $i..."
             RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
               --project ${{ env.GCP_PROJECT }} \
-              --zone ${{ env.GCE_ZONE }} \
+              --zone ${{ env.GCE_ZONE_RESOLVED }} \
               --tunnel-through-iap \
               --command="rm -f /tmp/health.json; HTTP_CODE=\$(curl -s -o /tmp/health.json -w '%{http_code}' http://localhost:8080/actuator/health); CURL_EXIT=\$?; BODY=\$(cat /tmp/health.json 2>/dev/null || echo ''); echo \"http=\$HTTP_CODE exit=\$CURL_EXIT body=\$BODY\"" \
               2>/dev/null) || RESULT="SSH_FAIL"
@@ -388,7 +508,7 @@ jobs:
         run: |
           RESULT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --command="curl -s http://localhost:8080/api/health/providers" \
             2>/dev/null) || RESULT="SSH_FAIL"
@@ -396,14 +516,23 @@ jobs:
           # Required providers for this environment — anthropic backs the default chat model. Add any
           # other provider you route runs to. A run hitting an unconfigured provider 401s at runtime.
           MISSING=""
-          for p in anthropic; do
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            REQUIRED_PROVIDERS="anthropic deepseek openrouter"
+          else
+            REQUIRED_PROVIDERS="anthropic"
+          fi
+          for p in $REQUIRED_PROVIDERS; do
             if echo "$RESULT" | grep -qE "\"$p\"[[:space:]]*:[[:space:]]*false"; then
               MISSING="$MISSING $p"
             fi
           done
           if [ -n "$MISSING" ]; then
             echo "::error::Deployed backend is missing API key(s) for:$MISSING — every run routing to them will 401."
-            echo "Fix gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy/config/api-keys and redeploy."
+            if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+              echo "Fix benchmark GitHub environment/repository secrets and redeploy."
+            else
+              echo "Fix gs://${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy/config/api-keys and redeploy."
+            fi
             exit 1
           fi
           echo "Required provider keys present."
@@ -415,7 +544,7 @@ jobs:
           echo "── systemctl status ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="sudo systemctl status executespec --no-pager 2>&1 || true" \
@@ -424,7 +553,7 @@ jobs:
           echo "── Last 150 lines of app log ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="sudo journalctl -u executespec --no-pager -n 150 2>&1 || true" \
@@ -433,7 +562,7 @@ jobs:
           echo "── Environment file (redacted) ──"
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="sudo cat /opt/app/executespec.env 2>/dev/null | sed 's/=.*/=***/' || echo 'No env file'" \
@@ -446,7 +575,7 @@ jobs:
         run: |
           gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
-            --zone ${{ env.GCE_ZONE }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
             --command="
@@ -458,9 +587,10 @@ jobs:
 
       # ── Prune old releases (keep last 10) ─────────────────────────────────
       - name: Prune old JAR releases
+        if: env.DEPLOY_ENV != 'benchmark'
         run: |
           CURRENT_JAR="app-${{ env.TARGET_SHA }}.jar"
-          ALL_JARS=$(gsutil ls ${{ env.DEPLOY_BUCKET }}/releases/ | sort)
+          ALL_JARS=$(gsutil ls "$DEPLOY_BUCKET/releases/" | sort)
           COUNT=$(echo "$ALL_JARS" | wc -l)
           if [ "$COUNT" -gt 10 ]; then
             echo "$ALL_JARS" \
@@ -476,7 +606,11 @@ jobs:
       - name: Deployment summary
         run: |
           echo "✅ Deployed commit ${{ env.TARGET_SHA }} to ${GCE_INSTANCE_RESOLVED:-unknown} (${{ env.DEPLOY_ENV }})"
-          echo "   JAR: ${{ env.DEPLOY_BUCKET }}/releases/app-${{ env.TARGET_SHA }}.jar"
+          if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
+            echo "   JAR: /opt/app/releases/app-${{ env.TARGET_SHA }}.jar"
+          else
+            echo "   JAR: $DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
+          fi
           echo "   Branch: ${{ github.ref_name }}"
           echo "   Environment: ${{ env.DEPLOY_ENV }}"
 

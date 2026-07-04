@@ -8,8 +8,10 @@ import lombok.Builder;
  * Input to {@link OutlinePlannerAgent#plan(PlannerRequest)}.
  *
  * @param spec the user's natural-language task specification
- * @param classification SINGLE_SHOT / SMALL / MEDIUM / LARGE / LEGACY, supplied by the classifier
- *     before planning.
+ * @param classification legacy planner cap used by callers that have not migrated to {@link
+ *     PlanStrategy}.
+ * @param planStrategy V2 classifier strategy. When present, this controls the planner prompt label
+ *     and output task cap.
  * @param provider which LLM provider to use (ignored when classification is SINGLE_SHOT since no
  *     LLM call is made)
  * @param model which model to use (ignored for SINGLE_SHOT)
@@ -22,6 +24,7 @@ import lombok.Builder;
 public record PlannerRequest(
     String spec,
     Classification classification,
+    PlanStrategy planStrategy,
     String provider,
     String model,
     ExecutionContext context,
@@ -64,5 +67,13 @@ public record PlannerRequest(
         throw new IllegalArgumentException("provider required");
       if (model == null || model.isBlank()) throw new IllegalArgumentException("model required");
     }
+  }
+
+  public String promptClassification() {
+    return planStrategy == null ? classification.name() : planStrategy.name();
+  }
+
+  public int plannerMaxTasks() {
+    return planStrategy == null ? classification.maxTasks() : planStrategy.maxTasks();
   }
 }

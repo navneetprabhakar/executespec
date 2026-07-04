@@ -32,7 +32,8 @@ class SwebenchInstanceLoaderTest {
             "test_patch": "diff --git a/test b/test",
             "dockerhub_tag": "nodebb-nodebb-049989",
             "repo_language": "javascript",
-            "interface": "web"
+            "interface": "web",
+            "requirements": "- Reconnect must resume the previous session."
           }
         ]
         """);
@@ -51,6 +52,7 @@ class SwebenchInstanceLoaderTest {
     assertThat(instance.passToPass()).containsExactly("test/smoke.js::still_works");
     assertThat(instance.repoLanguage()).isEqualTo("javascript");
     assertThat(instance.interfaceName()).isEqualTo("web");
+    assertThat(instance.requirements()).isEqualTo("- Reconnect must resume the previous session.");
     assertThat(loader.imageNameFor(instance.instanceId()))
         .isEqualTo("jefzda/sweap-images:nodebb-nodebb-049989");
   }

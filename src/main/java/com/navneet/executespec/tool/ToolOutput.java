@@ -16,9 +16,9 @@ import java.nio.file.Path;
  * with an explicit instruction to {@code readFile} it for the complete output. The worker never
  * loses access to the full output — it pages it in on demand only when it needs the detail.
  *
- * <p>{@code .agent-context/} is run-infra: it is excluded from the SWE-bench scoreable diff (see
- * {@code BenchmarkRunService} excludes) and is not pushed on product runs, so persisting here never
- * pollutes a patch or a PR. Fail-open: any IO error falls back to a plain head+tail truncation.
+ * <p>{@code .agent-context/} is run-infra: it is excluded from benchmark scoreable diffs and is not
+ * pushed on product runs, so persisting here never pollutes a patch or a PR. Fail-open: any IO
+ * error falls back to a plain head+tail truncation.
  */
 public final class ToolOutput {
 

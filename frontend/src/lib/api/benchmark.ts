@@ -35,6 +35,8 @@ export interface BenchmarkTaskResult {
   taskName: string;
   attempt: number;
   reward: number; // 1 = passed the verifier, 0 = failed
+  outcome?: string | null; // PASSED | FAILED | TIMEOUT | INFRA_FAILED | …
+  reason?: string | null;
   esRunId?: string | null;
   costUsd: number | string;
   inputTokens?: number;
