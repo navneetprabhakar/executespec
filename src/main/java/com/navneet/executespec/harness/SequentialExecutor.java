@@ -336,6 +336,7 @@ to boot — skip it for those.""";
 
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
+
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
@@ -4473,7 +4474,8 @@ to boot — skip it for those.""";
     return sb.toString();
   }
 
-  private String composeUserPrompt(PlannedTask task, String previousBuildError, String orientation) {
+  private String composeUserPrompt(
+      PlannedTask task, String previousBuildError, String orientation) {
     StringBuilder sb = new StringBuilder();
     sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
     sb.append(task.description());

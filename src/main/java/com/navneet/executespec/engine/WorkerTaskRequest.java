@@ -127,22 +127,22 @@ import lombok.Builder;
  *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
  *     {@link CodeGenEngineImpl} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
  * @param progressV2 harness-resolution Phase 1 (flag {@code worker.progress-v2.enabled}, V255,
- *     default OFF). Replaces the write-only progress definition with evidence-based progress:
- *     (a) any tool call with a NOVEL (name, normalized-args) signature resets the stagnation
- *     counter — investigation counts, repetition does not; (b) stagnation force adds a
- *     repetition trigger (the same call signature failing repeatedly) so true loops still
- *     terminate; (c) the PATCH pre-edit nudge moves from 6 non-write iters to a total-iteration
- *     exploration ceiling; (d) a text-only stop is retried with {@code tool_choice=required}
- *     (bounded) instead of terminating the run; (e) the corrective nudge drops the
- *     "an imperfect edit beats zero" directive (benchmark-diff logic, wrong for customer PRs).
- *     Null/false ⇒ the RL-2026-05-005 write-only engine runs byte-identically.
+ *     default OFF). Replaces the write-only progress definition with evidence-based progress: (a)
+ *     any tool call with a NOVEL (name, normalized-args) signature resets the stagnation counter —
+ *     investigation counts, repetition does not; (b) stagnation force adds a repetition trigger
+ *     (the same call signature failing repeatedly) so true loops still terminate; (c) the PATCH
+ *     pre-edit nudge moves from 6 non-write iters to a total-iteration exploration ceiling; (d) a
+ *     text-only stop is retried with {@code tool_choice=required} (bounded) instead of terminating
+ *     the run; (e) the corrective nudge drops the "an imperfect edit beats zero" directive
+ *     (benchmark-diff logic, wrong for customer PRs). Null/false ⇒ the RL-2026-05-005 write-only
+ *     engine runs byte-identically.
  * @param autoVerify harness-resolution Phase 2 (flag {@code worker.auto-verify.enabled}, V255,
- *     default OFF). When true, the SERVER runs the resolved test suite after each edit burst
- *     (an iteration with no write following iterations that had writes) and injects the result —
- *     counts + failing-output tail — as an observation. No model-visible schema change (the
- *     RL-2026-05-061 stall class is structurally avoided), deterministic (fires for every model,
- *     including ones too weak to self-verify), bounded per task, inert on remote runs and when no
- *     runner resolves. This is the edit→run→observe loop; supersedes V209/V217 on graduation.
+ *     default OFF). When true, the SERVER runs the resolved test suite after each edit burst (an
+ *     iteration with no write following iterations that had writes) and injects the result — counts
+ *     + failing-output tail — as an observation. No model-visible schema change (the RL-2026-05-061
+ *     stall class is structurally avoided), deterministic (fires for every model, including ones
+ *     too weak to self-verify), bounded per task, inert on remote runs and when no runner resolves.
+ *     This is the edit→run→observe loop; supersedes V209/V217 on graduation.
  */
 @Builder
 public record WorkerTaskRequest(

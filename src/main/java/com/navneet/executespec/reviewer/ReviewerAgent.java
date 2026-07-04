@@ -120,9 +120,9 @@ public class ReviewerAgent {
   private final com.navneet.executespec.router.ModelResolver modelResolver;
 
   /**
-   * Harness-resolution task 8 (flag {@code worker.auto-verify.enabled}) — lets the reviewer run
-   * the project's own tests after a GREEN final build and spend one bounded fix pass on red
-   * tests, mirroring the fix-build third pass. Nullable (tests / legacy wiring) ⇒ inert.
+   * Harness-resolution task 8 (flag {@code worker.auto-verify.enabled}) — lets the reviewer run the
+   * project's own tests after a GREEN final build and spend one bounded fix pass on red tests,
+   * mirroring the fix-build third pass. Nullable (tests / legacy wiring) ⇒ inert.
    */
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
 

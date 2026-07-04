@@ -42,11 +42,11 @@ public class ModelMatrixProperties {
 
   /**
    * Harness-resolution task 10 — per-provider capability profiles. Ends the tune-to-the-weakest-
-   * model spiral (RL-2026-05-061 class: features that stall one provider got reverted GLOBALLY):
-   * a mechanical affordance that breaks on one provider becomes a one-line profile edit for that
+   * model spiral (RL-2026-05-061 class: features that stall one provider got reverted GLOBALLY): a
+   * mechanical affordance that breaks on one provider becomes a one-line profile edit for that
    * provider, never a global rollback. Profiles cover mechanical affordances only (optional tool
-   * binding, stagnation thresholds); prompt shaping stays in the existing provider-tuning
-   * fragment mechanism. Key: provider name ("anthropic", "openai", "deepseek", ...).
+   * binding, stagnation thresholds); prompt shaping stays in the existing provider-tuning fragment
+   * mechanism. Key: provider name ("anthropic", "openai", "deepseek", ...).
    */
   private Map<String, CapabilityProfile> capabilityProfiles;
 
@@ -54,9 +54,9 @@ public class ModelMatrixProperties {
   public static class CapabilityProfile {
     /**
      * Flag-gated tool NAMES this provider binds even while the tool's global flag is OFF —
-     * per-provider re-enablement of e.g. {@code runWorkspaceTests} (V217) / {@code
-     * readCodeOutline} (V234) for schema-robust providers, while schema-sensitive providers
-     * (native DeepSeek) keep the lean schema that the global OFF protects.
+     * per-provider re-enablement of e.g. {@code runWorkspaceTests} (V217) / {@code readCodeOutline}
+     * (V234) for schema-robust providers, while schema-sensitive providers (native DeepSeek) keep
+     * the lean schema that the global OFF protects.
      */
     private List<String> optionalTools;
 

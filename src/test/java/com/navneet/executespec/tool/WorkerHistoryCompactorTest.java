@@ -61,7 +61,8 @@ class WorkerHistoryCompactorTest {
   @BeforeEach
   void setUp() {
     compactor =
-        new WorkerHistoryCompactor(router, modelResolver, promptAssembler, featureFlagService, null);
+        new WorkerHistoryCompactor(
+            router, modelResolver, promptAssembler, featureFlagService, null);
   }
 
   /**

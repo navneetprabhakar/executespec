@@ -82,16 +82,16 @@ public class ToolRegistry {
    * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
    * {@code executeCommand} / {@code lsp} / stubs — see {@link CommandToolConfiguration}); binding
    * those to server workers duplicates the schema 2-3× (schema-token bloat, the RL-2026-05-061
-   * stall class), splits model behavior across aliases with DIFFERENT error semantics ({@code
-   * bash} errs on non-zero exit, {@code shell} returns ok+exit=N), and teaches models the tool
-   * surface is unreliable when they hit a stub. When the flag is ON, server-side (non-remote)
-   * workers bind ONLY this set; remote/local-hands runs keep the full parity set — the aliases
-   * exist for those clients.
+   * stall class), splits model behavior across aliases with DIFFERENT error semantics ({@code bash}
+   * errs on non-zero exit, {@code shell} returns ok+exit=N), and teaches models the tool surface is
+   * unreliable when they hit a stub. When the flag is ON, server-side (non-remote) workers bind
+   * ONLY this set; remote/local-hands runs keep the full parity set — the aliases exist for those
+   * clients.
    *
-   * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent
-   * (glob, move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface),
-   * and unwired fallbacks (lsp, spawn_subagent, mcp_client, plan/todo stubs) stay out. Flag-gated
-   * tools listed here still require their own flag ON to bind.
+   * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
+   * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
+   * unwired fallbacks (lsp, spawn_subagent, mcp_client, plan/todo stubs) stay out. Flag-gated tools
+   * listed here still require their own flag ON to bind.
    */
   public static final Set<String> LEAN_WORKER_TOOLS =
       Set.of(
@@ -165,10 +165,10 @@ public class ToolRegistry {
   }
 
   /**
-   * Provider-aware worker bind (task 10). A provider's capability profile may list flag-gated
-   * tool NAMES in {@code optionalTools} — those bind for that provider even while the tool's
-   * global flag is OFF (per-provider re-enablement; the global OFF continues to protect
-   * schema-sensitive providers). Null provider / no profile ⇒ global flag gating only.
+   * Provider-aware worker bind (task 10). A provider's capability profile may list flag-gated tool
+   * NAMES in {@code optionalTools} — those bind for that provider even while the tool's global flag
+   * is OFF (per-provider re-enablement; the global OFF continues to protect schema-sensitive
+   * providers). Null provider / no profile ⇒ global flag gating only.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider) {
     // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs

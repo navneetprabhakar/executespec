@@ -39,7 +39,8 @@ class CodeGenEngineImplTest {
   private final PromptAssembler promptAssembler = mock(PromptAssembler.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
   private final CodeGenEngineImpl engine =
-      new CodeGenEngineImpl(workerAgent, runRepo, featureFlagService, promptAssembler, costTracker, null);
+      new CodeGenEngineImpl(
+          workerAgent, runRepo, featureFlagService, promptAssembler, costTracker, null);
 
   @BeforeEach
   void setUp() {

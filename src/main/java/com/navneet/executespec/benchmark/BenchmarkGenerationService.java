@@ -437,14 +437,14 @@ public class BenchmarkGenerationService {
   /**
    * Blind spec — issue + offline/existing-repo framing only. NO held-out tests.
    *
-   * <p>For SWE-bench Pro instances this also injects the annotator-written {@code requirements}
-   * and {@code interface} dataset fields. This is the OFFICIAL evaluation setting — "models are
+   * <p>For SWE-bench Pro instances this also injects the annotator-written {@code requirements} and
+   * {@code interface} dataset fields. This is the OFFICIAL evaluation setting — "models are
    * evaluated in the setting without any ambiguity — the problem statement, requirements and
-   * interface specification are included in the agent prompt" (arXiv:2509.16941). Requirements
-   * pin the exact expected behavior; interface pins exact class/function signatures that
-   * dependent code (including the held-out tests) will reference. Omitting them (the pre-2026-07
-   * behavior) made our runs strictly harder than every leaderboard entry. Blindness is
-   * unchanged: FAIL_TO_PASS / PASS_TO_PASS / test_patch / patch are still never injected.
+   * interface specification are included in the agent prompt" (arXiv:2509.16941). Requirements pin
+   * the exact expected behavior; interface pins exact class/function signatures that dependent code
+   * (including the held-out tests) will reference. Omitting them (the pre-2026-07 behavior) made
+   * our runs strictly harder than every leaderboard entry. Blindness is unchanged: FAIL_TO_PASS /
+   * PASS_TO_PASS / test_patch / patch are still never injected.
    */
   String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
     boolean hasInterface = i.interfaceName() != null && !i.interfaceName().isBlank();

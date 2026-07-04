@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -30,7 +31,8 @@ class WorkerAgentOverflowRecoveryTest {
             WorkerAgent.isContextLengthError(
                 new RuntimeException("outer", new RuntimeException("input is too long"))))
         .isTrue();
-    assertThat(WorkerAgent.isContextLengthError(new RuntimeException("429 rate limited"))).isFalse();
+    assertThat(WorkerAgent.isContextLengthError(new RuntimeException("429 rate limited")))
+        .isFalse();
     assertThat(WorkerAgent.isContextLengthError(new RuntimeException((String) null))).isFalse();
   }
 
@@ -48,8 +50,7 @@ class WorkerAgentOverflowRecoveryTest {
               .build());
       h.add(
           ToolResponseMessage.builder()
-              .responses(
-                  List.of(new ToolResponseMessage.ToolResponse("id" + i, "readFile", "ok")))
+              .responses(List.of(new ToolResponseMessage.ToolResponse("id" + i, "readFile", "ok")))
               .build());
     }
     List<Message> out = WorkerAgent.hardTrimHistory(h);

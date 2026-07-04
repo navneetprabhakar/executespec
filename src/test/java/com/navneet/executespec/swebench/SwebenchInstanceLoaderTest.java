@@ -52,8 +52,7 @@ class SwebenchInstanceLoaderTest {
     assertThat(instance.passToPass()).containsExactly("test/smoke.js::still_works");
     assertThat(instance.repoLanguage()).isEqualTo("javascript");
     assertThat(instance.interfaceName()).isEqualTo("web");
-    assertThat(instance.requirements())
-        .isEqualTo("- Reconnect must resume the previous session.");
+    assertThat(instance.requirements()).isEqualTo("- Reconnect must resume the previous session.");
     assertThat(loader.imageNameFor(instance.instanceId()))
         .isEqualTo("jefzda/sweap-images:nodebb-nodebb-049989");
   }
