@@ -1,5 +1,6 @@
-import {useCallback, useEffect, useState} from 'react';
-import {Link} from 'react-router-dom';
+import {useCallback, useEffect, useMemo, useState} from 'react';
+import {ArrowLeft, ChevronDown, ChevronRight, ExternalLink, RefreshCw} from 'lucide-react';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
@@ -23,6 +24,12 @@ function benchKind(status?: string | null): 'ok' | 'warn' | 'bad' {
   return 'warn';
 }
 
+function effectiveStatus(r: api.BenchmarkRun): string {
+  const s = (r.status || '').toUpperCase();
+  if ((s === 'RUNNING' || s === 'PENDING') && r.finishedAt) return 'DONE';
+  return r.status || 'UNKNOWN';
+}
+
 function fmtCost(c: number | string | null | undefined): string {
   const n = Number(c ?? 0);
   return Number.isFinite(n) ? `$${n.toFixed(4)}` : '$0.0000';
@@ -38,6 +45,18 @@ function fmtTok(t: number | null | undefined): string {
 
 function pct(resolved: number, total: number): number {
   return total > 0 ? Math.round((100 * resolved) / total) : 0;
+}
+
+function dateTime(iso?: string | null): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(t);
 }
 
 function relTime(iso?: string | null): string {
@@ -160,63 +179,152 @@ function KV({k, children}: {k: string; children: React.ReactNode}) {
 
 // ── run row ─────────────────────────────────────────────────────────────────
 
-function RunRow({r, active, onClick}: {r: api.BenchmarkRun; active: boolean; onClick: () => void}) {
+function shortDataset(dataset?: string | null): string {
+  if (!dataset) return '—';
+  return dataset.replace(/^swe-bench-pro-/, 'pro-').replace(/^terminal-bench-/, 'tb-');
+}
+
+function runSort(a: api.BenchmarkRun, b: api.BenchmarkRun): number {
+  return Date.parse(b.createdAt || '') - Date.parse(a.createdAt || '');
+}
+
+interface RunGroups {
+  current: api.BenchmarkRun[];
+  historical: api.BenchmarkRun[];
+}
+
+function groupRuns(runs: api.BenchmarkRun[]): RunGroups {
+  const latestDatasetBySuite = new Map<string, {key: string; t: number}>();
+  for (const r of runs) {
+    const suite = r.suite || 'UNKNOWN';
+    const key = `${suite}::${r.dataset || ''}`;
+    const t = Date.parse(r.createdAt || '') || 0;
+    const prev = latestDatasetBySuite.get(suite);
+    if (!prev || t > prev.t) latestDatasetBySuite.set(suite, {key, t});
+  }
+  const current: api.BenchmarkRun[] = [];
+  const historical: api.BenchmarkRun[] = [];
+  for (const r of runs) {
+    const status = effectiveStatus(r).toUpperCase();
+    const key = `${r.suite || 'UNKNOWN'}::${r.dataset || ''}`;
+    const newestDataset = latestDatasetBySuite.get(r.suite || 'UNKNOWN')?.key === key;
+    if (status === 'RUNNING' || status === 'PENDING' || newestDataset) current.push(r);
+    else historical.push(r);
+  }
+  return {current: current.sort(runSort), historical: historical.sort(runSort)};
+}
+
+function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
+  const status = effectiveStatus(r);
+  const scored = r.totalTasks > 0 ? `${r.resolvedTasks}/${r.totalTasks}` : String(r.resolvedTasks);
   return (
-    <button
-      onClick={onClick}
-      className='ide-card ide-benchmark-row'
-      style={{
-        width: '100%',
-        textAlign: 'left',
-        cursor: 'pointer',
-        marginBottom: 8,
-        border: `1px solid ${active ? 'var(--ide-accent)' : 'var(--ide-border)'}`,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        font: 'inherit',
-        color: 'var(--ide-fg)',
+    <tr
+      className='ide-benchmark-table-row'
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
       }}
+      tabIndex={0}
     >
-      <div
-        className='ide-benchmark-row-head'
-        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
-      >
-        <SuiteChip suite={r.suite} />
-        <span style={{fontWeight: 600}}>{r.model}</span>
-        <span style={{color: MUTED, fontSize: 12}}>{r.provider}</span>
-        <span
-          className='ide-benchmark-row-status'
-          style={{marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8}}
-        >
-          {r.submissionStatus && <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />}
-          <IdeBadge kind={benchKind(r.status)}>{r.status}</IdeBadge>
-        </span>
+      <td style={TD}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+          <SuiteChip suite={r.suite} />
+          <span className='ide-benchmark-model'>{r.model}</span>
+        </div>
+        <div style={{marginTop: 4, color: MUTED, fontSize: 12}}>{r.provider}</div>
+      </td>
+      <td style={TD}>{shortDataset(r.dataset)}</td>
+      <td style={TD}>
+        <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
+        {r.submissionStatus && (
+          <div style={{marginTop: 6}}>
+            <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />
+          </div>
+        )}
+      </td>
+      <td style={TD}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 160}}>
+          <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
+          <span style={{whiteSpace: 'nowrap'}}>
+            <strong>{scored}</strong> ({pct(r.resolvedTasks, r.totalTasks)}%)
+          </span>
+        </div>
+      </td>
+      <td style={TD}>k={r.k}</td>
+      <td style={TD}>{fmtCost(r.costUsd)}</td>
+      <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+        {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
+      </td>
+      <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+        {dateTime(r.createdAt)}
+        <div style={{fontSize: 11}}>
+          {r.finishedAt ? `done ${dateTime(r.finishedAt)}` : relTime(r.createdAt)}
+        </div>
+      </td>
+      <td style={{...TD, width: 36}}>
+        <ExternalLink size={15} aria-hidden='true' />
+      </td>
+    </tr>
+  );
+}
+
+function RunTable({runs, empty}: {runs: api.BenchmarkRun[]; empty: string}) {
+  const navigate = useNavigate();
+  if (!runs.length) return <EmptyCard>{empty}</EmptyCard>;
+  return (
+    <div className='ide-card ide-benchmark-table-card'>
+      <table className='ide-benchmark-table'>
+        <thead>
+          <tr>
+            {['Benchmark', 'Dataset', 'Status', 'Resolved', 'K', 'Cost', 'Tokens', 'Time', ''].map(
+              (h) => (
+                <th key={h} style={TH}>
+                  {h}
+                </th>
+              ),
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((r) => (
+            <RunRow key={r.id} r={r} onOpen={() => navigate(`/benchmark/${r.id}`)} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BenchmarkSection({
+  title,
+  subtitle,
+  runs,
+  collapsed,
+  onToggle,
+  empty,
+}: {
+  title: string;
+  subtitle: string;
+  runs: api.BenchmarkRun[];
+  collapsed: boolean;
+  onToggle: () => void;
+  empty: string;
+}) {
+  return (
+    <section className='ide-benchmark-section'>
+      <div className='ide-benchmark-section-head'>
+        <button className='ide-btn ghost ide-benchmark-collapse' onClick={onToggle}>
+          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+          <span>{title}</span>
+          <span className='ide-benchmark-count'>{runs.length}</span>
+        </button>
+        <span className='ide-benchmark-section-sub'>{subtitle}</span>
       </div>
-      <div
-        className='ide-benchmark-row-stats'
-        style={{display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'}}
-      >
-        <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
-        <span style={{fontSize: 12, whiteSpace: 'nowrap'}}>
-          <strong>
-            {r.resolvedTasks}/{r.totalTasks}
-          </strong>{' '}
-          <span style={{color: MUTED}}>resolved ({pct(r.resolvedTasks, r.totalTasks)}%)</span>
-        </span>
-        <span style={{fontSize: 12, color: MUTED}}>k={r.k}</span>
-        <span style={{fontSize: 12}}>{fmtCost(r.costUsd)}</span>
-        <span style={{fontSize: 12, color: MUTED}} title='input ↑ / output ↓ tokens'>
-          {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓ tok
-        </span>
-        <span
-          className='ide-benchmark-row-time'
-          style={{marginLeft: 'auto', fontSize: 12, color: MUTED}}
-        >
-          {relTime(r.createdAt)}
-        </span>
-      </div>
-    </button>
+      {!collapsed && <RunTable runs={runs} empty={empty} />}
+    </section>
   );
 }
 
@@ -392,27 +500,24 @@ function EventLog({events}: {events: api.BenchmarkEvent[]}) {
   );
 }
 
-function Detail({d, onClose}: {d: api.BenchmarkDetail; onClose: () => void}) {
+function Detail({d}: {d: api.BenchmarkDetail}) {
   const r = d.run;
   const groups = groupTasks(d.tasks);
-  const runDone = ['DONE', 'FAILED', 'CANCELLED'].includes((r.status || '').toUpperCase());
+  const status = effectiveStatus(r);
+  const runDone = ['DONE', 'FAILED', 'CANCELLED'].includes(status.toUpperCase());
   const resolved = groups.filter((g) => g.passed).length;
   const failed = groups.filter((g) => !g.passed && (g.done >= r.k || runDone)).length;
   const pending = groups.length - resolved - failed;
   return (
-    <div style={{marginTop: 20}}>
+    <div>
       <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
+        <Link to='/benchmark' className='ide-btn ghost' style={{fontSize: 12}}>
+          <ArrowLeft size={15} />
+          Back
+        </Link>
         <div className='ide-h2' style={{margin: 0}}>
           {r.model} · {r.suite}
         </div>
-        <button
-          onClick={onClose}
-          className='ide-btn ghost'
-          style={{marginLeft: 'auto', fontSize: 12}}
-          title='Close detail'
-        >
-          ✕ Close
-        </button>
       </div>
 
       <div
@@ -424,7 +529,7 @@ function Detail({d, onClose}: {d: api.BenchmarkDetail; onClose: () => void}) {
         }}
       >
         <KV k='Status'>
-          <IdeBadge kind={benchKind(r.status)}>{r.status}</IdeBadge>
+          <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
         </KV>
         <KV k='Resolved'>
           {r.resolvedTasks}/{r.totalTasks} ({pct(r.resolvedTasks, r.totalTasks)}%)
@@ -482,10 +587,13 @@ function Detail({d, onClose}: {d: api.BenchmarkDetail; onClose: () => void}) {
 
 export default function IdeBenchmark() {
   const isAdmin = useAuthStore(selectIsSuperAdmin);
+  const {benchmarkId} = useParams();
   const [runs, setRuns] = useState<api.BenchmarkRun[] | null>(null);
-  const [sel, setSel] = useState<string | null>(null);
   const [detail, setDetail] = useState<api.BenchmarkDetail | null>(null);
   const [err, setErr] = useState('');
+  const [currentCollapsed, setCurrentCollapsed] = useState(false);
+  const [historicalCollapsed, setHistoricalCollapsed] = useState(false);
+  const groups = useMemo(() => groupRuns(runs ?? []), [runs]);
 
   const loadList = useCallback(async () => {
     try {
@@ -515,30 +623,39 @@ export default function IdeBenchmark() {
     return () => clearInterval(t);
   }, [isAdmin, loadList]);
 
-  // Detail: load on select + 3s poll while selected (skipped when hidden).
+  // Detail route: load on open + 3s poll while selected (skipped when hidden).
   useEffect(() => {
-    if (!sel) {
+    if (!benchmarkId) {
       setDetail(null);
       return;
     }
-    void loadDetail(sel);
+    void loadDetail(benchmarkId);
     const t = setInterval(() => {
-      if (!document.hidden) void loadDetail(sel);
+      if (!document.hidden) void loadDetail(benchmarkId);
     }, 3000);
     return () => clearInterval(t);
-  }, [sel, loadDetail]);
+  }, [benchmarkId, loadDetail]);
 
   if (!isAdmin) {
     return (
       <div className='ide-pane' style={{maxWidth: 760}}>
-        <h1 className='ide-h1'>Benchmarks</h1>
+        <h1 className='ide-h1'>{benchmarkId ? 'Benchmark Detail' : 'Benchmarks'}</h1>
         <EmptyCard>This is an operator-only surface (SUPER_ADMIN).</EmptyCard>
       </div>
     );
   }
 
+  if (benchmarkId) {
+    return (
+      <div className='ide-pane' style={{maxWidth: 1180}}>
+        {err && <ErrCard msg={err} />}
+        {!detail ? <IdeLoader label='Loading benchmark detail…' pad={24} /> : <Detail d={detail} />}
+      </div>
+    );
+  }
+
   return (
-    <div className='ide-pane' style={{maxWidth: 1080}}>
+    <div className='ide-pane' style={{maxWidth: 1180}}>
       <div style={{display: 'flex', alignItems: 'baseline', gap: 12}}>
         <h1 className='ide-h1'>Benchmarks</h1>
         <button
@@ -547,7 +664,8 @@ export default function IdeBenchmark() {
           style={{marginLeft: 'auto', fontSize: 12}}
           title='Refresh now'
         >
-          ↻ Refresh
+          <RefreshCw size={15} />
+          Refresh
         </button>
       </div>
       <div className='ide-sub'>
@@ -565,17 +683,25 @@ export default function IdeBenchmark() {
           <code>/api/v2/test/benchmark</code>.
         </EmptyCard>
       ) : (
-        runs.map((r) => (
-          <RunRow
-            key={r.id}
-            r={r}
-            active={r.id === sel}
-            onClick={() => setSel(r.id === sel ? null : r.id)}
+        <>
+          <BenchmarkSection
+            title='Current'
+            subtitle='Latest dataset per suite plus any active benchmark runs.'
+            runs={groups.current}
+            collapsed={currentCollapsed}
+            onToggle={() => setCurrentCollapsed((v) => !v)}
+            empty='No current benchmark rows.'
           />
-        ))
+          <BenchmarkSection
+            title='Historical'
+            subtitle='Older completed benchmark lanes kept for comparison.'
+            runs={groups.historical}
+            collapsed={historicalCollapsed}
+            onToggle={() => setHistoricalCollapsed((v) => !v)}
+            empty='No historical benchmark rows.'
+          />
+        </>
       )}
-
-      {sel && detail && <Detail d={detail} onClose={() => setSel(null)} />}
     </div>
   );
 }

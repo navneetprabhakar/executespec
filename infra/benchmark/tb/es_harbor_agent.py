@@ -41,6 +41,7 @@ from harbor.models.agent.context import AgentContext
 
 READ_LIMIT, SHELL_LIMIT, DIFF_LIMIT = 8000, 6000, 5000
 TRAJECTORY_LIMIT = 12000
+TOOL_OUTPUT_DIR = "/tmp/es-tool-output"
 
 
 def _trunc(s: str, n: int) -> str:
@@ -187,13 +188,14 @@ class ExecuteSpecAgent(BaseAgent):
     # ---------------- tool execution in the TB container ----------------
     async def _exec_tool(self, name: str, args: dict, env: BaseEnvironment) -> dict:
         try:
+            name, args = self._normalize_tool_call(name, args)
             if name in ("shell", "buildProject", "runTests"):
                 cmd = args.get("command")
                 if not cmd:
                     return _err("INVALID_ARGS", f"{name}: no command")
                 r = await env.exec(cmd, timeout_sec=self.tool_timeout)
                 out = (r.stdout or "") + (r.stderr or "")
-                body = _trunc_head_tail(out, SHELL_LIMIT)
+                body = await self._bounded_shell_output(env, name, out)
                 if r.return_code != 0:
                     return _err(
                         "COMMAND_FAILED",
@@ -201,11 +203,7 @@ class ExecuteSpecAgent(BaseAgent):
                     )
                 return _ok(body)
             if name == "readFile":
-                path = args["path"]
-                r = await env.exec(f"cat -- {shlex.quote(path)}", timeout_sec=30)
-                if r.return_code != 0:
-                    return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
-                return _ok(_trunc(r.stdout or "", READ_LIMIT))
+                return await self._read(env, args)
             if name == "writeFile":
                 return await self._write(env, args["path"], args.get("content", ""))
             if name == "editFile":
@@ -247,6 +245,82 @@ class ExecuteSpecAgent(BaseAgent):
             return _err("INVALID_ARGS", f"unknown tool: {name}")
         except Exception as e:
             return _err("INTERNAL", f"{type(e).__name__}: {e}")
+
+    def _normalize_tool_call(self, name: str, args: dict) -> tuple[str, dict]:
+        """Accept common Claude-Code-style aliases advertised by server-side worker bindings."""
+        aliases = {
+            "bash": "shell",
+            "executeCommand": "shell",
+            "runCommand": "shell",
+            "terminalCommand": "shell",
+            "read_file": "readFile",
+            "grep": "searchFiles",
+            "glob": "listFiles",
+        }
+        normalized = aliases.get(name, name)
+        if normalized == "shell" and "command" not in args:
+            command = args.get("cmd") or args.get("script") or args.get("input")
+            if command:
+                args = {**args, "command": command}
+        if normalized == "readFile" and "path" not in args and args.get("file"):
+            args = {**args, "path": args["file"]}
+        if normalized == "searchFiles" and "query" not in args:
+            query = args.get("pattern") or args.get("regex")
+            if query:
+                args = {**args, "query": query}
+        return normalized, args
+
+    async def _bounded_shell_output(self, env: BaseEnvironment, tool_name: str, out: str) -> str:
+        if len(out) <= SHELL_LIMIT:
+            return out
+        spill = f"{TOOL_OUTPUT_DIR}/{tool_name}-{uuid.uuid4().hex}.txt"
+        written = await self._write(env, spill, out)
+        note = (
+            f"\n[full output saved at {spill}; use readFile with startLine/endLine to inspect it]"
+            if written.get("ok")
+            else "\n[full output spill failed]"
+        )
+        return _trunc_head_tail(out, SHELL_LIMIT) + note
+
+    async def _read(self, env: BaseEnvironment, args: dict) -> dict:
+        path = args["path"]
+        start = args.get("startLine")
+        end = args.get("endLine")
+        try:
+            start = int(start) if start is not None else None
+            end = int(end) if end is not None else None
+        except Exception:
+            return _err("INVALID_ARGS", "startLine/endLine must be integers")
+        if start is not None and start < 1:
+            return _err("INVALID_ARGS", "startLine must be >= 1")
+        if end is not None and end < 1:
+            return _err("INVALID_ARGS", "endLine must be >= 1")
+        if start is not None and end is not None and start > end:
+            return _err("INVALID_ARGS", f"startLine ({start}) > endLine ({end})")
+
+        quoted = shlex.quote(path)
+        if start is not None or end is not None:
+            lo = start or 1
+            hi = str(end) if end is not None else "$"
+            cmd = f"sed -n {shlex.quote(f'{lo},{hi}p')} {quoted}"
+            r = await env.exec(cmd, timeout_sec=30)
+            if r.return_code != 0:
+                return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
+            return _ok(r.stdout or "")
+
+        r = await env.exec(f"cat -- {quoted}", timeout_sec=30)
+        if r.return_code != 0:
+            return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
+        content = r.stdout or ""
+        if len(content) <= READ_LIMIT:
+            return _ok(content)
+        lc = await env.exec(f"wc -l < {quoted}", timeout_sec=30)
+        line_count = (lc.stdout or "").strip() if lc.return_code == 0 else "unknown"
+        return _ok(
+            _trunc(content, READ_LIMIT)
+            + f"\n[file truncated at {READ_LIMIT} chars; total lines: {line_count}; "
+            + "use startLine/endLine to read later ranges]"
+        )
 
     async def _write(self, env: BaseEnvironment, path: str, content: str) -> dict:
         """Write arbitrary content to a container path via base64 (newline/quote-safe)."""

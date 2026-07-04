@@ -217,6 +217,14 @@ function protectedChildren() {
           </SuperAdminOnly>
         }
       />
+      <Route
+        path='/benchmark/:benchmarkId'
+        element={
+          <SuperAdminOnly>
+            <IdeBenchmark />
+          </SuperAdminOnly>
+        }
+      />
       <Route path='/benchmarks' element={<Navigate to='/benchmark' replace />} />
     </>
   );

@@ -100,24 +100,15 @@ public class TerminalBenchRunService {
       !"false".equalsIgnoreCase(System.getenv("ES_TB_CRITIC"));
 
   /**
-   * Required-deliverable path extractor. Terminal-Bench deliverables usually live under {@code
-   * /app/} with a file extension (e.g. {@code /app/run.py}, {@code /app/ssl/server.key}, {@code
-   * /app/jump_analyzer.py}). Conservative by design: the gate only ever refuses on a MISSING path,
-   * so over-extraction is safe (an input file the task references already exists → never refused);
-   * under-extraction just means the gate doesn't help that task.
-   */
-  private static final Pattern DELIVERABLE_PATH =
-      Pattern.compile("/app/[A-Za-z0-9_][A-Za-z0-9._/-]*\\.[A-Za-z0-9]+");
-
-  /**
    * Extensionless executables are common enough to matter, but matching every {@code /app/foo}
    * would over-gate inputs. Only accept extensionless absolute paths when they appear in the same
    * clause as an output verb.
    */
   private static final Pattern ABSOLUTE_OUTPUT_DELIVERABLE =
       Pattern.compile(
-          "(?i)\\b(?:write|create|produce|generate|save|output|emit|store|build|put|place)\\b"
-              + "[^.\\n]{0,80}?(/app/[A-Za-z0-9_][A-Za-z0-9._/-]*[A-Za-z0-9_-])\\b");
+          "(?i)\\b(?:write|create|produce|generate|save|output|emit|store|build|put|place|"
+              + "copy|combine)\\b[^.\\n]{0,100}?(/app/[A-Za-z0-9_][A-Za-z0-9._/-]*"
+              + "[A-Za-z0-9_-])\\b");
 
   /**
    * RL-2026-06 — also catch a deliverable named RELATIVELY right after an output verb (e.g. "Write
@@ -361,19 +352,15 @@ iterating needlessly.
   /**
    * RL-2026-06 — extract the exact required deliverable path(s) the worker's deterministic gate
    * (#2) will check. Package-private + static for unit testing. Returns at most 8 distinct {@code
-   * /app/} output paths in first-seen order; empty when the gate is disabled or no path is named (→
-   * the gate is inert). Conservative on purpose — the gate only refuses on a MISSING path, so this
-   * can safely over-match (an existing input file is never refused).
+   * /app/} output paths in first-seen order; empty when the gate is disabled or no output-looking
+   * path is named (→ the gate is inert). The extractor intentionally does not gate every referenced
+   * {@code /app/*.ext} path: input files are evidence, not completion criteria.
    */
   static List<String> extractDeliverablePaths(String instruction) {
     if (instruction == null || instruction.isBlank() || !TB_DELIVERABLE_GATE_ENABLED) {
       return List.of();
     }
     LinkedHashSet<String> paths = new LinkedHashSet<>();
-    Matcher m = DELIVERABLE_PATH.matcher(instruction);
-    while (m.find() && paths.size() < 8) {
-      paths.add(m.group());
-    }
     Matcher absoluteOutput = ABSOLUTE_OUTPUT_DELIVERABLE.matcher(instruction);
     while (absoluteOutput.find() && paths.size() < 8) {
       paths.add(absoluteOutput.group(1));
