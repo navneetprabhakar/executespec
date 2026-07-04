@@ -90,6 +90,17 @@ class WorkerAgentVerifyBeforeCompleteTest {
     if (runnerResult != null) {
       runner = mock(WorkspaceTestRunner.class);
       lenient().when(runner.runTests(anyString(), any())).thenReturn(runnerResult);
+      // Task 8: the VBC gate now uses the detailed variant (failure tail for the repair message).
+      lenient()
+          .when(runner.runTestsDetailed(anyString(), any()))
+          .thenReturn(
+              runnerResult.map(
+                  s ->
+                      new WorkspaceTestRunner.DetailedResult(
+                          s,
+                          "FAILED test_x — AssertionError",
+                          "python3 -m pytest -q",
+                          s.getFailed() > 0 || s.getErrors() > 0 ? 1 : 0)));
     }
 
     if (!seq.isEmpty()) {

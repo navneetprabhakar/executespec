@@ -1462,6 +1462,7 @@ public class RunOrchestrator implements RunControlPort {
             PlannerRequest.builder()
                 .spec(userRequest)
                 .classification(autoClassification)
+                .planStrategy(planStrategy)
                 .provider(provider)
                 .model(model)
                 .context(rootCtx)

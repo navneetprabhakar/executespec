@@ -8,7 +8,8 @@
 ## What it does
 
 Runs a senior-engineer-style review against a single PR's diff. PLANNING-tier model
-(Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview) for quality. Single-call agent: one
+(Sonnet 5 on Anthropic through 2026-08-31; GPT-5.4 / Gemini 3.5 Flash on their providers)
+for quality. Single-call agent: one
 `submitReview` tool call, no multi-turn loop, no shell, no file mutations.
 
 Output shape:

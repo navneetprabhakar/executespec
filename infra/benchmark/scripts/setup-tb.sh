@@ -21,4 +21,4 @@ cp "$REPO/infra/benchmark/tb/tb-bench-bridge.py" "$TB_DIR/tb-bench-bridge.py"
 
 echo "✅ TB harness ready in $TB_DIR (harbor $(./.venv/bin/harbor --version 2>/dev/null || echo 0.13.1) + es_harbor_agent)."
 echo "   Dataset auto-caches to ~/.cache/harbor on first run (89 tasks)."
-echo "   Run a k=5 eval:  GCS_BUCKET=gs://<bucket> bash $REPO/infra/benchmark/scripts/run-tb.sh"
+echo "   Run the internal k=1 matrix:  GCS_BUCKET=gs://<bucket> bash $REPO/infra/benchmark/scripts/run-tb-internal-once-matrix.sh"

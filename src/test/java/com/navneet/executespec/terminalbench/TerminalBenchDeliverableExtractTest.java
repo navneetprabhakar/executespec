@@ -9,10 +9,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * RL-2026-06 — pins {@link TerminalBenchRunService#extractDeliverablePaths(String)}, the
- * required-deliverable extractor that feeds the worker's deterministic gate (#2). Conservative by
- * design: only {@code /app/} paths with a file extension, deduped in first-seen order. The gate
- * only refuses on a MISSING path, so over-matching an existing input file is harmless; these tests
- * pin the common shapes seen across the Terminal-Bench corpus.
+ * required-deliverable extractor that feeds the worker's deterministic gate (#2). It gates only
+ * output-looking {@code /app/} paths, deduped in first-seen order; referenced input files are not
+ * completion criteria.
  */
 class TerminalBenchDeliverableExtractTest {
 
@@ -40,12 +39,20 @@ class TerminalBenchDeliverableExtractTest {
 
   @Test
   void ignores_non_app_and_extensionless_paths() {
-    // /tests and /usr are not deliverables; /app/sim has no extension (skipped); /app/gates.txt is.
+    // /tests, /usr, and input-looking /app paths are not deliverables.
     String instruction =
         "The simulator /app/sim reads /app/gates.txt. Tests live in /tests/test.sh. Do not touch"
             + " /usr/bin/python.";
     List<String> paths = TerminalBenchRunService.extractDeliverablePaths(instruction);
-    assertEquals(List.of("/app/gates.txt"), paths);
+    assertTrue(paths.isEmpty());
+  }
+
+  @Test
+  void extracts_extensionless_absolute_output_after_verb() {
+    List<String> paths =
+        TerminalBenchRunService.extractDeliverablePaths(
+            "Build the executable at /app/solver and make it runnable.");
+    assertEquals(List.of("/app/solver"), paths);
   }
 
   @Test
@@ -65,17 +72,15 @@ class TerminalBenchDeliverableExtractTest {
   @Test
   void extracts_relative_output_after_verb() {
     // write-compressor shape: the OUTPUT is named relatively ("Write me data.comp") while the
-    // inputs
-    // are absolute. The absolute matcher gets the inputs; the relative matcher must add the
-    // un-prefixed output as /app/data.comp so the gate refuses completion until it's produced.
+    // inputs are absolute. The extractor must not gate input files as completion criteria.
     String instruction =
         "I have a decompressor in /app/decomp.c and a file /app/data.txt. Write me data.comp that's"
             + " compressed such that cat data.comp | /app/decomp gives data.txt.";
     List<String> paths = TerminalBenchRunService.extractDeliverablePaths(instruction);
     assertEquals(
-        List.of("/app/decomp.c", "/app/data.txt", "/app/data.comp"),
+        List.of("/app/data.comp"),
         paths,
-        "absolute inputs first, then the relatively-named output prepended with /app/");
+        "only the relatively-named output is prepended with /app/");
   }
 
   @Test

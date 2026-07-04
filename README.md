@@ -34,7 +34,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`     | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev` and `benchmark` | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 ## Repository layout
@@ -80,7 +80,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
 │       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
 ├── observability/                Local Prometheus + Grafana + Tempo (docker compose up -d)
-├── .github/workflows/            CI: lint.yml + deploy.yml (dev-only push trigger)
+├── .github/workflows/            CI: lint.yml + deploy.yml (dev + benchmark push trigger)
 └── docs/                         All project docs (see "Where to go next")
 ```
 

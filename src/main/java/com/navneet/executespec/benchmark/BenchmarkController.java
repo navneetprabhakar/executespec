@@ -18,9 +18,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Admin-only benchmark runner — runs SWE-bench instances through the REAL production pipeline
- * (PATCH run-mode), blind (see {@link BenchmarkRunService}). SUPER_ADMIN only. Disabled unless
- * {@code swebench.enabled=true}.
+ * Admin-only benchmark runner — runs SWE-bench instances through the shared {@code CodeGenEngine}
+ * single-task path, blind (see {@link BenchmarkGenerationService}). SUPER_ADMIN only. Disabled
+ * unless {@code swebench.enabled=true}.
  *
  * <p>Distinct from the legacy {@code /api/admin/swebench/*} controller (a bespoke oracle-mode
  * adapter that injected the gold test), which is superseded and will be removed once this path is
@@ -33,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class BenchmarkController {
 
-  private final BenchmarkRunService runService;
   private final BenchmarkGenerationService generationService;
   private final SwebenchInstanceLoader loader;
   private final SwebenchProperties props;
@@ -47,23 +46,16 @@ public class BenchmarkController {
       String projectId,
       java.util.List<String> selectedRepoIds) {}
 
-  /** Submit one instance for a blind PATCH-mode run through the production pipeline. */
+  /** Compatibility alias for the single benchmark codegen path. */
   @PostMapping("/run")
-  public ResponseEntity<BenchmarkRunService.TaskSubmitResult> submit(
+  public ResponseEntity<BenchmarkGenerationService.GenerateResult> submit(
       @RequestBody SubmitRequest req) {
     log.info(
-        "benchmark submit instance={} provider={} model={}",
+        "benchmark run(alias-generate) instance={} provider={} model={}",
         req.instanceId(),
         req.aiProvider(),
         req.modelName());
-    return ResponseEntity.accepted()
-        .body(
-            runService.submit(
-                req.instanceId(),
-                req.aiProvider(),
-                req.modelName(),
-                req.projectId(),
-                req.selectedRepoIds()));
+    return generate(req);
   }
 
   /**

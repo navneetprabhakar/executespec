@@ -77,7 +77,7 @@ class ReviewerAgentVerdictParsingTest {
   private static ReviewerAgent agent() {
     // 7 nulls: WorkerAgent, BuildProjectTool, ObjectMapper, Metrics, FeatureFlagService,
     // PostEditFormatter, ModelResolver. determineOverall touches none of them.
-    return new ReviewerAgent(null, null, null, null, null, null, null);
+    return new ReviewerAgent(null, null, null, null, null, null, null, null);
   }
 
   @Test
@@ -222,7 +222,7 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   @Test
-  void hasWriteCalls_recognises_writeFile_and_editFile() {
+  void hasWriteCalls_recognises_worker_write_aliases() {
     var withWrite =
         WorkerResult.builder()
             .outcome(WorkerResult.Outcome.COMPLETED)
@@ -239,6 +239,30 @@ class ReviewerAgentVerdictParsingTest {
             .toolCallLog(List.of("editFile(path=src/foo.ts, edits=2)"))
             .totalLatencyMs(0L)
             .build();
+    var withSnakeCaseEdit =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(1)
+            .toolCallsDispatched(1)
+            .toolCallLog(List.of("edit_file(path=src/foo.ts, edits=2)"))
+            .totalLatencyMs(0L)
+            .build();
+    var withPatch =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(1)
+            .toolCallsDispatched(1)
+            .toolCallLog(List.of("apply_patch(path=src/foo.ts)"))
+            .totalLatencyMs(0L)
+            .build();
+    var withRefusedWrite =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(1)
+            .toolCallsDispatched(1)
+            .toolCallLog(List.of("refused writeFile(path=src/foo.ts)"))
+            .totalLatencyMs(0L)
+            .build();
     var withNeither =
         WorkerResult.builder()
             .outcome(WorkerResult.Outcome.COMPLETED)
@@ -249,6 +273,9 @@ class ReviewerAgentVerdictParsingTest {
             .build();
     org.junit.jupiter.api.Assertions.assertTrue(ReviewerAgent.hasWriteCalls(withWrite));
     org.junit.jupiter.api.Assertions.assertTrue(ReviewerAgent.hasWriteCalls(withEdit));
+    org.junit.jupiter.api.Assertions.assertTrue(ReviewerAgent.hasWriteCalls(withSnakeCaseEdit));
+    org.junit.jupiter.api.Assertions.assertTrue(ReviewerAgent.hasWriteCalls(withPatch));
+    org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(withRefusedWrite));
     org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(withNeither));
     org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(null));
   }

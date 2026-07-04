@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
@@ -214,16 +215,19 @@ SCORE COMPUTATION GUIDANCE:
       messages.add(new SystemMessage(SYSTEM_PROMPT));
       messages.add(new UserMessage(userMessage));
 
-      AnthropicChatOptions opts =
-          "ANTHROPIC".equalsIgnoreCase(provider)
-              ? AnthropicChatOptions.builder()
-                  .temperature(0.0)
-                  .cacheOptions(
-                      AnthropicCacheOptions.builder()
-                          .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                          .build())
-                  .build()
-              : null;
+      AnthropicChatOptions opts = null;
+      if ("ANTHROPIC".equalsIgnoreCase(provider)) {
+        var optsBuilder =
+            AnthropicChatOptions.builder()
+                .cacheOptions(
+                    AnthropicCacheOptions.builder()
+                        .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
+                        .build());
+        if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
+          optsBuilder.temperature(0.0);
+        }
+        opts = optsBuilder.build();
+      }
       Prompt prompt = opts != null ? new Prompt(messages, opts) : new Prompt(messages);
 
       FallbackLlmRouter.LlmResponse lr =

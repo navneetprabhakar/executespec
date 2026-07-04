@@ -493,13 +493,7 @@ public class SmartClassifierAgent {
   }
 
   private static int defaultTaskCount(PlanStrategy strategy) {
-    return switch (strategy) {
-      case SINGLE_SHOT -> 1;
-      case SMALL -> 4;
-      case MEDIUM -> 10;
-      case LARGE -> 25;
-      case LEGACY -> 60;
-    };
+    return strategy.maxTasks();
   }
 
   /**

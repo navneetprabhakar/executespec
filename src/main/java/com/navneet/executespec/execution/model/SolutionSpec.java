@@ -3,8 +3,8 @@ package com.navneet.executespec.execution.model;
 import java.util.List;
 
 /**
- * Planner output — one solution within an {@link ExecutionPlan}. Mirrors the JSON emitted via the
- * {@code submitExecutionPlan} tool call.
+ * Planner output — one solution within an {@link ExecutionPlan}. Mirrors the JSON emitted by the
+ * execution planner prompt.
  */
 public record SolutionSpec(
     int sequenceNumber,

@@ -46,9 +46,7 @@ import lombok.extern.slf4j.Slf4j;
  * SolutionSpec}s (one per repo). Persists the decomposition as {@link ExecutionSolution} rows, plus
  * the overall JSON plan onto {@link ExecutionRun#setExecutionPlan(String)}.
  *
- * <p>First iteration uses a single PLANNING-tier LLM call with a JSON-in-text output contract (not
- * a tool call) to keep the implementation compact. Migrating to a {@code submitExecutionPlan}
- * native tool call is a follow-up.
+ * <p>Uses a single PLANNING-tier LLM call with a JSON-in-text output contract (not a tool call).
  */
 @Service
 @RequiredArgsConstructor
@@ -233,7 +231,7 @@ public class ExecutionPlannerService {
     }
   }
 
-  private ExecutionPlan parsePlan(String raw) throws Exception {
+  ExecutionPlan parsePlan(String raw) throws Exception {
     String json = raw == null ? "{}" : raw.trim();
     // Strip fenced code blocks if the model wrapped the response
     if (json.startsWith("```")) {
@@ -260,8 +258,16 @@ public class ExecutionPlannerService {
               n.path("complexity").asText("MEDIUM")));
     }
     List<DependencyEdge> edges = new ArrayList<>();
+    java.util.Set<String> seenEdges = new java.util.HashSet<>();
+    for (SolutionSpec spec : specs) {
+      if (spec.dependsOn() == null) continue;
+      for (Integer upstream : spec.dependsOn()) {
+        if (upstream == null) continue;
+        addDependencyEdge(edges, seenEdges, upstream, spec.sequenceNumber());
+      }
+    }
     for (JsonNode n : tree.path("dependencyEdges")) {
-      edges.add(new DependencyEdge(n.path("from").asInt(), n.path("to").asInt()));
+      addDependencyEdge(edges, seenEdges, n.path("from").asInt(), n.path("to").asInt());
     }
     List<FileConflict> conflicts = conflictDetector.detectConflicts(specs);
     long totalTok = specs.stream().mapToLong(SolutionSpec::estimatedTokens).sum();
@@ -270,6 +276,15 @@ public class ExecutionPlannerService {
             .multiply(new BigDecimal("0.00001"))
             .setScale(4, RoundingMode.HALF_UP);
     return new ExecutionPlan(specs, edges, conflicts, totalTok, totalCost);
+  }
+
+  private void addDependencyEdge(
+      List<DependencyEdge> edges, java.util.Set<String> seenEdges, int from, int to) {
+    if (from <= 0 || to <= 0 || from == to) return;
+    String key = from + "->" + to;
+    if (seenEdges.add(key)) {
+      edges.add(new DependencyEdge(from, to));
+    }
   }
 
   private void persistPlan(ExecutionRun run, ExecutionPlan plan) throws Exception {
