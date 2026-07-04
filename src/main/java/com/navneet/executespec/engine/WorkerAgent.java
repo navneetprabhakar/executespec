@@ -686,7 +686,7 @@ public class WorkerAgent {
                     .toolChoice(forcedThisCall ? "required" : null)
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
-                    .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                    .toolsOverride(toolRegistry.bindForWorker(req.context(), req.provider()))
                     // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
                     // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
                     // (thinking model) regularly takes 60-90s on dense tool-call iterations,
