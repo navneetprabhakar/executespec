@@ -118,7 +118,7 @@ def cmd_generate(a):
     out_root = pathlib.Path(a.out).expanduser()
     out_root.mkdir(parents=True, exist_ok=True)
     token = login()
-    dataset_label = pathlib.Path(a.dataset).stem + " k-eval " + time.strftime("%Y-%m-%d")
+    dataset_label = pathlib.Path(a.dataset).stem + " " + a.model + " k-eval " + time.strftime("%Y-%m-%d")
 
     for k in range(1, a.k + 1):
         bench_id = tracking_start(token, a.provider, a.model, a.k, len(instances), f"{dataset_label} pass{k}")
